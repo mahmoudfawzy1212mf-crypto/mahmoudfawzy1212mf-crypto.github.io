@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-0757-87ffcb";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-0921-c359e9";</script>
 
 <script>
 'use strict';
@@ -5862,7 +5862,7 @@ const sbEnabled = () => { const c = nfConfig(); return !!(c.supabaseUrl && c.sup
 const sbOn = () => S.mode === 'sb' && !!S.sb;
 const sbLoginId = s => { const ph = normPhone(s); return ph.length >= 8 ? ph : normUser(s); };
 const sbEmail = login => `${sbLoginId(login)}@${SB_EMAIL_DOMAIN}`;
-const sbErrText = e => { const m = String(e && (e.message || e.error_description || e) || ''); if (/Invalid login credentials/i.test(m)) return 'رقم الموبايل / اسم المستخدم أو كلمة السر غير صحيحة'; if (/Email not confirmed/i.test(m)) return 'الحساب بانتظار التأكيد — اطلب من المدير إيقاف «تأكيد البريد» في إعدادات Supabase'; if (/already registered|already been registered/i.test(m)) return 'الحساب مفعّل بالفعل — ادخل بكلمة سرك أو استخدم «نسيت كلمة السر»'; if (/Password should be/i.test(m)) return 'كلمة السر قصيرة — 6 أحرف على الأقل'; if (/NF_BAD_CODE|Database error saving new user/i.test(m)) return 'كود التفعيل غير صحيح أو انتهت صلاحيته'; if (/NF_NOT_FOUND/i.test(m)) return 'الرقم غير مسجّل في السيستم — راجع الموارد البشرية'; if (/rate limit/i.test(m)) return 'محاولات كثيرة — انتظر دقيقة'; if (/Failed to fetch|NetworkError|network/i.test(m)) return 'تعذّر الاتصال بالسيرفر — تحقق من الإنترنت'; return m || 'حدث خطأ'; };
+const sbErrText = e => { const m = String(e && (e.message || e.error_description || e) || ''); if (/banned/i.test(m)) return 'حسابك موقوف — لا يمكنك الدخول للسيستم. راجع الإدارة'; if (/Invalid login credentials/i.test(m)) return 'رقم الموبايل / اسم المستخدم أو كلمة السر غير صحيحة'; if (/Email not confirmed/i.test(m)) return 'الحساب بانتظار التأكيد — اطلب من المدير إيقاف «تأكيد البريد» في إعدادات Supabase'; if (/already registered|already been registered/i.test(m)) return 'الحساب مفعّل بالفعل — ادخل بكلمة سرك أو استخدم «نسيت كلمة السر»'; if (/Password should be/i.test(m)) return 'كلمة السر قصيرة — 6 أحرف على الأقل'; if (/NF_BAD_CODE|Database error saving new user/i.test(m)) return 'كود التفعيل غير صحيح أو انتهت صلاحيته'; if (/NF_NOT_FOUND/i.test(m)) return 'الرقم غير مسجّل في السيستم — راجع الموارد البشرية'; if (/rate limit/i.test(m)) return 'محاولات كثيرة — انتظر دقيقة'; if (/Failed to fetch|NetworkError|network/i.test(m)) return 'تعذّر الاتصال بالسيرفر — تحقق من الإنترنت'; return m || 'حدث خطأ'; };
 
 /* ---------------- adapter: the subset of the artifact-db API that Store uses, over Supabase ---------------- */
 const PRIV_WORKER_ROLES = ['admin', 'hr', 'office', 'kiosk'];
@@ -5926,7 +5926,7 @@ function sessFromPerson(p) { if (p.kind === 'sb') return { id: p.id, name: p.nam
 function resolveSession() {
   if (S.mode === 'memory') { S.session = { id: 'demo', name: 'المدير (وضع تجريبي)', role: 'admin', deptIds: [] }; return; }
   if (S.mode === 'local') { const rid = lsGet('nf.staff'); const p = rid ? personById(rid) : null; S.session = p ? sessFromPerson(p) : sessFromStaff(S.data.staff.get(LOCAL_ADMIN.id) || LOCAL_ADMIN); return; }
-  if (S.mode === 'sb') { const p = sbPersonFromUser(S.sbUser); S.session = p ? sessFromPerson(p) : null; if (S.sbUser && !p && S.loaded.workers && S.loaded.staff) { S.session = { id: 'sb:' + S.sbUser.id, name: 'مستخدم بدون ملف', role: 'viewer', deptIds: [], sb: true, orphan: true }; } return; }
+  if (S.mode === 'sb') { const p = sbPersonFromUser(S.sbUser); S.session = p ? sessFromPerson(p) : null; if (S.sbUser && !p && S.loaded.workers && S.loaded.staff) { sbForceSignOut('حسابك غير مرتبط بموظف نشط في السيستم — تم إنهاء الدخول. راجع الإدارة'); } return; }
   if (S.me && S.me.isOwner) { S.session = { id: 'owner', name: S.me.name || 'المدير', role: 'admin', deptIds: [], owner: true, avatar: S.me.avatarUrl }; return; }
   if (S.me && S.me.id) { const p = loginPeople().find(x => x.rec.accountId === S.me.id); if (p) { S.session = sessFromPerson(p); return; } }
   const rid = lsGet('nf.staff');
@@ -5950,6 +5950,12 @@ async function authenticateSb(identifier, password) {
   if (!p) { await S.sb.auth.signOut(); S.sbUser = null; return { ok: false, msg: 'الحساب موجود لكن لا يوجد ملف موظف مطابق له — راجع الموارد البشرية' }; }
   return { ok: true, person: p };
 }
+/* v4.6.2: no "user without a record" — a login whose worker/staff record is missing, stopped or without a role is signed out at once (the server bans it too) */
+let _sbKick = 0;
+function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
+/* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
+async function sbAccessCheck() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
+setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
 document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
 
 /* ---------------- login screen (shared build; backend-aware) ---------------- */
@@ -6046,7 +6052,7 @@ ACTIONS.actCode = async arg => {
   openModal({ title: `كود التفعيل / إعادة الضبط — ${rec.name}`, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<div style="text-align:center"><div class="muted small">يستخدمه ${kind === 'workers' ? 'الموظف' : 'صاحب الحساب'} من شاشة الدخول: «أول مرة؟ فعّل حسابك» أو «نسيت كلمة السر» (صالح 48 ساعة، يُستخدم مرة واحدة)</div><div class="num" style="font-size:40px;font-weight:700;letter-spacing:8px;direction:ltr;margin:14px 0">${code}</div><div class="tiny muted">يدخل بـ: <span class="ltr">${esc(login || '—')}</span></div></div>` });
 };
 /* HR approval of a password request in backend mode → issue a code instead of writing a hash */
-async function sbApplyPasswordRequest(r, w) { const code = String(Math.floor(100000 + Math.random() * 900000)); await Store.update('workers', w.id, { actCodeHash: await hashPin(w.id, code), actCodeExp: new Date(Date.now() + 48 * 3600 * 1000).toISOString() }); setTimeout(() => openModal({ title: `كود إعادة ضبط كلمة السر — ${w.name}`, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<div style="text-align:center"><div class="muted small">بلّغ الموظف هذا الكود ليكتبه في «نسيت كلمة السر» مع كلمة سره الجديدة (صالح 48 ساعة)</div><div class="num" style="font-size:40px;font-weight:700;letter-spacing:8px;direction:ltr;margin:14px 0">${code}</div></div>` }), 400); }
+async function sbApplyPasswordRequestBase(r, w) { const code = String(Math.floor(100000 + Math.random() * 900000)); await Store.update('workers', w.id, { actCodeHash: await hashPin(w.id, code), actCodeExp: new Date(Date.now() + 48 * 3600 * 1000).toISOString() }); setTimeout(() => openModal({ title: `كود إعادة ضبط كلمة السر — ${w.name}`, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<div style="text-align:center"><div class="muted small">بلّغ الموظف هذا الكود ليكتبه في «نسيت كلمة السر» مع كلمة سره الجديدة (صالح 48 ساعة)</div><div class="num" style="font-size:40px;font-weight:700;letter-spacing:8px;direction:ltr;margin:14px 0">${code}</div></div>` }), 400); }
 
 /* after a backend sign-in the settings snapshot may have arrived before the session existed: re-run the ready hooks (idempotent) */
 document.addEventListener('nf:login', () => { if (sbOn() && S._readyFired) setTimeout(() => document.dispatchEvent(new Event('nf:ready')), 50); });
@@ -10355,6 +10361,148 @@ wirePasswordEyes();
   if (m) m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
   document.addEventListener('focusout', () => { setTimeout(() => { if (window.visualViewport && window.visualViewport.scale > 1.01) window.scrollTo(0, window.scrollY); }, 50); });
 })();
+/* =====================================================================
+   v4.6.2 — كود التفعيل يصل للموظف في رسالة على موبايله ويلتقطه التطبيق تلقائيًا
+   · HR يضغط «كود تفعيل» → الكود يُولَّد ويُرسل SMS تلقائيًا (Edge Function «sms» — مزوّد SMS من الإعدادات)
+     ولو لا يوجد مزوّد: أزرار «واتساب» / «رسالة من موبايلك» / «نسخ» بنص جاهز فيه الكود ورابط التفعيل
+   · الرسالة فيها رابط #/activate?p=…&c=… → يفتح التطبيق ونافذة التفعيل والكود مكتوب جاهز
+   · على الآيفون: خانة الكود autocomplete=one-time-code تقرأ الكود من الرسالة فوق الكيبورد
+   · على أندرويد: WebOTP (السطر الأخير في الرسالة @domain #code) يملأ الكود وحده
+   · نفس الشيء لكود «نسيت كلمة السر» الذي يصدر عند اعتماد الـHR لطلب إعادة الضبط
+   ===================================================================== */
+const SMS_TPL_DEFAULT = 'كود تفعيل حسابك في سيستم {app}: {code}\nافتح الرابط وسيُملأ الكود تلقائيًا:\n{link}\n(صالح 48 ساعة)';
+const smsCfg = () => Object.assign({ auto: true, tpl: SMS_TPL_DEFAULT }, (S.settings && S.settings.sms) || {});
+function appPublicUrl() { const s = (S.settings && S.settings.appUrl) || ''; if (/^https?:/.test(location.href)) return location.href.split('#')[0]; return s || 'https://mahmoudfawzy1212mf-crypto.github.io/'; }
+function activateLink(login, code, reset) { const u = appPublicUrl(); return `${u}#/activate?p=${encodeURIComponent(login)}&c=${code}${reset ? '&r=1' : ''}`; }
+function smsCodeText(login, code, reset) {
+  const link = activateLink(login, code, reset); const app = (S.settings && S.settings.company) || APP.name;
+  let t = String(smsCfg().tpl || SMS_TPL_DEFAULT).replace(/\{code\}/g, code).replace(/\{link\}/g, link).replace(/\{app\}/g, app);
+  if (reset) t = t.replace('كود تفعيل حسابك', 'كود إعادة ضبط كلمة السر لحسابك');
+  try { const h = new URL(appPublicUrl()).host; if (h) t += `\n\n@${h} #${code}`; } catch (e) { /* file:// */ }
+  return t;
+}
+function smsUri(phone, text) { const d = normPhone(phone); const sep = /iP(hone|ad|od)/.test(navigator.userAgent) ? '&' : '?'; return `sms:${d}${sep}body=${encodeURIComponent(text)}`; }
+const smsAvailable = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.functions;
+async function smsSend(to, text) {
+  if (!smsAvailable()) return { error: 'offline' };
+  try { const r = await S.sb.functions.invoke('sms', { body: { action: 'send', to, text } }); if (r.error) return { error: String(r.error.message || r.error) }; return r.data || { error: 'empty' }; } catch (e) { return { error: String(e && e.message || e) }; }
+}
+async function smsStatus() { if (!smsAvailable()) return { configured: false }; try { const r = await S.sb.functions.invoke('sms', { body: { action: 'status' } }); return (r && r.data) || { configured: false }; } catch (e) { return { configured: false, error: String(e) }; } }
+
+/* ---------- the code modal (HR side) ---------- */
+function codeModal({ title, name, login, code, reset, phone }) {
+  const text = smsCodeText(login, code, reset); const ph = normPhone(phone || login);
+  openModal({ title, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<div style="text-align:center">
+    <div class="muted small">${reset ? 'يكتبه صاحب الحساب في «نسيت كلمة السر» مع كلمة سره الجديدة' : 'يستخدمه الموظف من شاشة الدخول: «أول مرة؟ فعّل حسابك»'} — أو يضغط الرابط في الرسالة فيُملأ وحده (صالح 48 ساعة، يُستخدم مرة واحدة)</div>
+    <div class="num" style="font-size:40px;font-weight:700;letter-spacing:8px;direction:ltr;margin:14px 0">${code}</div>
+    <div class="tiny muted">يدخل بـ: <span class="ltr">${esc(login || '—')}</span></div>
+    <div id="smsstate" class="small" style="margin:12px 0 6px;min-height:20px"></div>
+    <div class="row" style="justify-content:center;gap:8px;flex-wrap:wrap">
+      ${ph ? `<a class="btn sm" href="${waLink(ph, text)}" target="_blank" rel="noopener">${icon('wa')}واتساب</a><a class="btn sm" href="${smsUri(ph, text)}">${icon('send')}رسالة من موبايلك</a>` : ''}
+      <button type="button" class="btn sm" data-action="smsCopy">${icon('copy')}نسخ النص</button>
+      ${smsAvailable() && ph ? `<button type="button" class="btn sm p" data-action="smsResend">${icon('send')}إرسال SMS من السيستم</button>` : ''}
+    </div>
+    <textarea id="smstext" class="small" style="width:100%;margin-top:10px;min-height:96px;direction:rtl">${esc(text)}</textarea></div>` });
+  S._smsCtx = { to: ph, text };
+  if (smsAvailable() && ph && smsCfg().auto !== false) ACTIONS.smsResend();
+}
+ACTIONS.smsCopy = async () => { const t = document.getElementById('smstext'); if (!t) return; try { await navigator.clipboard.writeText(t.value); toast('تم نسخ الرسالة'); } catch (e) { t.select(); document.execCommand('copy'); toast('تم النسخ'); } };
+ACTIONS.smsResend = async () => {
+  const c = S._smsCtx; const box = document.getElementById('smsstate'); if (!c || !box) return;
+  box.innerHTML = `<span class="muted">جارٍ إرسال الرسالة إلى <span class="ltr">${esc(c.to)}</span>…</span>`;
+  const r = await smsSend(c.to, c.text);
+  if (r && r.ok) { box.innerHTML = `<span class="good-ink" style="color:var(--good-ink)">${icon('check')} أُرسلت الرسالة إلى <span class="ltr">${esc(c.to)}</span> (${esc(r.provider || 'SMS')})</span>`; toast('تم إرسال الكود في رسالة'); return; }
+  const why = r && r.error === 'no_provider' ? 'لم يُضبط مزوّد SMS بعد — الإعدادات ← رسائل SMS. ابعت الكود واتساب أو من موبايلك.' : r && r.error === 'offline' ? 'الإرسال التلقائي يعمل في النسخة المستضافة فقط — ابعت الكود واتساب أو من موبايلك.' : r && r.error === 'bad_number' ? 'رقم الموبايل غير صالح — راجع رقم الموظف.' : `تعذّر الإرسال (${esc(String(r && (r.detail && JSON.stringify(r.detail).slice(0, 120)) || r && r.error || '?'))}) — ابعته واتساب أو من موبايلك.`;
+  box.innerHTML = `<span style="color:var(--warn-ink,var(--warn))">${icon('alert')} ${why}</span>`;
+};
+
+/* ---------- HR: generate code (workers or staff, plain or hosted) ---------- */
+ACTIONS.actCode = async arg => {
+  const [kind, sid] = String(arg || '').startsWith('staff:') ? ['staff', String(arg).slice(6)] : ['workers', arg];
+  const rec = byId(kind, sid); if (!rec || !(canEditHr() || isAdmin())) return;
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  await Store.update(kind, rec.id, { actCodeHash: await hashPin(rec.id, code), actCodeExp: new Date(Date.now() + 48 * 3600 * 1000).toISOString() });
+  const login = kind === 'workers' ? loginIdOf(rec) : rec.username; const srv = typeof sbOn === 'function' && sbOn();
+  const done = kind === 'workers' ? (srv ? !!(rec.sbUid || rec.activatedAt) : !!rec.passHash) : !!rec.sbUid;
+  codeModal({ title: `${done ? 'كود إعادة ضبط كلمة السر' : 'كود تفعيل الحساب'} — ${rec.name}`, name: rec.name, login, code, reset: done, phone: rec.phone || rec.workPhone || '' });
+};
+/* HR approval of a password request (hosted mode) → code + message */
+async function sbApplyPasswordRequest(r, w) {
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  await Store.update('workers', w.id, { actCodeHash: await hashPin(w.id, code), actCodeExp: new Date(Date.now() + 48 * 3600 * 1000).toISOString() });
+  setTimeout(() => codeModal({ title: `كود إعادة ضبط كلمة السر — ${w.name}`, name: w.name, login: loginIdOf(w), code, reset: true, phone: w.phone || w.workPhone || '' }), 400);
+}
+
+/* ---------- employee side: link in the message opens the app with the code filled ---------- */
+function actParams() { const h = location.hash || ''; const m = h.match(/^#\/activate\??(.*)$/); if (!m) return null; const q = new URLSearchParams(m[1]); return { p: q.get('p') || '', c: (q.get('c') || '').replace(/\D/g, '').slice(0, 6), r: q.get('r') === '1' }; }
+function fillActivation(pre) {
+  const f = document.getElementById('mform'); if (!f) return false;
+  const ph = f.querySelector('[name=phone]'); const cd = f.querySelector('[name=code]');
+  if (ph && pre.p) ph.value = pre.p; if (cd && pre.c) cd.value = pre.c;
+  if (cd) { cd.setAttribute('autocomplete', 'one-time-code'); cd.setAttribute('inputmode', 'numeric'); }
+  const nw = f.querySelector('[name=nw]'); if (nw && pre.c) setTimeout(() => nw.focus(), 150);
+  return true;
+}
+function openFromLink() {
+  const pre = actParams(); if (!pre) return;
+  S._actPre = pre; history.replaceState(null, '', location.pathname + location.search + '#/');
+  let tries = 0; const go = () => {
+    if (S.session) { toast('أنت مسجّل الدخول بحساب آخر — سجّل الخروج ثم افتح الرابط مرة أخرى', 'err'); S._actPre = null; return; }
+    if (!document.getElementById('lg-user')) { if (tries++ < 12) return setTimeout(go, 400); return; }
+    (pre.r ? ACTIONS.forgotPw : ACTIONS.activate)(); setTimeout(() => fillActivation(pre), 60);
+  }; go();
+}
+window.addEventListener('hashchange', openFromLink);
+document.addEventListener('nf:ready', () => setTimeout(openFromLink, 300));
+setTimeout(openFromLink, 1200);
+
+/* iOS / Android: read the code from the SMS automatically once the activation or reset form is open */
+(() => {
+  let seen = null;
+  new MutationObserver(() => {
+    const f = document.getElementById('mform'); if (!f || f === seen) { if (!f) seen = null; return; }
+    const cd = f.querySelector('[name=code]'); if (!cd) return; seen = f;
+    cd.setAttribute('autocomplete', 'one-time-code'); cd.setAttribute('inputmode', 'numeric');
+    if (S._actPre) { fillActivation(S._actPre); S._actPre = null; }
+    if ('OTPCredential' in window && navigator.credentials && !cd.value) {
+      const ac = new AbortController(); const stop = () => ac.abort(); f.addEventListener('submit', stop, { once: true });
+      navigator.credentials.get({ otp: { transport: ['sms'] }, signal: ac.signal }).then(otp => { if (otp && otp.code && document.body.contains(cd)) { cd.value = otp.code; toast('تم قراءة الكود من الرسالة'); } }).catch(() => { /* cancelled / unsupported */ });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+})();
+
+/* ---------- settings: SMS provider (hosted) + message template ---------- */
+EXTRA_SETTINGS.sms = { label: 'رسائل SMS للأكواد', render: () => {
+  const c = smsCfg(); const hosted = smsAvailable();
+  setTimeout(async () => { const box = document.getElementById('smsprov'); if (!box) return; const st = await smsStatus(); box.innerHTML = st.configured ? `<span class="badge good">مضبوط: ${esc(st.provider)}${st.sender ? ' — المرسل ' + esc(st.sender) : ''}</span>` : `<span class="badge warn">لم يُضبط مزوّد SMS — الأكواد تُرسل يدويًا (واتساب / من موبايلك)</span>`; }, 50);
+  return `<form class="card" id="smsform"><h3>إرسال أكواد التفعيل في رسالة SMS</h3><p class="small ink2" style="margin:6px 0 12px">عند ضغط «كود تفعيل» أو اعتماد طلب «نسيت كلمة السر» يُرسل الكود تلقائيًا لرقم موبايل الموظف، والرابط في الرسالة يفتح التطبيق والكود مكتوب جاهز. الآيفون والأندرويد يقرآن الكود من الرسالة تلقائيًا.</p>
+    <div id="smsprov" style="margin-bottom:10px">${hosted ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">النسخة المستضافة فقط — هنا يعمل الإرسال اليدوي (واتساب / رسالة من موبايلك)</span>'}</div>
+    <div class="form"><label class="check full"><input type="checkbox" name="auto" ${c.auto !== false ? 'checked' : ''}> إرسال الرسالة تلقائيًا بمجرد إصدار الكود (لو المزوّد مضبوط)</label>
+    ${field('نص الرسالة — المتغيرات: {code} الكود · {link} رابط التفعيل · {app} اسم السيستم', `<textarea id="f-tpl" name="tpl" style="min-height:110px">${esc(c.tpl || SMS_TPL_DEFAULT)}</textarea>`, 'full')}
+    ${field('رابط التطبيق (يُستخدم في الرسالة من النسخة المكتبية)', inp('appUrl', (S.settings && S.settings.appUrl) || '', 'class="ltr" placeholder="https://…"'), 'full')}</div>
+    <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>
+    ${hosted && isAdmin() ? `<form class="card" id="smsprovform"><h3>مزوّد SMS (المالك فقط)</h3><p class="small ink2" style="margin:6px 0 12px">تُحفظ البيانات على السيرفر (لا تُخزَّن في المتصفح). مزوّدون مصريون: SMS Misr — أو Twilio / Vonage الدوليان — أو أي مزوّد له رابط HTTP.</p><div class="form">
+      ${field('المزوّد', `<select id="f-provider" name="provider"><option value="">— بدون (إرسال يدوي) —</option><option value="smsmisr">SMS Misr (مصر)</option><option value="twilio">Twilio</option><option value="vonage">Vonage</option><option value="generic">مزوّد آخر — رابط HTTP</option></select>`)}
+      ${field('اسم/رقم المرسل (Sender)', inp('sender', '', 'class="ltr" placeholder="Ninety أو +1…"'))}
+      <div class="full prov prov-smsmisr" hidden><div class="form">${field('Username', inp('username', '', 'class="ltr" autocomplete="off"'))}${field('Password', inp('password', '', 'type="password" class="ltr" autocomplete="new-password"'))}${field('البيئة', `<select id="f-env" name="env"><option value="1">فعلي (Live)</option><option value="2">تجريبي (Test)</option></select>`)}</div></div>
+      <div class="full prov prov-twilio" hidden><div class="form">${field('Account SID', inp('sid', '', 'class="ltr" autocomplete="off"'))}${field('Auth Token', inp('token', '', 'type="password" class="ltr" autocomplete="new-password"'))}</div></div>
+      <div class="full prov prov-vonage" hidden><div class="form">${field('API Key', inp('key', '', 'class="ltr" autocomplete="off"'))}${field('API Secret', inp('secret', '', 'type="password" class="ltr" autocomplete="new-password"'))}</div></div>
+      <div class="full prov prov-generic" hidden><div class="form">${field('رابط الإرسال — المتغيرات {to} {text} {sender}', inp('url', '', 'class="ltr" placeholder="https://api.example.com/send?to={to}&text={text}&key=…"'), 'full')}${field('الطريقة', `<select id="f-method" name="method"><option value="GET">GET</option><option value="POST">POST</option></select>`)}${field('جسم الطلب (POST) — JSON فيه {to} {text}', `<textarea id="f-body" name="body" class="ltr" placeholder='{"to":"{to}","message":"{text}"}'></textarea>`, 'full')}</div></div>
+      <div class="full tiny muted">الحقول السرية المتروكة فارغة تبقى كما هي عند الحفظ.</div></div>
+      <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap"><button type="submit" class="btn p">حفظ على السيرفر</button><button type="button" class="btn" data-action="smsTest">${icon('send')}رسالة تجريبية لموبايلي</button></div></form>` : ''}`;
+} };
+document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'f-provider') { const v = ev.target.value; document.querySelectorAll('#smsprovform .prov').forEach(el => { el.hidden = !el.classList.contains('prov-' + v); }); } });
+document.addEventListener('submit', async ev => {
+  if (ev.target.id === 'smsform') { ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ sms: { auto: !!d.auto, tpl: String(d.tpl || '').trim() || SMS_TPL_DEFAULT }, appUrl: String(d.appUrl || '').trim() }); toast('تم الحفظ'); return; }
+  if (ev.target.id === 'smsprovform') { ev.preventDefault(); if (!isAdmin() || !smsAvailable()) return; const d = formData(ev.target); const body = { action: 'setup', provider: d.provider || '', sender: d.sender || '', username: d.username, password: d.password, env: d.env, sid: d.sid, token: d.token, key: d.key, secret: d.secret, url: d.url, method: d.method, body: d.body };
+    try { const r = await S.sb.functions.invoke('sms', { body }); if (r.error || !r.data || r.data.error) { toast('تعذّر الحفظ: ' + (r.error?.message || r.data?.error || '?'), 'err'); return; } toast(r.data.configured ? 'تم ضبط مزوّد SMS' : 'أُلغي مزوّد SMS'); ev.target.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); const box = document.getElementById('smsprov'); if (box) { const st = await smsStatus(); box.innerHTML = st.configured ? `<span class="badge good">مضبوط: ${esc(st.provider)}</span>` : `<span class="badge warn">لم يُضبط مزوّد SMS</span>`; } } catch (e) { toast('تعذّر الحفظ', 'err'); } }
+});
+ACTIONS.smsTest = async () => {
+  if (!smsAvailable()) return; const me = S.session || {}; const w = me.workerId ? byId('workers', me.workerId) : null; const to = (w && (w.phone || w.workPhone)) || me.phone || me.login || '';
+  const ph = normPhone(to) || String(prompt('رقم الموبايل لاستلام الرسالة التجريبية', '01') || '');
+  if (!normPhone(ph)) { toast('لا يوجد رقم موبايل مسجّل لحسابك — اكتب رقمك في بياناتك أولًا', 'err'); return; }
+  toast('جارٍ الإرسال…'); try { const r = await S.sb.functions.invoke('sms', { body: { action: 'test', to: normPhone(ph) } }); if (r.error || !r.data || !r.data.ok) toast('فشل الإرسال: ' + (r.error?.message || r.data?.error || '?') + (r.data?.detail ? ' — ' + JSON.stringify(r.data.detail).slice(0, 120) : ''), 'err'); else toast('أُرسلت الرسالة التجريبية ✓'); } catch (e) { toast('فشل الإرسال', 'err'); }
+};
 boot();
 </script>
 
