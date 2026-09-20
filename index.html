@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1351-d9c1ca";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1425-491c04";</script>
 
 <script>
 'use strict';
@@ -5197,7 +5197,7 @@ function fileTile(f, ctx = '') {
   const ic = f.store === 'proc' || fileIsModel(f) ? 'inventory' : fileIsPdf(f) ? 'print' : fileIsHtml(f) ? 'link' : fileIsVideo(f) ? 'play' : 'star';
   return `<div class="ftile" data-action="fileOpen" data-arg="${esc(f.id)}${ctx ? ':' + esc(ctx) : ''}" title="${esc(f.name)}"><div class="fthumb">${f.thumb ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">` : `<div class="fico">${icon(ic)}<span>${esc(fileTypeLabel(f))}</span></div>`}${f.store === 'proc' || fileIsModel(f) ? '<span class="f3d">3D</span>' : fileIsPdf(f) && f.pages ? `<span class="f3d">${f.pages} صفحة</span>` : ''}</div><div class="fname">${esc(f.name)}</div><div class="tiny muted">${esc(FILE_KINDS[f.kind]?.[0] || '')}${f.size ? ' · ' + fmtBytes(f.size) : ''}${f.rev ? ' · ' + esc(f.rev) : ''}</div></div>`;
 }
-function fileGallery(files, ctx, o = {}) {
+function fileGalleryBase(files, ctx, o = {}) {
   if (!files.length) return o.empty ? `<div class="muted small">${o.empty}</div>` : '';
   const groups = [['drawing', 'الرسومات التنفيذية'], ['model', 'المعاينة 3D'], ['render', 'الصور والمعاينات'], ['html', 'معاينات تفاعلية'], ['video', 'فيديو'], ['other', 'ملفات أخرى']];
   return groups.map(([k, label]) => { const fs = files.filter(f => (f.kind || 'other') === k); return fs.length ? `<div class="fgroup"><div class="tiny muted" style="margin:6px 0 4px">${label} (${fs.length})</div><div class="fgrid">${fs.map(f => fileTile(f, ctx)).join('')}</div></div>` : ''; }).join('');
@@ -5253,7 +5253,7 @@ ACTIONS.fileUpload = arg => {
     } });
 };
 function uploadErrText(e) { const c = e && e.code; if (c === 'too_large') return 'الملف أكبر من الحد المسموح'; if (c === 'unsupported_type') return 'نوع الملف غير مدعوم'; if (c === 'quota_or_state') return 'امتلأت مساحة الملفات'; if (c === 'not_granted' || e?.message === 'no-assets') return 'الرفع غير مسموح من هذا الحساب'; if (c === 'rate_limited') return 'محاولات كثيرة — انتظر قليلًا'; return 'تعذّر الرفع'; }
-async function uploadOne(file, meta) {
+async function uploadOneBase(file, meta) {
   const mime = fileMimeOf(file); const kind = meta.kind || fileKindOf(file.name, mime);
   const doc = { id: uid(), name: file.name, kind, mime, size: file.size, rev: meta.rev || '', note: meta.note || '', productId: meta.productId || null, orderId: meta.orderId || null, byName: S.session?.name || '', thumb: null, pages: null };
   try {
@@ -5281,7 +5281,7 @@ function viewerClose() { if (!_viewer) return; try { _viewer.dispose && _viewer.
 window.addEventListener('hashchange', viewerClose);
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && _viewer && !_modal) viewerClose(); });
 ACTIONS.viewerClose = () => viewerClose();
-ACTIONS.fileOpen = arg => { const [id, ctx] = (arg || '').split(':'); const f = byId('files', id); if (!f) return; const set = viewerSetFor(f, ctx); openViewer(set, Math.max(0, set.findIndex(x => x.id === id)), { ctx }); };
+ACTIONS.fileOpen = arg => { const [id, ctx] = (arg || '').split(':'); const f = byId('files', id); if (!f) return; if (f.restricted && typeof canSeeCad === 'function' && !canSeeCad()) { toast('ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط', 'err'); return; } const set = viewerSetFor(f, ctx); openViewer(set, Math.max(0, set.findIndex(x => x.id === id)), { ctx }); };
 ACTIONS.viewerGo = arg => { if (!_viewer) return; viewerShow(+arg); };
 ACTIONS.viewerFs = () => { const el = $('#nfviewer'); if (!el) return; try { if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen && el.requestFullscreen(); } catch (e) { /* ignore */ } };
 function viewerSetFor(f, ctx) {
@@ -5717,7 +5717,7 @@ function productCard(p) {
 ACTIONS.prFilter = arg => { const [k, v] = arg.split(':'); (S.ui.filter.products ||= {})[k] = v; render(false); };
 
 /* ---------------- product detail ---------------- */
-function vProductDetail(id) {
+function vProductDetailBase(id) {
   const p = byId('products', id); if (!p) return `<div class="empty"><b>المنتج غير موجود</b></div>`;
   const fs = filesOf('product', id); const os = sortBy(productOrders(p), o => o.orderDate || '', true); const hint = Files.uploadHint();
   return `<div class="grid gmain"><div class="stack">
@@ -5739,7 +5739,7 @@ function vProductDetail(id) {
       <div class="card"><div class="cardhead"><h3>كيف تجهّز الملفات</h3></div><div class="small stack" style="gap:6px"><div><b>الرسومات:</b> PDF من LayOut أو AutoCAD (تُعرض صفحة صفحة مع تكبير، وتُطبع من زر «فتح / طباعة»).</div><div><b>المعاينة 3D:</b> ملف GLB من سكتش أب (File ← Export ← 3D Model ← glTF/GLB) أو من ChatGPT (اطلب زر «تصدير GLB»). يظهر بأسماء الأجزاء كما في الموديل، مع تفكيك وقطاع وزوايا محفوظة.</div><div><b>الصور:</b> PNG/JPG لأي رندر أو صورة عيّنة.</div><div><b>معاينة تفاعلية:</b> ملف HTML واحد من ChatGPT يُفتح داخل السيستم كما هو.</div></div></div>
     </div></div>`;
 }
-function productForm(p) {
+function productFormBase(p) {
   return `<div class="form">
     ${field('البراند', `<select id="f-brandId" name="brandId">${opts(S.settings.brands, p.brandId || S.settings.brands[0].id, x => `${x.name} — ${x.desc || ''}`)}</select>`)}
     ${field('كود المنتج', inp('code', p.code || '', 'required placeholder="مثال: LOF-C01" class="code"'))}
@@ -5755,7 +5755,7 @@ function productForm(p) {
     ${field('ملاحظات التصنيع', `<textarea id="f-notes" name="notes" placeholder="تنبيهات لرؤساء الأقسام: ترتيب التجميع، اللحامات، التشطيب، الفحص…">${esc(p.notes || '')}</textarea>`, 'full')}
   </div>`;
 }
-async function saveProduct(f, p) {
+async function saveProductBase(f, p) {
   const d = formData(f); if (!d.name || !d.code) { toast('اكتب كود المنتج واسمه', 'err'); return false; }
   const dup = list('products').find(x => x.id !== p.id && (x.code || '').trim().toLowerCase() === d.code.trim().toLowerCase()); if (dup) { toast('كود المنتج مستخدم لمنتج آخر', 'err'); return false; }
   const doc = Object.assign({}, p, { id: p.id || uid(), brandId: d.brandId, code: d.code.trim(), name: d.name, dims: d.dims, rev: d.rev, unit: d.unit, finish: d.finish, status: d.status || 'active', desc: d.desc, materials: d.materials, notes: d.notes });
@@ -5788,7 +5788,7 @@ function wireProductFields(f, o) {
 function readOrderItems(f) { return $$('#oitems .oitem', f).map(el => ({ productId: el.querySelector('input[type=hidden]').value, qty: num(el.querySelector('input[type=number]').value) || 1 })).filter(it => it.productId); }
 
 /* ---------------- order detail: drawings & 3D card ---------------- */
-function orderDrawingsCard(o) {
+function orderDrawingsCardBase(o) {
   const ps = orderProducts(o); const own = filesOf('order', o.id); const all = orderFiles(o); const hint = Files.uploadHint();
   if (!ps.length && !own.length && !canFiles()) return '';
   return `<div class="card" id="drawings"><div class="cardhead"><h3>الرسومات والمعاينة 3D</h3>${all.length ? `<span class="muted small">${all.length} ملف</span>` : ''}<div class="grow"></div>${all.length ? `<button class="btn sm p" data-action="fileOpen" data-arg="${all[0].id}:order-${o.id}">${icon('play')}فتح العارض</button>` : ''}${canFiles() ? `<button class="btn sm ghost" data-action="fileUpload" data-arg="order:${o.id}">${icon('plus')}رسومات خاصة بالأمر</button>` : ''}</div>
@@ -10701,6 +10701,121 @@ function vOrg() {
   html = html.replace('<button class="btn xs ghost" data-action="ocList">', `<span class="octools"><button type="button" data-action="ocZoom" data-arg="-0.1" title="تصغير">−</button><button type="button" data-action="ocZoom" data-arg="0.1" title="تكبير">+</button><button type="button" data-action="ocZoom" data-arg="reset" title="الحجم الطبيعي" style="width:auto;padding:0 8px;font-weight:600">100%</button></span><button class="btn xs ghost" data-action="ocList">`);
   return html;
 }
+/* =====================================================================
+   v4.6.2 — رابط التصميم / المراجعة الفنية على المنتج (صفحة GPT أو أي رابط):
+   خانة في بطاقة المنتج، وزر «فتح التصميم» في المنتج وأمر التشغيل ولوحة القسم — يفتح داخل التطبيق
+   (إطار بشريط رجوع) ولو الموقع يمنع العرض داخل التطبيقات يُفتح في نافذة جديدة
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.dsg{position:fixed;inset:0;z-index:120;background:var(--bg);display:flex;flex-direction:column}
+.dsg .dsgbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface);padding-top:calc(8px + env(safe-area-inset-top,0px))}
+.dsg .dsgbar .t{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsg iframe{flex:1;border:0;width:100%;background:#fff}
+.dsg .dsghint{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12.5px;box-shadow:var(--shadow);display:flex;gap:8px;align-items:center;max-width:92vw}
+.btn.dsgbtn{background:linear-gradient(135deg,var(--accent),#7c3aed);color:#fff;border-color:transparent}
+</style>`);
+const designUrlOk = u => /^https?:\/\/\S+$/i.test(String(u || '').trim());
+const designBtn = (p, cls = 'btn sm dsgbtn') => p && designUrlOk(p.designUrl) ? `<button class="${cls}" data-action="designOpen" data-arg="${esc(p.id)}" title="${esc(p.designUrl)}">${icon('layers')}فتح التصميم</button>` : '';
+function productForm(p) {
+  const h = productFormBase(p); const i = h.lastIndexOf('</div>'); if (i < 0) return h;
+  return h.slice(0, i) + field('رابط التصميم / المراجعة الفنية (صفحة GPT أو أي رابط)', inp('designUrl', p.designUrl || '', 'type="url" class="ltr" placeholder="https://…" inputmode="url"'), 'full') + h.slice(i);
+}
+async function saveProduct(f, p) {
+  const d = formData(f); const url = String(d.designUrl || '').trim();
+  if (url && !designUrlOk(url)) { toast('رابط التصميم غير صحيح — يبدأ بـ https://', 'err'); return false; }
+  const r = await saveProductBase(f, p); if (r === false) return false;
+  const doc = p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(d.code || '').trim().toLowerCase());
+  if (doc && (doc.designUrl || '') !== url) await Store.update('products', doc.id, { designUrl: url || null });
+  return r;
+}
+function designCard(p) {
+  if (!p || !designUrlOk(p.designUrl)) return '';
+  let host = ''; try { host = new URL(p.designUrl).host; } catch (e) { /* ignore */ }
+  return `<div class="card"><div class="cardhead"><h3>${icon('layers')} التصميم والمراجعة الفنية</h3><span class="muted small ltr">${esc(host)}</span><div class="grow"></div>${designBtn(p, 'btn p sm dsgbtn')}<a class="btn sm ghost" href="${esc(p.designUrl)}" target="_blank" rel="noopener">${icon('link')}في نافذة</a></div><div class="small ink2">صفحة المراجعة الفنية للمنتج (المقاسات، الخامات، مراحل التشغيل) — تُفتح داخل التطبيق ويقدر رئيس القسم يراجعها قبل التنفيذ.</div></div>`;
+}
+function vProductDetail(id) {
+  const html = vProductDetailBase(id); const p = byId('products', id); const c = p ? designCard(p) : ''; if (!c) return html;
+  const i = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card">') : null; return i == null ? html : html.slice(0, i) + c + html.slice(i);
+}
+function orderDrawingsCard(o) {
+  let html = orderDrawingsCardBase(o);
+  orderProducts(o).forEach(p => { if (!designUrlOk(p.designUrl)) return; const m = `<span class="code">${esc(p.code || '')}</span>`; const i = html.indexOf(m); if (i >= 0) html = html.slice(0, i + m.length) + designBtn(p) + html.slice(i + m.length); });
+  return html;
+}
+/* ---------- open inside the app ---------- */
+ACTIONS.designOpen = id => {
+  const p = byId('products', id); if (!p || !designUrlOk(p.designUrl)) return;
+  const old = document.getElementById('dsg'); if (old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div class="dsg" id="dsg"><div class="dsgbar"><button class="btn sm" data-action="designClose">${icon('x')}رجوع</button><span class="t">${esc(p.code || '')} — ${esc(p.name)} · التصميم والمراجعة الفنية</span><a class="btn sm ghost" href="${esc(p.designUrl)}" target="_blank" rel="noopener">${icon('link')}فتح في نافذة</a></div><iframe id="dsgfr" src="${esc(p.designUrl)}" allow="fullscreen; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe><div class="dsghint" id="dsghint"><span>لو الصفحة فاضية أو ظهر «رفض الاتصال»، الموقع لا يسمح بالعرض داخل التطبيقات —</span><a class="btn xs p" href="${esc(p.designUrl)}" target="_blank" rel="noopener">افتحها في نافذة</a><button class="btn xs ghost" data-action="designHint">إخفاء</button></div></div>`);
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => { const h = document.getElementById('dsghint'); if (h) h.style.opacity = '.92'; }, 3500);
+};
+ACTIONS.designClose = () => { const el = document.getElementById('dsg'); if (el) el.remove(); document.body.style.overflow = ''; };
+ACTIONS.designHint = () => { const h = document.getElementById('dsghint'); if (h) h.remove(); };
+window.addEventListener('hashchange', () => ACTIONS.designClose());
+/* =====================================================================
+   v4.6.2 — ملفات المصدر الهندسية (AutoCAD / SolidWorks / STEP…) سرّية:
+   تُعلَّم تلقائيًا عند الرفع وتُخزَّن تحت المسار cad/ الذي يمنعه السيرفر عن غير المالك/المكتب الفني/المكتب،
+   ويرى رئيس القسم بطاقة «مقفول» فقط. تبديل يدوي للسرّية لأي ملف (ينقل الملف بين المسارين على السيرفر)
+   ===================================================================== */
+const CAD_EXT = ['dwg', 'dxf', 'dwt', 'sldprt', 'sldasm', 'slddrw', 'step', 'stp', 'iges', 'igs', 'x_t', 'x_b', 'sat', 'ipt', 'iam', 'idw', 'prt', 'asm', 'catpart', 'catproduct', '3dm', 'skp', 'f3d', 'rvt', 'rfa', 'nc', 'gcode'];
+const cadExtOf = name => (String(name || '').split('.').pop() || '').toLowerCase();
+const isCadName = name => CAD_EXT.includes(cadExtOf(name));
+const canSeeCad = () => isAdmin() || ['office', 'tech'].includes(role());
+FILE_KINDS.cad = ['ملف مصدر CAD — سرّي', 'shield'];
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.ftile.locked{opacity:.75;cursor:not-allowed}.ftile.locked .fico{color:var(--warn-ink)}
+.ftile .flock{position:absolute;top:6px;inset-inline-start:6px;background:var(--warn-soft);color:var(--warn-ink);border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700;display:inline-flex;gap:3px;align-items:center}
+.ftile .flock svg{width:11px;height:11px}
+.ftile{position:relative}
+</style>`);
+/* upload: CAD files → restricted, stored under cad/ on the server */
+async function uploadOne(file, meta) {
+  const restricted = meta.restricted != null ? !!meta.restricted : isCadName(file.name);
+  if (!restricted) return uploadOneBase(file, meta);
+  if (!canSeeCad()) throw Object.assign(new Error('cad'), { code: 'not_granted' });
+  const mime = fileMimeOf(file) || 'application/octet-stream';
+  const doc = { id: uid(), name: file.name, kind: 'cad', mime, size: file.size, rev: meta.rev || '', note: meta.note || '', productId: meta.productId || null, orderId: meta.orderId || null, byName: S.session?.name || '', thumb: null, pages: null, restricted: true };
+  const st = await filesPutRestricted(file, mime); Object.assign(doc, st);
+  await Store.save('files', doc, { silent: true }); return doc;
+}
+async function filesPutRestricted(blob, mime) {
+  if (typeof sbOn === 'function' && sbOn()) {
+    const key = `cad/${todayISO().slice(0, 7)}/${uid()}`; const { error } = await S.sb.storage.from('files').upload(key, blob, { contentType: mime, upsert: false });
+    if (error) { const e = new Error(error.message || 'upload'); e.code = /size|large/i.test(error.message || '') ? 'too_large' : /policy|security|denied|unauthorized/i.test(error.message || '') ? 'not_granted' : 'upstream_error'; throw e; }
+    return { store: 'sb', ref: key, enc: null, mime, size: blob.size };
+  }
+  return Files.put(blob, mime);
+}
+/* gallery: locked tiles for everyone else */
+function fileGallery(files, ctx, o = {}) {
+  const cad = files.filter(f => f.restricted || f.kind === 'cad'); const rest = files.filter(f => !(f.restricted || f.kind === 'cad'));
+  let html = fileGalleryBase(rest, ctx, cad.length ? Object.assign({}, o, { empty: '' }) : o);
+  if (cad.length) {
+    const ok = canSeeCad();
+    html += `<div class="fgroup"><div class="tiny muted" style="margin:6px 0 4px">${icon('shield')} ملفات المصدر الهندسية (${cad.length}) — ${ok ? 'سرّية: المالك والمكتب الفني فقط' : 'مقفولة — اطلبها من المكتب الفني'}</div><div class="fgrid">${cad.map(f => ok ? `<div class="ftile" data-action="fileOpen" data-arg="${esc(f.id)}${ctx ? ':' + esc(ctx) : ''}" title="${esc(f.name)}"><span class="flock">${icon('shield')}سرّي</span><div class="fthumb"><div class="fico">${icon('shield')}<span>${esc(cadExtOf(f.name).toUpperCase())}</span></div></div><div class="fname">${esc(f.name)}</div><div class="tiny muted">${esc(FILE_KINDS.cad[0])}${f.size ? ' · ' + fmtBytes(f.size) : ''}${f.rev ? ' · ' + esc(f.rev) : ''}</div></div>` : `<div class="ftile locked" title="ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط"><span class="flock">${icon('shield')}مقفول</span><div class="fthumb"><div class="fico">${icon('shield')}<span>${esc(cadExtOf(f.name).toUpperCase())}</span></div></div><div class="fname">${esc(f.name)}</div><div class="tiny muted">ملف مصدر — المكتب الفني فقط</div></div>`).join('')}</div></div>`;
+  }
+  return html;
+}
+/* viewer: CAD has no in-browser viewer → download only (privileged) */
+ACTIONS.fileOpenCad = id => { const f = byId('files', id); if (!f || !canSeeCad()) return; ACTIONS.fileSave(id); };
+document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="fileOpen"]'); if (!a) return; const id = (a.dataset.arg || '').split(':')[0]; const f = byId('files', id); if (f && (f.restricted || f.kind === 'cad')) { ev.stopImmediatePropagation(); ev.preventDefault(); if (!canSeeCad()) { toast('ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط', 'err'); return; } toast('ملفات CAD تُحمَّل للفتح في برنامجها (AutoCAD / SolidWorks)'); ACTIONS.fileSave(id); } }, true);
+/* manual toggle from the file card (edit modal) */
+ACTIONS.fileLockToggle = async id => {
+  const f = byId('files', id); if (!f || !canSeeCad() || !canFiles()) return; const to = !f.restricted;
+  if (!(await confirmDlg(to ? 'جعل هذا الملف سرّيًا؟ لن يراه إلا المالك والمكتب الفني.' : 'فتح هذا الملف لرؤساء الأقسام؟', to ? 'اجعله سرّيًا' : 'افتحه'))) return;
+  try {
+    if (f.store === 'sb' && f.ref) { const dest = to ? (f.ref.startsWith('cad/') ? f.ref : 'cad/' + f.ref) : f.ref.replace(/^cad\//, ''); if (dest !== f.ref) { const { error } = await S.sb.storage.from('files').move(f.ref, dest); if (error) throw error; await Store.update('files', f.id, { ref: dest, restricted: to, kind: to ? 'cad' : (isCadName(f.name) ? 'other' : f.kind) }); } else await Store.update('files', f.id, { restricted: to }); }
+    else await Store.update('files', f.id, { restricted: to, kind: to ? 'cad' : (isCadName(f.name) ? 'other' : f.kind) });
+    toast(to ? 'أصبح الملف سرّيًا' : 'أصبح الملف متاحًا'); render(false);
+  } catch (e) { console.error(e); toast('تعذّر تغيير السرّية', 'err'); }
+};
+/* the upload dialog accepts CAD extensions + shows the rule */
+const _fileUploadBase = ACTIONS.fileUpload;
+ACTIONS.fileUpload = arg => { _fileUploadBase(arg); setTimeout(() => { const inp = document.getElementById('f-files'); if (!inp) return; inp.setAttribute('accept', inp.getAttribute('accept') + ',' + CAD_EXT.map(x => '.' + x).join(',')); const hint = inp.nextElementSibling; if (hint && canSeeCad()) hint.insertAdjacentHTML('beforeend', ` · <b>ملفات المصدر (DWG/DXF/SLDPRT/STEP…) تُحفظ سرّية تلقائيًا: المالك والمكتب الفني فقط</b>`); }, 30); };
+/* lock toggle button inside the viewer actions / file edit modal */
+const _fileEditBase = ACTIONS.fileEdit;
+ACTIONS.fileEdit = id => { _fileEditBase(id); setTimeout(() => { const f = byId('files', id); const mf = document.getElementById('mform'); if (!f || !mf || !canSeeCad()) return; const mb = mf.querySelector('.mb .form'); if (mb) mb.insertAdjacentHTML('beforeend', `<div class="field full"><label>السرّية</label><div class="row"><span class="badge ${f.restricted ? 'warn' : ''}">${f.restricted ? 'سرّي — المالك والمكتب الفني فقط' : 'متاح لرؤساء الأقسام'}</span><button type="button" class="btn sm" data-action="fileLockToggle" data-arg="${f.id}">${f.restricted ? 'افتحه للأقسام' : 'اجعله سرّيًا'}</button></div></div>`); }, 30); };
 boot();
 </script>
 
