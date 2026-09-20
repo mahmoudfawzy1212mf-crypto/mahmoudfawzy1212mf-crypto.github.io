@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1448-d0cd20";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1513-e659be";</script>
 
 <script>
 'use strict';
@@ -1709,7 +1709,7 @@ function sessFromWorker(w) { const role = w.role && w.role !== 'none' ? w.role :
 /* everyone who can log in: device/manual accounts (staff) + employees granted a role */
 function loginPeople() {
   const a = list('staff').filter(s => s.active !== false).map(s => ({ kind: 'staff', id: s.id, name: s.name, role: s.role, deptIds: s.deptIds || [], pinHash: s.pinHash, username: s.username, rec: s }));
-  const b = list('workers').filter(w => w.status !== 'inactive' && w.role && w.role !== 'none').map(w => ({ kind: 'worker', id: 'w:' + w.id, name: w.name, role: w.role, deptIds: sessFromWorker(w).deptIds, pinHash: w.pinHash, username: w.username, rec: w }));
+  const b = list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended' && w.role && w.role !== 'none').map(w => ({ kind: 'worker', id: 'w:' + w.id, name: w.name, role: w.role, deptIds: sessFromWorker(w).deptIds, pinHash: w.pinHash, username: w.username, rec: w }));
   return a.concat(b);
 }
 function personById(id) { return loginPeople().find(p => p.id === id) || null; }
@@ -3294,7 +3294,7 @@ function workerFormBase(w) {
     ${seesWages() ? `${field(`اليومية (${CUR()}) — للتعاقد اليومي`, inp('dailyWage', w.dailyWage ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field(`الراتب الأساسي الشهري (${CUR()})`, inp('basic', w.basic ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field(`بدلات شهرية (${CUR()})`, inp('allowances', w.allowances ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field('رقم التأمينات', inp('insuranceNo', w.insuranceNo || '', 'class="ltr" style="text-align:right"'))}${field(`اشتراك التأمين الصحي الشهري (${CUR()}) — الشركة تتحمل ${S.settings.policy?.healthInsCompanyPct ?? 50}%`, inp('healthIns', w.healthIns ?? '', 'type="number" step="any" min="0"'))}` : ''}
     <div class="field full"><label>أيام الراحة الأسبوعية (اتركها فارغة لاتباع الوردية)</label><div class="row" style="gap:6px">${AR_DAYS.map((d, i) => `<label class="check ${(w.offDays || []).map(Number).includes(i) ? 'on' : ''}"><input type="checkbox" name="off-${i}" id="f-off-${i}" ${(w.offDays || []).map(Number).includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
     ${field('رصيد الإجازة السنوية (يوم/سنة)', inp('annualDays', w.annualDays ?? '', 'type="number" min="0" placeholder="افتراضي ' + (lt('annual')?.days ?? 21) + '"'))}${field('جهة اتصال للطوارئ', inp('emergency', w.emergency || ''))}
-    ${field('الحالة', `<select id="f-status" name="status">${opts([['active', 'على رأس العمل'], ['inactive', 'ترك العمل']].map(x => ({ id: x[0], name: x[1] })), w.status || 'active')}</select>`)}${field('تاريخ ترك العمل', inp('leftAt', w.leftAt || '', 'type="date"'))}
+    ${field('الحالة', `<select id="f-status" name="status">${opts([['active', 'على رأس العمل'], ['suspended', 'موقوف مؤقتًا — بلا وصول للتطبيق'], ['inactive', 'ترك العمل']].map(x => ({ id: x[0], name: x[1] })), w.status || 'active')}</select>`)}${field('تاريخ ترك العمل', inp('leftAt', w.leftAt || '', 'type="date"'))}
     <div class="full" style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px"><b>إعداد البصمة</b> <span class="tiny muted">— الصورة وبصمة الوجه تُسجَّل من صفحة الموظف بعد الحفظ</span></div>
     ${field('مكان البصمة المسموح', `<select id="f-punchAt" name="punchAt">${opts(Object.keys(PUNCH_AT), punchAtOf(w.id ? w : Object.assign({}, w, { deptId: w.deptId || S.settings.departments[0].id })), k => PUNCH_AT[k])}</select><div class="hint">«تلقائي» يكفي في الغالب: يبصم في المصنع، وعندما يُحدَّد ضمن فريق تركيب مشروع (من أمر التشغيل ← المرحلة ← الفريق والموعد) تُقبل بصمته في موقع المشروع فقط خلال الفترة</div>`)}
     <div class="field full"><label>طرق البصمة والتحقق (احنا اللي نحدد لكل موظف)</label><div class="row" style="gap:6px">${[['face', 'الكشك: بصمة الوجه'], ['pin', 'الكشك: رقم سري (فقط عند إيقاف «البصمة البيومترية فقط»)'], ['selfie', 'الموبايل: التحقق بالوجه (سيلفي) عند الدخول والبصمة'], ['device', 'الموبايل: بصمة الجهاز (إصبع / وجه الموبايل)']].map(([k, l]) => `<label class="check ${punchMethodsOf(w)[k] ? 'on' : ''}"><input type="checkbox" name="pm-${k}" id="f-pm-${k}" ${punchMethodsOf(w)[k] ? 'checked' : ''}>${l}</label>`).join('')}</div></div>
@@ -5699,7 +5699,7 @@ const productCover = p => { const fs = filesOf('product', p.id); const c = p.cov
 const productOrders = p => list('orders').filter(o => orderItems(o).some(it => it.productId === p.id));
 
 /* ---------------- products list ---------------- */
-function vProducts() {
+function vProductsBase() {
   const f = S.ui.filter.products || (S.ui.filter.products = { brand: '' }); const q = (S.ui.search.products || '').toLowerCase();
   let arr = list('products').filter(p => p.status !== 'archived'); if (f.brand) arr = arr.filter(p => p.brandId === f.brand); if (q) arr = arr.filter(p => `${p.code} ${p.name} ${p.desc || ''}`.toLowerCase().includes(q));
   const byBrand = S.settings.brands.filter(b => !f.brand || b.id === f.brand).map(b => ({ b, items: sortBy(arr.filter(p => p.brandId === b.id), p => p.code || p.name) })).filter(x => x.items.length || !f.brand);
@@ -7931,7 +7931,7 @@ function workerFormOrg(w) {
   html = html.replace(/<select id="f-workplace" name="workplace">[\s\S]*?<\/select>/, `<select id="f-workplace" name="workplace">${opts([['office', 'من المصنع — يبصم في لوكيشن المصنع'], ['field', 'إنتاج وتركيبات — يبصم من المصنع أو من موقع العمل حسب مكان شغله'], ['sites', 'مواقع العمل فقط — يبصم من المواقع المخصصة له'], ['hq', 'من المكتب — يبصم في لوكيشن المكتب (الإدارة / المكتب الفني / الحسابات)'], ['home', 'من البيت — يبصم من أي مكان بدون قيد الموقع']].map(x => ({ id: x[0], name: x[1] })), w.workplace || 'office')}</select>`);
   return html;
 }
-async function workerFromForm(f, w) {
+async function workerFromFormOrg(f, w) {
   const doc = await workerFromFormBase(f, w); if (!doc) return doc;
   if (!doc.managerId) doc.managerId = defaultManagerFor(doc) || null;
   if (doc.workplace === 'field') doc.punchAt = 'both'; if (doc.workplace === 'sites') doc.punchAt = 'sites'; if (doc.workplace === 'office' && ['both', 'sites'].includes(w.punchAt) && ['field', 'sites'].includes(w.workplace)) doc.punchAt = 'auto';
@@ -8428,8 +8428,8 @@ ACTIONS.poSubmit = async id => {
   const h = poHead(p); if (h) await Store.save('tasks', { id: `po_appr_${p.id}`, title: `اعتماد طلب الشراء ${p.number} لقسمك`, desc: `${p.supplier || ''} — ${(p.items || []).map(it => `${it.name || byId('materials', it.materialId)?.name || ''} × ${fmtNum(it.qty)}`).join('، ')}\nاعتمد أو ارفض من «الطلبات».`, deptId: p.deptId, assigneeId: h.id, orderId: p.orderId || null, dueDate: todayISO(), priority: 'high', status: 'open', kind: 'update', source: 'system', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true });
   toast('تم إرسال الطلب للاعتماد');
 };
-function reqDesc(r) { if (r.type === 'po') { const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; return `طلب شراء ${p ? p.number : ''} — ${p ? p.supplier || '' : ''} · ${p ? deptName(p.deptId) : ''}${p && seesFinance() ? ` · ${fmtMoney(poTotal(p))} ${CUR()}` : ''}${p && (p.offers || []).length ? ` · ${(p.offers || []).length} عروض` : ''}`; } return reqDescPipeline(r); }
-async function applyRequestEffects(r, w, patch, opts = {}) {
+function reqDescPo(r) { if (r.type === 'po') { const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; return `طلب شراء ${p ? p.number : ''} — ${p ? p.supplier || '' : ''} · ${p ? deptName(p.deptId) : ''}${p && seesFinance() ? ` · ${fmtMoney(poTotal(p))} ${CUR()}` : ''}${p && (p.offers || []).length ? ` · ${(p.offers || []).length} عروض` : ''}`; } return reqDescPipeline(r); }
+async function applyRequestEffectsPo(r, w, patch, opts = {}) {
   if (r.type === 'po') {
     const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; if (!p) return;
     await Store.update('purchases', p.id, { status: 'approved', approval: Object.assign({}, p.approval || {}, { status: 'approved', approvedAt: nowISO(), approvedByName: S.session?.name || '' }) });
@@ -9129,7 +9129,7 @@ EXTRA_SETTINGS.security = { label: 'الحماية ضد التزوير', render:
     <div class="card"><div class="cardhead"><h3>محاولات مشبوهة وحسابات مقفولة</h3><span class="muted small">${sus.length}</span></div>${sus.length ? `<div class="tablewrap"><table><thead><tr><th>الموظف</th><th>المحاولات (30 يوم)</th><th>آخر محاولة</th><th>الحالة</th><th></th></tr></thead><tbody>${sus.map(w => { const last = (w.suspects || []).slice(-1)[0]; return `<tr><td><a href="#/workers/${w.id}">${esc(w.name)}</a></td><td>${(w.suspects || []).length}</td><td class="small">${last ? `${fmtDate(last.at.slice(0, 10))} — ${last.flags.map(f => SUSPECT_LABEL[f] || f).join('، ')}` : '—'}</td><td>${w.locked ? '<span class="badge crit">مقفول</span>' : '<span class="badge warn">للمراجعة</span>'}</td><td>${w.locked ? `<button class="btn xs" data-action="unlockWorker" data-arg="${w.id}">فك القفل</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد محاولات مشبوهة</div>'}</div>`; } };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'secform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ security: { liveness: !!d.liveness, antiSpoof: d.antiSpoof, lockAfter: +d.lockAfter || 3, maxSpeedKmh: +d.maxSpeedKmh || 100, ipCheck: !!d.ipCheck } }); toast('تم الحفظ'); });
 /* worker profile: lock badge + known devices */
-function vWorkerDetail(id) { let html = vWorkerDetailHelp(id); const w = byId('workers', id); if (!w) return html; const card = securityProfileCard(w); if (!card) return html; const i = html.indexOf('<div class="tabs">'); if (i < 0) return html + card; const j = html.lastIndexOf('<div class="card">', i); return j > 0 ? html.slice(0, j) + card + html.slice(j) : html + card; }
+function vWorkerDetailSec(id) { let html = vWorkerDetailHelp(id); const w = byId('workers', id); if (!w) return html; const card = securityProfileCard(w); if (!card) return html; const i = html.indexOf('<div class="tabs">'); if (i < 0) return html + card; const j = html.lastIndexOf('<div class="card">', i); return j > 0 ? html.slice(0, j) + card + html.slice(j) : html + card; }
 function securityProfileCard(w) {
   if (!(isAdmin() || ['hr', 'manager'].includes(role()) || isManagerOf(w))) return ''; const devs = w.devices || []; const sus = w.suspects || [];
   if (!devs.length && !sus.length && !w.locked) return '';
@@ -9362,7 +9362,7 @@ function productKind(p, o) {
   return brand === 'alu' ? 'alu' : brand === 'lof' ? 'metal' : 'wood';
 }
 /* ---------------- local template engine (no AI key) ---------------- */
-function routeTemplate(o) {
+function routeTemplateBase(o) {
   const ps = orderProducts(o); const items = orderItems(o); const qtyOf = p => (items.find(it => it.productId === p.id) || {}).qty || 1;
   const kinds = new Set(ps.map(p => productKind(p, o))); if (!ps.length) kinds.add(productKind({ name: o.title }, o));
   const dept = id => (S.settings.departments || []).find(d => d.id === id); const instDept = ((S.settings.departments || []).find(d => d.install === o.brandId) || {}).id || null;
@@ -9392,7 +9392,7 @@ function routeTemplate(o) {
 function bomMatch(row) { if (row.materialId && byId('materials', row.materialId)) return byId('materials', row.materialId); const n = (row.name || '').toLowerCase(); const ms = list('materials'); const tok = n.split(/[\s—\-×]+/).filter(x => x.length > 2); let best = null, bs = 0; ms.forEach(m => { const mn = (m.name || '').toLowerCase(); let s = 0; tok.forEach(t => { if (mn.includes(t)) s++; }); if (row.unit && m.unit === row.unit) s += .5; if (s > bs) { bs = s; best = m; } }); return bs >= 1.5 ? best : null; }
 const bomNeed = r => Math.ceil((+r.qty || 0) * (1 + (+r.waste || 0) / 100) * 100) / 100;
 /* ---------------- AI generation ---------------- */
-async function routeAI(o) {
+async function routeAIBase(o) {
   const ps = orderProducts(o); const items = orderItems(o);
   const prodTxt = (ps.length ? ps : [{ name: o.title, dims: '', desc: o.notes || '' }]).map(p => `- ${p.code || ''} ${p.name} | الكمية: ${(items.find(it => it.productId === p.id) || {}).qty || o.qty || 1} ${p.unit || o.unit || ''} | المقاسات: ${p.dims || '—'} | التشطيب: ${p.finish || '—'} | الخامات القياسية: ${p.materials || '—'} | الوصف: ${(p.desc || '').slice(0, 300)} | ملاحظات التصنيع: ${(p.notes || '').slice(0, 200)} | رسومات مرفقة: ${filesOf('product', p.id || '').length}`).join('\n');
   const depts = (S.settings.departments || []).map(d => `${d.id}: ${d.name}${d.install ? ' (تركيبات)' : ''}`).join('، ');
@@ -9412,10 +9412,10 @@ ${mats}
   j.source = 'ai'; return j;
 }
 /* ---------------- UI ---------------- */
-const routePlanBtn = o => (writable() && ['admin', 'manager', 'vice', 'tech', 'office'].includes(role()) && isOpen(o)) ? `<button class="btn sm ${o.routePlan ? 'ghost' : 'p'}" data-action="routePlan" data-arg="${o.id}">${icon('star')}${o.routePlan ? 'خطة التشغيل (AI)' : 'اقتراح خطة التشغيل بالذكاء الاصطناعي'}</button>` : '';
+const routePlanBtn = o => (writable() && ['admin', 'manager', 'vice', 'tech', 'office', 'head'].includes(role()) && isOpen(o)) ? `<button class="btn sm ${o.routePlan ? 'ghost' : 'p'}" data-action="routePlan" data-arg="${o.id}">${icon('star')}${o.routePlan ? 'خطة التشغيل (AI)' : 'اقتراح خطة التشغيل بالذكاء الاصطناعي'}</button>` : '';
 ACTIONS.routePlan = async oid => {
   const o = byId('orders', oid); if (!o) return; let plan = null; const useAi = aiAvailable();
-  openModal({ title: `خطة التشغيل — ${o.code}`, wide: true, submitLabel: 'اعتماد وتوليد المهام والخامات', body: `<div class="rplan" id="rplan"><div class="banner info" style="margin:0 0 8px">${icon('info')}<span>${useAi ? 'جارٍ قراءة المنتجات والرسومات واقتراح الخطة…' : 'المساعد الذكي غير مفعّل هنا — تُبنى الخطة بمحرك القوالب المحلي حسب نوع المنتج والمقاسات (تقدر تعدّل كل شيء قبل الاعتماد)'}</span></div><div id="rplanbody"><div class="muted small" style="padding:20px;text-align:center">⏳ لحظات…</div></div></div>`,
+  openModal({ title: `خطة التشغيل — ${o.code}`, wide: true, submitLabel: isAdmin() ? 'اعتماد وتوليد المهام والخامات' : 'إرسال الخطة للمالك للاعتماد', body: `<div class="rplan" id="rplan"><div class="banner info" style="margin:0 0 8px">${icon('info')}<span>${useAi ? 'جارٍ قراءة المنتجات والرسومات واقتراح الخطة…' : 'المساعد الذكي غير مفعّل هنا — تُبنى الخطة بمحرك القوالب المحلي حسب نوع المنتج والمقاسات (تقدر تعدّل كل شيء قبل الاعتماد)'}</span></div><div id="rplanbody"><div class="muted small" style="padding:20px;text-align:center">⏳ لحظات…</div></div></div>`,
     onOpen: async f => {
       try { plan = useAi ? await routeAI(o) : routeTemplate(o); } catch (e) { console.warn('ai route', e); plan = routeTemplate(o); plan.fallback = true; }
       if (o.routePlan && o.routePlan.stages && !plan.fromSaved) { /* keep an already-approved plan editable */ }
@@ -9435,7 +9435,7 @@ ACTIONS.routePlan = async oid => {
 const stageHTML = (s, i) => `<div class="stg"><div class="h"><span class="badge">${i + 1}</span><input name="s-name" value="${esc(s.name)}" style="flex:1;min-width:160px"><select name="s-dept">${opts([{ id: '', name: '— عام (جودة/تغليف) —' }].concat(S.settings.departments), s.deptId || '')}</select><label class="tiny muted">أيام <input name="s-days" type="number" min="0" step="0.5" value="${s.days || 1}"></label><button class="iconbtn" data-rp="delStage" title="حذف المرحلة">${icon('x')}</button></div><div class="tasks">${(s.tasks || []).map(taskLineHTML).join('')}</div><button class="btn xs ghost" data-rp="addTask" style="margin-top:6px">${icon('plus')}مهمة</button></div>`;
 const taskLineHTML = t => `<div class="tl"><input name="t-title" value="${esc(t.title || '')}" placeholder="المهمة"><input name="t-days" type="number" min="0" step="0.5" value="${t.days || ''}" placeholder="أيام"><button class="iconbtn" data-rp="delTask">${icon('x')}</button></div>`;
 function bomRowHTML(b) { const m = bomMatch(b); const need = bomNeed(b); return `<tr><td><input name="b-name" value="${esc(b.name || '')}"></td><td><input name="b-unit" value="${esc(b.unit || '')}" style="width:60px"></td><td class="n"><input name="b-qty" type="number" step="any" value="${b.qty ?? ''}"></td><td class="n"><input name="b-waste" type="number" step="any" value="${b.waste ?? 5}"></td><td><select name="b-mat"><option value="">— غير مطابق (شراء) —</option>${opts(sortBy(list('materials'), x => x.name), m ? m.id : '', x => `${x.name} (${x.unit}) — رصيد ${fmtNum(x.qty)}`)}</select></td><td class="stock">${m ? (m.qty >= need ? `<span class="okst">متاح ${fmtNum(m.qty)}</span>` : `<span class="short">ناقص ${fmtNum(Math.max(0, need - (+m.qty || 0)))}</span>`) : '<span class="muted">—</span>'}</td><td><input name="b-note" value="${esc(b.note || '')}" placeholder="ملاحظة"></td><td><button class="iconbtn" data-rp="delBom">${icon('x')}</button></td></tr>`; }
-function routePlanHTML(o, plan) {
+function routePlanHTMLBase(o, plan) {
   const total = plan.stages.reduce((a, s) => a + (+s.days || 0), 0);
   return `<div class="banner ${plan.source === 'ai' ? 'good' : 'info'}" style="margin:0 0 8px">${icon(plan.source === 'ai' ? 'check' : 'info')}<span>${plan.source === 'ai' ? 'اقتراح المساعد الذكي من توصيف المنتجات والرسومات' : (plan.fallback ? 'تعذّر الاتصال بالمساعد — ' : '') + 'خطة من محرك القوالب المحلي'} · ${plan.stages.length} مراحل · ${total} يوم تقديري · ${plan.bom.length} خامة${plan.notes ? ' · ' + esc(plan.notes) : ''}</span></div>
     <h3 style="margin:8px 0 4px">المراحل والمهام</h3><div id="rpstages">${plan.stages.map(stageHTML).join('')}</div><button class="btn sm ghost" data-rp="addStage" style="margin-top:8px">${icon('plus')}مرحلة</button>
@@ -9448,7 +9448,7 @@ function readPlan(f) {
   return { stages, bom };
 }
 /* ---------------- apply: tasks per stage + store issue / purchase request ---------------- */
-async function applyRoutePlan(o, p) {
+async function applyRoutePlanBase(o, p) {
   let day = o.orderDate && o.orderDate > todayISO() ? o.orderDate : todayISO(); let n = 0; const me = S.session || {};
   for (const [si, s] of p.stages.entries()) {
     const due = addDays(day, Math.ceil(s.days || 1)); const heads = s.deptId ? deptHeads(s.deptId) : [];
@@ -9468,7 +9468,7 @@ async function applyRoutePlan(o, p) {
   location.hash = `#/projects/${o.id}`;
 }
 /* order page: plan card */
-function routePlanCard(o) {
+function routePlanCardBase(o) {
   const rp = o.routePlan; const btn = routePlanBtn(o); if (!rp && !btn) return '';
   return `<div class="card"><div class="cardhead"><h3>خطة التشغيل والخامات</h3><div class="grow"></div>${btn}${rp ? `<a class="btn sm ghost" href="#/projects/${o.id}">${icon('layers')}المشروع</a>` : ''}</div>${rp ? `<div class="small">اعتُمدت ${fmtDate((rp.at || '').slice(0, 10))} بواسطة ${esc(rp.byName || '')} · ${rp.stages.length} مراحل · ${rp.tasks} مهمة · ${rp.bom.length} خامة${rp.buy ? ` · <span style="color:var(--warn-ink)">${rp.buy} صنف للشراء</span>` : ''}</div><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${rp.stages.map((s, i) => `<span class="badge">${i + 1}. ${esc(s.name.split(' — ')[0])} · ${s.days} ي</span>`).join('')}</div>${rp.bom.length ? `<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>الخامة</th><th class="n">الكمية</th><th class="n">مع الهالك</th><th>المخزن</th></tr></thead><tbody>${rp.bom.slice(0, 12).map(b => { const m = b.materialId ? byId('materials', b.materialId) : null; return `<tr><td>${esc(b.name)}${b.note ? `<div class="tiny muted">${esc(b.note)}</div>` : ''}</td><td class="n">${fmtNum(b.qty)} ${esc(b.unit)}</td><td class="n">${fmtNum(bomNeed(b))}</td><td>${m ? esc(m.name) : '<span class="muted">شراء</span>'}</td></tr>`; }).join('')}</tbody></table></div>` : ''}` : '<div class="muted small">يقرأ المساعد المنتجات (التوصيف والمقاسات والخامة والرسومات) ويقترح المراحل والمهام لكل قسم والخامات بكمياتها — وتعتمدها أو تعدّلها قبل التوليد.</div>'}</div>`;
 }
@@ -9595,7 +9595,7 @@ function vCrmBase() {
   return kpis + tabs + body;
 }
 ACTIONS.crmTab = arg => { (S.ui.filter.crm ||= {}).tab = arg; render(false); };
-function vLeadDetail(l) {
+function vLeadDetailBase(l) {
   const acts = sortBy(l.activities || [], a => a.at || '', true); const qs = leadQuotes(l); const os = leadOrders(l);
   return `<div class="grid g2" style="align-items:start"><div class="stack">
     <div class="card"><div class="cardhead"><h3>${esc(l.name)}</h3><div class="grow"></div>${badge(LEAD_STAGES, l.stage)}${canCrm() ? `<button class="btn xs ghost" data-action="leadEdit" data-arg="${l.id}">${icon('edit')}</button>` : ''}</div>
@@ -10027,7 +10027,7 @@ function crmFollowPro() {
   return grp.filter(g => g[1].length).map(g => `<div class="card fgrp"><div class="cardhead"><h3>${g[0]}</h3><span class="badge ${g[2]}">${g[1].length}</span></div><div class="tablewrap"><table><thead><tr><th>الموعد</th><th>العميل المحتمل</th><th>المرحلة</th><th>آخر نشاط</th><th>المسؤول</th><th></th></tr></thead><tbody>${sortBy(g[1], l => l.nextAt || '9').map(row).join('')}</tbody></table></div></div>`).join('') || '<div class="card muted">لا توجد فرص مفتوحة</div>';
 }
 /* replace the board / reports / follow-ups inside the CRM page */
-function vCrm() {
+function vCrmPro() {
   if (S.route.id) { const l = byId('leads', S.route.id); if (l) return vLeadDetail(l); }
   const f = S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' }; const html = vCrmBase();
   if (f.tab === 'board') { let ls = leadsAll(); if (f.q) { const q = f.q.toLowerCase(); ls = ls.filter(l => `${l.name} ${l.contact} ${l.phone} ${l.need}`.toLowerCase().includes(q)); } const i = html.indexOf('<div class="crm">'); if (i < 0) return html; return html.slice(0, i) + crmBoardPro(ls); }
@@ -10488,7 +10488,7 @@ EXTRA_SETTINGS.sms = { label: 'رسائل SMS للأكواد', render: () => {
     <div id="smsprov" style="margin-bottom:10px">${hosted ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">النسخة المستضافة فقط — هنا يعمل الإرسال اليدوي (واتساب / رسالة من موبايلك)</span>'}</div>
     <div class="form"><label class="check full"><input type="checkbox" name="auto" ${c.auto !== false ? 'checked' : ''}> إرسال الرسالة تلقائيًا بمجرد إصدار الكود (لو المزوّد مضبوط)</label>
     ${field('نص الرسالة — المتغيرات: {code} الكود · {link} رابط التفعيل · {app} اسم السيستم', `<textarea id="f-tpl" name="tpl" style="min-height:110px">${esc(c.tpl || SMS_TPL_DEFAULT)}</textarea>`, 'full')}
-    ${field('رابط التطبيق (يُستخدم في الرسالة من النسخة المكتبية)', inp('appUrl', (S.settings && S.settings.appUrl) || '', 'class="ltr" placeholder="https://…"'), 'full')}</div>
+    ${field('رابط التطبيق (يُستخدم في الرسالة من النسخة المكتبية)', inp('appUrl', (S.settings && S.settings.appUrl) || '', 'class="ltr" placeholder="https://…"'), 'full')}${field('موبايل المالك لتنبيهات SMS (تعديلات الحضور والرواتب)', inp('ownerPhone', (S.settings && S.settings.ownerPhone) || '', 'class="ltr" inputmode="tel" placeholder="01xxxxxxxxx"'))}<label class="check"><input type="checkbox" name="ownerAlerts" ${c.ownerAlerts !== false ? 'checked' : ''}> إرسال تنبيهات SMS للمالك</label></div>
     <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>
     ${hosted && isAdmin() ? `<form class="card" id="smsprovform"><h3>مزوّد SMS (المالك فقط)</h3><p class="small ink2" style="margin:6px 0 12px">تُحفظ البيانات على السيرفر (لا تُخزَّن في المتصفح). مزوّدون مصريون: SMS Misr — أو Twilio / Vonage الدوليان — أو أي مزوّد له رابط HTTP.</p><div class="form">
       ${field('المزوّد', `<select id="f-provider" name="provider"><option value="">— بدون (إرسال يدوي) —</option><option value="smsmisr">SMS Misr (مصر)</option><option value="twilio">Twilio</option><option value="vonage">Vonage</option><option value="generic">مزوّد آخر — رابط HTTP</option></select>`)}
@@ -10502,7 +10502,7 @@ EXTRA_SETTINGS.sms = { label: 'رسائل SMS للأكواد', render: () => {
 } };
 document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'f-provider') { const v = ev.target.value; document.querySelectorAll('#smsprovform .prov').forEach(el => { el.hidden = !el.classList.contains('prov-' + v); }); } });
 document.addEventListener('submit', async ev => {
-  if (ev.target.id === 'smsform') { ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ sms: { auto: !!d.auto, tpl: String(d.tpl || '').trim() || SMS_TPL_DEFAULT }, appUrl: String(d.appUrl || '').trim() }); toast('تم الحفظ'); return; }
+  if (ev.target.id === 'smsform') { ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ sms: { auto: !!d.auto, tpl: String(d.tpl || '').trim() || SMS_TPL_DEFAULT, ownerAlerts: !!d.ownerAlerts }, appUrl: String(d.appUrl || '').trim(), ownerPhone: normPhone(d.ownerPhone || '') }); toast('تم الحفظ'); return; }
   if (ev.target.id === 'smsprovform') { ev.preventDefault(); if (!isAdmin() || !smsAvailable()) return; const d = formData(ev.target); const body = { action: 'setup', provider: d.provider || '', sender: d.sender || '', username: d.username, password: d.password, env: d.env, sid: d.sid, token: d.token, key: d.key, secret: d.secret, url: d.url, method: d.method, body: d.body };
     try { const r = await S.sb.functions.invoke('sms', { body }); if (r.error || !r.data || r.data.error) { toast('تعذّر الحفظ: ' + (r.error?.message || r.data?.error || '?'), 'err'); return; } toast(r.data.configured ? 'تم ضبط مزوّد SMS' : 'أُلغي مزوّد SMS'); ev.target.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); const box = document.getElementById('smsprov'); if (box) { const st = await smsStatus(); box.innerHTML = st.configured ? `<span class="badge good">مضبوط: ${esc(st.provider)}</span>` : `<span class="badge warn">لم يُضبط مزوّد SMS</span>`; } } catch (e) { toast('تعذّر الحفظ', 'err'); } }
 });
@@ -10621,7 +10621,7 @@ ACTIONS.myPhoto = () => {
   const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
 };
 /* «بوابتي»: the big avatar at the top is clickable too */
-function vMe() {
+function vMeAvatar() {
   let html = vMeBio(); const i = html.indexOf('<div class="avatar"'); if (i < 0) return html;
   const j = html.indexOf('</div>', i) + 6;
   return html.slice(0, i) + `<span class="me-avatar" data-action="myPhoto" role="button" title="تغيير صورتي">${html.slice(i, j)}<span class="avcam">${icon('camera')}</span></span>` + html.slice(j);
@@ -10881,6 +10881,339 @@ ACTIONS.linkOpen = id => { const f = byId('files', id); if (!fileIsLink(f)) retu
 /* the file viewer set must not include links; clicking a link tile never reaches fileOpen */
 /* the in-app viewer never pages into links or locked CAD files */
 function viewerSetFor(f, ctx) { const set = viewerSetForBase(f, ctx); const ok = set.filter(x => !fileIsLink(x) && !(x.restricted || x.kind === 'cad')); return ok.length ? ok : [f]; }
+/* =====================================================================
+   v4.6.2 — «اسأل السيستم» لكل موظف من بوابتي: أسئلته الشخصية (رصيد الإجازات، السلفة المسموحة حسب اللائحة،
+   حضوره وتأخيره، جزاءاته، طلباته، سلفه، بنود اللائحة) — تُجاب فورًا من بياناته هو فقط بدون مفتاح AI،
+   ومع مفتاح Anthropic يُكمل المساعد الذكي الأسئلة الحرة بسياق بيانات الموظف نفسه لا غير
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.askbox{display:flex;gap:8px;align-items:flex-start}.askbox textarea{flex:1;min-height:52px}
+.askchips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.askchips .chip{cursor:pointer}
+.askans{background:var(--surface-2,var(--surface));border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;white-space:pre-wrap;line-height:1.7}
+.askans.ai{border-color:var(--accent)}
+</style>`);
+const ASK_CHIPS = ['عندي كام يوم إجازة؟', 'أقدر آخد سلفة قد إيه؟', 'حضوري وتأخيري الشهر ده', 'عليّ جزاءات؟', 'طلباتي إيه حالتها', 'سلفي المتبقية', 'مواعيد العمل والأوفر تايم', 'إمتى بيتصرف المرتب؟'];
+function askFacts(w) {
+  const ym = monthOf(todayISO()); const pol = S.settings.policy || {}; const s = hrMonthSummary(w, ym);
+  const bal = leaveBalances(w); const pay = monthlyPay(w); const pct = +pol.advanceMaxPct || 50; const maxAdv = Math.round(pay * pct / 100);
+  const advs = list('advances').filter(a => a.workerId === w.id && a.status !== 'closed'); const advRem = advs.reduce((t, a) => t + Math.max(0, (+a.amount || 0) - (+a.paid || 0)), 0);
+  const pens = list('penalties').filter(p => p.workerId === w.id && p.status !== 'waived' && String(p.date || '').startsWith(ym.slice(0, 4)));
+  const reqs = sortBy(list('requests').filter(r => r.workerId === w.id), r => r.createdAt || '', true).slice(0, 8);
+  const shift = (S.settings.shifts || []).find(x => x.id === w.shiftId) || (S.settings.shifts || [])[0] || {};
+  return { ym, pol, s, bal, pay, pct, maxAdv, advs, advRem, pens, reqs, shift };
+}
+function askLocal(w, q) {
+  const F = askFacts(w); const t = arDigits(String(q || '')).toLowerCase(); const has = (...ks) => ks.some(k => t.includes(k));
+  const out = [];
+  if (has('اجاز', 'إجاز', 'اجازه', 'رصيد')) {
+    const lines = F.bal.filter(b => !b.type.noBalance).map(b => `• ${b.type.name}: ${b.remaining == null ? '—' : fmtNum(Math.max(0, b.remaining))} يوم متبقٍ (المستحق ${fmtNum(b.entitlement)} · المستخدم ${fmtNum(b.used)})${b.eligible ? '' : ' — لم تكتمل مدة الاستحقاق بعد'}`);
+    out.push(`رصيد إجازاتك لسنة ${F.ym.slice(0, 4)}:\n${lines.join('\n') || '— لا توجد أنواع إجازات معرّفة'}\n(تُقدَّم الإجازة من «طلب جديد» ويعتمدها رئيس قسمك ثم الموارد البشرية)`);
+  }
+  if (has('سلف', 'سلفه', 'سلفة', 'قرض')) {
+    out.push(`حسب اللائحة يحق لك سلفة حتى ${F.pct}% من راتبك الذي عملت به، من يوم ${F.pol.advanceFromDay || 10} حتى نهاية الشهر — أي حتى ${fmtMoney(F.maxAdv)} ${CUR()} تقريبًا على أساس أجرك الحالي.${F.advRem > 0 ? `\nعليك سلف قائمة متبقٍ منها ${fmtMoney(F.advRem)} ${CUR()} (${F.advs.length} سلفة) — تُخصم أقساطها من المرتب.` : '\nلا توجد عليك سلف قائمة.'}\nالطلب من «طلب جديد ← سلفة» ويمر على رئيس القسم ثم مدير المصنع ثم الموارد البشرية.`);
+  }
+  if (has('حضور', 'تأخير', 'تاخير', 'غياب', 'اوفر', 'أوفر', 'ساعات')) {
+    out.push(`شهر ${fmtMonth(F.ym)}: حضور ${F.s.present} يوم${F.s.half ? ` + ${F.s.half} نصف يوم` : ''} · غياب ${F.s.absent} · إجازة ${F.s.leave} · تأخير ${F.s.late} دقيقة (${F.s.lateCount} مرة) · انصراف مبكر ${F.s.early} دقيقة · ساعات إضافية ${fmtHrs(F.s.ot + F.s.otHoliday)} · أذونات ${F.s.perms}${F.s.missing ? ` · بصمات ناقصة ${F.s.missing}` : ''}.\nالسماح: ${F.pol.graceTimesPerMonth || 4} مرات تأخير في الشهر بدون خصم، وبعدها تُطبَّق شرائح اللائحة.`);
+  }
+  if (has('جزاء', 'خصم', 'عقوب', 'إنذار', 'انذار')) {
+    out.push(F.pens.length ? `جزاءاتك هذه السنة (${F.pens.length}):\n${F.pens.slice(0, 8).map(p => `• ${fmtDate(p.date)} — ${p.kind === 'bonus' ? 'مكافأة' : p.kind === 'warning' ? 'إنذار' : 'خصم'}: ${esc(p.desc || p.reason || '')}${p.days ? ` (${p.days} يوم)` : ''}${p.amount ? ` (${fmtMoney(p.amount)} ${CUR()})` : ''}`).join('\n')}` : 'لا توجد عليك جزاءات هذه السنة.');
+  }
+  if (has('طلب', 'طلبات', 'موافق')) {
+    out.push(F.reqs.length ? `آخر طلباتك:\n${F.reqs.map(r => `• ${REQ_TYPES[r.type] || r.type} — ${fmtDate((r.createdAt || '').slice(0, 10))}: ${r.status === 'pending' ? (typeof stageChip === 'function' ? 'معلّق عند ' + (CHAIN_LABEL[reqStage(r).role] || '') : 'معلّق') : r.status === 'approved' ? 'موافق عليه' : r.status === 'rejected' ? 'مرفوض' : r.status}`).join('\n')}` : 'ليس لديك طلبات مسجّلة.');
+  }
+  if (has('مواعيد', 'وردية', 'شيفت', 'ميعاد')) out.push(`مواعيد عملك: من ${F.shift.start || '08:00'} إلى ${F.shift.end || '17:00'}${F.shift.name ? ` (${F.shift.name})` : ''}. الأوفر تايم يُحسب ×${S.settings.otMultiplier || 1.5}${F.pol.otNeedsApproval ? ' بعد اعتماد رئيس القسم' : ''}، والعطلات ×${F.pol.otHolidayMultiplier || 2}.`);
+  if (has('مرتب', 'راتب', 'صرف', 'قبض')) out.push(`المرتب يُصرف يوم ${F.pol.payDay || 5} من كل شهر عن الشهر السابق، ويُحسب على ${F.pol.monthDays || 26} يوم عمل. تفاصيل حسابك الشهري تظهر في بوابتي بعد إقفال الشهر.`);
+  if (has('لائحة', 'لايحة', 'قانون', 'قواعد')) out.push('اللائحة الداخلية كاملة موجودة في القائمة ← «اللائحة الداخلية»، وكل بند فيها هو المرجع لأي خصم أو استحقاق.');
+  return out.join('\n\n');
+}
+function askContext(w) {
+  const F = askFacts(w);
+  return `بيانات الموظف (لا تذكر بيانات أي شخص آخر):
+الاسم: ${w.name} · القسم: ${deptName(w.deptId)} · الوظيفة: ${w.trade || ''} · تاريخ التعيين: ${w.joined || '—'} · نوع التعاقد: ${w.contract === 'monthly' ? 'شهري' : 'يومي'}
+أرصدة الإجازات: ${F.bal.map(b => `${b.type.name}: متبقٍ ${b.remaining == null ? '—' : b.remaining} من ${b.entitlement} (مستخدم ${b.used})`).join(' | ')}
+حضور ${F.ym}: حضور ${F.s.present} · غياب ${F.s.absent} · إجازة ${F.s.leave} · تأخير ${F.s.late} د (${F.s.lateCount} مرة) · أوفر تايم ${F.s.ot + F.s.otHoliday} س · أذونات ${F.s.perms}
+السلف: الحد ${F.pct}% من الراتب = ${F.maxAdv} ج.م · متبقٍ من سلف قائمة ${F.advRem} ج.م
+الجزاءات هذه السنة: ${F.pens.length}
+آخر الطلبات: ${F.reqs.map(r => `${REQ_TYPES[r.type] || r.type}:${r.status}`).join('، ') || 'لا شيء'}
+بنود اللائحة المهمة: سماح تأخير ${F.pol.graceTimesPerMonth || 4} مرات/شهر · أذونات ${F.pol.permissionsPerMonth || 2}/شهر بحد ${F.pol.permissionMaxHours || 2} ساعة · غياب بدون إذن = خصم ${F.pol.absencePenaltyDays || 2} يوم · نسيان بصمة = ${F.pol.missingPunchDays || 0.5} يوم · صرف المرتب يوم ${F.pol.payDay || 5} · أوفر تايم ×${S.settings.otMultiplier || 1.5} والعطلات ×${F.pol.otHolidayMultiplier || 2}
+نص اللائحة (مختصر): ${String(regulation().text || '').slice(0, 2500)}`;
+}
+function askCard(w) {
+  const a = S.ui.askAns || null;
+  return `<div class="card" id="askcard"><div class="cardhead"><h3>${icon('star')} اسأل السيستم عن حاجتك</h3><span class="muted small">إجازاتك · سلفك · حضورك · اللائحة</span></div>
+    <div class="askchips">${ASK_CHIPS.map(c => `<span class="chip" data-action="askChip" data-arg="${esc(c)}">${esc(c)}</span>`).join('')}</div>
+    <div class="askbox"><textarea id="askq" placeholder="اكتب سؤالك… مثال: أقدر آخد سلفة قد إيه؟ / عندي كام يوم إجازة؟">${esc(S.ui.askQ || '')}</textarea><button class="btn p" data-action="askSend">${icon('send')}اسأل</button></div>
+    ${a ? `<div class="askans ${a.ai ? 'ai' : ''}">${a.html}</div>${a.ai ? '<div class="tiny muted" style="margin-top:6px">إجابة المساعد الذكي مبنية على بياناتك واللائحة — للتأكيد الرسمي راجع الموارد البشرية</div>' : ''}` : ''}
+  </div>`;
+}
+ACTIONS.askChip = async q => { S.ui.askQ = q; const el = document.getElementById('askq'); if (el) el.value = q; await ACTIONS.askSend(); };
+ACTIONS.askSend = async () => {
+  const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return;
+  const el = document.getElementById('askq'); const q = (el ? el.value : S.ui.askQ || '').trim(); if (!q) { toast('اكتب سؤالك', 'err'); return; } S.ui.askQ = q;
+  const local = askLocal(w, q);
+  if (local) { S.ui.askAns = { html: esc(local).replace(/\n/g, '<br>'), ai: false }; render(false); return; }
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { S.ui.askAns = { html: 'مش لاقي إجابة جاهزة للسؤال ده. جرّب واحدة من الأسئلة السريعة فوق، أو اسأل الموارد البشرية مباشرة من «طلب جديد».', ai: false }; render(false); return; }
+  S.ui.askAns = { html: 'جارٍ التفكير…', ai: true }; render(false);
+  try { const r = await aiText(`أنت مساعد الموارد البشرية في شركة Ninety Fabrication. أجب باللهجة المصرية المهذبة وباختصار على سؤال الموظف اعتمادًا فقط على بياناته واللائحة أدناه. لا تذكر أي بيانات لموظفين آخرين ولا تعِد بأي قرار — الاعتماد النهائي للموارد البشرية.\n\n${askContext(w)}\n\nسؤال الموظف: ${q}`, { max_tokens: 700 }); S.ui.askAns = { html: esc(r.text || '').replace(/\n/g, '<br>'), ai: true }; }
+  catch (e) { S.ui.askAns = { html: 'تعذّر الوصول للمساعد الذكي الآن: ' + esc(typeof aiErr === 'function' ? aiErr(e) : (e.message || '')), ai: false }; }
+  render(false);
+};
+/* بوابتي: the card sits right after the biometric card */
+function vMe() {
+  const html = vMeAvatar(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html;
+  const c = askCard(w); const marker = html.indexOf('<div class="card"'); const p = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card"') : null; return p == null || marker < 0 ? html + c : html.slice(0, p) + c + html.slice(p);
+}
+/* =====================================================================
+   v4.6.2 — إيقاف الموظف مؤقتًا: زر واضح في صفحة الموظف (المالك / HR)؛ الموقوف يفقد الوصول للتطبيق فورًا
+   (السيرفر يحظر حسابه) حتى يُرفع الإيقاف، ويبقى في القوائم بشارة «موقوف» ولا يُحسب حضوره
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.susbanner{display:flex;gap:10px;align-items:center;background:var(--crit-soft);border:1px solid var(--crit);color:var(--crit-ink);border-radius:12px;padding:10px 14px;margin-bottom:12px}
+.susbanner .grow{flex:1}
+</style>`);
+const isSuspended = w => !!w && w.status === 'suspended';
+function vWorkerDetail(id) {
+  let html = vWorkerDetailSec(id); const w = byId('workers', id); if (!w) return html;
+  const can = isAdmin() || role() === 'hr';
+  if (isSuspended(w)) { const b = `<div class="susbanner">${icon('alert')}<div class="grow"><b>موقوف مؤقتًا</b> منذ ${fmtDate((w.suspendedAt || '').slice(0, 10))}${w.suspendedBy ? ` — بواسطة ${esc(w.suspendedBy)}` : ''}${w.suspendReason ? `<div class="small">السبب: ${esc(w.suspendReason)}</div>` : ''}<div class="tiny">لا يستطيع الدخول للتطبيق ولا البصمة حتى يُرفع الإيقاف</div></div>${can ? `<button class="btn sm p" data-action="suspendToggle" data-arg="${w.id}">${icon('check')}رفع الإيقاف</button>` : ''}</div>`; const i = html.indexOf('<div class="card"'); html = i >= 0 ? html.slice(0, i) + b + html.slice(i) : b + html; }
+  else if (can && w.status !== 'inactive') { const m = `data-action="workerEdit" data-arg="${w.id}">`; const i = html.indexOf(m); if (i >= 0) { const j = html.indexOf('</button>', i) + 9; html = html.slice(0, j) + `<button class="btn sm ghost" style="color:var(--crit-ink)" data-action="suspendToggle" data-arg="${w.id}">${icon('shield')}إيقاف مؤقت</button>` + html.slice(j); } }
+  return html;
+}
+ACTIONS.suspendToggle = async wid => {
+  const w = byId('workers', wid); if (!w || !(isAdmin() || role() === 'hr')) return;
+  if (isSuspended(w)) { if (!(await confirmDlg(`رفع الإيقاف عن ${w.name}؟ سيعود وصوله للتطبيق فورًا.`, 'رفع الإيقاف', false))) return; await Store.update('workers', wid, { status: 'active', suspendedAt: null, suspendedBy: null, suspendReason: null, unsuspendedAt: nowISO() }); toast('تم رفع الإيقاف'); return; }
+  openModal({ title: `إيقاف ${w.name} مؤقتًا`, submitLabel: 'إيقاف الآن', body: `<div class="banner warn full" style="margin:0 0 10px">${icon('alert')}<span>سيُقطع وصوله للتطبيق والبصمة فورًا (يُطرد من الجلسة خلال دقيقة) ولن يعود إلا برفع الإيقاف من هنا.</span></div><div class="form">${field('السبب (يظهر للإدارة فقط)', `<textarea id="f-reason" name="reason" placeholder="مثال: تحقيق إداري / انقطاع عن العمل"></textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); await Store.update('workers', wid, { status: 'suspended', suspendedAt: nowISO(), suspendedBy: S.session?.name || '', suspendReason: d.reason || '' }); toast(`تم إيقاف ${w.name}`); } });
+};
+/* badges in lists + the org chart */
+RENDER_HOOKS.push(() => { document.querySelectorAll('a[href^="#/workers/"]').forEach(a => { if (a.dataset.sus) return; const id = a.getAttribute('href').split('/')[2]; const w = id && byId('workers', id); if (!w || !isSuspended(w) || a.closest('.ob')) return; a.dataset.sus = '1'; a.insertAdjacentHTML('afterend', ' <span class="badge crit" title="موقوف مؤقتًا">موقوف</span>'); }); });
+/* punching while suspended is refused on the device too */
+/* =====================================================================
+   v4.6.2 — موافقات المالك:
+   · تعديل أجر/راتب موظف (اليومية، الأساسي، البدلات، التأمين، نوع التعاقد) من الحسابات/HR → طلب «تعديل راتب» يعتمده المالك قبل السريان
+   · تعديل HR/الحسابات لحضور أي موظف يدويًا → إشعار فوري للمالك (مهمة «إشعار» + SMS لو المزوّد مضبوط)
+   · تعديل HR/الحسابات لحضورهم الشخصي → طلب «تصحيح حضور» يعتمده المالك أولًا ثم يُطبَّق
+   ===================================================================== */
+REQ_TYPES.wagechange = 'تعديل راتب'; REQ_TYPES.attfix = 'تصحيح حضور';
+DEFAULT_CHAINS.wagechange = ['admin']; DEFAULT_CHAINS.attfix = ['admin'];
+const WAGE_KEYS = { dailyWage: 'اليومية', basic: 'الأساسي', allowances: 'البدلات', healthIns: 'التأمين الصحي', contract: 'نوع التعاقد' };
+const ownerPhone = () => normPhone((S.settings && S.settings.ownerPhone) || (byId('workers', (peopleByRole('admin')[0] || {}).id) || {}).phone || '');
+async function notifyOwner(title, desc, opts = {}) {
+  const me = S.session || {}; const id = opts.id || uid();
+  await Store.save('tasks', { id, title, desc, deptId: null, assigneeId: null, toRole: 'admin', orderId: opts.orderId || null, dueDate: todayISO(), priority: opts.priority || 'high', status: 'open', kind: 'notice', source: 'owner-notify', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO() }, { silent: true });
+  const ph = ownerPhone(); if (ph && typeof smsAvailable === 'function' && smsAvailable() && (S.settings.sms || {}).ownerAlerts !== false) { try { await smsSend(ph, `${title}\n${desc}`.slice(0, 300)); } catch (e) { /* ignore */ } }
+}
+const wageGuardRole = () => ['hr', 'acc'].includes(role());
+/* ---------- wage changes ---------- */
+async function workerFromForm(f, w) {
+  const doc = await workerFromFormOrg(f, w); if (!doc || !w || !w.id || !wageGuardRole()) return doc;
+  const changes = {}; Object.keys(WAGE_KEYS).forEach(k => { const a = w[k] ?? null, b = doc[k] ?? null; if (String(a ?? '') !== String(b ?? '')) { changes[k] = { from: a, to: b }; doc[k] = a; } });
+  if (!Object.keys(changes).length) return doc;
+  const me = S.session || {}; const now = nowISO(); const txt = Object.entries(changes).map(([k, c]) => `${WAGE_KEYS[k]}: ${c.from ?? '—'} ← ${c.to ?? '—'}`).join(' · ');
+  await Store.save('requests', { id: uid(), type: 'wagechange', workerId: w.id, deptId: w.deptId || null, changes, reason: '', status: 'pending', chain: chainFor('wagechange'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تعديل راتب ${w.name} — ${txt}` }] });
+  await notifyOwner(`طلب تعديل راتب: ${w.name}`, `${txt}\nبواسطة ${me.name || ''} — بانتظار اعتمادك في الطلبات`, { id: `wg_${w.id}_${Date.now()}` });
+  toast('تعديل الراتب أُرسل للمالك للاعتماد — بقية البيانات حُفظت', 'err');
+  return doc;
+}
+function reqDesc(r) {
+  if (r.type === 'wagechange') { const w = byId('workers', r.workerId); return `تعديل راتب ${w ? w.name : ''}: ${Object.entries(r.changes || {}).map(([k, c]) => `${WAGE_KEYS[k] || k} ${c.from ?? '—'} ← ${c.to ?? '—'}`).join(' · ')}`; }
+  if (r.type === 'routeplan') { const o = r.orderId ? byId('orders', r.orderId) : null; const d = o && o.routeDraft; return `خطة تشغيل ${o ? o.code : ''}${d ? `: ${d.stages.length} مراحل — ${d.stages.map(s => s.name).join(' ← ')}` : ''} — تُعتمد من صفحة الأمر (زر مراجعة واعتماد)`; }
+  if (r.type === 'attfix') { const w = byId('workers', r.workerId); const p = r.patch || {}; return `تصحيح حضور ${w ? w.name : ''} يوم ${fmtDate(r.from)}: ${[p.s ? 'الحالة ' + p.s : '', p.in ? 'حضور ' + p.in : '', p.out ? 'انصراف ' + p.out : '', p.ot != null ? 'إضافي ' + p.ot : ''].filter(Boolean).join(' · ') || 'تعديل يدوي'}`; }
+  return reqDescPo(r);
+}
+async function applyRequestEffects(r, w, patch, opts = {}) {
+  if (r.type === 'wagechange') { const to = {}; Object.entries(r.changes || {}).forEach(([k, c]) => { to[k] = c.to; }); if (w) await Store.update('workers', w.id, to); return; }
+  if (r.type === 'routeplan') { const o = r.orderId ? byId('orders', r.orderId) : null; const d = o && o.routeDraft; if (o && d && d.stages) { await Store.update('orders', o.id, { routeDraft: null }); await applyRoutePlanBase(o, { stages: d.stages, bom: d.bom || [] }); } return; }
+  if (r.type === 'attfix') { if (w && r.from && r.patch) { S._attBypass = true; try { const cur = attendanceFor(r.from)[w.id] || {}; await setAtt(r.from, w, Object.assign({}, cur, r.patch, { fixReqId: r.id })); } finally { S._attBypass = false; } } return; }
+  return applyRequestEffectsPo(r, w, patch, opts);
+}
+/* ---------- manual attendance edits by HR / accounts ---------- */
+const isPunchRow = row => !!row && (row.method === 'self' || row.src === 'self' || row.src === 'kiosk' || row.src === 'request' || row.method === 'kiosk' || row.method === 'request' || row.fixReqId);
+const _storeUpdateApprovals = Store.update;
+Store.update = async function (col, id, patch, opts = {}) {
+  if (col === 'attendance' && !S._attBypass && wageGuardRole() && patch && patch.rows && typeof patch.rows === 'object') {
+    const me = S.session || {}; const myWid = me.workerId || null; const notes = []; let pending = 0;
+    for (const [date, rows] of Object.entries(patch.rows)) {
+      for (const [wid, row] of Object.entries(rows || {})) {
+        if (isPunchRow(row)) continue; const w = byId('workers', wid); if (!w) continue;
+        if (myWid && wid === myWid) {
+          const now = nowISO(); const p = {}; ['s', 'in', 'out', 'ot', 'late', 'early', 'hrs', 'alloc', 'perm', 'leaveType'].forEach(k => { if (row[k] !== undefined) p[k] = row[k]; });
+          await Store.save('requests', { id: uid(), type: 'attfix', workerId: wid, deptId: w.deptId || null, from: date, to: date, patch: p, reason: '', status: 'pending', chain: chainFor('attfix'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تصحيح حضور ${w.name} يوم ${fmtDate(date)}` }] });
+          delete rows[wid]; pending++;
+        } else notes.push(`${w.name} — ${fmtDate(date)}: ${[row.s ? 'الحالة ' + row.s : '', row.in ? 'حضور ' + row.in : '', row.out ? 'انصراف ' + row.out : '', row.ot != null ? 'إضافي ' + row.ot : ''].filter(Boolean).join(' · ') || 'تعديل'}`);
+      }
+      if (!Object.keys(rows || {}).length) delete patch.rows[date];
+    }
+    if (pending) { toast('تعديل حضورك الشخصي أُرسل للمالك للاعتماد', 'err'); await notifyOwner(`طلب تصحيح حضور: ${me.name || ''}`, 'بانتظار اعتمادك في الطلبات', { id: `af_${myWid}_${Date.now()}` }); if (!Object.keys(patch.rows).length) return S.data[col].get(id); }
+    if (notes.length) notifyOwner(`تعديل حضور بواسطة ${me.name || ''}`, notes.join('\n'), { id: `an_${me.id}_${todayISO()}_${Math.floor(Date.now() / 600000)}` }).catch(() => { });
+  }
+  return _storeUpdateApprovals.call(this, col, id, patch, opts);
+};
+/* =====================================================================
+   v4.6.2 — سرّية الشاشة (أقصى ما يسمح به الويب/المتصفح):
+   · علامة مائية شفافة باسم الموظف ورقمه والوقت على كل الشاشات (أي لقطة تتسرب يُعرف مصدرها)
+   · تعتيم المحتوى عند مغادرة التطبيق/تبديل التبويب/فقدان التركيز
+   · منع النسخ والطباعة وحفظ الصفحة والسحب للصور (لغير المالك)، ومسح الحافظة عند Print Screen
+   ملاحظة: المنع الفعلي للقطة الشاشة يحتاج تطبيقًا أصليًا (FLAG_SECURE) — الويب لا يستطيعه
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+#nfwm{position:fixed;inset:0;pointer-events:none;z-index:9998;overflow:hidden;opacity:.07;user-select:none}
+#nfwm .wmrow{white-space:nowrap;font-weight:700;font-size:15px;letter-spacing:1px;line-height:64px;transform:rotate(-18deg);transform-origin:0 0;color:var(--ink)}
+:root[data-theme="dark"] #nfwm{opacity:.09}
+body.nfblur #root{filter:blur(14px);transition:filter .15s}
+#nfblurmsg{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bg) 70%,transparent);font-weight:700;font-size:18px}
+body.nfblur #nfblurmsg{display:flex}
+body.nfnocopy{-webkit-user-select:none;user-select:none}
+body.nfnocopy input,body.nfnocopy textarea,body.nfnocopy [contenteditable]{-webkit-user-select:text;user-select:text}
+@media print{body.nfnoprint #root,body.nfnoprint #nfwm{display:none!important}body.nfnoprint:after{content:"الطباعة غير مسموحة — سيستم Ninety Fabrication";display:block;padding:40px;font-size:20px}}
+</style>`);
+const privacyCfg = () => Object.assign({ watermark: true, blur: true, nocopy: true }, (S.settings && S.settings.privacy) || {});
+const privacyExempt = () => !S.session || isAdmin();
+function wmText() { const s = S.session || {}; const w = s.workerId ? byId('workers', s.workerId) : null; const ph = (w && (w.phone || w.workPhone)) || ''; return `${s.name || ''} ${ph ? '· ' + ph : ''} · ${new Date().toLocaleString('ar-EG', { hour12: false }).replace(/[‏]/g, '')}`; }
+function wmRender() {
+  let el = document.getElementById('nfwm'); const c = privacyCfg();
+  if (!c.watermark || privacyExempt()) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'nfwm'; document.body.appendChild(el); }
+  const t = wmText(); if (el.dataset.t === t) return; el.dataset.t = t;
+  const rows = Math.ceil(window.innerHeight / 64) + 4; let h = ''; for (let i = 0; i < rows; i++) h += `<div class="wmrow" style="margin-inline-start:${(i % 2) * 160 - 80}px">${(t + '       ').repeat(6)}</div>`; el.innerHTML = h;
+}
+RENDER_HOOKS.push(wmRender); setInterval(wmRender, 60000); window.addEventListener('resize', wmRender);
+(() => {
+  const msg = document.createElement('div'); msg.id = 'nfblurmsg'; msg.textContent = 'ارجع للتطبيق لعرض المحتوى'; document.body.appendChild(msg);
+  const on = () => { if (privacyCfg().blur && !privacyExempt()) document.body.classList.add('nfblur'); }; const off = () => document.body.classList.remove('nfblur');
+  document.addEventListener('visibilitychange', () => { if (document.hidden) on(); else off(); }); window.addEventListener('blur', () => setTimeout(() => { if (!document.hasFocus()) on(); }, 150)); window.addEventListener('focus', off);
+  RENDER_HOOKS.push(() => { const c = privacyCfg(); const ex = privacyExempt(); document.body.classList.toggle('nfnocopy', !!c.nocopy && !ex); document.body.classList.toggle('nfnoprint', !!c.nocopy && !ex); });
+  document.addEventListener('copy', e => { if (privacyCfg().nocopy && !privacyExempt() && !e.target.closest('input,textarea,[contenteditable]')) { e.preventDefault(); toast('النسخ غير مسموح — بيانات سرّية', 'err'); } });
+  document.addEventListener('contextmenu', e => { if (privacyCfg().nocopy && !privacyExempt() && !e.target.closest('input,textarea')) e.preventDefault(); });
+  document.addEventListener('dragstart', e => { if (privacyCfg().nocopy && !privacyExempt() && e.target.tagName === 'IMG') e.preventDefault(); });
+  document.addEventListener('keydown', e => { if (privacyExempt() || !privacyCfg().nocopy) return; const k = (e.key || '').toLowerCase(); if ((e.ctrlKey || e.metaKey) && ['p', 's', 'u'].includes(k)) { e.preventDefault(); toast('غير مسموح — بيانات سرّية', 'err'); } });
+  document.addEventListener('keyup', e => { if (privacyExempt()) return; if (e.key === 'PrintScreen') { try { navigator.clipboard.writeText('لقطات الشاشة غير مسموحة — سيستم Ninety Fabrication'); } catch (x) { /* ignore */ } toast('لقطة الشاشة مسجّلة باسمك — غير مسموحة', 'err'); logChange && logChange('privacy', S.session?.id || '', 'screenshot', ['PrintScreen'], { at: nowISO(), view: location.hash }); } });
+})();
+EXTRA_SETTINGS.privacy = { label: 'سرّية الشاشة', render: () => { const c = privacyCfg(); return `<form class="card" id="privform"><h3>سرّية الشاشة</h3><p class="small ink2" style="margin:6px 0 12px">تنطبق على كل المستخدمين ما عدا المالك. الويب والموبايل لا يستطيعان منع لقطة الشاشة فعليًا — لذلك تُطبع علامة مائية باسم الموظف ورقمه على كل شاشة، ويُعتَّم المحتوى عند مغادرة التطبيق، ويُمنع النسخ والطباعة.</p><div class="form">
+  <label class="check full"><input type="checkbox" name="watermark" ${c.watermark ? 'checked' : ''}> علامة مائية باسم المستخدم ورقمه والوقت على كل الشاشات</label>
+  <label class="check full"><input type="checkbox" name="blur" ${c.blur ? 'checked' : ''}> تعتيم المحتوى عند الخروج من التطبيق أو تبديل النافذة</label>
+  <label class="check full"><input type="checkbox" name="nocopy" ${c.nocopy ? 'checked' : ''}> منع النسخ والطباعة وحفظ الصفحة وسحب الصور + تسجيل ضغطة Print Screen في سجل التغييرات</label></div>
+  <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>`; } };
+document.addEventListener('submit', async ev => { if (ev.target.id !== 'privform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ privacy: { watermark: !!d.watermark, blur: !!d.blur, nocopy: !!d.nocopy } }); toast('تم الحفظ'); });
+/* =====================================================================
+   v4.6.2 — خطة التشغيل باعتماد المالك: الـAI (أو القوالب) يقترح مراحل كل منتج، رئيس القسم/المكتب الفني يعدّل
+   (يزوّد/يشيل مراحل ومهام وخامات) ويرسلها كمسودة → المالك يراجع ويعتمد → عندها فقط تتولّد المهام والجدول
+   وطلبات الصرف والشراء (applyRoutePlanBase). المسودة تبقى قابلة للتعديل حتى الاعتماد.
+   ===================================================================== */
+REQ_TYPES.routeplan = 'اعتماد خطة تشغيل'; DEFAULT_CHAINS.routeplan = ['admin'];
+const routeDraftOf = o => (o && o.routeDraft && Array.isArray(o.routeDraft.stages) && o.routeDraft.status !== 'approved') ? o.routeDraft : null;
+function routeTemplate(o) { const d = routeDraftOf(o); if (d) return Object.assign({}, d, { source: 'draft', fromSaved: true }); return routeTemplateBase(o); }
+async function routeAI(o) { const d = routeDraftOf(o); if (d) return Object.assign({}, d, { source: 'draft', fromSaved: true }); return routeAIBase(o); }
+function routePlanHTML(o, plan) {
+  let h = routePlanHTMLBase(o, plan);
+  if (plan.source === 'draft') h = `<div class="banner warn" style="margin:0 0 8px">${icon('alert')}<span>مسودة خطة من ${esc(plan.byName || '')} — ${fmtDate((plan.at || '').slice(0, 10))} · ${isAdmin() ? 'راجعها وعدّل ما تشاء ثم «اعتماد»' : 'بانتظار اعتماد المالك — يمكنك تعديلها وإعادة إرسالها'}</span></div>` + h.replace(/^<div class="banner[^>]*>[\s\S]*?<\/div>/, '');
+  if (!isAdmin()) h = h.replace('عند الاعتماد: تتولّد', 'بعد اعتماد المالك: تتولّد');
+  return h;
+}
+async function applyRoutePlan(o, p) {
+  if (isAdmin()) { await Store.update('orders', o.id, { routeDraft: null }); const req = list('requests').find(r => r.type === 'routeplan' && r.orderId === o.id && r.status === 'pending'); if (req) await Store.update('requests', req.id, { status: 'approved', decidedAt: nowISO(), decidedByName: S.session?.name || '' }); return applyRoutePlanBase(o, p); }
+  const me = S.session || {}; const now = nowISO();
+  await Store.update('orders', o.id, { routeDraft: { stages: p.stages, bom: p.bom, at: now, byName: me.name || '', byId: me.id || null, status: 'pending' } });
+  const existing = list('requests').find(r => r.type === 'routeplan' && r.orderId === o.id && r.status === 'pending');
+  if (existing) await Store.update('requests', existing.id, { stepAt: now, thread: (existing.thread || []).concat([{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `تحديث المسودة: ${p.stages.length} مراحل · ${p.bom.length} خامات` }]) });
+  else await Store.save('requests', { id: uid(), type: 'routeplan', orderId: o.id, workerId: me.workerId || null, deptId: (p.stages[0] || {}).deptId || null, status: 'pending', chain: chainFor('routeplan'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `خطة تشغيل مقترحة لـ${o.code}: ${p.stages.length} مراحل (${p.stages.map(s => s.name).join(' ← ')}) · ${p.bom.length} خامة` }] });
+  if (typeof notifyOwner === 'function') notifyOwner(`خطة تشغيل بانتظار اعتمادك: ${o.code}`, `${p.stages.length} مراحل — ${p.stages.map(s => s.name).join(' ← ')}\nمن ${me.name || ''}`, { id: `rpn_${o.id}`, orderId: o.id }).catch(() => { });
+  toast('أُرسلت الخطة للمالك للاعتماد — ستُولَّد المهام والجدول بعد موافقته');
+}
+function routePlanCard(o) {
+  let h = routePlanCardBase(o); const d = routeDraftOf(o); if (!d) return h;
+  const banner = `<div class="banner ${isAdmin() ? 'warn' : 'info'}" style="margin:8px 0 0">${icon('alert')}<span><b>خطة تشغيل مقترحة</b> من ${esc(d.byName || '')} (${fmtDate((d.at || '').slice(0, 10))}): ${d.stages.map(s => esc(s.name)).join(' ← ')} · ${d.bom.length} خامة — ${isAdmin() ? 'بانتظار اعتمادك' : 'بانتظار اعتماد المالك'}</span>${isAdmin() ? `<button class="btn sm p" data-action="routePlan" data-arg="${o.id}">${icon('check')}مراجعة واعتماد</button>` : ''}</div>`;
+  if (!h) return `<div class="card"><div class="cardhead"><h3>خطة التشغيل والخامات</h3><div class="grow"></div>${routePlanBtn(o)}</div>${banner}</div>`;
+  const i = h.lastIndexOf('</div>'); return h.slice(0, i) + banner + h.slice(i);
+}
+/* the request card: approving = open the plan for review; the decision itself happens inside the plan dialog */
+/* =====================================================================
+   v4.6.2 — كتالوج لكل براند: رفع PDF الكتالوج من صفحة المنتجات، ثم «استخراج المنتجات بالذكاء الاصطناعي»:
+   كل صفحة تُحوَّل لصورة وتُرسل للمساعد الذكي (مفتاح Anthropic على السيرفر) الذي يعيد المنتجات بأكوادها كما في الكتالوج
+   (الكود، الاسم، المقاسات، السعر، التشطيب، الخامات، رقم الصفحة) → تُنشأ كمنتجات جاهزة لأوامر التشغيل، وصورة الصفحة غلافًا لكل منتج
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.catlist .item .fthumb img{width:56px;height:74px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}
+.catprog{margin-top:10px}
+</style>`);
+const catalogsOf = brandId => sortBy(list('files').filter(f => f.kind === 'catalog' && f.brandId === brandId && !f.deleted), f => f.createdAt || '', true);
+function vProducts() {
+  let html = vProductsBase(); if (!canFiles()) return html;
+  S.settings.brands.forEach(b => { const m = `<button class="btn sm" data-action="productNew" data-arg="${b.id}">`; const i = html.indexOf(m); if (i < 0) return; const n = catalogsOf(b.id).length; html = html.slice(0, i) + `<button class="btn sm ghost" data-action="catalogOpen" data-arg="${b.id}">${icon('print')}الكتالوج${n ? ` (${n})` : ''}</button>` + html.slice(i); });
+  if (html.includes('لا توجد منتجات بعد')) html = html.replace('<div class="empty"><b>لا توجد منتجات بعد</b>', `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">${S.settings.brands.map(b => `<button class="btn sm" data-action="catalogOpen" data-arg="${b.id}">${icon('print')}كتالوج ${esc(b.name)}</button>`).join('')}</div><div class="empty"><b>لا توجد منتجات بعد</b>`);
+  return html;
+}
+ACTIONS.catalogOpen = brandId => {
+  const b = brand(brandId); if (!b || !canFiles()) return; const cats = catalogsOf(brandId); const ai = typeof aiAvailable === 'function' && aiAvailable();
+  openModal({ title: `كتالوج ${b.name}`, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`, body: `<div class="stack">
+    <div class="card"><div class="cardhead"><h3>ملفات الكتالوج</h3><span class="muted small">${cats.length}</span></div>
+      ${cats.length ? `<div class="list catlist">${cats.map(f => `<div class="item" style="cursor:default"><div class="fthumb">${f.thumb ? `<img src="${esc(f.thumb)}" alt="">` : ''}</div><div class="main"><div class="title">${esc(f.name)}</div><div class="meta"><span>${f.pages || '?'} صفحة</span><span>${fmtBytes(f.size)}</span><span>${fmtDate((f.createdAt || '').slice(0, 10))}</span>${f.extracted ? `<span class="badge good">استُخرج منه ${f.extracted} منتج</span>` : ''}</div></div><div class="end" style="flex-direction:row;gap:6px"><button class="btn xs" data-action="fileOpen" data-arg="${f.id}">${icon('play')}فتح</button><button class="btn xs p" data-action="catalogExtract" data-arg="${f.id}" ${ai ? '' : 'disabled title="يحتاج مفتاح Anthropic على السيرفر"'}>${icon('star')}استخراج المنتجات بالذكاء الاصطناعي</button><button class="btn xs ghost" data-action="fileDelete" data-arg="${f.id}">${icon('trash')}</button></div></div>`).join('')}</div>` : '<div class="muted small">لم يُرفع كتالوج بعد</div>'}
+      <div class="form" style="margin-top:12px"><div class="field full"><label>رفع كتالوج جديد (PDF)</label><input type="file" id="cat-file" accept="application/pdf,.pdf"></div>${field('اسم / إصدار الكتالوج', inp('catname', '', 'placeholder="مثال: LOF Catalogue 2026"'), 'full')}<div class="full"><button type="button" class="btn p sm" id="cat-up">${icon('plus')}رفع الكتالوج</button></div></div>
+      ${ai ? '' : `<div class="banner warn" style="margin-top:10px">${icon('alert')}<span>استخراج المنتجات تلقائيًا يحتاج مفتاح Anthropic API على السيرفر — بعد ضبطه يظهر الزر مفعّلًا. حتى ذلك الحين أضف المنتجات يدويًا بنفس ترقيم الكتالوج.</span></div>`}
+      <div id="catprog" class="catprog"></div></div></div>`,
+    onOpen: f => { $('#cat-up', f).addEventListener('click', async () => { const inp = $('#cat-file', f); const file = inp.files && inp.files[0]; if (!file) { toast('اختر ملف PDF', 'err'); return; } if (file.size > MAX_FILE_BYTES) { toast('الملف أكبر من 20 ميجا', 'err'); return; } const prog = $('#catprog', f); prog.innerHTML = `<div class="banner info">${icon('info')}<span>جارٍ رفع الكتالوج…</span></div>`;
+      try { const doc = { id: uid(), name: ($('#f-catname', f).value || '').trim() || file.name, kind: 'catalog', mime: 'application/pdf', size: file.size, brandId, productId: null, orderId: null, byName: S.session?.name || '', thumb: null, pages: null, createdAt: nowISO() }; try { const t = await pdfThumb(file); doc.thumb = t.thumb; doc.pages = t.pages; } catch (e) { /* ignore */ } const st = await Files.put(file, 'application/pdf'); Object.assign(doc, st); await Store.save('files', doc, { silent: true }); toast('تم رفع الكتالوج'); ACTIONS.catalogOpen(brandId); } catch (e) { console.error(e); prog.innerHTML = `<div class="banner crit">${icon('alert')}<span>${esc(uploadErrText(e))}</span></div>`; } }); } });
+};
+/* ---------- render pages → ask the model → create products ---------- */
+async function catalogPageImages(blob, onProg) {
+  await vendorLoad('pdf'); const lib = pdfLib(); const doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise; const out = [];
+  for (let i = 1; i <= Math.min(doc.numPages, 80); i++) { const page = await doc.getPage(i); const vp0 = page.getViewport({ scale: 1 }); const scale = Math.min(1.6, 1100 / vp0.width); const vp = page.getViewport({ scale }); const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height); await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; out.push({ n: i, url: c.toDataURL('image/jpeg', 0.72) }); if (onProg) onProg(i, doc.numPages); }
+  try { doc.destroy(); } catch (e) { /* ignore */ } return out;
+}
+async function catalogAsk(b, pages) {
+  const content = pages.map(p => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: p.url.split(',')[1] } }));
+  content.unshift({ type: 'text', text: `هذه صفحات (${pages.map(p => p.n).join('، ')}) من كتالوج البراند «${b.name}» (${b.desc || ''}) لمصنع Ninety Fabrication. استخرج كل منتج ظاهر في هذه الصفحات بنفس كوده وترقيمه كما هو مكتوب في الكتالوج. أجب بـJSON فقط بدون أي نص آخر:
+{"products":[{"code":"LOF-C01","name":"اسم المنتج بالعربية أو كما في الكتالوج","dims":"المقاسات كما وردت","price":123,"finish":"التشطيب/الألوان","materials":"الخامات","desc":"وصف قصير","page":${pages[0].n}}]}
+لو لا يوجد كود مكتوب اترك code فارغًا. السعر رقم فقط (بدون عملة) أو null. page = رقم الصفحة التي يظهر فيها المنتج من الأرقام المذكورة.` });
+  const r = await aiText([{ role: 'user', content }], { max_tokens: 6000, raw: true }); const j = parseJsonLoose(r.text); return (j && Array.isArray(j.products)) ? j.products : [];
+}
+ACTIONS.catalogExtract = async fid => {
+  const f = byId('files', fid); if (!f || !canFiles()) return; const b = brand(f.brandId); if (!b) return;
+  if (!(typeof aiAvailable === 'function' && aiAvailable())) { toast('يحتاج مفتاح Anthropic على السيرفر', 'err'); return; }
+  const prog = document.getElementById('catprog'); const say = h => { if (prog) prog.innerHTML = `<div class="banner info">${icon('info')}<span>${h}</span></div>`; };
+  try {
+    say('جارٍ تحميل الكتالوج…'); const blob = await Files.blob(f); if (!blob) throw new Error('no blob');
+    const pages = await catalogPageImages(blob, (i, n) => say(`تجهيز الصفحات ${i} / ${n}…`));
+    const found = []; const BATCH = 3;
+    for (let i = 0; i < pages.length; i += BATCH) { say(`قراءة الصفحات ${i + 1}–${Math.min(pages.length, i + BATCH)} من ${pages.length} بالذكاء الاصطناعي… (وجدنا ${found.length} منتج حتى الآن)`); try { const ps = await catalogAsk(b, pages.slice(i, i + BATCH)); ps.forEach(p => found.push(p)); } catch (e) { console.warn('catalog batch', e); } }
+    const existing = new Set(list('products').map(p => String(p.code || '').trim().toUpperCase()));
+    let made = 0, skipped = 0; const seen = new Set();
+    for (const p of found) { const code = String(p.code || '').trim().toUpperCase(); const name = String(p.name || '').trim(); if (!name) continue; const key = code || name.toUpperCase(); if (seen.has(key)) continue; seen.add(key); if (code && existing.has(code)) { skipped++; continue; }
+      const id = uid(); const pg = pages.find(x => x.n === +p.page) || null; let coverFileId = null;
+      if (pg) { try { const bl = await (await fetch(pg.url)).blob(); const st = await Files.put(bl, 'image/jpeg'); const fdoc = Object.assign({ id: uid(), name: `${code || name} — صفحة ${pg.n} من ${f.name}`, kind: 'render', mime: 'image/jpeg', size: bl.size, productId: id, orderId: null, byName: 'الكتالوج', thumb: await imageThumb(pg.url), pages: null, createdAt: nowISO(), fromCatalog: f.id }, st); await Store.save('files', fdoc, { silent: true }); coverFileId = fdoc.id; } catch (e) { console.warn('cover', e); } }
+      await Store.save('products', { id, brandId: b.id, code: code || nextProductCode(b.id), name, dims: String(p.dims || ''), unit: 'قطعة', finish: String(p.finish || ''), materials: String(p.materials || ''), desc: String(p.desc || ''), price: p.price != null && !isNaN(+p.price) ? +p.price : undefined, status: 'active', catalogCode: code || '', catalogFileId: f.id, catalogPage: pg ? pg.n : null, coverFileId, source: 'catalog', createdAt: nowISO() }, { silent: true }); made++; }
+    await Store.update('files', f.id, { extracted: (f.extracted || 0) + made, extractedAt: nowISO() });
+    say(`تم: ${made} منتج جديد${skipped ? ` · ${skipped} موجود مسبقًا بنفس الكود` : ''} · من ${found.length} منتج قرأها المساعد`); toast(`أُضيف ${made} منتج من الكتالوج`); render(false);
+  } catch (e) { console.error(e); say(`تعذّر الاستخراج: ${esc(typeof aiErr === 'function' ? aiErr(e) : (e.message || ''))}`); }
+};
+/* =====================================================================
+   v4.6.2 — كتالوج المنتجات داخل CRM: بطاقات بالصورة والمقاسات والسعر لكل براند في صفحة CRM وفي ملف كل عميل محتمل،
+   مع فلتر بالبراند وبحث — لتسعير سريع وإرسال صور المنتج للعميل
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.crmpg{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.crmpg .pc{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);cursor:pointer;display:flex;flex-direction:column}
+.crmpg .pc .im{aspect-ratio:4/3;background:var(--surface-2,var(--surface));display:grid;place-items:center;overflow:hidden}.crmpg .pc .im img{width:100%;height:100%;object-fit:cover}
+.crmpg .pc .bd{padding:8px 10px;font-size:12.5px}.crmpg .pc .pr{font-weight:700;color:var(--accent);margin-top:4px}
+</style>`);
+function crmProductsCard(opts = {}) {
+  const f = S.ui.filter.crmprod || (S.ui.filter.crmprod = { brand: opts.brand || '', q: '' });
+  let arr = list('products').filter(p => p.status !== 'archived'); if (f.brand) arr = arr.filter(p => p.brandId === f.brand); if (f.q) arr = arr.filter(p => `${p.code} ${p.name} ${p.dims || ''}`.toLowerCase().includes(f.q.toLowerCase()));
+  arr = sortBy(arr, p => (brand(p.brandId) || {}).name + ' ' + (p.code || '')).slice(0, opts.limit || 60);
+  return `<div class="card"><div class="cardhead"><h3>${icon('inventory')} كتالوج المنتجات</h3><span class="muted small">${arr.length}</span><div class="grow"></div><div class="seg">${[['', 'الكل']].concat(S.settings.brands.map(b => [b.id, b.name])).map(s => `<button class="${f.brand === s[0] ? 'on' : ''}" data-action="crmProdFilter" data-arg="brand:${s[0]}">${esc(s[1])}</button>`).join('')}</div><div class="search">${icon('search')}<input placeholder="بحث" value="${esc(f.q || '')}" data-crmq="1"></div></div>
+    ${arr.length ? `<div class="crmpg">${arr.map(p => { const cover = productCover(p); return `<div class="pc" data-action="crmProdOpen" data-arg="${p.id}"><div class="im">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : `<div class="fico">${icon('inventory')}</div>`}</div><div class="bd"><div class="row" style="gap:6px"><span class="code">${esc(p.code || '')}</span>${brandChip(p.brandId)}</div><div class="bold" style="margin-top:2px">${esc(p.name)}</div>${p.dims ? `<div class="tiny muted">${esc(p.dims)}</div>` : ''}${seesFinance() && p.price ? `<div class="pr">${money(p.price)} ${CUR()}</div>` : ''}</div></div>`; }).join('')}</div>` : '<div class="muted small">لا توجد منتجات — أضفها من «المنتجات والرسومات» أو استخرجها من كتالوج البراند</div>'}
+  </div>`;
+}
+ACTIONS.crmProdFilter = arg => { const [k, v] = arg.split(':'); (S.ui.filter.crmprod ||= {})[k] = v; render(false); };
+document.addEventListener('input', ev => { const t = ev.target; if (t && t.dataset && t.dataset.crmq) { (S.ui.filter.crmprod ||= {}).q = t.value; clearTimeout(window._crmqT); window._crmqT = setTimeout(() => { render(false); const el = document.querySelector('[data-crmq]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 250); } });
+ACTIONS.crmProdOpen = id => {
+  const p = byId('products', id); if (!p) return; const cover = productCover(p); const fs = filesOf('product', p.id).filter(f => f.thumb).slice(0, 6);
+  openModal({ title: `${p.code || ''} — ${p.name}`, wide: true, footer: `<a class="btn p" href="#/products/${p.id}" data-action="closemodal">${icon('link')}صفحة المنتج</a>${canSee('quotes') ? `<a class="btn" href="#/quotes" data-action="closemodal">${icon('quote')}عرض سعر</a>` : ''}<button type="button" class="btn ghost" data-action="closemodal">إغلاق</button>`,
+    body: `<div class="grid g2" style="align-items:start"><div>${cover ? `<img src="${esc(cover)}" alt="" style="width:100%;border-radius:12px;border:1px solid var(--line)">` : ''}<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${fs.map(f => `<img src="${esc(f.thumb)}" alt="" style="width:64px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer" data-action="fileOpen" data-arg="${f.id}">`).join('')}</div></div>
+      <div class="stack"><div class="grid g2" style="gap:8px 14px;font-size:13px">${p.dims ? `<div><div class="tiny muted">المقاسات</div>${esc(p.dims)}</div>` : ''}${p.finish ? `<div><div class="tiny muted">التشطيب</div>${esc(p.finish)}</div>` : ''}${seesFinance() && p.price ? `<div><div class="tiny muted">السعر الاسترشادي</div><b>${money(p.price)} ${CUR()}</b></div>` : ''}${p.catalogCode ? `<div><div class="tiny muted">كود الكتالوج</div><span class="code">${esc(p.catalogCode)}</span></div>` : ''}</div>${p.desc ? `<div class="small" style="white-space:pre-wrap">${esc(p.desc)}</div>` : ''}${p.materials ? `<div class="tiny muted">الخامات</div><div class="small">${esc(p.materials)}</div>` : ''}${designUrlOk(p.designUrl) ? `<button class="btn sm dsgbtn" data-action="designOpen" data-arg="${p.id}">${icon('layers')}فتح التصميم</button>` : ''}</div></div>` });
+};
+function vCrm() { const html = vCrmPro(); if (S.route.id) return html; return html + crmProductsCard(); }
+function vLeadDetail(l) { const html = vLeadDetailBase(l); const i = html.lastIndexOf('</div>'); return i < 0 ? html + crmProductsCard({ limit: 24 }) : html.slice(0, i) + `<div style="grid-column:1/-1">${crmProductsCard({ limit: 24 })}</div>` + html.slice(i); }
 boot();
 </script>
 
