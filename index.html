@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1425-491c04";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1448-d0cd20";</script>
 
 <script>
 'use strict';
@@ -5284,7 +5284,7 @@ ACTIONS.viewerClose = () => viewerClose();
 ACTIONS.fileOpen = arg => { const [id, ctx] = (arg || '').split(':'); const f = byId('files', id); if (!f) return; if (f.restricted && typeof canSeeCad === 'function' && !canSeeCad()) { toast('ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط', 'err'); return; } const set = viewerSetFor(f, ctx); openViewer(set, Math.max(0, set.findIndex(x => x.id === id)), { ctx }); };
 ACTIONS.viewerGo = arg => { if (!_viewer) return; viewerShow(+arg); };
 ACTIONS.viewerFs = () => { const el = $('#nfviewer'); if (!el) return; try { if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen && el.requestFullscreen(); } catch (e) { /* ignore */ } };
-function viewerSetFor(f, ctx) {
+function viewerSetForBase(f, ctx) {
   if (ctx && ctx.startsWith('order-')) { const o = byId('orders', ctx.slice(6)); if (o) return orderFiles(o); }
   if (f.productId) return filesOf('product', f.productId);
   if (f.orderId) return filesOf('order', f.orderId);
@@ -10743,16 +10743,38 @@ function orderDrawingsCard(o) {
   return html;
 }
 /* ---------- open inside the app ---------- */
-ACTIONS.designOpen = id => {
-  const p = byId('products', id); if (!p || !designUrlOk(p.designUrl)) return;
+function openInApp(url, title) {
+  if (!designUrlOk(url)) return;
   const old = document.getElementById('dsg'); if (old) old.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div class="dsg" id="dsg"><div class="dsgbar"><button class="btn sm" data-action="designClose">${icon('x')}رجوع</button><span class="t">${esc(p.code || '')} — ${esc(p.name)} · التصميم والمراجعة الفنية</span><a class="btn sm ghost" href="${esc(p.designUrl)}" target="_blank" rel="noopener">${icon('link')}فتح في نافذة</a></div><iframe id="dsgfr" src="${esc(p.designUrl)}" allow="fullscreen; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe><div class="dsghint" id="dsghint"><span>لو الصفحة فاضية أو ظهر «رفض الاتصال»، الموقع لا يسمح بالعرض داخل التطبيقات —</span><a class="btn xs p" href="${esc(p.designUrl)}" target="_blank" rel="noopener">افتحها في نافذة</a><button class="btn xs ghost" data-action="designHint">إخفاء</button></div></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div class="dsg" id="dsg"><div class="dsgbar"><button class="btn sm" data-action="designClose">${icon('x')}رجوع</button><span class="t">${esc(title || url)}</span><a class="btn sm ghost" href="${esc(url)}" target="_blank" rel="noopener">${icon('link')}فتح في نافذة</a></div><iframe id="dsgfr" src="${esc(url)}" allow="fullscreen; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe><div class="dsghint" id="dsghint" style="opacity:0;transition:opacity .3s"><span>لو الصفحة فاضية أو ظهر «رفض الاتصال»، الموقع لا يسمح بالعرض داخل التطبيقات —</span><a class="btn xs p" href="${esc(url)}" target="_blank" rel="noopener">افتحها في نافذة</a><button class="btn xs ghost" data-action="designHint">إخفاء</button></div></div>`);
   document.body.style.overflow = 'hidden';
-  setTimeout(() => { const h = document.getElementById('dsghint'); if (h) h.style.opacity = '.92'; }, 3500);
-};
+  setTimeout(() => { const h = document.getElementById('dsghint'); if (h) h.style.opacity = '.95'; }, 3500);
+}
+ACTIONS.designOpen = id => { const p = byId('products', id); if (!p) return; openInApp(p.designUrl, `${p.code || ''} — ${p.name} · التصميم والمراجعة الفنية`); };
 ACTIONS.designClose = () => { const el = document.getElementById('dsg'); if (el) el.remove(); document.body.style.overflow = ''; };
 ACTIONS.designHint = () => { const h = document.getElementById('dsghint'); if (h) h.remove(); };
 window.addEventListener('hashchange', () => ACTIONS.designClose());
+
+/* ---------- product code suggested automatically (editable): <BRAND>-<series><nn>, catalog code <code>-<yy> ---------- */
+function nextProductCode(brandId) {
+  const b = brand(brandId) || {}; const pre = (b.code || (b.name || 'P').slice(0, 3)).toUpperCase();
+  const mine = list('products').filter(p => p.brandId === brandId).map(p => String(p.code || '').toUpperCase().trim());
+  const re = new RegExp('^' + pre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-([A-Z]*)(\\d+)$');
+  const series = {}; let width = 2;
+  mine.forEach(c => { const m = c.match(re); if (!m) return; const s = m[1] || ''; const n = parseInt(m[2], 10); width = Math.max(width, m[2].length); series[s] = Math.max(series[s] || 0, n); });
+  const keys = Object.keys(series); const s = keys.length ? keys.sort((a, c) => series[c] - series[a])[0] : (brandId === 'lof' ? 'C' : 'P');
+  const n = (series[s] || 0) + 1; return `${pre}-${s}${String(n).padStart(width, '0')}`;
+}
+const catalogCodeFor = code => `${code}-${String(new Date().getFullYear()).slice(2)}`;
+function productCodeSuggest(f, force) {
+  const code = $('#f-code', f), cat = $('#f-catalogCode', f), br = $('#f-brandId', f); if (!code || !br) return;
+  const sug = nextProductCode(br.value);
+  if (force || !code.value.trim() || code.dataset.auto === '1') { code.value = sug; code.dataset.auto = '1'; }
+  if (cat && (force || !cat.value.trim() || cat.dataset.auto === '1')) { cat.value = catalogCodeFor(code.value.trim()); cat.dataset.auto = '1'; }
+}
+document.addEventListener('input', ev => { const t = ev.target; if (t && (t.id === 'f-code' || t.id === 'f-catalogCode')) t.dataset.auto = '0'; });
+document.addEventListener('change', ev => { const t = ev.target; if (t && t.id === 'f-brandId') { const f = t.closest('form'); if (f && f.querySelector('#f-code') && f.querySelector('#f-code').dataset.auto !== '0') productCodeSuggest(f, true); } });
+new MutationObserver(() => { const f = document.getElementById('mform'); if (!f || f.dataset.codeSug) return; const code = f.querySelector('#f-code'); const h2 = f.querySelector('h2'); if (!code || !h2 || !/منتج جديد/.test(h2.textContent)) return; f.dataset.codeSug = '1'; productCodeSuggest(f, false); const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = 'مقترح تلقائيًا — عدّله لو حبيت'; code.insertAdjacentElement('afterend', hint); }).observe(document.body, { childList: true, subtree: true });
 /* =====================================================================
    v4.6.2 — ملفات المصدر الهندسية (AutoCAD / SolidWorks / STEP…) سرّية:
    تُعلَّم تلقائيًا عند الرفع وتُخزَّن تحت المسار cad/ الذي يمنعه السيرفر عن غير المالك/المكتب الفني/المكتب،
@@ -10788,7 +10810,7 @@ async function filesPutRestricted(blob, mime) {
   return Files.put(blob, mime);
 }
 /* gallery: locked tiles for everyone else */
-function fileGallery(files, ctx, o = {}) {
+function fileGalleryCad(files, ctx, o = {}) {
   const cad = files.filter(f => f.restricted || f.kind === 'cad'); const rest = files.filter(f => !(f.restricted || f.kind === 'cad'));
   let html = fileGalleryBase(rest, ctx, cad.length ? Object.assign({}, o, { empty: '' }) : o);
   if (cad.length) {
@@ -10816,6 +10838,49 @@ ACTIONS.fileUpload = arg => { _fileUploadBase(arg); setTimeout(() => { const inp
 /* lock toggle button inside the viewer actions / file edit modal */
 const _fileEditBase = ACTIONS.fileEdit;
 ACTIONS.fileEdit = id => { _fileEditBase(id); setTimeout(() => { const f = byId('files', id); const mf = document.getElementById('mform'); if (!f || !mf || !canSeeCad()) return; const mb = mf.querySelector('.mb .form'); if (mb) mb.insertAdjacentHTML('beforeend', `<div class="field full"><label>السرّية</label><div class="row"><span class="badge ${f.restricted ? 'warn' : ''}">${f.restricted ? 'سرّي — المالك والمكتب الفني فقط' : 'متاح لرؤساء الأقسام'}</span><button type="button" class="btn sm" data-action="fileLockToggle" data-arg="${f.id}">${f.restricted ? 'افتحه للأقسام' : 'اجعله سرّيًا'}</button></div></div>`); }, 30); };
+/* =====================================================================
+   v4.6.2 — روابط كملفات: في نافذة «رفع رسومات / معاينة» خانة رابط (صفحة GPT، Drive، فيديو…)
+   يُحفظ كبطاقة مع الرسومات ويُفتح داخل التطبيق (إطار بشريط رجوع) — على المنتج أو على أمر التشغيل
+   ===================================================================== */
+FILE_KINDS.link = ['رابط — يُفتح داخل التطبيق', 'link'];
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>.form .bold svg{width:16px;height:16px}</style>`);
+const fileIsLink = f => f && (f.kind === 'link' || f.store === 'link') && designUrlOk(f.url);
+const _fileUploadPrev = ACTIONS.fileUpload;
+ACTIONS.fileUpload = arg => {
+  _fileUploadPrev(arg);
+  setTimeout(() => {
+    const mf = document.getElementById('mform'); const form = mf && mf.querySelector('.mb .form'); if (!form || form.querySelector('#f-linkurl')) return;
+    const [kind, id] = (arg || '').split(':'); form.dataset.linkTarget = `${kind}:${id}`;
+    form.insertAdjacentHTML('beforeend', `<div class="full" style="margin-top:4px;padding-top:10px;border-top:1px dashed var(--line)"><div class="bold small" style="margin-bottom:6px;display:flex;align-items:center;gap:6px"><span style="display:inline-grid;width:16px;height:16px">${icon('link')}</span> أو أضف رابطًا يُفتح داخل التطبيق (صفحة GPT للتصميم، Google Drive، فيديو…)</div></div>
+      ${field('الرابط', inp('linkurl', '', 'type="url" class="ltr" placeholder="https://…" inputmode="url"'), 'full')}
+      ${field('اسم الرابط (يظهر على البطاقة)', inp('linkname', '', 'placeholder="مثال: المراجعة الفنية — GPT"'), 'full')}`);
+  }, 40);
+};
+/* a link needs no upload: intercept the dialog's submit when only the link is filled */
+document.addEventListener('submit', async ev => {
+  const f = ev.target; if (!f || f.id !== 'mform') return; const form = f.querySelector('.mb .form'); const urlEl = f.querySelector('#f-linkurl'); if (!form || !urlEl) return;
+  const url = String(urlEl.value || '').trim(); const files = f.querySelector('#f-files'); const nFiles = files && files.files ? files.files.length : 0;
+  if (!url) return; // normal upload path
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  if (!designUrlOk(url)) { toast('الرابط غير صحيح — يبدأ بـ https://', 'err'); return; }
+  const [kind, id] = (form.dataset.linkTarget || '').split(':'); if (!['product', 'order'].includes(kind) || !id) return;
+  const d = formData(f); let host = ''; try { host = new URL(url).host; } catch (e) { /* ignore */ }
+  const doc = { id: uid(), name: String(d.linkname || '').trim() || host || 'رابط', kind: 'link', store: 'link', url, mime: 'text/uri-list', size: 0, rev: d.rev || '', note: d.note || '', productId: kind === 'product' ? id : null, orderId: kind === 'order' ? id : null, byName: S.session?.name || '', thumb: null, pages: null };
+  await Store.save('files', doc, { silent: true });
+  if (nFiles) { toast('تم حفظ الرابط — ارفع الملفات في خطوة ثانية'); }
+  closeModal(); toast('تمت إضافة الرابط'); render(false);
+}, true);
+/* gallery: links as their own group */
+function fileGallery(files, ctx, o = {}) {
+  const links = files.filter(fileIsLink); const rest = files.filter(f => !fileIsLink(f));
+  let html = fileGalleryCad(rest, ctx, links.length ? Object.assign({}, o, { empty: '' }) : o);
+  if (links.length) html += `<div class="fgroup"><div class="tiny muted" style="margin:6px 0 4px">روابط تُفتح داخل التطبيق (${links.length})</div><div class="fgrid">${links.map(f => { let host = ''; try { host = new URL(f.url).host; } catch (e) { /* ignore */ } return `<div class="ftile" data-action="linkOpen" data-arg="${esc(f.id)}" title="${esc(f.url)}"><div class="fthumb"><div class="fico">${icon('link')}<span class="ltr">${esc(host)}</span></div></div><div class="fname">${esc(f.name)}</div><div class="tiny muted">${esc(FILE_KINDS.link[0])}${f.rev ? ' · ' + esc(f.rev) : ''}</div></div>`; }).join('')}</div></div>`;
+  return html;
+}
+ACTIONS.linkOpen = id => { const f = byId('files', id); if (!fileIsLink(f)) return; openInApp(f.url, f.name); };
+/* the file viewer set must not include links; clicking a link tile never reaches fileOpen */
+/* the in-app viewer never pages into links or locked CAD files */
+function viewerSetFor(f, ctx) { const set = viewerSetForBase(f, ctx); const ok = set.filter(x => !fileIsLink(x) && !(x.restricted || x.kind === 'cad')); return ok.length ? ok : [f]; }
 boot();
 </script>
 
