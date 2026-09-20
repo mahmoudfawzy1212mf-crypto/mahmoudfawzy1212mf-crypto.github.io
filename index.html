@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-2120-45160b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-2204-ea3bc2";</script>
 
 <script>
 'use strict';
@@ -2451,10 +2451,10 @@ function vQuotes() {
   ${arr.length ? `<div class="list">${arr.map(x => `<div class="item" data-action="go" data-arg="quotes/${x.id}"><div class="main"><div class="title"><span class="code">${esc(x.number)}</span><span>${esc(x.subject || '')}</span></div><div class="meta">${brandChip(x.brandId)}<span>${esc(clientName(x.clientId))}</span><span>${fmtDate(x.date)}</span>${x.validUntil && ['draft', 'sent'].includes(x.status) && x.validUntil < todayISO() ? `<span class="badge crit">انتهت الصلاحية</span>` : ''}</div></div><div class="end">${badge(QUOTE_STATUS, x.status)}${seesFinance() ? `<span class="num bold">${fmtMoney(quoteTotal(x))} ${CUR()}</span>` : ''}</div></div>`).join('')}</div>` : `<div class="empty"><b>لا توجد عروض أسعار</b>${canDo('sales') ? 'أنشئ عرض سعر جديد من الزر أعلى الصفحة' : ''}</div>`}`;
 }
 ACTIONS.qfilter = arg => { (S.ui.filter.quotes ||= {}).status = arg; render(false); };
-function lineRows(items) {
+function lineRowsBase(items) {
   return (items.length ? items : [{}]).map(it => `<div class="line"><input name="l-desc" placeholder="البند" value="${esc(it.desc || '')}"><input name="l-qty" type="number" step="any" min="0" placeholder="الكمية" value="${esc(it.qty ?? '')}" inputmode="decimal"><input name="l-unit" placeholder="الوحدة" value="${esc(it.unit || 'قطعة')}" list="unitlist"><input name="l-price" type="number" step="any" min="0" placeholder="سعر الوحدة" value="${esc(it.price ?? '')}" inputmode="decimal"><button type="button" class="del" data-line="del" title="حذف البند">${icon('x')}</button></div>`).join('');
 }
-function readLines(f) { return $$('#lines .line', f).map(l => ({ desc: l.querySelector('[name=l-desc]').value.trim(), qty: num(l.querySelector('[name=l-qty]').value), unit: l.querySelector('[name=l-unit]').value.trim(), price: num(l.querySelector('[name=l-price]').value) })).filter(x => x.desc); }
+function readLinesBase(f) { return $$('#lines .line', f).map(l => ({ desc: l.querySelector('[name=l-desc]').value.trim(), qty: num(l.querySelector('[name=l-qty]').value), unit: l.querySelector('[name=l-unit]').value.trim(), price: num(l.querySelector('[name=l-price]').value) })).filter(x => x.desc); }
 function wireLines(f, onChange) {
   const box = $('#lines', f);
   f.addEventListener('click', e => { const b = e.target.closest('[data-line]'); if (!b) return; e.preventDefault(); if (b.dataset.line === 'add') box.insertAdjacentHTML('beforeend', lineRows([{}])); else if (b.dataset.line === 'del') { if ($$('.line', box).length > 1) b.closest('.line').remove(); else b.closest('.line').querySelectorAll('input').forEach(i => i.value = ''); } onChange && onChange(); });
@@ -2465,14 +2465,14 @@ function quoteForm(q) {
     ${field('رقم العرض', inp('number', q.number || nextQuoteNo(), 'class="code"'))}${field('البراند', `<select id="f-brandId" name="brandId">${opts(crmBrandOptions(), q.brandId || CRM_BRAND())}</select>`)}
     ${field('العميل', clientPicker(q.clientId), 'full')}${field('موضوع العرض', inp('subject', q.subject || '', 'required placeholder="مثال: توريد وتركيب مقاعد خارجية — كمبوند X"'), 'full')}
     ${field('التاريخ', inp('date', q.date || todayISO(), 'type="date"'))}${field('ساري حتى', inp('validUntil', q.validUntil || addDays(todayISO(), 15), 'type="date"'))}
-    <div class="field full"><label>البنود</label><div class="linehead"><span>البند</span><span>الكمية</span><span>الوحدة</span><span>سعر الوحدة</span><span></span></div><div class="lines" id="lines">${lineRows(q.items || [])}</div><datalist id="unitlist">${S.settings.units.map(u => `<option value="${esc(u)}">`).join('')}</datalist><div><button type="button" class="btn sm" data-line="add">${icon('plus')}إضافة بند</button></div></div>
+    <div class="field full"><label>البنود</label><div class="linehead"><span></span><span>البند</span><span>الكمية</span><span>الوحدة</span><span>سعر الوحدة</span><span></span></div><div class="lines" id="lines">${lineRows(q.items || [])}</div><datalist id="unitlist">${S.settings.units.map(u => `<option value="${esc(u)}">`).join('')}</datalist><div><button type="button" class="btn sm" data-line="add">${icon('plus')}إضافة بند</button></div></div>
     ${field(`خصم (${CUR()})`, inp('discount', q.discount || 0, 'type="number" step="any" min="0" inputmode="decimal"'))}
     ${field('ضريبة القيمة المضافة', `<label class="check ${q.vat ? 'on' : ''}"><input type="checkbox" id="f-vat" name="vat" ${q.vat ? 'checked' : ''}> إضافة ${+S.settings.vat || 0}٪</label>`)}
     <div class="full card" style="background:var(--surface-2);padding:10px 14px"><div class="row small"><span class="muted">الإجمالي قبل الخصم</span><div class="grow"></div><b class="num" id="t-sub">0</b></div><div class="row small"><span class="muted">الضريبة</span><div class="grow"></div><b class="num" id="t-vat">0</b></div><div class="row"><span>الإجمالي النهائي (${CUR()})</span><div class="grow"></div><b class="num" id="t-total" style="font-size:18px">0</b></div></div>
     ${field('شروط وملاحظات', `<textarea id="f-terms" name="terms">${esc(q.terms || 'مدة التوريد تُحدد عند التعاقد. الأسعار شاملة التوريد وغير شاملة التركيب ما لم يُذكر خلاف ذلك.')}</textarea>`, 'full')}
   </div>`;
 }
-function wireQuoteForm(f) {
+function wireQuoteFormBase(f) {
   const recalc = () => { const q = { items: readLines(f), discount: num($('[name=discount]', f).value), vat: $('[name=vat]', f).checked }; $('#t-sub', f).textContent = fmtMoney(quoteSub(q)); const sub = quoteSub(q) - q.discount; $('#t-vat', f).textContent = fmtMoney(q.vat ? sub * (+S.settings.vat || 0) / 100 : 0); $('#t-total', f).textContent = fmtMoney(quoteTotal(q)); $('.check', f)?.classList.toggle('on', q.vat); };
   wireLines(f, recalc); $('[name=vat]', f).addEventListener('change', recalc); recalc();
 }
@@ -2504,7 +2504,7 @@ function vQuoteDetailBase(id) {
 function quotePrintBase(q, c, sub, after, vat) {
   return `<div class="rh">${reportLogo()}<div class="grow"><div class="t">عرض سعر ${esc(q.number)}</div><div class="s">${esc(S.settings.company)} · ${brandName(q.brandId)}</div></div><div style="text-align:left"><div class="small muted">التاريخ</div><div class="bold">${fmtDate(q.date)}</div><div class="small muted">ساري حتى ${fmtDate(q.validUntil)}</div></div></div>
     <div class="grid g2" style="margin-bottom:16px;font-size:13px"><div><div class="tiny muted">السادة</div><b>${esc(c?.name || '—')}</b>${c?.contact ? `<div>${esc(c.contact)}</div>` : ''}${c?.phone ? `<div class="ltr" style="text-align:right">${esc(c.phone)}</div>` : ''}</div><div><div class="tiny muted">الموضوع</div><b>${esc(q.subject || '')}</b></div></div>
-    <div class="tablewrap"><table><thead><tr><th>#</th><th>البند</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة</th><th class="n">الإجمالي</th></tr></thead><tbody>${(q.items || []).map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.desc)}</td><td class="n">${fmtNum(it.qty)}</td><td>${esc(it.unit || '')}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('')}</tbody</table></div>v class="tablewrap"><table><thead><tr><th>#</th><th>البند</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة</th><th class="n">الإجمالي</th></tr></thead><tbody>${(q.items || []).map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.desc)}</td><td class="n">${fmtNum(it.qty)}</td><td>${esc(it.unit || '')}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('')}</tbody>
+    <div class="tablewrap"><table><thead><tr><th>#</th><th>البند</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة</th><th class="n">الإجمالي</th></tr></thead><tbody>${(q.items || []).map((it, i) => `<tr><td>${i + 1}</td><td>${lineCell(it)}</td><td class="n">${fmtNum(it.qty)}</td><td>${esc(it.unit || '')}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="5">الإجمالي</td><td class="n">${fmtMoney(sub)}</td></tr>${+q.discount ? `<tr><td colspan="5">خصم</td><td class="n">- ${fmtMoney(q.discount)}</td></tr>` : ''}${q.vat ? `<tr><td colspan="5">ضريبة القيمة المضافة ${+S.settings.vat}٪</td><td class="n">${fmtMoney(vat)}</td></tr>` : ''}<tr><td colspan="5"><b>الإجمالي النهائي (${CUR()})</b></td><td class="n" style="font-size:15px"><b>${fmtMoney(after + vat)}</b></td></tr></tfoot></table>
     ${q.terms ? `<h3>الشروط</h3><div class="small" style="white-space:pre-wrap">${esc(q.terms)}</div>` : ''}`;
 }
@@ -3838,8 +3838,8 @@ ACTIONS.photoSet = wid => {
   openModal({ title: `الصورة الشخصية — ${w.name}`, sticky: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
     body: `<div class="row" style="align-items:flex-start;gap:16px"><div>${avatarHTML(w, 96)}<div id="photo-preview" style="margin-top:8px"></div></div><div class="grow stack"><div class="field"><label>رفع صورة من الجهاز</label><input type="file" id="photo-file" accept="image/*" capture="user"></div>${camAvailable() ? `<div class="field"><label>أو التقاط بالكاميرا</label><div class="camwrap" style="max-width:320px;margin:0"><video id="cam" autoplay muted playsinline></video></div><div class="row" style="margin-top:8px"><button type="button" class="btn a" id="photo-shot">${icon('user')}التقاط</button></div></div>` : ''}${w.photo ? `<button type="button" class="btn ghost" style="color:var(--crit-ink)" id="photo-del">${icon('trash')}حذف الصورة</button>` : ''}</div></div>`,
     onOpen: async f => {
-      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: await squareThumb(src) }); closeModal(); toast('تم حفظ الصورة'); } } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
-      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: videoThumb(v) }); closeModal(); toast('تم حفظ الصورة'); } }); }
+      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); closeModal(); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: await squareThumb(src) }); closeModal(); toast('تم حفظ الصورة'); } } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
+      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); closeModal(); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: videoThumb(v) }); closeModal(); toast('تم حفظ الصورة'); } }); }
       const del = $('#photo-del', f); if (del) del.addEventListener('click', async () => { await Store.update('workers', w.id, { photo: null }); stopStream($('#cam')); closeModal(); toast('تم حذف الصورة'); });
     } });
   const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
@@ -10618,8 +10618,8 @@ ACTIONS.myPhoto = () => {
       ${typeof camAvailable === 'function' && camAvailable() ? `<div class="field"><label>أو التقط الآن بالكاميرا</label><div class="camwrap" style="max-width:320px;margin:0"><video id="cam" autoplay muted playsinline></video></div><div class="row" style="margin-top:8px"><button type="button" class="btn a" id="photo-shot">${icon('camera')}التقاط</button></div></div>` : ''}
       ${cur ? `<button type="button" class="btn ghost" style="color:var(--crit-ink)" id="photo-del">${icon('trash')}حذف الصورة</button>` : ''}</div></div>`,
     onOpen: async f => {
-      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); openCropper(src, async url => { await saveMyPhoto(url); toast('تم حفظ صورتك'); }); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
-      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا — استخدم «اختر صورة»</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); openCropper(src, async url => { await saveMyPhoto(url); toast('تم حفظ صورتك'); }); }); }
+      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); openCropper(src, async url => { await saveMyPhoto(url); closeModal(); toast('تم حفظ صورتك'); }); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
+      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا — استخدم «اختر صورة»</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); openCropper(src, async url => { await saveMyPhoto(url); closeModal(); toast('تم حفظ صورتك'); }); }); }
       const del = $('#photo-del', f); if (del) del.addEventListener('click', async () => { await saveMyPhoto(null); stopStream($('#cam')); closeModal(); toast('تم حذف الصورة'); });
     } });
   const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
@@ -10646,7 +10646,10 @@ function vMeAvatar() {
 </style>`);
 function openCropper(src, onDone, o = {}) {
   const CV = 600, OUT = o.size || 256;
-  openModal({ title: o.title || 'ضبط الصورة', sticky: true, footer: `<button type="button" class="btn p" id="crop-ok">${icon('check')}حفظ الصورة</button><button type="button" class="btn" data-action="closemodal">إلغاء</button>`,
+  /* stacked: when another modal (e.g. the vehicle / employee form) is open, the cropper gets its own overlay so the form survives */
+  const stacked = !!document.getElementById('mform'); let sub = null; const done = () => { if (stacked) { if (sub) sub.remove(); } else closeModal(); };
+  const show = opts => { if (!stacked) return openModal(opts); sub = document.createElement('div'); sub.className = 'overlay sub'; sub.style.zIndex = 10002; sub.innerHTML = `<div class="modal"><div class="mh"><h2>${esc(opts.title)}</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb">${opts.body}</div><div class="mf" style="display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line)">${opts.footer.replace('data-action="closemodal"', 'data-x="1"')}</div></div>`; document.body.appendChild(sub); sub.addEventListener('click', e => { if (e.target === sub || e.target.closest('[data-x]')) { e.stopPropagation(); sub.remove(); } }); opts.onOpen(sub); };
+  show({ title: o.title || 'ضبط الصورة', sticky: true, footer: `<button type="button" class="btn p" id="crop-ok">${icon('check')}حفظ الصورة</button><button type="button" class="btn" data-action="closemodal">إلغاء</button>`,
     body: `<div class="cropwrap${o.square ? ' sq' : ''}"><canvas id="cropcv" width="${CV}" height="${CV}"></canvas><div class="cropmask"></div></div>
       <div class="cropbar"><button type="button" id="crop-minus" title="تصغير">−</button><input type="range" id="cropzoom" min="1" max="4" step="0.01" value="1"><button type="button" id="crop-plus" title="تكبير">+</button></div>
       <div class="tiny muted" style="text-align:center;margin-top:8px">اسحب الصورة لتحريكها يمينًا ويسارًا وأعلى وأسفل · كبّر أو صغّر بالشريط أو بإصبعين — ما داخل الدائرة هو ما يُحفظ</div>`,
@@ -10667,7 +10670,7 @@ function openCropper(src, onDone, o = {}) {
       cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
       cv.addEventListener('wheel', e => { e.preventDefault(); const rect = cv.getBoundingClientRect(); const r = ratio(); setZoom(s * (e.deltaY < 0 ? 1.08 : 0.92), (e.clientX - rect.left) * r, (e.clientY - rect.top) * r); }, { passive: false });
       zoom.addEventListener('input', () => setZoom(+zoom.value)); $('#crop-minus', f).addEventListener('click', () => setZoom(s - 0.15)); $('#crop-plus', f).addEventListener('click', () => setZoom(s + 0.15));
-      $('#crop-ok', f).addEventListener('click', async () => { const out = document.createElement('canvas'); out.width = OUT; out.height = OUT; out.getContext('2d').drawImage(cv, 0, 0, CV, CV, 0, 0, OUT, OUT); const url = out.toDataURL('image/jpeg', 0.86); closeModal(); try { await onDone(url); } catch (e) { toast('تعذّر حفظ الصورة', 'err'); } });
+      $('#crop-ok', f).addEventListener('click', async () => { const out = document.createElement('canvas'); out.width = OUT; out.height = OUT; out.getContext('2d').drawImage(cv, 0, 0, CV, CV, 0, 0, OUT, OUT); const url = out.toDataURL('image/jpeg', 0.86); done(); try { await onDone(url); } catch (e) { toast('تعذّر حفظ الصورة', 'err'); } });
     } });
 }
 /* =====================================================================
@@ -10720,11 +10723,11 @@ function vOrg() {
 </style>`);
 const designUrlOk = u => /^https?:\/\/\S+$/i.test(String(u || '').trim());
 const designBtn = (p, cls = 'btn sm dsgbtn') => p && designUrlOk(p.designUrl) ? `<button class="${cls}" data-action="designOpen" data-arg="${esc(p.id)}" title="${esc(p.designUrl)}">${icon('layers')}فتح التصميم</button>` : '';
-function productForm(p) {
+function productFormDesign(p) {
   const h = productFormBase(p); const i = h.lastIndexOf('</div>'); if (i < 0) return h;
   return h.slice(0, i) + field('رابط التصميم / المراجعة الفنية (صفحة GPT أو أي رابط)', inp('designUrl', p.designUrl || '', 'type="url" class="ltr" placeholder="https://…" inputmode="url"'), 'full') + h.slice(i);
 }
-async function saveProduct(f, p) {
+async function saveProductDesign(f, p) {
   const d = formData(f); const url = String(d.designUrl || '').trim();
   if (url && !designUrlOk(url)) { toast('رابط التصميم غير صحيح — يبدأ بـ https://', 'err'); return false; }
   const r = await saveProductBase(f, p); if (r === false) return false;
@@ -11153,11 +11156,11 @@ ACTIONS.catalogOpen = brandId => {
   openModal({ title: `كتالوج ${b.name}`, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`, body: `<div class="stack">
     <div class="card"><div class="cardhead"><h3>ملفات الكتالوج</h3><span class="muted small">${cats.length}</span></div>
       ${cats.length ? `<div class="list catlist">${cats.map(f => `<div class="item" style="cursor:default"><div class="fthumb">${f.thumb ? `<img src="${esc(f.thumb)}" alt="">` : ''}</div><div class="main"><div class="title">${esc(f.name)}</div><div class="meta"><span>${f.pages || '?'} صفحة</span><span>${fmtBytes(f.size)}</span><span>${fmtDate((f.createdAt || '').slice(0, 10))}</span>${f.extracted ? `<span class="badge good">استُخرج منه ${f.extracted} منتج</span>` : ''}</div></div><div class="end" style="flex-direction:row;gap:6px"><button class="btn xs" data-action="fileOpen" data-arg="${f.id}">${icon('play')}فتح</button><button class="btn xs p" data-action="catalogExtract" data-arg="${f.id}" ${ai ? '' : 'disabled title="يحتاج مفتاح Anthropic على السيرفر"'}>${icon('star')}استخراج المنتجات بالذكاء الاصطناعي</button><button class="btn xs ghost" data-action="fileDelete" data-arg="${f.id}">${icon('trash')}</button></div></div>`).join('')}</div>` : '<div class="muted small">لم يُرفع كتالوج بعد</div>'}
-      <div class="form" style="margin-top:12px"><div class="field full"><label>رفع كتالوج جديد (PDF)</label><input type="file" id="cat-file" accept="application/pdf,.pdf"></div>${field('اسم / إصدار الكتالوج', inp('catname', '', 'placeholder="مثال: LOF Catalogue 2026"'), 'full')}<div class="full"><button type="button" class="btn p sm" id="cat-up">${icon('plus')}رفع الكتالوج</button></div></div>
+      <div class="form" style="margin-top:12px"><div class="field full"><label>رفع كتالوج جديد (PDF)</label><input type="file" id="cat-file" accept="application/pdf,.pdf"></div>${field('القسم', `<select id="f-catcoll">${brandCollections(brandId).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="">— بدون قسم —</option></select>`)}${field('اسم / إصدار الكتالوج', inp('catname', '', 'placeholder="مثال: LOF Catalogue 2026"'), 'full')}<div class="full"><button type="button" class="btn p sm" id="cat-up">${icon('plus')}رفع الكتالوج</button></div></div>
       ${ai ? '' : `<div class="banner warn" style="margin-top:10px">${icon('alert')}<span>استخراج المنتجات تلقائيًا يحتاج مفتاح Anthropic API على السيرفر — بعد ضبطه يظهر الزر مفعّلًا. حتى ذلك الحين أضف المنتجات يدويًا بنفس ترقيم الكتالوج.</span></div>`}
       <div id="catprog" class="catprog"></div></div></div>`,
     onOpen: f => { $('#cat-up', f).addEventListener('click', async () => { const inp = $('#cat-file', f); const file = inp.files && inp.files[0]; if (!file) { toast('اختر ملف PDF', 'err'); return; } if (file.size > MAX_FILE_BYTES) { toast('الملف أكبر من 20 ميجا', 'err'); return; } const prog = $('#catprog', f); prog.innerHTML = `<div class="banner info">${icon('info')}<span>جارٍ رفع الكتالوج…</span></div>`;
-      try { const doc = { id: uid(), name: ($('#f-catname', f).value || '').trim() || file.name, kind: 'catalog', mime: 'application/pdf', size: file.size, brandId, productId: null, orderId: null, byName: S.session?.name || '', thumb: null, pages: null, createdAt: nowISO() }; try { const t = await pdfThumb(file); doc.thumb = t.thumb; doc.pages = t.pages; } catch (e) { /* ignore */ } const st = await Files.put(file, 'application/pdf'); Object.assign(doc, st); await Store.save('files', doc, { silent: true }); toast('تم رفع الكتالوج'); ACTIONS.catalogOpen(brandId); } catch (e) { console.error(e); prog.innerHTML = `<div class="banner crit">${icon('alert')}<span>${esc(uploadErrText(e))}</span></div>`; } }); } });
+      try { const doc = { id: uid(), name: ($('#f-catname', f).value || '').trim() || file.name, kind: 'catalog', mime: 'application/pdf', size: file.size, brandId, collection: ($('#f-catcoll', f) || {}).value || '', productId: null, orderId: null, byName: S.session?.name || '', thumb: null, pages: null, createdAt: nowISO() }; try { const t = await pdfThumb(file); doc.thumb = t.thumb; doc.pages = t.pages; } catch (e) { /* ignore */ } const st = await Files.put(file, 'application/pdf'); Object.assign(doc, st); await Store.save('files', doc, { silent: true }); toast('تم رفع الكتالوج'); ACTIONS.catalogOpen(brandId); } catch (e) { console.error(e); prog.innerHTML = `<div class="banner crit">${icon('alert')}<span>${esc(uploadErrText(e))}</span></div>`; } }); } });
 };
 /* ---------- render pages → ask the model → create products ---------- */
 async function catalogPageImages(blob, onProg) {
@@ -11203,9 +11206,9 @@ ACTIONS.catalogExtract = async fid => {
 </style>`);
 function crmProductsCard(opts = {}) {
   const f = S.ui.filter.crmprod || (S.ui.filter.crmprod = { brand: opts.brand || '', q: '' }); const lock = !!(S.ui.crmBrand && String(S.route.view || '').startsWith('crm-')); if (lock) f.brand = S.ui.crmBrand;
-  let arr = list('products').filter(p => p.status !== 'archived'); if (f.brand) arr = arr.filter(p => p.brandId === f.brand); if (f.q) arr = arr.filter(p => `${p.code} ${p.name} ${p.dims || ''}`.toLowerCase().includes(f.q.toLowerCase()));
+  let arr = list('products').filter(p => p.status !== 'archived'); if (f.brand) arr = arr.filter(p => p.brandId === f.brand); const colls = f.brand ? brandCollections(f.brand) : []; if (f.coll && colls.length) arr = arr.filter(p => productCollection(p) === f.coll); if (f.q) arr = arr.filter(p => `${p.code} ${p.name} ${p.dims || ''}`.toLowerCase().includes(f.q.toLowerCase()));
   arr = sortBy(arr, p => (brand(p.brandId) || {}).name + ' ' + (p.code || '')).slice(0, opts.limit || 60);
-  return `<div class="card"><div class="cardhead"><h3>${icon('inventory')} كتالوج المنتجات</h3><span class="muted small">${arr.length}</span><div class="grow"></div>${lock ? '' : `<div class="seg">${[['', 'الكل']].concat(S.settings.brands.map(b => [b.id, b.name])).map(s => `<button class="${f.brand === s[0] ? 'on' : ''}" data-action="crmProdFilter" data-arg="brand:${s[0]}">${esc(s[1])}</button>`).join('')}</div>`}<div class="search">${icon('search')}<input placeholder="بحث" value="${esc(f.q || '')}" data-crmq="1"></div></div>
+  return `<div class="card"><div class="cardhead"><h3>${icon('inventory')} كتالوج المنتجات</h3><span class="muted small">${arr.length}</span><div class="grow"></div>${lock ? '' : `<div class="seg">${[['', 'الكل']].concat(S.settings.brands.map(b => [b.id, b.name])).map(s => `<button class="${f.brand === s[0] ? 'on' : ''}" data-action="crmProdFilter" data-arg="brand:${s[0]}">${esc(s[1])}</button>`).join('')}</div>`}<div class="search">${icon('search')}<input placeholder="بحث" value="${esc(f.q || '')}" data-crmq="1"></div></div>${colls.length ? `<div class="seg" style="margin:0 0 10px">${[['', 'كل الأقسام']].concat(colls.map(c => [c.id, c.name])).map(s => `<button class="${(f.coll || '') === s[0] ? 'on' : ''}" data-action="crmProdFilter" data-arg="coll:${s[0]}">${esc(s[1])}</button>`).join('')}</div>` : ''}
     ${arr.length ? `<div class="crmpg">${arr.map(p => { const cover = productCover(p); return `<div class="pc" data-action="crmProdOpen" data-arg="${p.id}"><div class="im">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : `<div class="fico">${icon('inventory')}</div>`}</div><div class="bd"><div class="row" style="gap:6px"><span class="code">${esc(p.code || '')}</span>${brandChip(p.brandId)}</div><div class="bold" style="margin-top:2px">${esc(p.name)}</div>${p.dims ? `<div class="tiny muted">${esc(p.dims)}</div>` : ''}${seesFinance() && p.price ? `<div class="pr">${money(p.price)} ${CUR()}</div>` : ''}</div></div>`; }).join('')}</div>` : '<div class="muted small">لا توجد منتجات — أضفها من «المنتجات والرسومات» أو استخرجها من كتالوج البراند</div>'}
   </div>`;
 }
@@ -11518,7 +11521,7 @@ function brandDocHead(b, title, right) {
 const brandDocFoot = b => { const k = brandKit(b); const L = k.legal || {}; return `<div class="bf"><span>${esc(L.company || k.name)}${L.address ? ' · ' + esc(L.address) : ''}</span><span class="ltr">${esc([L.phone, L.email].filter(Boolean).join(' · '))}</span></div>`; };
 function quotePrint(q, c, sub, after, vat) {
   let html = quotePrintBase(q, c, sub, after, vat); const b = q.brandId; if (!b) return html;
-  const i = html.indexOf('<div class="rh">'); const j = i >= 0 ? html.indexOf('</div>', html.indexOf('</div>', html.indexOf('<div style="text-align:left">', i)) + 6) + 6 : -1;
+  const i = html.indexOf('<div class="rh">'); const j = i >= 0 ? html.indexOf('<div class="grid g2"', i) : -1;
   if (i < 0 || j < 0) return html;
   const head = brandDocHead(b, `عرض سعر ${esc(q.number)}`, `<div style="margin-top:6px"><span class="muted">التاريخ</span> <b>${fmtDate(q.date)}</b> · <span class="muted">ساري حتى</span> ${fmtDate(q.validUntil)}</div>`);
   return `<div class="bdoc" style="${brandVars(b)}">${head}${html.slice(j)}${brandDocFoot(b)}</div>`;
@@ -11538,7 +11541,7 @@ function invoiceForm(inv) {
     ${field('نوع الفاتورة', `<select id="f-kind" name="kind"><option value="tax" ${kind === 'tax' ? 'selected' : ''}>${INV_KIND.tax} — ${+S.settings.vat || 14}٪</option><option value="simple" ${kind === 'simple' ? 'selected' : ''}>${INV_KIND.simple}</option></select>`)}${field('العميل', clientPicker(inv.clientId), 'full')}
     ${field('التاريخ', inp('date', inv.date || todayISO(), 'type="date"'))}${field('تاريخ الاستحقاق', inp('dueDate', inv.dueDate || addDays(todayISO(), 7), 'type="date"'))}
     ${field('الموضوع / المرجع', inp('subject', inv.subject || '', 'placeholder="مثال: توريد وتركيب مقاعد حديقة — كمبوند X"'), 'full')}
-    <div class="field full"><label>البنود</label><div class="linehead"><span>البند</span><span>الكمية</span><span>الوحدة</span><span>سعر الوحدة</span><span></span></div><div class="lines" id="lines">${lineRows(inv.items || [])}</div><datalist id="unitlist">${S.settings.units.map(u => `<option value="${esc(u)}">`).join('')}</datalist><div class="row" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-line="add">${icon('plus')}إضافة بند</button><button type="button" class="btn sm ghost" data-action="invPickProduct">${icon('inventory')}من كتالوج المنتجات</button></div></div>
+    <div class="field full"><label>البنود</label><div class="linehead"><span></span><span>البند</span><span>الكمية</span><span>الوحدة</span><span>سعر الوحدة</span><span></span></div><div class="lines" id="lines">${lineRows(inv.items || [])}</div><datalist id="unitlist">${S.settings.units.map(u => `<option value="${esc(u)}">`).join('')}</datalist><div class="row" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-line="add">${icon('plus')}إضافة بند</button><button type="button" class="btn sm ghost" data-line="pick">${icon('inventory')}من الكتالوج</button><button type="button" class="btn sm ghost" data-line="custom">${icon('camera')}بند خاص بصورة</button></div></div>
     ${field(`خصم (${CUR()})`, inp('discount', inv.discount || 0, 'type="number" step="any" min="0" inputmode="decimal"'))}${field('نسبة الضريبة ٪', inp('vatPct', inv.vatPct ?? (+S.settings.vat || 14), 'type="number" step="any" min="0" max="100"'))}
     <div class="full card" style="background:var(--surface-2);padding:10px 14px"><div class="row small"><span class="muted">الإجمالي قبل الخصم</span><div class="grow"></div><b class="num" id="t-sub">0</b></div><div class="row small"><span class="muted">الضريبة</span><div class="grow"></div><b class="num" id="t-vat">0</b></div><div class="row"><span>الإجمالي النهائي (${CUR()})</span><div class="grow"></div><b class="num" id="t-total" style="font-size:18px">0</b></div></div>
     ${field('شروط السداد / ملاحظات', `<textarea id="f-terms" name="terms">${esc(inv.terms || (S.settings.invoiceTerms || 'السداد خلال 7 أيام من تاريخ الفاتورة. تُسدَّد القيمة بتحويل بنكي أو نقدًا مقابل إيصال.'))}</textarea>`, 'full')}
@@ -11547,14 +11550,7 @@ function invoiceForm(inv) {
 function wireInvoiceForm(f) {
   const recalc = () => { const inv = { items: readLines(f), discount: num($('[name=discount]', f).value), kind: $('[name=kind]', f).value, vatPct: num($('[name=vatPct]', f).value) }; const t = invTotals(inv); $('#t-sub', f).textContent = fmtMoney(t.sub); $('#t-vat', f).textContent = fmtMoney(t.vat); $('#t-total', f).textContent = fmtMoney(t.total); $('[name=vatPct]', f).closest('.field').style.opacity = inv.kind === 'tax' ? '1' : '.4'; };
   wireLines(f, recalc); $('[name=kind]', f).addEventListener('change', recalc); $('[name=vatPct]', f).addEventListener('input', recalc); recalc();
-  f.addEventListener('click', e => { const b = e.target.closest('[data-action="invPickProduct"]'); if (!b) return; e.preventDefault(); e.stopPropagation(); invPickProduct(f, recalc); });
-}
-function invPickProduct(f, recalc) {
-  const b = $('[name=brandId]', f).value; const arr = sortBy(list('products').filter(p => p.brandId === b && p.status !== 'archived'), p => p.code || p.name);
-  const box = document.createElement('div'); box.className = 'overlay'; box.style.zIndex = 10001; box.innerHTML = `<div class="modal" style="max-width:560px"><div class="mh"><h2>اختر منتجًا — ${esc(brandKit(b).name)}</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb"><div class="search" style="margin-bottom:8px">${icon('search')}<input placeholder="بحث" data-q="1"></div><div class="list" data-list="1">${arr.map(p => `<div class="item" data-pid="${p.id}" style="cursor:pointer"><div class="main"><div class="title"><span class="code">${esc(p.code || '')}</span> ${esc(p.name)}</div><div class="meta">${p.dims ? `<span>${esc(p.dims)}</span>` : ''}${p.price ? `<span>${fmtMoney(p.price)} ${CUR()}</span>` : ''}</div></div></div>`).join('') || '<div class="muted small">لا توجد منتجات لهذا البراند</div>'}</div></div></div>`;
-  document.body.appendChild(box);
-  box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-x]')) { box.remove(); return; } const it = e.target.closest('[data-pid]'); if (!it) return; const p = byId('products', it.dataset.pid); const lines = $('#lines', f); const empty = $$('.line', lines).find(l => !l.querySelector('[name=l-desc]').value.trim()); const row = empty || (lines.insertAdjacentHTML('beforeend', lineRows([{}])), $$('.line', lines).slice(-1)[0]); row.querySelector('[name=l-desc]').value = `${p.code ? p.code + ' — ' : ''}${p.name}${p.dims ? ' (' + p.dims + ')' : ''}`; row.querySelector('[name=l-qty]').value = 1; row.querySelector('[name=l-unit]').value = p.unit || 'قطعة'; row.querySelector('[name=l-price]').value = p.price || ''; box.remove(); recalc(); });
-  box.addEventListener('input', e => { if (!e.target.dataset.q) return; const q = e.target.value.toLowerCase(); $$('[data-pid]', box).forEach(x => { x.style.display = x.textContent.toLowerCase().includes(q) ? '' : 'none'; }); });
+  wireCatalogButtons(f, recalc, () => $('[name=brandId]', f).value);
 }
 async function saveInvoice(f, inv) {
   const d = formData(f); const items = readLines(f); if (!items.length) { toast('أضف بندًا واحدًا على الأقل', 'err'); return false; }
@@ -11586,7 +11582,7 @@ function invoicePrintHTML(inv) {
   const c = byId('clients', inv.clientId) || {}; const t = invTotals(inv); const b = inv.brandId; const k = brandKit(b); const tax = inv.kind === 'tax';
   return `<div class="bdoc" style="${brandVars(b)}">${brandDocHead(b, tax ? 'فاتورة ضريبية' : 'فاتورة مبيعات', `<div style="margin-top:6px"><span class="muted">رقم</span> <b class="ltr">${esc(inv.number)}</b> · <span class="muted">التاريخ</span> <b>${fmtDate(inv.date)}</b>${inv.dueDate ? ` · <span class="muted">الاستحقاق</span> ${fmtDate(inv.dueDate)}` : ''}</div>`)}
     <div class="grid g2" style="margin-bottom:16px;font-size:13px"><div><div class="tiny muted">${tax ? 'المشتري' : 'العميل'}</div><b>${esc(c.name || '—')}</b>${c.contact ? `<div>${esc(c.contact)}</div>` : ''}${c.address ? `<div class="small">${esc(c.address)}</div>` : ''}${c.phone ? `<div class="ltr" style="text-align:right">${esc(c.phone)}</div>` : ''}${tax && c.taxId ? `<div class="small">رقم التسجيل الضريبي: <b class="ltr">${esc(c.taxId)}</b></div>` : ''}${tax && c.crn ? `<div class="small">سجل تجاري: <b class="ltr">${esc(c.crn)}</b></div>` : ''}</div><div>${inv.subject ? `<div class="tiny muted">الموضوع</div><b>${esc(inv.subject)}</b>` : ''}${inv.orderId ? `<div class="small muted" style="margin-top:4px">أمر التشغيل: ${esc(byId('orders', inv.orderId)?.code || '')}</div>` : ''}${inv.quotationId ? `<div class="small muted">عرض السعر: ${esc(byId('quotations', inv.quotationId)?.number || '')}</div>` : ''}</div></div>
-    <div class="tablewrap"><table><thead><tr><th>#</th><th>البيان</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th></tr></thead><tbody>${(inv.items || []).map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.desc)}</td><td class="n">${fmtNum(it.qty)}</td><td>${esc(it.unit || '')}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('')}</tbody>
+    <div class="tablewrap"><table><thead><tr><th>#</th><th>البيان</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th></tr></thead><tbody>${(inv.items || []).map((it, i) => `<tr><td>${i + 1}</td><td>${lineCell(it)}</td><td class="n">${fmtNum(it.qty)}</td><td>${esc(it.unit || '')}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="5">الإجمالي</td><td class="n">${fmtMoney(t.sub)}</td></tr>${t.disc ? `<tr><td colspan="5">خصم</td><td class="n">- ${fmtMoney(t.disc)}</td></tr>` : ''}${tax ? `<tr><td colspan="5">صافي الفاتورة</td><td class="n">${fmtMoney(t.net)}</td></tr><tr><td colspan="5">ضريبة القيمة المضافة ${fmtNum(t.vatPct)}٪</td><td class="n">${fmtMoney(t.vat)}</td></tr>` : ''}<tr><td colspan="5"><b>الإجمالي المستحق (${CUR()})</b></td><td class="n" style="font-size:15px"><b>${fmtMoney(t.total)}</b></td></tr>${t.paid ? `<tr><td colspan="5">المسدد</td><td class="n">${fmtMoney(t.paid)}</td></tr><tr><td colspan="5"><b>المتبقي</b></td><td class="n"><b>${fmtMoney(t.due)}</b></td></tr>` : ''}</tfoot></table></div>
     ${inv.terms ? `<h3 style="margin-top:14px">شروط السداد</h3><div class="small" style="white-space:pre-wrap">${esc(inv.terms)}</div>` : ''}${brandDocFoot(b)}</div>`;
 }
@@ -11639,7 +11635,7 @@ document.addEventListener('submit', async ev => {
   if (ev.target.id !== 'bkitform') return; ev.preventDefault(); if (!isAdmin()) return; const f = ev.target; const kit = Object.assign({}, S.settings.brandKit || {});
   for (const b of (S.settings.brands || []).map(x => x.id)) {
     const v = n => (f.querySelector(`[name="${n}_${b}"]`) || {}).value || '';
-    const cur = Object.assign({}, kit[b] || {}); cur.tagline = v('tagline'); cur.ink = v('ink'); cur.bg = v('bg'); cur.accent = v('accent'); cur.legal = { company: v('company'), taxId: v('taxId'), crn: v('crn'), address: v('address'), phone: v('phone'), email: v('email') };
+    const cur = Object.assign({}, kit[b] || {}); cur.tagline = v('tagline'); cur.ink = v('ink'); cur.bg = v('bg'); cur.accent = v('accent'); cur.legal = { company: v('company'), taxId: v('taxId'), crn: v('crn'), address: v('address'), phone: v('phone'), email: v('email') }; const ta = f.querySelector(`[name="colls_${b}"]`); if (ta) cur.collections = ta.value.split('\n').map(x => x.trim()).filter(Boolean).map(n => ({ id: (brandCollections(b).find(c => c.name === n) || {}).id || n.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-').replace(/^-|-$/g, '') || uid(), name: n }));
     const file = f.querySelector(`[name="logo_${b}"]`); if (file && file.files && file.files[0]) { const fl = file.files[0]; if (fl.size > 400 * 1024) { toast(`لوجو ${brandKit(b).name} أكبر من 400 كيلوبايت`, 'err'); return; } cur.logo = await fileToDataURL(fl); }
     kit[b] = cur;
   }
@@ -11653,7 +11649,7 @@ const BRAND_SVG = {"lof": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink
    v4.7 — سرّية الأسعار (اتفاق 21 سبتمبر):
    · لا أحد يرى أسعار المنتجات ولا عروض الأسعار ولا الفواتير إلا المالك.
    · مدير الحسابات والموارد البشرية: يطلبان «إذن الأسعار» من المالك — يُفتح لهما لمدة ساعة واحدة.
-   · المدير التجاري / تطوير الأعمال: يطلب إذنًا لكل عرض سعر على حدة (72 ساعة)، ويرى مسودته التي يكتبها بنفسه حتى يرسلها.
+   · المدير التجاري / تطوير الأعمال: يرى الأسعار ويفتح أي عرض سعر في أي وقت (بلا إذن).
    · باقي الأدوار (المكتب الفني، الهندسة، الإنتاج، المشتريات، المخازن…): لا عروض ولا فواتير ولا أسعار إطلاقًا.
    · المبالغ داخل ملاحظات أمر التشغيل تُحجب عن غير المصرَّح لهم (شاشة وطباعة).
    ===================================================================== */
@@ -11670,18 +11666,18 @@ const myReqIds = () => { const s = S.session || {}; return [s.workerId, s.id].fi
 const grantAt = r => Date.parse(r.decidedAt || r.stepAt || 0);
 function priceGrant() { const me = myReqIds(); if (!me.length) return null; const lim = Date.now() - PRICE_GRANT_MIN * 60 * 1000; return list('requests').find(r => r.type === 'priceopen' && r.status === 'approved' && me.includes(r.requesterId) && grantAt(r) >= lim) || null; }
 function pricePending() { const me = myReqIds(); return list('requests').find(r => r.type === 'priceopen' && r.status === 'pending' && me.includes(r.requesterId)) || null; }
-const priceAllowed = () => !!S.session && (isAdmin() || (PRICE_ASK_ROLES.includes(role()) && !!priceGrant()));
+const priceAllowed = () => !!S.session && (isAdmin() || role() === 'bdd' || (PRICE_ASK_ROLES.includes(role()) && !!priceGrant()));
 const seesPrices = priceAllowed;
 /* seesFinance() (02) reads FINANCE_ROLES.includes(role()) — make it follow the grant */
 FINANCE_ROLES.splice(0, FINANCE_ROLES.length, 'admin');
-FINANCE_ROLES.includes = function (r) { return r === 'admin' || (PRICE_ASK_ROLES.includes(r) && !!priceGrant()); };
+FINANCE_ROLES.includes = function (r) { return r === 'admin' || r === 'bdd' || (PRICE_ASK_ROLES.includes(r) && !!priceGrant()); };
 /* who may open the quotes / invoices pages at all */
 const QUOTE_VIEW_ROLES = ['admin', 'acc', 'hr', 'bdd'];
 Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !QUOTE_VIEW_ROLES.includes(r)) ROLE_VIEWS[r] = ROLE_VIEWS[r].filter(v => v !== 'quotes' && v !== 'invoices'); });
 /* quote-level grant for the commercial director */
 function quoteGrant(q) { const me = myReqIds(); if (!me.length) return null; const lim = Date.now() - QUOTE_GRANT_HOURS * 3600 * 1000; return list('requests').find(r => r.type === 'quoteopen' && r.quotationId === q.id && r.status === 'approved' && me.includes(r.requesterId) && grantAt(r) >= lim) || null; }
 function quotePending(q) { const me = myReqIds(); return list('requests').find(r => r.type === 'quoteopen' && r.quotationId === q.id && r.status === 'pending' && me.includes(r.requesterId)) || null; }
-function quoteAllowed(q) { if (!q || !S.session) return false; if (priceAllowed()) return true; if (role() === 'bdd' && q.createdBy && myReqIds().includes(q.createdBy) && q.status === 'draft') return true; if (role() === 'bdd') return !!quoteGrant(q); return false; }
+function quoteAllowed(q) { if (!q || !S.session) return false; if (isAdmin() || role() === 'bdd') return true; if (PRICE_ASK_ROLES.includes(role()) && !!priceGrant()) return true; return false; }
 async function sendGrantRequest(type, extra, title, desc) {
   const me = S.session; const w = me.workerId ? byId('workers', me.workerId) : null; const now = nowISO();
   await Store.save('requests', Object.assign({ id: uid(), type, workerId: w ? w.id : null, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: w ? w.deptId || null : null, reason: '', status: 'pending', chain: chainFor(type), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, from: todayISO(), to: todayISO() }, extra || {}));
@@ -11729,6 +11725,95 @@ RENDER_HOOKS.push(() => { if (!S.session || !PRICE_ASK_ROLES.includes(role())) r
 RENDER_HOOKS.push(() => { if (!S.session || !isAdmin()) return; const n = list('requests').filter(r => ['quoteopen', 'priceopen'].includes(r.type) && r.status === 'pending').length; if (!n) return; const a = document.querySelector('.nav a[href="#/requests"]'); if (a && !a.querySelector('.qcnt')) a.insertAdjacentHTML('beforeend', `<span class="cnt warn qcnt">${n}</span>`); });
 /* re-render every minute so an expired grant closes by itself */
 setInterval(() => { if (S.session && (PRICE_ASK_ROLES.includes(role()) || role() === 'bdd') && ['quotes', 'invoices', 'products'].includes(S.route.view)) render(false); }, 60000);
+/* =====================================================================
+   v4.7 — أقسام الكتالوج + بنود بصور في عروض الأسعار والفواتير
+   · كل براند له أقسام (lōf: Garden · Site · Hospitality)، وكل كتالوج PDF ومنتج ينتمي لقسم
+   · في عرض السعر / الفاتورة: «من الكتالوج» (اختيار القسم ← المنتجات بالصور) أو «بند خاص بصورة» (صورة + وصف + كمية + سعر)
+   · البند يحمل صورة تُطبع بجانب الوصف في المستند
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.line,.linehead{grid-template-columns:36px minmax(0,3fr) 70px 80px 100px 32px}
+@media (max-width:640px){.line,.linehead{grid-template-columns:30px minmax(0,2fr) 52px 64px 80px 28px}}
+.line .lth{width:34px;height:34px;border-radius:8px;border:1px dashed var(--line-2);background:var(--surface-2,var(--surface));display:grid;place-items:center;overflow:hidden;cursor:pointer;padding:0;color:var(--muted)}
+.line .lth img{width:100%;height:100%;object-fit:cover;display:block}.line .lth svg{width:15px;height:15px}
+.lc{display:flex;align-items:center;gap:10px}.lc img{width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none}.lc .lcd{min-width:0}.lc .lcd .code{display:inline-block;margin-inline-end:6px}
+.pickgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:52vh;overflow:auto;padding:2px}
+.pickgrid .pc{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);cursor:pointer;display:flex;flex-direction:column;text-align:right}
+.pickgrid .pc:hover{border-color:var(--accent)}.pickgrid .pc .im{aspect-ratio:4/3;background:var(--surface-2,var(--surface));display:grid;place-items:center;overflow:hidden}.pickgrid .pc .im img{width:100%;height:100%;object-fit:cover}
+.pickgrid .pc .bd{padding:6px 8px;font-size:12px}.pickgrid .pc .bd .pr{font-weight:700;color:var(--accent)}
+.overlay.sub{z-index:10001}.overlay.sub .mh h2 svg{width:18px;height:18px;vertical-align:-3px;margin-inline-end:6px}.overlay.sub .mb{padding:14px 20px}.overlay.sub .mf{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line)}.pickgrid .pc .im svg{width:28px;height:28px;opacity:.4}
+@media print{.lc img{width:44px;height:44px}}
+</style>`);
+/* ---------- collections per brand ---------- */
+const COLLECTIONS_DEFAULT = { lof: [{ id: 'garden', name: 'Garden Furniture' }, { id: 'site', name: 'Site Furniture' }, { id: 'hospitality', name: 'Hospitality' }], elm: [{ id: 'furniture', name: 'Furniture' }, { id: 'kitchens', name: 'Kitchens' }, { id: 'dressing', name: 'Dressing Rooms' }], alu: [] };
+function brandCollections(b) { const k = (S.settings.brandKit || {})[b] || {}; if (Array.isArray(k.collections)) return k.collections.filter(c => c && c.id); return COLLECTIONS_DEFAULT[b] || []; }
+const collName = (b, id) => (brandCollections(b).find(c => c.id === id) || {}).name || '';
+function productCollection(p) { if (!p) return ''; if (p.collection) return p.collection; const f = p.catalogFileId ? byId('files', p.catalogFileId) : null; return (f && f.collection) || ''; }
+/* product form: collection select */
+function productForm(p) { const h = productFormDesign(p); const b = p.brandId || (S.settings.brands[0] || {}).id; const colls = brandCollections(b); const sel = `<select id="f-collection" name="collection"><option value="">— بدون قسم —</option>${colls.map(c => `<option value="${c.id}" ${productCollection(p) === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`; const i = h.lastIndexOf('</div>'); return i < 0 ? h + field('قسم الكتالوج', sel) : h.slice(0, i) + field('قسم الكتالوج', sel) + h.slice(i); }
+async function saveProduct(f, p) { const d = formData(f); const r = await saveProductDesign(f, p); if (r === false) return false; const doc = p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(d.code || '').trim().toLowerCase()); if (doc && (doc.collection || '') !== (d.collection || '')) await Store.update('products', doc.id, { collection: d.collection || '' }, { silent: true }); return r; }
+document.addEventListener('change', ev => { const t = ev.target; if (!t || t.id !== 'f-brandId') return; const f = t.closest('#mform'); const c = f && f.querySelector('#f-collection'); if (!c) return; const colls = brandCollections(t.value); c.innerHTML = `<option value="">— بدون قسم —</option>` + colls.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join(''); });
+/* ---------- line items with images ---------- */
+function lineRows(items) {
+  return (items.length ? items : [{}]).map(it => `<div class="line"><button type="button" class="lth" data-line="img" title="صورة البند">${it.img ? `<img src="${esc(it.img)}" alt="">` : icon('camera')}</button><input type="hidden" name="l-img" value="${esc(it.img || '')}"><input type="hidden" name="l-pid" value="${esc(it.productId || '')}"><input name="l-desc" placeholder="البند" value="${esc(it.desc || '')}"><input name="l-qty" type="number" step="any" min="0" placeholder="الكمية" value="${esc(it.qty ?? '')}" inputmode="decimal"><input name="l-unit" placeholder="الوحدة" value="${esc(it.unit || 'قطعة')}" list="unitlist"><input name="l-price" type="number" step="any" min="0" placeholder="سعر الوحدة" value="${esc(it.price ?? '')}" inputmode="decimal"><button type="button" class="del" data-line="del" title="حذف البند">${icon('x')}</button></div>`).join('');
+}
+function readLines(f) { return $$('#lines .line', f).map(l => { const g = n => l.querySelector(`[name=${n}]`); const o = { desc: g('l-desc').value.trim(), qty: num(g('l-qty').value), unit: g('l-unit').value.trim(), price: num(g('l-price').value) }; const img = g('l-img') && g('l-img').value; const pid = g('l-pid') && g('l-pid').value; if (img) o.img = img; if (pid) o.productId = pid; return o; }).filter(x => x.desc); }
+const lineCell = it => `<div class="lc">${it.img ? `<img src="${esc(it.img)}" alt="">` : ''}<div class="lcd">${it.productId && byId('products', it.productId)?.code ? `<span class="code">${esc(byId('products', it.productId).code)}</span>` : ''}${esc(it.desc || '')}</div></div>`;
+async function lineImageThumb(src) { try { return await squareThumb(src, 320); } catch (e) { return src; } }
+function setLineImg(row, img) { row.querySelector('[name=l-img]').value = img || ''; const b = row.querySelector('.lth'); b.innerHTML = img ? `<img src="${esc(img)}" alt="">` : icon('camera'); }
+/* buttons «من الكتالوج» / «بند خاص بصورة» + per-line image click */
+function wireCatalogButtons(f, recalc, brandOf) {
+  f.addEventListener('click', async e => {
+    const b = e.target.closest('[data-line="pick"],[data-line="custom"],[data-line="img"]'); if (!b) return; e.preventDefault(); e.stopPropagation();
+    if (b.dataset.line === 'pick') pickCatalogLine(f, recalc, brandOf());
+    else if (b.dataset.line === 'custom') customLineDialog(f, recalc, null);
+    else { const row = b.closest('.line'); const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = async () => { const fl = inp.files && inp.files[0]; if (!fl) return; const src = await fileToDataURL(fl); setLineImg(row, await lineImageThumb(src)); }; inp.click(); }
+  }, true);
+}
+function wireQuoteForm(f) {
+  wireQuoteFormBase(f);
+  const add = f.querySelector('[data-line="add"]'); if (add && !f.querySelector('[data-line="pick"]')) add.insertAdjacentHTML('afterend', ` <button type="button" class="btn sm ghost" data-line="pick">${icon('inventory')}من الكتالوج</button> <button type="button" class="btn sm ghost" data-line="custom">${icon('camera')}بند خاص بصورة</button>`);
+  const recalc = () => { const ev = new Event('input', { bubbles: true }); const l = f.querySelector('#lines input'); if (l) l.dispatchEvent(ev); };
+  wireCatalogButtons(f, recalc, () => (f.querySelector('[name=brandId]') || {}).value || CRM_BRAND());
+}
+function appendLine(f, it, recalc) { const lines = $('#lines', f); const empty = $$('.line', lines).find(l => !l.querySelector('[name=l-desc]').value.trim()); if (empty) empty.remove(); lines.insertAdjacentHTML('beforeend', lineRows([it])); recalc && recalc(); }
+/* catalog picker: collection tabs → product cards */
+function pickCatalogLine(f, recalc, b) {
+  const colls = brandCollections(b); let coll = colls.length ? colls[0].id : ''; let q = '';
+  const box = document.createElement('div'); box.className = 'overlay sub'; document.body.appendChild(box);
+  const draw = () => {
+    let arr = list('products').filter(p => p.brandId === b && p.status !== 'archived'); if (coll) arr = arr.filter(p => productCollection(p) === coll); if (q) arr = arr.filter(p => `${p.code} ${p.name} ${p.dims || ''}`.toLowerCase().includes(q.toLowerCase())); arr = sortBy(arr, p => p.code || p.name);
+    box.innerHTML = `<div class="modal wide" style="max-width:820px"><div class="mh"><h2>${icon('inventory')}منتجات ${esc(brandKit(b).name)}${coll ? ` — ${esc(collName(b, coll))}` : ''}</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb">
+      ${colls.length ? `<div class="seg" style="margin-bottom:8px">${colls.map(c => `<button type="button" class="${coll === c.id ? 'on' : ''}" data-coll="${c.id}">${esc(c.name)}</button>`).join('')}<button type="button" class="${coll === '' ? 'on' : ''}" data-coll="">الكل</button></div>` : ''}
+      <div class="search" style="margin-bottom:8px">${icon('search')}<input placeholder="بحث بالكود أو الاسم" value="${esc(q)}" data-q="1"></div>
+      ${arr.length ? `<div class="pickgrid">${arr.map(p => { const cover = productCover(p); return `<button type="button" class="pc" data-pid="${p.id}"><div class="im">${cover ? `<img src="${esc(cover)}" alt="">` : `<span class="muted">${icon('inventory')}</span>`}</div><div class="bd"><span class="code">${esc(p.code || '')}</span><div class="bold">${esc(p.name)}</div>${p.dims ? `<div class="tiny muted">${esc(p.dims)}</div>` : ''}${seesFinance() && p.price ? `<div class="pr">${fmtMoney(p.price)} ${CUR()}</div>` : ''}</div></button>`; }).join('')}</div>` : `<div class="empty"><b>لا توجد منتجات في هذا القسم بعد</b>ارفع كتالوج القسم واستخرج منتجاته من صفحة المنتجات</div>`}</div></div>`;
+    const qi = box.querySelector('[data-q]'); if (qi && q) { qi.focus(); qi.setSelectionRange(q.length, q.length); }
+  };
+  draw();
+  box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-x]')) { box.remove(); return; } const c = e.target.closest('[data-coll]'); if (c) { coll = c.dataset.coll; draw(); return; } const it = e.target.closest('[data-pid]'); if (!it) return; const p = byId('products', it.dataset.pid); appendLine(f, { productId: p.id, img: productCover(p) || '', desc: `${p.name}${p.dims ? ' — ' + p.dims : ''}${p.finish ? ' — ' + p.finish : ''}`, qty: 1, unit: p.unit || 'قطعة', price: seesFinance() ? (p.price || '') : '' }, recalc); box.remove(); toast(`أُضيف ${p.code || p.name}`); });
+  box.addEventListener('input', e => { if (!e.target.dataset.q) return; q = e.target.value; clearTimeout(box._t); box._t = setTimeout(draw, 200); });
+}
+/* custom line: image + description + qty + unit price */
+function customLineDialog(f, recalc, row) {
+  const box = document.createElement('div'); box.className = 'overlay sub'; let img = '';
+  box.innerHTML = `<form class="modal" id="cform" style="max-width:520px"><div class="mh"><h2>${icon('camera')}بند خاص (خارج الكتالوج)</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb"><div class="form">
+    <div class="field full"><label>صورة المنتج</label><div class="row" style="gap:10px;align-items:center"><div class="lth" id="c-prev" style="width:84px;height:84px;border-radius:12px;display:grid;place-items:center;border:1px dashed var(--line-2);overflow:hidden">${icon('camera')}</div><input type="file" id="c-file" accept="image/*" capture="environment" style="max-width:220px"></div></div>
+    ${field('الوصف', `<textarea id="c-desc" required placeholder="مثال: كنبة خارجية 3 مقاعد — ألومنيوم مطلي + حبل + وسائد"></textarea>`, 'full')}
+    ${field('الكمية', `<input type="number" id="c-qty" step="any" min="0" value="1" inputmode="decimal">`)}${field('الوحدة', `<input id="c-unit" value="قطعة" list="unitlist">`)}${field(`سعر القطعة (${CUR()})`, `<input type="number" id="c-price" step="any" min="0" inputmode="decimal">`)}
+    <div class="full row small"><span class="muted">الإجمالي</span><div class="grow"></div><b class="num" id="c-total">0</b></div>
+  </div></div><div class="mf"><button type="submit" class="btn p">إضافة البند</button><button type="button" class="btn ghost" data-x="1">إلغاء</button></div></form>`;
+  document.body.appendChild(box);
+  const tot = () => { box.querySelector('#c-total').textContent = fmtMoney(num(box.querySelector('#c-qty').value) * num(box.querySelector('#c-price').value)); };
+  box.addEventListener('input', tot);
+  box.querySelector('#c-file').addEventListener('change', async ev => { const fl = ev.target.files && ev.target.files[0]; if (!fl) return; img = await lineImageThumb(await fileToDataURL(fl)); box.querySelector('#c-prev').innerHTML = `<img src="${esc(img)}" alt="" style="width:100%;height:100%;object-fit:cover">`; });
+  box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-x]')) box.remove(); });
+  box.querySelector('#cform').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const desc = box.querySelector('#c-desc').value.trim(); if (!desc) return; appendLine(f, { img, desc, qty: num(box.querySelector('#c-qty').value) || 1, unit: box.querySelector('#c-unit').value || 'قطعة', price: num(box.querySelector('#c-price').value) }, recalc); box.remove(); });
+}
+/* settings: collections per brand (in the brand-kit tab) */
+RENDER_HOOKS.push(() => { const f = document.getElementById('bkitform'); if (!f) return; f.querySelectorAll('.form[data-brand]').forEach(box => { const b = box.dataset.brand; if (box.querySelector(`[name="colls_${b}"]`)) return; box.insertAdjacentHTML('beforeend', field('أقسام الكتالوج (سطر لكل قسم)', `<textarea name="colls_${b}" rows="3">${esc(brandCollections(b).map(c => c.name).join('\n'))}</textarea>`, 'full')); }); });
+/* catalog file list: show / change the collection */
+RENDER_HOOKS.push(() => { document.querySelectorAll('.catlist .item').forEach(it => { if (it.querySelector('.catcoll')) return; const name = it.querySelector('.title'); if (!name) return; const f = list('files').find(x => x.kind === 'catalog' && x.name === name.textContent.trim()); if (!f) return; const colls = brandCollections(f.brandId); if (!colls.length) return; name.insertAdjacentHTML('afterend', `<div class="catcoll tiny" style="margin-top:4px"><select data-catcoll="${f.id}" style="font-size:11px;padding:2px 6px"><option value="">— بدون قسم —</option>${colls.map(c => `<option value="${c.id}" ${f.collection === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>`); }); });
+document.addEventListener('change', async ev => { const t = ev.target; if (!t || !t.dataset || !t.dataset.catcoll) return; await Store.update('files', t.dataset.catcoll, { collection: t.value }); toast('تم تحديث قسم الكتالوج'); });
 boot();
 </script>
 
