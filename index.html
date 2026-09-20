@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-0921-c359e9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1018-3afd5d";</script>
 
 <script>
 'use strict';
@@ -3601,18 +3601,18 @@ ACTIONS.kioskReq = wid => openModal({ title: 'طلب جديد', body: requestFor
 /* =====================================================================
    Location (geofence) · Face recognition (kiosk) · Employee self-punch
    ===================================================================== */
-const GEO_DEFAULTS = { lat: null, lng: null, radius: 200, required: true };
+const GEO_DEFAULTS = { lat: null, lng: null, radius: 200, required: true, strict: true, minAcc: 25 };
 const FACE_DEFAULTS = { enabled: true, threshold: 0.5, libBase: 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/' };
 const geoCfg = () => Object.assign({}, GEO_DEFAULTS, S.settings.geo || {});
 const faceCfg = () => Object.assign({}, FACE_DEFAULTS, S.settings.face || {});
 const PUNCH_METHODS = { pin: 'كشك', face: 'بصمة وجه', self: 'موبايل', manual: 'يدوي', import: 'مورد', kiosk: 'كشك', request: 'طلب' };
 
 /* ---------------- location ---------------- */
-function getGeo(timeout = 7000) {
+function getGeoBase(timeout = 7000) {
   return new Promise(res => { if (!navigator.geolocation) return res(null); let done = false; const fin = v => { if (!done) { done = true; res(v); } }; const t = setTimeout(() => fin(null), timeout + 500); navigator.geolocation.getCurrentPosition(p => { clearTimeout(t); fin({ lat: r2(p.coords.latitude * 1e4) / 1e4, lng: r2(p.coords.longitude * 1e4) / 1e4, acc: Math.round(p.coords.accuracy || 0) }); }, () => { clearTimeout(t); fin(null); }, { enableHighAccuracy: true, timeout, maximumAge: 0 }); });
 }
 function haversine(a, b) { const R = 6371000; const toR = x => x * Math.PI / 180; const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng); const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); }
-function geoCheck(pos) { const g = geoCfg(); if (!pos || g.lat == null || g.lng == null || g.lat === '' || g.lng === '') return { inside: null, dist: null }; const dist = Math.round(haversine(pos, { lat: +g.lat, lng: +g.lng })); return { inside: dist <= (+g.radius || 200) + (pos.acc || 0) * 0.5, dist }; }
+function geoCheck(pos) { const g = geoCfg(); if (!pos || g.lat == null || g.lng == null || g.lat === '' || g.lng === '') return { inside: null, dist: null }; const dist = Math.round(haversine(pos, { lat: +g.lat, lng: +g.lng })); return { inside: dist <= (+g.radius || 200) + (g.strict === false ? Math.min(30, (pos.acc || 0) * 0.5) : 0), dist }; }
 const geoBadge = geo => !geo ? '' : geo.inside === false ? `<span class="badge crit" title="${geo.lat},${geo.lng}">خارج النطاق (${fmtNum(geo.dist)} م${geo.zone ? ` من ${esc(geo.zone)}` : ''})</span>` : geo.inside === true ? `<span class="badge good" title="${geo.lat},${geo.lng}">${esc(geo.zone || 'داخل النطاق')}</span>` : `<span class="badge" title="${geo.lat},${geo.lng}">موقع مسجّل</span>`;
 const methodBadge = r => { const m = r.method || r.src; return m && PUNCH_METHODS[m] ? `<span class="badge" style="padding:0 6px">${PUNCH_METHODS[m]}</span>` : ''; };
 
@@ -3725,14 +3725,14 @@ ACTIONS.selfPunch = async (arg, btn) => {
 function settingsGeoTab() {
   const g = geoCfg(); const fc = faceCfg(); const enrolled = list('workers').filter(w => w.face && w.face.d).length;
   return `<form class="card" id="geoform"><h3>موقع المصنع (نطاق البصمة)</h3><p class="small ink2" style="margin-bottom:12px">يُسجَّل موقع الجهاز مع كل بصمة (كشك أو موبايل). حدد إحداثيات المصنع ونصف قطر النطاق. مواقع التركيبات الخارجية ومدتها تُدار من صفحة «مواقع البصمة».</p>
-    <div class="form">${field('خط العرض (Latitude)', inp('lat', g.lat ?? '', 'type="number" step="any" class="ltr" placeholder="30.0300"'))}${field('خط الطول (Longitude)', inp('lng', g.lng ?? '', 'type="number" step="any" class="ltr" placeholder="31.4700"'))}${field('نصف قطر النطاق (متر)', inp('radius', g.radius ?? 200, 'type="number" min="20" step="10"'))}<div class="field"><label>&nbsp;</label><button type="button" class="btn" data-action="geoUseMine">${icon('link')}استخدام موقعي الحالي</button></div><label class="check full ${g.required !== false ? 'on' : ''}"><input type="checkbox" name="required" id="f-georeq" ${g.required !== false ? 'checked' : ''}> منع بصمة الموبايل خارج النطاق المسموح (المصنع أو موقع العمل المخصص)</label></div>
+    <div class="form">${field('خط العرض (Latitude)', inp('lat', g.lat ?? '', 'type="number" step="any" class="ltr" placeholder="30.0300"'))}${field('خط الطول (Longitude)', inp('lng', g.lng ?? '', 'type="number" step="any" class="ltr" placeholder="31.4700"'))}${field('نصف قطر النطاق (متر)', inp('radius', g.radius ?? 200, 'type="number" min="10" step="5"'))}<label class="check full ${g.strict !== false ? 'on' : ''}"><input type="checkbox" name="strict" id="f-geostrict" ${g.strict !== false ? 'checked' : ''}> وضع الدقة العالية: لا تسامح خارج النطاق، وتُرفض القراءة لو دقة الـGPS أسوأ من الحد أدناه (يُطلب من الموظف الوقوف في مكان مكشوف وإعادة المحاولة)</label>${field('أقصى خطأ مقبول لقراءة الموقع (متر)', inp('minAcc', g.minAcc ?? 25, 'type="number" min="5" step="5"'))}<div class="field"><label>&nbsp;</label><button type="button" class="btn" data-action="geoUseMine">${icon('link')}استخدام موقعي الحالي</button></div><label class="check full ${g.required !== false ? 'on' : ''}"><input type="checkbox" name="required" id="f-georeq" ${g.required !== false ? 'checked' : ''}> منع بصمة الموبايل خارج النطاق المسموح (المصنع أو موقع العمل المخصص)</label></div>
     <div class="sep"></div><h3>بصمة الوجه في الكشك</h3><p class="small ink2" style="margin:6px 0 12px">التعرف يعمل داخل المتصفح بكاميرا الجهاز (النسخة المكتبية أو المستضافة، وتحتاج إنترنت أول مرة لتحميل نموذج ~7 ميجا). سجّل وجه كل موظف من ملفه ← «تسجيل بصمة الوجه». مسجّل حاليًا: <b>${enrolled}</b> موظف.</p>
     <div class="form"><label class="check ${fc.enabled ? 'on' : ''}"><input type="checkbox" name="faceEnabled" id="f-faceEnabled" ${fc.enabled ? 'checked' : ''}> تفعيل زر بصمة الوجه في الكشك</label>${field('حساسية المطابقة (أقل = أدق وأصعب، الافتراضي 0.5)', inp('threshold', fc.threshold ?? 0.5, 'type="number" step="0.05" min="0.3" max="0.7"'))}<div class="field full"><div class="hint">البصمة من الموبايل تتحقق بالوجه (سيلفي) أو بصمة الجهاز حسب إعداد كل موظف، وقبول البصمة بدونهما يتحكم فيه خيار «البصمة البيومترية فقط» في الإعدادات ← السياسة. داخل claude.ai الكاميرا محجوبة، فالنسخة المكتبية/المستضافة هي التي تحقق بالوجه فعليًا.</div></div></div>
     <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>`;
 }
 document.addEventListener('submit', async ev => {
   if (ev.target.id !== 'geoform') return; ev.preventDefault(); const d = formData(ev.target);
-  const geo = { lat: d.lat === '' ? null : num(d.lat), lng: d.lng === '' ? null : num(d.lng), radius: num(d.radius) || 200, required: !!d.required };
+  const geo = { lat: d.lat === '' ? null : num(d.lat), lng: d.lng === '' ? null : num(d.lng), radius: num(d.radius) || 200, required: !!d.required, strict: !!d.strict, minAcc: num(d.minAcc) || 25 };
   const face = Object.assign({}, faceCfg(), { enabled: !!d.faceEnabled, threshold: num(d.threshold) || 0.5 });
   await Store.saveSettings(Object.assign({}, S.settings, { geo, face })); toast('تم الحفظ');
 });
@@ -3743,7 +3743,7 @@ ACTIONS.geoUseMine = async () => { toast('جارٍ تحديد الموقع…');
    ===================================================================== */
 const PUNCH_AT = { auto: 'تلقائي — المصنع، وموقع المشروع فقط أثناء التركيب', factory: 'المصنع فقط', sites: 'مواقع العمل المخصصة له فقط', both: 'المصنع أو مواقع العمل', any: 'بدون قيد موقع' };
 const INSTALL_DEPT = id => /^inst/.test(String(id || ''));
-const punchMethodsOf = w => Object.assign({ face: true, pin: true, device: false, selfie: true }, (w && w.punchMethods) || {});
+const punchMethodsOf = w => Object.assign({ face: true, pin: true, device: true, selfie: true }, (w && w.punchMethods) || {}); // v4.6.2: device biometric (fingerprint / phone face) is standard for everyone
 const punchAtOf = w => (w && (w.workplace === 'home' || ((S.settings.shifts || []).find(x => x.id === w.shiftId) || {}).remote)) ? 'any' : (w && w.workplace === 'hq' && (!w.punchAt || w.punchAt === 'auto')) ? 'office' : (w && w.punchAt && PUNCH_AT[w.punchAt]) ? w.punchAt : 'auto';
 const avatarHTML = (w, size = 34) => `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px">${w && w.photo ? `<img src="${esc(w.photo)}" alt="">` : esc(((w && w.name) || '?').trim().charAt(0))}</div>`;
 
@@ -3757,7 +3757,7 @@ function zonesFor(w, date) { /* overridden in part 13 (project zones) */
   if (mode === 'sites' || mode === 'both') activeSitesFor(w, date).forEach(s => zones.push({ id: s.id, name: s.name, lat: +s.lat, lng: +s.lng, radius: +s.radius || 50, to: s.to }));
   return { unrestricted: false, zones };
 }
-function zoneCheck(w, pos) {
+function zoneCheckBase(w, pos) {
   const z = zonesFor(w); if (z.unrestricted) return { unrestricted: true, inside: null, zone: null, dist: null };
   if (!z.zones.length) return { noZones: true, inside: null, zone: null, dist: null };
   if (!pos) return { inside: null, zone: null, dist: null, zones: z.zones };
@@ -3771,6 +3771,7 @@ async function punchGeoBase(w, method) {
   let blocked = false, msg = '';
   if (method === 'self' && g.required !== false && !chk.unrestricted && !chk.noZones) {
     if (!pos) { blocked = true; msg = 'تعذّر تحديد موقعك — فعّل خدمة الموقع (GPS) واسمح للمتصفح بالوصول إليه'; }
+    else if (chk.poorAcc) { blocked = true; msg = `دقة تحديد الموقع ضعيفة (±${fmtNum(chk.acc)} م والمسموح ±${chk.maxAcc} م) — قف في مكان مكشوف بعيدًا عن الأسقف، وتأكد أن الـGPS مفعّل، ثم أعد المحاولة`; }
     else if (!chk.inside) { blocked = true; msg = `أنت خارج نطاق البصمة — أقرب موقع مسموح: ${chk.zone.name} (على بُعد ${fmtNum(chk.dist)} م، والمسموح ${chk.zone.radius} م)`; }
   }
   return { geo, blocked, msg, chk };
@@ -3805,7 +3806,7 @@ function siteForm(s, presetWorker) {
     ${field('العنوان / وصف', inp('address', s.address || ''), 'full')}
     <div class="field full"><label>تحديد الموقع (اختر الأسهل)</label><div class="row"><button type="button" class="btn" data-action="siteUseMine">${icon('link')}أنا في الموقع الآن — استخدم موقعي</button><input id="f-paste" class="inp" style="flex:1;min-width:200px;direction:ltr" placeholder="أو الصق رابط Google Maps أو الإحداثيات 30.0300, 31.4700" data-sitepaste="1"></div><div class="hint">من تطبيق الخرائط: اضغط مطولًا على المكان ← مشاركة ← انسخ الرابط والصقه هنا (الرابط الكامل وليس المختصر)</div></div>
     ${field('خط العرض', inp('lat', s.lat ?? '', 'type="number" step="any" class="ltr"'))}${field('خط الطول', inp('lng', s.lng ?? '', 'type="number" step="any" class="ltr"'))}
-    <div class="field full"><label>نصف قطر النطاق المسموح (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="20" step="10" value="${s.radius ?? 50}" class="inp" style="width:110px">${[50, 100, 200, 500].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div>
+    <div class="field full"><label>نصف قطر النطاق المسموح (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="10" step="5" value="${s.radius ?? 50}" class="inp" style="width:110px">${[10, 20, 30, 40, 50, 100, 200].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div>
     ${field('ساري من', inp('from', s.from || todayISO(), 'type="date"'))}${field('ساري حتى', inp('to', s.to || addDays(todayISO(), 14), 'type="date"'))}
     <div class="field full"><label>الفريق المخصص لهذا الموقع</label><div class="row" style="margin-bottom:6px"><select id="f-deptpick" class="sel"><option value="">اختر قسمًا لإضافته بالكامل…</option>${opts(S.settings.departments)}</select><button type="button" class="btn sm" data-action="siteAddDept">إضافة القسم</button></div><div class="row" style="gap:6px" id="sitews">${ws.map(w => `<label class="check ${chosen.has(w.id) ? 'on' : ''}" data-dept="${esc(w.deptId || '')}"><input type="checkbox" name="w-${w.id}" id="f-w-${w.id}" ${chosen.has(w.id) ? 'checked' : ''}>${esc(w.name)}<span class="tiny muted"> · ${esc(deptName(w.deptId))}</span></label>`).join('')}</div></div>
     <label class="check full ${s.active !== false ? 'on' : ''}"><input type="checkbox" name="active" id="f-active" ${s.active !== false ? 'checked' : ''}> الموقع مفعّل</label>
@@ -3865,7 +3866,7 @@ function setupChecklist(w) {
   const can = canEditHr();
   return `<div class="card"><div class="cardhead"><h3>إعداد البصمة</h3><span class="muted small">${PUNCH_AT[punchAtOf(w)]}</span></div>
     ${item(!!w.photo, 'صورة شخصية', w.photo ? 'مضبوطة' : 'لم تُضف بعد — تظهر في الكشك والبوابة', can ? `<button class="btn xs" data-action="photoSet" data-arg="${w.id}">${w.photo ? 'تغيير' : 'إضافة'}</button>` : '')}
-    ${pm.face ? item(!!(w.face && w.face.d), 'بصمة الوجه (كاميرا الكشك)', w.face && w.face.d ? `مسجّلة (${w.face.n || w.face.d.length} صور) ${fmtDate((w.face.at || '').slice(0, 10))}` : 'غير مسجّلة — 3 لقطات من الكاميرا', can && faceCfg().enabled ? (w.face && w.face.d ? `<button class="btn xs ghost" data-action="faceRemove" data-arg="${w.id}">حذف</button>` : `<button class="btn xs" data-action="faceEnroll" data-arg="${w.id}">تسجيل</button>`) : '') : ''}
+    ${pm.face ? item(!!(w.face && w.face.d), 'بصمة الوجه (كاميرا الكشك)', w.face && w.face.d ? `مسجّلة (${w.face.n || w.face.d.length} صور) ${fmtDate((w.face.at || '').slice(0, 10))}${w.face.self ? ' — سجّلها بنفسه من موبايله، راجعها' : ''}` : 'غير مسجّلة — 3 لقطات من الكاميرا', can && faceCfg().enabled ? (w.face && w.face.d ? `<button class="btn xs ghost" data-action="faceRemove" data-arg="${w.id}">حذف</button>` : `<button class="btn xs" data-action="faceEnroll" data-arg="${w.id}">تسجيل</button>`) : '') : ''}
     ${pm.pin ? item(!!w.pinHash, 'رقم سري للكشك', w.pinHash ? 'مضبوط' : 'غير مضبوط', can ? `<button class="btn xs" data-action="pinSet" data-arg="${w.id}">${w.pinHash ? 'تغيير' : 'تعيين'}</button>` : '') : ''}
     ${pm.device ? item(!!w.deviceCred, 'بصمة الجهاز (إصبع / وجه الموبايل)', w.deviceCred ? `مفعّلة ${fmtDate((w.deviceCred.at || '').slice(0, 10))}` : 'يفعّلها الموظف بنفسه من «بوابتي» على موبايله (زر تفعيل بصمة الجهاز)', can && w.deviceCred ? `<button class="btn xs ghost" data-action="deviceRemove" data-arg="${w.id}">إلغاء</button>` : '') : ''}
     ${item(!needSite, 'نطاق البصمة', zone, can && (punchAtOf(w) === 'sites' || punchAtOf(w) === 'both') ? `<button class="btn xs" data-action="siteEdit" data-arg="" data-worker="${w.id}">${icon('plus')}موقع عمل</button>` : (can && !factoryZone() && punchAtOf(w) !== 'any' ? `<button class="btn xs" data-action="factoryEdit">${icon('map')}موقع المصنع</button>` : ''))}
@@ -3928,7 +3929,7 @@ function orderSiteFields(o) {
     ${field('العنوان / وصف الموقع', inp('siteAddress', st.address || '', 'placeholder="مثال: كمبوند الأفق — بوابة 3 — عمارة B"'), 'full')}
     <div class="field full"><label>تحديد الموقع</label><div class="row"><button type="button" class="btn" data-action="siteUseMine">${icon('link')}أنا في الموقع الآن</button><input id="f-paste" class="inp" style="flex:1;min-width:200px;direction:ltr" placeholder="أو الصق رابط Google Maps أو الإحداثيات" data-sitepaste="1"></div><div class="hint">من الخرائط: اضغط مطولًا على المكان ← مشاركة ← الصق الرابط الكامل هنا</div></div>
     ${field('خط العرض', inp('lat', st.lat ?? '', 'type="number" step="any" class="ltr"'))}${field('خط الطول', inp('lng', st.lng ?? '', 'type="number" step="any" class="ltr"'))}
-    <div class="field full"><label>نطاق البصمة حول الموقع (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="20" step="10" value="${st.radius ?? 100}" class="inp" style="width:110px">${[50, 100, 200, 500].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div>`;
+    <div class="field full"><label>نطاق البصمة حول الموقع (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="10" step="5" value="${st.radius ?? 100}" class="inp" style="width:110px">${[10, 20, 30, 40, 50, 100, 200].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div>`;
 }
 function readOrderSite(d) { if (d.lat === '' || d.lat === undefined || d.lng === '' || d.lng === undefined) return d.siteAddress ? { address: d.siteAddress, lat: null, lng: null, radius: Math.max(20, num(d.radius) || 100) } : null; return { address: d.siteAddress || '', lat: num(d.lat), lng: num(d.lng), radius: Math.max(20, num(d.radius) || 100) }; }
 function orderSiteCard(o) {
@@ -3957,7 +3958,7 @@ ACTIONS.teamClear = () => { $$('#teamws label').forEach(l => { const c = l.query
 /* ---------------- factory location quick edit (sites page) ---------------- */
 ACTIONS.factoryEdit = () => {
   if (!canEditHr()) return; const g = geoCfg();
-  openModal({ title: 'موقع المصنع', body: `<div class="form"><div class="field full"><label>تحديد الموقع</label><div class="row"><button type="button" class="btn" data-action="siteUseMine">${icon('link')}أنا في المصنع الآن — استخدم موقعي</button><input id="f-paste" class="inp" style="flex:1;min-width:200px;direction:ltr" placeholder="أو الصق رابط Google Maps أو الإحداثيات" data-sitepaste="1"></div></div>${field('خط العرض', inp('lat', g.lat ?? '', 'type="number" step="any" class="ltr"'))}${field('خط الطول', inp('lng', g.lng ?? '', 'type="number" step="any" class="ltr"'))}<div class="field full"><label>نصف قطر النطاق (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="20" step="10" value="${g.radius ?? 200}" class="inp" style="width:110px">${[50, 100, 200, 500].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div><label class="check full ${g.required !== false ? 'on' : ''}"><input type="checkbox" name="required" id="f-georeq" ${g.required !== false ? 'checked' : ''}> منع بصمة الموبايل خارج النطاق المسموح</label></div>`,
+  openModal({ title: 'موقع المصنع', body: `<div class="form"><div class="field full"><label>تحديد الموقع</label><div class="row"><button type="button" class="btn" data-action="siteUseMine">${icon('link')}أنا في المصنع الآن — استخدم موقعي</button><input id="f-paste" class="inp" style="flex:1;min-width:200px;direction:ltr" placeholder="أو الصق رابط Google Maps أو الإحداثيات" data-sitepaste="1"></div></div>${field('خط العرض', inp('lat', g.lat ?? '', 'type="number" step="any" class="ltr"'))}${field('خط الطول', inp('lng', g.lng ?? '', 'type="number" step="any" class="ltr"'))}<div class="field full"><label>نصف قطر النطاق (متر)</label><div class="row"><input id="f-radius" name="radius" type="number" min="10" step="5" value="${g.radius ?? 200}" class="inp" style="width:110px">${[10, 20, 30, 40, 50, 100, 200].map(r => `<button type="button" class="btn sm" data-radius="${r}">${r} م</button>`).join('')}</div></div><label class="check full ${g.required !== false ? 'on' : ''}"><input type="checkbox" name="required" id="f-georeq" ${g.required !== false ? 'checked' : ''}> منع بصمة الموبايل خارج النطاق المسموح</label></div>`,
     onOpen: wireSiteForm, onSubmit: async f => { const d = formData(f); if (d.lat === '' || d.lng === '') { toast('حدد إحداثيات المصنع', 'err'); return false; } await Store.saveSettings(Object.assign({}, S.settings, { geo: Object.assign({}, geoCfg(), { lat: num(d.lat), lng: num(d.lng), radius: Math.max(20, num(d.radius) || 200), required: !!d.required }) })); toast('تم حفظ موقع المصنع'); } });
 };
 /* project sites section for the sites page */
@@ -5896,7 +5897,10 @@ function sbBackend(client) {
   });
   const doc = (path) => { const [col, id] = path.split('/'); return {
     async set(data) { const { error } = await client.from('docs').upsert({ col, id, data }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, data); },
-    async update(patch) { const cur = (S.data[col] && S.data[col].get(id)) || deepMerge((cache[col] && cache[col].get(id)) || { id }, patch); const { error } = await client.from('docs').upsert({ col, id, data: cur }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, cur); },
+    async update(patch) {
+      /* v4.6.2: shared docs (attendance month sheets) are merged ON THE SERVER under lock — a punch from the Android app and one from the web never overwrite each other */
+      if (col === 'attendance' && patch && typeof patch === 'object') { const { data, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: patch }); if (error) throw mapErr(error); if (data) { (cache[col] ||= new Map()).set(id, data); if (S.data[col]) { S.data[col].set(id, data); } } return; }
+      const cur = (S.data[col] && S.data[col].get(id)) || deepMerge((cache[col] && cache[col].get(id)) || { id }, patch); const { error } = await client.from('docs').upsert({ col, id, data: cur }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, cur); },
     async delete() { const { error } = await client.from('docs').delete().eq('col', col).eq('id', id); if (error) throw mapErr(error); if (cache[col]) cache[col].delete(id); },
     onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb: () => { const d = cache[col] && cache[col].get(id); cb({ exists: !!d, data: () => d }); }, filter: null }); fetchCol(col).then(() => { const d = cache[col].get(id); cb({ exists: !!d, data: () => d }); }).catch(e => onErr && onErr(e)); return () => { }; },
   }; };
@@ -5955,6 +5959,10 @@ let _sbKick = 0;
 function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
 /* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
 async function sbAccessCheck() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
+/* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
+let _sbLastRefresh = 0;
+async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 15000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } }); if (changed) render(false); } catch (e) { /* offline */ } }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
 document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
 
@@ -9897,7 +9905,7 @@ function siteDayCard(w) {
 }
 function meExtraCards(w) { return typeof meExtraCardsFleet === 'function' ? meExtraCardsFleet(w) : ''; }
 /* the site-day card sits right under the punch card */
-function vMe() { const html = vMeHelp(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const c = siteDayCard(w); if (!c) return html; const p = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card') : null; return p == null ? c + html : html.slice(0, p) + c + html.slice(p); }
+function vMeSite() { const html = vMeHelp(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const c = siteDayCard(w); if (!c) return html; const p = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card') : null; return p == null ? c + html : html.slice(0, p) + c + html.slice(p); }
 /* order page: team day log per stage (heads / managers) */
 function siteDaysCard(o) {
   const days = o.siteDays || {}; const rows = []; Object.entries(days).forEach(([deptId, byDate]) => Object.entries(byDate).forEach(([date, byW]) => Object.entries(byW).forEach(([wid, d]) => rows.push({ deptId, date, w: byId('workers', wid), d }))));
@@ -10331,7 +10339,7 @@ wirePasswordEyes();
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .tb-logo{border-color:rgba(255,255,255,.22)!important}}
 /* الموبايل */
 @media (max-width:900px){
-  html,body{overflow-x:hidden;max-width:100vw;overscroll-behavior-x:none;touch-action:manipulation}
+  html,body{overflow-x:clip;overscroll-behavior-x:none}
   #root,.view{max-width:100vw;overflow-x:clip}
   /* iOS تكبّر الصفحة عند التركيز على خانة خطها أصغر من 16px */
   input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important}
@@ -10503,6 +10511,69 @@ ACTIONS.smsTest = async () => {
   if (!normPhone(ph)) { toast('لا يوجد رقم موبايل مسجّل لحسابك — اكتب رقمك في بياناتك أولًا', 'err'); return; }
   toast('جارٍ الإرسال…'); try { const r = await S.sb.functions.invoke('sms', { body: { action: 'test', to: normPhone(ph) } }); if (r.error || !r.data || !r.data.ok) toast('فشل الإرسال: ' + (r.error?.message || r.data?.error || '?') + (r.data?.detail ? ' — ' + JSON.stringify(r.data.detail).slice(0, 120) : ''), 'err'); else toast('أُرسلت الرسالة التجريبية ✓'); } catch (e) { toast('فشل الإرسال', 'err'); }
 };
+/* =====================================================================
+   v4.6.2 — أندرويد: القائمة الجانبية لا تنضغط (كان اللوجو يُقص عندما تطول القائمة)،
+   والموظف يسجّل بصمة وجهه بنفسه من «بوابتي» (تُعلَّم «سجّلها بنفسه» ليراجعها الـHR)
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.side{overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.side .brand,.side .userchip,.side .acct,.side .foot{flex:none}
+.side .nav{flex:1 0 auto;overflow:visible}
+.side .brand .wordmark{max-height:44px}
+@media (max-width:900px){.view{-webkit-overflow-scrolling:touch}}
+</style>`);
+function bioCard(w) {
+  if (!w) return '';
+  const faceOn = typeof faceCfg === 'function' ? faceCfg().enabled !== false : true; const cam = typeof camAvailable === 'function' ? camAvailable() : true;
+  const hasFace = !!(w.face && w.face.d); const hasDev = !!w.deviceCred; const pm = punchMethodsOf(w);
+  const devOk = !!(window.PublicKeyCredential);
+  const tile = (ok, ttl, sub, btn) => `<div class="kpi ${ok ? 'good' : 'warn'}" style="cursor:default;min-height:0"><span class="stripe"></span><div class="l">${ttl}</div><div style="margin:6px 0 8px"><span class="badge ${ok ? 'good' : 'warn'}">${ok ? 'مفعّلة ✓' : 'غير مفعّلة'}</span></div><div class="tiny muted" style="margin-bottom:8px">${sub}</div>${btn}</div>`;
+  const face = faceOn ? tile(hasFace, `${icon('camera')} بصمة الوجه`, hasFace ? `مسجّلة ${fmtDate((w.face.at || '').slice(0, 10))}${w.face.self ? ' (من موبايلك)' : ''}` : cam ? '3 لقطات من كاميرا موبايلك — مرة واحدة' : 'الكاميرا غير متاحة في هذا المتصفح', !hasFace && cam ? `<button class="btn p sm" data-action="faceEnrollSelf" data-arg="${w.id}">${icon('camera')}سجّل وجهك الآن</button>` : '') : '';
+  const dev = pm.device !== false ? tile(hasDev, `${icon('shield')} بصمة الجهاز (الإصبع / وجه الموبايل)`, hasDev ? `مفعّلة ${fmtDate((w.deviceCred.at || '').slice(0, 10))}` : devOk ? 'تستخدم قفل موبايلك (بصمة الإصبع أو الوجه) عند كل بصمة' : 'هذا المتصفح لا يدعم بصمة الجهاز — استخدم كروم أو سفاري', !hasDev && devOk ? `<button class="btn p sm" data-action="deviceEnroll" data-arg="${w.id}">${icon('shield')}فعّل بصمة الجهاز</button>` : '') : '';
+  if (!face && !dev) return '';
+  return `<div class="card" style="margin-bottom:14px"><div class="cardhead"><h3>${icon('shield')} التحقق عند البصمة</h3>${hasFace || hasDev ? '<span class="badge good">جاهز</span>' : '<span class="badge warn">فعّل واحدة على الأقل</span>'}</div><p class="small ink2" style="margin:4px 0 10px">البصمة من الموبايل تحتاج تحقق بيومتري: وجهك بالكاميرا أو قفل موبايلك (إصبع/وجه). فعّل الاثنين ليعمل أيهما متاح.</p><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${face}${dev}</div></div>`;
+}
+function vMe() {
+  const html = vMeSite(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html;
+  const c = bioCard(w); if (!c) return html;
+  const p = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card') : null; return p == null ? c + html : html.slice(0, p) + c + html.slice(p);
+}
+ACTIONS.faceEnrollSelf = wid => {
+  const w = byId('workers', wid); if (!w || !S.session || S.session.workerId !== wid) return; if (w.face && w.face.d) { toast('بصمة وجهك مسجّلة بالفعل'); return; }
+  ACTIONS.faceEnroll(wid);
+  let n = 0; const t = setInterval(async () => { n++; const x = byId('workers', wid); if (x && x.face && x.face.d && !x.face.self) { clearInterval(t); await Store.update('workers', wid, { face: Object.assign({}, x.face, { self: true, selfAt: nowISO() }) }); return; } if (n > 600 || !document.getElementById('mform')) clearInterval(t); }, 1000);
+};
+/* =====================================================================
+   v4.6.2 — بصمة الموقع بدقة عالية
+   · القراءة: watchPosition لعدة ثوانٍ وأخذ أدق قراءة (بدل أول قراءة تقريبية من الشبكة)، وإحداثيات بـ6 خانات عشرية (كانت 4 = خطأ ~10 م)
+   · النطاق: نصف القطر يبدأ من 10 م (10/20/30/40…)، ووضع الدقة العالية (افتراضي): بلا تسامح خارج النطاق،
+     وتُرفض القراءة لو خطأ الـGPS أكبر من الحد المضبوط (الإعدادات ← الموقع والبصمة)
+   ===================================================================== */
+function getGeo(timeout = 9000) {
+  return new Promise(res => {
+    if (!navigator.geolocation) return res(null);
+    const g = typeof geoCfg === 'function' ? geoCfg() : {}; const want = Math.max(5, +g.minAcc || 25);
+    let best = null, done = false, wid = null;
+    const fin = () => { if (done) return; done = true; try { if (wid != null) navigator.geolocation.clearWatch(wid); } catch (e) { /* ignore */ } res(best); };
+    const take = p => { const c = p.coords; const acc = Number.isFinite(c.accuracy) ? Math.round(c.accuracy) : 9999; const cur = { lat: Math.round(c.latitude * 1e6) / 1e6, lng: Math.round(c.longitude * 1e6) / 1e6, acc, at: Date.now() }; if (!best || acc < best.acc) best = cur; if (acc <= Math.min(want, 12)) fin(); };
+    const t = setTimeout(fin, timeout);
+    try { wid = navigator.geolocation.watchPosition(take, () => { /* keep waiting for a better fix */ }, { enableHighAccuracy: true, timeout, maximumAge: 0 }); } catch (e) { clearTimeout(t); return res(null); }
+    // first quick fix as a fallback if the watch never fires (some Android WebViews)
+    navigator.geolocation.getCurrentPosition(take, () => { }, { enableHighAccuracy: true, timeout, maximumAge: 0 });
+  });
+}
+function zoneCheck(w, pos) {
+  const z = zonesFor(w); if (z.unrestricted) return { unrestricted: true, inside: null, zone: null, dist: null };
+  if (!z.zones.length) return { noZones: true, inside: null, zone: null, dist: null };
+  if (!pos) return { inside: null, zone: null, dist: null, zones: z.zones };
+  const g = geoCfg(); const strict = g.strict !== false; const maxAcc = Math.max(5, +g.minAcc || 25);
+  let best = null;
+  z.zones.forEach(zn => { const dist = Math.round(haversine(pos, zn)); const slack = strict ? 0 : Math.min(30, (pos.acc || 0) * 0.5); const over = dist - zn.radius - slack; if (!best || over < best.over) best = { zone: zn, dist, over, inside: over <= 0 }; });
+  const out = { inside: best.inside, zone: best.zone, dist: best.dist, zones: z.zones, acc: pos.acc || 0 };
+  // strict: a reading looser than the allowed error is not trusted at all — unless it is clearly inside (distance + error still within the radius)
+  if (strict && (pos.acc || 0) > maxAcc && !(best.dist + (pos.acc || 0) <= best.zone.radius)) { out.inside = false; out.poorAcc = true; out.maxAcc = maxAcc; }
+  return out;
+}
 boot();
 </script>
 
