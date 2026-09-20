@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20260920-1513-e659be';
+const BUILD = '20260920-1804-ffbca2';
 const CACHE = 'nf-shell-' + BUILD;
 const SHELL = ["./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./laeha.pdf", "./lof-c01.pdf"];
 self.addEventListener('install', e => {
@@ -28,4 +28,14 @@ self.addEventListener('fetch', e => {
     // shell files, vendor libraries, face models: cache first
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => { if (r.ok || r.type === 'opaque') { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)).catch(() => { }); } return r; })));
   }
+});
+/* ---------- Web Push (chat messages, approvals, alerts) ---------- */
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (x) { d = { body: e.data ? e.data.text() : '' }; }
+  const title = d.title || 'Ninety Fabrication';
+  e.waitUntil(self.registration.showNotification(title, { body: d.body || '', tag: d.tag || 'nf', renotify: true, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: d.url || './' }, vibrate: [120, 60, 120] }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close(); const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => { for (const c of cs) { if ('focus' in c) { c.focus(); try { c.navigate(url); } catch (x) { c.postMessage({ nfOpen: url }); } return; } } return self.clients.openWindow(url); }));
 });

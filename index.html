@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1513-e659be";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1804-ffbca2";</script>
 
 <script>
 'use strict';
@@ -1505,6 +1505,8 @@ const ICONS = {
   more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
   request: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   penalty: '<path d="M12 3l9 5v8l-9 5-9-5V8z"/><path d="M12 8v5M12 16h.01"/>',
@@ -9190,7 +9192,7 @@ ACTIONS.taskPhotoOpen = arg => { const [tid, pid] = arg.split(':'); const t = by
 ACTIONS.taskPhotoDel = async arg => { const [tid, pid] = arg.split(':'); const t = byId('tasks', tid); if (!t) return; const p = taskPhotos(t).find(x => x.id === pid); if (!p || !(isAdmin() || p.by === S.session?.id)) return; if (!await confirmDlg('حذف الصورة؟', 'حذف')) return; await Store.update('tasks', tid, { photos: taskPhotos(t).filter(x => x.id !== pid) }); };
 const taskGallery = (t, big) => { const ps = taskPhotos(t); if (!ps.length) return ''; return `<div class="tgal ${big ? 'big' : ''}">${ps.map(p => `<div class="ph" data-action="taskPhotoOpen" data-arg="${t.id}:${p.id}" title="${esc(p.byName || '')} · ${fmtDate((p.at || '').slice(0, 10))}">${photoSrc(p) ? `<img src="${esc(photoSrc(p))}" alt="">` : `<div class="muted tiny" style="padding:6px">صورة</div>`}<div class="who">${esc((p.byName || '').split(' ')[0])}</div></div>`).join('')}</div>`; };
 /* ---------------- chat ---------------- */
-async function taskPost(t, text, photoFile) {
+async function taskPostBase(t, text, photoFile) {
   const m = { id: uid(), at: nowISO(), by: S.session?.id || S.session?.workerId || null, byName: S.session?.name || '', text: (text || '').trim() };
   if (photoFile) { const doc = await proofAttach(photoFile, { kind: 'chat', ownerKind: 'task', ownerId: t.id }); m.fileId = doc.id; m.thumb = doc.thumb || null; }
   if (!m.text && !m.fileId) return false;
@@ -9199,7 +9201,7 @@ async function taskPost(t, text, photoFile) {
   return true;
 }
 async function taskMarkSeen(t) { const me = S.session?.id; if (!me || !taskThread(t).length) return; const last = taskThread(t)[taskThread(t).length - 1].at; const seen = t.threadSeen || {}; if (seen[me] === last) return; try { await Store.update('tasks', t.id, { threadSeen: Object.assign({}, seen, { [me]: last }, S.session?.workerId ? { [S.session.workerId]: last } : {}) }, { silent: true }); } catch (e) { /* read-only */ } }
-function chatHTML(t) {
+function chatHTMLBase(t) {
   const me = myIds(); const th = taskThread(t);
   return `<div class="chat" id="tchat">${th.length ? th.map(m => `<div class="msg ${me.includes(m.by) ? 'me' : ''}"><div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}${m.fileId ? `<img src="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}" alt="" data-action="lightboxSrc" data-arg="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}">` : ''}</div>`).join('') : '<div class="muted small" style="text-align:center;padding:12px">لا توجد رسائل بعد — ابدأ المحادثة مع الأطراف المعنيين</div>'}</div>
     ${writable() && taskIsParty(t) ? `<div class="chatbox"><textarea id="tmsg" placeholder="اكتب رسالة للأطراف المعنيين…"></textarea><button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">${icon('camera')}</button><button class="btn p" data-action="taskChatSend" data-arg="${t.id}">${icon('send')}إرسال</button></div>` : ''}`;
@@ -11001,6 +11003,7 @@ const ownerPhone = () => normPhone((S.settings && S.settings.ownerPhone) || (byI
 async function notifyOwner(title, desc, opts = {}) {
   const me = S.session || {}; const id = opts.id || uid();
   await Store.save('tasks', { id, title, desc, deptId: null, assigneeId: null, toRole: 'admin', orderId: opts.orderId || null, dueDate: todayISO(), priority: opts.priority || 'high', status: 'open', kind: 'notice', source: 'owner-notify', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO() }, { silent: true });
+  if (typeof pushSend === 'function') pushSend(['role:admin'], title, desc, '/#/tasks/' + id, 'owner').catch(() => { });
   const ph = ownerPhone(); if (ph && typeof smsAvailable === 'function' && smsAvailable() && (S.settings.sms || {}).ownerAlerts !== false) { try { await smsSend(ph, `${title}\n${desc}`.slice(0, 300)); } catch (e) { /* ignore */ } }
 }
 const wageGuardRole = () => ['hr', 'acc'].includes(role());
@@ -11214,6 +11217,132 @@ ACTIONS.crmProdOpen = id => {
 };
 function vCrm() { const html = vCrmPro(); if (S.route.id) return html; return html + crmProductsCard(); }
 function vLeadDetail(l) { const html = vLeadDetailBase(l); const i = html.lastIndexOf('</div>'); return i < 0 ? html + crmProductsCard({ limit: 24 }) : html.slice(0, i) + `<div style="grid-column:1/-1">${crmProductsCard({ limit: 24 })}</div>` + html.slice(i); }
+/* =====================================================================
+   v4.6.2 — تنبيهات المحادثات والاعتمادات + رسائل صوتية + لوحات الأقسام عمودية على الموبايل
+   · جرس تنبيهات في الشريط العلوي بعدّاد غير المقروء (رسائل المهام، الطلبات المنتظرة، الإشعارات)
+   · رسالة جديدة في مهمة أنا طرف فيها → نغمة + اهتزاز + تنبيه في التطبيق (حتى لو في صفحة أخرى) + إشعار Web Push على الموبايل لو التطبيق مقفول
+     (Edge Function «push» + Service Worker — على الآيفون يعمل مع «إضافة إلى الشاشة الرئيسية»)
+   · زر ميكروفون في الشات: تسجيل فويس نوت وإرساله كملف صوتي يُشغَّل داخل المحادثة
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.bellbtn{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);display:inline-grid;place-items:center;cursor:pointer;flex:0 0 auto}
+.bellbtn svg{width:18px;height:18px}.bellbtn .bn{position:absolute;top:-6px;inset-inline-end:-6px;min-width:18px;height:18px;border-radius:999px;background:var(--crit);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+.bellbtn.ring{animation:nfring .6s ease}@keyframes nfring{0%,100%{transform:rotate(0)}25%{transform:rotate(14deg)}50%{transform:rotate(-12deg)}75%{transform:rotate(8deg)}}
+.bellpop{position:fixed;top:64px;inset-inline-end:14px;width:min(360px,92vw);max-height:70vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);z-index:60;padding:8px}
+.bellpop .it{display:flex;gap:10px;padding:10px;border-radius:10px;cursor:pointer;align-items:flex-start}.bellpop .it:hover{background:var(--surface-2,var(--surface))}
+.bellpop .it .k{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none}.bellpop .it .k svg{width:15px;height:15px}
+.bellpop .it .t{font-weight:700;font-size:13px}.bellpop .it .s{font-size:12px;color:var(--muted)}
+.nftoast{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:9997;background:var(--ink);color:var(--surface);border-radius:14px;padding:10px 14px;box-shadow:var(--shadow-lg);display:flex;gap:10px;align-items:center;max-width:92vw;cursor:pointer;animation:nfdrop .25s ease}
+@keyframes nfdrop{from{transform:translate(-50%,-30px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+.nftoast .t{font-weight:700;font-size:13px}.nftoast .s{font-size:12px;opacity:.85}
+.msg audio{width:220px;max-width:100%;margin-top:4px;display:block}
+.recbtn.rec{background:var(--crit)!important;color:#fff!important;animation:nfpulse 1s infinite}@keyframes nfpulse{50%{opacity:.6}}
+@media (max-width:760px){.board{flex-direction:column;overflow-x:visible;gap:12px}.col{flex:none;width:100%;max-height:none}.col .cb{max-height:none}}
+</style>`);
+/* ---------- unread / pending items ---------- */
+function notifItems() {
+  const items = []; const me = myIds();
+  list('tasks').forEach(t => { if (!['open', 'doing'].includes(t.status)) return; const party = taskMine(t) || taskParties(t).some(p => me.includes(p.id)); if (!party) return; const n = taskUnread(t); if (n) { const last = taskThread(t).slice(-1)[0] || {}; items.push({ kind: 'chat', n, at: last.at || t.updatedAt || '', title: `${n} رسالة في «${t.title}»`, sub: `${last.byName || ''}: ${last.text ? last.text.slice(0, 60) : (last.audioFileId ? '🎤 رسالة صوتية' : '📷 صورة')}`, href: `#/tasks/${t.id}` }); }
+    if (t.kind === 'notice' && t.toRole === 'admin' && isAdmin() && t.status === 'open') items.push({ kind: 'notice', n: 1, at: t.createdAt || '', title: t.title, sub: (t.desc || '').slice(0, 80), href: `#/tasks/${t.id}` }); });
+  list('requests').forEach(r => { if (typeof awaitingMe === 'function' && awaitingMe(r)) items.push({ kind: 'req', n: 1, at: r.stepAt || r.createdAt || '', title: `طلب ${REQ_TYPES[r.type] || r.type} بانتظارك`, sub: typeof reqDesc === 'function' ? reqDesc(r).slice(0, 80) : '', href: `#/requests` }); });
+  return sortBy(items, x => x.at, true);
+}
+const notifCount = () => notifItems().reduce((a, x) => a + (x.n || 1), 0);
+const bellHTML = () => { const n = notifCount(); return `<button class="bellbtn" data-action="bellOpen" title="التنبيهات" aria-label="التنبيهات">${icon('bell')}${n ? `<span class="bn">${n > 99 ? '99+' : n}</span>` : ''}</button>`; };
+RENDER_HOOKS.push(() => { if (!S.session) return; const box = document.querySelector('.tb-actions'); if (!box || box.querySelector('.bellbtn')) return; box.insertAdjacentHTML('afterbegin', bellHTML()); });
+ACTIONS.bellOpen = () => {
+  const old = document.getElementById('bellpop'); if (old) { old.remove(); return; }
+  const items = notifItems(); const KI = { chat: 'chat', req: 'check', notice: 'alert' };
+  document.body.insertAdjacentHTML('beforeend', `<div class="bellpop" id="bellpop">${items.length ? items.map(x => `<div class="it" data-action="bellGo" data-arg="${esc(x.href)}"><span class="k">${icon(KI[x.kind] || 'alert')}</span><div><div class="t">${esc(x.title)}</div><div class="s">${esc(x.sub)}</div></div></div>`).join('') : '<div class="muted small" style="padding:14px;text-align:center">لا توجد تنبيهات جديدة</div>'}${'Notification' in window && Notification.permission !== 'granted' ? `<div style="padding:8px 10px;border-top:1px solid var(--line)"><button class="btn sm p" data-action="pushEnable">${icon('alert')}تفعيل الإشعارات على هذا الجهاز</button></div>` : ''}</div>`);
+  setTimeout(() => document.addEventListener('click', e => { const p = document.getElementById('bellpop'); if (p && !e.target.closest('#bellpop') && !e.target.closest('.bellbtn')) p.remove(); }, { once: true }), 50);
+};
+ACTIONS.bellGo = href => { const p = document.getElementById('bellpop'); if (p) p.remove(); location.hash = href; };
+/* ---------- in-app alert on new messages (any page) ---------- */
+let _lastMsgSeen = {}; let _notifPrimed = false;
+let _nfCtx = null, _nfLastSound = 0;
+function nfSound() { if (Date.now() - _nfLastSound < 2500) return; _nfLastSound = Date.now(); try { _nfCtx = _nfCtx || new (window.AudioContext || window.webkitAudioContext)(); const ctx = _nfCtx; if (ctx.state === 'suspended') ctx.resume().catch(() => { }); const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.value = 0.05; o.start(); o.frequency.setValueAtTime(1175, ctx.currentTime + 0.12); o.stop(ctx.currentTime + 0.25); } catch (e) { /* no audio */ } try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) { /* ignore */ } }
+function nfToast(title, sub, href) { const old = document.querySelector('.nftoast'); if (old) old.remove(); document.body.insertAdjacentHTML('beforeend', `<div class="nftoast" data-action="bellGo" data-arg="${esc(href)}"><span>${icon('chat')}</span><div><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div></div>`); setTimeout(() => { const t = document.querySelector('.nftoast'); if (t) t.remove(); }, 6000); }
+RENDER_HOOKS.push(() => {
+  if (!S.session) { _notifPrimed = false; _lastMsgSeen = {}; return; }
+  const me = myIds(); const cur = {}; const fresh = [];
+  list('tasks').forEach(t => { const th = taskThread(t); if (!th.length) return; const party = taskMine(t) || taskParties(t).some(p => me.includes(p.id)); if (!party) return; const last = th[th.length - 1]; cur[t.id] = last.id; if (_notifPrimed && _lastMsgSeen[t.id] !== last.id && !me.includes(last.by) && !(location.hash === `#/tasks/${t.id}` && !document.hidden)) fresh.push({ t, last }); });
+  _lastMsgSeen = cur; _notifPrimed = true;
+  if (!fresh.length || fresh.length > 5) return; // a bulk load / restore is not a conversation
+  const { t, last } = fresh[0]; nfSound(); nfToast(fresh.length > 1 ? `${fresh.length} رسائل جديدة` : `${last.byName || 'رسالة'} — ${t.title}`.slice(0, 80), last.text ? last.text.slice(0, 80) : (last.audioFileId ? '🎤 رسالة صوتية' : '📷 صورة'), `#/tasks/${t.id}`);
+  const b = document.querySelector('.bellbtn'); if (b) { b.classList.add('ring'); setTimeout(() => b.classList.remove('ring'), 700); }
+});
+/* ---------- Web Push ---------- */
+const pushAvailable = () => typeof sbOn === 'function' && sbOn() && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function b64ToU8(b) { const p = '='.repeat((4 - b.length % 4) % 4); const s = (b + p).replace(/-/g, '+').replace(/_/g, '/'); const raw = atob(s); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))); }
+async function pushSubscribe(silent) {
+  if (!pushAvailable()) { if (!silent) toast(/iP(hone|ad)/.test(navigator.userAgent) && !window.matchMedia('(display-mode: standalone)').matches ? 'على الآيفون: أضف التطبيق للشاشة الرئيسية أولًا ثم فعّل الإشعارات من داخله' : 'الإشعارات غير مدعومة في هذا المتصفح', 'err'); return false; }
+  try {
+    const perm = await Notification.requestPermission(); if (perm !== 'granted') { if (!silent) toast('لم يُسمح بالإشعارات', 'err'); return false; }
+    const reg = await navigator.serviceWorker.ready; const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); const key = v.data && v.data.publicKey; if (!key) throw new Error('no vapid');
+    let sub = await reg.pushManager.getSubscription(); if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
+    const r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error;
+    try { localStorage.setItem('nf.push.' + (S.session?.id || ''), '1'); } catch (e) { /* ignore */ }
+    if (!silent) toast('تم تفعيل الإشعارات على هذا الجهاز ✓'); return true;
+  } catch (e) { console.warn('push', e); if (!silent) toast('تعذّر تفعيل الإشعارات: ' + (e.message || e), 'err'); return false; }
+}
+ACTIONS.pushEnable = async () => { const p = document.getElementById('bellpop'); if (p) p.remove(); await pushSubscribe(false); };
+async function pushSend(to, title, body, url, tag) { if (!pushAvailable() || !to || !to.length) return; try { await S.sb.functions.invoke('push', { body: { action: 'send', to, title, body, url: url || '/', tag: tag || 'nf' } }); } catch (e) { /* ignore */ } }
+/* re-subscribe silently when permission was already granted (endpoint may rotate) */
+document.addEventListener('nf:login', () => setTimeout(() => { if (pushAvailable() && Notification.permission === 'granted') pushSubscribe(true); }, 2500));
+navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.nfOpen) { const u = String(e.data.nfOpen); const i = u.indexOf('#'); if (i >= 0) location.hash = u.slice(i); } });
+/* first-time nudge on a phone: one banner in بوابتي / dashboard */
+let _nudgeDone = false;
+RENDER_HOOKS.push(() => { if (_nudgeDone || !S.session || !/^#\/(me|dashboard)/.test(location.hash) || !pushAvailable() || Notification.permission !== 'default') return; let k = ''; try { k = localStorage.getItem('nf.pushnudge') || ''; } catch (e) { /* ignore */ } if (k) return; _nudgeDone = true;
+  setTimeout(() => { const v = document.getElementById('view'); if (!v || v.querySelector('#pushnudge') || !S.session) return; v.insertAdjacentHTML('afterbegin', `<div class="banner info" id="pushnudge" style="margin-bottom:12px">${icon('alert')}<span>فعّل الإشعارات عشان توصلك رسائل المهام والاعتمادات حتى والتطبيق مقفول.</span><button class="btn sm p" data-action="pushEnable">تفعيل</button><button class="btn sm ghost" data-action="pushNudgeOff">لاحقًا</button></div>`); }, 400); });
+ACTIONS.pushNudgeOff = () => { try { localStorage.setItem('nf.pushnudge', '1'); } catch (e) { /* ignore */ } const el = document.getElementById('pushnudge'); if (el) el.remove(); };
+/* ---------- chat: notify parties on every post + voice notes ---------- */
+async function taskPost(t, text, file, opts = {}) {
+  const isAudio = file && /^audio\//.test(file.type || '');
+  let ok;
+  if (isAudio) {
+    const m = { id: uid(), at: nowISO(), by: S.session?.id || S.session?.workerId || null, byName: S.session?.name || '', text: (text || '').trim() };
+    const doc = await proofAttach(file, { kind: 'chat', ownerKind: 'task', ownerId: t.id }); m.audioFileId = doc.id; m.dur = opts.dur || null;
+    const seen = Object.assign({}, t.threadSeen || {}); if (m.by) seen[m.by] = m.at; if (S.session?.workerId) seen[S.session.workerId] = m.at;
+    await Store.update('tasks', t.id, { thread: taskThread(t).concat([m]), threadSeen: seen, lastMsgAt: m.at, updatedAt: nowISO() }); ok = true;
+  } else ok = await taskPostBase(t, text, file);
+  if (ok) { const me = myIds(); const to = Array.from(new Set(taskParties(t).map(p => p.id).filter(id => id && !me.includes(id)))); pushSend(to, `${S.session?.name || 'رسالة'} — ${t.title}`.slice(0, 100), (text || '').trim() || (isAudio ? '🎤 رسالة صوتية' : '📷 صورة'), `/#/tasks/${t.id}`, 'task-' + t.id); }
+  return ok;
+}
+function chatHTML(t) {
+  let h = chatHTMLBase(t); const th = taskThread(t); const me = myIds();
+  th.forEach(m => { if (!m.audioFileId) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; h = h.slice(0, j) + `<div class="tx">🎤 رسالة صوتية${m.dur ? ` (${m.dur} ث)` : ''}</div><button class="btn ghost" data-action="voicePlay" data-arg="${esc(m.audioFileId)}">▶ تشغيل</button>` + h.slice(j); });
+  if (writable() && taskIsParty(t)) h = h.replace(`<button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`, `<button class="btn ghost recbtn" id="recbtn" data-action="taskChatVoice" data-arg="${t.id}" title="رسالة صوتية">${icon('mic')}</button><button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`);
+  return h;
+}
+/* تحميل الصوت عند الطلب فقط (زر تشغيل) — لا يعمل مع كل إعادة رسم */
+ACTIONS.voicePlay = async fid => {
+  const f = byId('files', fid); if (!f) { toast('الملف الصوتي غير موجود', 'err'); return; }
+  const btn = document.querySelector(`button[data-action="voicePlay"][data-arg="${CSS.escape(fid)}"]`); if (!btn) return;
+  try {
+    const u = (typeof openLink === 'function') ? await openLink(f) : await Files.url(f);
+    if (!u) { toast('تعذّر تحميل الصوت', 'err'); return; }
+    const a = document.createElement('audio'); a.controls = true; a.autoplay = true; a.src = u; a.style.maxWidth = '100%';
+    btn.replaceWith(a);
+  } catch (e) { toast('تعذّر تحميل الصوت', 'err'); }
+};
+let _rec = null, _recT0 = 0, _recChunks = [];
+ACTIONS.taskChatVoice = async id => {
+  const t = byId('tasks', id); if (!t) return; const btn = document.getElementById('recbtn');
+  if (_rec) { _rec.stop(); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) { toast('التسجيل الصوتي غير مدعوم في هذا المتصفح', 'err'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', ''].find(m => !m || MediaRecorder.isTypeSupported(m)) || '';
+    _rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); _recChunks = []; _recT0 = Date.now();
+    _rec.ondataavailable = e => { if (e.data && e.data.size) _recChunks.push(e.data); };
+    _rec.onstop = async () => { stream.getTracks().forEach(x => x.stop()); const dur = Math.round((Date.now() - _recT0) / 1000); const type = _rec.mimeType || mime || 'audio/webm'; _rec = null; if (btn) { btn.classList.remove('rec'); btn.innerHTML = icon('mic'); }
+      if (dur < 1 || !_recChunks.length) { toast('التسجيل قصير جدًا', 'err'); return; }
+      const ext = /mp4|aac/.test(type) ? 'm4a' : 'webm'; const file = new File(_recChunks, `voice-${Date.now()}.${ext}`, { type: type.split(';')[0] });
+      if (file.size > 8 * 1024 * 1024) { toast('الرسالة الصوتية أكبر من 8 ميجا', 'err'); return; }
+      toast('جارٍ إرسال الرسالة الصوتية…'); const ta = $('#tmsg'); await taskPost(t, ta ? ta.value : '', file, { dur }); if (ta) ta.value = ''; };
+    _rec.start(250); if (btn) { btn.classList.add('rec'); btn.innerHTML = `${icon('x')} إيقاف`; } toast('جارٍ التسجيل — اضغط الزر مرة أخرى للإرسال');
+  } catch (e) { console.warn(e); toast('لم يُسمح بالميكروفون', 'err'); }
+};
 boot();
 </script>
 
