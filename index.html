@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1219-d2b496";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1351-d9c1ca";</script>
 
 <script>
 'use strict';
@@ -3836,8 +3836,8 @@ ACTIONS.photoSet = wid => {
   openModal({ title: `الصورة الشخصية — ${w.name}`, sticky: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
     body: `<div class="row" style="align-items:flex-start;gap:16px"><div>${avatarHTML(w, 96)}<div id="photo-preview" style="margin-top:8px"></div></div><div class="grow stack"><div class="field"><label>رفع صورة من الجهاز</label><input type="file" id="photo-file" accept="image/*" capture="user"></div>${camAvailable() ? `<div class="field"><label>أو التقاط بالكاميرا</label><div class="camwrap" style="max-width:320px;margin:0"><video id="cam" autoplay muted playsinline></video></div><div class="row" style="margin-top:8px"><button type="button" class="btn a" id="photo-shot">${icon('user')}التقاط</button></div></div>` : ''}${w.photo ? `<button type="button" class="btn ghost" style="color:var(--crit-ink)" id="photo-del">${icon('trash')}حذف الصورة</button>` : ''}</div></div>`,
     onOpen: async f => {
-      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const url = await squareThumb(await fileToDataURL(file.files[0])); await Store.update('workers', w.id, { photo: url }); stopStream($('#cam')); closeModal(); toast('تم حفظ الصورة'); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
-      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const url = videoThumb(v); await Store.update('workers', w.id, { photo: url }); stopStream(v); closeModal(); toast('تم حفظ الصورة'); }); }
+      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: await squareThumb(src) }); closeModal(); toast('تم حفظ الصورة'); } } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
+      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); if (typeof openCropper === 'function') openCropper(src, async url => { await Store.update('workers', w.id, { photo: url }); toast('تم حفظ الصورة'); }); else { await Store.update('workers', w.id, { photo: videoThumb(v) }); closeModal(); toast('تم حفظ الصورة'); } }); }
       const del = $('#photo-del', f); if (del) del.addEventListener('click', async () => { await Store.update('workers', w.id, { photo: null }); stopStream($('#cam')); closeModal(); toast('تم حذف الصورة'); });
     } });
   const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
@@ -7928,12 +7928,13 @@ function workerFormOrg(w) {
   const cur = w.managerId || defaultManagerFor(Object.assign({ role: w.id ? (w.role || 'none') : 'employee' }, w)); const cands = managerCandidates(Object.assign({ role: w.role || (w.id ? 'none' : 'employee') }, w));
   const sel = `<select id="f-managerId" name="managerId"><option value="">— تلقائي حسب الهيكل —</option>${cands.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? 'selected' : ''}>${esc(p.name)} — ${esc(ROLES[p.role] || p.role)}${p.dept ? ' · ' + esc(p.dept) : ''}</option>`).join('')}</select><div class="hint">تظهر الوظائف الأعلى فقط. المدير المباشر يعتمد طلباته ويحدد أهدافه ويقيّمه شهريًا (مؤشرات الأداء)</div>`;
   html = html.replace(/<select id="f-managerId"[\s\S]*?<\/select><div class="hint">[^<]*<\/div>/, sel);
-  html = html.replace(/<select id="f-workplace" name="workplace">[\s\S]*?<\/select>/, `<select id="f-workplace" name="workplace">${opts([['office', 'من المصنع — يبصم في لوكيشن المصنع'], ['hq', 'من المكتب — يبصم في لوكيشن المكتب (الإدارة / المكتب الفني / الحسابات)'], ['home', 'من البيت — يبصم من أي مكان بدون قيد الموقع']].map(x => ({ id: x[0], name: x[1] })), w.workplace || 'office')}</select>`);
+  html = html.replace(/<select id="f-workplace" name="workplace">[\s\S]*?<\/select>/, `<select id="f-workplace" name="workplace">${opts([['office', 'من المصنع — يبصم في لوكيشن المصنع'], ['field', 'إنتاج وتركيبات — يبصم من المصنع أو من موقع العمل حسب مكان شغله'], ['sites', 'مواقع العمل فقط — يبصم من المواقع المخصصة له'], ['hq', 'من المكتب — يبصم في لوكيشن المكتب (الإدارة / المكتب الفني / الحسابات)'], ['home', 'من البيت — يبصم من أي مكان بدون قيد الموقع']].map(x => ({ id: x[0], name: x[1] })), w.workplace || 'office')}</select>`);
   return html;
 }
 async function workerFromForm(f, w) {
   const doc = await workerFromFormBase(f, w); if (!doc) return doc;
   if (!doc.managerId) doc.managerId = defaultManagerFor(doc) || null;
+  if (doc.workplace === 'field') doc.punchAt = 'both'; if (doc.workplace === 'sites') doc.punchAt = 'sites'; if (doc.workplace === 'office' && ['both', 'sites'].includes(w.punchAt) && ['field', 'sites'].includes(w.workplace)) doc.punchAt = 'auto';
   if (doc.workplace === 'hq' && (!doc.punchAt || doc.punchAt === 'auto')) doc.punchAt = 'office';
   if (w.workplace === 'hq' && doc.workplace !== 'hq' && doc.punchAt === 'office') doc.punchAt = 'auto';
   return doc;
@@ -10234,7 +10235,7 @@ const ocColor = s => { const cols = ['#1d5fd1', '#0ea5a5', '#7c3aed', '#d97706',
 /* a person box (worker or staff account) */
 function ocPerson(p, rl, extra) {
   const w = p && p.id ? byId('workers', p.id) : null; const name = (p && p.name || '').split(' — ')[0]; const isW = !!w;
-  return `<div class="ob ${extra && extra.cls || ''}" ${isW && ocCanEdit() ? `draggable="true" data-ocdrag="${w.id}"` : ''} ${isW ? `data-ocdrop="mgr:${w.id}"` : ''} data-action="ocOpen" data-arg="${isW ? 'w:' + w.id : (p && p.id ? 's:' + p.id : '')}"><span class="av" style="background:${ocColor(name)}">${esc(ocInitial(name))}</span><span class="nm">${esc(name || '— شاغر —')}</span><div class="rl">${esc(rl || '')}${w && w.workplace === 'home' ? ' · من البيت' : w && w.workplace === 'hq' ? ' · المكتب' : ''}</div>${extra && extra.body || ''}</div>`;
+  return `<div class="ob ${extra && extra.cls || ''}" ${isW && ocCanEdit() ? `draggable="true" data-ocdrag="${w.id}"` : ''} ${isW ? `data-ocdrop="mgr:${w.id}"` : ''} data-action="ocOpen" data-arg="${isW ? 'w:' + w.id : (p && p.id ? 's:' + p.id : '')}"><span class="av" style="background:${ocColor(name)}">${esc(ocInitial(name))}</span><span class="nm">${esc(name || '— شاغر —')}</span><div class="rl">${esc(rl || '')}${w && w.workplace === 'home' ? ' · من البيت' : w && w.workplace === 'hq' ? ' · المكتب' : w && w.workplace === 'field' ? ' · مصنع/مواقع' : w && w.workplace === 'sites' ? ' · مواقع' : ''}</div>${extra && extra.body || ''}</div>`;
 }
 const ocChips = (people, rl) => people.length ? `<div class="chips">${people.map(p => { const w = byId('workers', p.id); return `<span class="chip" ${w && ocCanEdit() ? `draggable="true" data-ocdrag="${w.id}"` : ''} data-action="ocOpen" data-arg="${w ? 'w:' + w.id : 's:' + p.id}" data-stop="1" title="${esc(rl)}">${esc((p.name || '').split(' — ')[0].split(' (')[0])}</span>`; }).join('')}</div>` : '';
 const ocNode = (box, kids) => `<div class="on">${box}${kids && kids.length ? `<div class="ok">${kids.join('')}</div>` : ''}</div>`;
@@ -10262,9 +10263,9 @@ function orgChartHTML() {
   ];
   return `<div class="ocwrap"><div class="oc">${ocNode(ocPerson(owner, 'رئيس مجلس الإدارة — صاحب الشركة', { cls: 'owner' }), level1)}</div></div>`;
 }
-function vOrg() {
+function vOrgTreeBase() {
   const html = vOrgJobs();
-  const card = `<div class="card"><div class="cardhead"><h3>الهيكل التنظيمي</h3><span class="muted small">${ocCanEdit() ? 'اسحب أي موظف لقسم آخر أو تحت مدير آخر · اضغط أي شخص لتغيير بياناته وصلاحياته' : 'اضغط أي شخص لعرض بياناته'}</span><div class="grow"></div><button class="btn xs ghost" data-action="ocList">${S.ui.ocList ? 'إخفاء القائمة' : 'عرض كقائمة'}</button></div>${orgChartHTML()}<div class="oclegend"><span><i style="background:var(--ink)"></i>المالك</span><span><i></i>شخص — اضغط للصلاحيات</span><span><i style="border-style:dashed;background:var(--surface-2)"></i>قسم — أسقط عليه موظفًا لنقله</span></div></div>`;
+  const card = `<div class="card"><div class="cardhead"><h3>الهيكل التنظيمي</h3><span class="muted small">${ocCanEdit() ? 'اسحب اسم أي موظف وأسقطه على قسم أو مدير لنقله · اضغط على أي شخص لتعديل دوره وصلاحياته' : 'اضغط أي شخص لعرض بياناته'}</span><div class="grow"></div><button class="btn xs ghost" data-action="ocList">${S.ui.ocList ? 'إخفاء القائمة' : 'عرض كقائمة'}</button></div>${orgChartHTML()}<div class="oclegend"><span><i style="background:var(--ink)"></i>المالك</span><span><i></i>شخص — اضغط للصلاحيات</span><span><i style="border-style:dashed;background:var(--surface-2)"></i>قسم — أسقط عليه موظفًا لنقله</span></div></div>`;
   const i = html.indexOf('<div class="card"><div class="cardhead"><h3>الهيكل التنظيمي</h3>'); if (i < 0) return card + html;
   let out = html.slice(0, i) + card + html.slice(i); if (!S.ui.ocList) out = out.replace('<div class="orgtree">', '<div class="orgtree" hidden>').replace('<div class="card"><div class="cardhead"><h3>الهيكل التنظيمي</h3><span class="muted small">الأسماء تُقرأ من دور كل موظف في ملفه</span></div>', '<div class="card" hidden><div class="cardhead"><h3>الهيكل التنظيمي</h3><span class="muted small">الأسماء تُقرأ من دور كل موظف في ملفه</span></div>');
   return out;
@@ -10282,9 +10283,9 @@ ACTIONS.ocOpen = arg => {
     ${field('القسم', `<select id="f-deptId" name="deptId">${opts(S.settings.departments, w.deptId)}</select>`)}${field('المدير المباشر', `<select id="f-managerId" name="managerId"><option value="">— تلقائي حسب الهيكل —</option>${cands.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? 'selected' : ''}>${esc(p.name)} — ${esc(ROLES[p.role] || p.role)}</option>`).join('')}</select>`)}
     ${isAdmin() ? field('الدور في السيستم (الصلاحيات)', `<select id="f-role" name="role">${opts(workerRoleOptions(), w.role || 'none')}</select><div class="hint" id="rolehint">${typeof roleHint === 'function' ? roleHint(w.role || 'none') : ''}</div><div id="rolesees">${typeof roleSeesHTML === 'function' ? roleSeesHTML(w.role || 'none') : ''}</div>`, 'full') : `<div class="field full"><label>الدور في السيستم</label><div>${esc(ROLES[w.role] || 'بدون دخول')} <span class="tiny muted">(تغيير الصلاحيات للمالك)</span></div></div>`}
     ${isAdmin() ? `<div class="field full" id="accessDeptsBox" ${(w.role || 'none') === 'head' ? '' : 'hidden'}><label>أقسام إضافية يديرها</label><div class="row" style="gap:6px;flex-wrap:wrap">${S.settings.departments.map(d => `<label class="check"><input type="checkbox" name="acc-${d.id}" ${(w.accessDepts || []).includes(d.id) ? 'checked' : ''}>${esc(d.name)}</label>`).join('')}</div></div>` : ''}
-    ${field('مكان العمل', `<select id="f-workplace" name="workplace">${opts([['office', 'المصنع'], ['hq', 'المكتب'], ['home', 'من البيت']].map(x => ({ id: x[0], name: x[1] })), w.workplace || 'office')}</select>`)}${field('الحالة', `<select id="f-status" name="status">${opts([['active', 'على رأس العمل'], ['inactive', 'ترك العمل']].map(x => ({ id: x[0], name: x[1] })), w.status || 'active')}</select>`)}</div>`,
+    ${field('مكان العمل', `<select id="f-workplace" name="workplace">${opts([['office', 'المصنع'], ['field', 'إنتاج وتركيبات (المصنع أو الموقع)'], ['sites', 'مواقع العمل فقط'], ['hq', 'المكتب'], ['home', 'من البيت']].map(x => ({ id: x[0], name: x[1] })), w.workplace || 'office')}</select>`)}${field('الحالة', `<select id="f-status" name="status">${opts([['active', 'على رأس العمل'], ['inactive', 'ترك العمل']].map(x => ({ id: x[0], name: x[1] })), w.status || 'active')}</select>`)}</div>`,
     onOpen: f => { const rs = $('#f-role', f); if (rs) rs.addEventListener('change', () => { const h = $('#rolehint', f); if (h && typeof roleHint === 'function') h.textContent = roleHint(rs.value); const sm = $('#rolesees', f); if (sm && typeof roleSeesHTML === 'function') sm.innerHTML = roleSeesHTML(rs.value); const box = $('#accessDeptsBox', f); if (box) box.hidden = rs.value !== 'head'; }); },
-    onSubmit: async f => { const d = formData(f); const patch = { deptId: d.deptId, managerId: d.managerId || defaultManagerFor(Object.assign({}, w, { deptId: d.deptId, role: d.role || w.role })) || null, workplace: d.workplace, status: d.status }; if (isAdmin() && d.role) { patch.role = d.role; patch.accessDepts = S.settings.departments.filter(dp => d['acc-' + dp.id]).map(dp => dp.id); if (d.role !== 'head') patch.accessDepts = []; } if (patch.workplace === 'hq' && (!w.punchAt || w.punchAt === 'auto')) patch.punchAt = 'office'; await Store.update('workers', w.id, patch); toast('تم حفظ البيانات والصلاحيات'); } });
+    onSubmit: async f => { const d = formData(f); const patch = { punchAt: d.workplace === 'field' ? 'both' : d.workplace === 'sites' ? 'sites' : d.workplace === 'hq' ? 'office' : (['both', 'sites', 'office'].includes(w.punchAt) ? 'auto' : (w.punchAt || 'auto')), deptId: d.deptId, managerId: d.managerId || defaultManagerFor(Object.assign({}, w, { deptId: d.deptId, role: d.role || w.role })) || null, workplace: d.workplace, status: d.status }; if (isAdmin() && d.role) { patch.role = d.role; patch.accessDepts = S.settings.departments.filter(dp => d['acc-' + dp.id]).map(dp => dp.id); if (d.role !== 'head') patch.accessDepts = []; } if (patch.workplace === 'hq' && (!w.punchAt || w.punchAt === 'auto')) patch.punchAt = 'office'; await Store.update('workers', w.id, patch); toast('تم حفظ البيانات والصلاحيات'); } });
 };
 /* ---------------- drag & drop: move a person to a department or under a manager ---------------- */
 let _ocDrag = null;
@@ -10516,7 +10517,8 @@ ACTIONS.smsTest = async () => {
    والموظف يسجّل بصمة وجهه بنفسه من «بوابتي» (تُعلَّم «سجّلها بنفسه» ليراجعها الـHR)
    ===================================================================== */
 (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
-.side{overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.side{overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent;scrollbar-gutter:stable}
+.side::-webkit-scrollbar{width:8px}.side::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:8px}.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:8px;border:1px solid rgba(0,0,0,.2)}.side::-webkit-scrollbar-thumb:active{background:rgba(255,255,255,.55)}
 .side .brand,.side .userchip,.side .acct,.side .foot{flex:none}
 .side .nav{flex:1 0 auto;overflow:visible}
 .side .brand .wordmark{max-height:44px}
@@ -10612,8 +10614,8 @@ ACTIONS.myPhoto = () => {
       ${typeof camAvailable === 'function' && camAvailable() ? `<div class="field"><label>أو التقط الآن بالكاميرا</label><div class="camwrap" style="max-width:320px;margin:0"><video id="cam" autoplay muted playsinline></video></div><div class="row" style="margin-top:8px"><button type="button" class="btn a" id="photo-shot">${icon('camera')}التقاط</button></div></div>` : ''}
       ${cur ? `<button type="button" class="btn ghost" style="color:var(--crit-ink)" id="photo-del">${icon('trash')}حذف الصورة</button>` : ''}</div></div>`,
     onOpen: async f => {
-      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const url = await squareThumb(await fileToDataURL(file.files[0])); await saveMyPhoto(url); stopStream($('#cam')); closeModal(); toast('تم حفظ صورتك'); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
-      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا — استخدم «اختر صورة»</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const url = videoThumb(v); await saveMyPhoto(url); stopStream(v); closeModal(); toast('تم حفظ صورتك'); }); }
+      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const src = await fileToDataURL(file.files[0]); stopStream($('#cam')); openCropper(src, async url => { await saveMyPhoto(url); toast('تم حفظ صورتك'); }); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
+      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا — استخدم «اختر صورة»</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const src = c.toDataURL('image/jpeg', 0.92); stopStream(v); openCropper(src, async url => { await saveMyPhoto(url); toast('تم حفظ صورتك'); }); }); }
       const del = $('#photo-del', f); if (del) del.addEventListener('click', async () => { await saveMyPhoto(null); stopStream($('#cam')); closeModal(); toast('تم حذف الصورة'); });
     } });
   const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
@@ -10623,6 +10625,81 @@ function vMe() {
   let html = vMeBio(); const i = html.indexOf('<div class="avatar"'); if (i < 0) return html;
   const j = html.indexOf('</div>', i) + 6;
   return html.slice(0, i) + `<span class="me-avatar" data-action="myPhoto" role="button" title="تغيير صورتي">${html.slice(i, j)}<span class="avcam">${icon('camera')}</span></span>` + html.slice(j);
+}
+/* =====================================================================
+   v4.6.2 — ضبط الصورة قبل الحفظ: تكبير/تصغير (شريط أو عجلة أو قرص بإصبعين) وتحريك بالسحب داخل الدائرة
+   يُستخدم في «صورتي» (70) وفي صورة الموظف من ملفه (12) وفي التقاط الكاميرا
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.cropwrap{position:relative;width:min(300px,80vw);aspect-ratio:1;margin:0 auto;border-radius:16px;overflow:hidden;background:#111;touch-action:none;user-select:none;-webkit-user-select:none}
+.cropwrap canvas{width:100%;height:100%;display:block;cursor:grab}
+.cropwrap canvas:active{cursor:grabbing}
+.cropmask{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 0,transparent calc(50% - 1px),rgba(0,0,0,.55) calc(50% + 1px));}
+.cropmask:after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.85) inset}
+.cropbar{display:flex;align-items:center;gap:10px;margin:12px auto 0;width:min(300px,80vw)}
+.cropbar input[type=range]{flex:1;accent-color:var(--accent)}
+.cropbar button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:18px;font-weight:700;cursor:pointer;color:var(--ink)}
+</style>`);
+function openCropper(src, onDone, o = {}) {
+  const CV = 600, OUT = o.size || 256;
+  openModal({ title: o.title || 'ضبط الصورة', sticky: true, footer: `<button type="button" class="btn p" id="crop-ok">${icon('check')}حفظ الصورة</button><button type="button" class="btn" data-action="closemodal">إلغاء</button>`,
+    body: `<div class="cropwrap"><canvas id="cropcv" width="${CV}" height="${CV}"></canvas><div class="cropmask"></div></div>
+      <div class="cropbar"><button type="button" id="crop-minus" title="تصغير">−</button><input type="range" id="cropzoom" min="1" max="4" step="0.01" value="1"><button type="button" id="crop-plus" title="تكبير">+</button></div>
+      <div class="tiny muted" style="text-align:center;margin-top:8px">اسحب الصورة لتحريكها يمينًا ويسارًا وأعلى وأسفل · كبّر أو صغّر بالشريط أو بإصبعين — ما داخل الدائرة هو ما يُحفظ</div>`,
+    onOpen: f => {
+      const cv = $('#cropcv', f), ctx = cv.getContext('2d'), zoom = $('#cropzoom', f); const img = new Image();
+      let base = 1, s = 1, ox = 0, oy = 0; // base = cover scale; ox/oy = image offset in canvas px
+      const clamp = () => { const w = img.width * base * s, h = img.height * base * s; ox = Math.min(0, Math.max(CV - w, ox)); oy = Math.min(0, Math.max(CV - h, oy)); };
+      const draw = () => { ctx.fillStyle = '#111'; ctx.fillRect(0, 0, CV, CV); if (!img.width) return; clamp(); ctx.drawImage(img, ox, oy, img.width * base * s, img.height * base * s); };
+      const setZoom = (v, cx = CV / 2, cy = CV / 2) => { const ns = Math.min(4, Math.max(1, v)); const k = ns / s; ox = cx - (cx - ox) * k; oy = cy - (cy - oy) * k; s = ns; zoom.value = String(s); draw(); };
+      img.onload = () => { base = Math.max(CV / img.width, CV / img.height); ox = (CV - img.width * base) / 2; oy = (CV - img.height * base) / 2; draw(); }; img.src = src;
+      const ratio = () => CV / cv.getBoundingClientRect().width;
+      const ptrs = new Map(); let last = null, pinch = null;
+      cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (ptrs.size === 1) last = { x: e.clientX, y: e.clientY }; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s }; } e.preventDefault(); });
+      cv.addEventListener('pointermove', e => { if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); const r = ratio();
+        if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); const rect = cv.getBoundingClientRect(); setZoom(pinch.s * d / pinch.d, ((a.x + b.x) / 2 - rect.left) * r, ((a.y + b.y) / 2 - rect.top) * r); return; }
+        if (last) { ox += (e.clientX - last.x) * r; oy += (e.clientY - last.y) * r; last = { x: e.clientX, y: e.clientY }; draw(); } });
+      const up = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (ptrs.size === 1) { const p = [...ptrs.values()][0]; last = { x: p.x, y: p.y }; } else last = null; };
+      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+      cv.addEventListener('wheel', e => { e.preventDefault(); const rect = cv.getBoundingClientRect(); const r = ratio(); setZoom(s * (e.deltaY < 0 ? 1.08 : 0.92), (e.clientX - rect.left) * r, (e.clientY - rect.top) * r); }, { passive: false });
+      zoom.addEventListener('input', () => setZoom(+zoom.value)); $('#crop-minus', f).addEventListener('click', () => setZoom(s - 0.15)); $('#crop-plus', f).addEventListener('click', () => setZoom(s + 0.15));
+      $('#crop-ok', f).addEventListener('click', async () => { const out = document.createElement('canvas'); out.width = OUT; out.height = OUT; out.getContext('2d').drawImage(cv, 0, 0, CV, CV, 0, 0, OUT, OUT); const url = out.toDataURL('image/jpeg', 0.86); closeModal(); try { await onDone(url); } catch (e) { toast('تعذّر حفظ الصورة', 'err'); } });
+    } });
+}
+/* =====================================================================
+   v4.6.2 — الهيكل التنظيمي شجرة أفقية حقيقية: المالك أعلى المنتصف، وتحته المديرون جنبًا إلى جنب،
+   وتحت كل مدير أقسامه جنبًا إلى جنب، بخطوط توصيل رأسية/أفقية. تكبير/تصغير + تمرير أفقي،
+   ونفس السحب والإفلات والضغط على الشخص (64-orgchart)
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.ocwrap{overflow:auto;padding:14px 8px 18px;direction:rtl;max-height:78vh;scrollbar-width:thin}
+.oc{display:flex;flex-direction:row;justify-content:flex-start;align-items:flex-start;width:max-content;margin:0 auto;zoom:var(--oczoom,1)}
+.on{display:flex;flex-direction:column;align-items:center;position:relative;padding:0 6px}
+.ob{min-width:168px;max-width:200px;text-align:center}
+.ob .av{margin:0 0 4px;display:inline-grid}
+.ob .nm{display:block}
+.ok{display:flex;flex-direction:row;align-items:flex-start;justify-content:center;position:relative;padding:22px 0 0;margin-top:0;gap:0}
+.ok:before{content:"";position:absolute;top:0;left:50%;width:2px;height:22px;background:var(--line-2);margin-left:-1px}
+.ok > .on{position:relative;padding-top:22px}
+.ok > .on:before{content:"";position:absolute;top:0;left:50%;width:2px;height:22px;background:var(--line-2);margin-left:-1px}
+.ok > .on:after{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:var(--line-2)}
+.ok > .on:first-child:after{inset-inline-start:50%}.ok > .on:last-child:after{inset-inline-end:50%}.ok > .on:only-child:after{display:none}
+.ok > .on:first-child:last-child:before{top:0}
+.on > .ok{margin-inline-start:0;padding-inline-end:0}
+.octools{display:flex;gap:6px;align-items:center}
+.octools button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:700;color:var(--ink)}
+@media (max-width:760px){.ob{min-width:140px;max-width:170px;font-size:11.5px}.ocwrap{max-height:70vh}}
+</style>`);
+const ocZoom = () => +(S.ui.ocZoom || S.ui._ocFit || 1);
+ACTIONS.ocZoom = d => { const z = Math.min(1.6, Math.max(0.4, Math.round((ocZoom() + (+d || 0)) * 100) / 100)); S.ui.ocZoom = d === 'reset' ? null : z; render(false); };
+RENDER_HOOKS.push(() => { const oc = document.querySelector('.oc'); const wrap = document.querySelector('.ocwrap'); if (!oc || !wrap) return;
+  if (!S.ui.ocZoom) { oc.style.setProperty('--oczoom', '1'); const w = oc.getBoundingClientRect().width || 1; S.ui._ocFit = Math.max(0.55, Math.min(1, Math.floor((wrap.clientWidth - 16) / w * 100) / 100)); }
+  oc.style.setProperty('--oczoom', String(ocZoom())); const lbl = document.querySelector('.octools [data-arg=reset]'); if (lbl) lbl.textContent = Math.round(ocZoom() * 100) + '%'; });
+/* the tools live in the card header — add them after the list toggle */
+function vOrg() {
+  let html = vOrgTreeBase();
+  html = html.replace('<button class="btn xs ghost" data-action="ocList">', `<span class="octools"><button type="button" data-action="ocZoom" data-arg="-0.1" title="تصغير">−</button><button type="button" data-action="ocZoom" data-arg="0.1" title="تكبير">+</button><button type="button" data-action="ocZoom" data-arg="reset" title="الحجم الطبيعي" style="width:auto;padding:0 8px;font-weight:600">100%</button></span><button class="btn xs ghost" data-action="ocList">`);
+  return html;
 }
 boot();
 </script>
