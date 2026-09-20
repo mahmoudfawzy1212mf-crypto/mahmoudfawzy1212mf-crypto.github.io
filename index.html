@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-0715-b0817b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-0757-87ffcb";</script>
 
 <script>
 'use strict';
@@ -7831,7 +7831,7 @@ function installBoot() { if (_installInited) return; _installInited = true; try 
    page help button, smarter bottom tab bar
    (function declarations here replace the base ones by name — last wins)
    ===================================================================== */
-APP.version = '4.6.1';
+APP.version = '4.6.2';
 const TABBAR_PRIORITY = ['me', 'dashboard', 'boards', 'orders', 'fleet', 'tasks', 'products', 'purchases', 'inventory', 'kpi'];
 function tabbarItems() { const arr = TABBAR_PRIORITY.filter(canSee); return arr.slice(0, 4); }
 ACTIONS.goHome = () => { const h = homeView(); go(h); $('#side')?.classList.remove('open'); $('#sidecover')?.classList.add('hidden'); };
@@ -10310,6 +10310,51 @@ function wirePasswordEyes(root) {
 }
 new MutationObserver(() => wirePasswordEyes()).observe(document.body, { childList: true, subtree: true });
 wirePasswordEyes();
+/* =====================================================================
+   v4.6.2 — إصلاحات واجهة الموبايل (آيفون)
+   · منع تكبير سفاري التلقائي عند الكتابة في الخانات (يسبب قصّ الشاشة من اليمين)
+   · منع أي تمرير أفقي للصفحة على الموبايل
+   · شعار الشريط العلوي أسود دائمًا (ليلي/نهاري)
+   · بطاقات القوائم ذات الأزرار الكثيرة تلتف تحت النص على الشاشات الضيقة
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+/* الشعار: مربع أسود بعلامة بيضاء في الوضعين */
+.tb-logo{background:#0b0d10!important;color:#fff!important;border:1px solid rgba(255,255,255,.14)!important;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.tb-logo img{filter:invert(1)!important;width:26px;height:26px}
+:root[data-theme="dark"] .tb-logo{border-color:rgba(255,255,255,.22)!important}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .tb-logo{border-color:rgba(255,255,255,.22)!important}}
+/* الموبايل */
+@media (max-width:900px){
+  html,body{overflow-x:hidden;max-width:100vw;overscroll-behavior-x:none;touch-action:manipulation}
+  #root,.view{max-width:100vw;overflow-x:clip}
+  /* iOS تكبّر الصفحة عند التركيز على خانة خطها أصغر من 16px */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important}
+  .pinbox input{font-size:24px!important}
+  .att input.ot,input.tm{font-size:15px!important}
+  .kpi{min-width:0;overflow:hidden}
+  .kpi .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card,.item{min-width:0;max-width:100%}
+  .cardhead{flex-wrap:wrap}
+  .topbar .tb-actions{flex-wrap:nowrap;min-width:0;flex:none}
+  .topbar>div[style*="min-width"]{flex:1 1 auto;min-width:0}
+  .topbar h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+@media (max-width:640px){
+  .item:has(.end .btn + .btn),.item:has(.end .btn + a.btn){flex-wrap:wrap}
+  .item:has(.end .btn + .btn) .main,.item:has(.end .btn + a.btn) .main{flex:1 1 100%}
+  .item:has(.end .btn + .btn) .end,.item:has(.end .btn + a.btn) .end{flex:1 1 100%;margin-top:6px;justify-content:flex-start;flex-direction:row;flex-wrap:wrap;align-items:center}
+  .item .meta span{max-width:100%}
+}
+@media (max-width:420px){.kpi .v{font-size:24px}}
+</style>`);
+/* iOS Safari: منع التكبير التلقائي وإعادة الصفحة لوضعها الطبيعي بعد إغلاق لوحة المفاتيح */
+(() => {
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!ios) return;
+  const m = document.querySelector('meta[name=viewport]');
+  if (m) m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+  document.addEventListener('focusout', () => { setTimeout(() => { if (window.visualViewport && window.visualViewport.scale > 1.01) window.scrollTo(0, window.scrollY); }, 50); });
+})();
 boot();
 </script>
 
