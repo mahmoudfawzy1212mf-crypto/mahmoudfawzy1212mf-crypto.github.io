@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-0644-b84703";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-0700-b9f32e";</script>
 
 <script>
 'use strict';
@@ -6333,8 +6333,9 @@ async function sbBackupList(force) {
   const { data, error } = await S.sb.from('backups').select('id,slot,taken_at,docs_count,note').order('taken_at', { ascending: false }).limit(60);
   if (error) { console.warn('backups list', error); return _sbBk.rows; } _sbBk = { at: Date.now(), rows: data || [] }; return _sbBk.rows;
 }
+const pgDate = s => new Date(String(s || '').replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
 function backupRows() {
-  if (sbOn()) return _sbBk.rows.map(b => ({ id: String(b.id), slot: b.slot, at: b.taken_at, date: localISO(new Date(b.taken_at)), count: b.docs_count, note: b.note, server: true }));
+  if (sbOn()) return _sbBk.rows.map(b => ({ id: String(b.id), slot: b.slot, at: b.taken_at, date: localISO(pgDate(b.taken_at)), count: b.docs_count, note: b.note, server: true }));
   return sortBy(list('backups'), b => b.at || '', true).map(b => Object.assign({}, b, { server: false }));
 }
 
@@ -6370,9 +6371,9 @@ async function applyBackupJson(j, withSettings) {
 }
 
 /* ---------- scheduler ---------- */
-let _bkBusy = false, _bkTimer = null;
+let _bkBusy = false, _bkTimer = null; const _bkTaken = {};
 async function backupExists(date, slotId) {
-  if (sbOn()) { const rows = await sbBackupList(); return rows.some(b => b.slot === slotId && localISO(new Date(b.taken_at)) === date); }
+  if (_bkTaken[date + ':' + slotId]) return true; if (sbOn()) { const rows = await sbBackupList(); return rows.some(b => b.slot === slotId && localISO(pgDate(b.taken_at)) === date); }
   return !!(S.data.backups && S.data.backups.has(backupDocId(date, slotId)));
 }
 async function backupTick() {
@@ -6382,7 +6383,7 @@ async function backupTick() {
     if (!backupSlotDue(slot, now)) continue;
     if (sbOn()) { const t = new Date(now); t.setHours(slot.h, slot.m + 90, 0, 0); if (now < t) continue; } /* give the server job a chance first */
     if (await backupExists(date, slot.id)) continue;
-    _bkBusy = true; try { await backupTake(slot.id, 'تلقائي'); toast(`تم أخذ النسخة الاحتياطية التلقائية — ${slot.label}`); } catch (e) { console.warn('auto backup', e); } finally { _bkBusy = false; }
+    _bkBusy = true; _bkTaken[date + ':' + slot.id] = true; try { await backupTake(slot.id, 'تلقائي'); toast(`تم أخذ النسخة الاحتياطية التلقائية — ${slot.label}`); } catch (e) { console.warn('auto backup', e); } finally { _bkBusy = false; }
     break;
   }
 }
