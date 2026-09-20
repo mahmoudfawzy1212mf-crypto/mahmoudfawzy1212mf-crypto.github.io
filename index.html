@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-1018-3afd5d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260920-1219-d2b496";</script>
 
 <script>
 'use strict';
@@ -7855,7 +7855,7 @@ function shell() {
     <aside class="side" id="side">
       <div class="brand" data-action="goHome" title="لوحة المتابعة" role="button">${brandBlock(24)}</div>
       <div class="userchip">
-        <div class="avatar">${S.session.avatar ? `<img src="${esc(S.session.avatar)}" alt="">` : esc((S.session.name || '?').trim().charAt(0))}</div>
+        <div class="avatar myavatar" data-action="myPhoto" role="button" title="تغيير صورتي">${(typeof myAvatarSrc === 'function' ? myAvatarSrc() : S.session.avatar) ? `<img src="${esc(typeof myAvatarSrc === 'function' ? myAvatarSrc() : S.session.avatar)}" alt="">` : esc((S.session.name || '?').trim().charAt(0))}<span class="avcam">${icon('camera')}</span></div>
         <div style="min-width:0"><div class="n">${esc(S.session.name)}</div><div class="r">${esc(ROLES[role()] || role())}${myDepts().length ? ' · ' + esc(myDepts().map(deptName).join('، ')) : ''}</div></div>
       </div>
       ${navAccountHTML()}
@@ -10533,7 +10533,7 @@ function bioCard(w) {
   if (!face && !dev) return '';
   return `<div class="card" style="margin-bottom:14px"><div class="cardhead"><h3>${icon('shield')} التحقق عند البصمة</h3>${hasFace || hasDev ? '<span class="badge good">جاهز</span>' : '<span class="badge warn">فعّل واحدة على الأقل</span>'}</div><p class="small ink2" style="margin:4px 0 10px">البصمة من الموبايل تحتاج تحقق بيومتري: وجهك بالكاميرا أو قفل موبايلك (إصبع/وجه). فعّل الاثنين ليعمل أيهما متاح.</p><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${face}${dev}</div></div>`;
 }
-function vMe() {
+function vMeBio() {
   const html = vMeSite(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html;
   const c = bioCard(w); if (!c) return html;
   const p = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card') : null; return p == null ? c + html : html.slice(0, p) + c + html.slice(p);
@@ -10573,6 +10573,56 @@ function zoneCheck(w, pos) {
   // strict: a reading looser than the allowed error is not trusted at all — unless it is clearly inside (distance + error still within the radius)
   if (strict && (pos.acc || 0) > maxAcc && !(best.dist + (pos.acc || 0) <= best.zone.radius)) { out.inside = false; out.poorAcc = true; out.maxAcc = maxAcc; }
   return out;
+}
+/* =====================================================================
+   v4.6.2 — صورتي: الدائرة في القائمة الجانبية وفي «بوابتي» تفاعلية — اضغطها لرفع صورة أو التقاطها بكاميرا الموبايل
+   (موظف → صورته في ملفه · إداري → سجل staff · حساب المالك المؤسِّس بلا ملف → الإعدادات settings.avatars)
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.myavatar{cursor:pointer;position:relative;overflow:visible!important}
+.myavatar .avcam{position:absolute;inset-inline-end:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;border:2px solid var(--side-bg,var(--surface));box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.myavatar .avcam svg{width:10px;height:10px}
+.myavatar:hover{filter:brightness(1.08)}
+.me-avatar{cursor:pointer;position:relative;display:inline-block}
+.me-avatar .avcam{position:absolute;inset-inline-end:-2px;bottom:-2px;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;border:2px solid var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.me-avatar .avcam svg{width:13px;height:13px}
+</style>`);
+function myRecordRef() {
+  const s = S.session; if (!s) return null;
+  if (s.workerId) { const w = byId('workers', s.workerId); if (w) return { col: 'workers', rec: w }; }
+  const st = s.id && byId('staff', s.id); if (st) return { col: 'staff', rec: st };
+  return { col: 'settings', rec: null };
+}
+function myAvatarSrc() {
+  const s = S.session; if (!s) return null; const r = myRecordRef();
+  if (r && r.rec && r.rec.photo) return r.rec.photo;
+  const av = (S.settings && S.settings.avatars) || {}; return av[s.id] || s.avatar || null;
+}
+async function saveMyPhoto(url) {
+  const r = myRecordRef(); if (!r) return;
+  if (r.col === 'settings') { if (!isAdmin()) { toast('لا يمكن حفظ الصورة لهذا الحساب', 'err'); return; } const av = Object.assign({}, (S.settings && S.settings.avatars) || {}); if (url) av[S.session.id] = url; else delete av[S.session.id]; await Store.saveSettings({ avatars: av }); }
+  else await Store.update(r.col, r.rec.id, { photo: url });
+  render(true); // the sidebar chip lives in the shell
+}
+ACTIONS.myPhoto = () => {
+  if (!S.session) return; const cur = myAvatarSrc(); const name = S.session.name || '';
+  openModal({ title: `صورتي — ${name}`, sticky: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
+    body: `<div class="row" style="align-items:flex-start;gap:16px;flex-wrap:wrap"><div><div class="avatar" style="width:96px;height:96px;font-size:40px">${cur ? `<img src="${esc(cur)}" alt="">` : esc(name.trim().charAt(0) || '?')}</div></div><div class="grow stack" style="min-width:220px">
+      <div class="field"><label>اختر صورة من الموبايل / الكمبيوتر</label><input type="file" id="photo-file" accept="image/*"></div>
+      ${typeof camAvailable === 'function' && camAvailable() ? `<div class="field"><label>أو التقط الآن بالكاميرا</label><div class="camwrap" style="max-width:320px;margin:0"><video id="cam" autoplay muted playsinline></video></div><div class="row" style="margin-top:8px"><button type="button" class="btn a" id="photo-shot">${icon('camera')}التقاط</button></div></div>` : ''}
+      ${cur ? `<button type="button" class="btn ghost" style="color:var(--crit-ink)" id="photo-del">${icon('trash')}حذف الصورة</button>` : ''}</div></div>`,
+    onOpen: async f => {
+      const file = $('#photo-file', f); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const url = await squareThumb(await fileToDataURL(file.files[0])); await saveMyPhoto(url); stopStream($('#cam')); closeModal(); toast('تم حفظ صورتك'); } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } });
+      const v = $('#cam', f); if (v) { try { await openCamera(v); } catch (e) { v.parentElement.innerHTML = '<div class="muted small" style="padding:20px">لم يُسمح بالكاميرا — استخدم «اختر صورة»</div>'; } const shot = $('#photo-shot', f); if (shot) shot.addEventListener('click', async () => { if (!v.videoWidth) return; const url = videoThumb(v); await saveMyPhoto(url); stopStream(v); closeModal(); toast('تم حفظ صورتك'); }); }
+      const del = $('#photo-del', f); if (del) del.addEventListener('click', async () => { await saveMyPhoto(null); stopStream($('#cam')); closeModal(); toast('تم حذف الصورة'); });
+    } });
+  const ov = $('#overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) stopStream($('#cam')); });
+};
+/* «بوابتي»: the big avatar at the top is clickable too */
+function vMe() {
+  let html = vMeBio(); const i = html.indexOf('<div class="avatar"'); if (i < 0) return html;
+  const j = html.indexOf('</div>', i) + 6;
+  return html.slice(0, i) + `<span class="me-avatar" data-action="myPhoto" role="button" title="تغيير صورتي">${html.slice(i, j)}<span class="avcam">${icon('camera')}</span></span>` + html.slice(j);
 }
 boot();
 </script>
