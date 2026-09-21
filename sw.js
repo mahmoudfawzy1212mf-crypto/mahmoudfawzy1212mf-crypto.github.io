@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20260921-0738-bd75c5';
+const BUILD = '20260921-1658-352be0';
 const CACHE = 'nf-shell-' + BUILD;
 const SHELL = ["./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./laeha.pdf", "./lof-c01.pdf"];
 self.addEventListener('install', e => {
@@ -33,9 +33,11 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch (x) { d = { body: e.data ? e.data.text() : '' }; }
   const title = d.title || 'Ninety Fabrication';
-  e.waitUntil(self.registration.showNotification(title, { body: d.body || '', tag: d.tag || 'nf', renotify: true, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: d.url || './' }, vibrate: [120, 60, 120] }));
+  const badge = async () => { try { if (!('setAppBadge' in navigator)) return; const c = await caches.open('nf-badge'); const r = await c.match('count'); let n = r ? parseInt(await r.text(), 10) || 0 : 0; n++; await c.put('count', new Response(String(n))); await navigator.setAppBadge(n); } catch (x) { /* ignore */ } };
+  e.waitUntil(Promise.all([badge(), self.registration.showNotification(title, { body: d.body || '', tag: d.tag || 'nf', renotify: true, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: d.url || './' }, vibrate: [120, 60, 120] })]));
 });
+self.addEventListener('message', e => { const d = e.data || {}; if (d.nfBadge != null) { (async () => { try { const c = await caches.open('nf-badge'); await c.put('count', new Response(String(d.nfBadge))); if ('setAppBadge' in navigator) { if (d.nfBadge > 0) await navigator.setAppBadge(d.nfBadge); else await navigator.clearAppBadge(); } } catch (x) { /* ignore */ } })(); } });
 self.addEventListener('notificationclick', e => {
-  e.notification.close(); const url = (e.notification.data && e.notification.data.url) || './';
+  e.notification.close(); try { caches.open('nf-badge').then(c => c.put('count', new Response('0'))); if ('clearAppBadge' in navigator) navigator.clearAppBadge(); } catch (x) { /* ignore */ } const url = (e.notification.data && e.notification.data.url) || './';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => { for (const c of cs) { if ('focus' in c) { c.focus(); try { c.navigate(url); } catch (x) { c.postMessage({ nfOpen: url }); } return; } } return self.clients.openWindow(url); }));
 });
