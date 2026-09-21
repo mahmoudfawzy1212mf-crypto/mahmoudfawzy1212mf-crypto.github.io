@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260921-1729-834e09";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260921-1746-49e1a7";</script>
 
 <script>
 'use strict';
@@ -11731,9 +11731,11 @@ RENDER_HOOKS.push(() => { if (!S.session || !isAdmin()) return; const n = list('
 /* re-render every minute so an expired grant closes by itself */
 setInterval(() => { if (S.session && (PRICE_ASK_ROLES.includes(role()) || role() === 'bdd') && ['quotes', 'invoices', 'products'].includes(S.route.view)) render(false); }, 60000);
 /* v4.10c: accounts officer (acc) has no sales at all — no quotes, no CRM, no clients (owner's instruction 21 Sep) */
-if (Array.isArray(ROLE_VIEWS.acc)) ROLE_VIEWS.acc = ROLE_VIEWS.acc.filter(v => !['clients', 'quotes', 'invoices'].includes(v));
+if (Array.isArray(ROLE_VIEWS.acc)) ROLE_VIEWS.acc = ROLE_VIEWS.acc.filter(v => !['clients', 'quotes', 'invoices', 'accounts', 'projectcosts'].includes(v));
 canDo = (base => (act, ctx) => { if (role() === 'acc' && act === 'sales') return false; return base(act, ctx); })(canDo);
-crmBrandsOf = (base => () => (S.session && role() === 'acc' && !isAdmin()) ? [] : base())(crmBrandsOf);
+/* CRM is for the owner and the commercial/BD director only (21 Sep) — invoices stay with accounts & HR manager too */
+crmBrandsOf = (base => () => (S.session && !isAdmin() && role() !== 'bdd') ? [] : base())(crmBrandsOf);
+canSee = (base => view => view === 'invoices' ? (!!S.session && ['admin', 'hr', 'bdd'].includes(role())) : base(view))(canSee);
 /* =====================================================================
    v4.7 — أقسام الكتالوج + بنود بصور في عروض الأسعار والفواتير
    · كل براند له أقسام (lōf: Garden · Site · Hospitality)، وكل كتالوج PDF ومنتج ينتمي لقسم
@@ -11854,7 +11856,7 @@ const isViewing = () => !!S.viewOrig;
 const isOwnerReal = () => !!S.session && (S.session.owner || role() === 'admin') && !isViewing();
 function viewSessionFor(arg) {
   const [kind, a, b] = String(arg).split(':');
-  if (kind === 'person') { const p = personById(a); if (!p) return null; const s = sessFromPerson(p); s.viewAs = true; s.viewLabel = `${p.name} — ${ROLES[p.role] || p.role}`; return s; }
+  if (kind === 'person') { const p = personById(String(arg).slice(7)); if (!p) return null; const s = sessFromPerson(p); s.viewAs = true; s.viewLabel = `${p.name} — ${ROLES[p.role] || p.role}`; return s; }
   const r = a; if (!ROLES[r] && r !== 'employee') return null; const dept = b || (S.settings.departments[0] || {}).id;
   const w = list('workers').find(x => x.role === r && x.status !== 'inactive') || null;
   if (w) { const s = sessFromWorker(w); s.viewAs = true; s.viewLabel = `${ROLES[r] || r} (مثال: ${w.name})`; return s; }
