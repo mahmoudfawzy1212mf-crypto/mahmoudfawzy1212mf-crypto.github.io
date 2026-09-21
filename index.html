@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260920-2204-ea3bc2";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260921-0542-54abcd";</script>
 
 <script>
 'use strict';
@@ -4806,7 +4806,7 @@ const canTasks = () => writable() && !['viewer', 'kiosk'].includes(role());
 const assigneeName = id => { if (!id) return ''; const w = byId('workers', id); if (w) return w.name; const st = byId('staff', id); return st ? st.name : ''; };
 const myIds = () => { const st = S.session || {}; return [st.workerId, st.id].filter(Boolean); };
 const taskMine = t => myIds().includes(t.assigneeId) || (role() === 'head' && !t.assigneeId && myDepts().includes(t.deptId)) || (!!t.toRole && !t.assigneeId && ['open', 'doing'].includes(t.status) && (t.toRole === role() || ((t.toRole === 'office' || t.toRole === 'tech') && isAdmin())));
-function taskVisible(t) { const rl = role(); if (rl === 'admin' || rl === 'hr' || rl === 'office' || rl === 'manager' || rl === 'vice') return true; if (t.createdBy && t.createdBy === S.session?.id) return true; if (rl === 'head') return myDepts().includes(t.deptId) || taskMine(t); return taskMine(t); }
+function taskVisibleBase(t) { const rl = role(); if (rl === 'admin' || rl === 'hr' || rl === 'office' || rl === 'manager' || rl === 'vice') return true; if (t.createdBy && t.createdBy === S.session?.id) return true; if (rl === 'head') return myDepts().includes(t.deptId) || taskMine(t); return taskMine(t); }
 const openTasks = () => list('tasks').filter(t => ['open', 'doing'].includes(t.status));
 const tasksForMe = () => openTasks().filter(taskMine);
 /* items that need someone's action, derived from the live data (no duplication in the tasks collection) */
@@ -4820,7 +4820,7 @@ function actionItemsBase() {
   return out;
 }
 /* ---------------- tasks CRUD ---------------- */
-function taskForm(t) {
+function taskFormBase(t) {
   const ws = sortBy(list('workers').filter(w => w.status !== 'inactive'), w => (w.deptId || '') + w.name); const staff = list('staff').filter(s => s.active !== false);
   const people = [{ id: '', name: '— غير محدد (القسم كله) —' }].concat(ws.map(w => ({ id: w.id, name: `${w.name} — ${deptName(w.deptId)}` })), staff.map(s => ({ id: s.id, name: `${s.name} (${ROLES[s.role] || ''})` })));
   return `<div class="form">${field('المهمة', inp('title', t.title || '', 'required'), 'full')}${field('التفاصيل', `<textarea id="f-desc" name="desc">${esc(t.desc || '')}</textarea>`, 'full')}
@@ -4828,7 +4828,7 @@ function taskForm(t) {
     ${field('أمر التشغيل', `<select id="f-orderId" name="orderId"><option value="">—</option>${opts(sortBy(list('orders').filter(isOpen), o => o.code), t.orderId || '', o => `${o.code} — ${o.title}`)}</select>`)}${field('الموعد', inp('dueDate', t.dueDate || '', 'type="date"'))}
     ${field('الأولوية', `<select id="f-priority" name="priority">${opts(Object.keys(TASK_PRIORITY), t.priority || 'normal', k => TASK_PRIORITY[k][0])}</select>`)}${t.id ? field('الحالة', `<select id="f-status" name="status">${opts(Object.keys(TASK_STATUS), t.status || 'open', k => TASK_STATUS[k][0])}</select>`) : ''}</div>`;
 }
-async function saveTask(f, t) {
+async function saveTaskBase(f, t) {
   const d = formData(f); if (!d.title) { toast('اكتب المهمة', 'err'); return false; }
   const doc = Object.assign({}, t, { id: t.id || uid(), title: d.title, desc: d.desc || '', deptId: d.deptId || null, assigneeId: d.assigneeId || null, orderId: d.orderId || null, dueDate: d.dueDate || null, priority: d.priority || 'normal', status: d.status || t.status || 'open', kind: t.kind || 'task', source: t.source || 'manual', createdBy: t.createdBy || S.session?.id || null, createdByName: t.createdByName || S.session?.name || '', createdAt: t.createdAt || nowISO(), updatedAt: nowISO() });
   if (doc.status === 'done' && !doc.doneAt) doc.doneAt = nowISO(); await Store.save('tasks', doc); toast(t.id ? 'تم حفظ المهمة' : 'تمت إضافة المهمة');
@@ -9210,7 +9210,7 @@ ACTIONS.lightboxSrc = src => { if (src) lightbox(src, ''); };
 ACTIONS.taskChatSend = async id => { const t = byId('tasks', id); const ta = $('#tmsg'); if (!t || !ta) return; const txt = ta.value; if (!txt.trim()) return; ta.value = ''; if (await taskPost(t, txt)) { const c = $('#tchat'); if (c) c.scrollTop = c.scrollHeight; } };
 ACTIONS.taskChatPhoto = id => { const t = byId('tasks', id); if (!t) return; pickPhotos(async files => { const ta = $('#tmsg'); await taskPost(t, ta ? ta.value : '', files[0]); if (ta) ta.value = ''; }, false); };
 ACTIONS.taskChatOpen = id => { const t = byId('tasks', id); if (!t) return; location.hash = `#/tasks/${id}`; };
-ACTIONS.taskAddParty = id => {
+ACTIONS.taskAddPartyBase = id => {
   const t = byId('tasks', id); if (!t || !writable()) return; const have = new Set(taskParties(t).map(p => p.id));
   const people = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.role && w.role !== 'none' && !have.has(w.id)), w => w.name).map(w => ({ id: w.id, name: `${w.name} — ${deptName(w.deptId)}` })).concat(list('staff').filter(s => s.active !== false && !have.has(s.id) && s.id !== 'local-admin').map(s => ({ id: s.id, name: `${s.name} (${ROLES[s.role] || ''})` })));
   openModal({ title: 'إضافة طرف للمحادثة', body: `<div class="form">${field('الشخص', `<select id="f-pid" name="pid">${opts(people, '')}</select>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); const p = people.find(x => x.id === d.pid); if (!p) return false; await Store.update('tasks', id, { participants: (t.participants || []).concat([{ id: p.id, name: p.name.split(' — ')[0].split(' (')[0] }]) }); toast('تمت الإضافة'); } });
@@ -11313,7 +11313,7 @@ async function taskPost(t, text, file, opts = {}) {
   if (ok) { const me = myIds(); const to = Array.from(new Set(taskParties(t).map(p => p.id).filter(id => id && !me.includes(id)))); pushSend(to, `${S.session?.name || 'رسالة'} — ${t.title}`.slice(0, 100), (text || '').trim() || (isAudio ? '🎤 رسالة صوتية' : '📷 صورة'), `/#/tasks/${t.id}`, 'task-' + t.id); }
   return ok;
 }
-function chatHTML(t) {
+function chatHTMLNotif(t) {
   let h = chatHTMLBase(t); const th = taskThread(t); const me = myIds();
   th.forEach(m => { if (!m.audioFileId) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; h = h.slice(0, j) + `<div class="tx">🎤 رسالة صوتية${m.dur ? ` (${m.dur} ث)` : ''}</div><button class="btn ghost" data-action="voicePlay" data-arg="${esc(m.audioFileId)}">▶ تشغيل</button>` + h.slice(j); });
   if (writable() && taskIsParty(t)) h = h.replace(`<button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`, `<button class="btn ghost recbtn" id="recbtn" data-action="taskChatVoice" data-arg="${t.id}" title="رسالة صوتية">${icon('mic')}</button><button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`);
@@ -11814,6 +11814,124 @@ RENDER_HOOKS.push(() => { const f = document.getElementById('bkitform'); if (!f)
 /* catalog file list: show / change the collection */
 RENDER_HOOKS.push(() => { document.querySelectorAll('.catlist .item').forEach(it => { if (it.querySelector('.catcoll')) return; const name = it.querySelector('.title'); if (!name) return; const f = list('files').find(x => x.kind === 'catalog' && x.name === name.textContent.trim()); if (!f) return; const colls = brandCollections(f.brandId); if (!colls.length) return; name.insertAdjacentHTML('afterend', `<div class="catcoll tiny" style="margin-top:4px"><select data-catcoll="${f.id}" style="font-size:11px;padding:2px 6px"><option value="">— بدون قسم —</option>${colls.map(c => `<option value="${c.id}" ${f.collection === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>`); }); });
 document.addEventListener('change', async ev => { const t = ev.target; if (!t || !t.dataset || !t.dataset.catcoll) return; await Store.update('files', t.dataset.catcoll, { collection: t.value }); toast('تم تحديث قسم الكتالوج'); });
+/* =====================================================================
+   v4.7 — «شوف السيستم بعين…» للمالك فقط + تحسينات المهام
+   · أيقونة في منطقة حساب المالك: اختيار مسمى وظيفي أو موظف بعينه → السيستم يُعرض كما يراه، مع كارت ملخص الصلاحيات
+     وشريط «أنت تشاهد كـ …» وزر «ارجع لحسابي». أي حفظ أثناء المشاهدة يُوسم باسم المالك (viewedBy).
+   · نموذج المهمة: خانة براند تفلتر أوامر التشغيل + مرفقات (صور/فيديو) تُنشر كأول رسائل في شات المهمة
+   · إضافة طرف للمحادثة: رسالة نظام في الشات + إشعار له؛ المُضاف يرى المهمة وتاريخها كاملًا
+   · زر «+» عائم لمهمة سريعة من أي صفحة
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.viewbtn{display:flex;align-items:center;gap:8px;margin:0 6px 8px;padding:8px 10px;border-radius:10px;border:1px dashed var(--side-line,rgba(255,255,255,.14));color:var(--side-ink,#c7cfd8);background:none;width:calc(100% - 12px);font-size:12.5px;font-weight:600;cursor:pointer;text-align:right}
+.viewbtn svg{width:16px;height:16px;opacity:.8}.viewbtn:hover{background:rgba(255,255,255,.06)}
+.viewbar{position:sticky;top:0;z-index:30;background:#7c3aed;color:#fff;padding:8px 14px;display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap}
+.viewbar b{font-weight:700}.viewbar .btn{background:#fff;color:#4c1d95;border:0}
+.permcard{border-inline-start:4px solid #7c3aed}.permcard .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:8px}
+.permcard h4{margin:0 0 6px;font-size:13px}.permcard ul{margin:0;padding:0 18px 0 0;font-size:12.5px;line-height:1.8}.permcard .no{color:var(--crit-ink)}.permcard .ok{color:var(--good-ink)}
+.vpick .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}.vpick .rc{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--surface);text-align:right}.vpick .rc:hover{border-color:var(--accent)}.vpick .rc b{display:block;font-size:13px}.vpick .rc span{font-size:11.5px;color:var(--muted)}
+.fab{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:54px;height:54px;border-radius:50%;background:var(--accent);color:#fff;border:0;box-shadow:0 10px 24px -8px rgba(29,95,209,.7);display:grid;place-items:center;z-index:40;cursor:pointer}
+.fab svg{width:26px;height:26px}.fab:active{transform:scale(.96)}
+@media (max-width:900px){.fab{bottom:calc(76px + env(safe-area-inset-bottom,0px));left:14px;width:50px;height:50px}}
+body.printing .fab,body.fab-hide .fab{display:none}
+.tattach{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}.tattach .tf{width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:grid;place-items:center;background:var(--surface-2,var(--surface));font-size:10px;color:var(--muted);text-align:center;padding:2px}.tattach .tf img{width:100%;height:100%;object-fit:cover}
+.msg .vid{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin-top:4px;background:var(--surface);cursor:pointer;font-size:12.5px}
+.msg.sys .tx{background:none;color:var(--muted);font-size:11.5px;text-align:center;font-style:italic}
+</style>`);
+/* ---------- view-as ---------- */
+const VIEW_ROLES = ['vice', 'manager', 'hr', 'acc', 'purch', 'store', 'tech', 'office', 'head', 'bdd', 'fleet', 'driver', 'employee', 'viewer'];
+const isViewing = () => !!S.viewOrig;
+const isOwnerReal = () => !!S.session && (S.session.owner || role() === 'admin') && !isViewing();
+function viewSessionFor(arg) {
+  const [kind, a, b] = String(arg).split(':');
+  if (kind === 'person') { const p = personById(a); if (!p) return null; const s = sessFromPerson(p); s.viewAs = true; s.viewLabel = `${p.name} — ${ROLES[p.role] || p.role}`; return s; }
+  const r = a; if (!ROLES[r] && r !== 'employee') return null; const dept = b || (S.settings.departments[0] || {}).id;
+  const w = list('workers').find(x => x.role === r && x.status !== 'inactive') || null;
+  if (w) { const s = sessFromWorker(w); s.viewAs = true; s.viewLabel = `${ROLES[r] || r} (مثال: ${w.name})`; return s; }
+  const s = { id: 'view:' + r, name: `عرض كـ ${ROLES[r] || (r === 'employee' ? 'موظف' : r)}`, role: r === 'employee' ? 'none' : r, deptIds: r === 'head' ? [dept] : [], viewAs: true, viewLabel: `${ROLES[r] || (r === 'employee' ? 'موظف عادي' : r)}${r === 'head' ? ' — ' + deptName(dept) : ''}` };
+  if (r === 'employee') { s.role = 'viewer'; s.workerId = null; }
+  return s;
+}
+ACTIONS.viewPick = () => {
+  if (!isOwnerReal() && !isViewing()) return;
+  const people = sortBy(loginPeople().filter(p => p.role && !['kiosk', 'none', 'admin'].includes(p.role)), p => Object.keys(ROLES).indexOf(p.role) + p.name);
+  openModal({ title: 'شوف السيستم بعين…', wide: true, cls: 'vpick', body: `<p class="small ink2" style="margin:0 0 10px">اختر مسمى وظيفي أو موظفًا بعينه — السيستم كله يظهر لك كما يراه بالظبط، مع ملخص لصلاحياته. تقدر ترجع لحسابك في أي وقت من الشريط البنفسجي أعلى الصفحة.</p>
+    <h4 style="margin:6px 0">حسب المسمى الوظيفي</h4><div class="grid2">${VIEW_ROLES.filter(r => r === 'employee' || ROLES[r]).map(r => r === 'head' ? S.settings.departments.filter(d => !d.admin).slice(0, 6).map(d => `<button type="button" class="rc" data-action="viewAs" data-arg="role:head:${d.id}"><b>رئيس قسم — ${esc(d.name)}</b><span>يرى قسمه ولوحته ومهامه</span></button>`).join('') : `<button type="button" class="rc" data-action="viewAs" data-arg="role:${r}"><b>${esc(r === 'employee' ? 'موظف عادي (بوابتي فقط)' : ROLES[r])}</b><span>${esc(typeof ROLE_HINTS !== 'undefined' && ROLE_HINTS[r] ? ROLE_HINTS[r].slice(0, 70) : '')}</span></button>`).join('')}</div>
+    <h4 style="margin:14px 0 6px">موظف بعينه</h4><div class="search" style="margin-bottom:8px">${icon('search')}<input placeholder="بحث بالاسم" data-vq="1"></div><div class="list" style="max-height:34vh;overflow:auto">${people.map(p => `<div class="item" data-action="viewAs" data-arg="person:${esc(p.id)}" data-vname="${esc(p.name)}" style="padding:8px 12px;cursor:pointer"><div class="main"><div class="title">${esc(p.name)}</div><div class="meta"><span class="badge acc">${esc(ROLES[p.role] || p.role)}</span>${p.deptIds && p.deptIds.length ? `<span>${esc(p.deptIds.map(deptName).join('، '))}</span>` : ''}</div></div></div>`).join('')}</div>`, footer: `<button type="button" class="btn ghost" data-action="closemodal">إغلاق</button>` });
+};
+document.addEventListener('input', e => { const t = e.target; if (!t || !t.dataset || !t.dataset.vq) return; const q = t.value.toLowerCase(); document.querySelectorAll('#mform [data-vname]').forEach(x => { x.style.display = x.dataset.vname.toLowerCase().includes(q) ? '' : 'none'; }); });
+ACTIONS.viewAs = arg => { if (!isOwnerReal() && !isViewing()) return; const s = viewSessionFor(arg); if (!s) { toast('تعذّر تجهيز العرض', 'err'); return; } S.viewOrig = S.viewOrig || S.session; S.session = s; S.ui.crmBrand = null; S.ui._permOpen = true; closeModal(); S.route = { view: homeView(), id: null, sub: null }; location.hash = '#/' + S.route.view; render(true); toast(`أنت الآن تشاهد كـ ${s.viewLabel}`); };
+ACTIONS.viewBack = () => { if (!S.viewOrig) return; S.session = S.viewOrig; S.viewOrig = null; S.ui.crmBrand = null; location.hash = '#/dashboard'; render(true); toast('رجعت لحسابك'); };
+ACTIONS.permToggle = () => { S.ui._permOpen = !S.ui._permOpen; render(false); };
+/* writes made while viewing are stamped with the owner's name */
+(() => { const save = Store.save.bind(Store), upd = Store.update.bind(Store); Store.save = (col, doc, o) => { if (S.viewOrig && doc && typeof doc === 'object') doc.viewedBy = S.viewOrig.name || 'المالك'; return save(col, doc, o); }; Store.update = (col, id, patch, o) => { if (S.viewOrig && patch && typeof patch === 'object') patch.viewedBy = S.viewOrig.name || 'المالك'; return upd(col, id, patch, o); }; })();
+function permSummary() {
+  const r = role(); const pages = NAV.filter(n => n.id && canSee(n.id)).map(n => String(typeof n.label === 'function' ? n.label() : n.label || n.id).replace(/ — .*$/, ''));
+  const can = []; const no = [];
+  const t = (ok, label) => (ok ? can : no).push(label);
+  t(canDo('sales'), 'إنشاء عروض أسعار وأوامر'); t(canDo('orders.edit'), 'تعديل أوامر التشغيل'); t(canDo('stage.update'), 'تحديث مراحل التصنيع'); t(canDo('inventory.edit'), 'حركة المخزون والخامات'); t(typeof canTasks === 'function' && canTasks(), 'إنشاء مهام'); t(canDo('requests.decide'), 'اعتماد الطلبات'); t(typeof canFleet === 'function' && canFleet(), 'إدارة حركة النقل');
+  t(typeof priceAllowed === 'function' ? priceAllowed() : seesFinance(), 'رؤية الأسعار وقيم العروض'); t(canSee('quotes'), 'فتح عروض الأسعار'); t(canSee('invoices'), 'الفواتير'); t(seesWages(), 'المرتبات والأجور'); t(canSee('workers'), 'ملفات الموظفين'); t(canSee('settings'), 'الإعدادات');
+  const bs = typeof crmBrandsOf === 'function' ? crmBrandsOf() : [];
+  return `<div class="card permcard" style="margin-bottom:14px"><div class="cardhead"><h3>${icon('user')} صلاحيات: ${esc(ROLES[r] || (r === 'viewer' ? 'موظف عادي' : r))}</h3><div class="grow"></div><button class="btn xs ghost" data-action="permToggle">${S.ui._permOpen ? 'إخفاء' : 'عرض'}</button></div>${S.ui._permOpen ? `<div class="cols"><div><h4>يرى الصفحات</h4><ul>${pages.map(p => `<li>${esc(p)}</li>`).join('') || '<li>—</li>'}</ul>${bs.length ? `<div class="small" style="margin-top:6px">CRM: ${bs.map(b => esc(brandKit(b).name)).join(' · ')}</div>` : ''}</div><div><h4 class="ok">يقدر</h4><ul>${can.map(x => `<li class="ok">✓ ${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div><div><h4 class="no">ممنوع</h4><ul>${no.map(x => `<li class="no">✕ ${esc(x)}</li>`).join('') || '<li>—</li>'}</ul></div></div>` : ''}</div>`;
+}
+RENDER_HOOKS.push(() => {
+  if (!S.session) return;
+  if (isOwnerReal()) { const chip = document.querySelector('.side .userchip'); if (chip && !document.querySelector('.side .viewbtn')) chip.insertAdjacentHTML('afterend', `<button class="viewbtn" data-action="viewPick">${icon('user')}<span>شوف السيستم بعين…</span></button>`); }
+  if (isViewing()) {
+    const app = document.querySelector('.app'); if (app && !document.querySelector('.viewbar')) app.insertAdjacentHTML('afterbegin', `<div class="viewbar">${icon('alert')}<span>أنت تشاهد كـ <b>${esc(S.session.viewLabel || S.session.name)}</b> — كل اللي شايفه دلوقتي هو ما يراه هذا الدور بالظبط</span><div class="grow"></div><button class="btn sm" data-action="viewPick">دور آخر</button><button class="btn sm" data-action="viewBack">${icon('back')}ارجع لحسابي</button></div>`);
+    const v = document.getElementById('view'); if (v && !v.querySelector('.permcard')) v.insertAdjacentHTML('afterbegin', permSummary());
+  }
+});
+/* ---------- task form: brand → filtered orders, attachments ---------- */
+function taskForm(t) {
+  let html = taskFormBase(t);
+  const b = t.brandId || (t.orderId ? (byId('orders', t.orderId) || {}).brandId : '') || '';
+  const sel = field('البراند', `<select id="f-brandId" name="brandId"><option value="">— كل البراندات —</option>${opts(S.settings.brands, b, x => brandKit(x.id).name)}</select>`);
+  html = html.replace(`<div class="field "><label>أمر التشغيل</label>`, sel + `<div class="field "><label>أمر التشغيل</label>`);
+  html = html.replace(/<select id="f-orderId" name="orderId">([\s\S]*?)<\/select>/, (m, inner) => `<select id="f-orderId" name="orderId">${inner.replace(/<option value="([^"]+)"/g, (mm, id) => `<option value="${id}" data-brand="${esc((byId('orders', id) || {}).brandId || '')}"`)}</select>`);
+  if (!t.id) { const i = html.lastIndexOf('</div>'); html = html.slice(0, i) + `<div class="field full"><label>مرفقات (صور / فيديو) — تُنشر في شات المهمة</label><input type="file" id="f-attach" name="attach" accept="image/*,video/*" multiple><div class="tattach" id="tattach"></div></div>` + html.slice(i); }
+  return html;
+}
+function filterTaskOrders(f) { const b = (f.querySelector('#f-brandId') || {}).value || ''; const sel = f.querySelector('#f-orderId'); if (!sel) return; Array.from(sel.options).forEach(o => { if (!o.value) return; const ob = o.dataset.brand || ''; o.hidden = !!b && ob !== b; o.disabled = o.hidden; }); if (sel.selectedOptions[0] && sel.selectedOptions[0].hidden) sel.value = ''; }
+document.addEventListener('change', ev => { const t = ev.target; const f = t && t.closest && t.closest('#mform'); if (!f) return; if (t.id === 'f-brandId' && f.querySelector('#f-orderId')) filterTaskOrders(f); if (t.id === 'f-attach') { const box = f.querySelector('#tattach'); if (!box) return; box.innerHTML = Array.from(t.files || []).map(fl => fl.type.startsWith('image/') ? `<div class="tf"><img src="${URL.createObjectURL(fl)}" alt=""></div>` : `<div class="tf">${icon('play')}${esc(fl.name.slice(0, 14))}</div>`).join(''); } });
+(() => { const mo = new MutationObserver(() => { const f = document.getElementById('mform'); if (!f || f.dataset.tfilt) return; if (!f.querySelector('#f-brandId') || !f.querySelector('#f-orderId') || !f.querySelector('#f-assigneeId')) return; f.dataset.tfilt = '1'; filterTaskOrders(f); }); mo.observe(document.body, { childList: true, subtree: true }); })();
+async function saveTask(f, t) {
+  const files = Array.from((f.querySelector('#f-attach') || {}).files || []); const d = formData(f);
+  const r = await saveTaskBase(f, t); if (r === false) return false;
+  const doc = t.id ? byId('tasks', t.id) : sortBy(list('tasks').filter(x => x.title === d.title && x.createdBy === (S.session?.id || null)), x => x.createdAt || '', true)[0];
+  if (!doc) return r;
+  if ((d.brandId || '') !== (doc.brandId || '')) await Store.update('tasks', doc.id, { brandId: d.brandId || null }, { silent: true });
+  for (const fl of files) { if (fl.size > MAX_FILE_BYTES) { toast(`${fl.name}: أكبر من 20 ميجا — لم يُرفع`, 'err'); continue; } try { if (fl.type.startsWith('video/')) await taskPostVideo(byId('tasks', doc.id), fl); else await taskPost(byId('tasks', doc.id), '', fl); } catch (e) { console.warn('attach', e); toast(`تعذّر رفع ${fl.name}`, 'err'); } }
+  return r;
+}
+async function taskPostVideo(t, file) {
+  const m = { id: uid(), at: nowISO(), by: S.session?.id || S.session?.workerId || null, byName: S.session?.name || '', text: '' };
+  const doc = await proofAttach(file, { kind: 'chat', ownerKind: 'task', ownerId: t.id }); m.videoFileId = doc.id; m.name = file.name;
+  const seen = Object.assign({}, t.threadSeen || {}); if (m.by) seen[m.by] = m.at; if (S.session?.workerId) seen[S.session.workerId] = m.at;
+  await Store.update('tasks', t.id, { thread: taskThread(t).concat([m]), threadSeen: seen, lastMsgAt: m.at, updatedAt: nowISO() });
+  const me = myIds(); const to = Array.from(new Set(taskParties(t).map(p => p.id).filter(id => id && !me.includes(id)))); if (typeof pushSend === 'function') pushSend(to, `${S.session?.name || ''} — ${t.title}`.slice(0, 100), '🎬 فيديو', `/#/tasks/${t.id}`, 'task-' + t.id);
+}
+/* chat: video + system messages */
+function chatHTML(t) {
+  let h = chatHTMLNotif(t); const th = taskThread(t);
+  th.forEach(m => { if (!m.videoFileId && !m.sys) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; if (m.videoFileId) h = h.slice(0, j) + `<button type="button" class="vid" data-action="fileOpen" data-arg="${esc(m.videoFileId)}">${icon('play')} فيديو${m.name ? ' — ' + esc(m.name.slice(0, 30)) : ''}</button>` + h.slice(j); });
+  return h;
+}
+/* add a party: system line + push */
+ACTIONS.taskAddParty = id => {
+  const t = byId('tasks', id); if (!t || !writable()) return; const have = new Set(taskParties(t).map(p => p.id));
+  const people = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended' && w.role && w.role !== 'none' && !have.has(w.id)), w => w.name).map(w => ({ id: w.id, name: `${w.name} — ${deptName(w.deptId)}` })).concat(list('staff').filter(s => s.active !== false && !have.has(s.id) && s.id !== 'local-admin').map(s => ({ id: s.id, name: `${s.name} (${ROLES[s.role] || ''})` })));
+  openModal({ title: 'إضافة شخص للمحادثة', body: `<p class="small ink2" style="margin:0 0 10px">الشخص المُضاف يرى المهمة وكل الرسائل والمرفقات القديمة، ويوصله إشعار بأي رسالة جديدة.</p><div class="form">${field('الشخص', `<select id="f-pid" name="pid">${opts(people, '')}</select>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); const p = people.find(x => x.id === d.pid); if (!p) return false; const name = p.name.split(' — ')[0].split(' (')[0]; const now = nowISO(); const m = { id: uid(), at: now, by: S.session?.id || null, byName: S.session?.name || '', text: `انضم ${name} للمحادثة — بإضافة ${S.session?.name || ''}`, sys: true }; await Store.update('tasks', id, { participants: (t.participants || []).concat([{ id: p.id, name, addedBy: S.session?.id || null, at: now }]), thread: taskThread(t).concat([m]), lastMsgAt: now, updatedAt: now }); if (typeof pushSend === 'function') pushSend([p.id], `أُضفت لمهمة: ${t.title}`.slice(0, 100), `${S.session?.name || ''} أضافك لمحادثة المهمة`, `/#/tasks/${t.id}`, 'task-' + t.id); toast(`تمت إضافة ${name}`); } });
+};
+function taskVisible(t) { if (taskVisibleBase(t)) return true; const me = myIds(); return (t.participants || []).some(p => me.includes(p.id)); }
+RENDER_HOOKS.push(() => { document.querySelectorAll('#tchat .msg').forEach(el => { const tx = el.querySelector('.tx'); if (tx && /^انضم .+ للمحادثة/.test(tx.textContent)) el.classList.add('sys'); }); });
+/* ---------- floating «+» quick task ---------- */
+RENDER_HOOKS.push(() => {
+  const ok = !!S.session && typeof canTasks === 'function' && canTasks() && !document.querySelector('#loginform');
+  let fab = document.querySelector('.fab'); if (!ok) { if (fab) fab.remove(); return; }
+  if (!fab) { document.body.insertAdjacentHTML('beforeend', `<button class="fab" data-action="taskNew" title="مهمة سريعة" aria-label="مهمة جديدة">${icon('plus')}</button>`); }
+});
+(() => { const mo = new MutationObserver(() => { document.body.classList.toggle('fab-hide', !!document.getElementById('mform') || !!document.querySelector('.overlay')); }); mo.observe(document.body, { childList: true, subtree: true }); })();
 boot();
 </script>
 
