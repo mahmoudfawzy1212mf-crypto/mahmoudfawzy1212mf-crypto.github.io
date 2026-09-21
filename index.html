@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260921-1658-352be0";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260921-1710-7fe1a8";</script>
 
 <script>
 'use strict';
@@ -11076,7 +11076,7 @@ body.nfnocopy input,body.nfnocopy textarea,body.nfnocopy [contenteditable]{-webk
 @media print{body.nfnoprint #root,body.nfnoprint #nfwm{display:none!important}body.nfnoprint:after{content:"الطباعة غير مسموحة — سيستم Ninety Fabrication";display:block;padding:40px;font-size:20px}}
 </style>`);
 const privacyCfg = () => Object.assign({ watermark: true, blur: true, nocopy: true }, (S.settings && S.settings.privacy) || {});
-const privacyExempt = () => !S.session || isAdmin();
+const privacyExempt = () => !S.session || isAdmin() || (typeof isViewing === 'function' && isViewing());
 function wmText() { const s = S.session || {}; const w = s.workerId ? byId('workers', s.workerId) : null; const ph = (w && (w.phone || w.workPhone)) || ''; return `${s.name || ''} ${ph ? '· ' + ph : ''} · ${new Date().toLocaleString('ar-EG', { hour12: false }).replace(/[‏]/g, '')}`; }
 function wmRender() {
   let el = document.getElementById('nfwm'); const c = privacyCfg();
@@ -11089,7 +11089,9 @@ RENDER_HOOKS.push(wmRender); setInterval(wmRender, 60000); window.addEventListen
 (() => {
   const msg = document.createElement('div'); msg.id = 'nfblurmsg'; msg.textContent = 'ارجع للتطبيق لعرض المحتوى'; document.body.appendChild(msg);
   const on = () => { if (privacyCfg().blur && !privacyExempt()) document.body.classList.add('nfblur'); }; const off = () => document.body.classList.remove('nfblur');
-  document.addEventListener('visibilitychange', () => { if (document.hidden) on(); else off(); }); window.addEventListener('blur', () => setTimeout(() => { if (!document.hasFocus()) on(); }, 150)); window.addEventListener('focus', off);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) on(); else off(); }); window.addEventListener('focus', off);
+  /* v4.10: لا تعتيم عند مجرد فقدان تركيز النافذة (كان يعلق الشاشة على الديسكتوب) — التعتيم عند إخفاء التبويب/التطبيق فقط، وأي لمسة أو حركة تعيد المحتوى */
+  ['pointerdown', 'mousemove', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (!document.hidden) off(); }, { passive: true }));
   RENDER_HOOKS.push(() => { const c = privacyCfg(); const ex = privacyExempt(); document.body.classList.toggle('nfnocopy', !!c.nocopy && !ex); document.body.classList.toggle('nfnoprint', !!c.nocopy && !ex); });
   document.addEventListener('copy', e => { if (privacyCfg().nocopy && !privacyExempt() && !e.target.closest('input,textarea,[contenteditable]')) { e.preventDefault(); toast('النسخ غير مسموح — بيانات سرّية', 'err'); } });
   document.addEventListener('contextmenu', e => { if (privacyCfg().nocopy && !privacyExempt() && !e.target.closest('input,textarea')) e.preventDefault(); });
