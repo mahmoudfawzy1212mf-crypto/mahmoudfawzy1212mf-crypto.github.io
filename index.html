@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260921-0542-54abcd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260921-0738-bd75c5";</script>
 
 <script>
 'use strict';
@@ -1676,7 +1676,7 @@ const Store = {
     const ym = monthOf(addDays(todayISO(), -75));
     for (const c of ['attendance', 'movements']) {
       S.unsub.push(db.collection(c).where('month', '>=', ym).onSnapshot(snap => {
-        snap.docs.forEach(d => S.data[c].set(d.id, d.data()));
+        snap.docs.forEach(d => { if (typeof docInflight === 'function' && docInflight(c, d.id)) return; S.data[c].set(d.id, d.data()); });
         snap.docChanges().forEach(ch => { if (ch.type === 'removed') S.data[c].delete(ch.doc.id); });
         S.loaded[c] = true; rerender();
       }, onErr(c)));
@@ -5960,10 +5960,10 @@ async function authenticateSb(identifier, password) {
 let _sbKick = 0;
 function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
 /* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
-async function sbAccessCheck() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
+async function sbAccessCheckBase() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
 /* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
 let _sbLastRefresh = 0;
-async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 15000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } }); if (changed) render(false); } catch (e) { /* offline */ } }
+async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 15000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } }); if (changed) render(false); } catch (e) { /* offline */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
 document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
@@ -11932,6 +11932,119 @@ RENDER_HOOKS.push(() => {
   if (!fab) { document.body.insertAdjacentHTML('beforeend', `<button class="fab" data-action="taskNew" title="مهمة سريعة" aria-label="مهمة جديدة">${icon('plus')}</button>`); }
 });
 (() => { const mo = new MutationObserver(() => { document.body.classList.toggle('fab-hide', !!document.getElementById('mform') || !!document.querySelector('.overlay')); }); mo.observe(document.body, { childList: true, subtree: true }); })();
+/* =====================================================================
+   v4.8 — تجميد الطوارئ + تعديلات 21 سبتمبر:
+   · زر «تجميد» (المالك / الحسابات / المدير التجاري): السيستم يتقفل من السيرفر لكل الأجهزة → شاشة سودا؛
+     الفك للمالك فقط بكود يصله واتساب/SMS/إشعار (Edge Function «freeze»). ضغطة مطوّلة 3 ث على الشاشة السودا
+     أو رابط #/unfreeze?c=… يفتح خانة الكود.
+   · كلمة السر جنب تسجيل الخروج · الشريط السفلي ثابت على iOS (بدون backdrop-filter)
+   · مهام «+»: المكلَّف والقسم في نطاق اختصاص المنشئ فقط
+   · البصمة: لا تُستبدل بنسخة أقدم من السيرفر أثناء الكتابة (docInflight)
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.acct{display:grid!important;grid-template-columns:1fr 1fr;gap:6px}.acct a{justify-content:center;white-space:nowrap}.acct a:first-child:nth-last-child(3){grid-column:1/-1}
+.tabbar{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:var(--surface)!important;transform:translateZ(0);will-change:transform}
+.frzbtn{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(220,38,38,.35);background:rgba(220,38,38,.08);color:#dc2626;font-weight:700;font-size:12.5px;cursor:pointer}
+.frzbtn svg{width:16px;height:16px}@media (max-width:700px){.frzbtn span{display:none}.frzbtn{width:38px;padding:0;justify-content:center}}
+html.nf-frozen,html.nf-frozen body{background:#000!important;overflow:hidden!important}html.nf-frozen body>*:not(#nffreeze){display:none!important}
+#nffreeze{position:fixed;inset:0;background:#000;z-index:100000;display:none;color:#fff;font-family:inherit;direction:rtl;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html.nf-frozen #nffreeze{display:block}
+#nffreeze .unlock{position:absolute;inset:auto 0 0 0;margin:auto;max-width:360px;padding:22px 20px 40px;display:none;flex-direction:column;gap:10px;align-items:stretch;left:0;right:0;bottom:0}
+#nffreeze.ask .unlock{display:flex}#nffreeze .unlock input{font-size:26px;letter-spacing:8px;text-align:center;direction:ltr;padding:10px;border-radius:12px;border:1px solid #333;background:#111;color:#fff;font-family:inherit}
+#nffreeze .unlock button{padding:12px;border-radius:12px;border:0;background:#fff;color:#000;font-weight:700;font-size:15px;font-family:inherit;cursor:pointer}#nffreeze .unlock button.g{background:#222;color:#bbb}
+#nffreeze .unlock .m{font-size:12.5px;color:#888;text-align:center;line-height:1.7}#nffreeze .unlock .e{color:#f87171;font-size:13px;text-align:center;min-height:18px}
+</style>`);
+/* ---------- in-flight writes (attendance punches) ---------- */
+const _inflight = new Map();
+function docInflight(col, id) { const t = _inflight.get(col + '/' + id); return !!t && Date.now() - t < 8000; }
+(() => { const upd = Store.update.bind(Store); Store.update = async (col, id, patch, o) => { const k = col + '/' + id; if (col === 'attendance') _inflight.set(k, Date.now()); try { return await upd(col, id, patch, o); } finally { if (col === 'attendance') setTimeout(() => { if (_inflight.get(k) && Date.now() - _inflight.get(k) >= 2500) _inflight.delete(k); }, 3000); } }; })();
+/* ---------- freeze state ---------- */
+const FREEZE_ROLES = ['admin', 'acc', 'bdd'];
+const canFreeze = () => !!S.session && FREEZE_ROLES.includes(role()) && !(typeof isViewing === 'function' && isViewing());
+S.frozen = false;
+function frozenLocal() { try { return localStorage.getItem('nf.frozen') === '1'; } catch (e) { return false; } }
+async function freezeStatus() {
+  if (typeof sbOn === 'function' && sbOn() && S.sb) { try { const r = await S.sb.rpc('nf_frozen'); if (!r.error) return !!r.data; } catch (e) { /* offline: keep last state */ } return S.frozen; }
+  return frozenLocal();
+}
+function applyFrozen(on) {
+  const was = S.frozen; S.frozen = !!on; const root = document.documentElement;
+  if (S.frozen) { ensureFreezeScreen(); root.classList.add('nf-frozen'); }
+  else { root.classList.remove('nf-frozen'); const el = document.getElementById('nffreeze'); if (el) el.classList.remove('ask'); if (was) { toast('تم فك التجميد — السيستم يعمل'); location.hash = '#/dashboard'; render(true); if (typeof sbRefreshShared === 'function') setTimeout(sbRefreshShared, 500); } }
+}
+function ensureFreezeScreen() {
+  if (document.getElementById('nffreeze')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div id="nffreeze"><div class="unlock"><div class="m">فك التجميد — للمالك فقط<br>أدخل الكود الذي وصلك</div><input id="frz-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••"><div class="e" id="frz-err"></div><button type="button" id="frz-go">فك التجميد</button><button type="button" class="g" id="frz-resend">إعادة إرسال الكود</button><button type="button" class="g" id="frz-hide">إخفاء</button></div></div>`);
+  const el = document.getElementById('nffreeze');
+  let t0 = 0, timer = null; const start = e => { if (e.target.closest('.unlock')) return; t0 = Date.now(); clearTimeout(timer); timer = setTimeout(() => el.classList.add('ask'), 3000); };
+  const stop = () => { clearTimeout(timer); };
+  el.addEventListener('pointerdown', start); el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop); el.addEventListener('pointerleave', stop);
+  el.addEventListener('contextmenu', e => e.preventDefault());
+  el.querySelector('#frz-hide').addEventListener('click', () => el.classList.remove('ask'));
+  el.querySelector('#frz-go').addEventListener('click', () => unfreezeWith(el.querySelector('#frz-code').value));
+  el.querySelector('#frz-code').addEventListener('keydown', e => { if (e.key === 'Enter') unfreezeWith(e.target.value); });
+  el.querySelector('#frz-resend').addEventListener('click', async () => { const err = el.querySelector('#frz-err'); err.textContent = ''; if (!(sbOn() && S.sb)) { err.textContent = 'النسخة المحلية: الكود ظهر عند التجميد'; return; } const r = await S.sb.functions.invoke('freeze', { body: { action: 'resend' } }); err.textContent = r.error || (r.data && r.data.error) ? 'تعذّر الإرسال — تأكد أنك داخل بحساب المالك' : 'أُرسل كود جديد'; });
+}
+function freezeShowAsk(code) { ensureFreezeScreen(); const el = document.getElementById('nffreeze'); el.classList.add('ask'); if (code) el.querySelector('#frz-code').value = code; setTimeout(() => el.querySelector('#frz-code').focus(), 50); }
+async function unfreezeWith(code) {
+  code = String(code || '').replace(/\D/g, ''); const el = document.getElementById('nffreeze'); const err = el && el.querySelector('#frz-err'); if (err) err.textContent = '';
+  if (code.length !== 6) { if (err) err.textContent = 'الكود 6 أرقام'; return; }
+  if (sbOn() && S.sb) {
+    const r = await S.sb.functions.invoke('freeze', { body: { action: 'unfreeze', code } });
+    const d = r.data || {}; if (r.error || d.error) { if (err) err.textContent = d.error === 'bad_code' ? 'الكود غير صحيح' : d.error === 'forbidden' || d.error === 'unauthorized' ? 'الفك للمالك فقط — ادخل بحسابك أولًا' : 'تعذّر الاتصال'; return; }
+    applyFrozen(false); return;
+  }
+  let ok = false; try { ok = localStorage.getItem('nf.frozencode') === code && !!S.session && isAdmin(); } catch (e) { /* ignore */ }
+  if (!ok) { if (err) err.textContent = !S.session || !isAdmin() ? 'الفك للمالك فقط' : 'الكود غير صحيح'; return; }
+  try { localStorage.removeItem('nf.frozen'); localStorage.removeItem('nf.frozencode'); } catch (e) { /* ignore */ }
+  applyFrozen(false);
+}
+ACTIONS.freezeAsk = () => {
+  if (!canFreeze()) return;
+  openModal({ title: 'تجميد السيستم الآن؟', cls: 'frzm', body: `<div class="banner crit" style="margin:0 0 10px">${icon('alert')}<span><b>السيستم كله هيتقفل فورًا على كل الأجهزة</b> — شاشة سودا للجميع بدون أي بيانات.</span></div><p class="small ink2" style="margin:0">فك التجميد للمالك فقط بكود يوصله على موبايله. يتسجّل اسمك ووقت الضغط.</p>`, submitLabel: 'نعم — جمّد الآن', onSubmit: async () => { await doFreeze(); } });
+};
+async function doFreeze() {
+  if (sbOn() && S.sb) {
+    const r = await S.sb.functions.invoke('freeze', { body: { action: 'freeze' } });
+    const d = r.data || {}; if (r.error || d.error) { toast(d.error === 'forbidden' ? 'غير مصرَّح' : 'تعذّر التجميد — تحقق من الاتصال', 'err'); return false; }
+    applyFrozen(true); return true;
+  }
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  try { localStorage.setItem('nf.frozen', '1'); localStorage.setItem('nf.frozencode', code); } catch (e) { /* ignore */ }
+  console.info('freeze code (local)', code); S._lastFreezeCode = code;
+  applyFrozen(true); return true;
+}
+/* access check: while frozen the server answers nf_role() = null — that is the freeze, not a revoked account */
+async function sbAccessCheck() { if (!sbOn() || !S.sbUser || document.hidden) return; const on = await freezeStatus(); if (on !== S.frozen) applyFrozen(on); if (on) return; return sbAccessCheckBase(); }
+/* poll every 15s + on focus; also honour #/unfreeze?c=… links */
+async function freezeTick() { if (document.hidden) return; const on = await freezeStatus(); if (on !== S.frozen) applyFrozen(on); }
+setInterval(freezeTick, 15000); document.addEventListener('visibilitychange', () => { if (!document.hidden) freezeTick(); }); window.addEventListener('focus', freezeTick);
+document.addEventListener('nf:ready', () => setTimeout(freezeTick, 800)); setTimeout(freezeTick, 2500);
+function freezeRouteCheck() { const h = location.hash || ''; const m = h.match(/^#\/unfreeze(?:\?c=(\d{6}))?/); if (!m) return; freezeTick().then(() => { if (S.frozen) freezeShowAsk(m[1] || ''); else { location.hash = '#/dashboard'; } }); }
+window.addEventListener('hashchange', freezeRouteCheck); setTimeout(freezeRouteCheck, 1200);
+/* the button in the top bar */
+RENDER_HOOKS.push(() => { if (!canFreeze()) return; const box = document.querySelector('.tb-actions'); if (!box || box.querySelector('.frzbtn')) return; box.insertAdjacentHTML('beforeend', `<button class="frzbtn" data-action="freezeAsk" title="تجميد السيستم (طوارئ)">${icon('alert')}<span>تجميد</span></button>`); });
+/* ---------- tasks: assignee / department limited to the creator's own scope ---------- */
+function taskScopeIds() {
+  const r = role(); if (['admin', 'vice', 'manager', 'hr'].includes(r)) return null;
+  const me = S.session || {}; const ids = new Set([me.id, me.workerId].filter(Boolean)); const w = me.workerId ? byId('workers', me.workerId) : null;
+  let depts = [];
+  if (r === 'head') depts = myDepts();
+  else if (w && w.deptId) depts = [w.deptId];
+  list('workers').forEach(x => { if (depts.includes(x.deptId) && x.status !== 'inactive') ids.add(x.id); });
+  return { ids, depts };
+}
+(() => {
+  const base = typeof taskForm === 'function' ? taskForm : null; if (!base) return;
+  window.__taskFormScoped = true;
+  const scoped = t => {
+    let html = base(t); const sc = taskScopeIds(); if (!sc) return html;
+    html = html.replace(/<select id="f-assigneeId" name="assigneeId">([\s\S]*?)<\/select>/, (m, inner) => `<select id="f-assigneeId" name="assigneeId">${inner.replace(/<option value="([^"]*)"[^>]*>[^<]*<\/option>/g, (mm, id) => (!id || sc.ids.has(id) || id === t.assigneeId) ? mm : '')}</select>`);
+    if (sc.depts.length) html = html.replace(/<select id="f-deptId" name="deptId">([\s\S]*?)<\/select>/, (m, inner) => `<select id="f-deptId" name="deptId">${inner.replace(/<option value="([^"]*)"[^>]*>[^<]*<\/option>/g, (mm, id) => (!id || sc.depts.includes(id) || id === t.deptId) ? mm : '')}</select>`);
+    return html;
+  };
+  taskForm = scoped;
+})();
 boot();
 </script>
 
