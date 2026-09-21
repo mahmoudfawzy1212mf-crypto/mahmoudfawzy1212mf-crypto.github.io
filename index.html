@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260921-1746-49e1a7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260921-1805-95bc70";</script>
 
 <script>
 'use strict';
@@ -12510,8 +12510,8 @@ const WA_COLORS = ['#e542a3', '#1f7aec', '#00a884', '#e3a300', '#8e44ad', '#d354
 const whoColor = id => WA_COLORS[Math.abs(String(id || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % WA_COLORS.length];
 function chatHTML(t) {
   const th = taskThread(t); let last = null, lastBy = null; const rows = [];
-  th.forEach(m => {
-    const d = (m.at || '').slice(0, 10), tm = (m.at || '').slice(11, 16);
+  th.forEach((m, mi) => {
+    const mid = m.id || ('i' + mi); const d = (m.at || '').slice(0, 10), tm = (m.at || '').slice(11, 16);
     if (d !== last) { rows.push(`<div class="day">${waDay(d)}</div>`); last = d; lastBy = null; }
     if (m.sys) { rows.push(`<div class="sysl">${esc(m.text || '')}</div>`); lastBy = null; return; }
     const mine = msgMine(m); const first = lastBy !== m.by; lastBy = m.by;
@@ -12520,9 +12520,11 @@ function chatHTML(t) {
     if (m.audioFileId) body += `<div class="aud"><button class="btn sm" data-action="voicePlay" data-arg="${esc(m.audioFileId)}">▶</button><span>🎤 رسالة صوتية${m.dur ? ` · ${m.dur} ث` : ''}</span></div>`;
     if (m.videoFileId) body += `<button type="button" class="vid btn sm" data-action="fileOpen" data-arg="${esc(m.videoFileId)}">${icon('play')} فيديو${m.name ? ' — ' + esc(String(m.name).slice(0, 30)) : ''}</button>`;
     if (thumb) body += `<img src="${esc(thumb)}" alt="" data-action="lightboxSrc" data-arg="${esc(thumb)}">`;
-    if (m.text) body += `<div class="tx">${esc(m.text)}</div>`;
+    if (m.text) body += `<div class="tx">${m.mentions && m.mentions.length && typeof mentionHtml === 'function' ? mentionHtml(m.text, mentionPeople(t)) : esc(m.text)}</div>`;
     if (!body) body = '<div class="tx muted">مرفق</div>';
-    rows.push(`<div class="bb ${mine ? 'me' : ''} ${first ? 'first' : ''}">${first ? `<div class="who" style="color:${whoColor(m.by)}">${esc(m.byName || '')}</div>` : ''}${body}<span class="tm">${tm}${mine ? ' ✓✓' : ''}</span></div>`);
+    const quote = m.replyTo ? `<div class="qt" data-action="chatJump" data-arg="${esc(m.replyTo.id || '')}"><b>${esc(m.replyTo.byName || '')}</b>${esc(m.replyTo.text || '')}</div>` : '';
+    const rp = writable() && taskIsParty(t) ? `<button type="button" class="rp" title="رد" data-action="chatReply" data-arg="${t.id}:${mid}">↩</button>` : '';
+    rows.push(`<div class="bb ${mine ? 'me' : ''} ${first ? 'first' : ''}" data-mid="${esc(mid)}">${rp}${first ? `<div class="who" style="color:${whoColor(m.by)}">${esc(m.byName || '')}</div>` : ''}${quote}${body}<span class="tm">${tm}${mine ? ' ✓✓' : ''}</span></div>`);
   });
   const box = writable() && taskIsParty(t) ? `<div class="wabox"><div class="in"><textarea id="tmsg" rows="1" placeholder="اكتب رسالة…" enterkeyhint="send"></textarea><button class="iconbtn" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">${icon('camera')}</button><button class="iconbtn recbtn" id="recbtn" data-action="taskChatVoice" data-arg="${t.id}" title="رسالة صوتية">${icon('mic')}</button></div><button class="snd" data-action="taskChatSend" data-arg="${t.id}" title="إرسال">${icon('send')}</button></div>` : '';
   return `<div class="chat wa" id="tchat">${rows.length ? rows.join('') : '<div class="sysl">لا توجد رسائل بعد — ابدأ المحادثة مع الأطراف المعنيين</div>'}</div>${box}`;
@@ -12609,6 +12611,129 @@ RENDER_HOOKS.push(() => {
   const v = document.getElementById('view'); if (!v || v.querySelector('#susrev')) return; const card = v.querySelector('.card'); if (!card) return;
   card.insertAdjacentHTML('afterend', `<div class="card" id="susrev"><div class="cardhead"><h3>مراجعة البصمة</h3></div><div class="small muted" style="margin-bottom:8px">اسأل الموظف: كان فين؟ ليه ما كمّلش حركة التحقق؟ لو الإجابة مقنعة اعتبرها سليمة، غير كده ارفضها. ثلاث بصمات مشبوهة في 30 يومًا تقفل حسابه تلقائيًا.</div><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm good" data-action="suspectOk" data-arg="${t.id}">${icon('check')}البصمة سليمة</button><button class="btn sm crit" data-action="suspectNo" data-arg="${t.id}">${icon('x')}بصمة مرفوضة — يوم غياب</button></div></div>`);
 });
+/* =====================================================================
+   95 — v4.11: شات المهمة: منشن @شخص (قائمة أثناء الكتابة + إشعار له + يُضاف كطرف)،
+   الرد على رسالة بعينها (اقتباس)، زر تذكير للمهام المهمة/العاجلة،
+   تصعيد المهمة المهمة غير المُشاهدة: 10 دقائق → المدير المباشر/رئيس القسم،
+   10 أخرى → مدير المصنع، 10 أخرى → المالك (السيرفر: Edge `remind` كل دقيقتين).
+   ===================================================================== */
+(() => { const st = document.createElement('style'); st.textContent = `
+.wa .bb .qt{border-inline-start:3px solid #00a884;background:rgba(0,0,0,.06);border-radius:6px;padding:4px 8px;margin:0 0 4px;font-size:12px;color:inherit;opacity:.85;cursor:pointer}
+html[data-theme=dark] .wa .bb .qt{background:rgba(255,255,255,.06)}
+.wa .bb .qt b{display:block;font-size:11px;color:#00a884}
+.wa .bb .mn{color:#1f7aec;font-weight:700}html[data-theme=dark] .wa .bb .mn{color:#53bdeb}
+.wa .bb .rp{position:absolute;top:2px;left:-26px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.08);color:inherit;display:none;align-items:center;justify-content:center;cursor:pointer;font-size:12px}
+.wa .bb.me .rp{left:auto;right:-26px}.wa .bb:hover .rp,.wa .bb:active .rp{display:flex}
+@media(hover:none){.wa .bb .rp{display:flex;opacity:.35}}
+.wareply{display:flex;align-items:center;gap:8px;margin:0 6px;padding:6px 10px;border-inline-start:3px solid #00a884;background:var(--surface-2,var(--surface));border-radius:8px;font-size:12px}
+.wareply .x{margin-inline-start:auto;border:0;background:transparent;cursor:pointer;font-size:16px;color:inherit}
+#mnpop{position:absolute;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:220px;overflow:auto;min-width:220px}
+#mnpop .it{padding:8px 12px;cursor:pointer;font-size:13px;display:flex;gap:8px;align-items:center}#mnpop .it:hover,#mnpop .it.on{background:var(--surface-2,rgba(0,0,0,.05))}
+#mnpop .it .av{width:26px;height:26px;border-radius:50%;background:#00a884;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none}
+.rembtn{color:#b45309}.rembtn.sent{opacity:.5}
+.esc-badge{background:#fee2e2;color:#991b1b;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:700}
+`; document.body.appendChild(st); })();
+
+/* ---------- people that can be mentioned ---------- */
+function mentionPeople(t) {
+  const out = new Map(); const add = (id, name, sub) => { if (id && name && !out.has(id)) out.set(id, { id, name, sub: sub || '' }); };
+  taskParties(t).forEach(p => add(p.id, p.name, p.why));
+  list('workers').forEach(w => { if (w.status !== 'inactive' && w.status !== 'suspended') add(w.id, w.name, deptName(w.deptId)); });
+  list('staff').forEach(s => { if (s.active !== false && s.id !== 'local-admin') add(s.id, s.name, ROLES[s.role] || ''); });
+  return Array.from(out.values());
+}
+const mentionRe = /(^|\s)@([^\s@]+(?:\s[^\s@]+)?)/g;
+function mentionsIn(text, people) {
+  const ids = new Set(); const names = people.map(p => p.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  let s = String(text || ''); let i;
+  while ((i = s.indexOf('@')) >= 0) { const rest = s.slice(i + 1); const nm = names.find(n => rest.startsWith(n)); if (nm) { people.filter(p => p.name === nm).forEach(p => ids.add(p.id)); s = rest.slice(nm.length); } else s = rest; }
+  return Array.from(ids);
+}
+function mentionHtml(text, people) {
+  let h = esc(text || ''); const names = people.map(p => esc(p.name)).filter(Boolean).sort((a, b) => b.length - a.length);
+  names.forEach(n => { h = h.split('@' + n).join(`<span class="mn">@${n}</span>`); });
+  return h;
+}
+/* popup while typing "@" */
+let _mnState = null;
+function mnClose() { const p = document.getElementById('mnpop'); if (p) p.remove(); _mnState = null; }
+function mnOpen(ta, q) {
+  const t = S.route.view === 'tasks' && S.route.id ? byId('tasks', S.route.id) : null; if (!t) return mnClose();
+  const people = mentionPeople(t).filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8); if (!people.length) return mnClose();
+  let p = document.getElementById('mnpop'); if (!p) { p = document.createElement('div'); p.id = 'mnpop'; document.body.appendChild(p); }
+  p.innerHTML = people.map((x, i) => `<div class="it ${i === 0 ? 'on' : ''}" data-mn="${esc(x.id)}" data-mnname="${esc(x.name)}"><span class="av">${esc((x.name || '?').slice(0, 1))}</span><span>${esc(x.name)}<div class="tiny muted">${esc(x.sub)}</div></span></div>`).join('');
+  const r = ta.getBoundingClientRect(); p.style.left = Math.max(8, r.left) + 'px'; p.style.top = (window.scrollY + r.top - Math.min(220, 44 * people.length) - 8) + 'px'; p.style.width = Math.min(320, r.width) + 'px';
+  _mnState = { ta, q };
+}
+function mnInsert(ta, name) { const v = ta.value; const i = v.lastIndexOf('@'); if (i < 0) return; ta.value = v.slice(0, i) + '@' + name + ' '; ta.focus(); mnClose(); }
+document.addEventListener('input', e => { const ta = e.target; if (!ta || ta.id !== 'tmsg') return; const v = ta.value.slice(0, ta.selectionStart || ta.value.length); const m = /(?:^|\s)@([^\s@]*)$/.exec(v); if (m) mnOpen(ta, m[1]); else mnClose(); });
+document.addEventListener('keydown', e => { if (!_mnState) return; const p = document.getElementById('mnpop'); if (!p) return; const its = Array.from(p.querySelectorAll('.it')); let i = its.findIndex(x => x.classList.contains('on')); if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); i = (i + (e.key === 'ArrowDown' ? 1 : -1) + its.length) % its.length; its.forEach((x, k) => x.classList.toggle('on', k === i)); } else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); const it = its[i] || its[0]; if (it) mnInsert(_mnState.ta, it.dataset.mnname); } else if (e.key === 'Escape') mnClose(); }, true);
+document.addEventListener('pointerdown', e => { const it = e.target.closest('#mnpop .it'); if (it && _mnState) { e.preventDefault(); mnInsert(_mnState.ta, it.dataset.mnname); return; } if (!e.target.closest('#mnpop') && e.target.id !== 'tmsg') mnClose(); });
+
+/* ---------- reply / quote ---------- */
+ACTIONS.chatReply = arg => { const [tid, mid] = String(arg).split(':'); const t = byId('tasks', tid); const th = t ? taskThread(t) : []; const m = th.find(x => x.id === mid) || (/^i\d+$/.test(mid) ? th[+mid.slice(1)] : null); if (!m) return; const ta0 = document.getElementById('tmsg'); const keep = ta0 ? ta0.value : ''; S.ui.chatReply = { id: mid, byName: m.byName || '', text: (m.text || (m.audioFileId ? '🎤 رسالة صوتية' : m.videoFileId ? '🎬 فيديو' : m.fileId ? '📷 صورة' : '')).slice(0, 120) }; render(false); setTimeout(() => { const ta = document.getElementById('tmsg'); if (ta) { ta.value = keep; ta.focus(); } }, 50); };
+ACTIONS.chatReplyCancel = () => { const ta0 = document.getElementById('tmsg'); const keep = ta0 ? ta0.value : ''; S.ui.chatReply = null; render(false); setTimeout(() => { const ta = document.getElementById('tmsg'); if (ta) ta.value = keep; }, 50); };
+ACTIONS.chatJump = mid => { const el = document.querySelector(`.wa .bb[data-mid="${CSS.escape(mid)}"]`); if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.style.outline = '2px solid #00a884'; setTimeout(() => { el.style.outline = ''; }, 1200); } };
+/* the message being posted gets replyTo + mentions; mentioned people are notified and become parties */
+taskPost = (base => async (t, text, file, opts = {}) => {
+  const reply = S.ui.chatReply || null; const people = mentionPeople(t); const mentions = mentionsIn(text, people);
+  const ok = await base(t, text, file, opts); if (!ok) return ok;
+  try {
+    const cur = byId('tasks', t.id) || t; const th = taskThread(cur); const me = myIds(); let idx = -1; for (let i = th.length - 1; i >= 0; i--) if (me.includes(th[i].by)) { idx = i; break; }
+    if (idx >= 0 && (reply || mentions.length)) { const th2 = th.slice(); th2[idx] = Object.assign({}, th2[idx], reply ? { replyTo: reply } : {}, mentions.length ? { mentions } : {}); const patch = { thread: th2 }; const have = new Set(taskParties(cur).map(p => p.id)); const add = mentions.filter(id => !have.has(id)).map(id => { const p = people.find(x => x.id === id); return { id, name: p ? p.name : id }; }); if (add.length) patch.participants = (cur.participants || []).concat(add); await Store.update('tasks', t.id, patch, { silent: true }); }
+    if (mentions.length) pushSend(mentions.filter(id => !me.includes(id)), `${S.session?.name || ''} ذكرك في: ${cur.title}`.slice(0, 100), (text || '').slice(0, 140), `/#/tasks/${t.id}`, 'task-' + t.id);
+  } catch (e) { console.warn('mention', e); }
+  S.ui.chatReply = null; return ok;
+})(taskPost);
+/* the reply strip above the box (bubbles themselves are rendered in 94 with data-mid / quote / mentions) */
+chatHTML = (base => t => { let h = base(t); if (S.ui.chatReply && writable() && taskIsParty(t)) h = h.replace('<div class="wabox">', `<div class="wareply"><span><b>${esc(S.ui.chatReply.byName)}</b> · ${esc(S.ui.chatReply.text)}</span><button type="button" class="x" data-action="chatReplyCancel" title="إلغاء">×</button></div><div class="wabox">`); return h; })(chatHTML);
+RENDER_HOOKS.push(() => { if (S.route.view !== 'tasks') S.ui.chatReply = null; });
+
+/* ---------- reminder button for important / urgent tasks ---------- */
+const IMPORTANT = t => ['urgent', 'high'].includes(t.priority);
+ACTIONS.taskRemind = async id => {
+  const t = byId('tasks', id); if (!t || !writable() || !taskVisible(t)) return; const me = myIds();
+  const to = Array.from(new Set(taskParties(t).map(p => p.id).filter(x => x && !me.includes(x)))); if (t.assigneeId && !me.includes(t.assigneeId)) to.push(t.assigneeId);
+  const m = { id: uid(), at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '', sys: true, text: `🔔 ${S.session?.name || ''} بعت تذكير بالمهمة` };
+  await Store.update('tasks', id, { thread: taskThread(t).concat([m]), remindedAt: nowISO(), remindedBy: S.session?.name || '' }, { silent: true });
+  pushSend(to, `🔔 تذكير: ${t.title}`.slice(0, 100), `${S.session?.name || ''} بيفكّرك — ${TASK_PRIORITY[t.priority] ? TASK_PRIORITY[t.priority][0] : ''}${t.dueDate ? ' · ' + fmtDate(t.dueDate) : ''}`, `/#/tasks/${id}`, 'task-' + id);
+  toast('تم إرسال التذكير'); render(false);
+};
+taskItem = (base => (t, o) => { let h = base(t, o); if (IMPORTANT(t) && ['open', 'doing'].includes(t.status) && writable() && taskVisible(t)) h = h.replace('<a class="iconbtn camicon"', `<button class="iconbtn camicon rembtn ${t.remindedAt ? 'sent' : ''}" data-action="taskRemind" data-arg="${t.id}" title="إرسال تذكير">${icon('bell')}</button><a class="iconbtn camicon"`); if (t.escalation && t.escalation.level) h = h.replace('<div class="title">', `<div class="title"><span class="esc-badge">تصعيد ${t.escalation.level}</span> `); return h; })(taskItem);
+RENDER_HOOKS.push(() => {
+  if (S.route.view !== 'tasks' || !S.route.id) return; const t = byId('tasks', S.route.id); if (!t) return; const v = document.getElementById('view'); if (!v) return;
+  const head = v.querySelector('.card .cardhead'); if (head && IMPORTANT(t) && ['open', 'doing'].includes(t.status) && writable() && !head.querySelector('.rembtn')) head.insertAdjacentHTML('beforeend', `<button class="btn xs rembtn" data-action="taskRemind" data-arg="${t.id}" title="تذكير المكلَّف والأطراف">${icon('bell')}تذكير${t.remindedAt ? ' ✓' : ''}</button>`);
+  if (t.escalation && t.escalation.level && head && !head.querySelector('.esc-badge')) head.insertAdjacentHTML('beforeend', `<span class="esc-badge" title="${esc(t.escalation.note || '')}">صُعِّدت (${t.escalation.level}) — لم يشاهدها المكلَّف</span>`);
+  /* the assignee opening the task = seen */
+  const me = myIds(); if (t.assigneeId && me.includes(t.assigneeId) && !(t.seenAt || {})[t.assigneeId]) { Store.update('tasks', t.id, { seenAt: Object.assign({}, t.seenAt || {}, { [t.assigneeId]: nowISO() }) }, { silent: true }).catch(() => { }); }
+});
+/* opening from the list (tap) also counts */
+document.addEventListener('click', e => { const a = e.target.closest('a[href^="#/tasks/"]'); if (!a || !S.session) return; const id = a.getAttribute('href').slice(8).split('/')[0]; const t = byId('tasks', id); const me = myIds(); if (t && t.assigneeId && me.includes(t.assigneeId) && !(t.seenAt || {})[t.assigneeId]) Store.update('tasks', id, { seenAt: Object.assign({}, t.seenAt || {}, { [t.assigneeId]: nowISO() }) }, { silent: true }).catch(() => { }); });
+/* client-side escalation while the app is open (the server does the same when it is closed) */
+function escalationTargets(t, level) {
+  const w = t.assigneeId ? byId('workers', t.assigneeId) : null;
+  if (level === 1) { const ids = new Set(); if (w && w.managerId && w.managerId !== 'role:admin') ids.add(w.managerId); if (w) deptHeads(w.deptId).forEach(h => ids.add(h.id)); if (t.deptId) deptHeads(t.deptId).forEach(h => ids.add(h.id)); ids.delete(t.assigneeId); return { ids: Array.from(ids), label: 'المدير المباشر / رئيس القسم' }; }
+  if (level === 2) return { ids: list('workers').filter(x => x.role === 'manager' && x.status !== 'inactive').map(x => x.id).concat(list('staff').filter(s => s.role === 'manager' && s.active !== false).map(s => s.id)).concat(['role:manager']), label: 'مدير المصنع' };
+  return { ids: ['role:admin'], label: 'المالك' };
+}
+async function escalateTick() {
+  if (!S.session || !writable() || !(isAdmin() || ['manager', 'hr', 'head', 'office'].includes(role()))) return; // only a supervisor's open app runs it
+  const now = Date.now(); const pol = +(S.settings.policy && S.settings.policy.escalateMinutes) || 10;
+  for (const t of list('tasks')) {
+    if (!IMPORTANT(t) || !['open', 'doing'].includes(t.status) || !t.assigneeId || t.kind === 'update') continue;
+    if ((t.seenAt || {})[t.assigneeId]) continue; const lvl = (t.escalation && t.escalation.level) || 0; if (lvl >= 3) continue;
+    const since = new Date(lvl ? t.escalation.at : (t.assignedAt || t.createdAt || 0)).getTime(); if (!since || now - since < pol * 60000) continue;
+    const next = lvl + 1; const tg = escalationTargets(t, next); const note = `المكلَّف ${assigneeName(t.assigneeId)} لم يشاهد المهمة خلال ${pol} دقيقة — صُعِّدت إلى ${tg.label}`;
+    try { await Store.update('tasks', t.id, { escalation: { level: next, at: nowISO(), note }, thread: taskThread(t).concat([{ id: uid(), at: nowISO(), by: null, byName: 'السيستم', sys: true, text: `⚠️ ${note}` }]) }, { silent: true }); } catch (e) { continue; }
+    pushSend(tg.ids, `⚠️ مهمة مهمة لم تُشاهد: ${t.title}`.slice(0, 100), note, `/#/tasks/${t.id}`, 'esc-' + t.id);
+    for (const id of tg.ids) { if (id.startsWith('role:')) await notifyRole(id.slice(5), `⚠️ مهمة مهمة لم تُشاهد: ${t.title}`, note, { id: `esc${next}_${t.id}_${id.slice(5)}`, priority: 'urgent', fields: { link: `#/tasks/${t.id}` } }); else await Store.save('tasks', { id: `esc${next}_${t.id}_${id}`, title: `⚠️ مهمة مهمة لم تُشاهد: ${t.title}`, desc: note, assigneeId: id, kind: 'update', priority: 'urgent', status: 'open', source: 'system', createdAt: nowISO(), updatedAt: nowISO(), link: `#/tasks/${t.id}` }, { silent: true }); }
+  }
+}
+setInterval(escalateTick, 60000);
+/* remember when the assignee changed (escalation clock starts then) */
+Store.save = (base => async function (col, doc, opts) { if (col === 'tasks' && doc && doc.assigneeId) { const was = byId('tasks', doc.id); if (!was || was.assigneeId !== doc.assigneeId) { doc.assignedAt = nowISO(); doc.seenAt = Object.assign({}, doc.seenAt || {}); delete doc.seenAt[doc.assigneeId]; doc.escalation = null; } } return base.call(this, col, doc, opts); })(Store.save);
+EXTRA_SETTINGS.escalation = { label: 'تصعيد المهام المهمة', render: () => `<form class="card" id="escform"><h3>تصعيد المهام المهمة</h3><p class="small ink2">المهمة «مهمة» أو «عاجلة» لو المكلَّف ما فتحهاش خلال المدة دي تتصعّد: المدير المباشر/رئيس القسم ← مدير المصنع ← المالك (نفس المدة بين كل خطوة).</p><div class="form">${field('الدقائق', inp('escalateMinutes', (S.settings.policy && S.settings.policy.escalateMinutes) || 10, 'type="number" min="1"'))}</div><div class="row" style="margin-top:12px"><button type="submit" class="btn p">حفظ</button></div></form>` };
+document.addEventListener('submit', async ev => { if (ev.target.id !== 'escform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { escalateMinutes: num(d.escalateMinutes) || 10 }) })); toast('تم الحفظ'); });
 boot();
 </script>
 
