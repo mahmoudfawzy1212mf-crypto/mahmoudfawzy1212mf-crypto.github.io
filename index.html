@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260922-1900-3227a8";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260922-1910-da7dec";</script>
 
 <script>
 'use strict';
@@ -12951,7 +12951,7 @@ function ninetyHomeHTML() {
     ${main}</main></div>`;
 }
 /* ---------- render: the owner sees the Ninety home until he picks a company ---------- */
-const NINETY_VER = '4.15';
+const NINETY_VER = '4.15b';
 const ninetyHomeDue = () => { if (!isNinetyOwner() || S.mode === 'boot') return false; if (ninetyCo()) return false; const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety') { ninetySet('factory'); return false; } return true; };
 render = (base => function (full) {
   if (ninetyHomeDue()) { const root = $('#root'); if (root) { const h = (location.hash || '').replace(/^#\/?/, ''); if (h !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = ninetyHomeHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
@@ -13241,7 +13241,8 @@ boot();
 .cctvalert{border-inline-start:4px solid #b35c5c}
 .track{display:flex;gap:2px;flex-wrap:wrap}.track i{width:6px;height:14px;border-radius:2px;display:block}
 </style>`);
-const cctvCfg = () => Object.assign({ cameras: [], zones: [], idleMinutes: 20, awayMinutes: 15, silentMinutes: 10 }, (S.settings && S.settings.cctv) || {});
+const cctvCfg = () => Object.assign({ cameras: [], zones: [], idleMinutes: 20, awayMinutes: 15, silentMinutes: 10, demo: false }, (S.settings && S.settings.cctv) || {});
+const cctvDemoOn = () => !!cctvCfg().demo || !(typeof sbOn === 'function' && sbOn());
 const cctvZoneName = z => { if (!z) return 'غير محدد'; const d = S.settings.departments.find(x => x.id === z); if (d) return d.name; const zz = (cctvCfg().zones || []).find(x => x.id === z); return zz ? zz.name : z; };
 const cctvRoles = ['admin', 'manager', 'vice', 'hr', 'head'];
 const canCctv = () => !!S.session && (isAdmin() || cctvRoles.includes(role()));
@@ -13254,7 +13255,7 @@ async function cctvLoad(date, force) {
   date = date || todayISO(); const st = S.cctv; if (!force && st.date === date && Date.now() - st.at < 45000) return st.day;
   if (st.loading) return st.day; st.loading = true;
   try {
-    if (typeof sbOn === 'function' && sbOn()) { const { data } = await S.sb.from('docs').select('data').eq('col', 'cctvday').eq('id', date).maybeSingle(); st.day = (data && data.data) || null; }
+    if (!cctvDemoOn()) { const { data } = await S.sb.from('docs').select('data').eq('col', 'cctvday').eq('id', date).maybeSingle(); st.day = (data && data.data) || null; }
     else st.day = cctvDemoDay(date);
     st.date = date; st.at = Date.now();
   } catch (e) { console.warn('cctv', e); } finally { st.loading = false; }
@@ -13266,6 +13267,8 @@ function cctvDemoDay(date) {
   const cams = cctvCfg().cameras; const now = Date.now(); const day = { id: date, date, workers: {}, cams: {}, bridgeAt: now, demo: true };
   cams.forEach(c => { day.cams[c.id] = { n: 0, last: now - 60000, zone: c.zone, name: c.name, hb: now }; });
   list('workers').filter(w => w.status !== 'inactive' && w.deptId).slice(0, 40).forEach((w, i) => { const cam = cams.find(c => c.zone === w.deptId) || cams[0]; if (!cam) return; const last = now - (i % 4 === 0 ? 40 : 3) * 60000; const track = []; for (let k = 6; k >= 0; k--) track.push([last - k * 8 * 60000, cam.id, cam.zone]); day.workers[w.id] = { first: track[0][0], last, n: 7, zone: cam.zone, cam: cam.id, camName: cam.name, zones: { [cam.zone]: 6 * 5 * 60000 }, track }; day.cams[cam.id].n += 7; day.cams[cam.id].last = Math.max(day.cams[cam.id].last, last); });
+  cams.filter(c => c.zone === 'gate' || c.zone === 'yard').forEach((c, i) => { day.cams[c.id].unknown = i === 0 ? 2 : 0; day.cams[c.id].n += 12; });
+  const ws = Object.keys(day.workers); if (ws.length > 2) { const away = day.workers[ws[2]]; const other = cams.find(c => c.zone && c.zone !== away.zone && S.settings.departments.some(d => d.id === c.zone)); if (other) { away.zone = other.zone; away.cam = other.id; away.camName = other.name; away.last = now - 2 * 60000; away.zones[other.zone] = 25 * 60000; away.track = away.track.slice(0, 4).concat([[now - 26 * 60000, other.id, other.zone], [now - 14 * 60000, other.id, other.zone], [now - 2 * 60000, other.id, other.zone]]); } }
   S.cctvDemo = day; return day;
 }
 /* ---------- analysis ---------- */
@@ -13300,7 +13303,8 @@ function vCctv() {
   const seenN = an.rows.filter(r => r.d).length; const inN = an.rows.filter(r => r.inNow).length; const camsOn = an.cams.filter(x => !x.silent).length;
   const status = r => ({ ok: '<span class="badge good">طبيعي</span>', idle: '<span class="badge crit">لم يُشاهد</span>', away: '<span class="badge warn">خارج قسمه</span>', unseen: '<span class="badge crit">حاضر بلا رؤية</span>', nopunch: '<span class="badge warn">بلا بصمة</span>' })[r.status];
   if (!cfg.cameras.length) return `<div class="card"><div class="cardhead"><h3>المراقبة بالكاميرات</h3></div><div class="banner info">${icon('info')}<span>لم تُضبط الكاميرات بعد. من الإعدادات ← «كاميرات المراقبة» أضف الكاميرات (القناة على الـNVR واسمها ومنطقتها)، ثم شغّل الجسر على كمبيوتر المصنع بالمفتاح.</span></div>${isAdmin() ? `<a class="btn p sm" href="#/settings" data-tab="cctv" style="margin-top:8px">${icon('settings')}إعداد الكاميرات</a>` : ''}</div>`;
-  return `<div class="kpis"><div class="kpi ${camsOn === an.cams.length ? 'good' : 'crit'}"><div class="l">كاميرات شغّالة</div><div class="v">${camsOn}<span class="small">/${an.cams.length}</span></div><div class="s">${day && day.bridgeAt ? 'آخر إشارة ' + fmtTimeAgo(day.bridgeAt) : 'لا إشارة'}</div></div><div class="kpi"><div class="l">شوهدوا اليوم</div><div class="v">${seenN}<span class="small">/${an.rows.length}</span></div><div class="s">${inN} بصموا حضور</div></div><div class="kpi ${an.alerts.length ? 'warn' : 'good'}"><div class="l">تنبيهات الآن</div><div class="v">${an.alerts.length}</div><div class="s">${cfg.idleMinutes} د بلا رؤية · ${cfg.awayMinutes} د خارج القسم</div></div></div>
+  const demoBanner = cctvDemoOn() ? `<div class="banner warn" style="margin-bottom:10px">${icon('info')}<span><b>وضع تجريبي</b> — الأرقام والرؤى دي وهمية لعرض شكل الموديول لحد ما تتركب الكاميرات. عند التركيب: الإعدادات ← كاميرات المراقبة ← شيل علامة «وضع تجريبي».</span></div>` : '';
+  return `${demoBanner}<div class="kpis"><div class="kpi ${camsOn === an.cams.length ? 'good' : 'crit'}"><div class="l">كاميرات شغّالة</div><div class="v">${camsOn}<span class="small">/${an.cams.length}</span></div><div class="s">${day && day.bridgeAt ? 'آخر إشارة ' + fmtTimeAgo(day.bridgeAt) : 'لا إشارة'}</div></div><div class="kpi"><div class="l">شوهدوا اليوم</div><div class="v">${seenN}<span class="small">/${an.rows.length}</span></div><div class="s">${inN} بصموا حضور</div></div><div class="kpi ${an.alerts.length ? 'warn' : 'good'}"><div class="l">تنبيهات الآن</div><div class="v">${an.alerts.length}</div><div class="s">${cfg.idleMinutes} د بلا رؤية · ${cfg.awayMinutes} د خارج القسم</div></div></div>
   ${an.alerts.length ? `<div class="card cctvalert"><div class="cardhead"><h3>يحتاج نظرة</h3><div class="grow"></div><button class="btn xs" data-action="cctvRefresh">${icon('play')}تحديث</button></div><ul style="margin:0;padding-inline-start:18px">${an.alerts.map(a => `<li${a.w ? ` data-action="cctvOpen" data-arg="${a.w.id}" style="cursor:pointer"` : ''}>${esc(a.text)}</li>`).join('')}</ul></div>` : ''}
   <div class="card"><div class="cardhead"><h3>الموظفون — فين دلوقتي؟</h3><span class="muted small">${role() === 'head' ? 'قسمك' : 'كل الأقسام'}</span><div class="grow"></div>${!an.alerts.length ? `<button class="btn xs" data-action="cctvRefresh">${icon('play')}تحديث</button>` : ''}</div>
     <div class="tablewrap"><table><thead><tr><th>الموظف</th><th>القسم</th><th>البصمة</th><th>آخر رؤية</th><th>الوقت في قسمه</th><th>الحالة</th></tr></thead><tbody>${an.rows.map(r => { const d = r.d; return `<tr data-action="cctvOpen" data-arg="${r.w.id}" style="cursor:pointer"><td><div class="seen">${d && d.thumb ? `<img src="${d.thumb}" alt="">` : avatarHTML(r.w, 34)}<b>${esc(r.w.name)}</b></div></td><td class="small">${esc(deptName(r.w.deptId))}</td><td class="small">${r.inNow ? `حضور ${att0(r.w.id, 'in')}` : (attendanceFor(todayISO())[r.w.id] || {}).out ? 'انصرف' : '—'}</td><td class="small">${d ? `${esc(cctvZoneName(d.zone))} · ${fmtTimeAgo(d.last)}<div class="tiny muted">${esc(d.camName || '')}</div>` : '<span class="muted">لم يُشاهد</span>'}</td><td>${r.total ? `<div class="row" style="gap:6px;align-items:center"><div class="zbar" title="${r.ownPct}% في قسمه"><i style="width:${r.ownPct}%;background:#4f8a6d"></i><i style="width:${100 - r.ownPct}%;background:#9a7a3a"></i></div><span class="tiny">${r.ownPct}%</span></div>` : '—'}</td><td>${status(r)}${r.note ? `<div class="tiny muted">${esc(r.note)}</div>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
@@ -13321,7 +13325,7 @@ ACTIONS.cctvOpen = wid => {
 /* alerts → tasks/push for supervisors (once per worker per kind per hour), only while the page is used by a supervisor or every 5 min in the background */
 let _cctvTick = 0; const _cctvSent = {};
 setInterval(async () => { if (!S.session || !canCctv() || document.hidden || Date.now() - _cctvTick < 5 * 60000) return; _cctvTick = Date.now(); if (!cctvCfg().cameras.length) return; const day = await cctvLoad(todayISO(), true); const an = cctvAnalyse(day); S.cctvAlerts = an.alerts; if (S.route.view === 'cctv') render(false);
-  if (!(isAdmin() || role() === 'manager')) return;
+  if (cctvDemoOn() || !(isAdmin() || role() === 'manager')) return;
   for (const a of an.alerts) { if (!a.w || !['idle', 'away', 'unseen'].includes(a.kind)) continue; const k = a.w.id + ':' + a.kind; if (_cctvSent[k] && Date.now() - _cctvSent[k] < 3600000) continue; _cctvSent[k] = Date.now(); const h = deptHeads(a.w.deptId)[0]; try { await notifyRole('head', `كاميرات: ${a.text}`, 'افتح «المراقبة» وشوف حركته النهارده.', { id: `cctv_${a.w.id}_${todayISO()}_${a.kind}`, priority: 'high', fields: Object.assign({ deptId: a.w.deptId || null, kind: 'notice', link: '/#/cctv' }, h ? { assigneeId: h.id, toRole: null } : {}) }); } catch (e) { /* ignore */ } }
 }, 60000);
 /* ---------- settings ---------- */
@@ -13330,11 +13334,12 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-cam]
 EXTRA_SETTINGS.cctv = { label: 'كاميرات المراقبة', render: () => { const c = cctvCfg(); return `<form class="card" id="cctvform"><h3>كاميرات المراقبة (Hikvision)</h3><p class="small ink2">اكتب رقم القناة على الـNVR واسم الكاميرا والمنطقة اللي بتغطيها. الجسر على كمبيوتر المصنع بيبعت الأحداث بمفتاح الجسر (يظهر مرة واحدة عند توليده).</p>
   <div class="needlines" id="camlines">${(c.cameras || []).map(camRow).join('')}</div><button type="button" class="btn sm" data-cam="add" style="margin-top:6px">${icon('plus')}كاميرا</button>
   <div class="form" style="margin-top:12px">${field('تنبيه: حاضر ولم يُشاهد منذ (دقيقة)', inp('idleMinutes', c.idleMinutes, 'type="number" min="5"'))}${field('تنبيه: خارج منطقة قسمه أكثر من (دقيقة)', inp('awayMinutes', c.awayMinutes, 'type="number" min="5"'))}${field('كاميرا صامتة بعد (دقيقة)', inp('silentMinutes', c.silentMinutes, 'type="number" min="3"'))}</div>
+  <label class="row" style="gap:8px;align-items:center;margin-top:10px"><input type="checkbox" name="demo" ${c.demo ? 'checked' : ''}> <span>وضع تجريبي — بيانات وهمية لعرض الموديول لحد ما تتركب الكاميرات (لا تُنشأ مهام أو تنبيهات حقيقية)</span></label>
   <div class="row" style="margin-top:12px;gap:8px"><button class="btn p" type="submit">${icon('save')}حفظ</button>${typeof sbOn === 'function' && sbOn() ? `<button type="button" class="btn" data-action="cctvKey">${icon('shield')}توليد مفتاح الجسر</button>` : ''}</div>
   <p class="tiny muted" style="margin-top:10px">الجسر: مجلد <span class="code">tools/cctv-bridge</span> — يوصل بالـNVR ويبعت رؤية الوجوه للسيرفر، ويسجّل وجوه الموظفين (من صورهم في السيستم) على الـNVR باسم W:&lt;كود الموظف&gt;.</p></form>`; } };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'cctvform') return; ev.preventDefault(); if (!isAdmin()) return; const f = ev.target; const d = formData(f);
   const cameras = $$('#camlines .nl', f).map((l, i) => ({ id: String(l.querySelector('[name=c-ch]').value || (i + 1)).trim(), channel: String(l.querySelector('[name=c-ch]').value || (i + 1)).trim(), name: (l.querySelector('[name=c-name]').value || '').trim(), zone: l.querySelector('[name=c-zone]').value || null, deptId: S.settings.departments.some(x => x.id === l.querySelector('[name=c-zone]').value) ? l.querySelector('[name=c-zone]').value : null })).filter(c => c.name);
-  await Store.saveSettings(Object.assign({}, S.settings, { cctv: Object.assign({}, cctvCfg(), { cameras, idleMinutes: num(d.idleMinutes) || 20, awayMinutes: num(d.awayMinutes) || 15, silentMinutes: num(d.silentMinutes) || 10 }) })); S.cctvDemo = null; toast('تم الحفظ'); });
+  await Store.saveSettings(Object.assign({}, S.settings, { cctv: Object.assign({}, cctvCfg(), { cameras, idleMinutes: num(d.idleMinutes) || 20, awayMinutes: num(d.awayMinutes) || 15, silentMinutes: num(d.silentMinutes) || 10, demo: !!f.querySelector('[name=demo]').checked }) })); S.cctvDemo = null; S.cctv.at = 0; toast('تم الحفظ'); });
 ACTIONS.cctvKey = async () => { if (!isAdmin() || !sbOn()) return; if (!(await confirmDlg('توليد مفتاح جديد للجسر؟ المفتاح القديم يتوقف فورًا ويجب وضع الجديد في إعدادات الجسر على كمبيوتر المصنع.'))) return; const key = 'nfc_' + Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, '0')).join(''); const { error } = await S.sb.rpc('nf_set_cctv_key', { p_key: key }); if (error) { toast('تعذّر حفظ المفتاح: ' + error.message, 'err'); return; } openModal({ title: 'مفتاح الجسر — انسخه الآن', footer: null, body: `<p class="small">حطه في ملف <span class="code">config.json</span> بتاع الجسر في الخانة <span class="code">api.key</span>. لن يظهر مرة أخرى.</p><input class="inp ltr code" readonly value="${key}" onclick="this.select()" style="width:100%">` }); };
 /* ---------- receiving: the head always confirms the material is right (overrides the store-only shortcut from v4.14) ---------- */
 /* receipt rule (v4.15): the head always confirms — implemented in 98 */
