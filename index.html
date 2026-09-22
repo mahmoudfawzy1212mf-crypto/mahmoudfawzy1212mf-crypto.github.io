@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260922-1910-da7dec";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260922-2003-2ace38";</script>
 
 <script>
 'use strict';
@@ -12951,7 +12951,7 @@ function ninetyHomeHTML() {
     ${main}</main></div>`;
 }
 /* ---------- render: the owner sees the Ninety home until he picks a company ---------- */
-const NINETY_VER = '4.15b';
+const NINETY_VER = '4.16';
 const ninetyHomeDue = () => { if (!isNinetyOwner() || S.mode === 'boot') return false; if (ninetyCo()) return false; const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety') { ninetySet('factory'); return false; } return true; };
 render = (base => function (full) {
   if (ninetyHomeDue()) { const root = $('#root'); if (root) { const h = (location.hash || '').replace(/^#\/?/, ''); if (h !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = ninetyHomeHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
@@ -13343,6 +13343,51 @@ document.addEventListener('submit', async ev => { if (ev.target.id !== 'cctvform
 ACTIONS.cctvKey = async () => { if (!isAdmin() || !sbOn()) return; if (!(await confirmDlg('توليد مفتاح جديد للجسر؟ المفتاح القديم يتوقف فورًا ويجب وضع الجديد في إعدادات الجسر على كمبيوتر المصنع.'))) return; const key = 'nfc_' + Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, '0')).join(''); const { error } = await S.sb.rpc('nf_set_cctv_key', { p_key: key }); if (error) { toast('تعذّر حفظ المفتاح: ' + error.message, 'err'); return; } openModal({ title: 'مفتاح الجسر — انسخه الآن', footer: null, body: `<p class="small">حطه في ملف <span class="code">config.json</span> بتاع الجسر في الخانة <span class="code">api.key</span>. لن يظهر مرة أخرى.</p><input class="inp ltr code" readonly value="${key}" onclick="this.select()" style="width:100%">` }); };
 /* ---------- receiving: the head always confirms the material is right (overrides the store-only shortcut from v4.14) ---------- */
 /* receipt rule (v4.15): the head always confirms — implemented in 98 */
+/* =====================================================================
+   99d — v4.16: عائلات المنتجات (Product families) — المصنع
+   · المنتج بلا `parentId` = «فاميلي» (مثال: Beaver). المنتج بـ`parentId` = قطعة داخل الفاميلي (كنبة 3 مقاعد، كرسي، ترابيزة…)
+   · صفحة المنتجات تعرض الفاميليات فقط (بعدد قطعها)، وصفحة الفاميلي تعرض قطعها بصورها؛ كل قطعة منتج كامل له ملفاته وأوامره
+   · نموذج المنتج: خانة «الفاميلي (المنتج الأم)»؛ زر «قطعة جديدة» داخل صفحة الفاميلي
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.famcrumb{display:flex;align-items:center;gap:8px;margin-bottom:10px}.famcrumb img{width:36px;height:36px;border-radius:8px;object-fit:cover;background:#fff;border:1px solid var(--line)}
+.pcard .famn{font-size:11px;color:var(--accent);margin-top:2px}
+.pgrid.items .pcover{background:#fff}
+</style>`);
+const productParent = p => p && p.parentId ? byId('products', p.parentId) : null;
+const familyItems = id => sortBy(list('products').filter(p => p.parentId === id && p.status !== 'archived'), p => (p.order ?? 99) + ' ' + (p.code || p.name));
+const isFamilyItem = p => !!(p && p.parentId && byId('products', p.parentId));
+/* products page: hide the pieces, show the piece count on the family card */
+vProducts = (base => function () {
+  let html = base(); const items = list('products').filter(isFamilyItem);
+  items.forEach(p => { const re = new RegExp(`<a class="pcard" href="#/products/${p.id}">[\\s\\S]*?</a>`); html = html.replace(re, ''); });
+  list('products').filter(p => !p.parentId).forEach(p => { const n = familyItems(p.id).length; if (!n) return; const m = `<a class="pcard" href="#/products/${p.id}">`; const i = html.indexOf(m); if (i < 0) return; const j = html.indexOf('<div class="meta tiny">', i); if (j < 0) return; html = html.slice(0, j) + `<div class="famn">${n} قطع في الفاميلي</div>` + html.slice(j); });
+  return html;
+})(vProducts);
+/* family page: its pieces; piece page: breadcrumb to the family */
+vProductDetail = (base => function (id) {
+  let html = base(id); const p = byId('products', id); if (!p) return html;
+  const par = productParent(p);
+  if (par) { const cov = productCover(par); const crumb = `<div class="famcrumb card" style="padding:8px 12px">${cov ? `<img src="${esc(cov)}" alt="">` : ''}<span class="muted small">قطعة من الفاميلي</span><a href="#/products/${par.id}"><b>${esc(par.name)}</b> <span class="code">${esc(par.code || '')}</span></a><div class="grow"></div><span class="tiny muted">${familyItems(par.id).length} قطع</span></div>`; return crumb + html; }
+  const items = familyItems(id);
+  const card = `<div class="card"><div class="cardhead"><h3>قطع الفاميلي</h3><span class="muted small">${items.length}</span><div class="grow"></div>${canFiles() ? `<button class="btn sm p" data-action="familyItemNew" data-arg="${p.id}">${icon('plus')}قطعة جديدة</button>` : ''}</div>
+    ${items.length ? `<div class="pgrid items">${items.map(x => productCard(x)).join('')}</div>` : `<div class="empty small"><b>لا توجد قطع بعد</b>أضف قطع الفاميلي (كنبة 3 مقاعد، كنبة مقعدين، كرسي، ترابيزة، سايد تيبل…) وكل قطعة لها صورتها وملفاتها ورسوماتها</div>`}</div>`;
+  const i = typeof insertAfterBlock === 'function' ? insertAfterBlock(html, '<div class="card">') : null;
+  return i == null ? html + card : html.slice(0, i) + card + html.slice(i);
+})(vProductDetail);
+/* form: parent select (families of the same brand) */
+productForm = (base => function (p) {
+  const h = base(p); const fams = sortBy(list('products').filter(x => !x.parentId && x.id !== p.id && x.status !== 'archived'), x => x.code || x.name);
+  const sel = `<select id="f-parentId" name="parentId"><option value="">— منتج مستقل / فاميلي —</option>${fams.map(x => `<option value="${x.id}" ${p.parentId === x.id ? 'selected' : ''}>${esc(x.code || '')} ${esc(x.name)}</option>`).join('')}</select>`;
+  const i = h.lastIndexOf('</div>'); return i < 0 ? h + field('الفاميلي (المنتج الأم)', sel) : h.slice(0, i) + field('الفاميلي (المنتج الأم)', sel) + h.slice(i);
+})(productForm);
+saveProduct = (base => async function (f, p) {
+  const d = formData(f); const r = await base(f, p); if (r === false) return false;
+  const doc = p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(d.code || '').trim().toLowerCase());
+  if (doc && (doc.parentId || '') !== (d.parentId || '')) { if (d.parentId === doc.id) { toast('المنتج لا يمكن أن يكون أمًا لنفسه', 'err'); return r; } await Store.update('products', doc.id, { parentId: d.parentId || null }, { silent: true }); }
+  return r;
+})(saveProduct);
+ACTIONS.familyItemNew = id => { const par = byId('products', id); if (!par || !canFiles()) return; ACTIONS.productNew(par.brandId); setTimeout(() => { const f = $('#mform'); if (!f) return; const s = $('#f-parentId', f); if (s) s.value = par.id; const c = $('#f-code', f); if (c) c.value = `${par.code || ''}-${String(familyItems(par.id).length + 1).padStart(2, '0')}`; const col = $('#f-collection', f); if (col && par.collection) col.value = par.collection; }, 60); };
 </script>
 
 </body>
