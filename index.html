@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260922-1442-0ecd7a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260922-1811-7d97fd";</script>
 
 <script>
 'use strict';
@@ -3767,11 +3767,13 @@ function zoneCheckBase(w, pos) {
   return { inside: best.inside, zone: best.zone, dist: best.dist, zones: z.zones };
 }
 /* replaces the plain factory-only check: zone-aware, only mobile (self) punches are enforced */
+let _nzNoticeAt = 0; const isAdminMissingZoneNotice = () => { if (Date.now() - _nzNoticeAt < 3600000) return false; _nzNoticeAt = Date.now(); return true; };
 async function punchGeoBase(w, method) {
   const g = geoCfg(); const pos = await getGeo(); const chk = zoneCheck(w || {}, pos);
   const geo = pos ? Object.assign({}, pos, { dist: chk.dist, inside: chk.inside, zone: chk.zone ? chk.zone.name : null }) : null;
   let blocked = false, msg = '';
-  if (method === 'self' && g.required !== false && !chk.unrestricted && !chk.noZones) {
+  if (method === 'self' && g.required !== false && !chk.unrestricted && chk.noZones) { blocked = true; msg = punchAtOf(w) === 'sites' ? 'لا يوجد موقع عمل مخصص لك اليوم — راجع رئيس القسم' : 'موقع المصنع غير محدد في الإعدادات — البصمة موقوفة حتى يضبطه المدير'; if (typeof notifyOwner === 'function' && isAdminMissingZoneNotice()) notifyOwner('البصمة موقوفة: موقع المصنع غير محدد', `${w && w.name ? w.name + ' حاول البصمة و' : ''}لا توجد إحداثيات للمصنع في الإعدادات ← المواقع. اضبطها الآن.`, { id: 'nozone_' + todayISO() }).catch(() => { }); }
+  else if (method === 'self' && g.required !== false && !chk.unrestricted && !chk.noZones) {
     if (!pos) { blocked = true; msg = 'تعذّر تحديد موقعك — فعّل خدمة الموقع (GPS) واسمح للمتصفح بالوصول إليه'; }
     else if (chk.poorAcc) { blocked = true; msg = `دقة تحديد الموقع ضعيفة (±${fmtNum(chk.acc)} م والمسموح ±${chk.maxAcc} م) — قف في مكان مكشوف بعيدًا عن الأسقف، وتأكد أن الـGPS مفعّل، ثم أعد المحاولة`; }
     else if (!chk.inside) { blocked = true; msg = `أنت خارج نطاق البصمة — أقرب موقع مسموح: ${chk.zone.name} (على بُعد ${fmtNum(chk.dist)} م، والمسموح ${chk.zone.radius} م)`; }
@@ -5901,7 +5903,19 @@ function sbBackend(client) {
     where(field, op, v) { const filter = { field, op, v }; return { async get() { await fetchCol(col, filter); return snapOf(col, [], filter); }, onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb, filter }); fetchCol(col, filter).then(() => cb(snapOf(col, [], filter))).catch(e => onErr && onErr(e)); return () => { subs[col] = (subs[col] || []).filter(s => s.cb !== cb); }; } }; },
   });
   const doc = (path) => { const [col, id] = path.split('/'); return {
-    async set(data) { const { error } = await client.from('docs').upsert({ col, id, data }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, data); },
+    async set(data) {
+      /* v4.13d: settings are MERGED on the server, key by key — a phone holding an old copy of the settings (opened days ago) used to overwrite
+         the whole document and silently wipe keys it never knew (this is how the factory location disappeared on 20 Sep). Only the top-level keys
+         that actually changed compared to the last server copy are sent; the merged result comes back and refreshes the local copy. */
+      if (col === 'settings' && data && typeof data === 'object') {
+        const prev = (cache[col] && cache[col].get(id)) || null; const patch = {};
+        Object.keys(data).forEach(k => { if (!prev || JSON.stringify(prev[k]) !== JSON.stringify(data[k])) patch[k] = data[k]; });
+        if (prev && !Object.keys(patch).length) return;
+        const { data: merged, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: prev ? patch : data }); if (error) throw mapErr(error);
+        if (merged) { (cache[col] ||= new Map()).set(id, merged); if (id === 'general' && typeof mergeSettings === 'function') S.settings = mergeSettings(merged); }
+        return;
+      }
+      const { error } = await client.from('docs').upsert({ col, id, data }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, data); },
     async update(patch) {
       /* v4.6.2: shared docs (attendance month sheets) are merged ON THE SERVER under lock — a punch from the Android app and one from the web never overwrite each other */
       if (col === 'attendance' && patch && typeof patch === 'object') { const { data, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: patch }); if (error) throw mapErr(error); if (data) { (cache[col] ||= new Map()).set(id, data); if (S.data[col]) { S.data[col].set(id, data); } } return; }
@@ -8051,6 +8065,11 @@ function vSupplierDetail(id) {
 /* service factories get coordinates too (optional) */
 function sfForm(x) { const html = sfFormBase(x); return html.replace(/(<div class="field[^"]*"><label>العنوان[^<]*<\/label>[\s\S]*?<\/div>)/, `$1${field('خط العرض', inp('lat', x.lat ?? '', 'type="number" step="any" class="ltr"'))}${field('خط الطول', inp('lng', x.lng ?? '', 'type="number" step="any" class="ltr"'))}<div class="field full"><div class="row"><button type="button" class="btn sm" data-action="siteUseMine">${icon('link')}موقعي الآن</button><input id="f-paste" class="inp" style="flex:1;min-width:200px;direction:ltr" placeholder="أو الصق رابط Google Maps" data-sitepaste="1"></div></div>`); }
 ['sfNew', 'sfEdit'].forEach(k => { const f0 = ACTIONS[k]; if (!f0) return; ACTIONS[k] = arg => { f0(arg); const f = $('#mform'); if (f) { wireSiteForm(f); f.addEventListener('submit', () => { const d = formData(f); setTimeout(async () => { const x = list('servfactories').find(y => y.name === d.name); if (x && d.lat !== '' && d.lng !== '' && (x.lat !== num(d.lat) || x.lng !== num(d.lng))) await Store.update('servfactories', x.id, { lat: num(d.lat), lng: num(d.lng) }); }, 600); }); } }; });
+/* v4.13c: «موقعي الآن» ولصق رابط جوجل كانا يكتبان الإحداثيات في الخانات بصمت — الخريطة ما كانتش تعرف. الآن أي كتابة برمجية في #f-lat/#f-lng
+   تُبلَّغ للخريطة فتتحرك وتضع الدبوس على المكان (للتأكد بالعين إن اللوكيشن صح) */
+function mapNotify() { const la = $('#f-lat'), ln = $('#f-lng'); if (!la || !ln) return; la.dispatchEvent(new Event('input', { bubbles: true })); ln.dispatchEvent(new Event('input', { bubbles: true })); const box = document.querySelector('#mform .mappick'); if (box && box._map) { const v1 = +la.value, v2 = +ln.value; setTimeout(() => { box._map.invalidateSize(); if (isFinite(v1) && isFinite(v2) && la.value !== '') box._map.setView([v1, v2], 17); }, 60); } }
+['siteUseMine', 'geoUseMine'].forEach(k => { const base = ACTIONS[k]; if (!base) return; ACTIONS[k] = async arg => { const r = await base(arg); mapNotify(); const b = document.querySelector('#mform .leaflet-container'); if (b) b.scrollIntoView({ block: 'center', behavior: 'smooth' }); return r; }; });
+document.addEventListener('input', e => { if (e.target && e.target.id === 'f-paste') setTimeout(mapNotify, 0); });
 /* =====================================================================
    v4.5 — مؤشرات الأداء (KPIs) لكل موظف
    الالتزام (حضور/تأخير/غياب/بصمات ناقصة) · المهام (إنجاز في الموعد + توثيق)
@@ -12964,6 +12983,252 @@ vPayroll = (base => () => { let html = base(); const shared = list('workers').fi
 /* v4.13b: top-bar icon (all screens, phone included) — the Ninety mark takes the owner back to the three-companies screen */
 document.head.insertAdjacentHTML('beforeend', '<style>.nfhomebtn{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--nf-fab);background:color-mix(in srgb,var(--nf-fab) 12%,var(--surface));color:var(--nf-fab);display:inline-grid;place-items:center;cursor:pointer;flex:0 0 auto;padding:0}.nfhomebtn svg{width:20px;height:20px}.nfhomebtn .n3{position:absolute;top:-5px;inset-inline-end:-5px;min-width:16px;height:16px;border-radius:999px;background:var(--nf-fab);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;padding:0 4px}.nfhomebtn:hover{box-shadow:0 0 0 2px var(--nf-fab)}</style>');
 RENDER_HOOKS.push(() => { if (!isNinetyOwner()) { document.querySelectorAll('.nfhomebtn').forEach(b => b.remove()); return; } const box = document.querySelector('.tb-actions'); if (!box || box.querySelector('.nfhomebtn')) return; box.insertAdjacentHTML('afterbegin', `<button type="button" class="nfhomebtn" data-action="ninetyHome" title="الرجوع لشاشة Ninety — الثلاث شركات" aria-label="Ninety"><span class="n3">3</span>${icon('layers')}</button>`); });
+/* =====================================================================
+   v4.14 — دورة الشراء (اتفاق 22 سبتمبر) — المصنع:
+   1) صنف مكوَّد بلا رصيد عند مورد معتمد: مطابقة أسعار المورد (آخر سعر لكل صنف + الإجمالي) قبل الإرسال؛ أي اختلاف يحتاج تأكيد السعر.
+   2) المورد معندوش كل الأصناف: «فصل الأصناف الناقصة في طلب تاني» → أمر شراء جديد مربوط بنفس الاحتياج يُبحث له عن مورد آخر.
+   3) صنف مكوَّد عند مورد جديد: «تأكيد الصنف» → رئيس القسم (نفس المنتج) ← مدير المصنع (مراجعة) ← مسؤول الحسابات (الأسعار)
+      → يُضاف المورد على الصنف بسعره ويكمل أمر الشراء بنفس كود الصنف (الصنف الواحد له أكثر من مورد).
+   4) خامة جديدة غير مكوَّدة: «طلب عرض سعر» من رئيس القسم → المشتريات تسجّل مورد + سعر + صورة → الاعتماد الفني لرئيس القسم
+      (على الصورة / بعد المعاينة، أو رفض = مورد آخر) → اعتماد السعر: مدير المصنع، وفوق 5,000 ج.م المالك أيضًا → تُكوَّد الخامة
+      وتُسجَّل على المورد ويطلع أمر الشراء تلقائيًا ويكمل الدورة العادية.
+   5) الاستلام: وجهة كل بند = المخزن الرئيسي (أمين المخزن وحده) أو أرضية المصنع للتشغيل (أمين المخزن + رئيس القسم = عهدة القسم)،
+      وصرف لاحق من المخزن لأرضية المصنع بتأكيد رئيس القسم (عهدة).
+   6) مسؤول الحسابات يرى دورة المشتريات كاملة قراءةً فقط — دوره الاعتماد حين يأتي عليه الدور.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.pmatch td.bad{color:var(--crit-ink,#b35c5c);font-weight:700}.pmatch td.ok{color:var(--good-ink,#4f8a6d)}
+.popts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.popts .op{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface-2,var(--surface))}
+.popts .op b{display:block;font-size:13px;margin-bottom:2px}.popts .op small{color:var(--muted);display:block;line-height:1.4}.popts .op .btn{margin-top:8px}
+.popts .op.done{border-color:var(--good,#4f8a6d)}.popts .op.wait{border-color:var(--warn,#9a7a3a)}
+.rfqlines{display:grid;gap:6px}.rfqlines .rl{display:grid;grid-template-columns:1.4fr 2fr 70px 90px 1fr 28px;gap:6px;align-items:center}.rfqlines .rl input,.rfqlines .rl select{width:100%}
+@media(max-width:760px){.rfqlines .rl{grid-template-columns:1fr 1fr}}
+.rfqthumb{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.custody{font-size:12px;color:var(--muted)}
+</style>`);
+REQ_TYPES.itemconfirm = 'تأكيد صنف مكوَّد عند مورد جديد'; DEFAULT_CHAINS.itemconfirm = ['head', 'manager', 'acc'];
+REQ_TYPES.rfqtech = 'الاعتماد الفني لخامة جديدة'; DEFAULT_CHAINS.rfqtech = ['head'];
+REQ_TYPES.rfqprice = 'اعتماد سعر خامة جديدة'; DEFAULT_CHAINS.rfqprice = ['manager'];
+REQ_TYPES.custody = 'صرف خامة لأرضية المصنع (عهدة القسم)'; DEFAULT_CHAINS.custody = ['head'];
+Object.assign(PO_STATUS, { rfq: ['طلب عرض سعر — عند المشتريات', 'warn'], rfq_tech: ['بانتظار الاعتماد الفني لرئيس القسم', 'warn'], rfq_price: ['بانتظار اعتماد السعر', 'warn'] });
+['rfq', 'rfq_tech', 'rfq_price'].forEach(s => { if (!poOpenStatuses.includes(s)) poOpenStatuses.push(s); });
+const rfqOwnerAbove = () => { const v = +(S.settings.policy || {}).rfqOwnerAbove; return v > 0 ? v : 5000; };
+const canPurch = () => writable() && (canDo('purchases') || isAdmin());
+const nextRfqNo = () => { const y = todayISO().slice(2, 4); const n = list('purchases').filter(p => (p.number || '').startsWith(`RFQ-${y}-`)).length + 1; return `RFQ-${y}-${String(n).padStart(3, '0')}`; };
+const supplierPriceOf = (m, supplierId) => { const s = (m && m.suppliers || []).find(x => x.supplierId === supplierId); return s && s.price != null ? +s.price : null; };
+/* ---------- 6) accounts: read-only on the purchasing cycle ---------- */
+canDo = (base => (act, ctx) => { if (role() === 'acc' && ['suppliers', 'inventory.edit', 'receive', 'purchases'].includes(act)) return false; return base(act, ctx); })(canDo);
+
+/* ---------- 1) price match against the supplier's last prices ---------- */
+function poPriceMatch(p) {
+  const sid = p.supplierId || (supplierOf(p) || {}).id; if (!sid) return { rows: [], diffs: [], known: 0 };
+  const rows = (p.items || []).map(it => { const m = it.materialId && byId('materials', it.materialId); const last = m ? supplierPriceOf(m, sid) : null; const cost = it.cost != null ? +it.cost : null; const diff = last != null && cost != null ? r2(cost - last) : null; return { it, m, last, cost, diff, ok: diff === null ? null : Math.abs(diff) < 0.005 }; });
+  return { rows, diffs: rows.filter(r => r.ok === false), known: rows.filter(r => r.last != null).length, newItems: rows.filter(r => r.m && r.last == null) };
+}
+function priceMatchCard(p) {
+  const pm = poPriceMatch(p); if (!(p.items || []).length || !pm.known) return '';
+  const lastTotal = sum(pm.rows, r => (r.last != null ? r.last : (r.cost || 0)) * (+r.it.qty || 0)); const total = poTotal(p);
+  return `<div class="card"><div class="cardhead"><h3>مطابقة أسعار المورد — ${esc(p.supplier || '')}</h3>${pm.diffs.length ? `<span class="badge crit">${pm.diffs.length} اختلاف</span>` : '<span class="badge good">الأسعار مطابقة ✓</span>'}</div>
+    <div class="tablewrap"><table class="pmatch"><thead><tr><th>الصنف</th><th class="n">آخر سعر عندنا</th><th class="n">سعر الفاتورة/العرض</th><th class="n">الفرق</th></tr></thead><tbody>${pm.rows.map(r => `<tr><td>${esc(r.it.name || (r.m && r.m.name) || '')}</td><td class="n">${r.last != null ? fmtMoney(r.last) : '<span class="muted">جديد على المورد</span>'}</td><td class="n">${r.cost != null ? fmtMoney(r.cost) : '—'}</td><td class="n ${r.ok === false ? 'bad' : r.ok ? 'ok' : ''}">${r.diff == null ? '—' : r.ok ? '✓' : (r.diff > 0 ? '+' : '') + fmtMoney(r.diff)}</td></tr>`).join('')}</tbody><tfoot><tr><th>الإجمالي</th><th class="n">${fmtMoney(lastTotal)}</th><th class="n">${fmtMoney(total)}</th><th class="n ${Math.abs(total - lastTotal) > 0.005 ? 'bad' : 'ok'}">${Math.abs(total - lastTotal) > 0.005 ? (total - lastTotal > 0 ? '+' : '') + fmtMoney(r2(total - lastTotal)) : '✓'}</th></tr></tfoot></table></div>
+    ${pm.diffs.length ? `<div class="banner warn" style="margin-top:8px">${icon('alert')}<span>فيه أصناف بسعر مختلف عن آخر سعر لنفس المورد — لا يُرسل الأمر إلا بعد «تأكيد السعر من المالك» أو تصحيح السعر في التعديل.</span></div>` : ''}</div>`;
+}
+/* ---------- 2) split the lines the supplier doesn't have ---------- */
+ACTIONS.poSplit = id => {
+  const p = byId('purchases', id); if (!p || !canPurch() || !['draft', 'need_ok', 'rejected'].includes(p.status)) return;
+  const lines = (p.items || []).length ? p.items.map(it => ({ key: it.materialId || it.name, name: it.name || byId('materials', it.materialId)?.name || '', qty: it.qty, unit: it.unit })) : (p.needItems || []).map(it => ({ key: it.name, name: it.name, qty: it.qty, unit: it.unit }));
+  if (lines.length < 2) { toast('الطلب فيه بند واحد — مفيش حاجة تتفصل', 'err'); return; }
+  openModal({ title: `فصل الأصناف غير المتوفرة — ${p.number}`, submitLabel: 'فصل في طلب جديد', body: `<p class="small ink2">علّم الأصناف اللي المورد معندوش. هتتشال من هذا الأمر وتتفصل في طلب شراء جديد مربوط بنفس الاحتياج تدوّر له على مورد تاني.</p><div class="form">${lines.map((l, i) => `<label class="check full"><input type="checkbox" name="sp-${i}" id="f-sp-${i}"> ${esc(l.name)} × ${fmtNum(l.qty)} ${esc(l.unit || '')}</label>`).join('')}</div>`, onOpen: wireChecks,
+    onSubmit: async f => { const d = formData(f); const pick = lines.filter((_, i) => d['sp-' + i]); if (!pick.length) { toast('علّم صنفًا واحدًا على الأقل', 'err'); return false; } if (pick.length === lines.length) { toast('مينفعش تفصل كل الأصناف — غيّر المورد بدل كده', 'err'); return false; }
+      const keys = new Set(pick.map(x => x.key)); const me = S.session || {};
+      const child = { id: uid(), number: nextNeedNo(), kind: 'need', status: 'need_ok', deptId: p.deptId, brandId: p.brandId || null, orderId: p.orderId || null, needItems: pick.map(x => ({ name: x.name, qty: x.qty, unit: x.unit || 'قطعة' })), items: [], supplier: '', date: todayISO(), expected: p.expected || '', notes: `مفصول من ${p.number} — غير متوفر عند ${p.supplier || 'المورد'}`, splitFrom: p.id, requestedBy: p.requestedBy || null, requestedByName: p.requestedByName || '', needApprovedAt: p.needApprovedAt || nowISO(), needApprovedByName: p.needApprovedByName || 'موروث من الطلب الأصلي', createdAt: nowISO(), createdByName: me.name || '' };
+      await Store.save('purchases', child, { silent: true });
+      const items = (p.items || []).filter(it => !keys.has(it.materialId || it.name)); const needItems = (p.needItems || []).filter(it => !keys.has(it.name));
+      await Store.update('purchases', p.id, { items, needItems: needItems.length ? needItems : p.needItems, splitTo: (p.splitTo || []).concat([child.id]) });
+      await notifyRole('purch', `طلب مفصول ${child.number} — دوّر على مورد تاني`, `${pick.map(x => `${x.name} × ${fmtNum(x.qty)}`).join('، ')}\nمن ${p.number} (${p.supplier || ''} معندوش الأصناف دي)`, { id: `split_${child.id}`, fields: { purchaseId: child.id } });
+      toast(`تم فصل ${pick.length} صنف في ${child.number}`); go('purchases/' + child.id); } });
+};
+function linkedCard(p) {
+  const from = p.splitFrom && byId('purchases', p.splitFrom); const to = (p.splitTo || []).map(id => byId('purchases', id)).filter(Boolean); if (!from && !to.length) return '';
+  const row = x => `<a class="item" href="#/purchases/${x.id}"><div class="main"><div class="title"><span class="code">${esc(x.number)}</span> ${esc(x.supplier || 'بدون مورد بعد')}</div><div class="meta"><span>${(x.items && x.items.length ? x.items : x.needItems || []).slice(0, 3).map(i => esc(i.name || byId('materials', i.materialId)?.name || '')).join('، ')}</span></div></div><div class="end">${badge(PO_STATUS, x.status)}</div></a>`;
+  return `<div class="card"><div class="cardhead"><h3>أوامر مرتبطة بنفس الاحتياج</h3></div><div class="list">${from ? row(from) : ''}${to.map(row).join('')}</div></div>`;
+}
+/* ---------- 3) coded items at a supplier that never supplied them ---------- */
+function poUnconfirmedItems(p) { const sid = p.supplierId || (supplierOf(p) || {}).id; if (!sid) return []; return (p.items || []).filter(it => { const m = it.materialId && byId('materials', it.materialId); return m && supplierPriceOf(m, sid) == null; }); }
+const itemConfirmOk = p => !!(p.itemConfirm && p.itemConfirm.status === 'approved') || !!p.supplierConfirmed;
+ACTIONS.itemConfirmAsk = id => {
+  const p = byId('purchases', id); if (!p || !canPurch()) return; const s = supplierOf(p); if (!s) { toast('اربط الطلب بمورد مسجّل أولًا', 'err'); return; }
+  const items = poUnconfirmedItems(p); if (!items.length) { toast('كل الأصناف مسجّلة على هذا المورد بالفعل'); return; }
+  if (p.itemConfirm && p.itemConfirm.status === 'pending') { toast('طلب التأكيد مُرسَل بالفعل — بانتظار رئيس القسم'); return; }
+  if (items.some(it => it.cost == null || !(+it.cost > 0))) { toast('اكتب سعر المورد لكل صنف أولًا (تعديل)', 'err'); return; }
+  openModal({ title: `تأكيد الأصناف عند ${s.name}`, submitLabel: 'إرسال لرئيس القسم', body: `<p class="small ink2">المورد ده أول مرة يورّد الأصناف دي. رئيس القسم يأكد إنها نفس المنتج، ثم مدير المصنع يراجع، ثم الحسابات تعتمد الأسعار — وبعدها يتسجّل المورد على الصنف بسعره.</p><div class="form"><div class="field full"><label>الأصناف</label><ul style="margin:0;padding-inline-start:18px">${items.map(it => `<li>${esc(it.name || byId('materials', it.materialId)?.name || '')} <span class="code">${esc(byId('materials', it.materialId)?.code || '')}</span> — ${fmtMoney(it.cost)} ${CUR()} × ${fmtNum(it.qty)}</li>`).join('')}</ul></div><div class="field full"><label>صورة الصنف من المورد (يساعد رئيس القسم يتأكد)</label><input type="file" id="f-photo" name="photo" accept="image/*" capture="environment"></div>${field('ملاحظة', `<textarea id="f-note" name="note" placeholder="المواصفة كما ذكرها المورد، رقم الموديل…"></textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); const file = $('#f-photo', f)?.files?.[0]; let thumb = null, fileId = null; if (file) { const doc = await proofAttach(file, { kind: 'proof', ownerKind: 'purchase', ownerId: p.id, note: 'صورة صنف من المورد' }); if (doc) { fileId = doc.id; thumb = doc.thumb || null; } if (!thumb) thumb = await fileToThumb(file, 480); }
+      const me = S.session || {}; const total = sum(items, it => (+it.qty || 0) * (+it.cost || 0));
+      const r = { id: uid(), type: 'itemconfirm', purchaseId: p.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: p.deptId || null, amount: total, reason: `${p.number} — ${s.name}: ${items.map(it => `${it.name || byId('materials', it.materialId)?.name || ''} ${fmtMoney(it.cost)}`).join('، ')}${d.note ? ' — ' + d.note : ''}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('itemconfirm'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تأكيد ${items.length} صنف عند المورد الجديد ${s.name}` }] };
+      await Store.save('requests', r, { silent: true }); await Store.update('purchases', p.id, { itemConfirm: { status: 'pending', reqId: r.id, supplierId: s.id, items: items.map(it => ({ materialId: it.materialId, name: it.name, cost: it.cost, qty: it.qty })), thumb, fileId, note: d.note || '', at: nowISO(), byName: me.name || '' } });
+      const h = poHead(p); await notifyRole(poHeadRole(p), `تأكيد صنف عند مورد جديد — ${p.number}`, `${s.name}: ${items.map(it => it.name || byId('materials', it.materialId)?.name || '').join('، ')}\nهل هو نفس المنتج المكوَّد عندنا؟ اعتمد أو ارفض من الطلبات.`, { id: `ic_${p.id}`, priority: 'high', fields: Object.assign({ purchaseId: p.id, deptId: p.deptId || null }, h ? { assigneeId: h.id, toRole: null } : {}) });
+      toast('أُرسل لرئيس القسم للتأكيد'); return true; } });
+};
+/* ---------- 4) RFQ for a brand-new (uncoded) material ---------- */
+function rfqLineRow(it = {}) { return `<div class="rl"><input name="r-name" placeholder="اسم الخامة" value="${esc(it.name || '')}"><input name="r-desc" placeholder="الوصف الكامل / المواصفة" value="${esc(it.desc || '')}"><input name="r-qty" type="number" step="any" min="0" placeholder="الكمية" value="${it.qty ?? ''}"><select name="r-unit">${opts(S.settings.units, it.unit || 'قطعة')}</select><select name="r-cat">${ITEM_CATS.map(c => `<option value="${c[0]}" ${(it.cat || 'OTH') === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('')}</select><button type="button" class="iconbtn" data-rl="del">${icon('x')}</button></div>`; }
+document.addEventListener('click', e => { const b = e.target.closest('[data-rl]'); if (!b) return; const box = document.getElementById('rfqlines'); if (!box) return; if (b.dataset.rl === 'add') box.insertAdjacentHTML('beforeend', rfqLineRow()); else if ($$('.rl', box).length > 1) b.closest('.rl').remove(); });
+function rfqForm(p) {
+  const myDept = p.deptId || (role() === 'head' ? myDepts()[0] : '') || '';
+  return `<div class="form">${field('رقم الطلب', inp('number', p.number || nextRfqNo(), 'class="code" readonly'))}${field('القسم الطالب', `<select id="f-deptId" name="deptId">${opts(S.settings.departments.filter(d => !d.admin), myDept)}</select>`)}
+    ${field('البراند', `<select id="f-brandId" name="brandId"><option value="">—</option>${opts(S.settings.brands, p.brandId || '', x => typeof brandKit === 'function' ? brandKit(x.id).name : x.name)}</select>`)}${field('المشروع (أمر التشغيل)', `<select id="f-orderId" name="orderId"><option value="">— عام —</option>${opts(sortBy(list('orders').filter(isOpen), o => o.code), p.orderId || '', o => `${o.code} — ${o.title}`)}</select>`)}
+    <div class="field full"><label>الخامات الجديدة (غير مكوَّدة) — اكتب الوصف كاملًا</label><div class="rfqlines" id="rfqlines">${(p.rfqItems && p.rfqItems.length ? p.rfqItems : [{}]).map(rfqLineRow).join('')}</div><button type="button" class="btn sm" data-rl="add" style="margin-top:6px">${icon('plus')}خامة</button></div>
+    ${field('مطلوب قبل', inp('expected', p.expected || '', 'type="date"'))}${field('ملاحظات', `<textarea id="f-notes" name="notes" placeholder="لأي مرحلة؟ أي بدائل مقبولة؟">${esc(p.notes || '')}</textarea>`, 'full')}</div>`;
+}
+const readRfqLines = f => $$('#rfqlines .rl', f).map(l => ({ name: (l.querySelector('[name=r-name]').value || '').trim(), desc: (l.querySelector('[name=r-desc]').value || '').trim(), qty: num(l.querySelector('[name=r-qty]').value), unit: l.querySelector('[name=r-unit]').value, cat: l.querySelector('[name=r-cat]').value })).filter(x => x.name && x.qty > 0);
+async function saveRfq(f, p) {
+  const d = formData(f); const items = readRfqLines(f); if (!d.deptId) { toast('اختر القسم', 'err'); return false; } if (!items.length) { toast('أضف خامة واحدة على الأقل بكمية', 'err'); return false; }
+  const me = S.session || {}; const isNew = !p.id; const doc = Object.assign({}, p, { id: p.id || uid(), number: d.number || nextRfqNo(), kind: 'rfq', status: isNew ? 'rfq' : p.status, deptId: d.deptId, brandId: d.brandId || null, orderId: d.orderId || null, rfqItems: items, expected: d.expected || '', notes: d.notes || '', date: p.date || todayISO(), supplier: p.supplier || '', items: p.items || [], requestedBy: p.requestedBy || me.id || null, requestedByName: p.requestedByName || me.name || '', createdAt: p.createdAt || nowISO() });
+  await Store.save('purchases', doc, { silent: true });
+  if (isNew) await notifyRole('purch', `طلب عرض سعر ${doc.number} — خامة جديدة من ${deptName(doc.deptId)}`, `${items.map(x => `${x.name} (${x.desc}) × ${fmtNum(x.qty)} ${x.unit}`).join('\n')}\nدوّر على مورد وسجّل السعر والصورة من صفحة الطلب.`, { id: `rfq_${doc.id}`, orderId: doc.orderId || null, fields: { purchaseId: doc.id } });
+  toast(isNew ? 'أُرسل طلب عرض السعر للمشتريات' : 'تم الحفظ'); return doc;
+}
+ACTIONS.rfqNew = () => { if (!canNeed()) return; openModal({ title: 'طلب عرض سعر — خامة جديدة غير مكوَّدة', wide: true, body: rfqForm({}), onSubmit: f => saveRfq(f, {}) }); };
+ACTIONS.rfqEdit = id => { const p = byId('purchases', id); if (!p || !canNeed() || p.status !== 'rfq') return; openModal({ title: `تعديل ${p.number}`, wide: true, body: rfqForm(p), onSubmit: f => saveRfq(f, p) }); };
+/* purchasing records the supplier's quote */
+ACTIONS.rfqQuote = id => {
+  const p = byId('purchases', id); if (!p || !canPurch() || p.status !== 'rfq') return; const items = p.rfqItems || []; if (!items.length) return;
+  const q = p.rfqQuote || {}; const rej = (p.rfqRejected || []).map(x => x.supplierId);
+  openModal({ title: `عرض المورد — ${p.number}`, wide: true, submitLabel: 'إرسال لرئيس القسم للاعتماد الفني', body: `<div class="form">${field('المورد', `<select id="f-supplierId" name="supplierId" required><option value="">— اختر —</option>${sortBy(list('suppliers'), s => s.name).map(s => `<option value="${s.id}" ${q.supplierId === s.id ? 'selected' : ''} ${rej.includes(s.id) ? 'disabled' : ''}>${esc(s.name)}${rej.includes(s.id) ? ' — مرفوض فنيًا' : ''}</option>`).join('')}</select>`, 'full')}
+    <div class="field full"><div class="tablewrap"><table><thead><tr><th>الخامة</th><th class="n">الكمية</th><th class="n">سعر الوحدة (${CUR()})</th><th>صورة الخامة من المورد</th></tr></thead><tbody>${items.map((it, i) => `<tr><td>${esc(it.name)}<div class="tiny muted">${esc(it.desc || '')}</div></td><td class="n">${fmtNum(it.qty)} ${esc(it.unit)}</td><td class="n"><input class="inp num" name="pr-${i}" type="number" step="any" min="0" style="width:110px;padding:4px 8px" value="${q.items && q.items[i] ? q.items[i].price : ''}" required></td><td><input type="file" name="ph-${i}" accept="image/*" capture="environment"></td></tr>`).join('')}</tbody></table></div></div>
+    ${field('مدة التوريد (يوم)', inp('leadDays', q.leadDays || '', 'type="number" min="0"'))}${field('ملاحظة للمعتمدين', `<textarea id="f-note" name="note">${esc(q.note || '')}</textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); const s = byId('suppliers', d.supplierId); if (!s) { toast('اختر المورد', 'err'); return false; }
+      const lines = []; for (let i = 0; i < items.length; i++) { const price = num(d['pr-' + i]); if (!(price > 0)) { toast(`اكتب سعر ${items[i].name}`, 'err'); return false; } const file = f.querySelector(`[name=ph-${i}]`)?.files?.[0]; let thumb = q.items && q.items[i] ? q.items[i].thumb || null : null, fileId = q.items && q.items[i] ? q.items[i].fileId || null : null; if (file) { const doc = await proofAttach(file, { kind: 'proof', ownerKind: 'purchase', ownerId: p.id, note: `صورة ${items[i].name} من ${s.name}` }); if (doc) { fileId = doc.id; thumb = doc.thumb || null; } if (!thumb) thumb = await fileToThumb(file, 480); } lines.push({ price, thumb, fileId }); }
+      if (lines.every(l => !l.thumb)) { toast('ارفق صورة الخامة من المورد لبند واحد على الأقل — رئيس القسم يعتمد عليها', 'err'); return false; }
+      const me = S.session || {}; const total = r2(items.reduce((a, it, i) => a + (+it.qty || 0) * lines[i].price, 0)); const quote = { supplierId: s.id, supplierName: s.name, items: lines, leadDays: num(d.leadDays) || null, note: d.note || '', total, at: nowISO(), byName: me.name || '' };
+      const r = { id: uid(), type: 'rfqtech', purchaseId: p.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: p.deptId || null, amount: total, reason: `${p.number} — ${s.name}: ${items.map((it, i) => `${it.name} ${fmtMoney(lines[i].price)}`).join('، ')} — إجمالي ${fmtMoney(total)} ${CUR()}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('rfqtech'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `عرض ${s.name} — بانتظار الاعتماد الفني لرئيس القسم` }] };
+      await Store.save('requests', r, { silent: true }); await Store.update('purchases', p.id, { rfqQuote: quote, rfqQuotes: (p.rfqQuotes || []).concat([quote]), rfqTechReqId: r.id, status: 'rfq_tech', supplierId: s.id, supplier: s.name });
+      const h = poHead(p); await notifyRole(poHeadRole(p), `اعتماد فني — خامة جديدة ${p.number}`, `${s.name}: ${items.map(it => it.name).join('، ')}\nشوف الصورة على صفحة الطلب: وافق على الصورة، أو بعد المعاينة، أو ارفض (غير مطابقة).`, { id: `rfqt_${p.id}`, priority: 'high', fields: Object.assign({ purchaseId: p.id, deptId: p.deptId || null }, h ? { assigneeId: h.id, toRole: null } : {}) });
+      toast('أُرسل لرئيس القسم للاعتماد الفني'); return true; } });
+};
+/* technical approval mode (photo / inspected) is picked inside the decision dialog */
+const rfqTechModeSel = () => `<div class="field full"><label>نوع الاعتماد الفني</label><select id="f-techMode" name="techMode"><option value="photo">موافقة على الصورة</option><option value="inspected">تمت معاينة الخامة — موافقة فنية</option></select></div>`;
+(() => { const base = ACTIONS.reqDecide; ACTIONS.reqDecide = arg => { base(arg); const [id, status] = arg.split(':'); const r = byId('requests', id); if (!r || r.type !== 'rfqtech' || status !== 'approved') return; const f = document.getElementById('mform'); const box = f && f.querySelector('.form'); if (box && !box.querySelector('#f-techMode')) box.insertAdjacentHTML('afterbegin', rfqTechModeSel()); }; })();
+ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if (!r || r.type !== 'rfqtech' || !awaitingMe(r)) return; const inp0 = document.getElementById('rq-msg'); if (inp0 && !document.getElementById('f-techMode')) inp0.insertAdjacentHTML('beforebegin', `<select id="f-techMode" class="sel" style="max-width:220px"><option value="photo">موافقة على الصورة</option><option value="inspected">تمت المعاينة — موافقة فنية</option></select>`); })(ACTIONS.reqOpen);
+const techModeNow = () => (document.getElementById('f-techMode') || {}).value || 'photo';
+async function rfqCodeAndOrder(p, approvedByName) {
+  const q = p.rfqQuote; const s = byId('suppliers', q.supplierId); const dc = deptCode(p.deptId || 'store'); const items = [];
+  for (let i = 0; i < (p.rfqItems || []).length; i++) { const it = p.rfqItems[i]; const line = q.items[i] || {}; const code = nextItemCode(dc, it.cat || 'OTH'); const m = { id: uid(), code, name: it.name, desc: it.desc || '', unit: it.unit || 'قطعة', qty: 0, minQty: 0, cost: line.price, deptCode: dc, itemCat: it.cat || 'OTH', photo: line.thumb || null, supplier: s ? s.name : '', suppliers: s ? [{ supplierId: s.id, price: line.price, at: todayISO(), purchaseId: p.id, confirmedBy: approvedByName }] : [], createdFrom: p.id, createdAt: nowISO() }; await Store.save('materials', m, { silent: true }); items.push({ materialId: m.id, name: m.name, unit: m.unit, qty: it.qty, cost: line.price }); }
+  const offer = { id: uid(), supplierId: q.supplierId, supplierName: q.supplierName, price: q.total, leadDays: q.leadDays, notes: 'عرض طلب عرض السعر المعتمد', at: nowISO(), byName: q.byName, selected: true, thumb: (q.items.find(x => x.thumb) || {}).thumb || null };
+  await Store.update('purchases', p.id, { items, supplierId: q.supplierId, supplier: q.supplierName, offers: [offer], availOk: true, availAt: nowISO(), supplierConfirmed: true, status: 'draft', rfqPrice: { ok: true, byName: approvedByName, at: nowISO() } });
+  await notifyRole('purch', `${p.number}: الخامة اتكوّدت وأمر الشراء جاهز — أرسله للاعتماد`, `${items.map(x => `${byId('materials', x.materialId)?.code || ''} ${x.name}`).join('، ')}\nمن صفحة الطلب: «إرسال للاعتماد» → الحسابات → تحويل المالك.`, { id: `rfqok_${p.id}`, fields: { purchaseId: p.id } });
+  if (typeof pushSend === 'function' && p.requestedBy) pushSend([p.requestedBy], `اعتُمدت الخامة الجديدة ${p.number}`, 'اتكوّدت وطلع لها أمر شراء', `/#/purchases/${p.id}`, 'po-' + p.id);
+}
+/* ---------- request effects for the new types ---------- */
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; const by = S.session?.name || '';
+  if (r.type === 'itemconfirm' && p) {
+    const ic = p.itemConfirm || {}; const sid = ic.supplierId; for (const it of ic.items || []) { const m = it.materialId && byId('materials', it.materialId); if (!m || !sid) continue; const sup = (m.suppliers || []).filter(x => x.supplierId !== sid).concat([{ supplierId: sid, price: +it.cost || 0, at: todayISO(), purchaseId: p.id, confirmedBy: by }]); await Store.update('materials', m.id, { suppliers: sup }); }
+    await Store.update('purchases', p.id, { itemConfirm: Object.assign({}, ic, { status: 'approved', approvedAt: nowISO(), approvedByName: by }), supplierConfirmed: true });
+    await notifyRole('purch', `تم تأكيد الأصناف عند ${p.supplier || ''} — ${p.number}`, 'المورد اتسجّل على الأصناف بأسعاره. أرسل أمر الشراء للاعتماد.', { id: `ic_ok_${p.id}`, fields: { purchaseId: p.id } }); return;
+  }
+  if (r.type === 'rfqtech' && p) {
+    const mode = opts.techMode || techModeNow(); const total = (p.rfqQuote || {}).total || 0; const chain = ['manager'].concat(total >= rfqOwnerAbove() ? ['admin'] : []); const me = S.session || {};
+    const r2q = { id: uid(), type: 'rfqprice', purchaseId: p.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: p.deptId || null, amount: total, reason: `${p.number} — ${p.rfqQuote?.supplierName || ''}: إجمالي ${fmtMoney(total)} ${CUR()} (${(p.rfqItems || []).map((it, i) => `${it.name} ${fmtMoney((p.rfqQuote.items[i] || {}).price || 0)}`).join('، ')})`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain, step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `اعتماد فني (${mode === 'inspected' ? 'بعد المعاينة' : 'على الصورة'}) — بانتظار اعتماد السعر: ${chain.map(c => CHAIN_LABEL[c]).join(' ← ')}` }] };
+    await Store.save('requests', r2q, { silent: true }); await Store.update('purchases', p.id, { rfqTech: { ok: true, mode, byName: by, at: nowISO() }, rfqPriceReqId: r2q.id, status: 'rfq_price' });
+    await notifyRole('manager', `اعتماد سعر خامة جديدة — ${p.number}`, `${r2q.reason}${total >= rfqOwnerAbove() ? `\nفوق ${fmtMoney(rfqOwnerAbove())} — يليك اعتماد المالك.` : ''}`, { id: `rfqp_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); return;
+  }
+  if (r.type === 'rfqprice' && p) { await rfqCodeAndOrder(p, by); return; }
+  if (r.type === 'custody') { const m = byId('materials', r.materialId); if (m) { await addMovement({ materialId: m.id, type: 'out', qty: r.qty, orderId: r.orderId || null, deptId: r.deptId || null, note: `صرف لأرضية المصنع — عهدة ${deptName(r.deptId)}${r.orderId ? ' — ' + (byId('orders', r.orderId)?.code || '') : ''} (أكده ${by})`, custody: true }); } return; }
+  return base(r, w, patch, opts);
+})(applyRequestEffects);
+decideRequest = (base => async (id, status, note, opts = {}) => {
+  const r0 = byId('requests', id); if (r0 && r0.type === 'rfqtech' && status === 'approved') opts = Object.assign({}, opts, { techMode: techModeNow() });
+  const ok = await base(id, status, note, opts); if (ok === false) return false; const r = byId('requests', id); if (!r || r.status !== 'rejected') return ok; const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; if (!p) return ok;
+  if (r.type === 'itemconfirm') { await Store.update('purchases', p.id, { itemConfirm: Object.assign({}, p.itemConfirm || {}, { status: 'rejected', note: note || '', at: nowISO() }), supplierConfirmed: false }); await notifyRole('purch', `رُفض تأكيد الأصناف عند ${p.supplier || ''} — ${p.number}`, `${note || 'غير مطابق'}\nدوّر على مورد تاني لنفس الأصناف.`, { id: `ic_no_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); }
+  if (r.type === 'rfqtech') { const q = p.rfqQuote || {}; await Store.update('purchases', p.id, { status: 'rfq', rfqRejected: (p.rfqRejected || []).concat([{ supplierId: q.supplierId, supplierName: q.supplierName, note: note || '', at: nowISO(), byName: S.session?.name || '' }]), rfqQuote: null, supplierId: null, supplier: '' }); await notifyRole('purch', `رفض فني لخامة ${p.number} — دوّر على مورد تاني`, `رئيس القسم: ${note || 'غير مطابقة للمواصفات'}\nالمورد ${q.supplierName || ''} مرفوض لهذه الخامة.`, { id: `rfqt_no_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); }
+  if (r.type === 'rfqprice') { await Store.update('purchases', p.id, { status: 'rfq', rfqPrice: { ok: false, note: note || '', byName: S.session?.name || '', at: nowISO() } }); await notifyRole('purch', `لم يُعتمد سعر ${p.number}`, `${note || 'راجع السعر أو دوّر على مورد آخر'}`, { id: `rfqp_no_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); }
+  return ok;
+})(decideRequest);
+reqDesc = (base => r => {
+  if (r.type === 'itemconfirm' || r.type === 'rfqtech' || r.type === 'rfqprice') return r.reason || REQ_TYPES[r.type];
+  if (r.type === 'custody') { const m = byId('materials', r.materialId); return `صرف ${m ? m.name : ''} × ${fmtNum(r.qty)} لأرضية المصنع — عهدة ${deptName(r.deptId)}${r.orderId ? ' — ' + (byId('orders', r.orderId)?.code || '') : ''}`; }
+  return base(r);
+})(reqDesc);
+/* the head's request modal shows the supplier photo for rfqtech / itemconfirm */
+ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if (!r || !['rfqtech', 'itemconfirm'].includes(r.type)) return; const p = r.purchaseId && byId('purchases', r.purchaseId); if (!p) return; const th = r.type === 'rfqtech' ? ((p.rfqQuote || {}).items || []).map((x, i) => x.thumb ? `<figure style="margin:0;text-align:center"><img class="rfqthumb" src="${x.thumb}" alt="" data-action="lightboxRfq" data-arg="${p.id}:${i}" style="width:96px;height:96px;cursor:zoom-in"><figcaption class="tiny muted">${esc((p.rfqItems[i] || {}).name || '')}</figcaption></figure>` : '').join('') : (p.itemConfirm && p.itemConfirm.thumb ? `<img class="rfqthumb" src="${p.itemConfirm.thumb}" alt="" data-action="lightboxIc" data-arg="${p.id}" style="width:96px;height:96px;cursor:zoom-in">` : ''); const t = document.getElementById('rq-thread'); if (t && th && !document.getElementById('rq-photos')) t.insertAdjacentHTML('beforebegin', `<div id="rq-photos" class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px"><div class="small bold" style="width:100%">صور الخامة من المورد — <a href="#/purchases/${p.id}">فتح الطلب</a></div>${th}</div>`); })(ACTIONS.reqOpen);
+ACTIONS.lightboxRfq = arg => { const [id, i] = arg.split(':'); const p = byId('purchases', id); const x = p && p.rfqQuote && p.rfqQuote.items[+i]; if (x && x.thumb) lightbox(x.thumb, (p.rfqItems[+i] || {}).name || ''); };
+ACTIONS.lightboxIc = id => { const p = byId('purchases', id); if (p && p.itemConfirm && p.itemConfirm.thumb) lightbox(p.itemConfirm.thumb, 'صورة الصنف من المورد'); };
+/* ---------- chain / submit rules ---------- */
+poChainFor = (base => p => p.supplierConfirmed ? ['acc'] : base(p))(poChainFor);
+ACTIONS.poSubmit = async id => {
+  const p = byId('purchases', id); if (!p || !canPurch()) return; if (!['draft', 'rejected', 'need_ok'].includes(p.status)) return;
+  const pol = poPolicy(); const offers = p.offers || []; const newSup = isNewSupplier(p) && !p.supplierConfirmed;
+  if (!p.deptId) { toast('حدد القسم الطالب (تعديل ← القسم الطالب)', 'err'); return; }
+  if (!(p.items || []).length) { toast('أضف بنود أمر الشراء بأسعارها (تعديل)', 'err'); return; }
+  if (!supplierOf(p)) { toast('اربط الطلب بمورد مسجّل', 'err'); return; }
+  const unc = poUnconfirmedItems(p); if (unc.length && !itemConfirmOk(p)) { toast(`${unc.length} صنف مكوَّد أول مرة عند هذا المورد — اطلب «تأكيد الصنف» من رئيس القسم أولًا`, 'err'); return; }
+  if (newSup) { if (offers.length < (+pol.poMinOffers || 3)) { toast(`مورد جديد: مطلوب ${pol.poMinOffers || 3} عروض أسعار من 3 موردين (مسجّل ${offers.length})`, 'err'); return; } if (!offers.some(o => o.selected)) { toast('مدير المصنع يختار العرض المناسب أولًا', 'err'); return; } if (p.priceCheck && p.priceCheck.status === 'pending') { toast('بانتظار تأكيد المالك للسعر', 'err'); return; } }
+  else { if (!offers.length) { toast('ارفق عرض سعر / فاتورة المورد (عرض سعر مورد)', 'err'); return; } if (!p.availOk) { toast('أكّد توفر الأصناف عند المورد أولًا — أو افصل غير المتوفر في طلب تاني', 'err'); return; } const pm = poPriceMatch(p); if (pm.diffs.length && !(p.priceCheck && p.priceCheck.status === 'approved')) { toast(`${pm.diffs.length} صنف بسعر مختلف عن آخر سعر للمورد — صحّح السعر أو اطلب «تأكيد السعر من المالك»`, 'err'); return; } }
+  const chain = poChainFor(p); const total = poTotal(p);
+  if (!(await confirmDlg(`إرسال ${p.number} للاعتماد؟ المسار: ${chain.map(c => CHAIN_LABEL[c] || c).join(' ← ')} ثم تحويل المالك — الإجمالي ${fmtMoney(total)} ${CUR()}`, 'إرسال', false))) return;
+  const me = S.session || {}; const r = { id: uid(), type: 'po', purchaseId: p.id, workerId: null, requesterId: me.workerId || me.id, deptId: p.deptId, amount: total, reason: `أمر شراء ${p.number} — ${p.supplier || ''} — ${(p.items || []).length} بند`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain, step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `تم رفع أمر الشراء للاعتماد${newSup ? ' (مورد جديد)' : p.supplierConfirmed ? ' (مورد مؤكَّد على الأصناف)' : ''} — العرض: ${(offers.find(o => o.selected) || offers[0] || {}).supplierName || p.supplier || '—'}` }] };
+  await Store.save('requests', r, { silent: true }); await Store.update('purchases', p.id, { status: 'approval', approval: { status: 'pending', reqId: r.id, chain, at: nowISO(), byName: me.name || '' } });
+  await notifyRole(chain[0], `اعتماد أمر الشراء ${p.number}`, `${p.supplier || ''} — ${fmtMoney(total)} ${CUR()}`, { id: `po_appr_${p.id}`, fields: { purchaseId: p.id } });
+  toast('تم إرسال أمر الشراء للاعتماد');
+};
+/* purchasing may select the offer itself once the supplier is confirmed on the items */
+(() => { const base = ACTIONS.poOfferSelect; ACTIONS.poOfferSelect = async arg => { const [id, oid] = arg.split(':'); const p = byId('purchases', id); if (p && p.supplierConfirmed && canPurch()) { const of = (p.offers || []).find(x => x.id === oid); if (!of) return; await Store.update('purchases', id, { offers: (p.offers || []).map(x => Object.assign({}, x, { selected: x.id === of.id })) }); toast(`تم اختيار عرض ${of.supplierName}`); return; } return base(arg); }; })();
+/* ---------- 5) receiving: store-only when everything goes to the store; custody issue later ---------- */
+ACTIONS.poReceiveAs = (base => async arg => {
+  await base(arg); const [id, who] = arg.split(':'); const p = byId('purchases', id); if (!p || who !== 'store' || !p.receipts || !p.receipts.store || p.receipts.head) return;
+  const St = p.receipts.store; if (!(St.items || []).length || St.items.some(r => r.dest === 'floor' && (+r.accepted || 0) > 0)) return;
+  /* everything goes to the main store → the storekeeper's receipt is enough; the head is not needed */
+  const H = Object.assign({}, St, { auto: true, byName: `${St.byName} (تخزين — بدون رئيس القسم)`, note: St.note || 'دخل المخزن الرئيسي' });
+  await Store.update('purchases', p.id, { receipts: Object.assign({}, p.receipts, { head: H }) }); const wait = byId('tasks', `po_recv_wait_${p.id}`); if (wait && wait.status !== 'done') await Store.update('tasks', wait.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم' });
+  await poFinalizeReceipt(byId('purchases', p.id)); toast('كل الأصناف دخلت المخزن الرئيسي — اكتمل الاستلام بتوقيع أمين المخزن');
+})(ACTIONS.poReceiveAs);
+/* custody: storekeeper issues stock to the factory floor; the department head confirms it is now in his custody */
+ACTIONS.custodyNew = arg => {
+  if (!(isAdmin() || ['store', 'manager', 'purch', 'office'].includes(role()))) return; const [orderId0, materialId0] = (arg || '').split(':');
+  const mats = sortBy(list('materials').filter(m => +m.qty > 0), m => m.name); if (!mats.length) { toast('لا يوجد رصيد في المخزن', 'err'); return; }
+  openModal({ title: 'صرف لأرضية المصنع — عهدة قسم', submitLabel: 'إرسال لرئيس القسم للتأكيد', body: `<div class="form">${field('الخامة', `<select id="f-materialId" name="materialId">${opts(mats, materialId0 || '', m => `${m.code || ''} ${m.name} — رصيد ${fmtNum(m.qty)} ${m.unit || ''}`)}</select>`, 'full')}${field('الكمية', inp('qty', '', 'type="number" step="any" min="0" inputmode="decimal" required'))}${field('القسم المستلم', `<select id="f-deptId" name="deptId">${opts(S.settings.departments.filter(d => !d.admin), '')}</select>`)}${field('أمر التشغيل', `<select id="f-orderId" name="orderId"><option value="">—</option>${opts(sortBy(list('orders').filter(isOpen), o => o.code), orderId0 || '', o => `${o.code} — ${o.title}`)}</select>`, 'full')}${field('ملاحظة', `<textarea id="f-note" name="note"></textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); const m = byId('materials', d.materialId); const qty = num(d.qty); if (!m || !(qty > 0)) { toast('اختر الخامة واكتب الكمية', 'err'); return false; } if (qty > (+m.qty || 0) + 0.001) { toast(`الرصيد ${fmtNum(m.qty)} فقط`, 'err'); return false; } if (!d.deptId) { toast('اختر القسم', 'err'); return false; }
+      const me = S.session || {}; const r = { id: uid(), type: 'custody', materialId: m.id, qty, deptId: d.deptId, orderId: d.orderId || null, requesterId: me.workerId || me.id, requesterName: me.name || '', reason: `${m.code || ''} ${m.name} × ${fmtNum(qty)} ${m.unit || ''} → ${deptName(d.deptId)}${d.note ? ' — ' + d.note : ''}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('custody'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: 'صرف من المخزن لأرضية المصنع — بانتظار تأكيد رئيس القسم إنها في عهدته' }] };
+      await Store.save('requests', r, { silent: true }); const h = deptHeads(d.deptId)[0]; await notifyRole('head', `تأكيد عهدة: ${m.name} × ${fmtNum(qty)}`, `أمين المخزن صرف ${m.name} لأرضية المصنع لقسمك${d.orderId ? ' — ' + (byId('orders', d.orderId)?.code || '') : ''}. أكد الاستلام من الطلبات.`, { id: `cust_${r.id}`, priority: 'high', fields: Object.assign({ deptId: d.deptId }, h ? { assigneeId: h.id, toRole: null } : {}) });
+      toast('أُرسل لرئيس القسم لتأكيد العهدة'); return true; } });
+};
+function custodyOf(m) { const out = {}; list('movements').forEach(doc => Object.values(doc.items || {}).forEach(it => { if (it.materialId === m.id && it.type === 'out' && it.custody && it.deptId) out[it.deptId] = r2((out[it.deptId] || 0) + (+it.qty || 0)); })); return out; }
+RENDER_HOOKS.push(() => { if (S.route.view !== 'inventory' || S.route.id) return; const acts = document.querySelector('.tb-actions, .pagehead .actions'); if (!acts || acts.querySelector('[data-action="custodyNew"]') || !(isAdmin() || ['store', 'manager'].includes(role()))) return; acts.insertAdjacentHTML('afterbegin', `<button class="btn" data-action="custodyNew">${icon('arrow')}<span>صرف لأرضية المصنع</span></button>`); });
+/* movement notes carry the custody flag */
+addMovement = (base => async (mv, applyQty = true) => { const r = await base(mv, applyQty); if (mv && mv.custody && mv.materialId) { try { const month = monthOf(mv.date || todayISO()); const doc = byId('movements', month); const it = doc && Object.values(doc.items || {}).filter(x => x.materialId === mv.materialId && x.type === 'out').sort((a, b) => (a.ts < b.ts ? 1 : -1))[0]; if (it && !it.custody) await Store.update('movements', month, { items: { [it.id]: Object.assign({}, it, { custody: true }) } }); } catch (e) { /* ignore */ } } return r; })(addMovement);
+/* ---------- purchasing options panel + cards on the PO page ---------- */
+function purchOptionsCard(p) {
+  if (!canPurch() || !['draft', 'need_ok', 'rejected'].includes(p.status)) return '';
+  const s = supplierOf(p); const pm = poPriceMatch(p); const unc = poUnconfirmedItems(p); const ic = p.itemConfirm || {};
+  const op = (cls, title, sub, btn) => `<div class="op ${cls}"><b>${title}</b><small>${sub}</small>${btn || ''}</div>`;
+  return `<div class="card"><div class="cardhead"><h3>خيارات المشتريات لهذا الطلب</h3></div><div class="popts">
+    ${op(s ? (pm.diffs.length ? 'wait' : pm.known ? 'done' : '') : '', '١ · مورد معتمد بنفس الأسعار', s ? (pm.known ? (pm.diffs.length ? `${pm.diffs.length} صنف بسعر مختلف — صحّح أو اطلب تأكيد السعر` : 'الأسعار مطابقة لآخر سعر ✓ — أكّد التوفر وأرسل') : 'أصناف جديدة على هذا المورد — استخدم الخيار ٣') : 'اربط الطلب بمورد مسجّل (تعديل)')}
+    ${op((p.splitTo || []).length ? 'done' : '', '٢ · المورد معندوش كل الأصناف', (p.splitTo || []).length ? `اتفصل ${(p.splitTo || []).length} طلب لمورد آخر` : 'افصل الأصناف الناقصة في طلب تاني وكمّل الأمر باللي عنده', `<button class="btn xs" data-action="poSplit" data-arg="${p.id}">${icon('arrow')}فصل أصناف</button>`)}
+    ${op(ic.status === 'approved' || p.supplierConfirmed ? 'done' : ic.status === 'pending' ? 'wait' : '', '٣ · صنف مكوَّد عند مورد جديد', ic.status === 'approved' || p.supplierConfirmed ? 'المورد مؤكَّد على الأصناف ✓' : ic.status === 'pending' ? `بانتظار: رئيس القسم ← مدير المصنع ← الحسابات` : ic.status === 'rejected' ? `مرفوض: ${esc(ic.note || '')} — دوّر على مورد تاني` : unc.length ? `${unc.length} صنف أول مرة عند ${s ? esc(s.name) : 'المورد'} — اطلب تأكيد الصنف` : 'لا يوجد أصناف تحتاج تأكيدًا', unc.length && ic.status !== 'pending' && !p.supplierConfirmed ? `<button class="btn xs p" data-action="itemConfirmAsk" data-arg="${p.id}">${icon('check')}طلب تأكيد الصنف</button>` : '')}
+    ${op('', '٤ · خامة جديدة غير مكوَّدة', 'تُطلب بـ«طلب عرض سعر» من رئيس القسم: مورد + سعر + صورة ← اعتماد فني ← اعتماد السعر ← تكويد + أمر شراء تلقائي', `<button class="btn xs" data-action="rfqNew">${icon('plus')}طلب عرض سعر</button>`)}
+    ${op('', '٥ · الاستلام', 'وجهة كل بند تتحدد عند الوصول: المخزن الرئيسي (أمين المخزن وحده) أو أرضية المصنع للتشغيل (أمين المخزن + رئيس القسم = عهدة). الصرف لاحقًا من «المخزون ← صرف لأرضية المصنع».')}
+  </div></div>`;
+}
+function rfqCard(p) {
+  if (p.kind !== 'rfq') return ''; const q = p.rfqQuote; const items = p.rfqItems || [];
+  return `<div class="card"><div class="cardhead"><h3>طلب عرض سعر — خامة جديدة من ${esc(deptName(p.deptId))}</h3>${badge(PO_STATUS, p.status)}<div class="grow"></div>${p.status === 'rfq' && canNeed() ? `<button class="btn xs" data-action="rfqEdit" data-arg="${p.id}">${icon('edit')}تعديل</button>` : ''}${p.status === 'rfq' && canPurch() ? `<button class="btn xs p" data-action="rfqQuote" data-arg="${p.id}">${icon('money')}تسجيل عرض المورد</button>` : ''}</div>
+    <div class="small">${p.orderId && byId('orders', p.orderId) ? `<a href="#/orders/${p.orderId}"><span class="code">${esc(byId('orders', p.orderId).code)}</span></a> ` : ''}${p.requestedByName ? `طلبه ${esc(p.requestedByName)}` : ''}${p.expected ? ` · مطلوب قبل ${fmtDate(p.expected)}` : ''}</div>
+    <table class="tbl" style="margin-top:8px"><thead><tr><th>الخامة</th><th>الوصف</th><th class="n">الكمية</th>${q ? `<th class="n">سعر ${esc(q.supplierName)}</th><th>صورة</th>` : ''}</tr></thead><tbody>${items.map((x, i) => `<tr><td>${esc(x.name)}</td><td class="small">${esc(x.desc || '')}</td><td class="n">${fmtNum(x.qty)} ${esc(x.unit || '')}</td>${q ? `<td class="n">${fmtMoney((q.items[i] || {}).price || 0)}</td><td>${(q.items[i] || {}).thumb ? `<img class="rfqthumb" src="${q.items[i].thumb}" alt="" data-action="lightboxRfq" data-arg="${p.id}:${i}" style="cursor:zoom-in">` : '—'}</td>` : ''}</tr>`).join('')}</tbody>${q ? `<tfoot><tr><th colspan="3">الإجمالي</th><th class="n">${fmtMoney(q.total)} ${CUR()}</th><th>${q.leadDays ? `توريد ${q.leadDays} يوم` : ''}</th></tr></tfoot>` : ''}</table>
+    ${p.notes ? `<div class="small ink2" style="margin-top:6px">${esc(p.notes)}</div>` : ''}
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${p.rfqTech ? `<span class="badge good">اعتماد فني ${p.rfqTech.mode === 'inspected' ? 'بعد المعاينة' : 'على الصورة'} — ${esc(p.rfqTech.byName || '')}</span>` : ''}${p.rfqPrice ? `<span class="badge ${p.rfqPrice.ok ? 'good' : 'crit'}">${p.rfqPrice.ok ? 'السعر معتمد' : 'السعر مرفوض'} — ${esc(p.rfqPrice.byName || '')}</span>` : ''}${(p.rfqRejected || []).map(x => `<span class="badge crit" title="${esc(x.note || '')}">مرفوض فنيًا: ${esc(x.supplierName || '')}</span>`).join('')}</div>
+    ${p.status === 'rfq_price' ? `<div class="banner info" style="margin-top:8px">${icon('info')}<span>اعتماد السعر: مدير المصنع${(q && q.total >= rfqOwnerAbove()) ? ' ثم المالك (فوق ' + fmtMoney(rfqOwnerAbove()) + ')' : ''} — من الطلبات.</span></div>` : ''}
+    ${p.status === 'draft' && p.rfqPrice && p.rfqPrice.ok ? `<div class="banner info" style="margin-top:8px">${icon('check')}<span>الخامة اتكوّدت (${(p.items || []).map(x => esc(byId('materials', x.materialId)?.code || '')).join('، ')}) وأمر الشراء جاهز — «إرسال للاعتماد».</span></div>` : ''}</div>`;
+}
+vPurchaseDetail = (base => id => { const p = byId('purchases', id); let html = base(id); if (!p) return html; if (p.supplierConfirmed) html = html.replace('<span class="badge warn">مورد جديد — 3 عروض ويختار مدير المصنع</span>', '<span class="badge good">مورد مؤكَّد على الأصناف ✓ — لا يحتاج 3 عروض</span>').replace(/1 من 3 مطلوبة|0 من 3 مطلوبة/g, 'عرض واحد يكفي'); const extra = rfqCard(p) + linkedCard(p) + purchOptionsCard(p) + priceMatchCard(p); if (!extra) return html; const i = html.indexOf('<div class="card tight">'); return i > 0 ? html.slice(0, i) + extra + html.slice(i) : html + extra; })(vPurchaseDetail);
+vPurchases = (base => () => {
+  let html = base(); const f = S.ui.filter.purchases || {}; let rfqs = list('purchases').filter(p => p.kind === 'rfq'); if (role() === 'head') rfqs = rfqs.filter(p => myDepts().includes(p.deptId)); rfqs = sortBy(rfqs, p => p.date || '', true).filter(p => f.status === 'all' || poOpenStatuses.includes(p.status));
+  const card = `<div class="card"><div class="cardhead"><h3>طلبات عروض الأسعار — خامات جديدة</h3><span class="badge">${rfqs.length}</span><div class="grow"></div>${canNeed() ? `<button class="btn sm" data-action="rfqNew">${icon('plus')}طلب عرض سعر</button>` : ''}</div>${rfqs.length ? `<div class="list">${rfqs.map(p => `<a class="item" href="#/purchases/${p.id}"><div class="main"><div class="title"><span class="code">${esc(p.number)}</span> ${esc(deptName(p.deptId))}${p.supplier ? ` · ${esc(p.supplier)}` : ''}</div><div class="meta"><span>${(p.rfqItems || []).slice(0, 3).map(x => esc(x.name)).join('، ')}</span><span>${fmtDate(p.date)}</span></div></div><div class="end">${badge(PO_STATUS, p.status)}</div></a>`).join('')}</div>` : '<div class="muted small">لا توجد طلبات عروض أسعار</div>'}</div>`;
+  const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : card + html;
+})(vPurchases);
+/* inventory table: custody badge next to the stock figure */
+vInventory = (base => () => { let html = base(); try { list('materials').forEach(m => { const c = custodyOf(m); const keys = Object.keys(c).filter(k => c[k] > 0); if (!keys.length) return; html = html.replace(`<td class="code ltr">${esc(m.code || '')}</td>`, `<td class="code ltr">${esc(m.code || '')}<div class="custody">عهدة: ${keys.map(k => `${esc(deptName(k))} ${fmtNum(c[k])}`).join(' · ')}</div></td>`); }); } catch (e) { /* ignore */ } return html; })(vInventory);
+/* settings: the owner threshold for new-material prices */
+EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
+document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
 boot();
 </script>
 
