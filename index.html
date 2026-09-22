@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260922-1347-c6fee4";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260922-1417-94b624";</script>
 
 <script>
 'use strict';
@@ -12780,6 +12780,187 @@ ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if 
 vTaskDetail = (base => t => { let html = base(t); const r = requestForNotice(t); if (!r) return html; const card = `<div class="banner ${r.status === 'pending' ? 'warn' : 'info'}" style="margin-bottom:12px">${icon(r.status === 'pending' ? 'alert' : 'check')}<span><b>${esc(REQ_TYPES[r.type] || r.type)}</b> — ${esc(reqDesc(r))} · ${stageChip(r)}${r.status === 'pending' && awaitingMe(r) ? ` <button class="btn sm p" data-action="reqOpen" data-arg="${r.id}" style="margin-inline-start:8px">${icon('check')}موافقة / رفض</button>` : ''}</span></div>`; return card + html; })(vTaskDetail);
 ACTIONS.taskStatus = (base => async arg => { const [id, st] = arg.split(':'); const t = byId('tasks', id); if (t && t.kind === 'notice' && st === 'done') { await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' }); toast('تم'); return; } return base(arg); })(ACTIONS.taskStatus);
 document.head.insertAdjacentHTML('beforeend', '<style>.item.hl{outline:2px solid var(--accent);outline-offset:2px;transition:outline .3s}</style>');
+/* =====================================================================
+   97 — v4.13: شاشة Ninety الأم (للمالك فقط)
+   · أول ما المالك يفتح: شاشة Ninety — اللوجو، صورته واسمه، الثلاث شركات تحت بعض (Fabrication / Studioz / Construction)
+     بأرقام حقيقية للمصنع، وملخص لكل برند على الشمال. الموظفون لا يرون أي شيء من ذلك.
+   · Ninety Fabrication → السيستم الحالي كما هو، مع زر «⇄ Ninety» في الشريط الجانبي للرجوع.
+   · Studioz / Construction → بطاقة «قيد الإعداد» بنفس الشكل (بدون أرقام وهمية) حتى يُبنى كل سيستم.
+   · موظف مشترك بين الشركات: نسبة تحميل مرتبه على المصنع (workers.costShare) — تُطبَّق على كشف الرواتب والتكلفة،
+     وتغييرها يمر باعتماد المالك مثل أي تعديل راتب.
+   · الروابط الواصلة من الإشعارات (#/tasks/… إلخ) تفتح المصنع مباشرة.
+   ===================================================================== */
+const NINETY_COS = {
+  factory: { name: 'Ninety Fabrication', sub: 'المصنع', color: 'var(--nf-fab)', desc: 'LOF · elmen · Ninety Aluminum' },
+  studio: { name: 'Ninety Studioz', sub: 'الاستوديو', color: 'var(--nf-stu)', desc: 'التصميم والإظهار المعماري' },
+  construction: { name: 'Ninety Construction', sub: 'المقاولات', color: 'var(--nf-con)', desc: 'مقاولون خارجيون + توريد من براندات المصنع' },
+};
+document.head.insertAdjacentHTML('beforeend', `<style>
+:root{--nf-fab:#3d5f8a;--nf-stu:#6b7482;--nf-con:#3f6f6b;--nf-side:#0f1420;--nf-side-ink:#e5e7eb;--nf-side-muted:#8b93a3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--nf-fab:#7f9cc6;--nf-stu:#b4bac6;--nf-con:#86aaa6;--nf-side:#0a0d14}}
+:root[data-theme="dark"]{--nf-fab:#7f9cc6;--nf-stu:#b4bac6;--nf-con:#86aaa6;--nf-side:#0a0d14}
+.nhome{display:grid;grid-template-columns:272px 1fr;min-height:100vh;background:var(--bg);direction:rtl}
+.nhome .nside{background:var(--nf-side);color:var(--nf-side-ink);padding:calc(16px + env(safe-area-inset-top,0px)) 14px 16px;display:flex;flex-direction:column;gap:10px}
+.nhome .nbrand{display:flex;justify-content:flex-end;padding:4px 6px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+.nhome .nbrand img{height:24px;width:auto;filter:invert(1)!important;display:block}
+.nhome .uchip{display:flex;align-items:center;gap:10px;padding:6px 4px}
+.nhome .uchip .av{width:40px;height:40px;border-radius:50%;background:var(--nf-fab);display:grid;place-items:center;font-weight:700;color:#fff;flex:none;overflow:hidden}
+.nhome .uchip .av img{width:100%;height:100%;object-fit:cover;display:block}
+.nhome .uchip b{display:block;font-size:13.5px;direction:ltr;text-align:right;font-family:Inter,"Segoe UI",system-ui,sans-serif}.nhome .uchip small{color:var(--nf-side-muted);font-size:11px;direction:ltr;display:block;text-align:right;font-family:Inter,"Segoe UI",system-ui,sans-serif}
+.nhome .sec{font-size:10.5px;letter-spacing:.08em;color:var(--nf-side-muted);font-weight:700;padding:8px 6px 2px}
+.nhome .cos{display:flex;flex-direction:column;gap:6px}
+.nhome .co{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.035);color:var(--nf-side-ink);border:1px solid transparent;border-inline-start:3px solid var(--c);cursor:pointer;font:inherit;text-align:right;width:100%}
+.nhome .co:hover{background:rgba(255,255,255,.08)}.nhome .co.on{border-color:var(--c)}
+.nhome .co .top{display:flex;align-items:center;gap:8px}.nhome .co .top i{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+.nhome .co .nm{flex:1;font-size:13.5px;font-weight:600;line-height:1.25;min-width:0}.nhome .co .nm small{display:block;color:var(--nf-side-muted);font-size:11px;font-weight:400}
+.nhome .co .cnt{min-width:22px;height:22px;border-radius:999px;background:rgba(255,255,255,.1);color:#fff;font-size:11.5px;font-weight:700;display:grid;place-items:center;padding:0 7px}
+.nhome .co .mini{display:flex;gap:6px;flex-wrap:wrap}.nhome .co .mini span{font-size:10.5px;color:var(--nf-side-muted);background:rgba(255,255,255,.05);border-radius:6px;padding:1px 7px}
+.nhome .co .mini span.bad{color:#d98c8c}.nhome .co .mini span.wn{color:#d9b97a}.nhome .co .mini span.ok{color:#8cc3ad}
+.nhome .co .att{height:4px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}.nhome .co .att i{display:block;height:100%;background:var(--c);border-radius:99px}
+.nhome .qa{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.nhome .qa button{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--nf-side-ink);border-radius:10px;padding:8px 4px;font:inherit;font-size:11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
+.nhome .qa button svg{width:16px;height:16px}.nhome .qa button.crit{color:#d98c8c;border-color:rgba(217,140,140,.3)}.nhome .qa button:hover{background:rgba(255,255,255,.08)}
+.nhome .alerts{display:flex;flex-direction:column;gap:5px}
+.nhome .al{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.35;padding:7px 9px;border-radius:9px;background:rgba(255,255,255,.04);color:var(--nf-side-ink);text-decoration:none}
+.nhome .al i{width:7px;height:7px;border-radius:50%;flex:none;margin-top:6px}.nhome .al small{display:block;color:var(--nf-side-muted);font-size:10.5px}
+.nhome .sfoot{margin-top:auto;font-size:11px;color:var(--nf-side-muted);display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
+.nhome .nmain{padding:18px 20px 40px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.nhome .hhead h1{margin:0;font-size:20px}.nhome .hhead p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.nhome .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.nhome .strip .st{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:12px}
+.nhome .strip .st b{font-size:24px;font-variant-numeric:tabular-nums;line-height:1}.nhome .strip .st span{font-size:12px;color:var(--muted);line-height:1.3}
+.nhome .strip .st.wn b{color:#9a7a3a}.nhome .strip .st.bad b{color:#b35c5c}.nhome .strip .st.ok b{color:#4f8a6d}
+.nhome .blk{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:0;overflow:hidden;position:relative;cursor:pointer}
+.nhome .blk::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:5px;background:var(--c)}
+.nhome .blk:hover{box-shadow:0 0 0 2px var(--c)}
+.nhome .blk .hd{display:flex;align-items:center;gap:10px;padding:12px 18px 10px 16px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--c) 6%,var(--surface))}
+.nhome .blk .hd .dot{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}.nhome .blk .hd b{font-size:16px}.nhome .blk .hd small{color:var(--muted);font-size:12px}
+.nhome .blk .hd .open{margin-inline-start:auto;font-size:12.5px;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:5px 12px;font-weight:600;white-space:nowrap}
+.nhome .blk:hover .hd .open{background:var(--c);color:#fff;border-color:transparent}
+.nhome .blk .bd{padding:12px 18px 14px 16px;display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start}
+.nhome .r{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.nhome .it{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:var(--surface-2)}
+.nhome .it b{font-size:24px;min-width:32px;text-align:center;font-variant-numeric:tabular-nums;line-height:1}.nhome .it span{font-size:12.5px;line-height:1.3}.nhome .it small{display:block;font-size:11px;color:var(--muted)}
+.nhome .it.bad b{color:#b35c5c}.nhome .it.wn b{color:#9a7a3a}.nhome .it.ok b{color:#4f8a6d}
+.nhome .todo{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.nhome .todo .h{font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:2px}
+.nhome .todo li{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);font-size:13px}
+.nhome .todo li i{width:8px;height:8px;border-radius:50%;flex:none}.nhome .todo li .ar{margin-inline-start:auto;color:var(--muted);font-size:12px}
+.nhome .soon{padding:22px 18px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:8px}
+.nhome .soon .badge{align-self:flex-start}
+.nhome .plan{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.nhome .plan div{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;font-size:12px}
+.nhome .plan div b{display:block;color:var(--ink);font-size:12.5px}
+.nhome .mhead{display:none}
+@media(max-width:820px){.nhome{grid-template-columns:1fr}.nhome .nmain{order:-1}.nhome .mhead{display:flex;align-items:center;justify-content:space-between;background:var(--nf-side);color:var(--nf-side-ink);margin:-14px -14px 4px;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px}.nhome .mhead img{height:22px;filter:invert(1)!important}.nhome .mhead .av{width:34px;height:34px;border-radius:50%;overflow:hidden;background:var(--nf-fab);display:grid;place-items:center;color:#fff;font-weight:700}.nhome .mhead .av img{width:100%;height:100%;object-fit:cover;filter:none!important}.nhome .nside{padding-top:calc(12px + env(safe-area-inset-top,0px))}.nhome .blk .bd{grid-template-columns:1fr}.nhome .r{grid-template-columns:repeat(2,1fr)}.nhome .nmain{padding:14px 14px 40px}}
+.nfback{margin-top:8px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:10px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;text-align:right;width:100%}
+.nfback:hover{color:var(--ink);background:var(--surface-2)}
+.nfshare{font-size:11px}
+</style>`);
+const isNinetyOwner = () => !!S.session && typeof isOwnerReal === 'function' && isOwnerReal() && role() !== 'kiosk';
+const ninetyCo = () => { try { return sessionStorage.getItem('nf.ninety.co') || ''; } catch (e) { return ''; } };
+function ninetySet(co) { try { if (co) sessionStorage.setItem('nf.ninety.co', co); else sessionStorage.removeItem('nf.ninety.co'); } catch (e) { /* ignore */ } }
+/* deep links from notifications go straight into the factory */
+(() => { const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety' && !ninetyCo()) ninetySet('factory'); })();
+
+/* ---------- live numbers (factory) ---------- */
+function ninetyFactoryStats() {
+  const today = todayISO(); const S0 = { appr: [], transfer: [], late: [], esc: [], suspect: [], outfix: [], open: 0, present: 0, total: 0, mine: [] };
+  try {
+    S0.appr = list('requests').filter(r => r.status === 'pending' && awaitingMe(r));
+    S0.transfer = list('purchases').filter(p => p.status === 'transfer');
+    S0.late = list('orders').filter(o => isOpen(o) && o.dueDate && o.dueDate < today);
+    S0.open = list('orders').filter(isOpen).length;
+    S0.esc = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.escalation && t.escalation.level >= 3);
+    S0.suspect = list('tasks').filter(t => t.kind === 'suspect' && t.status !== 'done');
+    S0.outfix = list('requests').filter(r => r.type === 'outfix' && r.status === 'pending');
+    const att = attendanceFor(today); S0.present = Object.values(att).filter(r => r && r.in).length; S0.total = list('workers').filter(w => w.status !== 'inactive').length;
+    S0.mine = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update' && t.toRole === 'admin' && ['urgent', 'high'].includes(t.priority));
+  } catch (e) { /* partial data during boot */ }
+  S0.urgent = S0.esc.length + S0.suspect.length + S0.transfer.length; S0.count = S0.appr.length + S0.urgent + S0.late.length;
+  return S0;
+}
+const greet = () => { const h = new Date().getHours(); return h < 12 ? 'صباح الخير' : h < 18 ? 'مساء الخير' : 'مساء الخير'; };
+const firstName = () => ((S.session && S.session.name) || '').trim().split(/\s+/)[0] || '';
+function ninetyAvatar() { const src = typeof myAvatarSrc === 'function' ? myAvatarSrc() : null; return `<div class="av">${src ? `<img src="${esc(src)}" alt="">` : esc(firstName().slice(0, 1) || 'م')}</div>`; }
+function ninetyTodo(f) {
+  const rows = [];
+  f.transfer.slice(0, 2).forEach(p => rows.push({ c: '#9a7a3a', t: `تحويل ${fmtMoney(typeof poPayable === 'function' ? poPayable(p) : (p.total || 0))} ${CUR()} — ${p.supplier || p.number || ''}`, h: `#/purchases/${p.id}` }));
+  f.appr.slice(0, 3).forEach(r => { const w = byId('workers', r.workerId); rows.push({ c: '#9a7a3a', t: `${REQ_TYPES[r.type] || r.type} — ${w ? w.name : r.createdByName || ''}`, h: '#/requests' }); });
+  f.esc.slice(0, 2).forEach(t => rows.push({ c: '#b35c5c', t: `${t.title} — صُعِّدت إليك`, h: `#/tasks/${t.id}` }));
+  f.late.slice(0, 2).forEach(o => rows.push({ c: '#b35c5c', t: `${o.code} — متأخر عن ${fmtDate(o.dueDate)}`, h: `#/orders/${o.id}` }));
+  return rows.slice(0, 5);
+}
+function ninetyFactoryBlock(f) {
+  const it = (n, l, s, cls) => `<div class="it ${n ? cls : ''}"><b>${n}</b><span>${l}<small>${s}</small></span></div>`;
+  const todo = ninetyTodo(f);
+  return `<div class="blk" style="--c:${NINETY_COS.factory.color}" data-action="ninetyGo" data-arg="factory"><div class="hd"><span class="dot"></span><b>Ninety Fabrication</b><small>· المصنع · حضور ${f.present}/${f.total}</small><span class="open">فتح السيستم ←</span></div>
+    <div class="bd"><div class="r">${it(f.appr.length, 'اعتماد مستنيك', 'إجازات · سلف · طلبات', 'wn')}${it(f.transfer.length, 'تحويل لمورد', 'أوامر شراء بانتظارك', 'wn')}${it(f.late.length, 'أوامر متأخرة', 'تجاوزت التسليم', 'bad')}${it(f.open, 'أوامر جارية', 'قيد التشغيل', '')}${it(f.esc.length, 'مهمة مصعَّدة', 'لم يشاهدها المكلَّف', 'bad')}${it(f.suspect.length, 'بصمة مشبوهة', 'تحتاج مراجعة', 'wn')}</div>
+    <ul class="todo"><div class="h">مطلوب منك</div>${todo.length ? todo.map(r => `<li data-action="ninetyOpen" data-arg="${esc(r.h)}" data-stop="1"><i style="background:${r.c}"></i>${esc(r.t)}<span class="ar">←</span></li>`).join('') : '<li><i style="background:#4f8a6d"></i>مفيش حاجة مستنياك دلوقتي ✓</li>'}</ul></div></div>`;
+}
+function ninetySoonBlock(co) {
+  const c = NINETY_COS[co]; const plan = co === 'studio'
+    ? [['المشاريع ومراحلها', 'Concept → DD → 3D → Drawings'], ['تسليمات الأسبوع', 'واعتماد الآرت دايركتور'], ['العروض والدفعات', 'للمالك والحسابات فقط'], ['فريق الاستوديو', 'حضور · مهام · لائحة خاصة']]
+    : [['مشاريع بالموقع', 'نسبة الإنجاز'], ['مستخلصات المقاولين', 'بانتظار اعتمادك'], ['توريد من المصنع', 'أوامر تشغيل مرتبطة'], ['بنود تجاوزت تكلفتها', 'تنبيه فوري']];
+  return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="${co}"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">قيد الإعداد</span></div>
+    <div class="soon"><span class="badge warn">سيستم مستقل بموظفيه ولائحته — لم يُبنَ بعد</span><div class="plan">${plan.map(([a, b]) => `<div><b>${esc(a)}</b>${esc(b)}</div>`).join('')}</div></div></div>`;
+}
+function ninetySideCo(co, f) {
+  const c = NINETY_COS[co]; const on = (S.ui.ninetySel || '') === co;
+  if (co === 'factory') return `<button type="button" class="co ${on ? 'on' : ''}" style="--c:${c.color}" data-action="ninetyGo" data-arg="factory"><div class="top"><i></i><span class="nm">Ninety Fabrication<small>المصنع · ${f.total} موظف</small></span><span class="cnt">${f.count}</span></div><div class="mini">${f.appr.length ? `<span class="wn">${f.appr.length} اعتماد</span>` : ''}${f.late.length ? `<span class="bad">${f.late.length} متأخر</span>` : ''}${f.transfer.length ? `<span class="wn">${f.transfer.length} تحويل</span>` : ''}${!f.count ? '<span class="ok">كله تمام</span>' : ''}</div><div class="att" title="حضور ${f.present}/${f.total}"><i style="width:${f.total ? Math.round(f.present / f.total * 100) : 0}%"></i></div></button>`;
+  return `<button type="button" class="co ${on ? 'on' : ''}" style="--c:${c.color}" data-action="ninetyGo" data-arg="${co}"><div class="top"><i></i><span class="nm">${esc(c.name)}<small>${esc(c.sub)} · قيد الإعداد</small></span></div></button>`;
+}
+function ninetyAlerts() {
+  let items = []; try { items = typeof notifItems === 'function' ? notifItems().slice(0, 4) : []; } catch (e) { /* ignore */ }
+  if (!items.length) return '<div class="al"><i style="background:#8cc3ad"></i><span>لا توجد تنبيهات الآن<small>المصنع</small></span></div>';
+  return items.map(x => `<a class="al" data-action="ninetyOpen" data-arg="${esc(x.href || '#/dashboard')}"><i style="background:${x.kind === 'notice' || x.kind === 'req' ? '#d9b97a' : '#d98c8c'}"></i><span>${esc(x.title)}<small>${esc(x.sub || 'المصنع')}</small></span></a>`).join('');
+}
+function ninetyHomeHTML() {
+  const f = ninetyFactoryStats(); const sel = S.ui.ninetySel || ''; const day = fmtDate(todayISO());
+  const main = sel === 'studio' || sel === 'construction' ? ninetySoonBlock(sel) + ninetyFactoryBlock(f) + ninetySoonBlock(sel === 'studio' ? 'construction' : 'studio') : ninetyFactoryBlock(f) + ninetySoonBlock('studio') + ninetySoonBlock('construction');
+  return `<div class="nhome" id="nhome"><aside class="nside">
+    <div class="nbrand">${logoImg(24)}</div>
+    <div class="uchip">${ninetyAvatar()}<div><b>${esc(S.session.nameEn || 'Mahmoud Fawzy')}</b><small>Owner · Ninety · 3 companies</small></div></div>
+    <div class="sec">الشركات</div><div class="cos">${ninetySideCo('factory', f)}${ninetySideCo('studio', f)}${ninetySideCo('construction', f)}</div>
+    <div class="sec">إجراءات سريعة</div><div class="qa"><button type="button" data-action="ninetyView">${icon('user')}شوف بعين…</button><button type="button" data-action="ninetyBell">${icon('bell')}الإشعارات</button><button type="button" class="crit" data-action="ninetyFreeze">${icon('alert')}تجميد طارئ</button></div>
+    <div class="sec">تنبيهات الآن</div><div class="alerts">${ninetyAlerts()}</div>
+    <div class="sfoot"><span>${day}</span><span>Ninety · ${NINETY_VER}</span></div>
+  </aside><main class="nmain">
+    <div class="mhead">${logoImg(22)}${ninetyAvatar()}</div>
+    <div class="hhead"><div><h1>${greet()} يا ${esc(firstName())}</h1><p>${day} · ${f.count ? `${f.count} حاجة مستنياك النهارده في المصنع` : 'مفيش حاجة مستنياك النهارده ✓'}</p></div></div>
+    <div class="strip"><div class="st ${f.appr.length ? 'wn' : ''}"><b>${f.appr.length}</b><span>اعتمادات<br>مستنياك</span></div><div class="st ${f.urgent ? 'bad' : ''}"><b>${f.urgent}</b><span>تحتاج تدخّلك<br>فورًا</span></div><div class="st"><b>${f.open}</b><span>أوامر تشغيل<br>جارية</span></div><div class="st ok"><b>${f.present}<span style="font-size:13px">/${f.total}</span></b><span>حضور اليوم<br>في المصنع</span></div></div>
+    ${main}</main></div>`;
+}
+/* ---------- render: the owner sees the Ninety home until he picks a company ---------- */
+const NINETY_VER = '4.13';
+const ninetyHomeDue = () => { if (!isNinetyOwner() || S.mode === 'boot') return false; if (ninetyCo()) return false; const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety') { ninetySet('factory'); return false; } return true; };
+render = (base => function (full) {
+  if (ninetyHomeDue()) { const root = $('#root'); if (root) { const h = (location.hash || '').replace(/^#\/?/, ''); if (h !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = ninetyHomeHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
+  return base(full);
+})(render);
+ACTIONS.ninetyGo = co => {
+  if (!NINETY_COS[co]) return;
+  if (co === 'factory') { ninetySet('factory'); S.ui.ninetySel = ''; closeModal(); S.route = { view: 'dashboard', id: null, sub: null }; location.hash = '#/dashboard'; render(true); return; }
+  S.ui.ninetySel = co; render(true); const el = document.querySelector('#nhome .nmain'); if (el && window.innerWidth <= 820) el.scrollIntoView({ behavior: 'smooth' });
+};
+ACTIONS.ninetyHome = () => { if (!isNinetyOwner()) return; ninetySet(''); S.ui.ninetySel = ''; closeModal(); location.hash = '#/ninety'; render(true); };
+ACTIONS.ninetyOpen = href => { ninetySet('factory'); const h = String(href || '#/dashboard'); const v = h.replace(/^#\/?/, '').split('/'); S.route = { view: v[0] || 'dashboard', id: v[1] || null, sub: v[2] || null }; location.hash = h.startsWith('#') ? h : '#/' + h; render(true); };
+ACTIONS.ninetyView = () => { ninetySet('factory'); S.route = { view: 'dashboard', id: null, sub: null }; location.hash = '#/dashboard'; render(true); setTimeout(() => ACTIONS.viewPick && ACTIONS.viewPick(), 50); };
+ACTIONS.ninetyBell = () => { ninetySet('factory'); S.route = { view: 'dashboard', id: null, sub: null }; location.hash = '#/dashboard'; render(true); setTimeout(() => ACTIONS.bellOpen && ACTIONS.bellOpen(), 50); };
+ACTIONS.ninetyFreeze = () => { ninetySet('factory'); S.route = { view: 'dashboard', id: null, sub: null }; location.hash = '#/dashboard'; render(true); setTimeout(() => ACTIONS.freezeAsk && ACTIONS.freezeAsk(), 50); };
+/* hash #/ninety → home; a fresh login lands on the home */
+window.addEventListener('hashchange', () => { if ((location.hash || '').replace(/^#\/?/, '') === 'ninety' && isNinetyOwner()) { ninetySet(''); S.ui.ninetySel = ''; render(true); } });
+document.addEventListener('nf:login', () => { if (isNinetyOwner()) { ninetySet(''); S.ui.ninetySel = ''; setTimeout(() => render(true), 0); } });
+/* factory sidebar: back to Ninety */
+RENDER_HOOKS.push(() => { if (!isNinetyOwner()) { document.querySelectorAll('.nfback').forEach(b => b.remove()); return; } const side = document.querySelector('.side'); if (!side || side.querySelector('.nfback')) return; const nav = side.querySelector('#nav') || side.querySelector('.nav'); const b = document.createElement('button'); b.type = 'button'; b.className = 'nfback'; b.setAttribute('data-action', 'ninetyHome'); b.textContent = '⇄ الرجوع لـ Ninety'; if (nav && nav.parentNode === side) nav.insertAdjacentElement('afterend', b); else side.appendChild(b); });
+
+/* ---------- shared employee: share of the salary borne by the factory ---------- */
+WAGE_KEYS.costShare = 'نسبة التحميل على المصنع %';
+const costShareOf = w => { const v = w && w.costShare != null && w.costShare !== '' ? +w.costShare : 100; return v > 0 && v < 100 ? v : 100; };
+workerForm = (base => w => { let html = base(w); if (!seesWages()) return html; const fld = field('نسبة تحميل المرتب على المصنع % (موظف مشترك مع شركة أخرى — 100 = كامل المرتب)', inp('costShare', w.costShare ?? '', 'type="number" step="any" min="1" max="100" inputmode="decimal"')); const k = html.indexOf('name="healthIns"'); const end = k > -1 ? html.indexOf('</div>', k) + 6 : -1; return end > 5 ? html.slice(0, end) + fld + html.slice(end) : html.replace('</div>', '</div>' + fld); })(workerForm);
+workerFromFormBase = (base => async (f, w) => { const doc = await base(f, w); if (!doc) return doc; const d = formData(f); if (d.costShare !== undefined) doc.costShare = d.costShare === '' ? null : Math.min(100, Math.max(1, num(d.costShare) || 100)); return doc; })(workerFromFormBase);
+payrollRow = (base => (w, ym) => { const r = base(w, ym); const pct = costShareOf(w); if (pct >= 100 || !r) return r; const k = pct / 100; r.sharePct = pct; r.fullNet = r.net; ['basic', 'allow', 'gross', 'otPay', 'bonus', 'absenceDed', 'penaltyDed', 'insuranceDed', 'net'].forEach(x => { if (typeof r[x] === 'number') r[x] = r2(r[x] * k); }); return r; })(payrollRow);
+vPayroll = (base => () => { let html = base(); const shared = list('workers').filter(w => costShareOf(w) < 100); if (!shared.length) return html; shared.forEach(w => { html = html.replace(`<b>${esc(w.name)}</b>`, `<b>${esc(w.name)}</b> <span class="badge acc nfshare" title="موظف مشترك — المصنع يتحمل ${costShareOf(w)}% من مرتبه">${costShareOf(w)}% على المصنع</span>`); }); return html; })(vPayroll);
 boot();
 </script>
 
