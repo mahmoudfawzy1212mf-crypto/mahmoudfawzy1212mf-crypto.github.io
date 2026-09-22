@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260921-1805-95bc70";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260922-1347-c6fee4";</script>
 
 <script>
 'use strict';
@@ -4805,7 +4805,7 @@ const TASK_PRIORITY = { normal: ['عادية', ''], high: ['مهمة', 'warn'], 
 const canTasks = () => writable() && !['viewer', 'kiosk'].includes(role());
 const assigneeName = id => { if (!id) return ''; const w = byId('workers', id); if (w) return w.name; const st = byId('staff', id); return st ? st.name : ''; };
 const myIds = () => { const st = S.session || {}; return [st.workerId, st.id].filter(Boolean); };
-const taskMine = t => myIds().includes(t.assigneeId) || (role() === 'head' && !t.assigneeId && myDepts().includes(t.deptId)) || (!!t.toRole && !t.assigneeId && ['open', 'doing'].includes(t.status) && (t.toRole === role() || ((t.toRole === 'office' || t.toRole === 'tech') && isAdmin())));
+const taskMine = t => myIds().includes(t.assigneeId) || (role() === 'head' && !t.assigneeId && myDepts().includes(t.deptId)) || (!!t.toRole && !t.assigneeId && ['open', 'doing'].includes(t.status) && (t.toRole === role() || ((t.toRole === 'office' || t.toRole === 'tech') && isAdmin())) && !(role() === 'head' && t.deptId && !myDepts().includes(t.deptId)));
 function taskVisibleBase(t) { const rl = role(); if (rl === 'admin' || rl === 'hr' || rl === 'office' || rl === 'manager' || rl === 'vice') return true; if (t.createdBy && t.createdBy === S.session?.id) return true; if (rl === 'head') return myDepts().includes(t.deptId) || taskMine(t); return taskMine(t); }
 const openTasks = () => list('tasks').filter(t => ['open', 'doing'].includes(t.status));
 const tasksForMe = () => openTasks().filter(taskMine);
@@ -5877,19 +5877,22 @@ function sbBackend(client) {
   async function fetchCol(col, filter) {
     const m = cache[col] || (cache[col] = new Map()); const rows = [];
     if (col === 'workers') { const r0 = await client.from('docs_safe').select('id,data').eq('col', 'workers'); if (!r0.error) rows.push(...(r0.data || [])); }
-    let q = client.from('docs').select('id,data').eq('col', col); if (filter) q = q.gte('month', filter.v);
-    const { data, error } = await q; if (error) throw mapErr(error);
+    /* v4.12: page through the collection — PostgREST caps one request at 1000 rows, so a busy table (tasks / requests / changes) silently lost rows beyond that */
+    const data = []; for (let from = 0; ; from += 1000) { let q = client.from('docs').select('id,data').eq('col', col).range(from, from + 999); if (filter) q = q.gte('month', filter.v); const r = await q; if (r.error) throw mapErr(r.error); data.push(...(r.data || [])); if (!r.data || r.data.length < 1000) break; }
     if (!filter) { const keep = new Set(); rows.concat(data || []).forEach(r => { keep.add(r.id); m.set(r.id, r.data); }); Array.from(m.keys()).forEach(k => { if (!keep.has(k)) m.delete(k); }); }
     else (data || []).forEach(r => m.set(r.id, r.data));
     return m;
   }
+  let wasLive = false, _refetchT = 0;
+  /* v4.12: after the socket comes back (phone slept / app in background) every realtime message in between is gone — reload the subscribed collections from the server and push them to the app */
+  async function refetchAll(why) { if (Date.now() - _refetchT < 5000) return; _refetchT = Date.now(); for (const col of Object.keys(subs)) { if (!(subs[col] || []).length) continue; try { await fetchCol(col); emit(col, []); } catch (e) { console.warn('refetch', col, why, e && e.message); } } }
   function ensureChannel() {
     if (channel) return;
     channel = client.channel('nf-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, payload => {
       const row = (payload.new && payload.new.col) ? payload.new : payload.old; if (!row || !row.col) return; const col = row.col; const m = cache[col] || (cache[col] = new Map());
       if (payload.eventType === 'DELETE') { m.delete(row.id); emit(col, [{ type: 'removed', doc: { id: row.id, data: () => null } }]); }
       else { m.set(row.id, payload.new.data); emit(col, [{ type: payload.eventType === 'INSERT' ? 'added' : 'modified', doc: { id: row.id, data: () => payload.new.data } }]); }
-    }).subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('realtime', status); });
+    }).subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('realtime', status); if (status === 'SUBSCRIBED') { if (wasLive) refetchAll('reconnect'); wasLive = true; } });
     /* non-privileged roles only get realtime for their own worker doc — refresh the safe directory periodically */
     safeTimer = setInterval(() => { if (subs.workers && !PRIV_WORKER_ROLES.includes(role())) fetchCol('workers').then(() => emit('workers', [])).catch(() => { }); }, 120000);
   }
@@ -5906,7 +5909,9 @@ function sbBackend(client) {
     async delete() { const { error } = await client.from('docs').delete().eq('col', col).eq('id', id); if (error) throw mapErr(error); if (cache[col]) cache[col].delete(id); },
     onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb: () => { const d = cache[col] && cache[col].get(id); cb({ exists: !!d, data: () => d }); }, filter: null }); fetchCol(col).then(() => { const d = cache[col].get(id); cb({ exists: !!d, data: () => d }); }).catch(e => onErr && onErr(e)); return () => { }; },
   }; };
-  return { collection, doc, dispose() { if (channel) { try { client.removeChannel(channel); } catch (e) { /* ignore */ } channel = null; } clearInterval(safeTimer); Object.keys(subs).forEach(k => delete subs[k]); Object.keys(cache).forEach(k => delete cache[k]); } };
+  /* v4.12: let the app push a doc it fetched itself (sbRefreshShared) into the realtime cache — otherwise the next realtime message rebuilt S.data from the cache and the doc vanished from the lists */
+  const prime = (col, id, data) => { (cache[col] ||= new Map()).set(id, data); };
+  return { collection, doc, prime, refetch: refetchAll, dispose() { if (channel) { try { client.removeChannel(channel); } catch (e) { /* ignore */ } channel = null; } clearInterval(safeTimer); Object.keys(subs).forEach(k => delete subs[k]); Object.keys(cache).forEach(k => delete cache[k]); } };
 }
 
 /* ---------------- boot / session ---------------- */
@@ -5963,7 +5968,7 @@ function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) retur
 async function sbAccessCheckBase() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
 /* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
 let _sbLastRefresh = 0;
-async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 15000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } }); if (changed) render(false); } catch (e) { /* offline */ } }
+async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 5000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); }); if (changed) render(false); } catch (e) { /* offline */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
 document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
@@ -11007,7 +11012,7 @@ const WAGE_KEYS = { dailyWage: 'اليومية', basic: 'الأساسي', allowa
 const ownerPhone = () => normPhone((S.settings && S.settings.ownerPhone) || (byId('workers', (peopleByRole('admin')[0] || {}).id) || {}).phone || '');
 async function notifyOwner(title, desc, opts = {}) {
   const me = S.session || {}; const id = opts.id || uid();
-  await Store.save('tasks', { id, title, desc, deptId: null, assigneeId: null, toRole: 'admin', orderId: opts.orderId || null, dueDate: todayISO(), priority: opts.priority || 'high', status: 'open', kind: 'notice', source: 'owner-notify', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO() }, { silent: true });
+  await Store.save('tasks', { id, title, desc, deptId: null, assigneeId: null, toRole: 'admin', orderId: opts.orderId || null, dueDate: todayISO(), priority: opts.priority || 'high', status: 'open', kind: 'notice', source: 'owner-notify', reqId: opts.reqId || null, link: opts.reqId ? '/#/requests' : null, createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO() }, { silent: true });
   if (typeof pushSend === 'function') pushSend(['role:admin'], title, desc, '/#/tasks/' + id, 'owner').catch(() => { });
   const ph = ownerPhone(); if (ph && typeof smsAvailable === 'function' && smsAvailable() && (S.settings.sms || {}).ownerAlerts !== false) { try { await smsSend(ph, `${title}\n${desc}`.slice(0, 300)); } catch (e) { /* ignore */ } }
 }
@@ -11018,8 +11023,8 @@ async function workerFromFormApr(f, w) {
   const changes = {}; Object.keys(WAGE_KEYS).forEach(k => { const a = w[k] ?? null, b = doc[k] ?? null; if (String(a ?? '') !== String(b ?? '')) { changes[k] = { from: a, to: b }; doc[k] = a; } });
   if (!Object.keys(changes).length) return doc;
   const me = S.session || {}; const now = nowISO(); const txt = Object.entries(changes).map(([k, c]) => `${WAGE_KEYS[k]}: ${c.from ?? '—'} ← ${c.to ?? '—'}`).join(' · ');
-  await Store.save('requests', { id: uid(), type: 'wagechange', workerId: w.id, deptId: w.deptId || null, changes, reason: '', status: 'pending', chain: chainFor('wagechange'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تعديل راتب ${w.name} — ${txt}` }] });
-  await notifyOwner(`طلب تعديل راتب: ${w.name}`, `${txt}\nبواسطة ${me.name || ''} — بانتظار اعتمادك في الطلبات`, { id: `wg_${w.id}_${Date.now()}` });
+  const rid = uid(); await Store.save('requests', { id: rid, type: 'wagechange', workerId: w.id, deptId: w.deptId || null, changes, reason: '', status: 'pending', chain: chainFor('wagechange'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تعديل راتب ${w.name} — ${txt}` }] });
+  await notifyOwner(`طلب تعديل راتب: ${w.name}`, `${txt}\nبواسطة ${me.name || ''} — بانتظار اعتمادك في الطلبات`, { id: `wg_${w.id}_${Date.now()}`, reqId: rid });
   toast('تعديل الراتب أُرسل للمالك للاعتماد — بقية البيانات حُفظت', 'err');
   return doc;
 }
@@ -11045,14 +11050,14 @@ Store.update = async function (col, id, patch, opts = {}) {
       for (const [wid, row] of Object.entries(rows || {})) {
         if (isPunchRow(row)) continue; const w = byId('workers', wid); if (!w) continue;
         if (myWid && wid === myWid) {
-          const now = nowISO(); const p = {}; ['s', 'in', 'out', 'ot', 'late', 'early', 'hrs', 'alloc', 'perm', 'leaveType'].forEach(k => { if (row[k] !== undefined) p[k] = row[k]; });
-          await Store.save('requests', { id: uid(), type: 'attfix', workerId: wid, deptId: w.deptId || null, from: date, to: date, patch: p, reason: '', status: 'pending', chain: chainFor('attfix'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تصحيح حضور ${w.name} يوم ${fmtDate(date)}` }] });
-          delete rows[wid]; pending++;
+          const now = nowISO(); const rid = uid(); const p = {}; ['s', 'in', 'out', 'ot', 'late', 'early', 'hrs', 'alloc', 'perm', 'leaveType'].forEach(k => { if (row[k] !== undefined) p[k] = row[k]; });
+          await Store.save('requests', { id: rid, type: 'attfix', workerId: wid, deptId: w.deptId || null, from: date, to: date, patch: p, reason: '', status: 'pending', chain: chainFor('attfix'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب تصحيح حضور ${w.name} يوم ${fmtDate(date)}` }] });
+          delete rows[wid]; pending++; S._lastAttfixReq = rid;
         } else notes.push(`${w.name} — ${fmtDate(date)}: ${[row.s ? 'الحالة ' + row.s : '', row.in ? 'حضور ' + row.in : '', row.out ? 'انصراف ' + row.out : '', row.ot != null ? 'إضافي ' + row.ot : ''].filter(Boolean).join(' · ') || 'تعديل'}`);
       }
       if (!Object.keys(rows || {}).length) delete patch.rows[date];
     }
-    if (pending) { toast('تعديل حضورك الشخصي أُرسل للمالك للاعتماد', 'err'); await notifyOwner(`طلب تصحيح حضور: ${me.name || ''}`, 'بانتظار اعتمادك في الطلبات', { id: `af_${myWid}_${Date.now()}` }); if (!Object.keys(patch.rows).length) return S.data[col].get(id); }
+    if (pending) { toast('تعديل حضورك الشخصي أُرسل للمالك للاعتماد', 'err'); await notifyOwner(`طلب تصحيح حضور: ${me.name || ''}`, 'بانتظار اعتمادك في الطلبات', { id: `af_${myWid}_${Date.now()}`, reqId: S._lastAttfixReq || null }); if (!Object.keys(patch.rows).length) return S.data[col].get(id); }
     if (notes.length) notifyOwner(`تعديل حضور بواسطة ${me.name || ''}`, notes.join('\n'), { id: `an_${me.id}_${todayISO()}_${Math.floor(Date.now() / 600000)}` }).catch(() => { });
   }
   return _storeUpdateApprovals.call(this, col, id, patch, opts);
@@ -12475,7 +12480,7 @@ pushSend = (base => async (to, title, body, url, tag) => {
 /* request decided → push to the requester; next step → push to the next approver(s) */
 function reqStepTargets(r) {
   const step = r.chain && r.chain[r.step]; if (!step) return [];
-  if (step === 'head') { const w = r.workerId ? byId('workers', r.workerId) : null; const heads = deptHeads(r.deptId || (w && w.deptId)); return heads.map(h => 'w:' + h.id).concat(['role:head']); }
+  if (step === 'head') { const w = r.workerId ? byId('workers', r.workerId) : null; const heads = deptHeads(r.deptId || (w && w.deptId)); return heads.map(h => 'w:' + h.id); } // heads of that department only — never every head
   return ['role:' + step];
 }
 decideRequest = (base => async (id, status, note, opts = {}) => {
@@ -12734,6 +12739,47 @@ setInterval(escalateTick, 60000);
 Store.save = (base => async function (col, doc, opts) { if (col === 'tasks' && doc && doc.assigneeId) { const was = byId('tasks', doc.id); if (!was || was.assigneeId !== doc.assigneeId) { doc.assignedAt = nowISO(); doc.seenAt = Object.assign({}, doc.seenAt || {}); delete doc.seenAt[doc.assigneeId]; doc.escalation = null; } } return base.call(this, col, doc, opts); })(Store.save);
 EXTRA_SETTINGS.escalation = { label: 'تصعيد المهام المهمة', render: () => `<form class="card" id="escform"><h3>تصعيد المهام المهمة</h3><p class="small ink2">المهمة «مهمة» أو «عاجلة» لو المكلَّف ما فتحهاش خلال المدة دي تتصعّد: المدير المباشر/رئيس القسم ← مدير المصنع ← المالك (نفس المدة بين كل خطوة).</p><div class="form">${field('الدقائق', inp('escalateMinutes', (S.settings.policy && S.settings.policy.escalateMinutes) || 10, 'type="number" min="1"'))}</div><div class="row" style="margin-top:12px"><button type="submit" class="btn p">حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'escform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { escalateMinutes: num(d.escalateMinutes) || 10 }) })); toast('تم الحفظ'); });
+/* =====================================================================
+   v4.12 — الموافقات من الموبايل (المصنع):
+   · بعد الموافقة/الرفض من نافذة الطلب تتقفل النافذة وترجع للقائمة، مع زر «الطلب التالي» لو فيه طلبات تانية بانتظارك
+   · إشعار «طلب تعديل راتب / تصحيح حضور» اللي بيوصل المالك كمهمة: يفتح الطلب نفسه بزر موافقة/رفض، ويتقفل لوحده لما يتقرر
+     (وإقفاله يدويًا لا يحتاج صورة إثبات — هو إشعار مش مهمة تنفيذ)
+   · بعد الرجوع من الخلفية على الموبايل يعاد تحميل الطلبات والمهام من السيرفر (الجزء الأساسي في 26-backend: prime / refetch)
+   ===================================================================== */
+const awaitingList = () => sortBy(list('requests').filter(r => typeof awaitingMe === 'function' && awaitingMe(r)), r => r.createdAt || '');
+function nextAwaiting(exceptId) { const arr = awaitingList().filter(r => r.id !== exceptId); const cur = exceptId ? byId('requests', exceptId) : null; return (cur && arr.find(r => r.type === cur.type)) || arr[0] || null; }
+/* the notice task that announced a request (wg_<worker>_<ts> / af_<worker>_<ts>) */
+function noticeTasksFor(r) {
+  if (!r) return []; const w = byId('workers', r.workerId); const prefix = r.type === 'wagechange' ? 'wg_' : r.type === 'attfix' ? 'af_' : null;
+  return list('tasks').filter(t => t.kind === 'notice' && t.status === 'open' && ((t.reqId && t.reqId === r.id) || (prefix && String(t.id).startsWith(prefix + (r.workerId || '') + '_') && !t.reqId)));
+}
+function requestForNotice(t) {
+  if (!t || t.kind !== 'notice') return null; if (t.reqId) return byId('requests', t.reqId) || null;
+  const m = /^(wg|af)_(.+)_(\d+)$/.exec(String(t.id || '')); if (!m) return null; const type = m[1] === 'wg' ? 'wagechange' : 'attfix';
+  const cands = list('requests').filter(r => r.type === type && r.workerId === m[2] && Math.abs(new Date(r.createdAt || 0).getTime() - +m[3]) < 60000);
+  return cands.find(r => r.status === 'pending') || cands[0] || null;
+}
+/* deciding a request closes its notice task(s) */
+decideRequest = (base => async (id, status, note, opts = {}) => {
+  const ok = await base(id, status, note, opts);
+  if (ok !== false) { try { const r = byId('requests', id); if (r && r.status !== 'pending') for (const t of noticeTasksFor(r)) await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', doneNote: status === 'approved' ? 'تمت الموافقة على الطلب' : 'تم رفض الطلب' }); } catch (e) { /* ignore */ } }
+  return ok;
+})(decideRequest);
+/* modal: decide → close, back to the list, offer the next one */
+ACTIONS.reqAct = async arg => {
+  const [id, status] = arg.split(':'); const note = ($('#rq-msg')?.value || '').trim(); const ok = await decideRequest(id, status, note); if (ok === false) return;
+  closeModal(); render(false); const nx = nextAwaiting(id); const left = awaitingList().length;
+  toast(status === 'approved' ? (left ? `تمت الموافقة — باقي ${left} طلب بانتظارك` : 'تمت الموافقة — لا توجد طلبات أخرى بانتظارك') : 'تم الرفض');
+  if (nx && S.route.view === 'requests') { const el = document.querySelector(`#view .item[data-arg="${nx.id}"]`); if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('hl'); setTimeout(() => el.classList.remove('hl'), 2500); } }
+};
+ACTIONS.reqNext = id => { const nx = nextAwaiting(id); closeModal(); if (nx) ACTIONS.reqOpen(nx.id); else toast('لا توجد طلبات أخرى بانتظارك'); };
+ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if (!r || !(typeof awaitingMe === 'function' && awaitingMe(r))) return; const nx = nextAwaiting(id); if (!nx) return; const foot = document.querySelector('#modalroot .mf'); if (foot && !foot.querySelector('[data-action="reqNext"]')) foot.insertAdjacentHTML('afterbegin', `<button type="button" class="btn ghost" data-action="reqNext" data-arg="${id}">الطلب التالي (${awaitingList().length - 1}) ←</button>`); })(ACTIONS.reqOpen);
+/* the quick approve/reject dialog from the list: same feedback */
+(() => { const base = ACTIONS.reqDecide; ACTIONS.reqDecide = arg => { base(arg); const [id] = arg.split(':'); const m = _modal; if (m && typeof m.onSubmit === 'function') { const sub = m.onSubmit; m.onSubmit = async f => { const r = await sub(f); if (r !== false) { setTimeout(() => { const left = awaitingList().length; if (left) toast(`باقي ${left} طلب بانتظارك`); }, 50); } return r; }; } }; })();
+/* notice task page: open the request from it; closing a notice needs no proof */
+vTaskDetail = (base => t => { let html = base(t); const r = requestForNotice(t); if (!r) return html; const card = `<div class="banner ${r.status === 'pending' ? 'warn' : 'info'}" style="margin-bottom:12px">${icon(r.status === 'pending' ? 'alert' : 'check')}<span><b>${esc(REQ_TYPES[r.type] || r.type)}</b> — ${esc(reqDesc(r))} · ${stageChip(r)}${r.status === 'pending' && awaitingMe(r) ? ` <button class="btn sm p" data-action="reqOpen" data-arg="${r.id}" style="margin-inline-start:8px">${icon('check')}موافقة / رفض</button>` : ''}</span></div>`; return card + html; })(vTaskDetail);
+ACTIONS.taskStatus = (base => async arg => { const [id, st] = arg.split(':'); const t = byId('tasks', id); if (t && t.kind === 'notice' && st === 'done') { await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' }); toast('تم'); return; } return base(arg); })(ACTIONS.taskStatus);
+document.head.insertAdjacentHTML('beforeend', '<style>.item.hl{outline:2px solid var(--accent);outline-offset:2px;transition:outline .3s}</style>');
 boot();
 </script>
 

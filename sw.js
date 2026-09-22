@@ -1,8 +1,9 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20260921-1805-95bc70';
+const BUILD = '20260922-1347-c6fee4';
 const CACHE = 'nf-shell-' + BUILD;
 const SHELL = ["./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./laeha.pdf", "./lof-c01.pdf"];
 self.addEventListener('install', e => {
+  self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))).catch(() => { })));
 });
 self.addEventListener('activate', e => {
@@ -32,9 +33,12 @@ self.addEventListener('fetch', e => {
 /* ---------- Web Push (chat messages, approvals, alerts) ---------- */
 self.addEventListener('push', e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch (x) { d = { body: e.data ? e.data.text() : '' }; }
-  const title = d.title || 'Ninety Fabrication';
-  const badge = async () => { try { if (!('setAppBadge' in navigator)) return; const c = await caches.open('nf-badge'); const r = await c.match('count'); let n = r ? parseInt(await r.text(), 10) || 0 : 0; n++; await c.put('count', new Response(String(n))); await navigator.setAppBadge(n); } catch (x) { /* ignore */ } };
-  e.waitUntil(Promise.all([badge(), self.registration.showNotification(title, { body: d.body || '', tag: d.tag || 'nf', renotify: true, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: d.url || './' }, vibrate: [120, 60, 120] })]));
+  const title = String(d.title || 'Ninety Fabrication'); const body = String(d.body || ''); const tag = String(d.tag || 'nf-' + Date.now()); const url = d.url || './';
+  // iOS Safari: keep the options minimal (renotify / vibrate are not supported there and can make the whole call fail → generic "Notification")
+  const show = self.registration.showNotification(title, { body, tag, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url } })
+    .catch(() => self.registration.showNotification(title, { body }));
+  const badge = (async () => { try { if (!('setAppBadge' in navigator)) return; const c = await caches.open('nf-badge'); const r = await c.match('count'); let n = r ? parseInt(await r.text(), 10) || 0 : 0; n++; await c.put('count', new Response(String(n))); await navigator.setAppBadge(n); } catch (x) { /* ignore */ } })();
+  e.waitUntil(Promise.all([show, badge]).catch(() => { }));
 });
 self.addEventListener('message', e => { const d = e.data || {}; if (d.nfBadge != null) { (async () => { try { const c = await caches.open('nf-badge'); await c.put('count', new Response(String(d.nfBadge))); if ('setAppBadge' in navigator) { if (d.nfBadge > 0) await navigator.setAppBadge(d.nfBadge); else await navigator.clearAppBadge(); } } catch (x) { /* ignore */ } })(); } });
 self.addEventListener('notificationclick', e => {
