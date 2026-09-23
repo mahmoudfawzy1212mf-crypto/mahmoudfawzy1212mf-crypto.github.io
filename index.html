@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1236-446daf";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1301-70178a";</script>
 
 <script>
 'use strict';
@@ -13944,6 +13944,92 @@ saveProduct = (base => async function (f, p) {
   return r;
 })(saveProduct);
 ACTIONS.familyItemNew = id => { const par = byId('products', id); if (!par || !canFiles()) return; ACTIONS.productNew(par.brandId); setTimeout(() => { const f = $('#mform'); if (!f) return; const s = $('#f-parentId', f); if (s) s.value = par.id; const c = $('#f-code', f); if (c) c.value = `${par.code || ''}-${String(familyItems(par.id).length + 1).padStart(2, '0')}`; const col = $('#f-collection', f); if (col && par.collection) col.value = par.collection; }, 60); };
+/* =====================================================================
+   v4.25 — (1) ملف PDF لعرض السعر: يُرفع على عرض السعر ويُفتح من صفحته (مخزن quotes/ لا يقرؤه إلا المالك والحسابات والمدير التجاري)
+            (2) نوع المنتج: «منتج كتالوج» (رسوماته جاهزة) أو «منتج مشروع» (جديد لمشروع بعينه — يدخل «بانتظار رسومات التصنيع» ويُكلَّف المكتب الفني)
+   ===================================================================== */
+const QPDF_ROLES = ['admin', 'hr', 'bdd'];
+const qpdfCan = () => !!S.session && QPDF_ROLES.includes(role());
+const PKINDS = { catalog: ['منتج كتالوج — رسومات جاهزة', 'good'], project: ['منتج مشروع — جديد', 'warn'] };
+function pKind(p, depth) {
+  if (!p) return ''; if (p.kind) return p.kind;
+  if (p.parentId && (depth || 0) < 3) { const par = byId('products', p.parentId); const k = pKind(par, (depth || 0) + 1); if (k) return k; }
+  if (p.source === 'catalog' || p.catalogCode) return 'catalog';
+  if (p.projectOrderId) return 'project';
+  return '';
+}
+const pKindBadge = p => { const k = pKind(p); return k ? `<span class="badge ${PKINDS[k][1]}" style="padding:0 6px">${k === 'catalog' ? 'كتالوج' : 'منتج مشروع'}</span>` : ''; };
+
+/* ---------- products: badge on cards, filter, detail banner ---------- */
+if (typeof productCard === 'function') productCard = (base => function (p) {
+  const h = base.apply(this, arguments); const b = pKindBadge(p); if (!b) return h;
+  return h.replace('<div class="row" style="gap:6px"><span class="code">', `<div class="row" style="gap:6px">${b}<span class="code">`);
+})(productCard);
+if (typeof vProducts === 'function') vProducts = (base => function () {
+  let html = base.apply(this, arguments); const f = (S.ui.filter.products ||= {}); const k = f.kind || '';
+  if (k) list('products').filter(p => pKind(p) !== k).forEach(p => { const re = new RegExp(`<a class="pcard" href="#/products/${p.id}">[\\s\\S]*?</a>`); html = html.replace(re, ''); });
+  const sel = `<div class="row" style="gap:6px;margin-bottom:10px"><span class="muted small">النوع:</span>${[['', 'الكل'], ['catalog', 'منتجات الكتالوج'], ['project', 'منتجات المشاريع']].map(([v, l]) => `<button class="btn sm ${k === v ? 'p' : 'ghost'}" data-action="prFilter" data-arg="kind:${v}">${l}${v ? ` (${list('products').filter(p => pKind(p) === v).length})` : ''}</button>`).join('')}</div>`;
+  const i = html.indexOf('<div class="pgrid'); return i < 0 ? sel + html : html.slice(0, i) + sel + html.slice(i);
+})(vProducts);
+if (typeof vProductDetail === 'function') vProductDetail = (base => function (id) {
+  const html = base.apply(this, arguments); const p = byId('products', id); if (!p) return html; const k = pKind(p); if (!k) return html;
+  const o = p.projectOrderId ? byId('orders', p.projectOrderId) : null; const cl = p.projectClientId ? byId('clients', p.projectClientId) : (o ? byId('clients', o.clientId) : null);
+  const txt = k === 'catalog' ? 'منتج من الكتالوج — رسوماته جاهزة ويُستخدم مباشرة في عروض الأسعار والمقايسات.' : `منتج مشروع جديد${p.projectName ? ` — ${esc(p.projectName)}` : ''}${cl ? ` · ${esc(cl.name)}` : ''}${o ? ` · <a href="#/orders/${o.id}">${esc(o.code)}</a>` : ''} — ${productStage(p) === 'ready' ? 'رسومات التصنيع جاهزة' : 'بانتظار رسومات التصنيع من المكتب الفني'}.`;
+  return `<div class="banner ${k === 'catalog' ? 'good' : 'warn'}" style="margin-bottom:12px">${icon(k === 'catalog' ? 'check' : 'info')}<span><b>${PKINDS[k][0]}</b> — ${txt}</span></div>` + html;
+})(vProductDetail);
+if (typeof productForm === 'function') productForm = (base => function (p) {
+  const h = base.apply(this, arguments); const k = pKind(p) || 'catalog';
+  const ords = sortBy(list('orders').filter(o => o.status !== 'cancelled'), o => o.code || '', true);
+  const box = field('نوع المنتج', `<select id="f-pkind" name="pkind"><option value="catalog" ${k === 'catalog' ? 'selected' : ''}>منتج كتالوج — رسوماته جاهزة</option><option value="project" ${k === 'project' ? 'selected' : ''}>منتج مشروع — جديد ويحتاج رسومات تصنيع</option></select>`)
+    + field('المشروع (لمنتج المشروع)', `<select id="f-projectOrderId" name="projectOrderId"><option value="">—</option>${opts(ords, p.projectOrderId || '', o => `${o.code} — ${o.title}`)}</select>`);
+  const i = h.lastIndexOf('</div>'); return i < 0 ? h + box : h.slice(0, i) + box + h.slice(i);
+})(productForm);
+if (typeof saveProduct === 'function') saveProduct = (base => async function (f, p) {
+  const d = formData(f); const r = await base.apply(this, arguments); if (r === false) return r;
+  try {
+    const doc = p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(d.code || '').trim().toLowerCase()); if (!doc) return r;
+    const kind = d.pkind === 'project' ? 'project' : 'catalog'; const patch = { kind, projectOrderId: kind === 'project' ? (d.projectOrderId || null) : null };
+    const isNewProject = kind === 'project' && pKind(doc) !== 'project';
+    if (isNewProject && productStage(doc) === 'ready' && !(filesOf('product', doc.id) || []).some(x => x.kind === 'drawing')) Object.assign(patch, { stage: 'coded', stageAt: nowISO(), stageBy: S.session?.name || '' });
+    await Store.update('products', doc.id, patch, { silent: true });
+    if (isNewProject && typeof notifyRole === 'function') await notifyRole('tech', `رسومات تصنيع لمنتج مشروع جديد: ${doc.code || ''} ${doc.name}`, `${doc.dims ? 'المقاسات: ' + doc.dims + '\n' : ''}${doc.materials ? 'الخامات: ' + doc.materials + '\n' : ''}ارفع رسومات التصنيع على صفحة المنتج ثم غيّر مرحلته إلى «رسومات جاهزة».`, { id: `pdraw_${doc.id}`, kind: 'task', fields: { productId: doc.id } });
+  } catch (e) { console.warn(e); }
+  return r;
+})(saveProduct);
+
+/* ---------- quotation: products card + PDF card ---------- */
+async function quotePdfUpload(qid, file) {
+  const q = byId('quotations', qid); if (!q || !qpdfCan() || !file) return;
+  if (!/pdf$/i.test(file.type || '') && !/\.pdf$/i.test(file.name || '')) { toast('اختر ملف PDF', 'err'); return; }
+  let st;
+  if (typeof sbOn === 'function' && sbOn()) {
+    const key = `quotes/${todayISO().slice(0, 7)}/${uid()}.pdf`; const { error } = await S.sb.storage.from('files').upload(key, file, { contentType: 'application/pdf', upsert: false });
+    if (error) { toast('تعذّر رفع الملف: ' + (error.message || ''), 'err'); return; }
+    st = { store: 'sb', ref: key, enc: null, mime: 'application/pdf', size: file.size };
+  } else st = await Files.put(file, 'application/pdf');
+  const doc = Object.assign({ id: uid(), name: file.name, kind: 'pdf', mime: 'application/pdf', size: file.size, quotationId: qid, orderId: null, productId: null, restricted: true, byName: S.session?.name || '', note: `ملف عرض السعر ${q.number || ''}` }, st);
+  await Store.save('files', doc, { silent: true }); if (role() !== 'hr') { try { await Store.update('quotations', qid, { pdfFileId: doc.id }); } catch (e) { console.warn(e); } } else render(false); toast('تم رفع ملف العرض');
+}
+/* the latest PDF uploaded for the quotation (hr can attach one without editing the quotation itself) */
+const quotePdfOf = q => (q.pdfFileId && byId('files', q.pdfFileId)) || sortBy(list('files').filter(x => x.quotationId === q.id && x.kind === 'pdf' && !x.deleted), x => x.createdAt || '', true)[0] || null;
+ACTIONS.quotePdfPick = qid => { if (!qpdfCan()) return; const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf,.pdf'; i.onchange = () => { if (i.files[0]) quotePdfUpload(qid, i.files[0]); }; i.click(); };
+ACTIONS.quotePdfOpen = async fid => { const f = byId('files', fid); if (!f) { toast('الملف غير متاح', 'err'); return; } const w = window.open('', '_blank'); try { const u = await Files.url(f); if (w) w.location.href = u; else location.href = u; } catch (e) { if (w) w.close(); toast('تعذّر فتح الملف', 'err'); } };
+if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function (id) {
+  const html = base.apply(this, arguments); const q = byId('quotations', id); if (!q) return html;
+  const f = quotePdfOf(q);
+  const pdfCard = `<div class="card"><div class="cardhead"><h3>${icon('file')} ملف العرض (PDF)</h3><div class="grow"></div>${f ? `<button class="btn sm p" data-action="quotePdfOpen" data-arg="${f.id}">${icon('eye')}فتح</button>` : ''}${qpdfCan() && writable() ? `<button class="btn sm ${f ? 'ghost' : 'a'}" data-action="quotePdfPick" data-arg="${q.id}">${icon('upload')}${f ? 'استبدال' : 'رفع PDF'}</button>` : ''}</div>${f ? `<div class="small">${esc(f.name)} <span class="muted tiny">· ${fmtNum(Math.round((f.size || 0) / 1024))} KB · ${esc(f.byName || '')}</span></div>` : '<div class="muted small">لم يُرفع ملف العرض بعد — ارفع الـ PDF اللي اتبعت للعميل.</div>'}</div>`;
+  const prods = (q.items || []).map(it => it.productId && byId('products', it.productId)).filter(Boolean);
+  const pCard = prods.length ? `<div class="card"><div class="cardhead"><h3>منتجات العرض</h3><span class="muted small">${prods.filter(p => pKind(p) === 'catalog').length} كتالوج · ${prods.filter(p => pKind(p) === 'project').length} منتج مشروع</span></div><div class="list">${[...new Set(prods)].map(p => `<a class="item" href="#/products/${p.id}"><div class="main"><div class="title">${pKindBadge(p)} <span class="code">${esc(p.code || '')}</span> ${esc(p.name)}</div><div class="meta">${esc(p.dims || '')}</div></div>${typeof productStageBadge === 'function' ? productStageBadge(p) : ''}</a>`).join('')}</div></div>` : '';
+  return pdfCard + pCard + html;
+})(vQuoteDetailBase);
+/* ---------- order / project page: products with their kind ---------- */
+if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+  const html = base.apply(this, arguments); const o = byId('orders', id); if (!o) return html;
+  const prods = (o.items || []).map(it => ({ it, p: it.productId && byId('products', it.productId) })).filter(x => x.p); if (!prods.length) return html;
+  const card = `<div class="card"><div class="cardhead"><h3>منتجات المشروع</h3><span class="muted small">${prods.filter(x => pKind(x.p) === 'catalog').length} كتالوج · ${prods.filter(x => pKind(x.p) === 'project').length} منتج مشروع (يحتاج رسومات)</span></div><div class="list">${prods.map(({ it, p }) => `<a class="item" href="#/products/${p.id}"><div class="main"><div class="title">${pKindBadge(p)} <span class="code">${esc(p.code || '')}</span> ${esc(p.name)} <span class="muted">× ${fmtNum(it.qty)}</span></div><div class="meta">${esc(p.dims || '')}</div></div>${typeof productStageBadge === 'function' ? productStageBadge(p) : ''}</a>`).join('')}</div></div>`;
+  return html + card;
+})(vOrderDetail);
+Object.assign(window, { pKind, quotePdfUpload });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
