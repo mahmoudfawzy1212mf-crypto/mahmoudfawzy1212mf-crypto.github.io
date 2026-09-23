@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0449-4e3674";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0521-5d74b7";</script>
 
 <script>
 'use strict';
@@ -13222,6 +13222,43 @@ vInventory = (base => () => { let html = base(); try { list('materials').forEach
 /* settings: the owner threshold for new-material prices */
 EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
+/* =====================================================================
+   v4.19 — one login for all Ninety apps (factory · studio · construction).
+   The apps share one origin (github.io), so the browser already holds the
+   session of any Ninety app the person signed into. On boot, when this app
+   has no session, it asks a peer app's backend for a one-time ticket (with
+   that peer's session) and this backend turns the ticket into a session for
+   the same login here — Edge Function `sso` on every project, no passwords.
+   Peers come from config.js: NF_CONFIG.peers = [{ name, ref, url, anon }].
+   ===================================================================== */
+const NF_PEERS = () => (window.NF_CONFIG && Array.isArray(window.NF_CONFIG.peers)) ? window.NF_CONFIG.peers.filter(p => p && p.url && p.anon) : [];
+async function ssoPeerToken(peer) {
+  try {
+    const raw = localStorage.getItem('sb-' + (peer.ref || new URL(peer.url).hostname.split('.')[0]) + '-auth-token'); if (!raw) return null;
+    const client = window.supabase.createClient(peer.url, peer.anon, { auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false } });
+    const { data } = await client.auth.getSession(); return data && data.session ? data.session.access_token : null;
+  } catch (e) { return null; }
+}
+async function ssoTry() {
+  if (!S.sb || S.sbUser) return false; const c = nfConfig(); if (!c.supabaseUrl) return false;
+  for (const peer of NF_PEERS()) {
+    const tok = await ssoPeerToken(peer); if (!tok) continue;
+    try {
+      const r1 = await fetch(peer.url + '/functions/v1/sso', { method: 'POST', headers: { 'content-type': 'application/json', apikey: peer.anon, Authorization: 'Bearer ' + tok }, body: JSON.stringify({ action: 'ticket' }) }); const j1 = await r1.json().catch(() => ({})); if (!j1.code) continue;
+      const r2 = await fetch(c.supabaseUrl + '/functions/v1/sso', { method: 'POST', headers: { 'content-type': 'application/json', apikey: c.supabaseAnonKey }, body: JSON.stringify({ action: 'login', code: j1.code, from: peer.url }) }); const j2 = await r2.json().catch(() => ({})); if (!j2.token_hash) { console.warn('sso', peer.name, j2.error || ''); continue; }
+      const { data, error } = await S.sb.auth.verifyOtp({ token_hash: j2.token_hash, type: 'magiclink' }); if (error || !data || !data.session) { console.warn('sso verify', error); continue; }
+      S.sbUser = data.session.user; S.ssoFrom = peer.name || peer.url; return true;
+    } catch (e) { console.warn('sso', e); }
+  }
+  return false;
+}
+sbBoot = (base => async function () {
+  const ok = await base(); if (!ok || S.sbUser || S.sbBootstrap || !NF_PEERS().length) return ok;
+  const root = $('#root'); if (root && S.mode === 'sb') root.innerHTML = `<div class="login"><div class="loginbox" style="text-align:center"><div class="brand">${brandBlock(34)}</div><p class="muted">جارٍ الدخول بحسابك في Ninety…</p></div></div>`;
+  if (await ssoTry()) { sbStartData(); }
+  return ok;
+})(sbBoot);
+/* a fresh sign-in here also refreshes nothing elsewhere: each peer signs in on its own next open, from this session */
 boot();
 /* =====================================================================
    99 — v4.15: موديول «المراقبة» (كاميرات Hikvision بالتعرف على الوجه) — المصنع
