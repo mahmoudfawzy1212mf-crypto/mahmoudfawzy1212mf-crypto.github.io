@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0930-1e48e6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1224-399b58";</script>
 
 <script>
 'use strict';
@@ -13222,6 +13222,52 @@ vInventory = (base => () => { let html = base(); try { list('materials').forEach
 /* settings: the owner threshold for new-material prices */
 EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
+/* =====================================================================
+   v4.24 — أوامر تشغيل سرية: الأمر المعلَّم «سري» لا يصل من السيرفر أصلًا إلا للمالك والمدير التجاري ومدير الحسابات
+   (سياسة RLS: nf_conf_ok — الأمر نفسه وكل ما يشير إليه بـorderId: مهام/ملفات/توريدات/مشاوير…).
+   المالك ينزّله للإنتاج من صفحة الأمر فيظهر للمصنع ويُخطَر مدير المصنع كأمر جديد.
+   ===================================================================== */
+const CONF_ROLES = ['admin', 'hr', 'bdd'];
+const confCan = () => !!S.session && CONF_ROLES.includes(role());
+const isConfidential = o => !!(o && o.confidential);
+let _confPending = null;
+/* the order form: a checkbox for the three privileged roles */
+if (typeof orderForm === 'function') orderForm = (base => function (o) {
+  let html = base.apply(this, arguments); if (!confCan()) return html;
+  const box = `<label class="check full ${isConfidential(o) ? 'on' : ''}" id="confbox"><input type="checkbox" name="confidential" id="f-confidential" ${isConfidential(o) ? 'checked' : ''}> 🔒 أمر سري — لا يظهر لغير المالك والمدير التجاري ومدير الحسابات حتى ينزّله المالك للإنتاج</label>`;
+  const i = html.lastIndexOf('</div>'); return i < 0 ? html + box : html.slice(0, i) + box + html.slice(i);
+})(orderForm);
+if (typeof saveOrderBase === 'function') saveOrderBase = (base => async function (f, o) {
+  const cb = f && f.querySelector && f.querySelector('#f-confidential');
+  _confPending = cb ? !!cb.checked : (o && o.confidential ? true : null);
+  try { return await base.apply(this, arguments); } finally { _confPending = null; }
+})(saveOrderBase);
+Store.save = (base => function (col, doc, opts) {
+  if (col === 'orders' && doc && _confPending !== null) doc.confidential = _confPending;
+  return base.call(this, col, doc, opts);
+})(Store.save);
+/* a confidential order raises no factory notifications until it is released */
+if (typeof orderSavedHook === 'function') orderSavedHook = (base => async function (doc, prev) { if (isConfidential(doc)) return; return base.apply(this, arguments); })(orderSavedHook);
+/* order page: banner + release button (owner only) */
+if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+  let html = base.apply(this, arguments); const o = byId('orders', id); if (!o || !isConfidential(o)) return html;
+  const banner = `<div class="banner warn" style="margin-bottom:12px">${icon('info')}<span><b>🔒 أمر سري</b> — يراه المالك والمدير التجاري ومدير الحسابات فقط؛ المصنع والأقسام لا يعرفون به بعد.</span>${isAdmin() && writable() ? `<button class="btn sm p" data-action="orderRelease" data-arg="${o.id}" style="margin-inline-start:auto">${icon('check')}تنزيل للإنتاج</button>` : ''}</div>`;
+  return banner + html;
+})(vOrderDetail);
+ACTIONS.orderRelease = async id => {
+  const o = byId('orders', id); if (!o || !isAdmin() || !writable()) return;
+  if (!confirm(`تنزيل ${o.code} للإنتاج؟ سيظهر لمدير المصنع والأقسام (بدون أسعار) ويصلهم إخطار بأمر جديد.`)) return;
+  await Store.update('orders', id, { confidential: false, releasedAt: nowISO(), releasedBy: S.session.name || '' });
+  try { if (typeof orderSavedHook === 'function') await orderSavedHook(byId('orders', id), {}); } catch (e) { console.warn(e); }
+  toast(`تم تنزيل ${o.code} للإنتاج`);
+};
+/* lists: a lock next to the code */
+if (typeof vOrders === 'function') vOrders = (base => function () {
+  let html = base.apply(this, arguments); if (!confCan()) return html;
+  list('orders').filter(isConfidential).forEach(o => { if (o.code) html = html.split(`>${esc(o.code)}<`).join(`>${esc(o.code)} 🔒<`); });
+  return html;
+})(vOrders);
+Object.assign(window, { confCan, isConfidential });
 /* =====================================================================
    v4.21 — الاسم بالإنجليزي: كل مستخدم له «الاسم بالإنجليزي» اختياري (ملف الموظف · حساب الإداري · صورتي)
    في النسخة الإنجليزية يظهر بدل اسمه العربي في القائمة الجانبية والتحية والجداول وكل مكان يُكتب فيه الاسم.
