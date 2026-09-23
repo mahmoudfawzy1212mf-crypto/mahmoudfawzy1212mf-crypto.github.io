@@ -1,10 +1,9 @@
-create extension if not exists pgcrypto with schema extensions; create extension if not exists "uuid-ossp" with schema extensions; create extension if not exists pg_cron; create extension if not exists pg_net;
 insert into storage.buckets (id, name, public) values ('files','files',false), ('app','app',true) on conflict (id) do nothing;
 create table if not exists public.admin_config (id text not null, value text not null, updated_at timestamp with time zone default now(), constraint admin_config_pkey PRIMARY KEY (id));
 create table if not exists public.app_files (path text not null, content_type text not null, data text not null, size integer not null default 0, build text, updated_at timestamp with time zone default now(), constraint app_files_pkey PRIMARY KEY (path));
 create table if not exists public.app_stage (path text not null, build text not null, seq integer not null, chunk text not null, created_at timestamp with time zone not null default now(), constraint app_stage_pkey PRIMARY KEY (path, build, seq));
 create table if not exists public.backups (id bigserial not null, slot text not null, taken_at timestamp with time zone not null default now(), docs_count integer not null default 0, note text, data jsonb not null, constraint backups_pkey PRIMARY KEY (id));
-create table if not exists public.docs (col text not null, id text not null, data jsonb not null default '{}'::jsonb, month text default (data ->> 'month'::text), updated_at timestamp with time zone not null default now(), updated_by uuid, constraint docs_pkey PRIMARY KEY (col, id));
+create table if not exists public.docs (col text not null, id text not null, data jsonb not null default '{}'::jsonb, month text generated always as (data ->> 'month'::text) stored, updated_at timestamp with time zone not null default now(), updated_by uuid, constraint docs_pkey PRIMARY KEY (col, id));
 create table if not exists public.gps_config (id text not null, account text not null, password text not null, api_base text default 'http://api.etrack.vip/api'::text, bridge_key text not null, access_token text, token_expires_at timestamp with time zone, updated_at timestamp with time zone default now(), constraint gps_config_pkey PRIMARY KEY (id));
 create table if not exists public.nf_flags (key text not null, value jsonb not null default '{}'::jsonb, updated_at timestamp with time zone not null default now(), constraint nf_flags_pkey PRIMARY KEY (key));
 create table if not exists public.profiles (uid uuid not null, role text not null default 'employee'::text, person_id text, dept_id text, login text, name text, created_at timestamp with time zone not null default now(), constraint profiles_pkey PRIMARY KEY (uid));
@@ -12,6 +11,11 @@ create table if not exists public.vehicle_positions (id bigserial not null, imei
 alter table profiles add constraint profiles_uid_fkey FOREIGN KEY (uid) REFERENCES auth.users(id) ON DELETE CASCADE;
 CREATE INDEX docs_col_month_idx ON public.docs USING btree (col, month);
 CREATE UNIQUE INDEX vehicle_positions_imei_gps_at ON public.vehicle_positions USING btree (imei, gps_at);
+create or replace view public.docs_safe as  SELECT col,
+    id,
+    (((((((((((((((((data - 'dailyWage'::text) - 'basic'::text) - 'allowances'::text) - 'healthIns'::text) - 'salt'::text) - 'passHash'::text) - 'pinHash'::text) - 'actCodeHash'::text) - 'actCodeExp'::text) - 'face'::text) - 'deviceCred'::text) - 'nationalId'::text) - 'phone'::text) - 'workPhone'::text) - 'bankAccount'::text) - 'notes'::text) || jsonb_build_object('safe', true)) AS data
+   FROM docs
+  WHERE ((col = 'workers'::text) AND (COALESCE((data ->> 'status'::text), 'active'::text) <> 'inactive'::text));
 CREATE OR REPLACE FUNCTION public.nf_brand_ok(p_col text, p_data jsonb)
  RETURNS boolean
  LANGUAGE sql
