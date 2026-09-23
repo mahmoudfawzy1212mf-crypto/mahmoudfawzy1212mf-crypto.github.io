@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1605-9921a2";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1748-d6c373";</script>
 
 <script>
 'use strict';
@@ -14465,6 +14465,32 @@ if (typeof i18nToggleUI === 'function') i18nToggleUI = (base => function () {
 })(i18nToggleUI);
 if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { if (document.querySelector('#root .nhome') && typeof i18nToggleUI === 'function') i18nToggleUI(); } catch (e) { /* ignore */ } return r; })(render);
 Object.assign(window, { mySystems });
+/* =====================================================================
+   v4.29 — زرار «📷 إضافة صورة» على كارت العربية اللي ملهاش صورة (مدير حركة النقل والمالك ومدير المصنع):
+   يختار الصورة من الكاميرا/الموبايل ← يظبط القص ← تتحفظ على العربية مباشرة من غير صفحة التعديل.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>.vehaddph{margin-inline-start:auto;flex:0 0 auto;white-space:nowrap}</style>`);
+/* after every draw: vehicle cards without a photo get the button at the end of their header row */
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+  if (typeof canFleet !== 'function' || !canFleet()) return;
+  document.querySelectorAll('#root .vehcard[data-arg^="fleet/veh/"]').forEach(card => {
+    const id = card.getAttribute('data-arg').slice('fleet/veh/'.length); const v = byId('vehicles', id); const vh = card.querySelector('.vh');
+    if (!v || v.photo || !vh || vh.querySelector('.vehaddph')) return;
+    vh.insertAdjacentHTML('beforeend', `<button type="button" class="btn xs a vehaddph" data-action="vehPhotoAdd" data-arg="${esc(v.id)}">📷 إضافة صورة</button>`);
+  });
+});
+ACTIONS.vehPhotoAdd = id => {
+  const v = byId('vehicles', id); if (!v || !canFleet()) return;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0]; if (!file) return;
+    try {
+      const src = await fileToDataURL(file);
+      openCropper(src, async url => { if (!url) return; await Store.update('vehicles', id, { photo: url }); toast('تم حفظ صورة العربية'); render(false); }, { size: 512, square: true, title: 'ضبط صورة العربية' });
+    } catch (e) { toast('تعذّر قراءة الصورة', 'err'); }
+  };
+  inp.click();
+};
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
