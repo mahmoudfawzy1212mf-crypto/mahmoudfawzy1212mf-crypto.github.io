@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260922-2003-2ace38";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0405-bf27a8";</script>
 
 <script>
 'use strict';
@@ -12951,7 +12951,7 @@ function ninetyHomeHTML() {
     ${main}</main></div>`;
 }
 /* ---------- render: the owner sees the Ninety home until he picks a company ---------- */
-const NINETY_VER = '4.16';
+const NINETY_VER = '4.17';
 const ninetyHomeDue = () => { if (!isNinetyOwner() || S.mode === 'boot') return false; if (ninetyCo()) return false; const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety') { ninetySet('factory'); return false; } return true; };
 render = (base => function (full) {
   if (ninetyHomeDue()) { const root = $('#root'); if (root) { const h = (location.hash || '').replace(/^#\/?/, ''); if (h !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = ninetyHomeHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
@@ -13388,6 +13388,174 @@ saveProduct = (base => async function (f, p) {
   return r;
 })(saveProduct);
 ACTIONS.familyItemNew = id => { const par = byId('products', id); if (!par || !canFiles()) return; ACTIONS.productNew(par.brandId); setTimeout(() => { const f = $('#mform'); if (!f) return; const s = $('#f-parentId', f); if (s) s.value = par.id; const c = $('#f-code', f); if (c) c.value = `${par.code || ''}-${String(familyItems(par.id).length + 1).padStart(2, '0')}`; const col = $('#f-collection', f); if (col && par.collection) col.value = par.collection; }, 60); };
+/* =====================================================================
+   Ninety Studioz — company variant (v4.17)
+   Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
+   or window.NF_CO === 'studioz'. Same code base, different: branding · modules (no
+   production/stores/purchasing/fleet/CCTV/CRM) · roles (art director / team leader)
+   · regulation & policy of the design office · approval chain (team leader →
+   art director) · payroll visibility (HR/accounts) · Ninety home link back to the
+   factory app one level up.
+   ===================================================================== */
+const STU_ON = (() => { try { return (window.NF_CONFIG && window.NF_CONFIG.company === 'studioz') || window.NF_CO === 'studioz'; } catch (e) { return false; } })();
+const isStudioz = () => STU_ON;
+const STU_REGULATION_TEXT = `## أولًا: مواعيد وساعات العمل
+- يبدأ الدوام من يوم الأحد إلى يوم الخميس من الساعة {{shiftStart}} صباحًا وحتى الساعة {{shiftEnd}} مساءً، عدد ساعات العمل {{hoursPerDay}} يوميًا، والبريك ساعة واحدة تُسجَّل بالبصمة عند بدايته ونهايته.
+- يبدأ حساب ساعات العمل الإضافية عند التكليف من المدير المباشر فقط وبعد مرور ثماني ساعات عمل.
+- يجب على المهندس البصمة يوميًا؛ أي تأخير في البصمة أو عدم البصمة: تحذير شفهي أول مرة، وعند التكرار خصم {{missingPunchRepeatDays}}.
+- يجب البصمة عند أخذ البريك والبصمة عند الانتهاء منه، وفي حالة عدم البصم: تحذير شفهي أول مرة وخصم ربع يوم عند التكرار.
+## ثانيًا: الإجازات الرسمية
+- هي الإجازات المعتمدة من الدولة لعام 2026 والمذكورة للقطاع الخاص (مسجّلة في السيستم).
+- عند نزول الموظف في إجازة رسمية يُحسب اليوم بيومين.
+## ثالثًا: الإجازات السنوية
+- أول {{annualAfterMonths}} شهور بدون إجازات لأصحاب الخبرة، وأول 6 شهور بدون إجازات للخريج الجديد، ثم يُحتسب عدد أيام الإجازات بنسبة ما تبقّى من السنة.
+- الإجازات السنوية: {{annualDays}} في أول عام من التعيين، و22 يومًا بدءًا من العام الثاني للتعيين.
+- عدد أيام الإجازة العارضة 7 أيام تُخصم من رصيد الإجازات.
+- جميع الإجازات لا تُعتمد إلا بموافقة المدير المباشر (التيم ليدر / السينيور) ثم الاعتماد النهائي من مدير المكتب.
+- الإجازات بحد أقصى يومين في الشهر ما عدا أسبوع المصيف الذي يُؤخذ من أيام الإجازات، على أن يُقدَّم طلب الإجازة قبلها بأسبوعين على الأقل.
+- يجب توثيق طلب الإجازة خلال المدة المحددة لها وإلا تُعتبر لاغية: قبل الاعتيادية بيوم، وقبل بدء يوم العمل في العارضة، وقبل أسبوعين من إجازة المصيف.
+## رابعًا: جزاءات التأخير عن مواعيد العمل
+- في حال تأخير الموظف عن ساعات عمله بدون إذن يُخصم كالتالي:
+- من {{shiftStart}} إلى {{lateT2}}: بدون عقاب.
+- من {{lateT2}} إلى 11:30: تُحسب الساعة بساعتين (خصم ربع يوم).
+- من 11:30 إلى 12:30: خصم نصف يوم.
+- بعد 12:30: يُحسب اليوم غيابًا.
+- عدد الأذون مدفوعة الأجر الشهرية {{permissionsPerMonth}} فقط لا يتعدى أي منهما {{permissionMaxHours}}، ويجب ملء الطلب الخاص بذلك والإبلاغ بالإذن قبل بدء يوم العمل وإلا يُعتبر لاغيًا.
+## خامسًا: ساعات العمل الإضافي
+- في حال التكليف فقط بساعات عمل إضافية عن ساعات العمل اليومية تُحسب كل ساعة إضافية بـ{{otMultiplierTxt}} بعد أن يكون الموظف قد أمضى ثماني ساعات من دوامه الرسمي.
+- لا تُحتسب أي ساعات عمل إضافية للمهندس حديث التخرج في أول ثلاثة شهور.
+- في أيام العطلات المعتمدة تُحسب كل ساعة بساعتين.
+- يُترك تقدير الحاجة إلى التكليف بساعات العمل الإضافية إلى المدير، حيث يمكن للموظف متابعة عمله في المكتب بعد انتهاء الدوام بشكل طوعي إن تأخر عن إنجاز مهامه المتفق عليها على مدار المشروع.
+- يحق لمن كُلِّف بالعمل الإضافي من مديره المباشر لما بعد الساعة العاشرة مساءً أن يتأخر في اليوم التالي ساعتين بدون أي جزاء.
+## سادسًا: الحوافز
+- يوجد تقييم كل ثلاثة شهور بناءً على ما قام به الموظف خلالها من مشاريع ومشاركة فعّالة بها، بالإضافة إلى التزامه بلائحة الشركة من مواعيد حضور وانصراف وإجازات.
+- تُقدَّر الحوافز بما يتناسب مع ما قدّمه المهندس من فائدة لإنجاز المشاريع وليس بناءً على الخبرات التي يتمتع بها.
+## سابعًا: التعيين والانفكاك
+- عند التعيين توجد فترة تجربة لمدة شهر، يحق فيها للمهندس الانفصال بعد شهر، ويحق للمدير عدم التعيين بعد شهر إذا لم يثبت المهندس كفاءته والتزامه.
+- في حالة إتمام التعاقد ورغبة الشركة في الانفصال بدون أسباب يُبلَّغ الموظف قبلها بشهرين، وفي حالة رغبة المهندس/ة في الانفصال يُبلَّغ الشركة قبلها بشهرين على أن تكون هذه المدة بدون أي إجازات تمامًا سواء من الرصيد أو بدونه، وأي غياب أو إجازة في الشهرين يُخصم اليوم بثلاثة أيام من الراتب.
+- في حالة التيم ليدر تكون فترة ما قبل الانفصال 3 شهور ويُطبَّق البند السابق كما هو.
+## ثامنًا: الراتب
+- القبض يوم {{payDay}} من كل شهر عن الشهر السابق، ويُقسَّم الراتب على {{monthDays}} أيًا كان الشهر 30 أو 31 أو 28 يومًا، وساعة العمل = اليومية ÷ 8.
+## تعليمات عامة
+- المحافظة على الهدوء داخل قاعة العمل، واستخدام السماعات الشخصية عند سماع الموسيقى.
+- التركيز أثناء العمل وعدم الانخراط في استعمال الهواتف المحمولة بما يؤثر على عدد ساعات العمل، وعدم تصفح الإنترنت المكتبي للسوشيال ميديا أثناء فترة العمل.
+- نظافة المكتب الخاص بالمهندس مسؤولية المهندس في المقام الأول.
+- يُمنع التدخين أو المشروبات الكحولية داخل المكتب بجميع أنواعها.
+- يُمنع إدخال أي هاردات أو فلاشات في أجهزة الكمبيوتر أو الرندر إلا بإذن من المدير.
+- لا يحق لأي موظف الاعتذار عن أي مهمة داخل العمل خلال ساعاته الرسمية بما يتناسب مع طبيعة وخبرة المهندس.
+- يُنذَر من يخالف التعليمات الواردة بالترتيب: تحذير شفهي / غرامة ربع يوم / غرامة نصف يوم / غرامة يوم أو الفصل النهائي.
+- لا يُضاف المهندس/ة في أي مشاريع تخص الشركة خلال الثلاثة شهور الأولى على منصات التواصل الاجتماعي.
+## ملحوظة هامة جدًا
+- لا يوجد أي استثناءات في اللائحة.`;
+/* Egypt private-sector official holidays 2026 (lunar dates approximate — HR adjusts when announced) */
+const STU_HOLIDAYS_2026 = [
+  { date: '2026-01-07', name: 'عيد الميلاد المجيد' }, { date: '2026-01-25', name: 'عيد الشرطة / ثورة 25 يناير' },
+  { date: '2026-03-20', name: 'عيد الفطر (تقريبي)' }, { date: '2026-03-21', name: 'عيد الفطر (تقريبي)' }, { date: '2026-03-22', name: 'عيد الفطر (تقريبي)' },
+  { date: '2026-04-13', name: 'شم النسيم' }, { date: '2026-04-25', name: 'عيد تحرير سيناء' }, { date: '2026-05-01', name: 'عيد العمال' },
+  { date: '2026-05-26', name: 'وقفة عرفات (تقريبي)' }, { date: '2026-05-27', name: 'عيد الأضحى (تقريبي)' }, { date: '2026-05-28', name: 'عيد الأضحى (تقريبي)' }, { date: '2026-05-29', name: 'عيد الأضحى (تقريبي)' },
+  { date: '2026-06-16', name: 'رأس السنة الهجرية (تقريبي)' }, { date: '2026-06-30', name: 'ثورة 30 يونيو' }, { date: '2026-07-23', name: 'ثورة 23 يوليو' },
+  { date: '2026-08-25', name: 'المولد النبوي (تقريبي)' }, { date: '2026-10-06', name: 'عيد القوات المسلحة' },
+];
+const STU_DEFAULTS = {
+  company: 'Ninety Studioz',
+  hoursPerDay: 8, otMultiplier: 1.5, weekStart: 0,
+  shiftStart: '10:00', shiftEnd: '18:00', breakMinutes: 60, graceMinutes: 30,
+  brands: [{ id: 'stu', name: 'Ninety Studioz', desc: 'التصميم والإظهار المعماري', code: 'STU', color: '#6b7482', route: [] }],
+  departments: [
+    { id: 'arch', name: 'التصميم المعماري' },
+    { id: 'int', name: 'التصميم الداخلي' },
+    { id: 'viz', name: 'الإظهار المعماري (3D)' },
+    { id: 'draw', name: 'الرسومات التنفيذية' },
+    { id: 'mgmt', name: 'إدارة المكتب', admin: true },
+    { id: 'acct', name: 'الحسابات والموارد البشرية', admin: true },
+  ],
+  trades: ['مهندس معماري', 'مهندس ديكور', 'فيجوالايزر 3D', 'رسّام تنفيذي', 'تيم ليدر', 'سينيور', 'جونيور', 'أوفيس بوي'],
+  shifts: [{ id: 'main', name: 'دوام المكتب (اللائحة) — الأحد إلى الخميس', start: '10:00', end: '18:00', breakMinutes: 60, graceMinutes: 30, otAfterMinutes: 0, offDays: [5, 6] }, { id: 'remote', name: 'عمل من البيت (بصمة من أي مكان — بإذن المدير)', start: '10:00', end: '18:00', breakMinutes: 60, graceMinutes: 30, otAfterMinutes: 0, offDays: [5, 6], remote: true }],
+  leaveTypes: [
+    { id: 'annual', name: 'إجازة اعتيادية (15 يوم أول سنة — 22 يوم من السنة الثانية)', days: 15, paid: true, afterMonths: 3, carry: false, noticeDays: 1 },
+    { id: 'casual', name: 'إجازة عارضة (7 أيام من رصيد الاعتيادية)', days: 7, paid: true, fromAnnual: true, afterMonths: 3 },
+    { id: 'summer', name: 'أسبوع المصيف (من الرصيد — يُطلب قبلها بأسبوعين)', days: 7, paid: true, fromAnnual: true, afterMonths: 3, noticeDays: 14 },
+    { id: 'sick', name: 'إجازة مرضية (بشهادة)', days: 0, paid: false, noBalance: true },
+    { id: 'unpaid', name: 'إجازة بدون أجر', days: 0, paid: false, noBalance: true },
+    { id: 'mission', name: 'مأمورية عمل / زيارة موقع', days: 0, paid: true, noBalance: true },
+  ],
+  holidays: STU_HOLIDAYS_2026,
+  policy: {
+    lateTiers: [{ from: 1, to: 30, days: 0 }, { from: 31, to: 90, days: 0.25 }, { from: 91, to: 150, days: 0.5 }, { from: 151, to: 1440, days: 1 }],
+    earlyTiers: [{ from: 1, to: 60, days: 0.25 }, { from: 61, to: 1440, days: 0.5 }],
+    graceTimesPerMonth: 999, graceExceedDays: 0, absencePenaltyDays: 0, missingPunchDays: 0, missingPunchRepeatDays: 0.5,
+    permissionsPerMonth: 2, permissionMaxHours: 2, permissionBeforeDay: true, otHolidayMultiplier: 2, monthDays: 30, dailyPaidLeave: true, otNeedsApproval: true,
+    earlyAssignmentMultiplier: 1, mealCost: 0, mealBreakMinutes: 0, bonusOtHours: 0, bonusAmount: 0, travelMultiplier: 1, advanceMaxPct: 50, advanceFromDay: 10, advanceSplitOncePerYear: true, healthInsCompanyPct: 0, payDay: 1,
+    thuSatEnabled: false, teamApproval: false, punchStrict: true, passwordResetApproval: true, escalateMinutes: 15, maxLeaveDaysPerMonth: 2, noticeMonths: 2, noticeMonthsLead: 3, noticeAbsenceDays: 3, probationMonths: 1, freshGradNoOtMonths: 3, freshGradNoLeaveMonths: 6, lateOtNextDayMinutes: 120,
+    chains: { leave: ['head', 'manager'], permission: ['head', 'manager'], advance: ['head', 'manager', 'hr'], punch: ['head', 'manager'] },
+  },
+  regulation: { version: 1, title: 'لائحة العمل الداخلية — Ninety Studioz (Ninety Degree Studio)', text: STU_REGULATION_TEXT, updatedAt: null },
+  regParams: { annualAfterMonths: 3, summerDays: 7, summerAfterMonths: 3, summerNoticeDays: 14 },
+};
+/* views that do not exist in a design office */
+const STU_HIDE_SET = new Set(['orders', 'boards', 'products', 'external', 'fleet', 'inventory', 'purchases', 'suppliers', 'crm', 'cctv', 'invoices', 'catalog', 'brands', 'lof', 'elm']);
+const STU_HIDE = { has: id => STU_HIDE_SET.has(id) || /^crm[-_]/.test(String(id || '')) };
+if (STU_ON) {
+  APP.name = 'Ninety Studioz';
+  Object.assign(DEFAULT_SETTINGS, clone(STU_DEFAULTS));
+  /* the factory merge adds its own departments (sales…) to older settings — the office keeps only its departments unless saved explicitly */
+  mergeSettings = (base => saved => { const s = base(saved ? clone(saved) : saved); const keep = new Set(STU_DEFAULTS.departments.map(d => d.id).concat(((saved || {}).departments || []).map(d => d.id))); s.departments = (s.departments || []).filter(d => keep.has(d.id)); return s; })(mergeSettings);
+  if (!(S.loaded && S.loaded.settings)) S.settings = mergeSettings(null);
+  /* roles of the office */
+  ['vice', 'purch', 'store', 'tech', 'fleet', 'driver', 'bdd'].forEach(k => { delete ROLES[k]; });
+  Object.assign(ROLES, { admin: 'المالك', manager: 'الآرت دايركتور — مدير المكتب', hr: 'الموارد البشرية والحسابات', acc: 'مسؤول الحسابات', head: 'تيم ليدر / سينيور', office: 'مهندس (مكتب)', employee: 'مهندس — بوابة الموبايل', viewer: 'مشاهد', kiosk: 'كشك الحضور' });
+  Object.assign(ROLE_VIEWS, {
+    manager: ['dashboard', 'projects', 'tasks', 'workers', 'attendance', 'requests', 'penalties', 'kpi', 'sites', 'reports', 'org', 'clients', 'ai'],
+    hr: ['dashboard', 'workers', 'attendance', 'requests', 'penalties', 'kpi', 'payroll', 'sites', 'reports', 'accounts', 'expenses', 'projectcosts', 'tasks', 'projects', 'ai', 'clients', 'quotes', 'org'],
+    acc: ['dashboard', 'accounts', 'expenses', 'projectcosts', 'clients', 'quotes', 'requests', 'tasks', 'reports', 'projects'],
+    head: ['projects', 'tasks', 'workers', 'attendance', 'requests', 'penalties', 'kpi'],
+    office: ['dashboard', 'projects', 'tasks', 'clients', 'ai'],
+    viewer: ['dashboard', 'projects'],
+  });
+  /* approval chain: direct manager (team leader / senior) → art director (final); HR only for advances */
+  Object.assign(DEFAULT_CHAINS, { leave: ['head', 'manager'], leaveThuSat: ['head', 'manager'], permission: ['head', 'manager'], advance: ['head', 'manager', 'hr'], punch: ['head', 'manager'], penalty_cancel: ['head', 'manager', 'admin'] });
+  /* navigation: drop the factory modules, rename what stays */
+  for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (n.id && STU_HIDE.has(n.id)) NAV.splice(i, 1); }
+  const grpFix = { 'التشغيل': 'المشاريع', 'المخازن': null };
+  for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (!n.grp) continue; if (grpFix[n.grp] === null || !NAV[i + 1] || NAV[i + 1].grp) NAV.splice(i, 1); else if (grpFix[n.grp]) n.grp = grpFix[n.grp]; }
+  const relabel = { projects: 'المشاريع ومراحلها', clients: 'العملاء', quotes: 'عروض الأسعار والدفعات', workers: 'فريق المكتب', sites: 'موقع البصمة (المكتب)', kpi: 'التقييم ربع السنوي' };
+  NAV.forEach(n => { if (n.id && relabel[n.id]) n.label = relabel[n.id]; });
+  Object.assign(VIEW_TITLES, { projects: 'المشاريع ومراحلها', workers: 'فريق المكتب', sites: 'موقع البصمة', kpi: 'التقييم ربع السنوي' });
+  if (typeof TABBAR_PRIORITY !== 'undefined') { TABBAR_PRIORITY.length = 0; TABBAR_PRIORITY.push('me', 'dashboard', 'projects', 'tasks', 'attendance', 'requests', 'kpi'); }
+  canSee = (base => view => STU_HIDE.has(view) ? false : base(view))(canSee);
+  /* shared employee (Said): the share of the salary borne by the office */
+  if (typeof WAGE_KEYS !== 'undefined') WAGE_KEYS.costShare = 'نسبة التحميل على المكتب %';
+  workerForm = (base => w => base(w).replace('نسبة تحميل المرتب على المصنع % (موظف مشترك مع شركة أخرى — 100 = كامل المرتب)', 'نسبة تحميل المرتب على المكتب % (موظف مشترك مع المصنع — 100 = كامل المرتب)'))(workerForm);
+  vPayroll = (base => () => base().replace(/على المصنع/g, 'على المكتب'))(vPayroll);
+  /* «تطبيق بنود اللائحة» (and the one-time auto-apply on a fresh database) writes the OFFICE regulation, not the factory one */
+  applyRegulationSettings = async silent => { const s = Object.assign({}, S.settings); const d = clone(STU_DEFAULTS); s.shifts = d.shifts.concat((s.shifts || []).filter(x => x.id !== 'main')); s.leaveTypes = d.leaveTypes; s.holidays = d.holidays; s.policy = Object.assign({}, s.policy || {}, d.policy); s.hoursPerDay = 8; s.otMultiplier = 1.5; s.breakMinutes = 60; s.regParams = Object.assign({}, s.regParams || {}, d.regParams); if (!s.regulation || !s.regulation.text || s.regulation.text === DEFAULT_REGULATION_TEXT) s.regulation = Object.assign({}, s.regulation || {}, d.regulation); s.regPolicyApplied = regulation().version; await Store.saveSettings(s); if (!silent) toast('تم تطبيق بنود لائحة المكتب على الإعدادات'); };
+  /* AI assistants talk about a design office, not a factory */
+  if (typeof aiInstructionsBase === 'function') aiInstructionsBase = (base => () => base().replace(/مساعد إدارة مصنع "[^"]*" في القاهرة \(براندات:[^)]*\)/, `مساعد إدارة مكتب التصميم المعماري "${S.settings.company || 'Ninety Studioz'}" في القاهرة (تصميم معماري وداخلي وإظهار 3D ورسومات تنفيذية)`))(aiInstructionsBase);
+  /* Ninety home: this build IS the studio — the studio card shows this office's numbers, the factory card opens the factory app one level up */
+  document.addEventListener('DOMContentLoaded', () => { document.title = 'Ninety Studioz'; });
+  document.head.insertAdjacentHTML('beforeend', '<style>#regpdf{display:none}</style>'); /* the office regulation lives as text in the system (no scanned PDF shipped) */
+}
+if (typeof NINETY_COS !== 'undefined') {
+  const stuLabel = html => html.replace(/Ninety Fabrication/g, 'Ninety Studioz').replace(/في المصنع/g, 'في المكتب').replace(/المصنع/g, 'المكتب');
+  const linkBlock = co => { const c = NINETY_COS[co]; const plan = co === 'studio' ? [['فريق المكتب', 'حضور · إجازات · لائحة خاصة'], ['المشاريع ومراحلها', 'Concept → DD → 3D → Drawings'], ['المهام والتحديثات', 'واعتماد الآرت دايركتور'], ['العروض والدفعات', 'للمالك والحسابات فقط']] : [['أوامر التشغيل', 'LOF · elmen · Aluminum'], ['الحضور والرواتب', 'لائحة المصنع'], ['المخازن والمشتريات', 'الخامات والموردون'], ['المراقبة', '24 كاميرا']]; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="${co}"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال</span><div class="plan">${plan.map(([a, b]) => `<div><b>${esc(a)}</b>${esc(b)}</div>`).join('')}</div></div></div>`; };
+  const linkSide = co => { const c = NINETY_COS[co]; return `<button type="button" class="co" style="--c:${c.color}" data-action="ninetyGo" data-arg="${co}"><div class="top"><i></i><span class="nm">${esc(c.name)}<small>${esc(c.sub)} · فتح السيستم</small></span></div></button>`; };
+  if (STU_ON) {
+    NINETY_COS.factory.url = '../index.html';
+    ACTIONS.ninetyGo = (base => co => { if (co === 'factory') { location.href = NINETY_COS.factory.url; return; } if (co === 'studio') return base('factory'); return base(co); })(ACTIONS.ninetyGo);
+    ninetyFactoryBlock = f => { const it = (n, l, sub, cls) => `<div class="it ${n ? cls : ''}"><b>${n}</b><span>${l}<small>${sub}</small></span></div>`; const openTasks = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update').length; const todo = ninetyTodo(f).filter(r => !/#\/orders|#\/purchases/.test(r.h)); return `<div class="blk" style="--c:${NINETY_COS.studio.color}" data-action="ninetyGo" data-arg="studio"><div class="hd"><span class="dot"></span><b>Ninety Studioz</b><small>· المكتب · حضور ${f.present}/${f.total}</small><span class="open">فتح السيستم ←</span></div>
+    <div class="bd"><div class="r">${it(f.appr.length, 'اعتماد مستنيك', 'إجازات · أذونات · سلف', 'wn')}${it(openTasks, 'مهام جارية', 'على فريق المكتب', '')}${it(f.esc.length, 'مهمة مصعَّدة', 'لم يشاهدها المكلَّف', 'bad')}${it(f.suspect.length, 'بصمة مشبوهة', 'تحتاج مراجعة', 'wn')}</div>
+    <ul class="todo"><div class="h">مطلوب منك</div>${todo.length ? todo.map(r => `<li data-action="ninetyOpen" data-arg="${esc(r.h)}" data-stop="1"><i style="background:${r.c}"></i>${esc(r.t)}<span class="ar">←</span></li>`).join('') : '<li><i style="background:#4f8a6d"></i>مفيش حاجة مستنياك دلوقتي ✓</li>'}</ul></div></div>`; };
+    ninetyFactoryStats = (base => () => { const f = base(); f.open = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update').length; f.late = []; f.transfer = []; return f; })(ninetyFactoryStats);
+    ninetySoonBlock = (base => co => co === 'studio' ? linkBlock('factory') : base(co))(ninetySoonBlock);
+    ninetySideCo = (base => (co, f) => co === 'factory' ? stuLabel(base('factory', f)).replace('data-arg="factory"', 'data-arg="studio"').replace(/--c:[^"]*"/, `--c:${NINETY_COS.studio.color}"`) : co === 'studio' ? linkSide('factory') : base(co, f))(ninetySideCo);
+    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في المكتب').replace('Owner · Ninety · 3 companies', 'Owner · Ninety Studioz').replace(/أوامر تشغيل<br>جارية/, 'مهام<br>جارية'))(ninetyHomeHTML);
+  } else {
+    NINETY_COS.studio.url = 'studioz/index.html';
+    ACTIONS.ninetyGo = (base => co => { if (co === 'studio') { location.href = NINETY_COS.studio.url; return; } return base(co); })(ACTIONS.ninetyGo);
+    ninetySoonBlock = (base => co => co === 'studio' ? linkBlock('studio') : base(co))(ninetySoonBlock);
+    ninetySideCo = (base => (co, f) => co === 'studio' ? linkSide('studio') : base(co, f))(ninetySideCo);
+  }
+}
 </script>
 
 </body>
