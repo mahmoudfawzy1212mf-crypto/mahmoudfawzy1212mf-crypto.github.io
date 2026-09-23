@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0405-bf27a8";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0449-4e3674";</script>
 
 <script>
 'use strict';
@@ -13555,6 +13555,684 @@ if (typeof NINETY_COS !== 'undefined') {
     ninetySoonBlock = (base => co => co === 'studio' ? linkBlock('studio') : base(co))(ninetySoonBlock);
     ninetySideCo = (base => (co, f) => co === 'studio' ? linkSide('studio') : base(co, f))(ninetySideCo);
   }
+}
+/* =====================================================================
+   Ninety Studioz v4.18 — studio core: dark identity theme · data collections
+   (projects / boards / bitems) · office projects (Concept → DD → 3D → Drawings)
+   Only active in the studioz build (STU_ON). The boards themselves live in
+   99zc-ideas.js (whiteboard) and 99zd-design.js (design board).
+   ===================================================================== */
+const STU_STAGES = [
+  { id: 'concept', name: 'Concept', ar: 'الفكرة', desc: 'مود بورد · اتجاه التصميم · سكتشات' },
+  { id: 'dd', name: 'DD', ar: 'التصميم التفصيلي', desc: 'مساقط · خامات · قطاعات مبدئية' },
+  { id: 'viz', name: '3D', ar: 'الإظهار', desc: 'مودل · إضاءة · ريندرات نهائية' },
+  { id: 'drawings', name: 'Drawings', ar: 'الرسومات التنفيذية', desc: 'لوحات تنفيذية · جداول · تفاصيل' },
+  { id: 'handover', name: 'Handover', ar: 'التسليم', desc: 'ملف العميل · اعتماد نهائي' },
+];
+const stuStage = id => STU_STAGES.find(s => s.id === id) || STU_STAGES[0];
+const stuStageIdx = id => Math.max(0, STU_STAGES.findIndex(s => s.id === id));
+/* who am I (worker id first — everybody in the office is a worker; the owner is a staff/sb session) */
+const stuMe = () => (S.session && (S.session.workerId || S.session.id)) || '';
+const stuMeIds = () => { const st = S.session || {}; return [st.workerId, st.id].filter(Boolean); };
+const stuPerson = id => { if (!id) return null; const w = byId('workers', String(id).replace(/^w:/, '')); if (w) return { id: w.id, name: w.name, role: w.role, avatar: w.avatar || null }; const st = byId('staff', id); if (st) return { id: st.id, name: st.name, role: st.role, avatar: null }; if (S.session && (S.session.id === id || S.session.workerId === id)) return { id, name: S.session.name, role: role(), avatar: S.session.avatar || null }; return { id, name: '—', role: '', avatar: null }; };
+const stuPeople = () => list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended').map(w => ({ id: w.id, name: w.name, role: w.role, deptId: w.deptId }));
+const stuInitial = name => (String(name || '').trim().split(/\s+/)[0] || '?').slice(0, 1);
+const stuAvatar = (p, sz = 26) => { const q = typeof p === 'string' ? stuPerson(p) : p; if (!q) return ''; const hue = [...String(q.id || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360; return `<span class="stuav" title="${esc(q.name)}" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .42)}px;background:hsl(${hue} 30% 35%)">${q.avatar ? `<img src="${esc(q.avatar)}" alt="">` : esc(stuInitial(q.name))}</span>`; };
+const stuManager = () => isAdmin() || role() === 'manager';
+const stuCanEdit = () => !!S.session && writable() && !['viewer', 'kiosk'].includes(role());
+
+if (STU_ON) {
+  /* ---------- identity: charcoal, one calm accent, big radii, thin type; dark by default ---------- */
+  document.head.insertAdjacentHTML('beforeend', `<style>
+html:root[data-theme="dark"],html:root:not([data-theme="light"]){
+  --bg:#0c0e11;--surface:#14171c;--surface-2:#1a1e24;--surface-3:#232830;--ink:#eceff3;--ink-2:#b9c0c9;--muted:#7f8893;--line:#22272e;--line-2:#333a44;
+  --primary:#eceff3;--primary-ink:#0c0e11;--accent:#9fb3c8;--accent-ink:#0c0e11;--accent-soft:#1c2430;--accent-2:#8ea5bf;
+  --side-bg:#0a0c0f;--side-ink:#b9c0c9;--side-muted:#6c7581;--side-on-bg:linear-gradient(135deg,#2a3340,#1f2732);--side-on:#ffffff;
+  --radius:18px;--radius-sm:12px;--shadow:0 1px 2px rgba(0,0,0,.5),0 12px 32px -14px rgba(0,0,0,.7);--shadow-lg:0 24px 60px -20px rgba(0,0,0,.8);
+}
+html:root[data-theme="light"]{--accent:#4a6078;--accent-ink:#fff;--accent-soft:#e6ebf1;--accent-2:#6b8199;--radius:18px;--radius-sm:12px;--side-on-bg:linear-gradient(135deg,#2a3340,#1f2732)}
+body{letter-spacing:.005em}
+h1{font-weight:600;letter-spacing:-.01em} h2{font-weight:600}
+.card{border-radius:var(--radius)}
+.btn.p{background:var(--accent);color:var(--accent-ink);border-color:transparent}.btn.p:hover{filter:brightness(1.08)}
+.topbar h1{font-size:19px}
+.stuav{display:inline-grid;place-items:center;border-radius:999px;color:#fff;font-weight:600;overflow:hidden;flex:0 0 auto;border:2px solid var(--surface)}.stuav img{width:100%;height:100%;object-fit:cover}
+.stuavs{display:inline-flex}.stuavs .stuav{margin-inline-start:-8px}.stuavs .stuav:first-child{margin-inline-start:0}
+/* projects grid */
+.spgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
+.spcard{position:relative;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);overflow:hidden;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .18s;display:flex;flex-direction:column;min-height:250px}
+.spcard:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--line-2)}.spcard,.spcard:hover,.spcard *{text-decoration:none!important;color:inherit}
+body.stuboard .fab{display:none!important}
+.spcard .cov{aspect-ratio:16/10;background:linear-gradient(135deg,var(--surface-2),var(--surface-3));display:grid;place-items:center;color:var(--muted);font-size:34px;font-weight:200;letter-spacing:.06em;overflow:hidden}
+.spcard .cov img{width:100%;height:100%;object-fit:cover}
+.spcard .bd{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;flex:1}
+.spcard .nm{font-weight:600;font-size:15px;line-height:1.3}.spcard .cl{font-size:12px;color:var(--muted)}
+.spcard .ft{display:flex;align-items:center;gap:8px;margin-top:auto}.spcard .ft .grow{flex:1}
+.stg{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600;letter-spacing:.02em}
+.stg i{width:6px;height:6px;border-radius:999px;background:currentColor}
+.spnew{border:1px dashed var(--line-2);background:transparent;display:grid;place-items:center;color:var(--muted);min-height:250px;border-radius:var(--radius);cursor:pointer;font-size:14px}.spnew:hover{color:var(--ink);border-color:var(--ink-2)}
+.spnew svg{width:26px;height:26px;display:block;margin:0 auto 6px}
+/* project page */
+.sphead{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.sphead .cov{width:220px;aspect-ratio:16/10;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);flex:0 0 auto;display:grid;place-items:center;color:var(--muted)}.sphead .cov img{width:100%;height:100%;object-fit:cover}.sphead .cov svg{width:36px;height:36px;opacity:.5}
+.spsteps{display:flex;gap:0;margin:14px 0 4px;overflow-x:auto}
+.spstep{flex:1;min-width:120px;padding:10px 12px;border:1px solid var(--line);background:var(--surface);position:relative;cursor:pointer;font-size:12px;color:var(--muted)}
+.spstep:first-child{border-radius:12px 0 0 12px}.spstep:last-child{border-radius:0 12px 12px 0}
+.spstep b{display:block;font-size:14px;color:var(--ink-2);font-weight:600}.spstep.done{color:var(--good-ink)}.spstep.done b{color:var(--good-ink)}.spstep.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}.spstep.on b{color:var(--accent)}
+.sptiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:14px}
+.sptile{border-radius:var(--radius);padding:18px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:130px;transition:transform .18s,box-shadow .18s}
+.sptile:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.sptile .ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}.sptile .ic svg{width:20px;height:20px}
+.sptile b{font-size:16px}.sptile small{color:var(--muted)}
+.sptile.ideas .ic{background:#2c2a1c;color:#f2d16b}.sptile.design .ic{background:#1c2a2c;color:#7fd6d6}
+@media (max-width:760px){.sphead .cov{width:100%}}
+</style>`);
+  /* dark unless the person chose light */
+  themeLoad = (base => function () { let v = null; try { v = localStorage.getItem(THEME_KEY()) || localStorage.getItem('nf.theme.guest'); } catch (e) { /* private mode */ } themeApply(v || 'dark'); })(themeLoad);
+  themeCurrent = () => { const a = document.documentElement.getAttribute('data-theme'); return a === 'light' ? 'light' : 'dark'; };
+  themeLoad();
+
+  /* ---------- data: three office collections on the same docs table ---------- */
+  ['projects', 'boards', 'bitems'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; for (const c of ['projects', 'boards', 'bitems']) { S.unsub.push(db.collection(c).onSnapshot(snap => { if (typeof stuBoardBusy === 'function' && stuBoardBusy()) { snap.docs.forEach(d => { if (!stuBoardHeld(c, d.id)) S.data[c].set(d.id, d.data()); }); } else S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, e => console.warn('snapshot', c, e))); } })(Store.subscribeAll);
+
+  /* ---------- office projects ---------- */
+  Object.assign(VIEW_TITLES, { studio: 'Studio Boards', ideas: 'سبورة الأفكار', design: 'الديزاين بورد' });
+  const stuProjectsAll = () => sortBy(list('projects').filter(p => p.status !== 'archived'), p => (p.updatedAt || ''), true);
+  const stuProjectVisible = p => stuManager() || role() === 'hr' || role() === 'acc' || (p.team || []).includes(stuMe()) || p.leadId === stuMe() || p.createdBy === S.session?.id;
+  const stuProjectBoards = pid => list('boards').filter(b => b.projectId === pid && !b.parentId);
+  const stuCoverSrc = p => { if (!p) return null; if (p.coverThumb) return p.coverThumb; if (p.coverFileId) { const f = byId('files', p.coverFileId); if (f && f.thumb) return f.thumb; } const items = list('bitems').filter(i => i.type === 'image' && i.thumb && list('boards').some(b => b.id === i.boardId && b.projectId === p.id)); return items.length ? items[items.length - 1].thumb : null; };
+  function stuProjectCard(p) {
+    const st = stuStage(p.stage); const cov = stuCoverSrc(p); const team = (p.team || []).slice(0, 5); const nb = stuProjectBoards(p.id).length;
+    return `<a class="spcard" href="#/projects/${p.id}"><div class="cov">${cov ? `<img src="${esc(cov)}" alt="">` : esc((p.code || p.name || 'NS').slice(0, 2).toUpperCase())}</div>
+      <div class="bd"><div class="nm">${esc(p.name)}</div><div class="cl">${esc(p.client || '—')}${p.code ? ` · ${esc(p.code)}` : ''}</div>
+      <div class="ft"><span class="stg"><i></i>${esc(st.name)} · ${esc(st.ar)}</span><div class="grow"></div><span class="stuavs">${team.map(id => stuAvatar(id, 24)).join('')}</span></div>
+      <div class="tiny muted">${nb} بورد · ${p.dueDate ? 'تسليم ' + fmtDate(p.dueDate) : 'بدون موعد'}</div></div></a>`;
+  }
+  vProjects = function () {
+    const ps = stuProjectsAll().filter(stuProjectVisible);
+    if (S.route.id) return stuProjectPage(S.route.id);
+    const mine = ps.filter(p => (p.team || []).includes(stuMe()) || p.leadId === stuMe()); const rest = ps.filter(p => !mine.includes(p));
+    const grid = arr => `<div class="spgrid">${arr.map(stuProjectCard).join('')}</div>`;
+    return `<div class="card"><div class="cardhead"><h2 style="margin:0">مشاريع المكتب</h2><div class="grow"></div>${stuCanEdit() ? `<button class="btn p" data-action="stuProjectNew">${icon('plus')}<span>مشروع جديد</span></button>` : ''}</div>
+      ${!ps.length ? `<div class="spnew" data-action="stuProjectNew">${icon('layers')}ابدأ أول مشروع — هيتعمل له سبورة أفكار وديزاين بورد تلقائيًا</div>` : ''}
+      ${mine.length ? `<div class="tiny muted" style="margin:6px 0 8px">مشاريعي</div>${grid(mine)}` : ''}
+      ${rest.length ? `<div class="tiny muted" style="margin:14px 0 8px">${mine.length ? 'باقي المشاريع' : 'كل المشاريع'}</div>${grid(rest)}` : ''}</div>`;
+  };
+  function stuProjectPage(id) {
+    const p = byId('projects', id); if (!p) return `<div class="banner crit">المشروع غير موجود</div>`;
+    if (!stuProjectVisible(p)) return `<div class="banner warn">المشروع ده لفريقه فقط</div>`;
+    const cov = stuCoverSrc(p); const idx = stuStageIdx(p.stage); const boards = stuProjectBoards(p.id); const ideas = boards.find(b => b.kind === 'ideas'); const design = boards.find(b => b.kind === 'design');
+    const tasks = list('tasks').filter(t => t.projectId === p.id && ['open', 'doing'].includes(t.status)); const files = list('files').filter(f => f.projectId === p.id);
+    const canStage = stuManager() || p.leadId === stuMe();
+    return `<div class="card"><div class="sphead"><div class="cov">${cov ? `<img src="${esc(cov)}" alt="">` : icon('layers')}</div>
+      <div style="flex:1;min-width:240px"><div class="row" style="gap:8px;flex-wrap:wrap"><h2 style="margin:0">${esc(p.name)}</h2><span class="stg"><i></i>${esc(stuStage(p.stage).name)}</span><div class="grow"></div>${stuCanEdit() ? `<button class="btn sm ghost" data-action="stuProjectEdit" data-arg="${p.id}">${icon('edit')}تعديل</button>` : ''}</div>
+      <div class="small muted" style="margin-top:4px">${esc(p.client || '')}${p.code ? ` · ${esc(p.code)}` : ''}${p.dueDate ? ` · تسليم ${fmtDate(p.dueDate)}` : ''}${p.area ? ` · ${esc(p.area)} م²` : ''}</div>
+      ${p.desc ? `<p class="small" style="margin:8px 0 0;white-space:pre-wrap">${esc(p.desc)}</p>` : ''}
+      <div class="row" style="gap:6px;margin-top:10px;align-items:center"><span class="tiny muted">الفريق</span><span class="stuavs">${(p.team || []).map(x => stuAvatar(x, 28)).join('')}</span>${p.leadId ? `<span class="tiny muted">· تيم ليدر: ${esc(stuPerson(p.leadId).name)}</span>` : ''}</div></div></div>
+      <div class="spsteps">${STU_STAGES.map((s, i) => `<div class="spstep ${i < idx ? 'done' : i === idx ? 'on' : ''}" ${canStage ? `data-action="stuStageSet" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.desc)}"><b>${esc(s.name)}</b>${esc(s.ar)}</div>`).join('')}</div>
+      <div class="sptiles">
+        <div class="sptile ideas" data-action="stuOpenBoard" data-arg="${p.id}:ideas"><span class="ic">${icon('star')}</span><b>سبورة الأفكار</b><small>برينستورم · ستيكي · فريمات · أسهم · قلم · تصويت</small><span class="tiny muted">${ideas ? `${list('bitems').filter(i => i.boardId === ideas.id).length} عنصر` : 'هتتعمل عند أول فتح'}</span></div>
+        <div class="sptile design" data-action="stuOpenBoard" data-arg="${p.id}:design"><span class="ic">${icon('layers')}</span><b>الديزاين بورد</b><small>مود بورد · صور · ألوان · خامات · ملاحظات · بوردات فرعية</small><span class="tiny muted">${design ? `${list('bitems').filter(i => i.boardId === design.id).length} كارت${design.approved ? ' · معتمد ✓' : ''}` : 'هتتعمل عند أول فتح'}</span></div>
+      </div></div>
+      <div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">مهام المشروع (${tasks.length})</h3><div class="grow"></div>${stuCanEdit() ? `<button class="btn sm ghost" data-action="stuTaskNew" data-arg="${p.id}">${icon('plus')}مهمة</button>` : ''}</div>
+      ${tasks.length ? tasks.map(t => `<a class="row small" href="#/tasks/${t.id}" style="padding:6px 0;border-bottom:1px solid var(--line);gap:8px"><span class="stagedot ${t.status === 'doing' ? 'active' : ''}"></span><span>${esc(t.title)}</span><div class="grow"></div><span class="muted">${t.assigneeId ? esc(stuPerson(t.assigneeId).name) : ''}${t.dueDate ? ' · ' + fmtDate(t.dueDate) : ''}</span></a>`).join('') : '<p class="small muted">لا توجد مهام مفتوحة</p>'}</div>
+      ${files.length ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3></div><div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div></div>` : ''}`;
+  }
+  EXTRA_TITLES.projects = () => { if (S.route.id) { const p = byId('projects', S.route.id); return { title: p ? p.name : 'مشروع', sub: p ? `${stuStage(p.stage).ar} · ${p.client || ''}` : '', actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>كل المشاريع</span></a>` }; } return { sub: 'مشاريع التصميم بمراحلها وفِرقها وبورداتها' }; };
+  viewTitleProjects = t => { const x = EXTRA_TITLES.projects(); return S.route.view === 'projects' ? Object.assign(t, x) : t; };
+  function stuProjectForm(p) {
+    const people = stuPeople(); const team = new Set(p.team || []);
+    return `<div class="form">${field('اسم المشروع', inp('name', p.name || '', 'required'), 'full')}${field('العميل', inp('client', p.client || ''))}${field('الكود', inp('code', p.code || '', 'class="ltr"'))}
+      ${field('المرحلة', `<select id="f-stage" name="stage">${opts(STU_STAGES, p.stage || 'concept', s => `${s.name} — ${s.ar}`)}</select>`)}${field('تاريخ التسليم', inp('dueDate', p.dueDate || '', 'type="date"'))}
+      ${field('التيم ليدر / السينيور', `<select id="f-leadId" name="leadId"><option value="">—</option>${opts(people, p.leadId || '', x => x.name)}</select>`)}${field('المساحة (م²)', inp('area', p.area || '', 'type="number" step="any" min="0"'))}
+      <div class="field full"><label>الفريق</label><div class="row" style="flex-wrap:wrap;gap:6px">${people.map(x => `<label class="check ${team.has(x.id) ? 'on' : ''}" style="padding:4px 10px"><input type="checkbox" name="team-${x.id}" ${team.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></div>
+      ${field('وصف / بريف مختصر', `<textarea id="f-desc" name="desc" rows="3">${esc(p.desc || '')}</textarea>`, 'full')}</div>`;
+  }
+  async function stuProjectSave(f, p) {
+    const d = formData(f); if (!d.name) { toast('اكتب اسم المشروع', 'err'); return false; }
+    const team = stuPeople().filter(x => d['team-' + x.id]).map(x => x.id); if (d.leadId && !team.includes(d.leadId)) team.unshift(d.leadId);
+    const doc = Object.assign({}, p, { name: d.name, client: d.client, code: d.code || p.code || ('NS-' + String(list('projects').length + 1).padStart(3, '0')), stage: d.stage, dueDate: d.dueDate || null, leadId: d.leadId || null, area: d.area || '', team, desc: d.desc, status: p.status || 'active' });
+    if (!doc.id) { doc.id = uid(); doc.createdBy = S.session?.id || null; }
+    await Store.save('projects', doc); return doc;
+  }
+  ACTIONS.stuProjectNew = () => { if (!stuCanEdit()) return; openModal({ title: 'مشروع جديد', wide: true, body: stuProjectForm({ team: [stuMe()].filter(Boolean) }), submitLabel: 'إنشاء المشروع', onSubmit: async f => { const p = await stuProjectSave(f, {}); if (!p) return false; await stuEnsureBoards(p.id); toast('اتعمل المشروع وبورداته'); go('projects/' + p.id); } }); };
+  ACTIONS.stuProjectEdit = id => { const p = byId('projects', id); if (!p || !stuCanEdit()) return; openModal({ title: 'تعديل المشروع', wide: true, body: stuProjectForm(p), extra: stuManager() ? `<button type="button" class="btn d" data-action="stuProjectArchive" data-arg="${p.id}">أرشفة</button>` : '', onSubmit: async f => { await stuProjectSave(f, p); } }); };
+  ACTIONS.stuProjectArchive = async id => { const p = byId('projects', id); if (!p || !stuManager()) return; if (!(await confirmDlg(`أرشفة مشروع «${p.name}»؟ يختفي من القائمة ويفضل محفوظًا.`, 'أرشفة'))) return; await Store.save('projects', Object.assign({}, p, { status: 'archived' })); closeModal(); go('projects'); };
+  ACTIONS.stuStageSet = async arg => { const [pid, st] = arg.split(':'); const p = byId('projects', pid); if (!p || !(stuManager() || p.leadId === stuMe())) return; if (p.stage === st) return; await Store.save('projects', Object.assign({}, p, { stage: st, stageAt: Object.assign({}, p.stageAt || {}, { [st]: nowISO() }) })); toast(`المرحلة: ${stuStage(st).ar}`); };
+  ACTIONS.stuTaskNew = pid => { const p = byId('projects', pid); if (!p || !stuCanEdit()) return; const people = stuPeople(); openModal({ title: `مهمة في ${p.name}`, body: `<div class="form">${field('المهمة', inp('title', '', 'required'), 'full')}${field('المكلَّف', `<select id="f-assigneeId" name="assigneeId"><option value="">—</option>${opts(people, '', x => x.name)}</select>`)}${field('الموعد', inp('dueDate', '', 'type="date"'))}${field('الأولوية', `<select id="f-priority" name="priority">${opts(Object.keys(PRIORITY), 'normal', k => PRIORITY[k][0])}</select>`)}${field('تفاصيل', `<textarea id="f-desc" name="desc" rows="3"></textarea>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.title) return false; const t = { id: uid(), title: d.title, desc: d.desc, assigneeId: d.assigneeId || null, dueDate: d.dueDate || null, priority: d.priority || 'normal', status: 'open', source: 'project', projectId: p.id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', assignedAt: nowISO() }; await Store.save('tasks', t); toast('اتسجلت المهمة'); } }); };
+
+  /* every project owns two root boards (created lazily) */
+  async function stuEnsureBoards(pid) {
+    const p = byId('projects', pid); if (!p) return null; const out = {};
+    for (const kind of ['ideas', 'design']) {
+      let b = list('boards').find(x => x.projectId === pid && x.kind === kind && !x.parentId);
+      if (!b) { b = { id: uid(), kind, projectId: pid, title: kind === 'ideas' ? `أفكار — ${p.name}` : `ديزاين بورد — ${p.name}`, cols: kind === 'design' ? [{ id: 'c1', title: 'مراجع' }, { id: 'c2', title: 'اتجاه التصميم' }, { id: 'c3', title: 'خامات وألوان' }] : [], createdBy: S.session?.id || null }; await Store.save('boards', b, { silent: true }); }
+      out[kind] = b;
+    }
+    return out;
+  }
+  ACTIONS.stuOpenBoard = async arg => { const [pid, kind] = arg.split(':'); const bs = await stuEnsureBoards(pid); if (!bs) return; go(`${kind}/${bs[kind].id}`); };
+  /* personal boards: one ideas + one design board per person, private */
+  async function stuEnsurePersonal(kind) {
+    const me = stuMe(); if (!me) return null; let b = list('boards').find(x => x.personal && x.ownerId === me && x.kind === kind && !x.parentId);
+    if (!b) { b = { id: uid(), kind, personal: true, ownerId: me, title: kind === 'ideas' ? `أفكاري — ${S.session.name}` : `بوردي — ${S.session.name}`, cols: kind === 'design' ? [{ id: 'c1', title: 'أفكار' }, { id: 'c2', title: 'مراجع' }] : [], createdBy: S.session?.id || null }; await Store.save('boards', b, { silent: true }); }
+    return b;
+  }
+  ACTIONS.stuOpenPersonal = async kind => { const b = await stuEnsurePersonal(kind); if (b) go(`${kind}/${b.id}`); };
+  window.stuEnsureBoards = stuEnsureBoards; window.stuEnsurePersonal = stuEnsurePersonal; window.stuProjectVisible = stuProjectVisible; window.stuCoverSrc = stuCoverSrc;
+  Object.assign(window, { stuProjectPage, stuProjectCard, stuProjectForm, stuProjectSave });
+}
+/* =====================================================================
+   Ninety Studioz v4.18 — سبورة الأفكار (whiteboard, Miro-style)
+   Infinite canvas per project / per person: sticky notes · text · frames ·
+   images · links · connectors · freehand pen · comments · votes · timer ·
+   live cursors (Supabase presence) · «→ الديزاين بورد».
+   Every element is its own doc in `bitems` (boardId) so people edit at once
+   without clobbering each other; positions are saved on pointer-up only.
+   ===================================================================== */
+const WB = { id: null, zoom: 1, pan: { x: 0, y: 0 }, tool: 'select', sel: new Set(), drag: null, held: new Set(), editing: null, cursors: {}, chan: null, chanId: null, stroke: null, connFrom: null, panel: null, timerT: null };
+const WB_COLORS = ['#f7e463', '#f9b48d', '#f19ea6', '#c9a9f5', '#9ad6f7', '#a6e6a1', '#e8e8e8'];
+const WB_PEN = ['#f2f2f2', '#f2d16b', '#7fd6d6', '#f19ea6', '#9ad6f7'];
+const stuBoardBusy = () => !!WB.drag || !!WB.stroke || !!WB.editing || (typeof DB !== 'undefined' && DB.drag);
+const stuBoardHeld = (col, id) => col === 'bitems' && (WB.held.has(id) || (WB.editing === id));
+const wbItems = () => list('bitems').filter(i => i.boardId === WB.id && !i.deleted);
+const wbBoard = () => byId('boards', WB.id);
+const wbCanEdit = () => { const b = wbBoard(); if (!b || !stuCanEdit()) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin(); return true; };
+const wbCanSee = b => { if (!b) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); const p = b.projectId ? byId('projects', b.projectId) : null; return p ? stuProjectVisible(p) : true; };
+const wbW2S = (x, y) => ({ x: x * WB.zoom + WB.pan.x, y: y * WB.zoom + WB.pan.y });
+const wbS2W = (sx, sy) => ({ x: (sx - WB.pan.x) / WB.zoom, y: (sy - WB.pan.y) / WB.zoom });
+const wbRect = i => ({ x: +i.x || 0, y: +i.y || 0, w: +i.w || 160, h: +i.h || 160 });
+const wbCenter = i => { const r = wbRect(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; };
+const wbInside = (i, fr) => { const c = wbCenter(i), r = wbRect(fr); return c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h; };
+
+if (STU_ON) {
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.wbwrap{position:relative;height:calc(100vh - 118px);min-height:520px;border-radius:var(--radius);overflow:hidden;background:#0f1216;border:1px solid var(--line);direction:ltr;user-select:none;-webkit-user-select:none;touch-action:none}
+.wbwrap.light{background:#f4f5f7}
+.wbgrid{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.09) 1px,transparent 1px);background-size:24px 24px;pointer-events:none}
+.wbwrap.light .wbgrid{background-image:radial-gradient(rgba(0,0,0,.12) 1px,transparent 1px)}
+.wbworld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+.wbsvg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.wbsvg path.stroke{fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:stroke;cursor:pointer}
+.wbsvg path.conn{fill:none;stroke:#9fb3c8;stroke-width:2;pointer-events:stroke;cursor:pointer}.wbsvg path.conn.sel,.wbsvg path.stroke.sel{stroke:#f2d16b}
+.wbi{position:absolute;box-sizing:border-box;border-radius:6px;cursor:grab;color:#111}
+.wbi.sel{outline:2px solid #f2d16b;outline-offset:2px}
+.wbi.sticky{box-shadow:0 8px 20px -8px rgba(0,0,0,.5);padding:14px;font-size:16px;line-height:1.4;font-family:var(--font)}
+.wbi.text{background:transparent;color:#eceff3;padding:6px;font-size:20px;line-height:1.35}.wbwrap.light .wbi.text{color:#111}
+.wbi.frame{background:rgba(255,255,255,.035);border:1.5px solid rgba(255,255,255,.22);border-radius:10px;z-index:0;cursor:grab}.wbwrap.light .wbi.frame{background:rgba(0,0,0,.03);border-color:rgba(0,0,0,.18)}
+.wbi.frame .ttl{position:absolute;left:0;top:-26px;font-size:13px;color:#c9d2dc;background:transparent;padding:2px 6px;font-weight:600;white-space:nowrap}.wbwrap.light .wbi.frame .ttl{color:#333}
+.wbi.image{background:#1a1e24;overflow:hidden;box-shadow:0 8px 20px -8px rgba(0,0,0,.5)}.wbi.image img{width:100%;height:100%;object-fit:cover;pointer-events:none;display:block}
+.wbi.link{background:#1f242b;color:#eceff3;padding:10px 12px;border:1px solid #333a44;font-size:13px;overflow:hidden}.wbi.link b{display:block;font-size:14px;margin-bottom:2px}.wbi.link small{color:#8a95a1;direction:ltr;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wbi .txt{width:100%;height:100%;overflow:hidden;outline:0;white-space:pre-wrap;word-break:break-word;direction:rtl;text-align:right}
+.wbi .txt[contenteditable="true"]{cursor:text;overflow:auto}
+.wbi .votes{position:absolute;left:6px;bottom:6px;display:flex;gap:2px}.wbi .votes i{width:8px;height:8px;border-radius:999px;background:#d9534f;box-shadow:0 0 0 1.5px #fff}
+.wbi .cmt{position:absolute;right:6px;bottom:4px;font-size:11px;color:#333;background:rgba(255,255,255,.7);border-radius:999px;padding:0 6px}
+.wbi .by{position:absolute;right:8px;top:-18px;font-size:10px;color:#8a95a1;white-space:nowrap}
+.wbh{position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;border-radius:3px;background:#f2d16b;cursor:nwse-resize;display:none}.wbi.sel .wbh{display:block}
+.wbtools{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:4px;background:rgba(20,23,28,.92);border:1px solid var(--line-2);border-radius:14px;padding:6px;z-index:5;backdrop-filter:blur(8px)}
+.wbtools button{width:40px;height:40px;border:0;background:transparent;color:#c9d2dc;border-radius:10px;cursor:pointer;display:grid;place-items:center;font-size:16px}
+.wbtools button:hover{background:rgba(255,255,255,.08);color:#fff}.wbtools button.on{background:#f2d16b;color:#111}
+.wbtools button svg{width:18px;height:18px}
+.wbtop{position:absolute;right:12px;top:12px;display:flex;gap:6px;align-items:center;z-index:5;direction:rtl}
+.wbtop .chip{background:rgba(20,23,28,.92);border:1px solid var(--line-2);border-radius:12px;padding:6px 10px;color:#c9d2dc;font-size:12px;display:flex;align-items:center;gap:6px;backdrop-filter:blur(8px)}
+.wbtop .chip button{border:0;background:transparent;color:#fff;cursor:pointer;font-size:13px;padding:0 4px}
+.wbtop .chip.timer{font-variant-numeric:tabular-nums;font-weight:600}.wbtop .chip.timer.hot{color:#f19ea6}
+.wbzoom{position:absolute;right:12px;bottom:12px;display:flex;gap:4px;background:rgba(20,23,28,.92);border:1px solid var(--line-2);border-radius:12px;padding:4px;z-index:5;direction:ltr}
+.wbzoom button{border:0;background:transparent;color:#c9d2dc;width:32px;height:30px;border-radius:8px;cursor:pointer;font-size:14px}.wbzoom button:hover{background:rgba(255,255,255,.08)}.wbzoom span{color:#8a95a1;font-size:12px;line-height:30px;padding:0 4px;min-width:44px;text-align:center}
+.wbselbar{position:absolute;z-index:6;display:flex;gap:3px;background:#1f242b;border:1px solid var(--line-2);border-radius:12px;padding:4px;box-shadow:var(--shadow-lg);direction:rtl}
+.wbselbar button{border:0;background:transparent;color:#eceff3;height:30px;min-width:30px;padding:0 8px;border-radius:8px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px}.wbselbar button:hover{background:rgba(255,255,255,.08)}
+.wbselbar .sw{width:18px;height:18px;border-radius:999px;border:2px solid transparent;cursor:pointer;display:inline-block;margin:0 1px}.wbselbar .sw.on{border-color:#fff}
+.wbcur{position:absolute;pointer-events:none;z-index:7;transition:transform .08s linear;left:0;top:0}
+.wbcur svg{width:16px;height:16px;display:block}.wbcur span{position:absolute;left:14px;top:12px;font-size:11px;padding:2px 7px;border-radius:999px;color:#fff;white-space:nowrap}
+.wbpanel{position:absolute;right:12px;top:58px;bottom:56px;width:300px;background:rgba(20,23,28,.96);border:1px solid var(--line-2);border-radius:14px;z-index:6;direction:rtl;display:flex;flex-direction:column;backdrop-filter:blur(8px)}
+.wbpanel .ph{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-weight:600;color:#eceff3}.wbpanel .ph svg,.wbpanel .pf svg{width:16px;height:16px}
+.wbpanel .pb{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.wbpanel .pf{padding:8px 10px;border-top:1px solid var(--line);display:flex;gap:6px}.wbpanel .pf input{flex:1;background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;color:#eceff3;padding:8px 10px;font:inherit}
+.wbc{background:var(--surface-2);border-radius:10px;padding:8px 10px;font-size:13px;color:#eceff3}.wbc small{display:block;color:#8a95a1;font-size:11px;margin-bottom:2px}
+.wbmarq{position:absolute;border:1px dashed #f2d16b;background:rgba(242,209,107,.08);pointer-events:none;z-index:4}
+.wbempty{position:absolute;inset:0;display:grid;place-items:center;color:#5d6773;font-size:14px;pointer-events:none;text-align:center;direction:rtl}
+.wbpresence{display:flex;direction:ltr}
+@media (max-width:760px){.wbwrap{height:calc(100vh - 150px)}.wbpanel{width:min(300px,86vw)}.wbtools button{width:36px;height:36px}}
+@media print{.wbtools,.wbtop,.wbzoom,.wbselbar,.wbpanel,.wbcur{display:none!important}}
+</style>`);
+
+  Object.assign(ROLE_VIEWS, Object.fromEntries(Object.entries(ROLE_VIEWS).map(([k, v]) => [k, v === null ? null : v.concat(['ideas', 'design', 'studio'])])));
+  canSee = (base => view => (['ideas', 'design', 'studio'].includes(view) ? (!!S.session && !['kiosk', 'viewer'].includes(role())) : base(view)))(canSee);
+  NAV.splice(NAV.findIndex(n => n.id === 'projects') + 1, 0, { id: 'studio', label: 'Studio Boards', icon: 'star', count: () => 0 });
+
+  /* ---------- view ---------- */
+  EXTRA_VIEWS.ideas = r => {
+    const b = byId('boards', r.id); if (!b) return '<div class="banner crit">البورد غير موجود</div>'; if (!wbCanSee(b)) return '<div class="banner warn">البورد ده خاص بصاحبه</div>';
+    if (WB.id !== b.id) { WB.id = b.id; WB.sel.clear(); WB.tool = 'select'; WB.editing = null; WB.connFrom = null; wbFitSoon(); }
+    const items = wbItems(); const light = themeCurrent() === 'light';
+    return `<div class="wbwrap ${light ? 'light' : ''}" id="wbwrap" data-board="${b.id}"><div class="wbgrid"></div>
+      <div class="wbworld" id="wbworld" style="transform:translate(${WB.pan.x}px,${WB.pan.y}px) scale(${WB.zoom})">${wbSvg(items)}${items.filter(i => !['stroke', 'conn'].includes(i.type)).map(wbItemHTML).join('')}</div>
+      ${!items.length ? '<div class="wbempty">سبورة فاضية — اختار أداة من الشمال واضغط في أي مكان<br><small>ستيكي · نص · فريم · صورة · لينك · قلم · ربط</small></div>' : ''}
+      ${wbToolsHTML()}${wbTopHTML(b)}${wbZoomHTML()}${wbPanelHTML(b)}${wbSelBarHTML()}<div id="wbcursors"></div></div>`;
+  };
+  EXTRA_TITLES.ideas = () => { const b = wbBoard(); const p = b && b.projectId ? byId('projects', b.projectId) : null; return { title: b ? b.title : 'سبورة الأفكار', sub: p ? `${p.name} · ${stuStage(p.stage).ar}` : (b && b.personal ? 'بورد شخصي' : ''), actions: `<a class="btn ghost" href="#/${p ? 'projects/' + p.id : 'studio'}">${icon('back')}<span>${p ? 'المشروع' : 'Studio Boards'}</span></a>` }; };
+  const wbToolsHTML = () => { const t = (id, label, inner) => `<button type="button" class="${WB.tool === id ? 'on' : ''}" data-wbtool="${id}" title="${label}">${inner}</button>`; return `<div class="wbtools">${t('select', 'تحديد / تحريك (V)', '↖')}${t('sticky', 'ستيكي نوت (S)', '▣')}${t('text', 'نص (T)', 'T')}${t('frame', 'فريم (F)', '▢')}${t('image', 'صورة (I)', icon('camera'))}${t('link', 'لينك (L)', icon('link'))}${t('pen', 'قلم (P)', '✎')}${t('conn', 'ربط بسهم (C)', '↗')}<button type="button" data-action="stuAi" data-arg="ideas" title="مساعد الذكاء الاصطناعي">✦</button></div>`; };
+  const wbTopHTML = b => { const ppl = Object.values(WB.cursors); const tm = b.timer && b.timer.end && new Date(b.timer.end).getTime() > Date.now() ? b.timer : null; return `<div class="wbtop"><span class="chip wbpresence" title="أونلاين دلوقتي">${stuAvatar(stuMe(), 22)}${ppl.map(c => stuAvatar(c.person, 22)).join('')}</span>${tm ? `<span class="chip timer ${(new Date(tm.end) - Date.now()) < 60000 ? 'hot' : ''}" id="wbtimer" data-end="${tm.end}">⏱ <span>--:--</span><button type="button" data-action="wbTimerStop" title="إيقاف">✕</button></span>` : `<span class="chip"><button type="button" data-action="wbTimerStart">⏱ تايمر</button></span>`}<span class="chip"><button type="button" data-action="wbPanel" data-arg="comments" title="التعليقات">${icon('chat')}</button><button type="button" data-action="wbPanel" data-arg="people" title="الفريق">${icon('workers')}</button>${wbCanEdit() && b.projectId ? `<button type="button" data-action="wbSendSel" title="ابعت المحدد للديزاين بورد">← ديزاين</button>` : ''}<button type="button" data-action="wbExport" title="تصدير PDF">${icon('print')}</button></span></div>`; };
+  const wbZoomHTML = () => `<div class="wbzoom"><button type="button" data-action="wbZoom" data-arg="-">−</button><span>${Math.round(WB.zoom * 100)}%</span><button type="button" data-action="wbZoom" data-arg="+">+</button><button type="button" data-action="wbZoom" data-arg="fit" title="ملاءمة">⤢</button></div>`;
+  function wbPanelHTML(b) {
+    if (!WB.panel) return '';
+    if (WB.panel === 'people') { const p = b.projectId ? byId('projects', b.projectId) : null; const team = p ? (p.team || []) : [b.ownerId]; return `<div class="wbpanel"><div class="ph">الفريق<div class="grow"></div><button class="iconbtn" data-action="wbPanel" data-arg="">${icon('x')}</button></div><div class="pb">${team.map(id => { const q = stuPerson(id); const on = Object.values(WB.cursors).some(c => c.person === id) || id === stuMe(); return `<div class="row" style="gap:8px;color:#eceff3">${stuAvatar(id, 28)}<span>${esc(q.name)}</span><div class="grow"></div><span class="tiny" style="color:${on ? '#a6e6a1' : '#6c7581'}">${on ? 'أونلاين' : 'أوفلاين'}</span></div>`; }).join('') || '<p class="tiny muted">لا أحد</p>'}${b.personal && wbCanEdit() ? `<div class="sep"></div><div class="tiny muted">مشاركة البورد الشخصي مع:</div>${stuPeople().filter(x => x.id !== b.ownerId).map(x => `<label class="check ${(b.shared || []).includes(x.id) ? 'on' : ''}" style="padding:4px 8px;color:#eceff3"><input type="checkbox" data-wbshare="${x.id}" ${(b.shared || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}` : ''}</div></div>`; }
+    if (WB.panel !== 'comments') return '';
+    const sel = [...WB.sel].map(id => byId('bitems', id)).filter(Boolean); const one = sel.length === 1 ? sel[0] : null;
+    const all = one ? (one.thread || []) : wbItems().flatMap(i => (i.thread || []).map(c => Object.assign({ item: i }, c))).sort((a, c) => (a.at < c.at ? 1 : -1)).slice(0, 60);
+    return `<div class="wbpanel"><div class="ph">${icon('chat')} ${one ? 'تعليقات العنصر' : 'كل التعليقات'}<div class="grow"></div><button class="iconbtn" data-action="wbPanel" data-arg="">${icon('x')}</button></div>
+      <div class="pb" id="wbcomments">${all.length ? all.map(c => `<div class="wbc"><small>${esc(c.byName || '')} · ${esc(wbAgo(c.at))}${c.item ? ` · <a href="#" data-action="wbFocus" data-arg="${c.item.id}">${esc((c.item.text || c.item.title || c.item.type || '').slice(0, 24))}</a>` : ''}</small>${esc(c.text)}</div>`).join('') : `<p class="tiny muted">${one ? 'لا تعليقات على العنصر ده — اكتب أول تعليق' : 'حدّد عنصر واكتب تعليق، أو اقرأ كل تعليقات السبورة هنا'}</p>`}</div>
+      ${one && wbCanEdit() ? `<div class="pf"><input id="wbcin" placeholder="تعليق… (@اسم للمنشن)"><button class="btn p sm" data-action="wbComment" data-arg="${one.id}">إرسال</button></div>` : ''}</div>`;
+  }
+  const wbAgo = iso => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'الآن' : m < 60 ? `${m} د` : m < 1440 ? `${Math.round(m / 60)} س` : fmtDate(iso.slice(0, 10)); };
+  function wbSelBarHTML() {
+    const sel = [...WB.sel].map(id => byId('bitems', id)).filter(Boolean); if (!sel.length || !wbCanEdit()) return '';
+    const xs = sel.map(i => wbRect(i)); const minX = Math.min(...xs.map(r => r.x)), minY = Math.min(...xs.map(r => r.y)), maxX = Math.max(...xs.map(r => r.x + r.w));
+    const s = wbW2S((minX + maxX) / 2, minY); const one = sel.length === 1 ? sel[0] : null; const colorable = sel.every(i => ['sticky', 'stroke', 'conn'].includes(i.type));
+    return `<div class="wbselbar" style="left:${Math.round(s.x)}px;top:${Math.round(s.y - 46)}px;transform:translateX(-50%)">
+      ${colorable ? (sel[0].type === 'sticky' ? WB_COLORS : WB_PEN).map(c => `<span class="sw ${sel.every(i => i.color === c) ? 'on' : ''}" style="background:${c}" data-action="wbColor" data-arg="${c}"></span>`).join('') : ''}
+      ${one && ['sticky', 'text', 'frame', 'link'].includes(one.type) ? `<button type="button" data-action="wbEdit" data-arg="${one.id}" title="تعديل النص">${icon('edit')}</button>` : ''}
+      <button type="button" data-action="wbVote" title="تصويت">▲ ${sel.reduce((a, i) => a + Object.values(i.votes || {}).reduce((x, y) => x + y, 0), 0) || ''}</button>
+      ${one ? `<button type="button" data-action="wbPanel" data-arg="comments" title="تعليق">${icon('chat')} ${(one.thread || []).length || ''}</button><button type="button" data-action="wbConnStart" data-arg="${one.id}" title="ربط بسهم">↗</button>` : ''}
+      <button type="button" data-action="wbDup" title="نسخ">${icon('copy')}</button>
+      ${wbBoard().projectId ? `<button type="button" data-action="wbSendSel" title="ابعت للديزاين بورد">← ديزاين</button>` : ''}
+      <button type="button" data-action="wbDelete" title="حذف">${icon('trash')}</button></div>`;
+  }
+  function wbItemHTML(i) {
+    const r = wbRect(i); const sel = WB.sel.has(i.id) ? 'sel' : ''; const by = i.byName ? `<span class="by">${esc(i.byName)}</span>` : '';
+    const votes = Object.values(i.votes || {}).reduce((a, b) => a + b, 0); const vt = votes ? `<span class="votes">${'<i></i>'.repeat(Math.min(votes, 12))}</span>` : ''; const cm = (i.thread || []).length ? `<span class="cmt">💬 ${(i.thread || []).length}</span>` : '';
+    const st = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;`;
+    if (i.type === 'frame') return `<div class="wbi frame ${sel}" data-id="${i.id}" style="${st}"><span class="ttl">${esc(i.text || 'فريم')}</span><span class="wbh"></span></div>`;
+    if (i.type === 'image') return `<div class="wbi image ${sel}" data-id="${i.id}" style="${st}"><img src="${esc(i.thumb || '')}" alt="">${vt}${cm}<span class="wbh"></span></div>`;
+    if (i.type === 'link') { let host = ''; try { host = new URL(i.url).hostname; } catch (e) { /* ignore */ } return `<div class="wbi link ${sel}" data-id="${i.id}" style="${st}"><b>${esc(i.text || host || 'لينك')}</b><small>${esc(i.url || '')}</small>${vt}${cm}<span class="wbh"></span></div>`; }
+    const ed = WB.editing === i.id; const bg = i.type === 'sticky' ? `background:${i.color || WB_COLORS[0]};` : '';
+    return `<div class="wbi ${i.type} ${sel}" data-id="${i.id}" style="${st}${bg}${i.type === 'text' ? `font-size:${i.size || 20}px;` : ''}">${by}<div class="txt" contenteditable="${ed ? 'true' : 'false'}">${esc(i.text || '')}</div>${vt}${cm}<span class="wbh"></span></div>`;
+  }
+  function wbSvg(items) {
+    const strokes = items.filter(i => i.type === 'stroke'); const conns = items.filter(i => i.type === 'conn');
+    const path = pts => pts.length ? 'M' + pts.map(p => `${p[0]},${p[1]}`).join(' L') : '';
+    const conn = c => { const a = byId('bitems', c.from), b = byId('bitems', c.to); if (!a || !b || a.deleted || b.deleted) return ''; const p1 = wbCenter(a), p2 = wbCenter(b); const ra = wbRect(a), rb = wbRect(b); const clip = (c0, r0, tx, ty) => { const dx = tx - c0.x, dy = ty - c0.y; const sx = dx ? (r0.w / 2) / Math.abs(dx) : Infinity, sy = dy ? (r0.h / 2) / Math.abs(dy) : Infinity; const k = Math.min(sx, sy); return { x: c0.x + dx * k, y: c0.y + dy * k }; }; const s = clip(p1, ra, p2.x, p2.y), e = clip(p2, rb, p1.x, p1.y); const mx = (s.x + e.x) / 2, my = (s.y + e.y) / 2; return `<path class="conn ${WB.sel.has(c.id) ? 'sel' : ''}" data-id="${c.id}" d="M${s.x},${s.y} Q${mx},${my} ${e.x},${e.y}" marker-end="url(#wbarrow)" style="${c.color ? `stroke:${c.color}` : ''}"></path>${c.text ? `<text x="${mx}" y="${my - 6}" fill="#c9d2dc" font-size="12" text-anchor="middle">${esc(c.text)}</text>` : ''}`; };
+    return `<svg class="wbsvg" id="wbsvg" width="1" height="1"><defs><marker id="wbarrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9fb3c8"></path></marker></defs>${strokes.map(s => `<path class="stroke ${WB.sel.has(s.id) ? 'sel' : ''}" data-id="${s.id}" d="${path(s.points || [])}" stroke="${esc(s.color || WB_PEN[0])}" stroke-width="${s.width || 3}"></path>`).join('')}${conns.map(conn).join('')}<path id="wblive" class="stroke" d="" stroke="${WB_PEN[1]}" stroke-width="3"></path></svg>`;
+  }
+
+  /* ---------- state helpers ---------- */
+  let _fitSoon = false; const wbFitSoon = () => { _fitSoon = true; };
+  function wbFit() { const host = $('#wbwrap'); const items = wbItems().filter(i => i.type !== 'conn'); if (!host) return; if (!items.length) { WB.zoom = 1; WB.pan = { x: host.clientWidth / 2 - 200, y: 80 }; return; } const rs = items.map(i => i.type === 'stroke' ? wbStrokeRect(i) : wbRect(i)); const x0 = Math.min(...rs.map(r => r.x)) - 60, y0 = Math.min(...rs.map(r => r.y)) - 60, x1 = Math.max(...rs.map(r => r.x + r.w)) + 60, y1 = Math.max(...rs.map(r => r.y + r.h)) + 60; const z = Math.min(2, Math.max(.1, Math.min(host.clientWidth / (x1 - x0), host.clientHeight / (y1 - y0)))); WB.zoom = z; WB.pan = { x: (host.clientWidth - (x1 - x0) * z) / 2 - x0 * z, y: (host.clientHeight - (y1 - y0) * z) / 2 - y0 * z }; }
+  const wbStrokeRect = s => { const xs = (s.points || []).map(p => p[0]), ys = (s.points || []).map(p => p[1]); return xs.length ? { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs) + 1, h: Math.max(...ys) - Math.min(...ys) + 1 } : { x: 0, y: 0, w: 1, h: 1 }; };
+  function wbApplyView() { const w = $('#wbworld'); if (w) w.style.transform = `translate(${WB.pan.x}px,${WB.pan.y}px) scale(${WB.zoom})`; const z = document.querySelector('.wbzoom span'); if (z) z.textContent = Math.round(WB.zoom * 100) + '%'; const bar = document.querySelector('.wbselbar'); if (bar) bar.remove(); }
+  function wbNode(id) { return document.querySelector(`#wbworld [data-id="${id}"]`); }
+  async function wbSave(item, silent) { item.boardId = WB.id; await Store.save('bitems', item, { silent: !!silent }); }
+  async function wbNew(type, x, y, extra = {}) {
+    if (!wbCanEdit()) return null; const base = { sticky: { w: 180, h: 180, color: WB_COLORS[0], text: '' }, text: { w: 260, h: 60, text: '', size: 20 }, frame: { w: 640, h: 420, text: 'فريم' }, image: { w: 280, h: 200 }, link: { w: 240, h: 76 } }[type] || { w: 160, h: 160 };
+    const it = Object.assign({ id: uid(), type, x: Math.round(x - base.w / 2), y: Math.round(y - base.h / 2), byName: S.session?.name || '', by: stuMe(), z: type === 'frame' ? 0 : 1 }, base, extra);
+    await wbSave(it, true); WB.sel = new Set([it.id]); rerender(); return it;
+  }
+  function wbSelect(ids, add) { if (!add) WB.sel.clear(); ids.forEach(id => WB.sel.add(id)); }
+  function wbSelRender() { document.querySelectorAll('#wbworld .sel').forEach(n => n.classList.remove('sel')); WB.sel.forEach(id => { const n = wbNode(id); if (n) n.classList.add('sel'); }); const old = document.querySelector('.wbselbar'); if (old) old.remove(); const host = $('#wbwrap'); if (host) host.insertAdjacentHTML('beforeend', wbSelBarHTML()); }
+
+  /* ---------- pointer machinery ---------- */
+  function wbMount(host) {
+    if (host.dataset.mounted) return; host.dataset.mounted = '1';
+    const pt = e => { const r = host.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; };
+    host.addEventListener('wheel', e => { e.preventDefault(); const { sx, sy } = pt(e); if (e.ctrlKey || e.metaKey) { const k = Math.exp(-e.deltaY * 0.0015); const z = Math.min(4, Math.max(.08, WB.zoom * k)); const w = wbS2W(sx, sy); WB.zoom = z; WB.pan = { x: sx - w.x * z, y: sy - w.y * z }; } else { WB.pan = { x: WB.pan.x - e.deltaX, y: WB.pan.y - e.deltaY }; } wbApplyView(); wbSelRender(); wbCursorBroadcast(e); }, { passive: false });
+    host.addEventListener('pointerdown', e => {
+      if (e.target.closest('.wbtools,.wbtop,.wbzoom,.wbselbar,.wbpanel')) return;
+      const { sx, sy } = pt(e); const w = wbS2W(sx, sy); const node = e.target.closest('.wbi'); const svgEl = e.target.closest('path[data-id]'); const id = node ? node.dataset.id : svgEl ? svgEl.dataset.id : null;
+      if (WB.editing && (!node || node.dataset.id !== WB.editing)) wbEditEnd();
+      if (e.target.closest('.txt[contenteditable="true"]')) return; // typing
+      const middle = e.button === 1 || (e.button === 0 && e.altKey);
+      if (WB.tool === 'pen' && wbCanEdit() && !middle) { WB.stroke = { points: [[Math.round(w.x), Math.round(w.y)]], color: WB.penColor || WB_PEN[1] }; host.setPointerCapture(e.pointerId); return; }
+      if (WB.tool === 'conn' && wbCanEdit()) { if (id && !svgEl) { if (!WB.connFrom) { WB.connFrom = id; wbSelect([id]); wbSelRender(); toast('دلوقتي اضغط على العنصر التاني'); } else if (WB.connFrom !== id) { wbNew('conn', 0, 0, { from: WB.connFrom, to: id, w: 0, h: 0 }); WB.connFrom = null; WB.tool = 'select'; } } return; }
+      if (['sticky', 'text', 'frame'].includes(WB.tool) && wbCanEdit() && !node && !middle) { const t = WB.tool; WB.tool = 'select'; wbNew(t, w.x, w.y).then(it => { if (it && t !== 'frame') setTimeout(() => wbEditStart(it.id), 60); }); return; }
+      if (WB.tool === 'image' && wbCanEdit() && !middle) { WB.tool = 'select'; wbPickImage(w); return; }
+      if (WB.tool === 'link' && wbCanEdit() && !middle) { WB.tool = 'select'; wbLinkDialog(w); return; }
+      if (e.target.closest('.wbh') && node && wbCanEdit()) { const it = byId('bitems', node.dataset.id); WB.drag = { kind: 'resize', id: it.id, sx, sy, w0: wbRect(it).w, h0: wbRect(it).h }; WB.held.add(it.id); host.setPointerCapture(e.pointerId); return; }
+      if (id && !middle) {
+        if (!WB.sel.has(id)) wbSelect([id], e.shiftKey); else if (e.shiftKey) WB.sel.delete(id);
+        wbSelRender();
+        if (!wbCanEdit() || svgEl) return;
+        const ids = [...WB.sel].filter(x => { const it = byId('bitems', x); return it && !['conn'].includes(it.type); });
+        // a frame carries what sits inside it
+        const extra = []; ids.forEach(x => { const it = byId('bitems', x); if (it && it.type === 'frame') wbItems().forEach(o => { if (o.id !== x && !ids.includes(o.id) && !['conn', 'frame'].includes(o.type) && (o.type === 'stroke' ? false : wbInside(o, it))) extra.push(o.id); }); });
+        const all = ids.concat(extra); const orig = {}; all.forEach(x => { const it = byId('bitems', x); orig[x] = it.type === 'stroke' ? { points: (it.points || []).map(p => p.slice()) } : { x: +it.x || 0, y: +it.y || 0 }; WB.held.add(x); });
+        WB.drag = { kind: 'move', ids: all, sx, sy, orig, moved: false }; host.setPointerCapture(e.pointerId); return;
+      }
+      // empty space: pan (or marquee with shift)
+      if (e.shiftKey && !middle) { WB.drag = { kind: 'marq', sx, sy }; host.insertAdjacentHTML('beforeend', `<div class="wbmarq" id="wbmarq" style="left:${sx}px;top:${sy}px;width:0;height:0"></div>`); }
+      else { WB.drag = { kind: 'pan', sx, sy, px: WB.pan.x, py: WB.pan.y }; if (!e.shiftKey) { WB.sel.clear(); wbSelRender(); } }
+      host.setPointerCapture(e.pointerId);
+    });
+    host.addEventListener('pointermove', e => {
+      wbCursorBroadcast(e);
+      const { sx, sy } = pt(e);
+      if (WB.stroke) { const w = wbS2W(sx, sy); WB.stroke.points.push([Math.round(w.x), Math.round(w.y)]); const p = $('#wblive'); if (p) { p.setAttribute('d', 'M' + WB.stroke.points.map(q => q.join(',')).join(' L')); p.setAttribute('stroke', WB.stroke.color); } return; }
+      const d = WB.drag; if (!d) return;
+      if (d.kind === 'pan') { WB.pan = { x: d.px + (sx - d.sx), y: d.py + (sy - d.sy) }; wbApplyView(); return; }
+      if (d.kind === 'marq') { const m = $('#wbmarq'); if (m) { m.style.left = Math.min(sx, d.sx) + 'px'; m.style.top = Math.min(sy, d.sy) + 'px'; m.style.width = Math.abs(sx - d.sx) + 'px'; m.style.height = Math.abs(sy - d.sy) + 'px'; } return; }
+      const dx = (sx - d.sx) / WB.zoom, dy = (sy - d.sy) / WB.zoom;
+      if (d.kind === 'resize') { const it = byId('bitems', d.id); if (!it) return; it.w = Math.max(40, Math.round(d.w0 + dx)); it.h = Math.max(30, Math.round(d.h0 + dy)); const n = wbNode(d.id); if (n) { n.style.width = it.w + 'px'; n.style.height = it.h + 'px'; } wbRedrawConns(); return; }
+      if (d.kind === 'move') { if (Math.abs(dx) + Math.abs(dy) > 1) d.moved = true; d.ids.forEach(id => { const it = byId('bitems', id); if (!it) return; const o = d.orig[id]; if (it.type === 'stroke') { it.points = o.points.map(p => [Math.round(p[0] + dx), Math.round(p[1] + dy)]); const n = wbNode(id); if (n) n.setAttribute('d', 'M' + it.points.map(q => q.join(',')).join(' L')); } else { it.x = Math.round(o.x + dx); it.y = Math.round(o.y + dy); const n = wbNode(id); if (n) { n.style.left = it.x + 'px'; n.style.top = it.y + 'px'; } } }); wbRedrawConns(); const bar = document.querySelector('.wbselbar'); if (bar) bar.style.display = 'none'; }
+    });
+    const up = async e => {
+      if (WB.stroke) { const s = WB.stroke; WB.stroke = null; const p = $('#wblive'); if (p) p.setAttribute('d', ''); if (s.points.length > 2) await wbSave({ id: uid(), type: 'stroke', points: s.points, color: s.color, width: 3, by: stuMe(), byName: S.session?.name || '' }, true); rerender(); return; }
+      const d = WB.drag; if (!d) return; WB.drag = null;
+      if (d.kind === 'marq') { const m = $('#wbmarq'); const { sx, sy } = pt(e); const a = wbS2W(Math.min(sx, d.sx), Math.min(sy, d.sy)), b = wbS2W(Math.max(sx, d.sx), Math.max(sy, d.sy)); if (m) m.remove(); const ids = wbItems().filter(i => !['conn', 'stroke'].includes(i.type)).filter(i => { const r = wbRect(i); return r.x >= a.x && r.y >= a.y && r.x + r.w <= b.x && r.y + r.h <= b.y; }).map(i => i.id); wbSelect(ids, e.shiftKey); wbSelRender(); return; }
+      if (d.kind === 'pan') return;
+      const ids = d.kind === 'resize' ? [d.id] : d.ids; const changed = d.kind === 'resize' || d.moved;
+      if (changed) { for (const id of ids) { const it = byId('bitems', id); if (it) await wbSave(it, true); } }
+      ids.forEach(id => WB.held.delete(id)); rerender();
+    };
+    host.addEventListener('pointerup', up); host.addEventListener('pointercancel', up);
+    host.addEventListener('dblclick', e => { const node = e.target.closest('.wbi'); if (!node || !wbCanEdit()) return; const it = byId('bitems', node.dataset.id); if (it && ['sticky', 'text', 'frame', 'link'].includes(it.type)) { if (it.type === 'frame' || it.type === 'link') ACTIONS.wbEdit(it.id); else wbEditStart(it.id); } });
+    host.addEventListener('paste', e => wbPaste(e));
+    host.addEventListener('dragover', e => { e.preventDefault(); });
+    host.addEventListener('drop', async e => { e.preventDefault(); if (!wbCanEdit()) return; const { sx, sy } = pt(e); const w = wbS2W(sx, sy); const files = [...(e.dataTransfer.files || [])].filter(f => f.type.startsWith('image/')); for (const f of files) await wbAddImageFile(f, w); const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain'); if (!files.length && /^https?:\/\//.test(url || '')) await wbNew('link', w.x, w.y, { url, text: '' }); });
+    host.tabIndex = 0;
+    host.addEventListener('keydown', e => { if (WB.editing || e.target.closest('input,textarea,[contenteditable="true"]')) return; const k = e.key.toLowerCase(); if ((e.key === 'Delete' || e.key === 'Backspace') && WB.sel.size) { e.preventDefault(); ACTIONS.wbDelete(); } else if (e.key === 'Escape') { WB.sel.clear(); WB.tool = 'select'; WB.connFrom = null; rerender(); } else if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); ACTIONS.wbDup(); } else if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); wbSelect(wbItems().filter(i => i.type !== 'conn').map(i => i.id)); wbSelRender(); } else if (!e.ctrlKey && !e.metaKey && { v: 'select', s: 'sticky', t: 'text', f: 'frame', i: 'image', l: 'link', p: 'pen', c: 'conn' }[k]) { WB.tool = { v: 'select', s: 'sticky', t: 'text', f: 'frame', i: 'image', l: 'link', p: 'pen', c: 'conn' }[k]; wbToolsRender(); } });
+    host.addEventListener('click', e => { const b = e.target.closest('[data-wbtool]'); if (b) { WB.tool = b.dataset.wbtool; WB.connFrom = null; wbToolsRender(); } const sh = e.target.closest('[data-wbshare]'); if (sh) { const b0 = wbBoard(); const set = new Set(b0.shared || []); if (sh.checked) set.add(sh.dataset.wbshare); else set.delete(sh.dataset.wbshare); Store.save('boards', Object.assign({}, b0, { shared: [...set] }), { silent: true }); } });
+  }
+  function wbToolsRender() { document.querySelectorAll('.wbtools [data-wbtool]').forEach(b => b.classList.toggle('on', b.dataset.wbtool === WB.tool)); const host = $('#wbwrap'); if (host) host.style.cursor = WB.tool === 'pen' ? 'crosshair' : WB.tool === 'select' ? '' : 'copy'; }
+  function wbRedrawConns() { const svg = $('#wbsvg'); if (!svg) return; const items = wbItems(); const tmp = document.createElement('div'); tmp.innerHTML = wbSvg(items); svg.innerHTML = tmp.firstChild.innerHTML; }
+  function wbEditStart(id) { const it = byId('bitems', id); if (!it || !wbCanEdit()) return; WB.editing = id; const n = wbNode(id); const t = n && n.querySelector('.txt'); if (!t) return; t.setAttribute('contenteditable', 'true'); t.focus(); const r = document.createRange(); r.selectNodeContents(t); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); t.addEventListener('blur', wbEditEnd, { once: true }); }
+  async function wbEditEnd() { const id = WB.editing; if (!id) return; const n = wbNode(id); const t = n && n.querySelector('.txt'); WB.editing = null; if (!t) return; const text = t.innerText.replace(/\n{3,}/g, '\n\n').trim(); t.setAttribute('contenteditable', 'false'); const it = byId('bitems', id); if (it && it.text !== text) { it.text = text; await wbSave(it, true); } rerender(); }
+  async function wbAddImageFile(file, w) { if (!file.type.startsWith('image/')) return; toast('جارٍ رفع الصورة…'); try { const doc = await uploadOneBase(file, { kind: 'render', projectId: wbBoard().projectId || null }); const dims = await new Promise(res => { const im = new Image(); im.onload = () => res({ w: im.width, h: im.height }); im.onerror = () => res({ w: 4, h: 3 }); im.src = doc.thumb || ''; }); const wd = 280, ht = Math.round(wd * dims.h / dims.w) || 200; await wbNew('image', w.x, w.y, { fileId: doc.id, thumb: doc.thumb, w: wd, h: ht }); } catch (e) { console.warn(e); toast('فشل رفع الصورة', 'err'); } }
+  function wbPickImage(w) { const inp0 = document.createElement('input'); inp0.type = 'file'; inp0.accept = 'image/*'; inp0.multiple = true; inp0.onchange = async () => { let k = 0; for (const f of inp0.files) { await wbAddImageFile(f, { x: w.x + k * 40, y: w.y + k * 40 }); k++; } }; inp0.click(); }
+  async function wbPaste(e) { if (!wbCanEdit() || WB.editing) return; const items = [...(e.clipboardData?.items || [])]; const img = items.find(x => x.type.startsWith('image/')); const host = $('#wbwrap'); const c = wbS2W(host.clientWidth / 2, host.clientHeight / 2); if (img) { e.preventDefault(); await wbAddImageFile(img.getAsFile(), c); return; } const txt = e.clipboardData?.getData('text/plain') || ''; if (/^https?:\/\/\S+$/.test(txt.trim())) { e.preventDefault(); await wbNew('link', c.x, c.y, { url: txt.trim(), text: '' }); } else if (txt.trim()) { e.preventDefault(); await wbNew('sticky', c.x, c.y, { text: txt.trim().slice(0, 600) }); } }
+  function wbLinkDialog(w, it) { openModal({ title: it ? 'تعديل اللينك' : 'لينك جديد', body: `<div class="form">${field('الرابط', inp('url', it ? it.url : '', 'required class="ltr" placeholder="https://"'), 'full')}${field('العنوان (اختياري)', inp('text', it ? it.text : ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!/^https?:\/\//.test(d.url)) { toast('اكتب رابط يبدأ بـ http', 'err'); return false; } if (it) { it.url = d.url; it.text = d.text; await wbSave(it); } else await wbNew('link', w.x, w.y, { url: d.url, text: d.text }); } }); }
+
+  /* ---------- actions ---------- */
+  ACTIONS.wbZoom = arg => { const host = $('#wbwrap'); if (!host) return; if (arg === 'fit') { wbFit(); } else { const k = arg === '+' ? 1.2 : 1 / 1.2; const sx = host.clientWidth / 2, sy = host.clientHeight / 2; const w = wbS2W(sx, sy); WB.zoom = Math.min(4, Math.max(.08, WB.zoom * k)); WB.pan = { x: sx - w.x * WB.zoom, y: sy - w.y * WB.zoom }; } wbApplyView(); wbSelRender(); };
+  ACTIONS.wbPanel = arg => { WB.panel = arg || null; rerender(); };
+  ACTIONS.wbFocus = id => { const it = byId('bitems', id); if (!it) return; const host = $('#wbwrap'); const c = wbCenter(it); WB.pan = { x: host.clientWidth / 2 - c.x * WB.zoom, y: host.clientHeight / 2 - c.y * WB.zoom }; wbSelect([id]); rerender(); };
+  ACTIONS.wbColor = async c => { for (const id of WB.sel) { const it = byId('bitems', id); if (it) { it.color = c; await wbSave(it, true); } } rerender(); };
+  ACTIONS.wbEdit = id => { const it = byId('bitems', id); if (!it || !wbCanEdit()) return; if (it.type === 'link') return wbLinkDialog(null, it); if (it.type === 'frame') { openModal({ title: 'اسم الفريم', body: `<div class="form">${field('الاسم', inp('text', it.text || '', 'required'), 'full')}</div>`, onSubmit: async f => { it.text = formData(f).text; await wbSave(it); } }); return; } wbEditStart(id); };
+  ACTIONS.wbVote = async () => { const me = stuMe(); for (const id of WB.sel) { const it = byId('bitems', id); if (!it) continue; it.votes = Object.assign({}, it.votes || {}); if (it.votes[me]) delete it.votes[me]; else it.votes[me] = 1; await wbSave(it, true); } rerender(); };
+  ACTIONS.wbDup = async () => { const made = []; for (const id of WB.sel) { const it = byId('bitems', id); if (!it || it.type === 'conn') continue; const c = Object.assign(clone(it), { id: uid(), x: (+it.x || 0) + 30, y: (+it.y || 0) + 30, votes: {}, thread: [], by: stuMe(), byName: S.session?.name || '' }); if (it.type === 'stroke') c.points = (it.points || []).map(p => [p[0] + 30, p[1] + 30]); await wbSave(c, true); made.push(c.id); } WB.sel = new Set(made); rerender(); };
+  ACTIONS.wbDelete = async () => { if (!WB.sel.size || !wbCanEdit()) return; const ids = [...WB.sel]; WB.sel.clear(); for (const id of ids) { const it = byId('bitems', id); if (!it) continue; await Store.remove('bitems', id); for (const c of wbItems().filter(x => x.type === 'conn' && (x.from === id || x.to === id))) await Store.remove('bitems', c.id); } toast('اتحذف'); };
+  ACTIONS.wbConnStart = id => { WB.tool = 'conn'; WB.connFrom = id; wbToolsRender(); toast('اضغط على العنصر اللي عايز توصله'); };
+  ACTIONS.wbComment = async id => { const it = byId('bitems', id); const inp0 = $('#wbcin'); const text = (inp0 && inp0.value.trim()) || ''; if (!it || !text) return; it.thread = (it.thread || []).concat([{ id: uid(), at: nowISO(), by: stuMe(), byName: S.session?.name || '', text }]); await wbSave(it, true); inp0.value = ''; stuMentionNotify(text, `تعليق على «${(it.text || it.type).slice(0, 30)}» في ${wbBoard().title}`, `#/ideas/${WB.id}`); rerender(); };
+  ACTIONS.wbTimerStart = () => { if (!wbCanEdit()) return; openModal({ title: 'تايمر السيشن', body: `<div class="form">${field('الدقائق', inp('min', '10', 'type="number" min="1" max="180"'))}</div>`, submitLabel: 'ابدأ', onSubmit: async f => { const m = Math.max(1, +formData(f).min || 10); await Store.save('boards', Object.assign({}, wbBoard(), { timer: { end: new Date(Date.now() + m * 60000).toISOString(), min: m, by: S.session?.name || '' } })); } }); };
+  ACTIONS.wbTimerStop = async () => { await Store.save('boards', Object.assign({}, wbBoard(), { timer: null })); };
+  ACTIONS.wbExport = () => { const b = wbBoard(); if (!b) return; wbFit(); wbApplyView(); document.body.classList.add('stuprint'); const p = b.projectId ? byId('projects', b.projectId) : null; const hdr = document.createElement('div'); hdr.id = 'stuprinthdr'; hdr.innerHTML = `<div style="display:flex;align-items:center;gap:12px;padding:10px 0 12px;border-bottom:1px solid #ddd;margin-bottom:10px;direction:rtl"><img src="${LOGO_MARK}" style="height:28px"><b>${esc(b.title)}</b><span style="color:#666">${p ? esc(p.name) + ' · ' : ''}${fmtDate(todayISO())} · Ninety Studioz</span></div>`; const v = $('#view'); if (v) v.prepend(hdr); setTimeout(() => { window.print(); setTimeout(() => { document.body.classList.remove('stuprint'); hdr.remove(); }, 500); }, 200); };
+  ACTIONS.wbSendSel = async () => { const b = wbBoard(); if (!b || !WB.sel.size) { toast('حدّد عناصر الأول', 'err'); return; } const sel = [...WB.sel].map(id => byId('bitems', id)).filter(i => i && ['sticky', 'text', 'image', 'link'].includes(i.type)); if (!sel.length) { toast('المحدد مفيهوش ستيكي/نص/صورة/لينك', 'err'); return; } let target = null; if (b.projectId) { const bs = await stuEnsureBoards(b.projectId); target = bs.design; } else target = await stuEnsurePersonal('design'); if (!target) return; const col = (target.cols || [])[0] ? target.cols[0].id : 'c1'; let n = 0; for (const it of sel) { const card = { id: uid(), boardId: target.id, col, ord: Date.now() + n, by: stuMe(), byName: S.session?.name || '', fromIdeas: it.id }; if (it.type === 'image') Object.assign(card, { type: 'image', fileId: it.fileId, thumb: it.thumb, caption: '' }); else if (it.type === 'link') Object.assign(card, { type: 'link', url: it.url, title: it.text || '' }); else Object.assign(card, { type: 'note', title: '', text: it.text || '', color: it.color || null }); await Store.save('bitems', card, { silent: true }); it.sent = { boardId: target.id, at: nowISO() }; await wbSave(it, true); n++; } toast(`اتبعت ${n} للديزاين بورد`); rerender(); };
+  window.stuMentionNotify = async (text, title, link) => { const names = [...text.matchAll(/@([^\s@]+)/g)].map(m => m[1]); if (!names.length) return; const ppl = stuPeople(); for (const nm of names) { const p = ppl.find(x => x.name.split(/\s+/)[0] === nm || x.name.replace(/\s+/g, '') === nm); if (!p || p.id === stuMe()) continue; const id = 'mention_' + uid(); await Store.save('tasks', { id, title: `${S.session?.name || ''} ذكرك: ${title}`.slice(0, 120), desc: text, assigneeId: p.id, kind: 'update', priority: 'normal', status: 'open', source: 'system', link, createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } };
+
+  /* ---------- presence: cursors of the others on this board ---------- */
+  function wbPresence(boardId) {
+    if (!S.sb || !boardId || WB.chanId === boardId) return; wbPresenceStop();
+    try {
+      const me = stuMe(); const ch = S.sb.channel('wb:' + boardId, { config: { presence: { key: me } } });
+      if (!ch || typeof ch.track !== 'function' || typeof ch.presenceState !== 'function') { WB.chanId = boardId; return; } // test double without presence
+      ch.on('presence', { event: 'sync' }, () => { const st = ch.presenceState(); WB.cursors = {}; Object.entries(st).forEach(([k, arr]) => { if (k === me) return; const c = arr[arr.length - 1]; if (c) WB.cursors[k] = Object.assign({ person: k }, c); }); wbCursorsRender(); const pr = document.querySelector('.wbpresence'); if (pr) pr.innerHTML = stuAvatar(me, 22) + Object.values(WB.cursors).map(c => stuAvatar(c.person, 22)).join(''); })
+        .on('broadcast', { event: 'cur' }, ({ payload }) => { if (!payload || payload.person === me) return; WB.cursors[payload.person] = Object.assign(WB.cursors[payload.person] || { person: payload.person }, payload); wbCursorsRender(); })
+        .subscribe(async status => { if (status === 'SUBSCRIBED') await ch.track({ name: S.session?.name || '', at: Date.now() }); });
+      WB.chan = ch; WB.chanId = boardId;
+    } catch (e) { console.warn('presence', e); }
+  }
+  function wbPresenceStop() { if (WB.chan) { try { WB.chan.unsubscribe(); } catch (e) { /* ignore */ } } WB.chan = null; WB.chanId = null; WB.cursors = {}; }
+  let _curT = 0; function wbCursorBroadcast(e) { if (!WB.chan || Date.now() - _curT < 80) return; _curT = Date.now(); const host = $('#wbwrap'); if (!host) return; const r = host.getBoundingClientRect(); const w = wbS2W(e.clientX - r.left, e.clientY - r.top); try { WB.chan.send({ type: 'broadcast', event: 'cur', payload: { person: stuMe(), name: S.session?.name || '', x: Math.round(w.x), y: Math.round(w.y) } }); } catch (x) { /* ignore */ } }
+  function wbCursorsRender() { const box = $('#wbcursors'); if (!box) return; box.innerHTML = Object.values(WB.cursors).filter(c => c.x != null).map(c => { const s = wbW2S(c.x, c.y); const hue = [...String(c.person)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 360; return `<div class="wbcur" style="transform:translate(${Math.round(s.x)}px,${Math.round(s.y)}px)"><svg viewBox="0 0 16 16"><path d="M2 2 L14 8 L8 9 L6 15 Z" fill="hsl(${hue} 70% 60%)" stroke="#fff"></path></svg><span style="background:hsl(${hue} 40% 35%)">${esc((c.name || '').split(' ')[0])}</span></div>`; }).join(''); }
+  function wbTimerTick() { const el = $('#wbtimer'); if (!el) return; const left = Math.max(0, Math.round((new Date(el.dataset.end).getTime() - Date.now()) / 1000)); const sp = el.querySelector('span'); if (sp) sp.textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`; el.classList.toggle('hot', left < 60); if (left === 0 && !el.dataset.done) { el.dataset.done = '1'; toast('⏱ خلص الوقت!'); } }
+
+  RENDER_HOOKS.push(() => {
+    const host = $('#wbwrap');
+    document.body.classList.toggle('stuboard', !!document.querySelector('#wbwrap,#dbwrap'));
+    if (!host) { if (S.route.view !== 'ideas') wbPresenceStop(); return; }
+    wbMount(host); if (_fitSoon) { _fitSoon = false; wbFit(); wbApplyView(); wbSelRender(); } wbToolsRender(); wbPresence(host.dataset.board); wbCursorsRender();
+    if (!WB.timerT) WB.timerT = setInterval(wbTimerTick, 1000); wbTimerTick();
+    const w = $('#wbworld'); if (w && WB.editing) { const n = wbNode(WB.editing); const t = n && n.querySelector('.txt'); if (t && t.getAttribute('contenteditable') !== 'true') wbEditStart(WB.editing); }
+  });
+  document.head.insertAdjacentHTML('beforeend', '<style>@media print{body.stuprint .side,body.stuprint .topbar,body.stuprint .tabbar,body.stuprint .fab,body.stuprint .nfback{display:none!important}body.stuprint #view{padding:0}body.stuprint .wbwrap{height:auto;min-height:0;aspect-ratio:1.414;border:0;background:#fff!important}body.stuprint .wbwrap.light{background:#fff}body.stuprint .wbi.text{color:#111}}</style>');
+  Object.assign(window, { wbNew, wbSave, wbAgo, wbEditStart, wbEditEnd, wbFit, wbApplyView, wbSelRender, wbSelect, wbSvg, wbItemHTML, wbPresenceStop, wbCursorsRender, wbAddImageFile });
+}
+/* =====================================================================
+   Ninety Studioz v4.18 — الديزاين بورد (Milanote-style)
+   Columns of cards that tidy themselves: note · image (upload / paste /
+   drop) · link · colour palette · to-do · file · sub-board (board in board,
+   breadcrumb on top) — toolbar on the start side, drag & drop between
+   columns, comments per card, art-director approval, PDF export with the
+   studio mark, «→ سبورة الأفكار» to send a card back for discussion.
+   ===================================================================== */
+const DB = { id: null, drag: null, sel: null, panel: null, pick: null };
+const DB_NOTE_COLORS = [null, '#f7e463', '#f9b48d', '#f19ea6', '#c9a9f5', '#9ad6f7', '#a6e6a1'];
+const dbBoard = () => byId('boards', DB.id);
+const dbItems = () => sortBy(list('bitems').filter(i => i.boardId === DB.id && !i.deleted), i => +i.ord || 0);
+const dbCanEdit = () => { const b = dbBoard(); if (!b || !stuCanEdit()) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); return true; };
+const dbRoot = b => { let x = b, n = 0; while (x && x.parentId && n < 20) { x = byId('boards', x.parentId); n++; } return x || b; };
+const dbCrumbs = b => { const out = []; let x = b, n = 0; while (x && n < 20) { out.unshift(x); x = x.parentId ? byId('boards', x.parentId) : null; n++; } return out; };
+
+if (STU_ON) {
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.dbwrap{position:relative;min-height:calc(100vh - 118px);border-radius:var(--radius);background:var(--surface-2);border:1px solid var(--line);padding:16px 76px 16px 16px;overflow:auto}
+.dbcrumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-bottom:10px;flex-wrap:wrap}.dbcrumb a{color:var(--ink-2)}.dbcrumb b{color:var(--ink)}.dbcrumb .apr{margin-inline-start:auto}
+.dbtools{position:absolute;right:14px;top:14px;display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--line-2);border-radius:14px;padding:6px;z-index:4;box-shadow:var(--shadow)}
+.dbtools button{width:44px;height:44px;border:0;background:transparent;color:var(--ink-2);border-radius:10px;cursor:pointer;display:grid;place-items:center;font-size:11px;line-height:1;gap:2px}
+.dbtools button svg{width:18px;height:18px}.dbtools button:hover{background:var(--surface-3);color:var(--ink)}.dbtools button.on{background:var(--accent);color:var(--accent-ink)}
+.dbtools .sep{height:1px;background:var(--line);margin:4px 6px}
+.dbcols{display:flex;gap:14px;align-items:flex-start;min-height:60vh}
+.dbcol{flex:0 0 300px;width:300px;display:flex;flex-direction:column;gap:10px;min-height:200px;border-radius:14px;padding:6px;transition:background .15s}
+.dbcol.over{background:var(--accent-soft)}
+.dbcol .ch{display:flex;align-items:center;gap:6px;padding:4px 6px;font-weight:600;color:var(--ink-2);font-size:13px}.dbcol .ch input{background:transparent;border:0;color:inherit;font:inherit;font-weight:600;width:100%;outline:0;border-bottom:1px solid transparent}.dbcol .ch input:focus{border-bottom-color:var(--accent)}
+.dbcol .ch .cnt{color:var(--muted);font-weight:400}
+.dbadd{flex:0 0 220px;border:1px dashed var(--line-2);border-radius:14px;min-height:120px;display:grid;place-items:center;color:var(--muted);cursor:pointer;font-size:13px}.dbadd:hover{color:var(--ink);border-color:var(--ink-2)}
+.dbc{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:grab;box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s}
+.dbc:hover{box-shadow:var(--shadow-lg)}.dbc.sel{outline:2px solid var(--accent);outline-offset:1px}.dbc.ghost{opacity:.35}
+.dbc .cb{padding:12px 14px;font-size:14px;line-height:1.55;color:var(--ink)}
+.dbc .ttl{font-weight:600;font-size:15px;margin-bottom:2px;outline:0}.dbc .tx{white-space:pre-wrap;word-break:break-word;outline:0;color:var(--ink-2)}
+.dbc .tx:empty:before,.dbc .ttl:empty:before{content:attr(data-ph);color:var(--muted)}
+.dbc.note.colored{color:#111}.dbc.note.colored .tx,.dbc.note.colored .ttl{color:#111}
+.dbc.image img{width:100%;display:block;pointer-events:none}.dbc .cap{padding:8px 12px;font-size:12px;color:var(--muted);outline:0;min-height:18px}
+.dbc.link .lk{display:flex;gap:10px;padding:12px 14px;align-items:center}.dbc.link img{width:22px;height:22px;border-radius:6px;background:#fff;flex:0 0 auto}.dbc.link b{display:block;font-size:14px}.dbc.link small{color:var(--muted);direction:ltr;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px}
+.dbc.color .sw{display:flex;height:74px}.dbc.color .sw i{flex:1;position:relative}.dbc.color .sw i span{position:absolute;bottom:4px;left:0;right:0;text-align:center;font-size:9px;color:#fff;text-shadow:0 0 3px #000;direction:ltr;opacity:0}.dbc.color:hover .sw i span{opacity:1}
+.dbc.color .sw i.add{flex:0 0 28px;background:var(--surface-2);display:grid;place-items:center;color:var(--muted);cursor:pointer;font-size:16px}
+.dbc.todo .ti{display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:14px}.dbc.todo .ti input[type=checkbox]{margin-top:5px}.dbc.todo .ti .t{flex:1;outline:0}.dbc.todo .ti.done .t{text-decoration:line-through;color:var(--muted)}
+.dbc.todo .tadd{color:var(--muted);font-size:12px;cursor:pointer;padding:4px 0}
+.dbc.file .fl{display:flex;gap:10px;padding:10px 12px;align-items:center}.dbc.file .fl img{width:56px;height:56px;object-fit:cover;border-radius:8px;background:var(--surface-2)}.dbc.file b{font-size:13px;display:block}.dbc.file small{color:var(--muted)}
+.dbc.board{background:linear-gradient(160deg,var(--surface),var(--surface-3));cursor:pointer}.dbc.board .bd{padding:14px}.dbc.board .bd b{font-size:15px;display:block}.dbc.board .bd small{color:var(--muted)}.dbc.board .thumbs{display:flex;gap:4px;padding:0 14px 12px}.dbc.board .thumbs img{width:48px;height:48px;object-fit:cover;border-radius:6px}.dbc.board .bd svg{width:22px;height:22px;color:var(--accent);margin-bottom:6px}
+.dbc .meta{display:flex;align-items:center;gap:6px;padding:0 12px 8px;font-size:11px;color:var(--muted)}.dbc .meta .grow{flex:1}.dbc .meta button{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:2px 4px;border-radius:6px;font-size:11px}.dbc .meta button:hover{color:var(--ink);background:var(--surface-3)}
+.dbc .ai{position:absolute;top:8px;left:8px;width:24px;height:24px;border-radius:999px;border:0;background:rgba(0,0,0,.45);color:#f2d16b;display:none;cursor:pointer;font-size:13px}.dbc:hover .ai{display:block}
+.dbempty{padding:60px 20px;text-align:center;color:var(--muted)}
+.dbpanel{position:fixed;left:16px;bottom:16px;width:320px;max-height:60vh;background:var(--surface);border:1px solid var(--line-2);border-radius:14px;z-index:30;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.dbpanel .ph{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-weight:600}.dbpanel .ph svg{width:16px;height:16px}.dbpanel .pb{overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}.dbpanel .pf{padding:8px 10px;border-top:1px solid var(--line);display:flex;gap:6px}.dbpanel .pf input{flex:1;background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;color:var(--ink);padding:8px 10px;font:inherit}
+.dbapr{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--good-soft);color:var(--good-ink);font-weight:600}
+@media (max-width:760px){.dbwrap{padding:12px 12px 70px}.dbtools{position:fixed;right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--tab-h) + 10px);flex-direction:row;padding:4px}.dbtools .sep{width:1px;height:auto;margin:6px 2px}.dbcol{flex:0 0 260px;width:260px}.dbpanel{width:calc(100vw - 32px)}}
+@media print{.dbtools,.dbpanel,.dbadd,.dbc .meta,.dbc .ai{display:none!important}.dbwrap{background:#fff;border:0;padding:0;overflow:visible}.dbcols{flex-wrap:wrap}.dbc{break-inside:avoid;box-shadow:none}}
+</style>`);
+
+  EXTRA_VIEWS.design = r => {
+    const b = byId('boards', r.id); if (!b) return '<div class="banner crit">البورد غير موجود</div>'; if (!wbCanSee(dbRoot(b))) return '<div class="banner warn">البورد ده خاص بصاحبه</div>';
+    if (DB.id !== b.id) { DB.id = b.id; DB.sel = null; DB.panel = null; }
+    const cols = (b.cols && b.cols.length ? b.cols : [{ id: 'c1', title: 'أفكار' }]); const items = dbItems(); const edit = dbCanEdit();
+    const crumbs = dbCrumbs(b); const p = dbRoot(b).projectId ? byId('projects', dbRoot(b).projectId) : null;
+    const col = c => { const its = items.filter(i => (i.col || cols[0].id) === c.id); return `<div class="dbcol" data-col="${c.id}"><div class="ch">${edit ? `<input value="${esc(c.title)}" data-dbcol="${c.id}" placeholder="اسم العمود">` : `<span>${esc(c.title)}</span>`}<span class="cnt">${its.length}</span>${edit ? `<button class="iconbtn" data-action="dbColDel" data-arg="${c.id}" title="حذف العمود">${icon('x')}</button>` : ''}</div>${its.map(i => dbCardHTML(i, edit)).join('')}${edit ? `<div class="tiny muted" style="padding:6px;text-align:center;cursor:pointer" data-action="dbNoteAt" data-arg="${c.id}">+ ملاحظة</div>` : ''}</div>`; };
+    return `<div class="dbwrap" id="dbwrap" data-board="${b.id}">
+      <div class="dbcrumb">${crumbs.map((x, i) => i < crumbs.length - 1 ? `<a href="#/design/${x.id}">${esc(x.title)}</a><span>›</span>` : `<b>${esc(x.title)}</b>`).join('')}${b.approved ? `<span class="dbapr">✓ معتمد · ${esc(b.approved.byName || '')} · ${fmtDate((b.approved.at || '').slice(0, 10))}</span>` : ''}<span class="apr">${p ? `<a class="btn sm ghost" href="#/projects/${p.id}">${esc(p.name)}</a>` : ''}</span></div>
+      ${edit ? dbToolsHTML(b) : ''}
+      ${items.length || cols.length > 1 ? '' : '<div class="dbempty">بورد فاضي — اختار كارت من الشريط على اليمين، أو اسحب صور من جهازك، أو الصق (Ctrl+V) صورة أو لينك أو نص</div>'}
+      <div class="dbcols">${cols.map(col).join('')}${edit ? `<div class="dbadd" data-action="dbColAdd">+ عمود جديد</div>` : ''}</div>
+      ${dbPanelHTML()}</div>`;
+  };
+  EXTRA_TITLES.design = () => { const b = dbBoard(); const root = b ? dbRoot(b) : null; const p = root && root.projectId ? byId('projects', root.projectId) : null; return { title: b ? b.title : 'الديزاين بورد', sub: p ? `${p.name} · ${stuStage(p.stage).ar}` : (root && root.personal ? 'بورد شخصي' : ''), actions: `<a class="btn ghost" href="#/${b && b.parentId ? 'design/' + b.parentId : p ? 'projects/' + p.id : 'studio'}">${icon('back')}<span>${b && b.parentId ? 'البورد الأعلى' : p ? 'المشروع' : 'Studio Boards'}</span></a>` }; };
+  const dbToolsHTML = b => { const t = (act, arg, label, inner) => `<button type="button" data-action="${act}" data-arg="${arg}" title="${label}">${inner}<span>${label}</span></button>`; return `<div class="dbtools">${t('dbAdd', 'note', 'ملاحظة', '▤')}${t('dbAdd', 'image', 'صورة', icon('camera'))}${t('dbAdd', 'link', 'لينك', icon('link'))}${t('dbAdd', 'color', 'ألوان', '◐')}${t('dbAdd', 'todo', 'To-do', icon('check'))}${t('dbAdd', 'file', 'ملف', icon('data'))}${t('dbAdd', 'board', 'بورد', icon('layers'))}<div class="sep"></div><button type="button" data-action="stuAi" data-arg="design" title="الذكاء الاصطناعي">✦<span>AI</span></button>${t('dbExport', '', 'PDF', icon('print'))}${stuManager() ? (b.approved ? t('dbUnapprove', '', 'إلغاء', icon('x')) : t('dbApprove', '', 'اعتماد', icon('shield'))) : ''}</div>`; };
+  function dbCardHTML(i, edit) {
+    const sel = DB.sel === i.id ? 'sel' : ''; const ce = edit ? 'contenteditable="true"' : ''; const meta = `<div class="meta"><span>${esc(i.byName || '')}</span><div class="grow"></div>${(i.thread || []).length ? `<button data-action="dbPanel" data-arg="${i.id}">💬 ${(i.thread || []).length}</button>` : `<button data-action="dbPanel" data-arg="${i.id}" title="تعليق">${icon('chat')}</button>`}${edit && dbRoot(dbBoard()).projectId ? `<button data-action="dbToIdeas" data-arg="${i.id}" title="ابعت لسبورة الأفكار">↗ أفكار</button>` : ''}${edit ? `<button data-action="dbDelete" data-arg="${i.id}" title="حذف">${icon('trash')}</button>` : ''}</div>`;
+    const ai = edit && ['image', 'note'].includes(i.type) ? `<button class="ai" data-action="stuAi" data-arg="card:${i.id}" title="AI">✦</button>` : '';
+    const head = `<div class="dbc ${i.type} ${sel} ${i.color ? 'colored' : ''}" data-id="${i.id}" draggable="${edit ? 'true' : 'false'}" style="${i.color ? `background:${i.color};` : ''}">`;
+    if (i.type === 'note') return `${head}${ai}<div class="cb"><div class="ttl" ${ce} data-ph="عنوان" data-f="title">${esc(i.title || '')}</div><div class="tx" ${ce} data-ph="اكتب هنا…" data-f="text">${esc(i.text || '')}</div></div>${meta}</div>`;
+    if (i.type === 'image') return `${head}${ai}<img src="${esc(i.thumb || '')}" alt="" data-action="dbOpenImage" data-arg="${i.id}"><div class="cap" ${ce} data-ph="تعليق على الصورة" data-f="caption">${esc(i.caption || '')}</div>${meta}</div>`;
+    if (i.type === 'link') { let host = ''; try { host = new URL(i.url).hostname; } catch (e) { /* ignore */ } return `${head}<a class="lk" href="${esc(i.url)}" target="_blank" rel="noopener"><img src="https://www.google.com/s2/favicons?domain=${esc(host)}&sz=64" alt="" onerror="this.style.visibility='hidden'"><div style="min-width:0"><b>${esc(i.title || host)}</b><small>${esc(i.url)}</small></div></a>${meta}</div>`; }
+    if (i.type === 'color') return `${head}<div class="sw">${(i.colors || []).map((c, k) => `<i style="background:${esc(c)}" title="${esc(c)}" ${edit ? `data-action="dbColorDel" data-arg="${i.id}:${k}"` : ''}><span>${esc(c)}</span></i>`).join('')}${edit ? `<i class="add" data-action="dbColorAdd" data-arg="${i.id}">+</i>` : ''}</div><div class="cap" ${ce} data-ph="اسم اللوحة" data-f="title">${esc(i.title || '')}</div>${meta}</div>`;
+    if (i.type === 'todo') return `${head}<div class="cb"><div class="ttl" ${ce} data-ph="قائمة" data-f="title">${esc(i.title || '')}</div>${(i.items || []).map((t, k) => `<div class="ti ${t.done ? 'done' : ''}"><input type="checkbox" data-dbtodo="${i.id}:${k}" ${t.done ? 'checked' : ''} ${edit ? '' : 'disabled'}><span class="t" ${ce} data-f="todo:${k}">${esc(t.text || '')}</span></div>`).join('')}${edit ? `<div class="tadd" data-action="dbTodoAdd" data-arg="${i.id}">+ بند</div>` : ''}</div>${meta}</div>`;
+    if (i.type === 'file') { const f = byId('files', i.fileId); return `${head}<div class="fl" data-action="fileOpen" data-arg="${i.fileId}:db">${f && f.thumb ? `<img src="${esc(f.thumb)}" alt="">` : `<span style="font-size:26px">📄</span>`}<div style="min-width:0"><b>${esc(f ? f.name : i.title || 'ملف')}</b><small>${f ? esc((FILE_KINDS[f.kind] || ['ملف'])[0]) + ' · ' + Math.round((f.size || 0) / 1024) + ' KB' : 'الملف غير موجود'}</small></div></div>${meta}</div>`; }
+    if (i.type === 'board') { const c = byId('boards', i.childId); const its = c ? list('bitems').filter(x => x.boardId === c.id) : []; const th = its.filter(x => x.type === 'image' && x.thumb).slice(0, 4); return `${head}<div class="bd" data-action="dbOpenChild" data-arg="${i.childId}">${icon('layers')}<b>${esc(c ? c.title : i.title || 'بورد')}</b><small>${its.length} كارت</small></div>${th.length ? `<div class="thumbs">${th.map(x => `<img src="${esc(x.thumb)}" alt="">`).join('')}</div>` : ''}${meta}</div>`; }
+    return `${head}<div class="cb">${esc(i.text || i.type)}</div>${meta}</div>`;
+  }
+  function dbPanelHTML() {
+    if (!DB.panel) return ''; const i = byId('bitems', DB.panel); if (!i) return '';
+    return `<div class="dbpanel"><div class="ph">${icon('chat')} تعليقات الكارت<div class="grow"></div><button class="iconbtn" data-action="dbPanel" data-arg="">${icon('x')}</button></div><div class="pb">${(i.thread || []).map(c => `<div class="wbc" style="color:var(--ink)"><small>${esc(c.byName || '')} · ${esc(wbAgo(c.at))}</small>${esc(c.text)}</div>`).join('') || '<p class="tiny muted">لا تعليقات بعد</p>'}</div>${dbCanEdit() ? `<div class="pf"><input id="dbcin" placeholder="تعليق… (@اسم للمنشن)"><button class="btn p sm" data-action="dbComment" data-arg="${i.id}">إرسال</button></div>` : ''}</div>`;
+  }
+  async function dbSave(it, silent) { it.boardId = it.boardId || DB.id; await Store.save('bitems', it, { silent: !!silent }); }
+  const dbFirstCol = () => { const b = dbBoard(); return (b.cols && b.cols[0] ? b.cols[0].id : 'c1'); };
+  async function dbNew(type, extra = {}, colId) { if (!dbCanEdit()) return null; const it = Object.assign({ id: uid(), boardId: DB.id, type, col: colId || DB.pick || dbFirstCol(), ord: Date.now(), by: stuMe(), byName: S.session?.name || '' }, extra); await dbSave(it); DB.sel = it.id; return it; }
+  async function dbAddImageFile(file, colId) { toast('جارٍ رفع الصورة…'); try { const doc = await uploadOneBase(file, { kind: 'render', projectId: dbRoot(dbBoard()).projectId || null }); return await dbNew('image', { fileId: doc.id, thumb: doc.thumb, caption: '' }, colId); } catch (e) { console.warn(e); toast('فشل رفع الصورة', 'err'); return null; } }
+
+  ACTIONS.dbAdd = async type => {
+    if (!dbCanEdit()) return;
+    if (type === 'note') { const it = await dbNew('note', { title: '', text: '' }); setTimeout(() => { const n = document.querySelector(`.dbc[data-id="${it.id}"] .ttl`); if (n) n.focus(); }, 80); return; }
+    if (type === 'image') { const inp0 = document.createElement('input'); inp0.type = 'file'; inp0.accept = 'image/*'; inp0.multiple = true; inp0.onchange = async () => { for (const f of inp0.files) await dbAddImageFile(f); }; inp0.click(); return; }
+    if (type === 'link') { openModal({ title: 'لينك جديد', body: `<div class="form">${field('الرابط', inp('url', '', 'required class="ltr" placeholder="https://"'), 'full')}${field('العنوان (اختياري)', inp('title', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!/^https?:\/\//.test(d.url)) { toast('اكتب رابط يبدأ بـ http', 'err'); return false; } await dbNew('link', { url: d.url, title: d.title }); } }); return; }
+    if (type === 'color') { await dbNew('color', { title: 'لوحة ألوان', colors: ['#1f2732', '#9fb3c8', '#d9c9a3', '#b06a4a', '#f2f2f2'] }); return; }
+    if (type === 'todo') { await dbNew('todo', { title: 'To-do', items: [{ text: '', done: false }] }); return; }
+    if (type === 'file') { const root = dbRoot(dbBoard()); const files = list('files').filter(f => !root.projectId || f.projectId === root.projectId || !f.projectId).slice(-80).reverse(); openModal({ title: 'ملف من ملفات المشروع', body: `<div class="form">${field('الملف', `<select id="f-fileId" name="fileId">${opts(files, '', f => f.name)}</select>`, 'full')}<p class="tiny muted full">أو ارفع ملف جديد من صفحة المشروع ← الملفات</p></div>`, onSubmit: async f => { const d = formData(f); if (!d.fileId) return false; await dbNew('file', { fileId: d.fileId }); } }); return; }
+    if (type === 'board') { openModal({ title: 'بورد فرعي', body: `<div class="form">${field('اسم البورد', inp('title', '', 'required'), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.title) return false; const b = dbBoard(); const child = { id: uid(), kind: 'design', parentId: b.id, projectId: b.projectId || null, personal: b.personal || false, ownerId: b.ownerId || null, title: d.title, cols: [{ id: 'c1', title: 'أفكار' }, { id: 'c2', title: 'مراجع' }], createdBy: S.session?.id || null }; await Store.save('boards', child, { silent: true }); await dbNew('board', { childId: child.id, title: d.title }); } }); }
+  };
+  ACTIONS.dbNoteAt = async colId => { const it = await dbNew('note', { title: '', text: '' }, colId); if (it) setTimeout(() => { const n = document.querySelector(`.dbc[data-id="${it.id}"] .ttl`); if (n) n.focus(); }, 80); };
+  ACTIONS.dbColAdd = async () => { const b = dbBoard(); if (!dbCanEdit()) return; const cols = (b.cols || []).concat([{ id: 'c' + uid().slice(-5), title: 'عمود جديد' }]); await Store.save('boards', Object.assign({}, b, { cols })); };
+  ACTIONS.dbColDel = async id => { const b = dbBoard(); if (!dbCanEdit() || (b.cols || []).length < 2) { toast('لازم يفضل عمود واحد على الأقل', 'err'); return; } const first = (b.cols || []).find(c => c.id !== id); for (const it of dbItems().filter(i => (i.col || b.cols[0].id) === id)) { it.col = first.id; await dbSave(it, true); } await Store.save('boards', Object.assign({}, b, { cols: b.cols.filter(c => c.id !== id) })); };
+  ACTIONS.dbDelete = async id => { const it = byId('bitems', id); if (!it || !dbCanEdit()) return; if (it.type === 'board' && !(await confirmDlg('حذف البورد الفرعي وكل اللي جواه؟', 'حذف'))) return; if (it.type === 'board' && it.childId) { for (const x of list('bitems').filter(y => y.boardId === it.childId)) await Store.remove('bitems', x.id); await Store.remove('boards', it.childId); } await Store.remove('bitems', id); };
+  ACTIONS.dbPanel = id => { DB.panel = id || null; rerender(); };
+  ACTIONS.dbComment = async id => { const it = byId('bitems', id); const inp0 = $('#dbcin'); const text = (inp0 && inp0.value.trim()) || ''; if (!it || !text) return; it.thread = (it.thread || []).concat([{ id: uid(), at: nowISO(), by: stuMe(), byName: S.session?.name || '', text }]); await dbSave(it, true); stuMentionNotify(text, `تعليق على كارت في ${dbBoard().title}`, `#/design/${DB.id}`); rerender(); };
+  ACTIONS.dbOpenChild = id => go('design/' + id);
+  ACTIONS.dbOpenImage = async id => { const it = byId('bitems', id); if (!it) return; const f = byId('files', it.fileId); let src = it.thumb; if (f) { try { src = (await Files.url(f)) || it.thumb; } catch (e) { /* thumb */ } } lightbox(src, it.caption || ''); };
+  ACTIONS.dbColorAdd = id => { const it = byId('bitems', id); if (!it || !dbCanEdit()) return; const inp0 = document.createElement('input'); inp0.type = 'color'; inp0.value = '#9fb3c8'; inp0.onchange = async () => { it.colors = (it.colors || []).concat([inp0.value]); await dbSave(it); }; inp0.click(); };
+  ACTIONS.dbColorDel = async arg => { const [id, k] = arg.split(':'); const it = byId('bitems', id); if (!it || !dbCanEdit()) return; if (!(await confirmDlg(`حذف اللون ${it.colors[+k]}؟`, 'حذف'))) return; it.colors.splice(+k, 1); await dbSave(it); };
+  ACTIONS.dbTodoAdd = async id => { const it = byId('bitems', id); if (!it || !dbCanEdit()) return; it.items = (it.items || []).concat([{ text: '', done: false }]); await dbSave(it); setTimeout(() => { const ns = document.querySelectorAll(`.dbc[data-id="${id}"] .ti .t`); if (ns.length) ns[ns.length - 1].focus(); }, 60); };
+  ACTIONS.dbToIdeas = async id => { const it = byId('bitems', id); const root = dbRoot(dbBoard()); if (!it || !root.projectId) return; const bs = await stuEnsureBoards(root.projectId); const wb = bs.ideas; const n = list('bitems').filter(x => x.boardId === wb.id).length; const base = { id: uid(), boardId: wb.id, x: 80 + (n % 6) * 200, y: 80 + Math.floor(n / 6) * 200, by: stuMe(), byName: S.session?.name || '', z: 1, fromDesign: it.id }; let doc; if (it.type === 'image') doc = Object.assign(base, { type: 'image', fileId: it.fileId, thumb: it.thumb, w: 280, h: 200 }); else if (it.type === 'link') doc = Object.assign(base, { type: 'link', url: it.url, text: it.title || '', w: 240, h: 76 }); else doc = Object.assign(base, { type: 'sticky', text: [it.title, it.text].filter(Boolean).join('\n'), color: it.color || WB_COLORS[0], w: 180, h: 180 }); await Store.save('bitems', doc, { silent: true }); toast('اتبعت لسبورة الأفكار'); };
+  ACTIONS.dbApprove = async () => { const b = dbBoard(); if (!b || !stuManager()) return; if (!(await confirmDlg(`اعتماد «${b.title}» بالشكل الحالي؟ هيتسجل الاعتماد باسمك ونسخة من الكروت.`, 'اعتماد', false))) return; const snap = dbItems().map(i => ({ id: i.id, type: i.type, title: i.title || i.text || i.caption || '', thumb: i.thumb || null })); await Store.save('boards', Object.assign({}, b, { approved: { at: nowISO(), by: stuMe(), byName: S.session?.name || '', snapshot: snap } })); const root = dbRoot(b); if (root.projectId) { const p = byId('projects', root.projectId); if (p) await Store.save('projects', Object.assign({}, p, { approvals: Object.assign({}, p.approvals || {}, { [b.id]: { at: nowISO(), byName: S.session?.name || '', title: b.title } }) }), { silent: true }); } toast('اتعتمد البورد ✓'); };
+  ACTIONS.dbUnapprove = async () => { const b = dbBoard(); if (!b || !stuManager()) return; await Store.save('boards', Object.assign({}, b, { approved: null })); };
+  ACTIONS.dbExport = () => { const b = dbBoard(); if (!b) return; const p = dbRoot(b).projectId ? byId('projects', dbRoot(b).projectId) : null; document.body.classList.add('stuprint'); const hdr = document.createElement('div'); hdr.id = 'stuprinthdr'; hdr.innerHTML = `<div style="display:flex;align-items:center;gap:12px;padding:10px 0 12px;border-bottom:1px solid #ddd;margin-bottom:12px;direction:rtl"><img src="${LOGO_MARK}" style="height:28px"><b>${esc(b.title)}</b><span style="color:#666">${p ? esc(p.name) + ' · ' : ''}${fmtDate(todayISO())} · Ninety Studioz${b.approved ? ' · معتمد ✓' : ''}</span></div>`; const v = $('#view'); if (v) v.prepend(hdr); setTimeout(() => { window.print(); setTimeout(() => { document.body.classList.remove('stuprint'); hdr.remove(); }, 500); }, 200); };
+
+  /* ---------- inline editing, drag & drop, paste ---------- */
+  function dbMount(host) {
+    if (host.dataset.mounted) return; host.dataset.mounted = '1';
+    host.addEventListener('focusout', async e => { const el = e.target; if (!el.matches || !el.matches('[data-f]')) { if (el.matches && el.matches('[data-dbcol]')) { const b = dbBoard(); const c = (b.cols || []).find(x => x.id === el.dataset.dbcol); if (c && c.title !== el.value.trim()) { c.title = el.value.trim() || c.title; await Store.save('boards', Object.assign({}, b), { silent: true }); } } return; } const card = el.closest('.dbc'); const it = card && byId('bitems', card.dataset.id); if (!it) return; const f = el.dataset.f; const val = el.innerText.replace(/\n{3,}/g, '\n\n').trim(); if (f.startsWith('todo:')) { const k = +f.slice(5); it.items = it.items || []; if (it.items[k] && it.items[k].text !== val) { it.items[k].text = val; await dbSave(it, true); } return; } if (it[f] !== val) { it[f] = val; await dbSave(it, true); } });
+    host.addEventListener('change', async e => { const cb = e.target.closest('[data-dbtodo]'); if (!cb) return; const [id, k] = cb.dataset.dbtodo.split(':'); const it = byId('bitems', id); if (!it || !it.items || !it.items[+k]) return; it.items[+k].done = cb.checked; await dbSave(it, true); cb.closest('.ti').classList.toggle('done', cb.checked); });
+    host.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.ttl,.ti .t') && !e.shiftKey) { e.preventDefault(); if (e.target.matches('.ti .t')) { const card = e.target.closest('.dbc'); ACTIONS.dbTodoAdd(card.dataset.id); } else { const tx = e.target.closest('.cb').querySelector('.tx'); if (tx) tx.focus(); else e.target.blur(); } } });
+    host.addEventListener('click', e => { const card = e.target.closest('.dbc'); if (card && !e.target.closest('[data-action],a,input,[contenteditable="true"]')) { DB.sel = card.dataset.id; document.querySelectorAll('.dbc.sel').forEach(n => n.classList.remove('sel')); card.classList.add('sel'); } });
+    host.addEventListener('dragstart', e => { const card = e.target.closest('.dbc'); if (!card || !dbCanEdit() || e.target.matches('[contenteditable="true"]')) { if (card) e.preventDefault(); return; } DB.drag = card.dataset.id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', card.dataset.id); } catch (x) { /* ignore */ } setTimeout(() => card.classList.add('ghost'), 0); });
+    host.addEventListener('dragend', () => { DB.drag = null; document.querySelectorAll('.dbc.ghost').forEach(n => n.classList.remove('ghost')); document.querySelectorAll('.dbcol.over').forEach(n => n.classList.remove('over')); });
+    host.addEventListener('dragover', e => { e.preventDefault(); const col = e.target.closest('.dbcol'); document.querySelectorAll('.dbcol.over').forEach(n => { if (n !== col) n.classList.remove('over'); }); if (col) col.classList.add('over'); });
+    host.addEventListener('drop', async e => {
+      e.preventDefault(); const col = e.target.closest('.dbcol'); const colId = col ? col.dataset.col : dbFirstCol();
+      if (DB.drag) { const it = byId('bitems', DB.drag); DB.drag = null; if (!it) return; const over = e.target.closest('.dbc'); const its = dbItems().filter(x => (x.col || dbFirstCol()) === colId && x.id !== it.id); let ord; if (over && over.dataset.id !== it.id) { const k = its.findIndex(x => x.id === over.dataset.id); const r = over.getBoundingClientRect(); const before = e.clientY < r.top + r.height / 2; const prev = before ? its[k - 1] : its[k], next = before ? its[k] : its[k + 1]; ord = ((prev ? +prev.ord : (next ? +next.ord - 2000 : Date.now())) + (next ? +next.ord : (prev ? +prev.ord + 2000 : Date.now()))) / 2; } else ord = its.length ? +its[its.length - 1].ord + 1000 : Date.now(); it.col = colId; it.ord = ord; await dbSave(it); return; }
+      if (!dbCanEdit()) return; const files = [...(e.dataTransfer.files || [])].filter(f => f.type.startsWith('image/')); for (const f of files) await dbAddImageFile(f, colId); const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain'); if (!files.length && /^https?:\/\//.test(url || '')) await dbNew('link', { url, title: '' }, colId);
+    });
+    host.addEventListener('paste', async e => { if (!dbCanEdit() || e.target.closest('[contenteditable="true"],input,textarea')) return; const items = [...(e.clipboardData?.items || [])]; const img = items.find(x => x.type.startsWith('image/')); if (img) { e.preventDefault(); await dbAddImageFile(img.getAsFile()); return; } const txt = (e.clipboardData?.getData('text/plain') || '').trim(); if (/^https?:\/\/\S+$/.test(txt)) { e.preventDefault(); await dbNew('link', { url: txt, title: '' }); } else if (txt) { e.preventDefault(); await dbNew('note', { title: '', text: txt.slice(0, 2000) }); } });
+    host.tabIndex = 0;
+  }
+  RENDER_HOOKS.push(() => { const host = $('#dbwrap'); if (host) dbMount(host); });
+  Object.assign(window, { dbSave, dbNew, dbAddImageFile, dbCardHTML, dbFirstCol });
+}
+/* =====================================================================
+   Ninety Studioz v4.18 — ✦ AI inside the boards + Studio Boards hub +
+   AI keys in settings + render guard while somebody types or drags.
+   Images: Higgsfield (Grok Imagine 2.0) through the office's Edge function
+   `ai` (key in admin_config, monthly cap per person). Text: Claude through
+   the same function. Palettes are computed in the browser.
+   ===================================================================== */
+if (STU_ON) {
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.aip .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}.aip .chips span{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-2);cursor:pointer;color:var(--ink-2)}.aip .chips span.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.aip .refs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.aip .refs img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:2px solid var(--line-2)}
+.aip .usage{font-size:11px;color:var(--muted);margin-top:6px}
+.aip textarea{width:100%;min-height:90px}
+.aip .out{margin-top:10px;background:var(--surface-2);border-radius:12px;padding:10px 12px;white-space:pre-wrap;font-size:13px;max-height:260px;overflow:auto}
+.aip .imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:10px}.aip .imgs img{width:100%;border-radius:10px;display:block}
+.aitabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}.aitabs button{border:1px solid var(--line-2);background:transparent;color:var(--ink-2);padding:6px 12px;border-radius:999px;cursor:pointer;font:inherit;font-size:13px}.aitabs button.on{background:var(--ink);color:var(--surface);border-color:transparent}
+.hubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.hubb{border-radius:var(--radius);border:1px solid var(--line);background:var(--surface);padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:transform .18s,box-shadow .18s;text-decoration:none;color:inherit}
+.hubb:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}.hubb .k{font-size:11px;color:var(--muted);letter-spacing:.04em}.hubb b{font-size:15px}.hubb .th{display:flex;gap:4px;margin-top:4px}.hubb .th img{width:44px;height:44px;object-fit:cover;border-radius:8px}.hubb .th i{width:44px;height:44px;border-radius:8px;display:block}
+</style>`);
+
+  /* ---------- render guard: never rebuild a board while its person is typing or dragging ---------- */
+  const stuTyping = () => { const a = document.activeElement; return !!(a && a.closest && a.closest('#dbwrap [contenteditable="true"], #dbwrap input[data-dbcol], #wbwrap [contenteditable="true"], .wbpanel input, .dbpanel input')); };
+  let _stuDirty = false;
+  render = (base => function (full) { if (!full && (stuBoardBusy() || stuTyping()) && document.querySelector('#wbwrap,#dbwrap') && !document.querySelector('#overlay')) { _stuDirty = true; return; } _stuDirty = false; return base(full); })(render);
+  document.addEventListener('focusout', () => { if (_stuDirty) setTimeout(() => { if (_stuDirty && !stuBoardBusy() && !stuTyping()) render(false); }, 120); });
+  document.addEventListener('pointerup', () => { if (_stuDirty) setTimeout(() => { if (_stuDirty && !stuBoardBusy() && !stuTyping()) render(false); }, 150); });
+
+  /* ---------- Studio Boards hub ---------- */
+  EXTRA_VIEWS.studio = () => {
+    const me = stuMe(); const boards = list('boards').filter(b => !b.parentId && wbCanSee(b));
+    const mine = boards.filter(b => b.personal && b.ownerId === me); const proj = boards.filter(b => !b.personal && b.projectId); const shared = boards.filter(b => b.personal && b.ownerId !== me);
+    const th = b => { const its = list('bitems').filter(i => i.boardId === b.id); const imgs = its.filter(i => i.type === 'image' && i.thumb).slice(-4); const cols = its.filter(i => i.type === 'sticky' && i.color).slice(-4); return `<div class="th">${imgs.map(i => `<img src="${esc(i.thumb)}" alt="">`).join('')}${!imgs.length ? cols.map(i => `<i style="background:${i.color}"></i>`).join('') : ''}</div><span class="tiny muted">${its.length} عنصر · ${b.updatedAt ? wbAgo(b.updatedAt) : ''}</span>`; };
+    const card = b => { const p = b.projectId ? byId('projects', b.projectId) : null; return `<a class="hubb" href="#/${b.kind}/${b.id}"><span class="k">${b.kind === 'ideas' ? '✦ سبورة أفكار' : '▤ ديزاين بورد'}${p ? ' · ' + esc(p.name) : ''}${b.approved ? ' · معتمد ✓' : ''}</span><b>${esc(b.title)}</b>${th(b)}</a>`; };
+    return `<div class="card"><div class="cardhead"><h2 style="margin:0">Studio Boards</h2><div class="grow"></div><button class="btn ghost sm" data-action="stuOpenPersonal" data-arg="ideas">✦ سبورة أفكاري</button><button class="btn p sm" data-action="stuOpenPersonal" data-arg="design">▤ بوردي الشخصي</button></div>
+      ${mine.length ? `<div class="tiny muted" style="margin:6px 0 8px">بورداتي الشخصية</div><div class="hubgrid">${mine.map(card).join('')}</div>` : '<p class="small muted">لسه معندكش بورد شخصي — افتح واحد من الزرارين فوق.</p>'}
+      ${proj.length ? `<div class="tiny muted" style="margin:16px 0 8px">بوردات المشاريع</div><div class="hubgrid">${sortBy(proj, b => (b.projectId || '') + b.kind).map(card).join('')}</div>` : ''}
+      ${shared.length ? `<div class="tiny muted" style="margin:16px 0 8px">بوردات متشاركة معايا</div><div class="hubgrid">${shared.map(card).join('')}</div>` : ''}</div>`;
+  };
+  EXTRA_TITLES.studio = () => ({ sub: 'سبورات الأفكار (Miro-style) والديزاين بوردات (Milanote-style) — للمشاريع ولكل مهندس' });
+
+  /* ---------- AI panel ---------- */
+  const AI = { tab: 'image', style: '', ctx: null, refs: [], busy: false, out: '', imgs: [] };
+  const AI_STYLES = [['', '', 'حر'], ['interior', 'Interior render, photoreal, soft daylight, 35mm', 'ريندر داخلي'], ['exterior', 'Exterior architectural visualization, golden hour, wide angle', 'ريندر خارجي'], ['material', 'Material close-up, studio lighting, macro texture', 'خامة'], ['mood', 'Mood board collage, editorial, calm palette', 'مود بورد'], ['sketch', 'Loose concept sketch, ink and marker, white paper', 'سكتش'], ['section', 'Architectural section diagram, clean lines, muted colours', 'قطاع']];
+  const aiUsage = async () => { try { const r = await S.sb.functions.invoke('ai', { body: { action: 'usage' } }); return r.data || null; } catch (e) { return null; } };
+  const aiCtxRefs = () => { if (!AI.ctx) return []; if (AI.ctx.startsWith('card:')) { const it = byId('bitems', AI.ctx.slice(5)); return it && it.type === 'image' ? [it] : []; } if (AI.ctx === 'ideas') return [...WB.sel].map(id => byId('bitems', id)).filter(i => i && i.type === 'image'); if (AI.ctx === 'design') { const it = DB.sel ? byId('bitems', DB.sel) : null; return it && it.type === 'image' ? [it] : []; } return []; };
+  const aiSelText = () => { if (AI.ctx === 'ideas') return [...WB.sel].map(id => byId('bitems', id)).filter(Boolean).map(i => i.text || '').filter(Boolean).join('\n'); const it = AI.ctx === 'design' && DB.sel ? byId('bitems', DB.sel) : AI.ctx && AI.ctx.startsWith('card:') ? byId('bitems', AI.ctx.slice(5)) : null; return it ? [it.title, it.text, it.caption].filter(Boolean).join('\n') : ''; };
+  function aiBody() {
+    const refs = aiCtxRefs(); const tab = AI.tab;
+    const tabs = [['image', '✦ صورة'], ['edit', '↻ تنويع / تعديل'], ['text', '✎ نص وأفكار'], ['brief', '▤ بريف العميل'], ['palette', '◐ ألوان']].map(([k, l]) => `<button type="button" class="${tab === k ? 'on' : ''}" data-aitab="${k}">${l}</button>`).join('');
+    let inner = '';
+    if (tab === 'image') inner = `<div class="chips">${AI_STYLES.map(([k, l, ar]) => `<span class="${AI.style === k ? 'on' : ''}" data-aistyle="${k}">${esc(ar)}</span>`).join('')}</div>${field('وصف الصورة', `<textarea id="f-prompt" name="prompt" placeholder="مثال: ريسبشن لمكتب محاماة، رخام أبيض وخشب جوز، إضاءة دافئة…">${esc(AI.prompt || '')}</textarea>`, 'full')}<div class="row" style="gap:10px;flex-wrap:wrap">${field('الجودة', `<select id="f-quality" name="quality"><option value="fast">سريع 1K</option><option value="high">عالي 2K</option></select>`)}${field('عدد', `<select id="f-n" name="n">${[1, 2, 3, 4].map(n => `<option>${n}</option>`).join('')}</select>`)}${field('النسبة', `<select id="f-aspect" name="aspect">${['auto', '1:1', '4:3', '3:4', '16:9', '9:16'].map(a => `<option>${a}</option>`).join('')}</select>`)}</div>${refs.length ? `<label class="check on" style="margin-top:6px"><input type="checkbox" name="useRefs" checked> استخدم الصور المحددة كمرجع للستايل</label><div class="refs">${refs.map(r => `<img src="${esc(r.thumb)}" alt="">`).join('')}</div>` : '<p class="tiny muted">لو حدّدت صورة على البورد قبل ما تفتح ✦ هتتاخد كمرجع.</p>'}`;
+    else if (tab === 'edit') inner = refs.length ? `<div class="refs">${refs.map(r => `<img src="${esc(r.thumb)}" alt="">`).join('')}</div><div class="chips">${[['variation', 'تنويعات بنفس الروح'], ['Remove the background completely and place the subject on a pure white seamless background, keep the subject identical', 'إزالة الخلفية'], ['Same design, night scene with warm artificial lighting', 'نسخة ليلية'], ['Same design rendered as a loose hand sketch with markers', 'تحويل لسكتش'], ['Same space, change the palette to warm earthy tones with walnut wood', 'تغيير الألوان']].map(([k, l]) => `<span class="${AI.edit === k ? 'on' : ''}" data-aiedit="${k}">${l}</span>`).join('')}</div>${field('أو اكتب التعديل', `<textarea id="f-prompt" name="prompt" placeholder="غيّر…">${esc(AI.edit && AI.edit !== 'variation' ? AI.edit : '')}</textarea>`, 'full')}<div class="row" style="gap:10px">${field('عدد', `<select id="f-n" name="n">${[1, 2, 3].map(n => `<option>${n}</option>`).join('')}</select>`)}${field('الجودة', `<select id="f-quality" name="quality"><option value="fast">سريع</option><option value="high">عالي</option></select>`)}</div>` : '<p class="small muted">حدّد صورة على البورد الأول (أو اضغط ✦ على كارت صورة).</p>';
+    else if (tab === 'text') inner = `<div class="chips">${[['concept', 'Concept statement'], ['prompt', 'اكتب لي prompt احترافي'], ['ideas', '10 أفكار'], ['names', 'أسماء للمشروع'], ['critique', 'نقد وتحسين']].map(([k, l]) => `<span class="${AI.textKind === k ? 'on' : ''}" data-aitext="${k}">${l}</span>`).join('')}</div>${field('عن إيه؟', `<textarea id="f-prompt" name="prompt" placeholder="المشروع، الطراز، العميل، القيود… (أو سيب فاضي وهاخد النص المحدد على البورد)">${esc(AI.prompt || '')}</textarea>`, 'full')}${aiSelText() ? `<p class="tiny muted">النص المحدد على البورد: «${esc(aiSelText().slice(0, 120))}…»</p>` : ''}`;
+    else if (tab === 'brief') { const root = AI.ctx === 'ideas' ? wbBoard() : dbBoard() ? dbRoot(dbBoard()) : null; const pid = root && root.projectId; const pdfs = list('files').filter(f => f.mime === 'application/pdf' && (!pid || f.projectId === pid || !f.projectId)).slice(-40).reverse(); inner = `${field('ملف بريف (PDF)', `<select id="f-fileId" name="fileId"><option value="">— الصق النص تحت —</option>${opts(pdfs, '', f => f.name)}</select>`, 'full')}${field('أو الصق نص البريف / رسالة العميل', `<textarea id="f-prompt" name="prompt"></textarea>`, 'full')}<p class="tiny muted">هيطلع: ملخص، متطلبات العميل كنقاط، قيود، أسئلة مفتوحة — ككروت على البورد.</p>`; }
+    else if (tab === 'palette') inner = refs.length ? `<div class="refs">${refs.map(r => `<img src="${esc(r.thumb)}" alt="">`).join('')}</div><p class="small muted">هيتطلّع 6 ألوان من الصورة المحددة ويتعملها كارت ألوان (أو ستيكي بالأكواد على سبورة الأفكار).</p>` : '<p class="small muted">حدّد صورة على البورد الأول.</p>';
+    return `<div class="aip"><div class="aitabs">${tabs}</div>${inner}${AI.out ? `<div class="out">${esc(AI.out)}</div>` : ''}${AI.imgs.length ? `<div class="imgs">${AI.imgs.map(u => `<img src="${u}" alt="">`).join('')}</div>` : ''}<div class="usage" id="aiusage">${AI.usage && AI.usage.cap != null ? `صور الشهر: ${AI.usage.used} / ${AI.usage.cap}` : ''}</div></div>`;
+  }
+  function aiOpen(ctx) {
+    AI.ctx = ctx; AI.out = ''; AI.imgs = []; if (aiCtxRefs().length && AI.tab === 'image') AI.tab = 'edit';
+    const submitLabel = () => ({ image: 'ولّد', edit: 'نفّذ', text: 'اكتب', brief: 'حلّل', palette: 'استخرج' })[AI.tab];
+    openModal({ title: '✦ مساعد الاستوديو', wide: true, cls: 'aimodal', body: aiBody(), submitLabel: submitLabel(), onOpen: f => {
+      f.addEventListener('click', e => { const t = e.target.closest('[data-aitab]'); if (t) { AI.tab = t.dataset.aitab; AI.out = ''; AI.imgs = []; f.querySelector('.mb').innerHTML = aiBody(); f.querySelector('button[type=submit]').textContent = submitLabel(); } const s = e.target.closest('[data-aistyle]'); if (s) { AI.style = s.dataset.aistyle; f.querySelectorAll('[data-aistyle]').forEach(x => x.classList.toggle('on', x === s)); } const ed = e.target.closest('[data-aiedit]'); if (ed) { AI.edit = ed.dataset.aiedit; f.querySelectorAll('[data-aiedit]').forEach(x => x.classList.toggle('on', x === ed)); const ta = f.querySelector('#f-prompt'); if (ta) ta.value = AI.edit === 'variation' ? '' : AI.edit; } const tk = e.target.closest('[data-aitext]'); if (tk) { AI.textKind = tk.dataset.aitext; f.querySelectorAll('[data-aitext]').forEach(x => x.classList.toggle('on', x === tk)); } });
+      aiUsage().then(u => { AI.usage = u; const el = f.querySelector('#aiusage'); if (el && u && u.cap != null) el.textContent = `صور الشهر: ${u.used} / ${u.cap}`; });
+    }, onSubmit: async f => { if (AI.busy) return false; AI.busy = true; const btn = f.querySelector('button[type=submit]'); const old = btn.textContent; btn.textContent = '… شغال'; try { await aiRun(f); } catch (e) { console.warn(e); toast(aiErr(e), 'err'); } finally { AI.busy = false; btn.textContent = old; } const mb = f.querySelector('.mb'); if (mb) mb.innerHTML = aiBody(); return false; } });
+  }
+  const aiErr = e => { const m = String((e && (e.message || e.code)) || e); if (/no_image_key/.test(m)) return 'مفتاح Higgsfield مش متسجل — الإعدادات ← الذكاء الاصطناعي'; if (/no_key/.test(m)) return 'مفتاح Anthropic مش متسجل — الإعدادات ← الذكاء الاصطناعي'; if (/cap/.test(m)) return 'وصلت لسقف صور الشهر — كلّم المالك'; return 'حصل خطأ: ' + m.slice(0, 120); };
+  async function aiImages(body) { const r = await S.sb.functions.invoke('ai', { body: Object.assign({ action: 'image' }, body) }); if (r.error) throw new Error(String(r.error.message || r.error)); const j = r.data || {}; if (j.error) throw new Error(j.error); if (j.usage) AI.usage = j.usage; if (!(j.images || []).length) throw new Error((j.errors || []).join(' | ') || 'مفيش صور رجعت'); return j.images; }
+  function b64File(b64, mime, name) { const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return new File([bytes], name, { type: mime || 'image/png' }); }
+  async function aiPlaceImage(file, k) {
+    if (AI.ctx === 'ideas') { const host = $('#wbwrap'); const c = wbS2W(host.clientWidth / 2 + k * 40, host.clientHeight / 2 + k * 40); const doc = await uploadOneBase(file, { kind: 'render', projectId: wbBoard().projectId || null, ai: true }); await wbNew('image', c.x, c.y, { fileId: doc.id, thumb: doc.thumb, w: 320, h: 240, ai: true }); return; }
+    const src = AI.ctx && AI.ctx.startsWith('card:') ? byId('bitems', AI.ctx.slice(5)) : DB.sel ? byId('bitems', DB.sel) : null; const doc = await uploadOneBase(file, { kind: 'render', projectId: dbRoot(dbBoard()).projectId || null, ai: true });
+    await Store.save('bitems', { id: uid(), boardId: DB.id, type: 'image', col: src ? src.col : (dbBoard().cols[0] || {}).id, ord: src ? (+src.ord || 0) + 1 + k : Date.now() + k, fileId: doc.id, thumb: doc.thumb, caption: 'AI ✦', by: stuMe(), byName: S.session?.name || '', ai: true }, { silent: true }); rerender();
+  }
+  async function aiPlaceCards(cards) { // [{title,text}] → stickies or note cards
+    if (AI.ctx === 'ideas') { const host = $('#wbwrap'); const c = wbS2W(host.clientWidth / 2, host.clientHeight / 2); let k = 0; for (const cd of cards) { await wbNew('sticky', c.x + (k % 4) * 200 - 300, c.y + Math.floor(k / 4) * 200 - 200, { text: [cd.title, cd.text].filter(Boolean).join('\n'), color: WB_COLORS[k % WB_COLORS.length], ai: true }); k++; } return; }
+    const colId = (DB.sel && byId('bitems', DB.sel) || {}).col || (dbBoard().cols[0] || {}).id; let k = 0; for (const cd of cards) { await Store.save('bitems', { id: uid(), boardId: DB.id, type: 'note', col: colId, ord: Date.now() + k, title: cd.title || '', text: cd.text || '', by: stuMe(), byName: S.session?.name || '', ai: true }, { silent: true }); k++; } rerender();
+  }
+  async function aiRun(f) {
+    const d = formData(f); const refs = aiCtxRefs();
+    if (AI.tab === 'image' || AI.tab === 'edit') {
+      let prompt = (d.prompt || '').trim(); if (AI.tab === 'image') { AI.prompt = prompt; const st = AI_STYLES.find(x => x[0] === AI.style); if (st && st[0]) prompt = `${prompt}. ${st[1]}`; } else if (!prompt) prompt = 'Create a close variation of this image: same space, same materials and mood, slightly different composition and details';
+      if (!prompt) { toast('اكتب وصف الصورة', 'err'); return; }
+      const useRefs = AI.tab === 'edit' || (refs.length && d.useRefs); const refKeys = useRefs ? refs.map(r => { const fd = byId('files', r.fileId); return fd && fd.store === 'sb' ? fd.ref : null; }).filter(Boolean) : [];
+      toast('✦ جارٍ التوليد… (نص دقيقة)'); const imgs = await aiImages({ prompt, refs: refKeys, quality: d.quality || 'fast', n: +d.n || 1, aspect: d.aspect || 'auto' });
+      let k = 0; for (const im of imgs) { const file = b64File(im.b64, im.mime, `ai-${Date.now()}-${k}.png`); AI.imgs.push(URL.createObjectURL(file)); await aiPlaceImage(file, k); k++; }
+      toast(`اتضافت ${imgs.length} صورة على البورد ✦`); return;
+    }
+    if (AI.tab === 'palette') { if (!refs.length) return; const cols = await aiPalette(refs[0].thumb); if (AI.ctx === 'ideas') { const host = $('#wbwrap'); const c = wbS2W(host.clientWidth / 2, host.clientHeight / 2); await wbNew('sticky', c.x, c.y, { text: 'لوحة ألوان\n' + cols.join('  '), color: '#e8e8e8', ai: true }); } else { const src = refs[0]; await Store.save('bitems', { id: uid(), boardId: DB.id, type: 'color', col: src.col, ord: (+src.ord || 0) + 1, title: 'ألوان من الصورة ✦', colors: cols, by: stuMe(), byName: S.session?.name || '', ai: true }, { silent: true }); rerender(); } AI.out = cols.join('  '); toast('اتعملت لوحة الألوان'); return; }
+    if (AI.tab === 'text' || AI.tab === 'brief') {
+      let src = (d.prompt || '').trim(); if (AI.tab === 'brief' && d.fileId) { const fd = byId('files', d.fileId); if (fd) { toast('جارٍ قراءة الـPDF…'); src = (await aiPdfText(fd)).slice(0, 60000) + '\n' + src; } }
+      if (!src) src = aiSelText(); if (!src) { toast('اكتب أو حدّد نص', 'err'); return; }
+      const board = AI.ctx === 'ideas' ? wbBoard() : dbBoard(); const p = board && (board.projectId || (dbRoot(board) || {}).projectId) ? byId('projects', board.projectId || dbRoot(board).projectId) : null;
+      const ctx = p ? `المشروع: ${p.name}${p.client ? ' — العميل: ' + p.client : ''} — المرحلة: ${stuStage(p.stage).ar}${p.desc ? ' — ' + p.desc : ''}\n` : '';
+      const kind = AI.tab === 'brief' ? 'brief' : (AI.textKind || 'concept');
+      const ask = { concept: 'اكتب Concept statement احترافي (عربي أولًا ثم نسخة إنجليزية قصيرة) لمشروع تصميم داخلي/معماري بناءً على المدخل. أرجع JSON فقط: {"cards":[{"title":"Concept","text":"…"},{"title":"Concept (EN)","text":"…"},{"title":"Keywords","text":"…"}]}', prompt: 'اكتب prompt إنجليزي احترافي لتوليد صورة معمارية (render) من المدخل، مع 3 تنويعات. أرجع JSON فقط: {"cards":[{"title":"Prompt 1","text":"…"},{"title":"Prompt 2","text":"…"},{"title":"Prompt 3","text":"…"}]}', ideas: 'اقترح 10 أفكار تصميم مختلفة وقابلة للتنفيذ للمدخل، كل فكرة بعنوان قصير وسطرين. أرجع JSON فقط: {"cards":[{"title":"…","text":"…"}]}', names: 'اقترح 8 أسماء/عناوين للمشروع أو الكونسبت مع سطر شرح. أرجع JSON فقط: {"cards":[{"title":"…","text":"…"}]}', critique: 'انقد الفكرة/النص التالي كآرت دايركتور خبير: نقاط قوة، مخاطر، 5 تحسينات محددة. أرجع JSON فقط: {"cards":[{"title":"نقاط القوة","text":"…"},{"title":"المخاطر","text":"…"},{"title":"تحسينات","text":"…"}]}', brief: 'ده بريف/رسالة عميل. استخرج: ملخص المشروع، متطلبات العميل (نقاط)، القيود (ميزانية/وقت/موقع)، الطراز والمزاج المطلوب، أسئلة مفتوحة نسألها للعميل. أرجع JSON فقط: {"cards":[{"title":"الملخص","text":"…"},{"title":"المتطلبات","text":"…"},{"title":"القيود","text":"…"},{"title":"الطراز والمزاج","text":"…"},{"title":"أسئلة للعميل","text":"…"}]}' }[kind];
+      const r = await aiText(`أنت مساعد مكتب تصميم معماري (Ninety Studioz). ${ask}\n\n${ctx}المدخل:\n${src}`, { max_tokens: 3000 });
+      let cards = []; try { const m = r.text.match(/\{[\s\S]*\}/); cards = (JSON.parse(m ? m[0] : r.text).cards || []).filter(c => c && (c.title || c.text)); } catch (e) { cards = [{ title: '', text: r.text }]; }
+      AI.out = cards.map(c => `${c.title ? c.title + ': ' : ''}${c.text}`).join('\n\n'); await aiPlaceCards(cards.slice(0, 12)); toast(`اتضاف ${Math.min(cards.length, 12)} كارت ✦`);
+    }
+  }
+  function aiPalette(src) { return new Promise(res => { const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = 48; c.height = 48; const x = c.getContext('2d'); x.drawImage(im, 0, 0, 48, 48); const d = x.getImageData(0, 0, 48, 48).data; const m = new Map(); for (let i = 0; i < d.length; i += 4) { const k = [(d[i] >> 4), (d[i + 1] >> 4), (d[i + 2] >> 4)].join(','); const e = m.get(k) || { n: 0, r: 0, g: 0, b: 0 }; e.n++; e.r += d[i]; e.g += d[i + 1]; e.b += d[i + 2]; m.set(k, e); } const arr = [...m.values()].sort((a, b) => b.n - a.n); const out = []; for (const e of arr) { const rgb = [e.r / e.n, e.g / e.n, e.b / e.n].map(Math.round); if (out.some(o => Math.abs(o[0] - rgb[0]) + Math.abs(o[1] - rgb[1]) + Math.abs(o[2] - rgb[2]) < 60)) continue; out.push(rgb); if (out.length >= 6) break; } res(out.map(([r, g, b]) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join(''))); }; im.onerror = () => res(['#1f2732', '#9fb3c8', '#d9c9a3']); im.src = src; }); }
+  async function aiPdfText(fd) { await vendorLoad('pdf'); const lib = pdfLib(); const blob = await Files.blob(fd); const doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise; let out = ''; for (let i = 1; i <= Math.min(doc.numPages, 30); i++) { const pg = await doc.getPage(i); const tc = await pg.getTextContent(); out += tc.items.map(t => t.str).join(' ') + '\n'; } try { doc.destroy(); } catch (e) { /* ignore */ } return out; }
+  ACTIONS.stuAi = arg => { if (!S.session) return; if (!sbOn()) { toast('الـAI شغال مع السيرفر بس', 'err'); return; } aiOpen(arg || (S.route.view === 'ideas' ? 'ideas' : 'design')); };
+
+  /* ---------- settings: AI keys (owner only, never shown back) ---------- */
+  EXTRA_SETTINGS.stuai = { label: 'الذكاء الاصطناعي', render: () => { if (!isAdmin()) return '<div class="card"><p class="small muted">للمالك فقط</p></div>'; const st = S.ui.stuSecret || {}; if (!S.ui.stuSecretAsked && sbOn()) { S.ui.stuSecretAsked = true; Promise.resolve().then(() => S.sb.rpc('nf_secret_status')).then(r => { S.ui.stuSecret = (r && r.data) || {}; rerender(); }, () => { S.ui.stuSecret = {}; }); } return `<form class="card" id="stuaiform"><h3>مفاتيح الذكاء الاصطناعي</h3><p class="small muted">المفاتيح تُحفظ على السيرفر فقط (admin_config) ولا تُعرض مرة أخرى. صور البوردات تتولّد عبر Higgsfield (Grok Imagine 2.0)، والنصوص عبر Claude.</p><div class="form">${field(`مفتاح Higgsfield (KEY_ID:KEY_SECRET) ${st.higgsfield ? '— مسجّل ✓' : '— غير مسجّل'}`, inp('higgsfield_key', '', 'type="password" class="ltr" placeholder="اتركه فارغًا للإبقاء على الحالي" autocomplete="new-password"'), 'full')}${field(`مفتاح Anthropic ${st.anthropic ? '— مسجّل ✓' : '— غير مسجّل'}`, inp('anthropic_key', '', 'type="password" class="ltr" placeholder="sk-ant-…" autocomplete="new-password"'), 'full')}${field('سقف الصور شهريًا لكل مهندس', inp('ai_image_cap', st.cap || '60', 'type="number" min="0"'))}</div><div class="row" style="margin-top:10px"><button class="btn p" data-action="stuAiKeysSave">حفظ</button><span class="tiny muted">من open.higgsfield.ai ← API keys؛ ومن console.anthropic.com ← API keys</span></div></form>`; } };
+  ACTIONS.stuAiKeysSave = async () => { if (!isAdmin() || !sbOn()) return; const f = $('#stuaiform'); const d = formData(f); let n = 0; for (const k of ['higgsfield_key', 'anthropic_key', 'ai_image_cap']) { const v = (d[k] || '').trim(); if (!v && k !== 'ai_image_cap') continue; const { error } = await S.sb.rpc('nf_set_secret', { p_key: k, p_value: v }); if (error) { toast('فشل الحفظ: ' + error.message, 'err'); return; } n++; } f.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); S.ui.stuSecretAsked = false; toast(n ? 'اتحفظت المفاتيح' : 'مفيش تغيير'); rerender(); };
+  Object.assign(window, { aiOpen, aiRun, aiPalette, aiPdfText, aiPlaceCards, aiPlaceImage });
 }
 </script>
 
