@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1340-5c19fe";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1355-3bf19b";</script>
 
 <script>
 'use strict';
@@ -14126,7 +14126,7 @@ if (typeof vProjects === 'function') vProjects = (base => function () {
   else html = base.apply(this, arguments);
   const keep = o => want === 'open' ? isOpen(o) && o.status !== 'hold' : want === 'hold' ? o.status === 'hold' : want === 'cancelled' ? o.status === 'cancelled' : want === 'all' ? o.status !== 'cancelled' : true;
   list('orders').forEach(o => {
-    const re = new RegExp(`<a class="pjcard" href="#/projects/${o.id}">([\\s\\S]*?)</a>(?=<a class="pjcard"|</div>)`);
+    const re = new RegExp(`<a class="pjcard" href="#/projects/${o.id}">((?:(?!<a[\\s>])[\\s\\S])*?)</a>`);
     if (!keep(o)) { html = html.replace(re, ''); return; }
     const line = ORDER_STATE_LINE(o);
     html = html.replace(re, (m0, inner) => `<div class="pjwrap"><a class="pjcard ${o.status === 'hold' ? 'pj-hold' : o.status === 'cancelled' ? 'pj-cancelled' : ''}" href="#/projects/${o.id}">${inner}${line ? `<div class="small" style="color:var(--${o.status === 'hold' ? 'warn' : 'crit'}-ink)">${line}</div>` : ''}</a>${pjCanAct() ? `<button type="button" class="pjmenu" data-action="pjMenu" data-arg="${o.id}" title="إجراءات المشروع">⋮</button>` : ''}</div>`);
@@ -14224,6 +14224,48 @@ const pjStateBanner = arr => arr.filter(o => ORDER_STATE_LINE(o)).map(o => `<div
 if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function (id) { const html = base.apply(this, arguments); const q = byId('quotations', id); return q ? pjStateBanner(ordersOfQuote(q)) + html : html; })(vQuoteDetailBase);
 if (typeof vLeadDetail === 'function') vLeadDetail = (base => function (l0) { const html = base.apply(this, arguments); const l = typeof l0 === 'string' ? byId('leads', l0) : l0; if (!l || !l.clientId) return html; return pjStateBanner(list('orders').filter(o => o.clientId === l.clientId && (o.brandId || '') === (l.brandId || o.brandId || ''))) + html; })(vLeadDetail);
 Object.assign(window, { myScopeDepts, fileDeptOk, orderDeptOk, fileDeptChips });
+/* =====================================================================
+   v4.27 — التنقل بين سيستمات Ninety من غير «شاشة كلمة السر»:
+   · وقت التحميل، لو فيه جلسة محفوظة، تظهر شاشة «جارٍ فتح …» بدل فورم الدخول لحد ما البيانات توصل
+     (كان فورم رقم الموبايل وكلمة السر بيظهر ثواني قبل ما السيستم يدخل لوحده، فالمستخدم يحاول تاني).
+   · زرار السيستم التاني: يظهر فورًا «جارٍ فتح …» ويقفل الضغط المتكرر، والسيستم التاني يتحمّل مسبقًا في الخلفية.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.nfsplash{min-height:100vh;display:grid;place-items:center;background:var(--bg)}
+.nfsplash .box{display:flex;flex-direction:column;align-items:center;gap:14px;color:var(--muted);font-size:13.5px}
+.nfspin{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:nfspin .8s linear infinite}
+@keyframes nfspin{to{transform:rotate(360deg)}}
+.nfswitch{position:fixed;inset:0;z-index:9999;background:color-mix(in srgb,var(--bg) 88%,transparent);display:grid;place-items:center;backdrop-filter:blur(2px)}
+</style>`);
+const nfSplash = msg => `<div class="nfsplash"><div class="box"><div class="brand">${typeof brandBlock === 'function' ? brandBlock(30) : ''}</div><div class="nfspin"></div><div>${esc(msg)}</div></div></div>`;
+/* a stored session is being restored: never show the password form meanwhile */
+const nfRestoring = () => typeof sbOn === 'function' && sbOn() && !!S.sbUser && !S.session && !(S.loaded && S.loaded.staff && S.loaded.workers);
+if (typeof loginScreen === 'function') loginScreen = (base => function () {
+  if (nfRestoring()) return nfSplash(`جارٍ فتح ${(S.settings && S.settings.company) || APP.name}…`);
+  return base.apply(this, arguments);
+})(loginScreen);
+
+/* switching to the sibling system: instant feedback, one click only */
+const nfOtherCo = () => (typeof STU_ON !== 'undefined' && STU_ON) ? 'factory' : 'studio';
+const nfOtherUrl = () => { try { const c = NINETY_COS[nfOtherCo()]; return c && c.url ? c.url : ''; } catch (e) { return ''; } };
+let _nfSwitching = false;
+document.addEventListener('click', ev => {
+  const el = ev.target.closest && ev.target.closest('[data-action="ninetyGo"]'); if (!el) return;
+  if (el.dataset.arg !== nfOtherCo() || !nfOtherUrl()) return;
+  if (_nfSwitching) { ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+  _nfSwitching = true; const name = (NINETY_COS[nfOtherCo()] || {}).name || 'Ninety';
+  document.body.insertAdjacentHTML('beforeend', `<div class="nfswitch" id="nfswitch">${nfSplash(`جارٍ فتح ${name}…`).replace('class="nfsplash"', 'class="nfsplash" style="min-height:0;background:transparent"')}</div>`);
+  setTimeout(() => { _nfSwitching = false; const o = document.getElementById('nfswitch'); if (o) o.remove(); }, 12000);
+}, true);
+window.addEventListener('pageshow', () => { _nfSwitching = false; const o = document.getElementById('nfswitch'); if (o) o.remove(); });
+/* warm the sibling app so the switch opens from the browser cache */
+document.addEventListener('nf:ready', () => setTimeout(() => {
+  try {
+    if (!(typeof isNinetyOwner === 'function' && isNinetyOwner())) return;
+    const u = nfOtherUrl(); if (!u) return; const base = u.replace(/index\.html$/, '');
+    [u, base + 'config.js', base + 'en.json', base + 'vendor/supabase.js'].forEach(h => { const l = document.createElement('link'); l.rel = 'prefetch'; l.href = h; document.head.appendChild(l); });
+  } catch (e) { /* ignore */ }
+}, 4000));
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
