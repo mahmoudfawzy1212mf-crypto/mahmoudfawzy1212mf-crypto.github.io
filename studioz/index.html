@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1301-70178a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1340-5c19fe";</script>
 
 <script>
 'use strict';
@@ -14030,6 +14030,200 @@ if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
   return html + card;
 })(vOrderDetail);
 Object.assign(window, { pKind, quotePdfUpload });
+/* =====================================================================
+   v4.26 — (1) كل قسم يشوف مشاريعه بس: رئيس القسم والموظفين تحته لا يصلهم مشروع قسمهم ليس في مساره
+            (السيرفر: nf_scope_ok)، وفي صفحة الأمر يشوف مرحلة قسمه فقط + سطر استلام/تسليم،
+            والرسومات لها «الأقسام» — كل قسم يشوف الرسومات الخاصة به فقط.
+            (2) إجراءات المشروع: إيقاف مؤقت / استئناف / إلغاء وإخراج من قائمة المشاريع (أرشيف) / استرجاع /
+            حذف نهائي للمالك من الأرشيف — عرض السعر والعميل وCRM يبقون كما هم مع علامة الحالة.
+   ===================================================================== */
+const SCOPED_ROLES = ['head', 'employee'];
+const deptScoped = () => !!S.session && SCOPED_ROLES.includes(role());
+function myScopeDepts() {
+  if (!S.session) return [];
+  if (role() === 'head') return myDepts();
+  const w = S.session.workerId ? byId('workers', S.session.workerId) : null; return w && w.deptId ? [w.deptId] : [];
+}
+const fileDeptOk = f => { if (!deptScoped() || !f || !Array.isArray(f.deptIds) || !f.deptIds.length) return true; const m = myScopeDepts(); return f.deptIds.some(d => m.includes(d)); };
+const orderDeptOk = o => { if (!deptScoped()) return true; if (!o) return false; const m = myScopeDepts(); return (o.route || []).some(d => m.includes(d)); };
+
+/* ---------- files: each drawing carries the departments it is for ---------- */
+if (typeof filesOf === 'function') filesOf = (base => function () { return base.apply(this, arguments).filter(fileDeptOk); })(filesOf);
+let _pendingFileDepts = null;
+const fileDeptBox = (opts0, sel, editId) => `<div class="field full" id="fdepts" ${editId ? `data-edit="${editId}"` : ''}><label>الأقسام اللي تشوف الملف <span class="muted tiny">(فاضي = كل أقسام المشروع)</span></label><div class="row" style="gap:6px;flex-wrap:wrap">${opts0.map(d => `<label class="check ${sel.includes(d.id) ? 'on' : ''}" style="padding:4px 10px"><input type="checkbox" value="${esc(d.id)}" ${sel.includes(d.id) ? 'checked' : ''}> ${esc(d.name)}</label>`).join('')}</div></div>`;
+const fileDeptChoices = (kind, id) => { const all = prodDepts(); if (kind === 'order') { const o = byId('orders', id); const r = (o && o.route) || []; const c = all.filter(d => r.includes(d.id)); return c.length ? c : all; } return all; };
+if (ACTIONS.fileUpload) ACTIONS.fileUpload = (base => function (arg) {
+  _pendingFileDepts = null; const r = base.apply(this, arguments);
+  setTimeout(() => { const mf = document.getElementById('mform'); const form = mf && mf.querySelector('.mb .form'); if (!form || form.querySelector('#fdepts')) return; const [kind, id] = (arg || '').split(':'); const prog = form.querySelector('#upprog'); const h = fileDeptBox(fileDeptChoices(kind, id), []); if (prog) prog.insertAdjacentHTML('beforebegin', h); else form.insertAdjacentHTML('beforeend', h); }, 60);
+  return r;
+})(ACTIONS.fileUpload);
+if (ACTIONS.fileEdit) ACTIONS.fileEdit = (base => function (id) {
+  const r = base.apply(this, arguments);
+  setTimeout(() => { const f = byId('files', id); const mf = document.getElementById('mform'); const form = mf && mf.querySelector('.mb .form'); if (!f || !form || form.querySelector('#fdepts')) return; form.insertAdjacentHTML('beforeend', fileDeptBox(fileDeptChoices(f.orderId ? 'order' : 'product', f.orderId || f.productId), f.deptIds || [], id)); }, 60);
+  return r;
+})(ACTIONS.fileEdit);
+document.addEventListener('change', ev => { const t = ev.target; if (t && t.type === 'checkbox' && t.closest && t.closest('#fdepts')) t.closest('label').classList.toggle('on', t.checked); });
+document.addEventListener('submit', ev => {
+  const f = ev.target; if (!f || f.id !== 'mform') return; const box = f.querySelector('#fdepts'); if (!box) return;
+  const sel = Array.from(box.querySelectorAll('input:checked')).map(i => i.value);
+  if (box.dataset.edit) { const id = box.dataset.edit; setTimeout(() => { if (byId('files', id)) Store.update('files', id, { deptIds: sel }, { silent: true }); }, 400); }
+  else _pendingFileDepts = sel;
+}, true);
+Store.save = (base => function (col, doc, opts) {
+  if (col === 'files' && doc && _pendingFileDepts && _pendingFileDepts.length && !doc.deptIds && (doc.orderId || doc.productId) && !byId('files', doc.id)) doc.deptIds = _pendingFileDepts.slice();
+  return base.call(this, col, doc, opts);
+})(Store.save);
+const fileDeptChips = f => Array.isArray(f.deptIds) && f.deptIds.length ? `<div class="tiny muted" style="margin-top:2px">🔒 ${f.deptIds.map(deptName).map(esc).join('، ')}</div>` : '';
+
+/* ---------- the order page for a department head: only his stage ---------- */
+let _scopeRender = false;
+orderStages = (base => function (o) { const st = base.apply(this, arguments); if (!_scopeRender || !deptScoped()) return st; const m = myScopeDepts(); return st.filter(s => m.includes(s.deptId)); })(orderStages);
+function scopeHandLine(o) {
+  const r = o.route || []; const m = myScopeDepts(); const idx = r.map((d, i) => m.includes(d) ? i : -1).filter(i => i >= 0); if (!idx.length) return '';
+  const first = Math.min(...idx), last = Math.max(...idx); const st = d => (o.stages || {})[d] || {};
+  const prev = first > 0 ? r[first - 1] : null; const next = last < r.length - 1 ? r[last + 1] : null;
+  const pv = prev ? (['done', 'skipped'].includes(st(prev).status) ? `✓ استلمت من ${esc(deptName(prev))}${st(prev).doneAt ? ' يوم ' + fmtDate(String(st(prev).doneAt).slice(0, 10)) : ''}` : `⏳ بانتظار ${esc(deptName(prev))} — لم يسلّم بعد`) : 'قسمك أول مرحلة في المشروع';
+  const nx = next ? `بعدك: التسليم لـ${esc(deptName(next))}` : 'قسمك آخر مرحلة قبل التسليم';
+  return `<div class="banner info" style="margin-bottom:12px">${icon('info')}<span><b>مرحلة قسمك فقط</b> — ${pv} · ${nx}</span></div>`;
+}
+if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+  if (!deptScoped()) return base.apply(this, arguments);
+  const o = byId('orders', id); if (o && !orderDeptOk(o)) return `<div class="empty"><b>هذا المشروع ليس ضمن أقسامك</b></div>`;
+  _scopeRender = true; let html; try { html = base.apply(this, arguments); } finally { _scopeRender = false; }
+  if (!o) return html;
+  // the route-plan card lists every department's tasks: drop it for department heads
+  html = html.replace(/<div class="card" id="routeplan"[\s\S]*?<!--\/routeplan-->/, '');
+  return scopeHandLine(o) + html;
+})(vOrderDetail);
+if (typeof routePlanCard === 'function') routePlanCard = (base => function (o) { if (deptScoped()) return ''; return base.apply(this, arguments); })(routePlanCard);
+if (typeof orderInMyScope === 'function') orderInMyScope = (base => function (o) { if (deptScoped() && !orderDeptOk(o)) return false; return base.apply(this, arguments); })(orderInMyScope);
+if (typeof taskVisible === 'function') taskVisible = (base => function (t) {
+  if (!base.apply(this, arguments)) return false;
+  if (deptScoped() && t.orderId) { const o = byId('orders', t.orderId); if (!o || !orderDeptOk(o)) return myIds().includes(t.assigneeId); }
+  return true;
+})(taskVisible);
+
+/* =====================================================================
+   (2) project actions: hold / resume / cancel (archive) / restore / purge
+   ===================================================================== */
+const pjCanAct = () => !!S.session && writable() && (isAdmin() || role() === 'manager');
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.pjwrap{position:relative;display:flex}.pjwrap>.pjcard{flex:1;min-width:0}
+.pjwrap .pjcard>.row:first-child{padding-inline-end:36px}
+.pjmenu{position:absolute;top:10px;inset-inline-end:10px;width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:18px;line-height:1;cursor:pointer;display:grid;place-items:center;z-index:2}
+.pjmenu:hover{background:var(--line)}
+.pjcard.pj-hold{opacity:.8;border-style:dashed}.pjcard.pj-cancelled{opacity:.6;border-style:dashed}
+.pjacts{display:grid;gap:8px}.pjacts .btn{justify-content:flex-start}
+</style>`);
+const ORDER_STATE_LINE = o => o.status === 'hold' ? `⏸ موقوف مؤقتًا${o.holdReason ? ' — ' + esc(o.holdReason) : ''}${o.holdAt ? ' · ' + fmtDate(String(o.holdAt).slice(0, 10)) : ''}${o.holdBy ? ' · ' + esc(o.holdBy) : ''}`
+  : o.status === 'cancelled' ? `✕ ملغي — خرج من قائمة المشاريع${o.cancelReason ? ' — ' + esc(o.cancelReason) : ''}${o.cancelledAt ? ' · ' + fmtDate(String(o.cancelledAt).slice(0, 10)) : ''}${o.cancelledBy ? ' · ' + esc(o.cancelledBy) : ''}` : '';
+
+if (typeof vProjects === 'function') vProjects = (base => function () {
+  const f = (S.ui.filter.projects ||= { brand: '', risk: false, tab: 'cards', status: 'open' });
+  if (S.route.id || (f.tab || 'cards') === 'gantt') return base.apply(this, arguments);
+  const want = f.status || 'open'; let html;
+  if (want === 'hold' || want === 'cancelled') { f.status = 'all'; try { html = base.apply(this, arguments); } finally { f.status = want; } }
+  else html = base.apply(this, arguments);
+  const keep = o => want === 'open' ? isOpen(o) && o.status !== 'hold' : want === 'hold' ? o.status === 'hold' : want === 'cancelled' ? o.status === 'cancelled' : want === 'all' ? o.status !== 'cancelled' : true;
+  list('orders').forEach(o => {
+    const re = new RegExp(`<a class="pjcard" href="#/projects/${o.id}">([\\s\\S]*?)</a>(?=<a class="pjcard"|</div>)`);
+    if (!keep(o)) { html = html.replace(re, ''); return; }
+    const line = ORDER_STATE_LINE(o);
+    html = html.replace(re, (m0, inner) => `<div class="pjwrap"><a class="pjcard ${o.status === 'hold' ? 'pj-hold' : o.status === 'cancelled' ? 'pj-cancelled' : ''}" href="#/projects/${o.id}">${inner}${line ? `<div class="small" style="color:var(--${o.status === 'hold' ? 'warn' : 'crit'}-ink)">${line}</div>` : ''}</a>${pjCanAct() ? `<button type="button" class="pjmenu" data-action="pjMenu" data-arg="${o.id}" title="إجراءات المشروع">⋮</button>` : ''}</div>`);
+  });
+  // status filter: running / on hold / archive
+  html = html.replace(/<select class="sel" data-filter="projects:status">[\s\S]*?<\/select>/, `<select class="sel" data-filter="projects:status">${[['open', 'الجارية (في التنفيذ)'], ['hold', 'الموقوفة'], ['delivered', 'المسلَّمة'], ['cancelled', 'الملغاة — الأرشيف'], ['all', 'الكل (بدون الملغاة)']].map(([v, l]) => `<option value="${v}" ${want === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`);
+  return html;
+})(vProjects);
+
+ACTIONS.pjMenu = id => {
+  const o = byId('orders', id); if (!o || !pjCanAct()) return;
+  const b = (act, label, cls = '') => `<button type="button" class="btn ${cls}" data-action="${act}" data-arg="${o.id}">${label}</button>`;
+  const acts = [];
+  if (isOpen(o) && o.status !== 'hold') acts.push(b('pjHold', '⏸ إيقاف مؤقت'));
+  if (o.status === 'hold') acts.push(b('pjResume', '▶ استئناف التنفيذ', 'p'));
+  if (o.status !== 'cancelled' && o.status !== 'delivered') acts.push(b('pjCancel', '✕ إلغاء المشروع وإخراجه من قائمة المشاريع', 'ghost'));
+  if (o.status === 'cancelled') { acts.push(b('pjRestore', '↩ استرجاع للتنفيذ', 'p')); if (isAdmin()) acts.push(b('pjPurge', '🗑 حذف نهائي', 'ghost')); }
+  acts.push(`<a class="btn ghost" href="#/orders/${o.id}" onclick="closeModal()">فتح أمر التشغيل</a>`);
+  openModal({ title: `${o.code} — ${o.title}`, body: `<div class="pjacts">${ORDER_STATE_LINE(o) ? `<div class="banner ${o.status === 'hold' ? 'warn' : 'crit'}">${ORDER_STATE_LINE(o)}</div>` : ''}${acts.join('')}<div class="tiny muted">الإيقاف أو الإلغاء لا يمسح عرض السعر ولا العميل ولا فرصة CRM — بيظهر عليهم إن المشروع موقوف أو ملغي.</div></div>`, footer: null });
+};
+function pjReasonDlg(title, label, okLabel) {
+  return new Promise(res => {
+    let done = false;
+    openModal({ title, body: `<div class="form">${field(label, `<textarea id="f-reason" name="reason" required placeholder="اكتب السبب"></textarea>`, 'full')}</div>`, submitLabel: okLabel,
+      onSubmit: async f => { const v = String(formData(f).reason || '').trim(); if (!v) { toast('اكتب السبب', 'err'); return false; } done = true; setTimeout(() => res(v), 0); },
+      onClose: () => { if (!done) res(null); } });
+    // fallback when the modal helper has no onClose: resolve null when the modal disappears
+    const iv = setInterval(() => { if (!document.getElementById('mform') && !done) { clearInterval(iv); res(null); } else if (done) clearInterval(iv); }, 500);
+  });
+}
+async function pjTasksSet(o, fromSts, patch) {
+  for (const t of list('tasks').filter(t => t.orderId === o.id && fromSts.includes(t.status))) await Store.update('tasks', t.id, Object.assign({}, patch, { updatedAt: nowISO() }), { silent: true });
+}
+ACTIONS.pjHold = async id => {
+  const o = byId('orders', id); if (!o || !pjCanAct()) return; closeModal();
+  const why = await pjReasonDlg(`إيقاف ${o.code} مؤقتًا`, 'سبب الإيقاف (يظهر للأقسام والمبيعات)', 'إيقاف'); if (!why) return;
+  await Store.update('orders', id, { status: 'hold', prevStatus: o.status, holdReason: why, holdAt: nowISO(), holdBy: S.session.name || '' });
+  await pjTasksSet(o, ['open', 'doing'], { paused: true });
+  toast(`تم إيقاف ${o.code} مؤقتًا`); render(false);
+};
+ACTIONS.pjResume = async id => {
+  const o = byId('orders', id); if (!o || !pjCanAct()) return; closeModal();
+  await Store.update('orders', id, { status: o.prevStatus && !['hold', 'cancelled'].includes(o.prevStatus) ? o.prevStatus : 'production', resumedAt: nowISO(), resumedBy: S.session.name || '', holdReason: '' });
+  for (const t of list('tasks').filter(t => t.orderId === id && t.paused)) await Store.update('tasks', t.id, { paused: false, updatedAt: nowISO() }, { silent: true });
+  toast(`تم استئناف ${o.code}`); render(false);
+};
+ACTIONS.pjCancel = async id => {
+  const o = byId('orders', id); if (!o || !pjCanAct()) return; closeModal();
+  const why = await pjReasonDlg(`إلغاء ${o.code} وإخراجه من قائمة المشاريع`, 'سبب الإلغاء (المشروع يتحفظ في الأرشيف ولا يُمسح)', 'إلغاء المشروع'); if (!why) return;
+  await Store.update('orders', id, { status: 'cancelled', prevStatus: o.status, cancelReason: why, cancelledAt: nowISO(), cancelledBy: S.session.name || '' });
+  await pjTasksSet(o, ['open', 'doing'], { status: 'cancelled', cancelledByOrder: true });
+  toast(`${o.code} خرج من قائمة المشاريع — محفوظ في الأرشيف`); render(false);
+};
+ACTIONS.pjRestore = async id => {
+  const o = byId('orders', id); if (!o || !pjCanAct()) return; closeModal();
+  if (!(await confirmDlg(`استرجاع ${o.code} للتنفيذ؟`, 'استرجاع', false))) return;
+  await Store.update('orders', id, { status: o.prevStatus && !['hold', 'cancelled'].includes(o.prevStatus) ? o.prevStatus : 'new', restoredAt: nowISO(), restoredBy: S.session.name || '' });
+  for (const t of list('tasks').filter(t => t.orderId === id && t.cancelledByOrder)) await Store.update('tasks', t.id, { status: 'open', cancelledByOrder: false, updatedAt: nowISO() }, { silent: true });
+  toast(`تم استرجاع ${o.code}`); render(false);
+};
+ACTIONS.pjPurge = async id => {
+  const o = byId('orders', id); if (!o || !isAdmin() || o.status !== 'cancelled') return; closeModal();
+  if (!(await confirmDlg(`حذف ${o.code} نهائيًا؟ لا يمكن التراجع.`, 'متابعة'))) return;
+  if (!(await confirmDlg(`تأكيد أخير: حذف ${o.code} — ${o.title} نهائيًا مع مراحله ومهامه. عرض السعر والعميل يفضلوا موجودين.`, 'حذف نهائي'))) return;
+  for (const t of list('tasks').filter(t => t.orderId === id)) await Store.remove('tasks', t.id);
+  await Store.remove('orders', id); go('projects'); toast('تم الحذف النهائي');
+};
+/* the order page: «حذف» archives the order; permanent delete only from the archive (owner) */
+ACTIONS.orderDelete = (base => async function (id) {
+  const o = byId('orders', id); if (!o) return;
+  if (o.status === 'cancelled' && isAdmin()) return ACTIONS.pjPurge(id);
+  return ACTIONS.pjCancel(id);
+})(ACTIONS.orderDelete);
+ACTIONS.orderStatus = (base => async function (arg) {
+  const [id, st] = String(arg || '').split(':');
+  if (st === 'hold' && pjCanAct()) return ACTIONS.pjHold(id);
+  if (st === 'cancelled' && pjCanAct()) return ACTIONS.pjCancel(id);
+  if (st === 'production' && byId('orders', id)?.status === 'hold' && pjCanAct()) return ACTIONS.pjResume(id);
+  return base.apply(this, arguments);
+})(ACTIONS.orderStatus);
+/* paused tasks drop out of «my tasks» while the project is on hold */
+if (typeof taskVisible === 'function') taskVisible = (base => function (t) {
+  if (!base.apply(this, arguments)) return false;
+  if (t.paused && !isAdmin() && role() !== 'manager') return false;
+  return true;
+})(taskVisible);
+/* order page banner: on hold / cancelled */
+if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+  const html = base.apply(this, arguments); const o = byId('orders', id); const line = o && ORDER_STATE_LINE(o); if (!line) return html;
+  return `<div class="banner ${o.status === 'hold' ? 'warn' : 'crit'}" style="margin-bottom:12px">${icon('info')}<span>${line}</span>${pjCanAct() ? `<button class="btn sm" data-action="pjMenu" data-arg="${o.id}" style="margin-inline-start:auto">إجراءات المشروع</button>` : ''}</div>` + html;
+})(vOrderDetail);
+/* the quotation and the CRM lead stay — with the project state on them */
+const ordersOfQuote = q => list('orders').filter(o => o.quotationId === q.id || (q.orderId && o.id === q.orderId));
+const pjStateBanner = arr => arr.filter(o => ORDER_STATE_LINE(o)).map(o => `<div class="banner ${o.status === 'hold' ? 'warn' : 'crit'}" style="margin-bottom:10px">${icon('info')}<span><b>المشروع <a href="#/orders/${o.id}">${esc(o.code)}</a>:</b> ${ORDER_STATE_LINE(o)}</span></div>`).join('');
+if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function (id) { const html = base.apply(this, arguments); const q = byId('quotations', id); return q ? pjStateBanner(ordersOfQuote(q)) + html : html; })(vQuoteDetailBase);
+if (typeof vLeadDetail === 'function') vLeadDetail = (base => function (l0) { const html = base.apply(this, arguments); const l = typeof l0 === 'string' ? byId('leads', l0) : l0; if (!l || !l.clientId) return html; return pjStateBanner(list('orders').filter(o => o.clientId === l.clientId && (o.brandId || '') === (l.brandId || o.brandId || ''))) + html; })(vLeadDetail);
+Object.assign(window, { myScopeDepts, fileDeptOk, orderDeptOk, fileDeptChips });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
