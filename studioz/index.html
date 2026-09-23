@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1955-dbaa38";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-2014-d8732c";</script>
 
 <script>
 'use strict';
@@ -7068,7 +7068,8 @@ const VEH_STATUS = { active: ['جاهزة', 'good'], maintenance: ['صيانة',
 const canFleet = () => writable() && (isAdmin() || canDo('fleet'));
 const isDriver = () => role() === 'driver';
 const vehicleName = id => { const v = byId('vehicles', id); return v ? `${v.name}${v.plate ? ` (${v.plate})` : ''}` : '—'; };
-const drivers = () => sortBy(list('workers').filter(w => w.status !== 'inactive' && w.role === 'driver'), w => w.name);
+/* v4.35: مدير حركة النقل نفسه في قائمة السواقين (يقدر يطلع بالعربية بنفسه) — آخر القائمة */
+const drivers = () => sortBy(list('workers').filter(w => w.status !== 'inactive' && ['driver', 'fleet'].includes(w.role)), w => (w.role === 'fleet' ? '1' : '0') + w.name);
 const nextTripNo = () => { const y = todayISO().slice(2, 4); const n = list('trips').filter(x => (x.number || '').startsWith(`TR-${y}-`)).length + 1; return `TR-${y}-${String(n).padStart(3, '0')}`; };
 const myDriverId = () => S.session?.workerId || null;
 function fleetNeedsMe() {
@@ -14632,8 +14633,8 @@ ACTIONS.itemNewPurch = () => {
     if (list('materials').some(x => x.code && x.code === d.code)) d.code = nextItemCode(d.deptCode || 'GN', d.itemCat || 'OTH');
     const doc = Object.assign({ id: uid() }, d, { qty: 0, minQty: num(d.minQty), cost: num(d.cost), category: d.category || itemCatLabel(d.itemCat), createdAt: nowISO(), createdByName: S.session?.name || '' });
     await Store.save('materials', doc);
-    const saved = byId('materials', doc.id) || doc; await nfNewItemNotify(saved, deptIdOfCode(saved.deptCode), `أضافه ${S.session?.name || 'المشتريات'} من صفحة المشتريات — رصيده صفر لحد الاستلام.`);
-    toast(`تم تكويد الصنف ${saved.code} وإضافته للمخزن`); return true;
+    const saved = byId('materials', doc.id) || doc; await nfItemTechAsk(saved, deptIdOfCode(saved.deptCode), 'من صفحة المشتريات');
+    toast(`تم تكويد الصنف ${saved.code} — بانتظار الاعتماد الفني لرئيس القسم`); return true;
   } });
 };
 vPurchases = (base => () => {
@@ -14666,13 +14667,13 @@ wirePoForm = (base => function (f) {
         const sid = (f.querySelector('[name="supplierId"]') || {}).value || ''; const sname = sid ? (byId('suppliers', sid) || {}).name || '' : ((f.querySelector('[name="supplier"]') || {}).value || '').trim();
         const sup = sid ? byId('suppliers', sid) : list('suppliers').find(s => (s.name || '').trim() === sname);
         const m = { id: uid(), code: nextItemCode(dc, cat), name, unit: f.querySelector('#ni-unit').value || 'قطعة', qty: 0, minQty: 0, cost: price || 0, deptCode: dc, itemCat: cat, category: itemCatLabel(cat), photo: null, supplier: sup ? sup.name : sname, suppliers: sup ? [{ supplierId: sup.id, price: price || null, at: todayISO() }] : [], createdAt: nowISO(), createdByName: S.session?.name || '' };
-        await Store.save('materials', m, { silent: true }); await nfNewItemNotify(m, deptIdOfCode(dc), `أضافه ${S.session?.name || 'المشتريات'} من جوه أمر شراء — رصيده صفر لحد الاستلام.`);
+        await Store.save('materials', m, { silent: true }); await nfItemTechAsk(m, deptIdOfCode(dc), 'من جوه أمر شراء');
         $$('#lines [name=l-mat]', f).forEach(s => { const v = s.value; s.innerHTML = matOptions(v); s.value = v; });
         let line = $$('#lines .line', f).find(l => !l.querySelector('[name=l-mat]').value || !num(l.querySelector('[name=l-qty]').value));
         if (!line) { f.querySelector('#lines').insertAdjacentHTML('beforeend', poLineRows([{}])); line = $$('#lines .line', f).pop(); line.querySelector('[name=l-mat]').innerHTML = matOptions(m.id); }
         line.querySelector('[name=l-mat]').value = m.id; if (price) line.querySelector('[name=l-cost]').value = price; line.querySelector('[name=l-mat]').dispatchEvent(new Event('change', { bubbles: true }));
         box.hidden = true; f.querySelector('#ni-name').value = ''; f.querySelector('#ni-price').value = ''; const q = line.querySelector('[name=l-qty]'); if (q) q.focus();
-        toast(`اتكوّد ${m.code} واتضاف للأمر — اكتب الكمية`);
+        toast(`اتكوّد ${m.code} واتضاف للأمر — اكتب الكمية (الأمر ميتبعتش قبل الاعتماد الفني لرئيس القسم)`);
       });
     }
   } catch (e) { console.warn('nibox', e); }
@@ -14817,6 +14818,75 @@ vTripDetail = (base => id => {
   const i = html.indexOf('<div class="card">'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
 })(vTripDetail);
 Object.assign(window, { nfPlaces, geoCall });
+/* =====================================================================
+   v4.35 — (1) مسؤول المشتريات لا يعمل حركة مخزون ولا يسجّل استلام في المخزن — ده شغل أمين المخزن
+           (والاستلام بيعتمده رئيس القسم فنيًا زي ما هو).
+           (2) أي صنف جديد يتكوّد من المشتريات (زرار «صنف جديد» في صفحة المشتريات، أو جوه أمر الشراء)
+           ماكانش متكوّد ولا اتشغل قبل كده ← «اعتماد فني» من رئيس القسم بتاع الصنف (مطابقة المواصفات)
+           قبل ما أي أمر شراء فيه يتبعت للاعتماد. بعد الموافقة: إشعار لأمين المخزن والمشتريات.
+           الرفض: الصنف يتوقف (مايظهرش في أوامر شراء جديدة) والمشتريات تتبلغ بالسبب.
+           (طلب عرض السعر للخامة الجديدة عنده اعتماد فني بالفعل — مش محتاج ده.)
+   ===================================================================== */
+/* iPhone: date/time boxes were wider than the form (Safari's intrinsic min-width) and stuck out on the left */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>input[type=date],input[type=time],input[type=datetime-local]{min-width:0;max-width:100%;box-sizing:border-box;-webkit-appearance:none;appearance:none}.field{min-width:0}</style>`);
+canDo = (base => (act, ctx) => { if (role() === 'purch' && ['inventory.edit', 'receive'].includes(act)) return false; return base(act, ctx); })(canDo);
+REQ_TYPES.itemtech = 'اعتماد فني لصنف جديد (مطابقة المواصفات)'; DEFAULT_CHAINS.itemtech = ['head'];
+const itemTechPending = m => !!(m && m.techPending && m.techPending.status === 'pending');
+const itemTechRejected = m => !!(m && m.techPending && m.techPending.status === 'rejected');
+async function nfItemTechAsk(m, deptId, where) {
+  const me = S.session || {}; const d = deptId && S.settings.departments.find(x => x.id === deptId);
+  const hasHead = !!(d && !d.admin && typeof deptHeads === 'function' && deptHeads(d.id).length);
+  const chain = hasHead ? ['head'] : ['manager'];
+  const r = { id: uid(), type: 'itemtech', materialId: m.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: hasHead ? d.id : null, reason: `${m.code} — ${m.name}${m.unit ? ` (${m.unit})` : ''}${m.supplier ? ` · المورد: ${m.supplier}` : ''} — صنف جديد ${where || ''} من ${me.name || 'المشتريات'}: هل ده الصنف المطلوب ومطابق للمواصفات؟`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain, step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: 'صنف جديد متكوّد من المشتريات — مستني الاعتماد الفني' }] };
+  await Store.save('requests', r, { silent: true });
+  await Store.update('materials', m.id, { techPending: { status: 'pending', reqId: r.id, deptId: r.deptId, at: nowISO(), byName: me.name || '' } }, { silent: true });
+  const t = `اعتماد فني لصنف جديد — ${m.code}`, body = `${m.name}${m.supplier ? ` — المورد: ${m.supplier}` : ''}\nالمشتريات كوّدت صنف جديد ماتشغلش قبل كده. راجع إنه مطابق للمواصفات واعتمده أو ارفضه من «الطلبات».`;
+  if (hasHead) await notifyRole('head', t, body, { id: `itemtech_${m.id}`, priority: 'high', fields: { deptId: d.id } });
+  else await notifyRole('manager', t, body, { id: `itemtech_${m.id}`, priority: 'high' });
+  return r;
+}
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r.type !== 'itemtech') return base(r, w, patch, opts);
+  const m = byId('materials', r.materialId); if (!m) return; const by = S.session?.name || '';
+  await Store.update('materials', m.id, { techPending: Object.assign({}, m.techPending || {}, { status: 'approved', approvedAt: nowISO(), approvedByName: by }) });
+  await nfNewItemNotify(Object.assign({}, m), null, `اعتمده فنيًا ${by} — رصيده صفر لحد الاستلام.`);
+  await notifyRole('purch', `اتعتمد الصنف ${m.code} فنيًا`, `${m.name} — تقدر تبعت أوامر الشراء اللي فيه للاعتماد.`, { id: `itemtech_ok_${m.id}` });
+})(applyRequestEffects);
+decideRequest = (base => async (id, status, note, opts = {}) => {
+  const ok = await base(id, status, note, opts); if (ok === false) return ok; const r = byId('requests', id);
+  if (r && r.type === 'itemtech' && r.status === 'rejected') { const m = byId('materials', r.materialId); if (m) { await Store.update('materials', m.id, { techPending: Object.assign({}, m.techPending || {}, { status: 'rejected', note: note || '', at: nowISO(), byName: S.session?.name || '' }), inactive: true }); await notifyRole('purch', `رئيس القسم رفض الصنف ${m.code}`, `${m.name}: ${note || 'غير مطابق للمواصفات'}\nدوّر على صنف/مورد تاني وشيله من أي أمر شراء.`, { id: `itemtech_no_${m.id}`, priority: 'high' }); } }
+  return ok;
+})(decideRequest);
+/* a purchase order with an item still waiting for (or refused) technical approval can't go for approval */
+(() => { const base = ACTIONS.poSubmit; ACTIONS.poSubmit = async id => {
+  const p = byId('purchases', id); const bad = p ? (p.items || []).map(it => byId('materials', it.materialId)).filter(m => itemTechPending(m) || itemTechRejected(m)) : [];
+  if (bad.length) { toast(`لازم الاعتماد الفني لرئيس القسم الأول: ${bad.map(m => `${m.code}${itemTechRejected(m) ? ' (مرفوض)' : ''}`).join('، ')}`, 'err'); return; }
+  return base(id);
+}; })();
+/* show the state on the purchase-order page and in the store */
+vPurchaseDetail = (base => id => {
+  let html = base(id); const p = byId('purchases', id); if (!p) return html;
+  const ms = (p.items || []).map(it => byId('materials', it.materialId)).filter(m => itemTechPending(m) || itemTechRejected(m)); if (!ms.length) return html;
+  const card = `<div class="card"><div class="banner warn" style="margin:0">${icon('alert')}<span>أصناف جديدة محتاجة الاعتماد الفني لرئيس القسم قبل إرسال الأمر: ${ms.map(m => `<b>${esc(m.code)}</b> ${esc(m.name)} — ${itemTechRejected(m) ? `مرفوض${m.techPending.note ? `: ${esc(m.techPending.note)}` : ''}` : 'بانتظار الاعتماد'}`).join(' · ')}</span></div></div>`;
+  const i = html.indexOf('<div class="card'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+})(vPurchaseDetail);
+vInventory = (base => () => { let html = base(); try { list('materials').forEach(m => { if (!itemTechPending(m) && !itemTechRejected(m)) return; html = html.replace(`<td class="code ltr">${esc(m.code || '')}`, `<td class="code ltr">${esc(m.code || '')}<div class="custody" style="color:var(--warn-ink,#9a7a3a)">${itemTechRejected(m) ? 'مرفوض فنيًا' : 'بانتظار الاعتماد الفني'}</div>`); }); } catch (e) { /* ignore */ } return html; })(vInventory);
+/* refused items don't appear when picking lines for new orders */
+matOptions = (base => function (sel) { const h = base.apply(this, arguments); try { let out = h; list('materials').filter(m => itemTechRejected(m) && m.id !== sel).forEach(m => { out = out.replace(new RegExp(`<option value="${m.id}"[^>]*>[^<]*</option>`), ''); }); return out; } catch (e) { return h; } })(matOptions);
+/* the old «تكويد صنف جديد» button on a purchase order goes through the same approval */
+(() => { const base = ACTIONS.itemNewFromPo; if (!base) return; ACTIONS.itemNewFromPo = id => {
+  const p = byId('purchases', id); if (!p || !(canDo('purchases') || isAdmin() || role() === 'manager')) return; const s = supplierOf(p);
+  const m0 = { deptCode: deptCode(p.deptId || 'store'), suppliers: s ? [{ supplierId: s.id }] : [] };
+  openModal({ title: 'تكويد صنف جديد', wide: true, body: materialForm(m0), onSubmit: async f => {
+    const d = formData(f); if (!d.name) { toast('اكتب اسم الصنف', 'err'); return false; }
+    if (list('materials').some(x => x.code && x.code === d.code)) d.code = nextItemCode(d.deptCode || 'GN', d.itemCat || 'OTH');
+    const doc = Object.assign({ id: uid() }, d, { qty: 0, minQty: num(d.minQty), cost: num(d.cost), createdAt: nowISO(), createdByName: S.session?.name || '' });
+    await Store.save('materials', doc); const saved = byId('materials', doc.id) || doc;
+    await nfItemTechAsk(saved, deptIdOfCode(saved.deptCode) || p.deptId || null, `لأمر الشراء ${p.number}`);
+    toast(`تم تكويد الصنف ${saved.code} — بانتظار الاعتماد الفني لرئيس القسم`); return true;
+  } });
+}; })();
+Object.assign(window, { nfItemTechAsk });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
