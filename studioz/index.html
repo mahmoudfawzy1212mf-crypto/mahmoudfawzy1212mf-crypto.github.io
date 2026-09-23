@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0736-50a392";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0827-b4990e";</script>
 
 <script>
 'use strict';
@@ -13252,7 +13252,7 @@ function nameEnChip() {
   if (typeof I18N === 'undefined' || I18N.lang !== 'en') return;
   const txt = a => Array.from(a.childNodes).find(n => n.nodeType === 3 && n.nodeValue.trim());
   // a one-letter Arabic initial in any avatar circle is a name, not a word: keep it out of the translator
-  document.querySelectorAll('#root .avatar').forEach(a => { if (a.querySelector('img') || a.classList.contains('notr')) return; const t = txt(a); if (t && t.nodeValue.trim().length === 1 && /[\u0600-\u06FF]/.test(t.nodeValue)) a.classList.add('notr'); });
+  document.querySelectorAll('#root .avatar').forEach(a => { if (a.querySelector('img')) return; const t = txt(a); if (t && t.nodeValue.trim().length === 1 && /[\u0600-\u06FF]/.test(t.nodeValue)) { const l = typeof nfTrWord === 'function' ? nfTrWord(t.nodeValue.trim()).charAt(0).toUpperCase() : ''; if (l) t.nodeValue = l; else a.classList.add('notr'); } });
   const en = myNameEn(); if (!en) return;
   document.querySelectorAll('#root .userchip .avatar, #root .me-avatar .avatar').forEach(a => { if (a.querySelector('img')) return; const t = txt(a); if (t) t.nodeValue = en.charAt(0).toUpperCase(); });
 }
@@ -13554,6 +13554,140 @@ function i18nMirrorCSS() {
   if (saved === 'en') { I18N.lang = 'en'; i18nDir(); i18nObserve(); I18N.bootReady = i18nLoad().then(ok => { if (ok) i18nApply(); else { I18N.lang = 'ar'; i18nDir(); } }); }
 })();
 Object.assign(window, { I18N, i18nTr, i18nSet, i18nApply, i18nLang, i18nLoad });
+/* =====================================================================
+   v4.22 — كتابة الأسماء العربية بالحروف اللاتينية تلقائيًا في النسخة الإنجليزية
+   قاموس الأسماء المصرية الشائعة بكتابتها المعتادة + قواعد نطق لأي اسم غير موجود؛ «الاسم بالإنجليزي» في الملف يتقدم على الاثنين.
+   ===================================================================== */
+const NF_NAMES = {
+  'محمد': 'Mohamed', 'أحمد': 'Ahmed', 'احمد': 'Ahmed', 'محمود': 'Mahmoud', 'مصطفى': 'Mostafa', 'مصطفي': 'Mostafa', 'إبراهيم': 'Ibrahim', 'ابراهيم': 'Ibrahim', 'عبدالله': 'Abdullah', 'عبد الله': 'Abdullah', 'عبدالرحمن': 'Abdelrahman', 'عبد الرحمن': 'Abdelrahman',
+  'عبدالعزيز': 'Abdelaziz', 'عبد العزيز': 'Abdelaziz', 'عبدالحميد': 'Abdelhamid', 'عبد الحميد': 'Abdelhamid', 'عبدالفتاح': 'Abdelfattah', 'عبد الفتاح': 'Abdelfattah', 'عبدالمنعم': 'Abdelmoneim', 'عبد المنعم': 'Abdelmoneim', 'عبدالناصر': 'Abdelnasser', 'عبد الناصر': 'Abdelnasser',
+  'عبدالسلام': 'Abdelsalam', 'عبد السلام': 'Abdelsalam', 'عبدالعال': 'Abdelaal', 'عبد العال': 'Abdelaal', 'عبدالمجيد': 'Abdelmegid', 'عبد المجيد': 'Abdelmegid', 'عبدالوهاب': 'Abdelwahab', 'عبد الوهاب': 'Abdelwahab', 'عبدالرازق': 'Abdelrazek', 'عبد الرازق': 'Abdelrazek',
+  'عبدالحكيم': 'Abdelhakim', 'عبد الحكيم': 'Abdelhakim', 'عبدالغني': 'Abdelghany', 'عبد الغني': 'Abdelghany', 'عبدالباسط': 'Abdelbaset', 'عبد الباسط': 'Abdelbaset', 'عبدالقادر': 'Abdelkader', 'عبد القادر': 'Abdelkader', 'عبدالرحيم': 'Abdelrehim', 'عبد الرحيم': 'Abdelrehim',
+  'عبدالمقصود': 'Abdelmaksoud', 'عبد المقصود': 'Abdelmaksoud', 'عبدالموجود': 'Abdelmawgoud', 'عبد الموجود': 'Abdelmawgoud', 'عبدالمولى': 'Abdelmawla', 'عبد المولى': 'Abdelmawla', 'عبدالصمد': 'Abdelsamad', 'عبد الصمد': 'Abdelsamad', 'عبدالكريم': 'Abdelkarim', 'عبد الكريم': 'Abdelkarim',
+  'عبداللطيف': 'Abdellatif', 'عبد اللطيف': 'Abdellatif', 'عبدالهادي': 'Abdelhady', 'عبد الهادي': 'Abdelhady', 'عبدالستار': 'Abdelsattar', 'عبد الستار': 'Abdelsattar', 'عبدالعليم': 'Abdelalim', 'عبد العليم': 'Abdelalim', 'عبدالظاهر': 'Abdelzaher', 'عبد الظاهر': 'Abdelzaher',
+  'علي': 'Ali', 'على': 'Ali', 'عمر': 'Omar', 'عمرو': 'Amr', 'عماد': 'Emad', 'عادل': 'Adel', 'عاطف': 'Atef', 'عصام': 'Essam', 'عزت': 'Ezzat', 'عيد': 'Eid', 'عبده': 'Abdo', 'عوض': 'Awad', 'علاء': 'Alaa', 'عزيز': 'Aziz', 'عثمان': 'Osman', 'عاصم': 'Assem', 'عامر': 'Amer', 'عزام': 'Azzam', 'عربي': 'Araby', 'عطية': 'Attia', 'عطا': 'Atta', 'عيسى': 'Eissa', 'عمار': 'Ammar', 'عاشور': 'Ashour', 'عرفة': 'Arafa', 'عرفات': 'Arafat', 'عشري': 'Ashry',
+  'سعيد': 'Said', 'سعد': 'Saad', 'سامي': 'Samy', 'سامح': 'Sameh', 'سمير': 'Samir', 'سيد': 'Sayed', 'سليمان': 'Soliman', 'سالم': 'Salem', 'سلامة': 'Salama', 'سلام': 'Salam', 'سلطان': 'Sultan', 'سيف': 'Seif', 'سراج': 'Serag', 'سعدي': 'Saady', 'سابق': 'Sabek', 'سلمان': 'Salman',
+  'رضا': 'Reda', 'رامي': 'Ramy', 'رمضان': 'Ramadan', 'رجب': 'Ragab', 'رفعت': 'Refaat', 'رأفت': 'Raafat', 'رافت': 'Raafat', 'رشاد': 'Rashad', 'رشدي': 'Roshdy', 'رزق': 'Rizk', 'رياض': 'Riad', 'راضي': 'Rady', 'ربيع': 'Rabie', 'راشد': 'Rashed', 'رمزي': 'Ramzy', 'رائد': 'Raed', 'رؤوف': 'Raouf', 'رحيم': 'Rehim',
+  'خالد': 'Khaled', 'خليل': 'Khalil', 'خيري': 'Khairy', 'خميس': 'Khamis', 'خضر': 'Khedr', 'خطاب': 'Khattab',
+  'حسن': 'Hassan', 'حسين': 'Hussein', 'حسام': 'Hossam', 'حمدي': 'Hamdy', 'حمادة': 'Hamada', 'حماده': 'Hamada', 'حازم': 'Hazem', 'حاتم': 'Hatem', 'حمزة': 'Hamza', 'حمزه': 'Hamza', 'حلمي': 'Helmy', 'حافظ': 'Hafez', 'حسني': 'Hosny', 'حمدان': 'Hamdan', 'حجازي': 'Hegazy', 'حبيب': 'Habib', 'حنفي': 'Hanafy', 'حمد': 'Hamed', 'حامد': 'Hamed', 'حسانين': 'Hassanein', 'حجاج': 'Haggag',
+  'يوسف': 'Youssef', 'يحيى': 'Yehia', 'يحيي': 'Yehia', 'ياسر': 'Yasser', 'ياسين': 'Yassin', 'يونس': 'Younis',
+  'طارق': 'Tarek', 'طه': 'Taha', 'طلعت': 'Talaat', 'طلال': 'Talal',
+  'كريم': 'Karim', 'كمال': 'Kamal', 'كامل': 'Kamel', 'كرم': 'Karam',
+  'ماجد': 'Maged', 'مجدي': 'Magdy', 'مدحت': 'Medhat', 'مراد': 'Mourad', 'مروان': 'Marwan', 'ممدوح': 'Mamdouh', 'منير': 'Mounir', 'منصور': 'Mansour', 'مختار': 'Mokhtar', 'معتز': 'Moataz', 'مؤمن': 'Moamen', 'مومن': 'Moamen', 'مهند': 'Mohannad', 'مينا': 'Mina', 'مرزوق': 'Marzouk', 'مسعد': 'Mosaad', 'ميلاد': 'Milad', 'مكرم': 'Makram', 'مازن': 'Mazen', 'مرسي': 'Morsy', 'متولي': 'Metwally', 'محسن': 'Mohsen', 'ماهر': 'Maher', 'مبروك': 'Mabrouk', 'مندور': 'Mandour', 'مرعي': 'Marei', 'مهدي': 'Mahdy', 'مسلم': 'Moslem',
+  'نادر': 'Nader', 'ناصر': 'Nasser', 'نبيل': 'Nabil', 'نور': 'Nour', 'نور الدين': 'Noureldin', 'نورالدين': 'Noureldin', 'نجيب': 'Naguib', 'ناجي': 'Nagy', 'نصر': 'Nasr', 'نعيم': 'Naeem', 'نشأت': 'Nashaat',
+  'هاني': 'Hany', 'هشام': 'Hesham', 'هيثم': 'Haitham', 'هلال': 'Helal', 'هاشم': 'Hashem', 'همام': 'Homam',
+  'وليد': 'Walid', 'وائل': 'Wael', 'وجدي': 'Wagdy', 'وحيد': 'Wahid', 'وجيه': 'Wagih',
+  'فتحي': 'Fathy', 'فوزي': 'Fawzy', 'فؤاد': 'Fouad', 'فواد': 'Fouad', 'فارس': 'Fares', 'فايز': 'Fayez', 'فاروق': 'Farouk', 'فرج': 'Farag', 'فهمي': 'Fahmy', 'فكري': 'Fekry', 'فادي': 'Fady', 'فراج': 'Farrag', 'فريد': 'Farid', 'فيصل': 'Faisal',
+  'جمال': 'Gamal', 'جابر': 'Gaber', 'جلال': 'Galal', 'جميل': 'Gamil', 'جاد': 'Gad', 'جرجس': 'Gerges', 'جورج': 'George', 'جوزيف': 'Joseph',
+  'صلاح': 'Salah', 'صابر': 'Saber', 'صبحي': 'Sobhy', 'صادق': 'Sadek', 'صفوت': 'Safwat', 'صلاح الدين': 'Salaheldin', 'صبري': 'Sabry',
+  'شريف': 'Sherif', 'شعبان': 'Shaaban', 'شوقي': 'Shawky', 'شادي': 'Shady', 'شحاتة': 'Shehata', 'شحاته': 'Shehata', 'شاكر': 'Shaker', 'شهاب': 'Shehab', 'شكري': 'Shokry', 'شرف': 'Sharaf',
+  'أسامة': 'Osama', 'اسامة': 'Osama', 'أسامه': 'Osama', 'اسامه': 'Osama', 'أشرف': 'Ashraf', 'اشرف': 'Ashraf', 'أيمن': 'Ayman', 'ايمن': 'Ayman', 'أمير': 'Amir', 'امير': 'Amir', 'أمين': 'Amin', 'امين': 'Amin', 'أنور': 'Anwar', 'انور': 'Anwar', 'أنس': 'Anas', 'انس': 'Anas', 'أدهم': 'Adham', 'ادهم': 'Adham', 'إسلام': 'Islam', 'اسلام': 'Islam', 'إسماعيل': 'Ismail', 'اسماعيل': 'Ismail', 'إيهاب': 'Ehab', 'ايهاب': 'Ehab', 'أكرم': 'Akram', 'اكرم': 'Akram', 'أمجد': 'Amgad', 'امجد': 'Amgad', 'إيمان': 'Eman', 'ايمان': 'Eman', 'آدم': 'Adam', 'ادم': 'Adam', 'أبو': 'Abu', 'ابو': 'Abu', 'أبانوب': 'Abanoub', 'ابانوب': 'Abanoub', 'إمام': 'Emam', 'امام': 'Emam', 'أسعد': 'Asaad', 'اسعد': 'Asaad',
+  'بهاء': 'Bahaa', 'بلال': 'Belal', 'باسم': 'Bassem', 'بسام': 'Bassam', 'بدر': 'Badr', 'بدوي': 'Badawy', 'بشير': 'Bashir', 'بيشوي': 'Bishoy', 'بولس': 'Boulos', 'بكر': 'Bakr', 'بركات': 'Barakat',
+  'تامر': 'Tamer', 'توفيق': 'Tawfik', 'ثروت': 'Tharwat', 'تيسير': 'Tayseer',
+  'زكريا': 'Zakaria', 'زياد': 'Ziad', 'زكي': 'Zaki', 'زغلول': 'Zaghloul', 'زايد': 'Zayed',
+  'ضياء': 'Diaa', 'ضياء الدين': 'Diaaeldin',
+  'لطفي': 'Lotfy', 'لبيب': 'Labib', 'لؤي': 'Loay',
+  'قاسم': 'Kassem', 'قدري': 'Kadry',
+  'غريب': 'Ghareeb', 'غانم': 'Ghanem', 'غالي': 'Ghaly',
+  'ذكي': 'Zaki', 'ظريف': 'Zarif',
+  'داود': 'Dawoud', 'داوود': 'Dawoud', 'دياب': 'Diab', 'درويش': 'Darwish',
+  'إلهامي': 'Elhamy', 'الهامي': 'Elhamy',
+  /* female */
+  'فاطمة': 'Fatma', 'فاطمه': 'Fatma', 'مريم': 'Mariam', 'منى': 'Mona', 'مني': 'Mona', 'مها': 'Maha', 'مي': 'Mai', 'ميادة': 'Mayada', 'مروة': 'Marwa', 'مروه': 'Marwa', 'منال': 'Manal', 'مرام': 'Maram', 'ملك': 'Malak', 'منة': 'Menna', 'منه': 'Menna', 'منة الله': 'Mennatullah', 'منه الله': 'Mennatullah',
+  'نهى': 'Noha', 'نهي': 'Noha', 'ندى': 'Nada', 'ندي': 'Nada', 'نورا': 'Nora', 'نورهان': 'Nourhan', 'نيرة': 'Naira', 'نيره': 'Naira', 'نجلاء': 'Naglaa', 'نادية': 'Nadia', 'ناديه': 'Nadia', 'نسرين': 'Nesrine', 'نانسي': 'Nancy', 'نرمين': 'Nermin', 'نهال': 'Nehal', 'نيفين': 'Neveen',
+  'هبة': 'Heba', 'هبه': 'Heba', 'هدى': 'Hoda', 'هدي': 'Hoda', 'هند': 'Hend', 'هالة': 'Hala', 'هاله': 'Hala', 'هاجر': 'Hagar', 'هنا': 'Hana', 'هايدي': 'Heidi', 'هدير': 'Hadeer', 'هناء': 'Hanaa',
+  'سارة': 'Sara', 'ساره': 'Sara', 'سلمى': 'Salma', 'سلمي': 'Salma', 'سمر': 'Samar', 'سحر': 'Sahar', 'سناء': 'Sanaa', 'سهام': 'Seham', 'سهير': 'Soheir', 'سمية': 'Somaya', 'سميه': 'Somaya', 'سعاد': 'Souad', 'سوسن': 'Sawsan', 'شيماء': 'Shaimaa', 'شيرين': 'Sherine', 'شروق': 'Shorouk', 'شهد': 'Shahd',
+  'رنا': 'Rana', 'رانيا': 'Rania', 'رحاب': 'Rehab', 'رشا': 'Rasha', 'ريهام': 'Reham', 'ريم': 'Reem', 'رضوى': 'Radwa', 'رضوي': 'Radwa', 'روان': 'Rawan', 'رقية': 'Rokaya', 'رقيه': 'Rokaya', 'رنيم': 'Ranim', 'رحمة': 'Rahma', 'رحمه': 'Rahma',
+  'أمل': 'Amal', 'امل': 'Amal', 'أميرة': 'Amira', 'اميرة': 'Amira', 'أميره': 'Amira', 'اميره': 'Amira', 'أسماء': 'Asmaa', 'اسماء': 'Asmaa', 'آية': 'Aya', 'اية': 'Aya', 'آيه': 'Aya', 'ايه': 'Aya', 'آلاء': 'Alaa', 'الاء': 'Alaa', 'إسراء': 'Esraa', 'اسراء': 'Esraa', 'أمنية': 'Omnia', 'امنية': 'Omnia', 'أمانى': 'Amany', 'أماني': 'Amany', 'اماني': 'Amany', 'إنجي': 'Engy', 'انجي': 'Engy', 'أميمة': 'Omaima', 'اميمة': 'Omaima', 'أروى': 'Arwa', 'اروى': 'Arwa', 'أية': 'Aya',
+  'دينا': 'Dina', 'داليا': 'Dalia', 'دعاء': 'Doaa', 'دنيا': 'Donia', 'ديانا': 'Diana',
+  'ياسمين': 'Yasmin', 'يارا': 'Yara', 'يسرا': 'Yosra', 'يسرية': 'Yosreya',
+  'غادة': 'Ghada', 'غاده': 'Ghada', 'عبير': 'Abeer', 'عزة': 'Azza', 'عزه': 'Azza', 'عفاف': 'Afaf', 'علياء': 'Alyaa', 'عائشة': 'Aisha', 'عائشه': 'Aisha', 'عايدة': 'Aida', 'عايده': 'Aida',
+  'كريمة': 'Karima', 'كريمه': 'Karima', 'كوثر': 'Kawthar', 'لمياء': 'Lamiaa', 'لبنى': 'Lobna', 'لبني': 'Lobna', 'ليلى': 'Laila', 'ليلي': 'Laila', 'لينا': 'Lina', 'لميس': 'Lamis',
+  'زينب': 'Zeinab', 'زهرة': 'Zahra', 'زهره': 'Zahra', 'خديجة': 'Khadija', 'خديجه': 'Khadija', 'جيهان': 'Gihan', 'جميلة': 'Gamila', 'جميله': 'Gamila', 'جنى': 'Jana', 'جني': 'Jana', 'جنة': 'Janna', 'جنه': 'Janna', 'جهاد': 'Gehad',
+  'تسنيم': 'Tasneem', 'تقى': 'Toqa', 'تقي': 'Toqa', 'حبيبة': 'Habiba', 'حبيبه': 'Habiba', 'حنان': 'Hanan', 'حسناء': 'Hasnaa', 'صفاء': 'Safaa', 'صباح': 'Sabah', 'وفاء': 'Wafaa', 'ولاء': 'Walaa', 'وسام': 'Wesam', 'فريدة': 'Farida', 'فريده': 'Farida', 'فرح': 'Farah', 'فدوى': 'Fadwa', 'ثريا': 'Thoraya', 'بسمة': 'Basma', 'بسمه': 'Basma', 'بسنت': 'Bassant', 'بشرى': 'Boshra', 'بشري': 'Boshra', 'إيناس': 'Enas', 'ايناس': 'Enas', 'إيمي': 'Emy', 'مارينا': 'Marina', 'مادونا': 'Madonna', 'مارتينا': 'Martina', 'كيرلس': 'Kirollos', 'كيرولس': 'Kirollos', 'ماريو': 'Mario', 'مايكل': 'Michael', 'بيتر': 'Peter', 'أندرو': 'Andrew', 'اندرو': 'Andrew', 'توماس': 'Thomas', 'فيبي': 'Phoebe', 'فيرونيا': 'Veronia', 'كريستينا': 'Christina', 'مرقس': 'Morkos', 'أنطون': 'Anton', 'انطون': 'Anton', 'رومانى': 'Romany', 'روماني': 'Romany',
+  /* common family names and particles */
+  'الشربجي': 'El Sherbagy', 'البحيري': 'El Beheiry', 'الدسوقي': 'El Desouky', 'السيد': 'El Sayed', 'الشيخ': 'El Sheikh', 'الجندي': 'El Gendy', 'المصري': 'El Masry', 'الشافعي': 'El Shafei', 'النجار': 'El Naggar', 'الحداد': 'El Haddad', 'الخولي': 'El Khouly', 'الطحان': 'El Tahan', 'العربي': 'El Araby', 'الفقي': 'El Feky', 'الغزالي': 'El Ghazaly', 'الزيات': 'El Zayat', 'الخطيب': 'El Khatib', 'الصاوي': 'El Sawy', 'القاضي': 'El Kady', 'الهواري': 'El Hawary', 'العزب': 'El Azab', 'البنا': 'El Banna', 'الجمل': 'El Gamal', 'الحسيني': 'El Husseiny', 'الدين': 'Eldin', 'الشناوي': 'El Shenawy', 'المهدي': 'El Mahdy', 'البدري': 'El Badry', 'الطويل': 'El Taweel', 'السعيد': 'El Saeed', 'العدوي': 'El Adawy', 'الشرقاوي': 'El Sharkawy', 'العشري': 'El Ashry', 'الباز': 'El Baz', 'الليثي': 'El Leithy', 'الديب': 'El Deeb', 'الصياد': 'El Sayad', 'المنشاوي': 'El Menshawy', 'السباعي': 'El Sebaey', 'الرفاعي': 'El Refaey', 'الجزار': 'El Gazzar', 'الخياط': 'El Khayat', 'النحاس': 'El Nahas', 'الحلواني': 'El Halawany', 'الشامي': 'El Shamy',
+  'أبو زيد': 'Abouzeid', 'ابو زيد': 'Abouzeid', 'أبوزيد': 'Abouzeid', 'ابوزيد': 'Abouzeid', 'أبو العلا': 'Aboul Ela', 'ابو العلا': 'Aboul Ela', 'أبو المجد': 'Aboul Magd', 'ابو المجد': 'Aboul Magd', 'أبو الفتوح': 'Aboul Fotouh', 'ابو الفتوح': 'Aboul Fotouh', 'أبو بكر': 'Abu Bakr', 'ابو بكر': 'Abu Bakr', 'أبو سريع': 'Abu Serie', 'ابو سريع': 'Abu Serie', 'أبو طالب': 'Abu Taleb', 'ابو طالب': 'Abu Taleb',
+  'الله': 'Allah', 'بسيوني': 'Bassiouny', 'عبد النبي': 'Abdelnabi', 'عبدالنبي': 'Abdelnabi', 'الشاذلي': 'El Shazly', 'الغندور': 'El Ghandour', 'العطار': 'El Attar', 'السمان': 'El Samman', 'الملاح': 'El Mallah', 'الجارحي': 'El Garhy', 'البسيوني': 'El Bassiouny', 'الحفناوي': 'El Hefnawy', 'الدمرداش': 'El Demerdash', 'الوكيل': 'El Wakil', 'النمر': 'El Nemr', 'الفار': 'El Far', 'الخضري': 'El Khodary', 'الصباغ': 'El Sabbagh', 'القصبي': 'El Kasaby', 'المليجي': 'El Meligy', 'السنباطي': 'El Sonbaty', 'السقا': 'El Sakka', 'الحناوي': 'El Henawy', 'الهلالي': 'El Helaly', 'الدالي': 'El Daly', 'الكردي': 'El Kurdy', 'النقيب': 'El Nakib', 'الأنصاري': 'El Ansary', 'الانصاري': 'El Ansary', 'الجوهري': 'El Gohary', 'مبارك': 'Mubarak',  'محمدين': 'Mohamedein', 'حسنين': 'Hassanein', 'قنديل': 'Kandil', 'شلبي': 'Shalaby', 'نصار': 'Nassar', 'عيسي': 'Eissa', 'موسى': 'Moussa', 'موسي': 'Moussa', 'هارون': 'Haroun', 'يعقوب': 'Yacoub', 'إسحق': 'Ishak', 'اسحق': 'Ishak', 'مرقص': 'Morkos', 'بطرس': 'Botros', 'سليم': 'Selim', 'صقر': 'Sakr', 'نمر': 'Nemr', 'شاهين': 'Shahin', 'غنيم': 'Ghoneim', 'سرور': 'Sorour', 'سويلم': 'Sewilam', 'مطر': 'Matar', 'عبيد': 'Obeid', 'عفيفي': 'Afifi', 'عمران': 'Emran', 'عبد': 'Abd', 'ريان': 'Rayan', 'طنطاوي': 'Tantawy', 'زهران': 'Zahran', 'سلامه': 'Salama', 'بخيت': 'Bekhit', 'رمزى': 'Ramzy', 'هيكل': 'Heikal', 'حمودة': 'Hammouda', 'حموده': 'Hammouda', 'عوض الله': 'Awadallah', 'جاد الله': 'Gadallah', 'خير الله': 'Khairallah', 'فتح الله': 'Fathallah', 'نصر الله': 'Nasrallah', 'سعد الدين': 'Saadeldin', 'علاء الدين': 'Alaaeldin', 'عز الدين': 'Ezzeldin', 'محي الدين': 'Mohieldin', 'شمس الدين': 'Shamseldin', 'كمال الدين': 'Kamaleldin', 'نجم الدين': 'Nagmeldin', 'تاج الدين': 'Tageldin', 'سيف الدين': 'Seifeldin', 'بدر الدين': 'Badreldin', 'جمال الدين': 'Gamaleldin', 'عماد الدين': 'Emadeldin', 'حسام الدين': 'Hossameldin', 'زين الدين': 'Zeineldin', 'زين': 'Zein', 'زين العابدين': 'Zeinelabidin',
+};
+const NF_WORDS = { 'شركة': 'Co.', 'شركه': 'Co.', 'مكتب': 'Office', 'مجموعة': 'Group', 'مجموعه': 'Group', 'مؤسسة': 'Est.', 'مؤسسه': 'Est.', 'كمبوند': 'Compound', 'للتطوير': 'Development', 'للتطوير العقاري': 'Real Estate Development', 'العقارية': 'Real Estate', 'العقاريه': 'Real Estate', 'العقاري': 'Real Estate', 'للمقاولات': 'Contracting', 'للاستثمار': 'Investment', 'للتجارة': 'Trading', 'للتجاره': 'Trading', 'للصناعة': 'Industries', 'للصناعه': 'Industries', 'للاستيراد': 'Import', 'والتصدير': '& Export', 'الدولية': 'International', 'الدوليه': 'International', 'المصرية': 'Egyptian', 'المصريه': 'Egyptian', 'العالمية': 'Global', 'الحديثة': 'Modern', 'الحديثه': 'Modern', 'كافيه': 'Cafe', 'كافيتريا': 'Cafeteria', 'مطعم': 'Restaurant', 'فندق': 'Hotel', 'نادي': 'Club', 'نادى': 'Club', 'مدارس': 'Schools', 'مدرسة': 'School', 'مدرسه': 'School', 'جامعة': 'University', 'جامعه': 'University', 'مستشفى': 'Hospital', 'مستشفي': 'Hospital', 'عيادة': 'Clinic', 'عياده': 'Clinic', 'صيدلية': 'Pharmacy', 'صيدليه': 'Pharmacy', 'فيلا': 'Villa', 'شقة': 'Apartment', 'شقه': 'Apartment', 'مول': 'Mall', 'برج': 'Tower', 'أبراج': 'Towers', 'ابراج': 'Towers', 'حديقة': 'Park', 'حديقه': 'Park', 'حديقة الحيوان': 'Zoo', 'حديقه الحيوان': 'Zoo', 'مصنع': 'Factory', 'ورشة': 'Workshop', 'ورشه': 'Workshop', 'معرض': 'Showroom', 'مخزن': 'Warehouse', 'محل': 'Shop', 'سوبر ماركت': 'Supermarket', 'كارفور': 'Carrefour', 'هايبر وان': 'Hyper One', 'سبينس': 'Spinneys', 'أمازون': 'Amazon', 'امازون': 'Amazon', 'نون': 'Noon', 'جوميا': 'Jumia', 'مركز': 'Center', 'مستقبل': 'Mostakbal', 'مدينة': 'City', 'مدينه': 'City', 'التجمع': 'El Tagamoa', 'التجمع الخامس': 'Fifth Settlement', 'التجمع الأول': 'First Settlement', 'الشيخ زايد': 'Sheikh Zayed', 'الشروق': 'El Shorouk', 'العبور': 'El Obour', 'الرحاب': 'El Rehab', 'مدينتي': 'Madinaty', 'المعادي': 'Maadi', 'مصر الجديدة': 'Heliopolis', 'الزمالك': 'Zamalek', 'الدقي': 'Dokki', 'المهندسين': 'Mohandessin', 'الجيزة': 'Giza', 'الجيزه': 'Giza', 'القاهرة': 'Cairo', 'القاهره': 'Cairo', 'الإسكندرية': 'Alexandria', 'الاسكندرية': 'Alexandria', 'الساحل': 'Sahel', 'الساحل الشمالي': 'North Coast', 'العين السخنة': 'Ain Sokhna', 'الغردقة': 'Hurghada', 'شرم الشيخ': 'Sharm El Sheikh', 'أكتوبر': 'October', 'اكتوبر': 'October', '6 أكتوبر': '6th of October', 'العاصمة الإدارية': 'New Capital', 'العاصمه الاداريه': 'New Capital', 'المنصورة': 'Mansoura', 'طنطا': 'Tanta', 'أسيوط': 'Assiut', 'اسيوط': 'Assiut', 'المنيا': 'Minya', 'سوهاج': 'Sohag', 'الأقصر': 'Luxor', 'أسوان': 'Aswan', 'اسوان': 'Aswan', 'بورسعيد': 'Port Said', 'السويس': 'Suez', 'الإسماعيلية': 'Ismailia', 'دمياط': 'Damietta', 'الفيوم': 'Fayoum', 'بني سويف': 'Beni Suef', 'قنا': 'Qena', 'الزقازيق': 'Zagazig', 'بنها': 'Benha', 'شبين الكوم': 'Shebin El Kom', 'كفر الشيخ': 'Kafr El Sheikh', 'دمنهور': 'Damanhour', 'مرسى مطروح': 'Marsa Matrouh', 'الوادي الجديد': 'New Valley', 'البحر الأحمر': 'Red Sea', 'شمال سيناء': 'North Sinai', 'جنوب سيناء': 'South Sinai' };
+/* rule-based fallback (Egyptian pronunciation): ج→g · ق→k · ث→s · ذ→z · ظ→z · ض→d · ع→a · غ→gh · خ→kh · ش→sh · ح→h */
+const NF_TR_MAP = { 'ا': 'a', 'أ': 'a', 'إ': 'e', 'آ': 'a', 'ب': 'b', 'ت': 't', 'ث': 's', 'ج': 'g', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'z', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'k', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'ة': 'a', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ء': '', 'ؤ': 'o', 'ئ': 'e', 'ٱ': 'a', 'گ': 'g', 'چ': 'j', 'پ': 'p', 'ڤ': 'v' };
+const NF_TR_VOWEL = /^[aeiou]$/;
+function nfTrWord(w) {
+  w = w.replace(/[ً-ْٰـ]/g, ''); if (!w) return '';
+  const dict = NF_NAMES[w] || NF_WORDS[w]; if (dict) return dict;
+  if (/^بال/.test(w) && w.length > 4) return 'in ' + nfTrWord(w.slice(1));
+  if (/^وال/.test(w) && w.length > 4) return '& ' + nfTrWord(w.slice(1));
+  if (/^(ال|ٱل)/.test(w) && w.length > 3) { const rest = w.slice(2); return 'El ' + (NF_NAMES[rest] || nfTrRaw(rest, true)); }
+  return nfTrRaw(w, true);
+}
+function nfTrRaw(w, cap) {
+  const chars = Array.from(w); let out = ''; const CONS = 'bcdfghjklmnpqrstvwxyz';
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]; let t = NF_TR_MAP[ch]; if (t === undefined) { out += ch; continue; }
+    const first = i === 0, last = i === chars.length - 1;
+    if (ch === 'و') t = first ? 'w' : (last ? 'o' : (CONS.includes(out.slice(-1)) ? 'ou' : 'w'));
+    if (ch === 'ي') t = first ? 'y' : (last ? 'y' : (CONS.includes(out.slice(-1)) ? 'i' : 'y'));
+    if (ch === 'ا' && !first) t = 'a';
+    if (ch === 'ع') t = first ? 'a' : (last ? 'a' : (CONS.includes(out.slice(-1)) ? 'a' : ''));
+    if (ch === 'ه' && last) t = 'h';
+    if (ch === 'ة') t = 'a';
+    // vowel between two consonants so "محمد"-like clusters read (mhmd → mohamed is in the dictionary; unknown words get a light "a")
+    if (t && CONS.includes(t[0]) && out && CONS.includes(out.slice(-1)) && !last && !first) out += 'a';
+    if (t && CONS.includes(t[0]) && out && CONS.includes(out.slice(-1)) && last && out.length >= 2) out += 'e';
+    out += t;
+  }
+  out = out.replace(/aa+/g, 'a').replace(/^e(?=[aeiou])/, '');
+  return cap ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+}
+/* whole name: dictionary first for two-word compounds (عبد الرحمن · نور الدين · أبو زيد), then word by word */
+function nfTranslit(name) {
+  const s = String(name || '').trim().replace(/\s+/g, ' '); if (!s || !/[\u0600-\u06FF]/.test(s)) return s;
+  const words = s.split(' '); const out = [];
+  for (let i = 0; i < words.length; i++) {
+    const two = i + 1 < words.length ? words[i] + ' ' + words[i + 1] : null; const k2 = two && two.replace(/[ً-ْٰـ]/g, '');
+    if (k2 && (NF_NAMES[k2] || NF_WORDS[k2])) { out.push(NF_NAMES[k2] || NF_WORDS[k2]); i++; continue; }
+    const w = words[i]; out.push(/[\u0600-\u06FF]/.test(w) ? nfTrWord(w) : w);
+  }
+  return out.join(' ');
+}
+/* pieces that are not names (UI words that somehow have no translation) stay Arabic rather than becoming gibberish */
+const NF_TR_STOP = new Set(['من', 'في', 'على', 'إلى', 'الى', 'عن', 'مع', 'لا', 'لم', 'لن', 'هل', 'كل', 'تم', 'أو', 'او', 'و', 'أن', 'ان', 'إن', 'ما', 'لو', 'ثم', 'بعد', 'قبل', 'غير', 'حتى', 'عند', 'هذا', 'هذه', 'ذلك', 'التي', 'الذي', 'يوم', 'شهر', 'سنة', 'أيام', 'ايام', 'ساعة', 'ساعات', 'دقيقة', 'جنيه', 'رقم', 'بدون', 'فقط', 'الآن', 'اليوم', 'أمس', 'غدًا', 'له', 'لها', 'لهم', 'به', 'بها', 'منه', 'منها', 'عليه', 'عليها', 'إليه', 'فيه', 'فيها', 'كان', 'كانت', 'يكون', 'تكون', 'ليس', 'ليست', 'نعم']);
+function nfTranslitPiece(p) {
+  const t = p.trim(); if (!t || !/[\u0600-\u06FF]/.test(t)) return p;
+  const words = t.split(/\s+/); if (words.length > 3) return null;
+  if (words.some(w => NF_TR_STOP.has(w.replace(/[ً-ْ]/g, '')))) return null;
+  if (/[؟!،؛:]/.test(t)) return null;
+  // looks like a name only when at least half its words are known names/places (free text such as an item description stays as written)
+  const strip = w => w.replace(/[ً-ْٰـ]/g, '');
+  let hits = 0; for (let i = 0; i < words.length; i++) { const w = strip(words[i]); const two = i + 1 < words.length ? w + ' ' + strip(words[i + 1]) : null; if (two && (NF_NAMES[two] || NF_WORDS[two])) { hits += 2; i++; continue; } if (NF_NAMES[w] || NF_WORDS[w] || (/^ال/.test(w) && (NF_NAMES[w.slice(2)] || NF_WORDS[w.slice(2)]))) hits++; }
+  if (hits * 2 < words.length) return null;
+  return p.replace(t, nfTranslit(t));
+}
+/* hook into the translator: an Arabic run with no dictionary entry is transliterated piece by piece (names of people, clients, projects) */
+if (typeof i18nRun === 'function') {
+  i18nRun = (base => function (run) {
+    const r = base.apply(this, arguments); if (r != null) return r;
+    const parts = run.split(/(\s*[—·:|/()،,؛\-]+\s*|\s+\d[\d.,:%]*\s+|\s+[A-Za-z][\w.-]*\s+)/); let out = '';
+    for (let i = 0; i < parts.length; i++) { const p = parts[i]; if (i % 2 === 1 || !/[\u0600-\u06FF]/.test(p)) { out += p; continue; } const ex = p.trim() ? I18N.exact.get(p.trim()) : null; if (ex) { out += p.replace(p.trim(), ex); continue; } const t = nfTranslitPiece(p); if (t == null) return null; out += t; }
+    return out;
+  })(i18nRun);
+}
+/* every person without a hand-written English name gets the transliteration registered as their English name */
+if (typeof nameEnRegister === 'function') {
+  nameEnRegister = (base => function () {
+    base.apply(this, arguments);
+    if (typeof I18N === 'undefined' || !I18N.exact) return;
+    const add = (ar, en) => { ar = (ar || '').trim(); if (!ar || !en || !/[\u0600-\u06FF]/.test(ar) || I18N.exact.has(ar)) return; I18N.exact.set(ar, en); };
+    try {
+      ['workers', 'staff', 'clients', 'suppliers', 'leads'].forEach(col => { const m = S.data && S.data[col]; if (m && m.forEach) m.forEach(r => { if (!r.nameEn && r.name) add(r.name, nfTranslit(r.name)); if (r.contact && !/[A-Za-z]/.test(r.contact)) add(r.contact, nfTranslit(r.contact)); }); });
+      if (S.session && S.session.name && !myNameEn()) add(S.session.name, nfTranslit(S.session.name));
+    } catch (e) { /* not loaded yet */ }
+  })(nameEnRegister);
+}
+if (typeof myNameEn === 'function') myNameEn = (base => function () { const v = base.apply(this, arguments); if (v) return v; try { return S.session && S.session.name ? nfTranslit(S.session.name) : ''; } catch (e) { return ''; } })(myNameEn);
+Object.assign(window, { nfTranslit, nfTrWord, NF_NAMES, NF_WORDS });
 /* =====================================================================
    v4.19 — one login for all Ninety apps (factory · studio · construction).
    The apps share one origin (github.io), so the browser already holds the
@@ -14602,6 +14736,166 @@ if (STU_ON) {
   EXTRA_SETTINGS.stuai = { label: 'الذكاء الاصطناعي', render: () => { if (!isAdmin()) return '<div class="card"><p class="small muted">للمالك فقط</p></div>'; const st = S.ui.stuSecret || {}; if (!S.ui.stuSecretAsked && sbOn()) { S.ui.stuSecretAsked = true; Promise.resolve().then(() => S.sb.rpc('nf_secret_status')).then(r => { S.ui.stuSecret = (r && r.data) || {}; rerender(); }, () => { S.ui.stuSecret = {}; }); } return `<form class="card" id="stuaiform"><h3>مفاتيح الذكاء الاصطناعي</h3><p class="small muted">المفاتيح تُحفظ على السيرفر فقط (admin_config) ولا تُعرض مرة أخرى. صور البوردات تتولّد عبر Higgsfield (Grok Imagine 2.0)، والنصوص عبر Claude.</p><div class="form">${field(`مفتاح Higgsfield (KEY_ID:KEY_SECRET) ${st.higgsfield ? '— مسجّل ✓' : '— غير مسجّل'}`, inp('higgsfield_key', '', 'type="password" class="ltr" placeholder="اتركه فارغًا للإبقاء على الحالي" autocomplete="new-password"'), 'full')}${field(`مفتاح Anthropic ${st.anthropic ? '— مسجّل ✓' : '— غير مسجّل'}`, inp('anthropic_key', '', 'type="password" class="ltr" placeholder="sk-ant-…" autocomplete="new-password"'), 'full')}${field('سقف الصور شهريًا لكل مهندس', inp('ai_image_cap', st.cap || '60', 'type="number" min="0"'))}</div><div class="row" style="margin-top:10px"><button class="btn p" data-action="stuAiKeysSave">حفظ</button><span class="tiny muted">من open.higgsfield.ai ← API keys؛ ومن console.anthropic.com ← API keys</span></div></form>`; } };
   ACTIONS.stuAiKeysSave = async () => { if (!isAdmin() || !sbOn()) return; const f = $('#stuaiform'); const d = formData(f); let n = 0; for (const k of ['higgsfield_key', 'anthropic_key', 'ai_image_cap']) { const v = (d[k] || '').trim(); if (!v && k !== 'ai_image_cap') continue; const { error } = await S.sb.rpc('nf_set_secret', { p_key: k, p_value: v }); if (error) { toast('فشل الحفظ: ' + error.message, 'err'); return; } n++; } f.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); S.ui.stuSecretAsked = false; toast(n ? 'اتحفظت المفاتيح' : 'مفيش تغيير'); rerender(); };
   Object.assign(window, { aiOpen, aiRun, aiPalette, aiPdfText, aiPlaceCards, aiPlaceImage });
+}
+/* =====================================================================
+   v4.22 — Ninety Studioz: هيكل المكتب (المالك ← الشريك المؤسس والآرت دايركتور ← فريق التصميم · الحسابات والموارد البشرية ← الأوفيس بوي)
+   + مشتريات مبسّطة للمكتب (كافيتيريا ومطبخ · إكسسوارات · أجهزة · اشتراكات) + سجل الاشتراكات (Higgsfield/ChatGPT/Claude/Magnific…)
+   بتذكير قبل التجديد وتسجيل كل تجديد كمصروف تلقائيًا.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) {
+  /* ---------- roles & departments ---------- */
+  Object.assign(ROLES, { admin: 'المالك — المدير التنفيذي', manager: 'الشريك المؤسس والآرت دايركتور', hr: 'الحسابات والموارد البشرية', employee: 'موظف — بوابة الموبايل' });
+  const SVC_DEPT = { id: 'svc', name: 'خدمات المكتب' };
+  if (!STU_DEFAULTS.departments.some(d => d.id === 'svc')) STU_DEFAULTS.departments.push(SVC_DEPT);
+  if (DEFAULT_SETTINGS.departments && !DEFAULT_SETTINGS.departments.some(d => d.id === 'svc')) DEFAULT_SETTINGS.departments.push(clone(SVC_DEPT));
+  STU_DEFAULTS.trades = (STU_DEFAULTS.trades || []).concat(['أوفيس بوي', 'أرت دايركتور', 'محاسب']).filter((t, i, a) => a.indexOf(t) === i);
+  /* new engineers report to the art director by default */
+  workerFormBase = (base => function (w) { if (!w.id && !w.managerId) { const ad = list('workers').find(x => x.role === 'manager' && x.status !== 'inactive'); if (ad) w = Object.assign({}, w, { managerId: ad.id }); } return base.call(this, w); })(workerFormBase);
+
+  /* ---------- org chart of the office ---------- */
+  const stuPeople = r => list('workers').filter(w => w.status !== 'inactive' && w.role === r).concat(list('staff').filter(s => s.active !== false && s.role === r)).map(p => ({ name: p.name, href: p.deptId ? `#/workers/${p.id}` : null, home: p.workplace === 'home' }));
+  const stuUnder = mgrId => list('workers').filter(w => w.status !== 'inactive' && w.managerId === mgrId);
+  vOrg = function () {
+    const node = (name, rl, kids, extra) => `<div class="orgnode"><div class="row" style="gap:8px;flex-wrap:wrap"><span class="nm">${name}</span><span class="rl">${rl}</span>${extra || ''}</div>${kids ? `<div class="orgkids">${kids}</div>` : ''}</div>`;
+    const names = arr => arr.length ? arr.map(p => p.href ? `<a href="${p.href}">${esc(p.name)}</a>${p.home ? ' <span class="badge">من البيت</span>' : ''}` : esc(p.name)).join('، ') : '<span class="muted">— لم يُحدَّد بعد —</span>';
+    const owner = stuPeople('admin'); const ad = list('workers').filter(w => w.status !== 'inactive' && w.role === 'manager'); const hr = stuPeople('hr'); const acc = stuPeople('acc');
+    const leads = list('workers').filter(w => w.status !== 'inactive' && w.role === 'head');
+    const engineers = list('workers').filter(w => w.status !== 'inactive' && ['office', 'employee'].includes(w.role) && w.deptId !== 'svc' && !/أوفيس بوي/.test(w.trade || ''));
+    const svc = list('workers').filter(w => w.status !== 'inactive' && (w.deptId === 'svc' || /أوفيس بوي/.test(w.trade || '')));
+    const leadNode = l => node(`<a href="#/workers/${l.id}">${esc(l.name)}</a>`, `${esc(l.trade || 'تيم ليدر / سينيور')} — ${deptName(l.deptId)}`, stuUnder(l.id).filter(w => w.role !== 'head').length ? names(stuUnder(l.id).filter(w => w.role !== 'head').map(w => ({ name: w.name, href: `#/workers/${w.id}`, home: w.workplace === 'home' }))) : null);
+    const loose = engineers.filter(w => !leads.some(l => l.id === w.managerId));
+    return `<div class="stack" style="max-width:980px">
+    <div class="card"><div class="cardhead"><h3>هيكل Ninety Studioz</h3><span class="muted small">النشاط الأساسي: الإظهار المعماري (ArchViz) والتصميم — الأسماء تُقرأ من دور كل موظف في ملفه</span></div><div class="orgtree">
+      ${node(names(owner.length ? owner : [{ name: S.session?.role === 'admin' ? S.session.name : 'المالك' }]), 'المالك والمدير التنفيذي — الاعتماد النهائي للمشاريع وعروض الأسعار والمصروفات والاشتراكات', [
+        node(names(ad.map(w => ({ name: w.name, href: `#/workers/${w.id}` }))), 'الشريك المؤسس والآرت دايركتور — يقود فريق التصميم كله، يعتمد الديزاين بوردات والإجازات والأذونات', [
+          ...leads.map(leadNode),
+          loose.length ? node('مهندسو التصميم', 'تحت الآرت دايركتور مباشرة', names(loose.map(w => ({ name: w.name, href: `#/workers/${w.id}`, home: w.workplace === 'home' })))) : '',
+        ].join('')),
+        node(names(hr), 'الحسابات والموارد البشرية — الرواتب والحضور والمصروفات والاشتراكات والمشتريات', [
+          acc.length ? node(names(acc), ROLES.acc) : '',
+          node(names(svc.map(w => ({ name: w.name, href: `#/workers/${w.id}` }))), 'أوفيس بوي — خدمات المكتب والكافيتيريا ومشتريات المطبخ'),
+        ].join('')),
+      ].join(''))}
+    </div></div>
+    <div class="card"><div class="cardhead"><h3>سلاسل الاعتماد</h3></div><div class="tablewrap"><table><thead><tr><th>الموضوع</th><th>المسار</th></tr></thead><tbody>
+      ${[['إجازة / إذن / تعديل بصمة', 'المدير المباشر (تيم ليدر أو سينيور) ← الآرت دايركتور'], ['سلفة', 'المدير المباشر ← الآرت دايركتور ← الحسابات والموارد البشرية'], ['مشتريات المكتب', 'أي موظف يطلب ← الحسابات تشتري وتسجّل الفاتورة ← المالك يعتمد ما فوق الحد'], ['اشتراك جديد أو تجديد', 'الحسابات تسجّل الاشتراك ← المالك يعتمد ← يتسجّل مصروفًا تلقائيًا عند كل تجديد'], ['اعتماد ديزاين بورد', 'الآرت دايركتور'], ['مرحلة المشروع', 'التيم ليدر أو الآرت دايركتور أو المالك']].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}
+    </tbody></table></div></div></div>`;
+  };
+
+  /* ---------- data: two office collections ---------- */
+  ['spurch', 'subs'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; for (const c of ['spurch', 'subs']) { S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, e => console.warn('snapshot', c, e))); } })(Store.subscribeAll);
+
+  const SP_CATS = [{ id: 'kitchen', name: 'الكافيتيريا والمطبخ' }, { id: 'kitchenacc', name: 'إكسسوارات وأدوات المطبخ' }, { id: 'devices', name: 'أجهزة ومعدات' }, { id: 'stationery', name: 'أدوات مكتبية' }, { id: 'subs', name: 'اشتراكات' }, { id: 'other', name: 'أخرى' }];
+  const SP_STATUS = { requested: 'مطلوب', approved: 'معتمد', bought: 'تم الشراء', rejected: 'مرفوض' };
+  const SUB_CYCLES = { monthly: 'شهري', yearly: 'سنوي', quarterly: 'ربع سنوي' };
+  const SUB_CUR = ['USD', 'EGP', 'EUR', 'GBP'];
+  const spCatName = id => (SP_CATS.find(c => c.id === id) || {}).name || id || '—';
+  const spCanManage = () => writable() && (isAdmin() || ['hr', 'acc'].includes(role()));
+  const spCanRequest = () => writable() && role() !== 'viewer' && role() !== 'kiosk';
+  const subCan = spCanManage;
+  const fx = () => Object.assign({ USD: 50, EUR: 55, GBP: 64, EGP: 1 }, (S.settings.fx || {}));
+  const toEgp = (amt, cur) => (+amt || 0) * (cur === 'EGP' || !cur ? 1 : (fx()[cur] || 1));
+  const perMonth = s => { const a = toEgp(s.amount, s.currency); return s.cycle === 'yearly' ? a / 12 : s.cycle === 'quarterly' ? a / 3 : a; };
+  const addMonthsISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); const day = d.getDate(); d.setMonth(d.getMonth() + n); if (d.getDate() !== day) d.setDate(0); return localISO(d); };
+  const cycleMonths = c => c === 'yearly' ? 12 : c === 'quarterly' ? 3 : 1;
+
+  /* ---------- office purchases ---------- */
+  function spForm(p) {
+    return `<div class="form">${field('البند', inp('item', p.item || '', 'required placeholder="مثال: بن للكافيتيريا · كوبايات · طابعة"'), 'full')}
+      ${field('التصنيف', `<select id="f-cat" name="cat">${opts(SP_CATS, p.cat || 'kitchen')}</select>`)}${field('الكمية', inp('qty', p.qty ?? 1, 'type="number" min="0" step="any"'))}
+      ${field('المبلغ التقديري / الفعلي (ج.م)', inp('amount', p.amount ?? '', 'type="number" min="0" step="any" inputmode="decimal"'))}${field('التاريخ', inp('date', p.date || todayISO(), 'type="date"'))}
+      ${spCanManage() ? field('الحالة', `<select id="f-status" name="status">${opts(Object.keys(SP_STATUS).map(k => ({ id: k, name: SP_STATUS[k] })), p.status || 'requested')}</select>`) : ''}${spCanManage() ? field('من حساب (عند الشراء)', `<select id="f-account" name="account">${opts(acctCfg().accounts, p.account || 'cash')}</select>`) : ''}
+      ${field('المورد / المكان', inp('vendor', p.vendor || ''))}${field('رقم الفاتورة', inp('ref', p.ref || '', 'class="ltr"'))}${field('ملاحظة', `<textarea id="f-note" name="note">${esc(p.note || '')}</textarea>`, 'full')}</div>`;
+  }
+  async function spSave(f, p) {
+    const d = formData(f); if (!d.item) { toast('اكتب البند', 'err'); return false; }
+    const doc = Object.assign({}, p, { id: p.id || uid(), item: d.item, cat: d.cat, qty: num(d.qty) || 1, amount: num(d.amount), date: d.date || todayISO(), status: spCanManage() ? (d.status || 'requested') : (p.status || 'requested'), account: d.account || p.account || 'cash', vendor: d.vendor || '', ref: d.ref || '', note: d.note || '', byId: p.byId || stuMe(), byName: p.byName || S.session?.name || '', createdAt: p.createdAt || nowISO(), updatedAt: nowISO() });
+    if (doc.status === 'bought' && !doc.expenseId && doc.amount > 0) { const eid = 'sp_' + doc.id; await Store.save('expenses', { id: eid, date: doc.date, month: monthOf(doc.date), amount: doc.amount, cat: 'other', account: doc.account, orderId: null, payee: doc.vendor || spCatName(doc.cat), ref: doc.ref, note: `مشتريات المكتب — ${doc.item} (${spCatName(doc.cat)})`, src: 'spurch', byName: S.session?.name || '', createdAt: nowISO() }); doc.expenseId = eid; }
+    await Store.save('spurch', doc); toast('تم الحفظ');
+    if (doc.status === 'requested' && !p.id) notifyRole('hr', `طلب شراء: ${doc.item}`, `${spCatName(doc.cat)} · ${doc.byName}${doc.amount ? ' · ' + fmtMoney(doc.amount) + ' ج.م' : ''}`, { id: 'spreq_' + doc.id, kind: 'update' }).catch(() => { });
+  }
+  ACTIONS.spNew = () => { if (!spCanRequest()) return; openModal({ title: 'طلب شراء للمكتب', body: spForm({}), onSubmit: f => spSave(f, {}) }); };
+  ACTIONS.spEdit = id => { const p = byId('spurch', id); if (!p) return; if (!spCanManage() && p.byId !== stuMe()) return; openModal({ title: `مشتريات — ${p.item}`, body: spForm(p), onSubmit: f => spSave(f, p), extra: spCanManage() ? `<div class="grow"></div><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-action="spDelete" data-arg="${id}">${icon('trash')}حذف</button>` : '' }); };
+  ACTIONS.spDelete = async id => { if (!spCanManage()) return; if (!confirm('حذف هذا البند؟')) return; await Store.remove('spurch', id); closeModal(); toast('تم الحذف'); };
+  ACTIONS.spStatus = async arg => { const [id, st] = arg.split(':'); const p = byId('spurch', id); if (!p || !spCanManage()) return; const f = document.createElement('form'); f.innerHTML = spForm(Object.assign({}, p, { status: st })); await spSave(f, Object.assign({}, p, { status: st })); };
+  EXTRA_VIEWS.spurch = () => {
+    const f = S.ui.filter.spurch ||= { ym: monthOf(todayISO()), cat: '' }; const ym = f.ym;
+    let rows = sortBy(list('spurch').filter(p => monthOf(p.date) === ym && (!f.cat || p.cat === f.cat) && (spCanManage() || p.byId === stuMe())), p => p.date, true);
+    const total = sum(rows.filter(p => p.status === 'bought'), p => +p.amount || 0); const pending = rows.filter(p => p.status === 'requested').length;
+    const byCat = SP_CATS.map(c => ({ c, t: sum(rows.filter(p => p.cat === c.id && p.status === 'bought'), p => +p.amount || 0) })).filter(x => x.t > 0);
+    return `<div class="toolbar">${monthNavBar('spurch')}<select class="sel" id="fl-spcat" data-filter="spurch:cat"><option value="">كل التصنيفات</option>${opts(SP_CATS, f.cat)}</select><div class="grow"></div>${spCanRequest() ? `<button class="btn p" data-action="spNew">${icon('plus')}طلب شراء</button>` : ''}</div>
+      <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi"><span class="stripe"></span><div class="l">مشتريات الشهر (تم الشراء)</div><div class="v num">${fmtMoney(total)}</div><div class="s">${CUR()}</div></div><div class="kpi"><span class="stripe"></span><div class="l">طلبات بانتظار الحسابات</div><div class="v num">${pending}</div><div class="s">طلب</div></div><div class="kpi"><span class="stripe"></span><div class="l">حسب التصنيف</div><div class="s">${byCat.length ? byCat.map(x => `${esc(x.c.name)}: ${fmtMoney(x.t)}`).join(' · ') : '—'}</div></div></div>
+      <div class="card"><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>التصنيف</th><th>الكمية</th><th>المبلغ</th><th>طلبه</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map(p => `<tr><td>${fmtDate(p.date)}</td><td><b>${esc(p.item)}</b>${p.vendor ? `<div class="tiny muted">${esc(p.vendor)}</div>` : ''}</td><td>${esc(spCatName(p.cat))}</td><td>${fmtNum(p.qty)}</td><td>${money(p.amount)}</td><td>${esc(p.byName || '')}</td><td><span class="badge ${p.status === 'bought' ? 'good' : p.status === 'rejected' ? 'crit' : p.status === 'approved' ? 'acc' : 'warn'}">${SP_STATUS[p.status] || p.status}</span></td>
+        <td class="row" style="gap:4px">${spCanManage() && p.status === 'requested' ? `<button class="btn sm" data-action="spStatus" data-arg="${p.id}:approved">اعتماد</button><button class="btn sm ghost" data-action="spStatus" data-arg="${p.id}:rejected">رفض</button>` : ''}${spCanManage() && p.status === 'approved' ? `<button class="btn sm a" data-action="spStatus" data-arg="${p.id}:bought">تم الشراء</button>` : ''}<button class="btn sm ghost" data-action="spEdit" data-arg="${p.id}">${icon('edit')}</button></td></tr>`).join('') : `<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">لا مشتريات في هذا الشهر</td></tr>`}
+      </tbody></table></div></div>`;
+  };
+  EXTRA_TITLES.spurch = () => ({ sub: 'مشتريات المكتب: الكافيتيريا والمطبخ · إكسسوارات · أجهزة · أدوات مكتبية — كل شراء يتسجل مصروفًا تلقائيًا' });
+
+  /* ---------- subscriptions ---------- */
+  function subForm(s) {
+    return `<div class="form">${field('الخدمة', inp('service', s.service || '', 'required list="sublist" placeholder="Higgsfield · ChatGPT · Claude · Magnific · Adobe…') + `<datalist id="sublist">${['Higgsfield', 'ChatGPT', 'Claude', 'Magnific', 'Midjourney', 'Adobe Creative Cloud', 'Autodesk 3ds Max', 'Chaos V-Ray', 'Corona Renderer', 'Enscape', 'Lumion', 'D5 Render', 'SketchUp', 'Google Workspace', 'Microsoft 365', 'Dropbox', 'Canva', 'Notion', 'Zoom', 'Netflix (المكتب)'].map(x => `<option value="${x}">`).join('')}</datalist>`)}${field('الباقة', inp('plan', s.plan || '', 'placeholder="Pro · Team · Creator…"'))}
+      ${field('التكلفة', inp('amount', s.amount ?? '', 'type="number" min="0" step="any" required inputmode="decimal"'))}${field('العملة', `<select id="f-currency" name="currency">${opts(SUB_CUR.map(c => ({ id: c, name: c })), s.currency || 'USD')}</select>`)}
+      ${field('دورة السداد', `<select id="f-cycle" name="cycle">${opts(Object.keys(SUB_CYCLES).map(k => ({ id: k, name: SUB_CYCLES[k] })), s.cycle || 'monthly')}</select>`)}${field('تاريخ التجديد القادم', inp('nextDate', s.nextDate || addMonthsISO(todayISO(), 1), 'type="date" required'))}
+      ${field('طريقة الدفع / الكارت', inp('payment', s.payment || '', 'placeholder="فيزا محمود ****1234 · PayPal…"'))}${field('من حساب', `<select id="f-account" name="account">${opts(acctCfg().accounts, s.account || 'cash')}</select>`)}
+      ${field('المسؤول عنه', `<select id="f-ownerId" name="ownerId"><option value="">—</option>${opts(list('workers').filter(w => w.status !== 'inactive'), s.ownerId || '')}</select>`)}${field('الحالة', `<select id="f-status" name="status">${opts([{ id: 'active', name: 'نشط' }, { id: 'paused', name: 'موقوف' }, { id: 'cancelled', name: 'ملغي' }], s.status || 'active')}</select>`)}
+      ${field('الحساب / البريد المسجَّل به', inp('login', s.login || '', 'class="ltr" placeholder="info@ninetystudioz.com"'))}${field('عدد المقاعد', inp('seats', s.seats ?? 1, 'type="number" min="1"'))}
+      <label class="check full ${s.autoRenew !== false ? 'on' : ''}"><input type="checkbox" name="autoRenew" id="f-autoRenew" ${s.autoRenew !== false ? 'checked' : ''}> يتجدد تلقائيًا (يُسجَّل المصروف في يوم التجديد)</label>
+      ${field('ملاحظات', `<textarea id="f-note" name="note">${esc(s.note || '')}</textarea>`, 'full')}</div>`;
+  }
+  async function subSave(f, s) {
+    const d = formData(f); if (!d.service || !num(d.amount) || !d.nextDate) { toast('اكتب الخدمة والتكلفة وتاريخ التجديد', 'err'); return false; }
+    const doc = Object.assign({}, s, { id: s.id || uid(), service: d.service.trim(), plan: d.plan || '', amount: num(d.amount), currency: d.currency || 'USD', cycle: d.cycle || 'monthly', nextDate: d.nextDate, payment: d.payment || '', account: d.account || 'cash', ownerId: d.ownerId || '', status: d.status || 'active', login: d.login || '', seats: num(d.seats) || 1, autoRenew: !!d.autoRenew, note: d.note || '', byName: s.byName || S.session?.name || '', createdAt: s.createdAt || nowISO(), updatedAt: nowISO() });
+    await Store.save('subs', doc); toast('تم حفظ الاشتراك'); subHousekeeping(true).catch(() => { });
+  }
+  ACTIONS.subNew = () => { if (!subCan()) return; openModal({ title: 'اشتراك جديد', body: subForm({}), onOpen: wireChecks, onSubmit: f => subSave(f, {}) }); };
+  ACTIONS.subEdit = id => { const s = byId('subs', id); if (!s || !subCan()) return; openModal({ title: `اشتراك — ${s.service}`, body: subForm(s), onOpen: wireChecks, onSubmit: f => subSave(f, s), extra: `<div class="grow"></div><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-action="subDelete" data-arg="${id}">${icon('trash')}حذف</button>` }); };
+  ACTIONS.subDelete = async id => { if (!subCan()) return; if (!confirm('حذف هذا الاشتراك؟ (المصروفات المسجّلة تبقى)')) return; await Store.remove('subs', id); closeModal(); toast('تم الحذف'); };
+  /* renewal: record the expense (idempotent id) and move the next date — an admin/HR/accounts client does this on load */
+  async function subRenew(s, date) {
+    const eid = `sub_${s.id}_${date}`; if (!byId('expenses', eid)) await Store.save('expenses', { id: eid, date, month: monthOf(date), amount: r2(toEgp(s.amount, s.currency)), cat: 'other', account: s.account || 'cash', orderId: null, payee: s.service, ref: '', note: `اشتراك ${s.service}${s.plan ? ' — ' + s.plan : ''} (${fmtMoney(s.amount)} ${s.currency} · ${SUB_CYCLES[s.cycle] || ''})`, src: 'subs', byName: 'تلقائي', createdAt: nowISO() });
+    await Store.save('subs', Object.assign({}, s, { lastPaid: date, nextDate: addMonthsISO(date, cycleMonths(s.cycle)), updatedAt: nowISO() }), { silent: true });
+  }
+  ACTIONS.subPaid = async id => { const s = byId('subs', id); if (!s || !subCan()) return; await subRenew(s, s.nextDate <= todayISO() ? s.nextDate : todayISO()); toast(`تم تسجيل تجديد ${s.service}`); };
+  let _subTick = 0;
+  async function subHousekeeping(force) {
+    if (!subCan() || !S.loaded.subs || !S.loaded.expenses || (!force && Date.now() - _subTick < 60000)) return; _subTick = Date.now();
+    const today = todayISO(); const soon = addDays(today, 3);
+    for (const s of list('subs')) {
+      if (s.status !== 'active') continue;
+      if (s.autoRenew !== false && s.nextDate && s.nextDate <= today) { let guard = 0; let cur = s; while (cur.nextDate <= today && guard++ < 12) { await subRenew(cur, cur.nextDate); cur = byId('subs', s.id) || cur; } continue; }
+      if (s.nextDate && s.nextDate <= soon && !byId('tasks', `subrem_${s.id}_${s.nextDate}`)) await notifyRole('admin', `تجديد اشتراك ${s.service} يوم ${fmtDate(s.nextDate)}`, `${fmtMoney(s.amount)} ${s.currency} · ${SUB_CYCLES[s.cycle] || ''}${s.payment ? ' · ' + s.payment : ''}${s.autoRenew === false ? ' — التجديد يدوي: اضغط «تم الدفع» في الاشتراكات' : ''}`, { id: `subrem_${s.id}_${s.nextDate}`, kind: 'update', priority: 'high', dueDate: s.nextDate });
+    }
+  }
+  EXTRA_VIEWS.subs = () => {
+    const rows = sortBy(list('subs'), s => (s.status === 'active' ? '0' : '1') + (s.nextDate || '')); const act = rows.filter(s => s.status === 'active');
+    const monthly = sum(act, perMonth); const yearly = monthly * 12; const today = todayISO(); const soon = addDays(today, 7);
+    const ownerName = id => { const w = id && byId('workers', id); return w ? w.name : '—'; };
+    return `<div class="toolbar"><div class="muted small">أسعار التحويل للجنيه تُضبط من الإعدادات ← الحسابات (الافتراضي: دولار ${fx().USD} · يورو ${fx().EUR})</div><div class="grow"></div>${subCan() ? `<button class="btn p" data-action="subNew">${icon('plus')}اشتراك جديد</button>` : ''}</div>
+      <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi"><span class="stripe"></span><div class="l">إجمالي شهري (نشط)</div><div class="v num">${fmtMoney(monthly)}</div><div class="s">${CUR()} تقريبًا</div></div><div class="kpi"><span class="stripe"></span><div class="l">إجمالي سنوي</div><div class="v num">${fmtMoney(yearly)}</div><div class="s">${CUR()} تقريبًا</div></div><div class="kpi"><span class="stripe"></span><div class="l">اشتراكات نشطة</div><div class="v num">${act.length}</div><div class="s">${act.filter(s => s.nextDate && s.nextDate <= soon).length} تتجدد خلال أسبوع</div></div></div>
+      <div class="card"><div class="tablewrap"><table><thead><tr><th>الخدمة</th><th>الباقة</th><th>التكلفة</th><th>الدورة</th><th>≈ شهريًا (ج.م)</th><th>التجديد القادم</th><th>الدفع</th><th>المسؤول</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map(s => { const due = s.status === 'active' && s.nextDate && s.nextDate <= soon; return `<tr class="${s.status !== 'active' ? 'muted' : ''}"><td><b>${esc(s.service)}</b>${s.login ? `<div class="tiny muted ltr">${esc(s.login)}</div>` : ''}</td><td>${esc(s.plan || '—')}${s.seats > 1 ? ` <span class="tiny muted">× ${s.seats}</span>` : ''}</td><td class="ltr">${fmtMoney(s.amount)} ${esc(s.currency)}</td><td>${SUB_CYCLES[s.cycle] || s.cycle}</td><td>${money(perMonth(s))}</td><td>${s.nextDate ? `<span class="badge ${due ? 'warn' : ''}">${fmtDate(s.nextDate)}</span>` : '—'}${s.lastPaid ? `<div class="tiny muted">آخر دفع ${fmtDate(s.lastPaid)}</div>` : ''}</td><td>${esc(s.payment || '—')}${s.autoRenew === false ? '<div class="tiny muted">يدوي</div>' : ''}</td><td>${esc(ownerName(s.ownerId))}</td><td><span class="badge ${s.status === 'active' ? 'good' : ''}">${s.status === 'active' ? 'نشط' : s.status === 'paused' ? 'موقوف' : 'ملغي'}</span></td>
+        <td class="row" style="gap:4px">${subCan() && s.status === 'active' ? `<button class="btn sm a" data-action="subPaid" data-arg="${s.id}" title="تسجيل الدفع وتحريك موعد التجديد">تم الدفع</button>` : ''}${subCan() ? `<button class="btn sm ghost" data-action="subEdit" data-arg="${s.id}">${icon('edit')}</button>` : ''}</td></tr>`; }).join('') : `<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">لا اشتراكات مسجّلة بعد — ابدأ بـ Higgsfield وChatGPT وClaude وMagnific</td></tr>`}
+      </tbody></table></div></div>`;
+  };
+  EXTRA_TITLES.subs = () => ({ sub: 'كل اشتراكات المكتب في مكان واحد: التكلفة والتجديد والمسؤول — تذكير قبل التجديد بـ3 أيام وكل تجديد يتسجل مصروفًا تلقائيًا' });
+
+  /* ---------- fx in accounting settings ---------- */
+  EXTRA_SETTINGS.fx = { label: 'أسعار العملات', render: () => isAdmin() || role() === 'hr' ? `<div class="card"><div class="cardhead"><h3>أسعار تحويل العملات (للاشتراكات)</h3><span class="muted small">جنيه لكل وحدة</span></div><form id="fxform" class="form">${['USD', 'EUR', 'GBP'].map(c => field(c, inp('fx_' + c, fx()[c], 'type="number" step="any" min="0" class="ltr"'))).join('')}<div class="full"><button class="btn p" type="submit">حفظ</button></div></form></div>` : '' };
+  document.addEventListener('submit', async ev => { if (ev.target.id !== 'fxform') return; ev.preventDefault(); const d = formData(ev.target); await Store.saveSettings({ fx: { USD: num(d.fx_USD) || 50, EUR: num(d.fx_EUR) || 55, GBP: num(d.fx_GBP) || 64, EGP: 1 } }); toast('تم الحفظ'); });
+
+  /* ---------- navigation & roles ---------- */
+  Object.assign(VIEW_TITLES, { spurch: 'مشتريات المكتب', subs: 'الاشتراكات' });
+  const addViews = (r, v) => { if (ROLE_VIEWS[r] && ROLE_VIEWS[r] !== null) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(v.filter(x => !ROLE_VIEWS[r].includes(x))); };
+  addViews('hr', ['spurch', 'subs']); addViews('acc', ['spurch', 'subs']); addViews('manager', ['spurch']); addViews('head', ['spurch']); addViews('office', ['spurch']); addViews('employee', ['spurch']);
+  const at = NAV.findIndex(n => n.id === 'expenses'); const ins = at >= 0 ? at + 1 : NAV.length;
+  NAV.splice(ins, 0, { id: 'spurch', label: 'مشتريات المكتب', icon: 'cart', count: () => spCanManage() ? list('spurch').filter(p => p.status === 'requested').length : 0 }, { id: 'subs', label: 'الاشتراكات', icon: 'star', count: () => subCan() ? list('subs').filter(s => s.status === 'active' && s.nextDate && s.nextDate <= addDays(todayISO(), 7)).length : 0 });
+  if (!ICONS.cart) ICONS.cart = '<circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.4 11h11l2-8H6.5"/>';
+
+  /* ---------- housekeeping after each render ---------- */
+  render = (base => function () { const r = base.apply(this, arguments); try { subHousekeeping().catch(() => { }); } catch (e) { /* ignore */ } return r; })(render);
+  Object.assign(window, { SP_CATS, spSave, subSave, subRenew, subHousekeeping, perMonth, toEgp, addMonthsISO });
 }
 </script>
 
