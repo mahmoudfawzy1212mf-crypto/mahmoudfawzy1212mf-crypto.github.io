@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1815-40f044";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1930-ac4221";</script>
 
 <script>
 'use strict';
@@ -14546,6 +14546,139 @@ if (typeof openCropper === 'function') openCropper = (base => function (src, onD
   return r;
 })(openCropper);
 Object.assign(window, { photoDownscale });
+/* =====================================================================
+   v4.33 — «صنف جديد» من دورة الشراء:
+   أ) رئيس القسم وهو بيعمل «طلب احتياج»: قسم «أصناف جديدة (مش موجودة في المخزن)» جوه نفس الطلب
+      → تطلع تلقائيًا «طلب عرض سعر» مربوط بالطلب وتمشي الدورة المتفق عليها:
+      المشتريات (مورد + سعر + صورة) ← الاعتماد الفني لرئيس القسم ← اعتماد السعر (مدير المصنع / + المالك فوق الحد)
+      ← تتكوّد في المخزن تلقائيًا (نفس ترتيب الأكواد) ← أمر الشراء يطلع ← إشعار لأمين المخزن.
+   ب) مسؤول المشتريات (والمالك ومدير المصنع): زر «＋ صنف جديد» في صفحة المشتريات بنفس فورم المخزن،
+      وجوه فورم أمر الشراء (صنف جديد يتسجّل في المخزن وينزل في سطر الأمر على طول).
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.needrfq{border:1px dashed var(--line);border-radius:12px;padding:10px;margin-top:4px;background:var(--surface-2,var(--surface))}
+.needrfq .hint{margin:2px 0 8px}
+.nibox{border:1px dashed var(--line);border-radius:12px;padding:10px;margin-top:8px;display:grid;gap:8px;grid-template-columns:2fr 1fr 1.3fr 1.6fr 1fr;align-items:end}
+.nibox label{font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px}.nibox input,.nibox select{width:100%}
+.nibox .acts{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
+@media(max-width:760px){.nibox{grid-template-columns:1fr 1fr}}
+.pol .line,.pol .linehead{grid-template-columns:minmax(0,3fr) 80px 90px 100px 32px}
+@media (max-width:640px){.pol .line,.pol .linehead{grid-template-columns:minmax(0,2fr) 60px 60px 76px 28px}}
+.rfqfromneed img{max-width:180px;border-radius:10px;border:1px solid var(--line)}
+</style>`);
+const canNewItemPurch = () => writable() && (isAdmin() || ['purch', 'manager'].includes(role()));
+const itemCatLabel = cat => ((typeof ITEM_CATS !== 'undefined' ? ITEM_CATS : []).find(c => c[0] === cat) || [])[1] || '';
+const deptIdOfCode = dc => Object.keys(DEPT_CODES).find(k => deptCode(k) === dc && S.settings.departments.some(d => d.id === k)) || null;
+/* who hears about a freshly coded item: store keeper + the head of the item's department */
+async function nfNewItemNotify(m, deptId, how) {
+  const t = `صنف جديد اتكوّد في المخزن — ${m.code}`, body = `${m.name}${m.unit ? ` (${m.unit})` : ''}${m.supplier ? ` — المورد: ${m.supplier}` : ''}\n${how}`;
+  await notifyRole('store', t, body, { id: `newitem_st_${m.id}` });
+  if (deptId && !(S.settings.departments.find(d => d.id === deptId) || {}).admin) await notifyRole('head', t, body, { id: `newitem_hd_${m.id}`, fields: { deptId } });
+}
+
+/* ---------------- أ) new items inside the department need ---------------- */
+const needRfqBox = () => `<div class="field full"><label>أصناف جديدة (مش موجودة في المخزن)</label><div class="needrfq" id="needrfq"><div class="hint small ink2">اكتب الوصف كامل — الطلب ده يروح للمشتريات يجيبوا مورد وسعر، بعدها انت تعتمد فنيًا، ومدير المصنع يعتمد السعر، وبعدها الصنف يتكوّد في المخزن وأمر الشراء يطلع لوحده.</div><div class="rfqlines" id="rfqlines"></div><div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-rl="add">${icon('plus')}صنف جديد (مش موجود في المخزن)</button><label class="btn sm ghost" style="cursor:pointer">${icon('camera')}صورة (اختياري)<input type="file" id="f-rfqphoto" accept="image/*" hidden></label><span class="small muted" id="rfqphoto-n"></span></div></div></div>`;
+needForm = (base => function (p) {
+  const html = base.apply(this, arguments); if (p && p.id && p.kind !== 'need') return html;
+  const i = html.lastIndexOf('</div>'); return i < 0 ? html + needRfqBox() : html.slice(0, i) + needRfqBox() + html.slice(i);
+})(needForm);
+/* deleting the only new-item line is allowed here (the RFQ form keeps one) */
+document.addEventListener('click', e => { const b = e.target.closest('#needrfq [data-rl="del"]'); if (!b) return; e.preventDefault(); e.stopImmediatePropagation(); b.closest('.rl').remove(); }, true);
+document.addEventListener('change', e => { if (e.target && e.target.id === 'f-rfqphoto') { const n = document.getElementById('rfqphoto-n'); if (n) n.textContent = e.target.files && e.target.files[0] ? e.target.files[0].name : ''; } });
+async function needRfqCreate(f, need) {
+  const items = readRfqLines(f); if (!items.length) return null;
+  const d = formData(f); const me = S.session || {}; const file = (f.querySelector('#f-rfqphoto') || {}).files?.[0];
+  let photo = null; if (file) { try { photo = await fileToThumb(file, 480); } catch (e) { photo = null; } }
+  const doc = { id: uid(), number: nextRfqNo(), kind: 'rfq', status: 'rfq', deptId: d.deptId, brandId: d.brandId || null, orderId: d.orderId || null, rfqItems: items, rfqPhoto: photo, expected: d.expected || '', notes: d.notes || '', date: todayISO(), supplier: '', items: [], fromNeed: need ? need.id : null, requestedBy: me.id || null, requestedByName: me.name || '', createdAt: nowISO() };
+  await Store.save('purchases', doc, { silent: true });
+  if (need) await Store.update('purchases', need.id, { rfqIds: (byId('purchases', need.id)?.rfqIds || []).concat([doc.id]) }, { silent: true });
+  await notifyRole('purch', `طلب عرض سعر ${doc.number} — صنف جديد من ${deptName(doc.deptId)}`, `${items.map(x => `${x.name}${x.desc ? ` (${x.desc})` : ''} × ${fmtNum(x.qty)} ${x.unit}`).join('\n')}${need ? `\nمن طلب الاحتياج ${need.number}` : ''}\nدوّر على مورد وسجّل السعر والصورة من صفحة الطلب.`, { id: `rfq_${doc.id}`, orderId: doc.orderId || null, fields: { purchaseId: doc.id } });
+  return doc;
+}
+saveNeed = (base => async function (f, p) {
+  const known = readNeedLines(f), fresh = readRfqLines(f);
+  if (!known.length && fresh.length) {
+    const d = formData(f); if (!d.deptId) { toast('اختر القسم', 'err'); return false; }
+    const r = await needRfqCreate(f, null); toast(`أُرسل طلب عرض السعر ${r.number} للمشتريات`); return r;
+  }
+  const doc = await base.apply(this, arguments); if (doc === false || !doc) return doc;
+  if (fresh.length) { const r = await needRfqCreate(f, byId('purchases', doc.id) || doc); if (r) toast(`وكمان طلب عرض سعر ${r.number} للأصناف الجديدة`); }
+  return doc;
+})(saveNeed);
+/* link both ways on the detail pages + the head's photo on the RFQ */
+function needRfqLinkCard(p) {
+  const rows = []; const row = x => `<a class="item" href="#/purchases/${x.id}"><div class="main"><div class="title"><span class="code">${esc(x.number)}</span> ${x.kind === 'rfq' ? 'طلب عرض سعر — أصناف جديدة' : 'طلب الاحتياج'}</div><div class="meta"><span>${(x.kind === 'rfq' ? x.rfqItems || [] : x.needItems || []).slice(0, 4).map(i => esc(i.name || '')).join('، ')}</span></div></div><div class="end">${badge(PO_STATUS, x.status)}</div></a>`;
+  if (p.fromNeed && byId('purchases', p.fromNeed)) rows.push(row(byId('purchases', p.fromNeed)));
+  (p.rfqIds || []).map(id => byId('purchases', id)).filter(Boolean).forEach(x => rows.push(row(x)));
+  const ph = p.rfqPhoto ? `<div class="rfqfromneed" style="margin-top:8px"><div class="small muted">صورة من القسم الطالب</div><img src="${esc(p.rfqPhoto)}" alt="" data-action="lightboxSrc" data-arg="${esc(p.rfqPhoto)}"></div>` : '';
+  if (!rows.length && !ph) return '';
+  return `<div class="card"><div class="cardhead"><h3>${p.kind === 'rfq' ? 'مرتبط بطلب الاحتياج' : 'أصناف جديدة من نفس الطلب'}</h3></div>${rows.length ? `<div class="list">${rows.join('')}</div>` : ''}${ph}</div>`;
+}
+vPurchaseDetail = (base => id => { const html = base(id); const p = byId('purchases', id); if (!p) return html; const c = needRfqLinkCard(p); if (!c) return html; const i = html.indexOf('<div class="card tight">'); return i > 0 ? html.slice(0, i) + c + html.slice(i) : html + c; })(vPurchaseDetail);
+/* the RFQ photo from the department is used when purchasing adds none */
+rfqCodeAndOrder = (base => async function (p, by) {
+  const before = new Set(list('materials').map(m => m.id));
+  const r = await base.apply(this, arguments);
+  const fresh = list('materials').filter(m => !before.has(m.id) && m.createdFrom === p.id);
+  for (const m of fresh) { if (!m.photo && p.rfqPhoto) await Store.update('materials', m.id, { photo: p.rfqPhoto }, { silent: true }); await nfNewItemNotify(m, p.deptId, `من طلب عرض السعر ${p.number} بعد الاعتماد الفني واعتماد السعر — رصيده صفر لحد الاستلام.`); }
+  return r;
+})(rfqCodeAndOrder);
+
+/* ---------------- ب) purchasing: «＋ صنف جديد» (same form as the store) ---------------- */
+ACTIONS.itemNewPurch = () => {
+  if (!canNewItemPurch()) return;
+  openModal({ title: 'صنف جديد — يتسجّل في المخزن', wide: true, body: materialForm({ deptCode: deptCode('store') }), onSubmit: async f => {
+    const d = formData(f); if (!d.name) { toast('اكتب اسم الصنف', 'err'); return false; }
+    if (list('materials').some(x => x.code && x.code === d.code)) d.code = nextItemCode(d.deptCode || 'GN', d.itemCat || 'OTH');
+    const doc = Object.assign({ id: uid() }, d, { qty: 0, minQty: num(d.minQty), cost: num(d.cost), category: d.category || itemCatLabel(d.itemCat), createdAt: nowISO(), createdByName: S.session?.name || '' });
+    await Store.save('materials', doc);
+    const saved = byId('materials', doc.id) || doc; await nfNewItemNotify(saved, deptIdOfCode(saved.deptCode), `أضافه ${S.session?.name || 'المشتريات'} من صفحة المشتريات — رصيده صفر لحد الاستلام.`);
+    toast(`تم تكويد الصنف ${saved.code} وإضافته للمخزن`); return true;
+  } });
+};
+vPurchases = (base => () => {
+  let html = base(); if (!canNewItemPurch()) return html;
+  const btn = `<button class="btn sm" data-action="itemNewPurch">${icon('plus')}صنف جديد</button>`;
+  const k = html.indexOf('data-action="needNew"'); if (k > 0) { const s = html.lastIndexOf('<button', k); return html.slice(0, s) + btn + html.slice(s); }
+  const i = html.indexOf('<div class="card'); const card = `<div class="card"><div class="cardhead"><h3>أصناف المخزن</h3><div class="grow"></div>${btn}</div></div>`; return i >= 0 ? html.slice(0, i) + card + html.slice(i) : card + html;
+})(vPurchases);
+/* inside the purchase-order form: add a new item without leaving the order */
+const niBoxHTML = () => `<div><button type="button" class="btn sm" data-ni="open">${icon('plus')}صنف جديد (مش في المخزن)</button></div><div class="nibox" id="nibox" hidden>
+  <div><label>اسم الصنف</label><input id="ni-name" placeholder="الاسم / المواصفة"></div>
+  <div><label>الوحدة</label><select id="ni-unit">${opts(S.settings.units, 'قطعة')}</select></div>
+  <div><label>قسم الصنف</label><select id="ni-dc">${Object.keys(DEPT_CODES).filter(k => S.settings.departments.some(d => d.id === k)).map(k => `<option value="${deptCode(k)}" ${k === 'store' ? 'selected' : ''}>${esc(deptName(k))} (${deptCode(k)})</option>`).join('')}</select></div>
+  <div><label>فئة الصنف</label><select id="ni-cat">${ITEM_CATS.map(([c, l]) => `<option value="${c}" ${c === 'OTH' ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+  <div><label>سعر المورد</label><input id="ni-price" type="number" step="any" min="0" inputmode="decimal"></div>
+  <div class="acts"><span class="small muted">الكود: <span class="codeprev" id="ni-code"></span></span><div class="grow"></div><button type="button" class="btn sm p" data-ni="save">${icon('check')}حفظ في المخزن وإضافته للأمر</button><button type="button" class="btn sm ghost" data-ni="cancel">إلغاء</button></div></div>`;
+wirePoForm = (base => function (f) {
+  try { f.classList.add('pol'); /* PO lines have 5 columns — the quotation-line grid (87) was squeezing them */
+    if (canNewItemPurch() && !f.querySelector('#nibox')) {
+      const add = f.querySelector('[data-line="add"]'); const host = add && add.parentElement; if (host) host.insertAdjacentHTML('afterend', niBoxHTML());
+      const code = () => { const c = f.querySelector('#ni-code'); if (c) c.textContent = nextItemCode(f.querySelector('#ni-dc').value, f.querySelector('#ni-cat').value); };
+      f.addEventListener('change', e => { if (e.target && (e.target.id === 'ni-dc' || e.target.id === 'ni-cat')) code(); });
+      f.addEventListener('click', async e => {
+        const b = e.target.closest('[data-ni]'); if (!b) return; e.preventDefault(); const box = f.querySelector('#nibox');
+        if (b.dataset.ni === 'open') { box.hidden = false; code(); f.querySelector('#ni-name').focus(); return; }
+        if (b.dataset.ni === 'cancel') { box.hidden = true; return; }
+        const name = (f.querySelector('#ni-name').value || '').trim(); if (!name) { toast('اكتب اسم الصنف', 'err'); return; }
+        if (list('materials').some(m => (m.name || '').trim() === name) && !(await confirmDlg(`فيه صنف في المخزن بنفس الاسم «${name}» — تكوّد صنف جديد برضه؟`, 'أيوه، صنف جديد'))) return;
+        const dc = f.querySelector('#ni-dc').value, cat = f.querySelector('#ni-cat').value, price = num(f.querySelector('#ni-price').value);
+        const sid = (f.querySelector('[name="supplierId"]') || {}).value || ''; const sname = sid ? (byId('suppliers', sid) || {}).name || '' : ((f.querySelector('[name="supplier"]') || {}).value || '').trim();
+        const sup = sid ? byId('suppliers', sid) : list('suppliers').find(s => (s.name || '').trim() === sname);
+        const m = { id: uid(), code: nextItemCode(dc, cat), name, unit: f.querySelector('#ni-unit').value || 'قطعة', qty: 0, minQty: 0, cost: price || 0, deptCode: dc, itemCat: cat, category: itemCatLabel(cat), photo: null, supplier: sup ? sup.name : sname, suppliers: sup ? [{ supplierId: sup.id, price: price || null, at: todayISO() }] : [], createdAt: nowISO(), createdByName: S.session?.name || '' };
+        await Store.save('materials', m, { silent: true }); await nfNewItemNotify(m, deptIdOfCode(dc), `أضافه ${S.session?.name || 'المشتريات'} من جوه أمر شراء — رصيده صفر لحد الاستلام.`);
+        $$('#lines [name=l-mat]', f).forEach(s => { const v = s.value; s.innerHTML = matOptions(v); s.value = v; });
+        let line = $$('#lines .line', f).find(l => !l.querySelector('[name=l-mat]').value || !num(l.querySelector('[name=l-qty]').value));
+        if (!line) { f.querySelector('#lines').insertAdjacentHTML('beforeend', poLineRows([{}])); line = $$('#lines .line', f).pop(); line.querySelector('[name=l-mat]').innerHTML = matOptions(m.id); }
+        line.querySelector('[name=l-mat]').value = m.id; if (price) line.querySelector('[name=l-cost]').value = price; line.querySelector('[name=l-mat]').dispatchEvent(new Event('change', { bubbles: true }));
+        box.hidden = true; f.querySelector('#ni-name').value = ''; f.querySelector('#ni-price').value = ''; const q = line.querySelector('[name=l-qty]'); if (q) q.focus();
+        toast(`اتكوّد ${m.code} واتضاف للأمر — اكتب الكمية`);
+      });
+    }
+  } catch (e) { console.warn('nibox', e); }
+  return base.apply(this, arguments);
+})(wirePoForm);
+Object.assign(window, { nfNewItemNotify });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
