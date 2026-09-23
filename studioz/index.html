@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1355-3bf19b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1605-9921a2";</script>
 
 <script>
 'use strict';
@@ -14266,6 +14266,205 @@ document.addEventListener('nf:ready', () => setTimeout(() => {
     [u, base + 'config.js', base + 'en.json', base + 'vendor/supabase.js'].forEach(h => { const l = document.createElement('link'); l.rel = 'prefetch'; l.href = h; document.head.appendChild(l); });
   } catch (e) { /* ignore */ }
 }, 4000));
+/* =====================================================================
+   v4.28 — ترجمة البيانات في الاتجاهين (عربي ⇄ English):
+   · قاموس بيانات مشترك (collection `dict`): لكل نص مكتوب (اسم مشروع/عميل/منتج/مهمة/بند عرض/ملاحظة) ترجمته للغة التانية.
+   · السيستم إنجليزي: النص العربي يظهر بالإنجليزي. السيستم عربي: النص الإنجليزي يظهر بالعربي.
+     الأكواد والأرقام وأسماء البراندات والموديلات تفضل زي ما هي. الاسم الإنجليزي المسجّل للعميل/الموظف له الأولوية.
+   · الشات والرسايل بين الموظفين لا تُترجم أبدًا.
+   · النصوص الجديدة تُترجم تلقائيًا في الخلفية بالذكاء الاصطناعي (Edge Function ai)، ويمكن تعديل الترجمة من الفورم.
+   ===================================================================== */
+const DICT_COL = 'dict';
+const dictHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return 'd' + h.toString(36) + s.length.toString(36); };
+const dictAr = s => /[؀-ۿ]/.test(s);
+const dictNorm = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+/* strings worth translating: a real word, not a code / number / dimension */
+const dictWorth = s => { if (!s || s.length < 2 || s.length > 400) return false; if (dictAr(s)) return true; const letters = (s.match(/[A-Za-z]/g) || []).length; if (letters < 3) return false; if (/^[A-Z0-9][A-Z0-9\-_./ ]*$/.test(s) && !/[a-z]/.test(s)) return false; if (/^https?:|@/.test(s)) return false; return true; };
+/* which fields of which collections carry business text */
+const DICT_FIELDS = {
+  orders: ['title', 'notes'], clients: ['name'], suppliers: ['name'], servfactories: ['name'], products: ['name', 'materials', 'finish', 'desc'], materials: ['name'],
+  tasks: ['title', 'desc'], quotations: ['subject', 'items.desc'], invoices: ['subject', 'items.desc'], leads: ['name', 'need'], extorders: ['title', 'desc'], sites: ['name'],
+  purchases: ['items.name'], workers: ['trade'], spurch: ['name', 'item'], subs: ['name'], projects: ['title', 'name', 'notes'], boards: ['title', 'name'],
+};
+function dictSources() {
+  const out = new Set(); const add = v => { v = dictNorm(v); if (dictWorth(v)) out.add(v); };
+  Object.entries(DICT_FIELDS).forEach(([col, fields]) => {
+    const m = S.data && S.data[col]; if (!m || !m.forEach) return;
+    m.forEach(d => fields.forEach(f => { if (f.includes('.')) { const [a, b] = f.split('.'); (Array.isArray(d[a]) ? d[a] : []).forEach(it => add(it && it[b])); } else add(d[f]); }));
+  });
+  return out;
+}
+const dictMap = () => (S.data && S.data[DICT_COL]) || new Map();
+const dictGet = s => { s = dictNorm(s); return s ? dictMap().get(dictHash(s)) : null; };
+/* the English / Arabic version of a data string (null when unknown) */
+function dictTr(s, lang) { const d = dictGet(s); if (!d) return null; const v = lang === 'en' ? d.en : d.ar; return v && v !== s ? v : null; }
+
+/* ---------- load the dictionary with the rest of the data ---------- */
+if (S.data && !S.data[DICT_COL]) S.data[DICT_COL] = new Map();
+function dictSubscribe() {
+  if (S._dictSub || !S.db || typeof S.db.collection !== 'function') return; S._dictSub = true;
+  try { S.unsub.push(S.db.collection(DICT_COL).onSnapshot(snap => { S.data[DICT_COL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[DICT_COL] = true; I18N_DATA_DIRTY = true; rerender(); }, () => { })); } catch (e) { /* ignore */ }
+}
+let I18N_DATA_DIRTY = true;
+document.addEventListener('nf:ready', dictSubscribe);
+if (typeof Store !== 'undefined' && Store.subscribeAll) Store.subscribeAll = (base => function () { const r = base.apply(this, arguments); S._dictSub = false; setTimeout(dictSubscribe, 0); return r; })(Store.subscribeAll);
+
+/* ---------- English UI: register Arabic → English pairs (record nameEn first) ---------- */
+if (typeof nameEnRegister === 'function') nameEnRegister = (base => function () {
+  base.apply(this, arguments);
+  if (typeof I18N === 'undefined' || !I18N.exact) return;
+  try {
+    dictMap().forEach(d => { if (d && d.ar && d.en && dictAr(d.ar) && d.en !== d.ar) I18N.exact.set(d.ar, d.en); });
+    ['clients', 'suppliers', 'leads', 'workers', 'staff'].forEach(col => { const m = S.data && S.data[col]; if (m && m.forEach) m.forEach(r => { const n = dictNorm(r.name); if (n && r.nameEn && dictAr(n)) I18N.exact.set(n, String(r.nameEn).trim()); }); });
+  } catch (e) { /* not loaded yet */ }
+})(nameEnRegister);
+
+/* ---------- Arabic UI: English data strings shown in Arabic ---------- */
+const DICT_SKIP = 'script,style,textarea,input,select,option,.notr,.code,.thread,[contenteditable="true"],.langsw';
+function dictArPass(root) {
+  if (!root || typeof I18N === 'undefined' || I18N.lang === 'en') return;
+  const m = dictMap(); if (!m.size) return;
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; let n; while ((n = tw.nextNode())) nodes.push(n);
+  nodes.forEach(t => {
+    const raw = t.nodeValue; if (!raw || !/[A-Za-z]{3}/.test(raw) || dictAr(raw)) return;
+    const p = t.parentElement; if (!p || p.closest(DICT_SKIP)) return;
+    const s = dictNorm(raw); let v = dictTr(s, 'ar');
+    if (!v && / · | — /.test(s)) { const parts = s.split(/( · | — )/); let hit = false; const tr = parts.map(x => { if (/^( · | — )$/.test(x)) return x; const y = dictTr(x, 'ar'); if (y) { hit = true; return y; } return x; }); if (hit) v = tr.join(''); }
+    if (v) t.nodeValue = raw.replace(s, v);
+  });
+}
+/* chat bubbles are the people's own words: never translated */
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { document.querySelectorAll('#root .thread .msg:not(.sys), #root .chatmsg').forEach(el => el.classList.add('notr')); });
+if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { if (typeof I18N !== 'undefined' && I18N.lang !== 'en') dictArPass(document.getElementById('root')); } catch (e) { console.warn('dict', e); } return r; })(render);
+
+/* ---------- background translation of new strings ---------- */
+const DICT_ROLES = ['admin', 'hr', 'office', 'manager', 'vice', 'tech', 'bdd', 'acc'];
+const _dictTried = new Map();
+let _dictBusy = false;
+async function dictTranslateBatch(max = 30) {
+  if (_dictBusy || !S.session || !writable() || !DICT_ROLES.includes(role())) return 0;
+  if (!(typeof sbOn === 'function' && sbOn()) && !S.sample) return 0;
+  const m = dictMap(); const todo = [];
+  for (const s of dictSources()) { const id = dictHash(s); const d = m.get(id); const need = !d || (dictAr(s) ? !d.en : !d.ar); if (!need) continue; if ((_dictTried.get(id) || 0) > Date.now()) continue; todo.push(s); if (todo.length >= max) break; }
+  if (!todo.length) return 0;
+  _dictBusy = true; todo.forEach(s => _dictTried.set(dictHash(s), Date.now() + 30 * 60 * 1000));
+  try {
+    const prompt = `You translate short business texts for the management system of an Egyptian furniture factory (brands LOF outdoor furniture, elmen interiors, Ninety Aluminum) and an architecture/design studio (Ninety Studioz).
+For each input string return its translation into the OTHER language: Arabic → natural, professional English; English → natural Arabic as used by Egyptian businesses (clear Modern Standard wording).
+Rules: keep codes, numbers, dimensions, units and model/collection/brand names unchanged (e.g. LOF, elmen, Sree, Beaver, Gaia, Patchi stays Patchi in English and باتشي in Arabic); names of people and companies are transliterated properly, never translated word by word (الشربجي → El Shorbagy, جاردنيا → Gardenia); place names use their usual English/Arabic form (حديقة حيوان الجيزة → Giza Zoo, المستقبل سيتي → Mostakbal City); keep punctuation like " — " and "×".
+If a string is only a brand/model name that should stay as is, return it unchanged.
+Input (JSON array of strings):
+${JSON.stringify(todo)}
+Answer ONLY with a JSON array of the same length, each element the translated string.`;
+    const out = await aiJson(prompt); if (!Array.isArray(out) || out.length !== todo.length) return 0;
+    let n = 0;
+    for (let i = 0; i < todo.length; i++) {
+      const s = todo[i]; const t = dictNorm(out[i]); if (!t) continue; const id = dictHash(s); const cur = m.get(id) || {};
+      const doc = Object.assign({}, cur, { id, s, ar: dictAr(s) ? s : (cur.manualAr ? cur.ar : t), en: dictAr(s) ? (cur.manualEn ? cur.en : t) : s, at: nowISO(), by: 'ai' });
+      await Store.save(DICT_COL, doc, { silent: true }); n++;
+    }
+    if (n) { I18N_DATA_DIRTY = true; rerender(); }
+    return n;
+  } catch (e) { console.warn('dict translate', e); return 0; } finally { _dictBusy = false; }
+}
+setInterval(() => { if (document.hidden) return; dictTranslateBatch().catch(() => { }); }, 45000);
+document.addEventListener('nf:ready', () => setTimeout(() => dictTranslateBatch().catch(() => { }), 8000));
+
+/* ---------- forms: the translation under the name/title, editable ---------- */
+const DICT_FORM_FIELDS = ['title', 'name', 'subject'];
+if (typeof openModal === 'function') openModal = (base => function (o) {
+  const r = base.apply(this, arguments);
+  try {
+    const f = document.getElementById('mform'); if (!f || f.querySelector('#f-trx')) return r;
+    if (f.querySelector('input[name="nameEn"],input[name="rev"],input[type="file"],input[name="username"],input[name="password"]')) return r;
+    if (!['orders', 'projects', 'products', 'clients', 'quotes', 'suppliers', 'tasks', 'inventory', 'purchases', 'external', 'invoices', 'office', 'subs', 'sites'].includes(S.route && S.route.view) && !/^crm/.test((S.route && S.route.view) || '')) return r;
+    const inp0 = DICT_FORM_FIELDS.map(n => f.querySelector(`input[name="${n}"]`)).find(Boolean); if (!inp0) return r;
+    const fieldEl = inp0.closest('.field'); if (!fieldEl) return r;
+    const src = dictNorm(inp0.value); const isAr = src ? dictAr(src) : true; const cur = src ? dictTr(src, isAr ? 'en' : 'ar') : '';
+    fieldEl.insertAdjacentHTML('afterend', `<div class="field" id="trxbox"><label>الترجمة (${isAr ? 'English' : 'عربي'}) <span class="muted tiny">— تلقائي لو فاضي</span></label><input id="f-trx" data-trx="1" class="${isAr ? 'ltr' : ''}" style="${isAr ? 'text-align:left' : ''}" value="${esc(cur || '')}" placeholder="${isAr ? 'English translation' : 'الترجمة بالعربي'}"></div>`);
+    inp0.addEventListener('input', () => { const v = dictNorm(inp0.value); const ar = dictAr(v); const lb = f.querySelector('#trxbox label'); if (lb && lb.firstChild) lb.firstChild.nodeValue = `الترجمة (${ar ? 'English' : 'عربي'}) `; });
+  } catch (e) { /* ignore */ }
+  return r;
+})(openModal);
+document.addEventListener('submit', ev => {
+  const f = ev.target; if (!f || f.id !== 'mform') return; const tx = f.querySelector('#f-trx'); if (!tx) return;
+  const inp0 = DICT_FORM_FIELDS.map(n => f.querySelector(`input[name="${n}"]`)).find(Boolean); if (!inp0) return;
+  const s = dictNorm(inp0.value); const t = dictNorm(tx.value); if (!s || !t || !dictWorth(s)) return;
+  const id = dictHash(s); const cur = dictMap().get(id) || {}; const ar = dictAr(s);
+  const doc = Object.assign({}, cur, { id, s, ar: ar ? s : t, en: ar ? t : s, at: nowISO(), by: S.session?.name || '' }, ar ? { manualEn: true } : { manualAr: true });
+  setTimeout(() => { Store.save(DICT_COL, doc, { silent: true }).then(() => { I18N_DATA_DIRTY = true; rerender(); }).catch(() => { }); }, 50);
+}, true);
+Object.assign(window, { dictTr, dictSources, dictTranslateBatch, dictHash });
+/* two-letter Arabic initials in avatar circles (CRM, org chart): Latin initials in the English UI */
+if (typeof render === 'function') render = (base => function () {
+  const r = base.apply(this, arguments);
+  try {
+    if (typeof I18N === 'undefined' || I18N.lang !== 'en' || typeof nfTrWord !== 'function') return r;
+    document.querySelectorAll('#root [class*="av"], #root .own, #root [class*="ini"], #root [class*="oc"]').forEach(el => {
+      if (el.children.length) return; const t = (el.textContent || '').trim(); if (!t || t.length > 2 || !/^[؀-ۿ]+$/.test(t)) return;
+      const l = nfTrWord(t).replace(/[^A-Za-z]/g, ''); if (l) el.textContent = l.charAt(0).toUpperCase() + (t.length > 1 && l.length > 1 ? l.charAt(1).toLowerCase() : '');
+    });
+  } catch (e) { /* ignore */ }
+  return r;
+})(render);
+/* =====================================================================
+   v4.28 — موظف على أكتر من سيستم (زي مدير الحسابات والموارد البشرية):
+   · خانة «يدخل على السيستمات» في ملف الموظف (للمالك) — المصنع / الاستوديو / المقاولات.
+   · اللي له أكتر من سيستم يظهر له زر «⇄» في القائمة الجانبية وفي أعلى الشاشة (موبايل) للتنقل —
+     الدخول الموحد (sso) يدخله السيستم التاني بنفس رقمه من غير كلمة سر، وبدوره المسجّل هناك.
+   · زر عربي | English في شاشة Ninety الأم (الموبايل والكمبيوتر).
+   ===================================================================== */
+const NF_SYS = [['factory', 'Ninety Fabrication', 'المصنع'], ['studio', 'Ninety Studioz', 'الاستوديو'], ['construction', 'Ninety Construction', 'المقاولات']];
+const nfSelfCo = () => (typeof STU_ON !== 'undefined' && STU_ON) ? 'studio' : 'factory';
+const nfSysLive = co => { try { return co === nfSelfCo() || !!(NINETY_COS[co] && NINETY_COS[co].url); } catch (e) { return false; } };
+function mySystems() {
+  if (!S.session || !S.session.workerId) return [];
+  const w = byId('workers', S.session.workerId); const arr = w && Array.isArray(w.systems) ? w.systems : [];
+  return arr.filter(co => co !== nfSelfCo() && nfSysLive(co));
+}
+/* ---------- worker form: the systems the person works on (owner only) ---------- */
+if (typeof workerForm === 'function') workerForm = (base => function (w) {
+  let html = base.apply(this, arguments); if (!isAdmin()) return html; w = w || {}; const cur = Array.isArray(w.systems) ? w.systems : [];
+  const box = `<div class="field full"><label>يدخل على السيستمات <span class="muted tiny">— نفس رقم الموبايل ونفس الدور لازم يكون مسجّل في السيستم التاني</span></label><div class="row" style="gap:6px;flex-wrap:wrap">${NF_SYS.map(([id, name, ar]) => `<label class="check ${cur.includes(id) || id === nfSelfCo() ? 'on' : ''}"><input type="checkbox" name="sys_${id}" ${cur.includes(id) || id === nfSelfCo() ? 'checked' : ''} ${id === nfSelfCo() ? 'disabled' : ''}> ${esc(name)} <span class="muted tiny">${esc(ar)}</span></label>`).join('')}</div></div>`;
+  const i = html.lastIndexOf('</div>'); return i < 0 ? html + box : html.slice(0, i) + box + html.slice(i);
+})(workerForm);
+if (typeof workerFromFormBase === 'function') workerFromFormBase = (base => async function (f, w) {
+  const doc = await base.apply(this, arguments); if (!doc || !isAdmin() || !f || !f.querySelector('[name="sys_construction"]')) return doc;
+  const sys = NF_SYS.map(x => x[0]).filter(id => id === nfSelfCo() || (f.querySelector(`[name="sys_${id}"]`) || {}).checked);
+  doc.systems = sys.length > 1 ? sys : [];
+  return doc;
+})(workerFromFormBase);
+
+/* ---------- switcher for multi-system staff (the owner keeps the Ninety home) ---------- */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.nfsysbtn{position:relative;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);display:inline-flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto;padding:0 10px;font:inherit;font-size:12.5px;font-weight:600}
+.nfsysbtn:hover{background:var(--surface-2)}
+.nfsysside{margin-top:8px;display:grid;gap:6px}.nfsysside button{border:1px dashed var(--line);background:transparent;color:var(--ink);border-radius:10px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;text-align:start;width:100%}
+.nfsysside button:hover{background:var(--surface-2)}
+.nhome .langrow.nh{display:flex;justify-content:center;margin:4px 0}.nhome .mhead .langsw{margin-inline-start:auto;margin-inline-end:10px}
+</style>`);
+const nfOwnerHome = () => typeof isNinetyOwner === 'function' && isNinetyOwner();
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+  const sys = nfOwnerHome() ? [] : mySystems();
+  if (!sys.length) { document.querySelectorAll('.nfsysbtn,.nfsysside').forEach(b => b.remove()); return; }
+  const nameOf = co => (NF_SYS.find(x => x[0] === co) || [])[1] || co;
+  const side = document.querySelector('.side');
+  if (side && !side.querySelector('.nfsysside')) { const nav = side.querySelector('#nav') || side.querySelector('.nav'); const d = document.createElement('div'); d.className = 'nfsysside'; d.innerHTML = sys.map(co => `<button type="button" data-action="ninetyGo" data-arg="${co}">⇄ ${esc(nameOf(co))}</button>`).join(''); if (nav) nav.parentNode.insertBefore(d, nav); else side.appendChild(d); }
+  const box = document.querySelector('.tb-actions');
+  if (box && !box.querySelector('.nfsysbtn')) box.insertAdjacentHTML('afterbegin', sys.length === 1 ? `<button type="button" class="nfsysbtn notr" data-action="ninetyGo" data-arg="${sys[0]}" title="${esc(nameOf(sys[0]))}">⇄ ${esc(nameOf(sys[0]).replace('Ninety ', ''))}</button>` : `<button type="button" class="nfsysbtn notr" data-action="nfSysPick">⇄ Ninety</button>`);
+});
+ACTIONS.nfSysPick = () => { const sys = mySystems(); openModal({ title: 'التنقل بين السيستمات', body: `<div class="stack" style="gap:8px">${sys.map(co => `<button type="button" class="btn" data-action="ninetyGo" data-arg="${co}">⇄ ${esc((NF_SYS.find(x => x[0] === co) || [])[1] || co)}</button>`).join('')}</div>`, footer: null }); };
+
+/* ---------- language toggle on the Ninety home (phone header + sidebar) ---------- */
+if (typeof i18nToggleUI === 'function') i18nToggleUI = (base => function () {
+  base.apply(this, arguments);
+  try {
+    const mh = document.querySelector('#root .nhome .mhead'); if (mh && !mh.querySelector('.langsw')) { const av = mh.querySelector('.av'); const h = i18nToggleHTML(); if (av) av.insertAdjacentHTML('beforebegin', h); else mh.insertAdjacentHTML('beforeend', h); }
+    const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !uc.parentNode.querySelector('.langrow.nh')) uc.insertAdjacentHTML('afterend', `<div class="langrow nh">${i18nToggleHTML()}</div>`);
+  } catch (e) { /* ignore */ }
+})(i18nToggleUI);
+if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { if (document.querySelector('#root .nhome') && typeof i18nToggleUI === 'function') i18nToggleUI(); } catch (e) { /* ignore */ } return r; })(render);
+Object.assign(window, { mySystems });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
