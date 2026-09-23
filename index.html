@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0827-b4990e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0919-6f80e3";</script>
 
 <script>
 'use strict';
@@ -13257,7 +13257,8 @@ function nameEnChip() {
   document.querySelectorAll('#root .userchip .avatar, #root .me-avatar .avatar').forEach(a => { if (a.querySelector('img')) return; const t = txt(a); if (t) t.nodeValue = en.charAt(0).toUpperCase(); });
 }
 /* خانة «الاسم بالإنجليزي» في فورم الموظف وفورم الإداري */
-const NAME_EN_FIELD = x => field('الاسم بالإنجليزي (يظهر في النسخة الإنجليزية)', inp('nameEn', (x && x.nameEn) || '', 'class="ltr" style="text-align:left" placeholder="Mahmoud Fawzy"'));
+const nameEnHint = n => (typeof nfTranslit === 'function' && n && /[\u0600-\u06FF]/.test(n)) ? nfTranslit(n) : 'Mahmoud Fawzy';
+const NAME_EN_FIELD = x => field('الاسم بالإنجليزي (يظهر في النسخة الإنجليزية — تلقائي لو فاضي)', inp('nameEn', (x && x.nameEn) || '', `class="ltr" style="text-align:left" placeholder="${esc(nameEnHint(x && x.name))}"`));
 const nameEnInject = (html, x) => { const i = html.indexOf('name="name"'); if (i < 0) return html; const j = html.indexOf('</div>', i); return j < 0 ? html : html.slice(0, j + 6) + NAME_EN_FIELD(x) + html.slice(j + 6); };
 if (typeof workerFormBase === 'function') workerFormBase = (base => function (w) { return nameEnInject(base.apply(this, arguments), w); })(workerFormBase);
 if (typeof staffFormBase === 'function') staffFormBase = (base => function (x) { return nameEnInject(base.apply(this, arguments), x); })(staffFormBase);
@@ -13271,7 +13272,7 @@ if (typeof ACTIONS !== 'undefined' && ACTIONS.myPhoto) ACTIONS.myPhoto = (base =
   const r = base.apply(this, arguments);
   try {
     const f = document.querySelector('#mform'); const stack = f && f.querySelector('.stack'); if (!stack) return r;
-    stack.insertAdjacentHTML('afterbegin', `<div class="field"><label>الاسم بالإنجليزي (يظهر في النسخة الإنجليزية)</label><div class="row" style="gap:6px"><input type="text" id="name-en" class="ltr" style="text-align:left" value="${esc(myNameEn())}" placeholder="Mahmoud Fawzy"><button type="button" class="btn a" id="name-en-save">حفظ الاسم</button></div></div>`);
+    stack.insertAdjacentHTML('afterbegin', `<div class="field"><label>الاسم بالإنجليزي (يظهر في النسخة الإنجليزية)</label><div class="row" style="gap:6px"><input type="text" id="name-en" class="ltr" style="text-align:left" value="${esc(myNameEn())}" placeholder="${esc(nameEnHint(S.session && S.session.name))}"><button type="button" class="btn a" id="name-en-save">حفظ الاسم</button></div></div>`);
     stack.querySelector('#name-en-save').addEventListener('click', async () => { await saveMyNameEn(stack.querySelector('#name-en').value); toast('تم حفظ الاسم'); });
   } catch (e) { /* ignore */ }
   return r;
@@ -14896,6 +14897,72 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   /* ---------- housekeeping after each render ---------- */
   render = (base => function () { const r = base.apply(this, arguments); try { subHousekeeping().catch(() => { }); } catch (e) { /* ignore */ } return r; })(render);
   Object.assign(window, { SP_CATS, spSave, subSave, subRenew, subHousekeeping, perMonth, toEgp, addMonthsISO });
+}
+/* =====================================================================
+   v4.23 — Ninety Studioz: مسميات الأدوار وشرحها في فورم الموظف بلغة المكتب (بدل «مدير المصنع»)،
+   دليل وظائف الاستوديو (اختيار الوظيفة يملأ الحرفة والدور والقسم)، ومكان العمل «من المكتب».
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) {
+  /* ---------- role picker: groups, labels, hints, powers ---------- */
+  ROLE_GROUPS.splice(0, ROLE_GROUPS.length, ['الإدارة', ['admin', 'manager', 'hr']], ['فريق المكتب', ['acc', 'head', 'office', 'employee']], ['أخرى', ['viewer', 'none']]);
+  Object.assign(ROLE_OPTION_LABEL, {
+    admin: 'المالك — المدير التنفيذي (كل الصلاحيات)',
+    manager: 'الشريك المؤسس والآرت دايركتور — كل المشاريع والفريق بلا أي أرقام مالية',
+    hr: 'الحسابات والموارد البشرية — الرواتب والحضور والمصروفات والاشتراكات',
+    acc: 'محاسب — الحسابات والمصروفات وعروض الأسعار',
+    head: 'تيم ليدر / سينيور — يدير فريقه ويوافق أولًا على طلباته',
+    office: 'مهندس (مكتب) — المشاريع والبوردات والمهام من الكمبيوتر',
+    employee: 'مهندس — بوابة الموبايل (بصمة وطلبات) + البوردات',
+    none: 'بدون دخول — يبصم من الكشك فقط',
+    viewer: 'مشاهد (قراءة فقط)',
+  });
+  if (typeof ROLE_HINTS !== 'undefined') Object.assign(ROLE_HINTS, {
+    admin: 'المالك — المدير التنفيذي: كل الشاشات والأرقام، الاعتماد النهائي للمشاريع وعروض الأسعار والمصروفات والاشتراكات، والإعدادات.',
+    manager: 'الشريك المؤسس والآرت دايركتور: يشوف كل المشاريع والبوردات وكل الموظفين وحضورهم وطلباتهم، يعتمد الإجازات والأذونات وتعديل البصمة والإضافي لمهندسي المكتب (لو للمهندس تيم ليدر يوافق التيم ليدر أولًا ثم الآرت دايركتور نهائيًا)، ويعتمد الديزاين بوردات ومراحل المشاريع — بدون أي مرتبات أو عقود أو أسعار أو عروض.',
+    hr: 'الحسابات والموارد البشرية: الموظفون والحضور والرواتب والطلبات، الحسابات والمصروفات، مشتريات المكتب والاشتراكات، ويعتمد السلف بعد الآرت دايركتور.',
+    acc: 'محاسب: لوحة الحسابات والمصروفات وعروض الأسعار والعملاء ومشتريات المكتب والاشتراكات.',
+    head: 'تيم ليدر / سينيور: يدير فريقه (المهندسون الذين مديرهم المباشر هو)، يوافق أولًا على إجازاتهم وأذوناتهم وتعديل بصمتهم، ويغيّر مراحل مشاريعه.',
+    office: 'مهندس (مكتب): المشاريع والبوردات والمهام والعملاء من الكمبيوتر، بلا أرقام مالية.',
+    employee: 'مهندس — بوابة الموبايل: بصمة ورصيد إجازات وطلبات، ومشاريعه وبوردات فريقه.',
+    none: 'بدون دخول للسيستم — يبصم من الكشك فقط.',
+    viewer: 'مشاهد: قراءة فقط.',
+  });
+  Object.assign(ROLE_POWERS, {
+    admin: ['كل الشاشات والأرقام', 'اعتماد المشاريع وعروض الأسعار والمصروفات والاشتراكات', 'الإعدادات'],
+    manager: ['كل المشاريع والبوردات والمهام', 'كل الموظفين والحضور والطلبات والتقييم', 'يعتمد الإجازات والأذونات والبصمة والإضافي', 'يعتمد الديزاين بوردات', 'لا يرى الرواتب ولا العقود ولا الأسعار ولا العروض'],
+    hr: ['الموظفون والحضور والرواتب والطلبات', 'الحسابات والمصروفات', 'مشتريات المكتب والاشتراكات', 'يعتمد السلف'],
+    acc: ['الحسابات والمصروفات', 'عروض الأسعار والعملاء', 'مشتريات المكتب والاشتراكات'],
+    head: ['فريقه: حضور وطلبات وموافقة أولى', 'مشاريعه وبورداته ومراحلها', 'المهام'],
+    office: ['المشاريع والبوردات والمهام', 'العملاء (بلا أسعار)'],
+    employee: ['بوابتي: بصمة ورصيد وطلبات', 'مشاريعه وبوردات فريقه', 'مهامه'],
+  });
+
+  /* ---------- job directory of the studio ---------- */
+  const STU_JOBS = [
+    { id: 'js_owner', title: 'المالك — المدير التنفيذي', dept: 'mgmt', role: 'admin', rank: 0, trade: 'المالك — المدير التنفيذي' },
+    { id: 'js_ad', title: 'الشريك المؤسس والآرت دايركتور', dept: 'mgmt', role: 'manager', rank: 1, trade: 'الشريك المؤسس والآرت دايركتور' },
+    { id: 'js_hr', title: 'الحسابات والموارد البشرية', dept: 'acct', role: 'hr', rank: 2, trade: 'الحسابات والموارد البشرية' },
+    { id: 'js_acc', title: 'محاسب', dept: 'acct', role: 'acc', rank: 3, trade: 'محاسب' },
+    { id: 'js_lead', title: 'تيم ليدر', dept: 'prod', role: 'head', rank: 3, trade: 'تيم ليدر' },
+    { id: 'js_senior', title: 'سينيور', dept: 'prod', role: 'head', rank: 4, trade: 'سينيور' },
+    { id: 'js_arch', title: 'مهندس معماري', dept: 'prod', role: 'office', rank: 5, trade: 'مهندس معماري' },
+    { id: 'js_int', title: 'مهندس ديكور', dept: 'prod', role: 'office', rank: 5, trade: 'مهندس ديكور' },
+    { id: 'js_viz', title: 'فيجوالايزر 3D', dept: 'prod', role: 'office', rank: 5, trade: 'فيجوالايزر 3D' },
+    { id: 'js_draw', title: 'رسّام تنفيذي', dept: 'prod', role: 'office', rank: 5, trade: 'رسّام تنفيذي' },
+    { id: 'js_junior', title: 'جونيور', dept: 'prod', role: 'office', rank: 6, trade: 'جونيور' },
+    { id: 'js_boy', title: 'أوفيس بوي', dept: 'svc', role: 'employee', rank: 7, trade: 'أوفيس بوي', noPhone: true },
+  ];
+  if (typeof JOBS_DEFAULT !== 'undefined') JOBS_DEFAULT.splice(0, JOBS_DEFAULT.length, ...STU_JOBS);
+  if (typeof workerFormJobs === 'function') workerFormJobs = (base => function () { return base.apply(this, arguments).replace('label="الأقسام الإنتاجية"', 'label="أقسام التصميم"'); })(workerFormJobs);
+
+  /* ---------- employee form wording ---------- */
+  const stuWording = html => html
+    .replace(/من المصنع( \/ المكتب)? — يبصم في (لوكيشن المصنع|الموقع)/g, 'من المكتب — يبصم في لوكيشن المكتب')
+    .replace(/في المصنع/g, 'في المكتب').replace(/المصنع أو المكتب/g, 'المكتب')
+    .replace(/<option[^>]*>إنتاج وتركيبات — يبصم من المصنع أو من موقع العمل حسب مكان شغله<\/option>/, '')
+    .replace('تلقائي — المصنع، وموقع المشروع فقط أثناء التركيب', 'تلقائي — المكتب').replace('المصنع فقط', 'المكتب فقط').replace('المصنع أو مواقع العمل', 'المكتب أو موقع المشروع')
+    .replace('للمهندسين والإداريين الذين يعملون عن بُعد: البصمة والمهام والملفات تصلهم في أي مكان', 'المهندس الذي يعمل من البيت بإذن الآرت دايركتور يبصم من أي مكان');
+  if (typeof workerFormJobs === 'function') workerFormJobs = (base => function () { return stuWording(base.apply(this, arguments)); })(workerFormJobs);
 }
 </script>
 
