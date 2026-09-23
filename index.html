@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0656-5bf446";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0736-50a392";</script>
 
 <script>
 'use strict';
@@ -13222,6 +13222,62 @@ vInventory = (base => () => { let html = base(); try { list('materials').forEach
 /* settings: the owner threshold for new-material prices */
 EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
+/* =====================================================================
+   v4.21 — الاسم بالإنجليزي: كل مستخدم له «الاسم بالإنجليزي» اختياري (ملف الموظف · حساب الإداري · صورتي)
+   في النسخة الإنجليزية يظهر بدل اسمه العربي في القائمة الجانبية والتحية والجداول وكل مكان يُكتب فيه الاسم.
+   ===================================================================== */
+function nameEnOf(rec) { return rec && rec.nameEn ? String(rec.nameEn).trim() : ''; }
+function myNameEn() {
+  if (!S.session) return ''; const r = typeof myRecordRef === 'function' ? myRecordRef() : null; if (!r) return '';
+  if (r.rec) return nameEnOf(r.rec);
+  const m = (S.settings && S.settings.namesEn) || {}; return m[S.session.id] || '';
+}
+async function saveMyNameEn(v) {
+  const r = typeof myRecordRef === 'function' ? myRecordRef() : null; if (!r) return; v = (v || '').trim();
+  if (r.col === 'settings') { if (!isAdmin()) { toast('لا يمكن حفظ الاسم لهذا الحساب', 'err'); return; } const m = Object.assign({}, (S.settings && S.settings.namesEn) || {}); if (v) m[S.session.id] = v; else delete m[S.session.id]; await Store.saveSettings({ namesEn: m }); }
+  else await Store.update(r.col, r.rec.id, { nameEn: v });
+  nameEnRegister(); render(true);
+}
+/* يضيف أزواج (الاسم العربي → الاسم الإنجليزي) لقاموس الترجمة فتُترجم الأسماء أينما ظهرت */
+function nameEnRegister() {
+  if (typeof I18N === 'undefined' || !I18N.exact) return;
+  const add = (ar, en) => { ar = (ar || '').trim(); en = (en || '').trim(); if (!ar || !en || !/[\u0600-\u06FF]/.test(ar)) return; if (I18N.exact.get(ar) !== en) I18N.exact.set(ar, en); };
+  try {
+    ['workers', 'staff'].forEach(col => { const m = S.data && S.data[col]; if (m && m.forEach) m.forEach(r => add(r.name, r.nameEn)); });
+    const ne = (S.settings && S.settings.namesEn) || {}; if (S.session && ne[S.session.id]) add(S.session.name, ne[S.session.id]);
+  } catch (e) { /* not loaded yet */ }
+}
+/* الحرف الأول في دائرة الصورة يتبع الاسم الإنجليزي */
+function nameEnChip() {
+  if (typeof I18N === 'undefined' || I18N.lang !== 'en') return;
+  const txt = a => Array.from(a.childNodes).find(n => n.nodeType === 3 && n.nodeValue.trim());
+  // a one-letter Arabic initial in any avatar circle is a name, not a word: keep it out of the translator
+  document.querySelectorAll('#root .avatar').forEach(a => { if (a.querySelector('img') || a.classList.contains('notr')) return; const t = txt(a); if (t && t.nodeValue.trim().length === 1 && /[\u0600-\u06FF]/.test(t.nodeValue)) a.classList.add('notr'); });
+  const en = myNameEn(); if (!en) return;
+  document.querySelectorAll('#root .userchip .avatar, #root .me-avatar .avatar').forEach(a => { if (a.querySelector('img')) return; const t = txt(a); if (t) t.nodeValue = en.charAt(0).toUpperCase(); });
+}
+/* خانة «الاسم بالإنجليزي» في فورم الموظف وفورم الإداري */
+const NAME_EN_FIELD = x => field('الاسم بالإنجليزي (يظهر في النسخة الإنجليزية)', inp('nameEn', (x && x.nameEn) || '', 'class="ltr" style="text-align:left" placeholder="Mahmoud Fawzy"'));
+const nameEnInject = (html, x) => { const i = html.indexOf('name="name"'); if (i < 0) return html; const j = html.indexOf('</div>', i); return j < 0 ? html : html.slice(0, j + 6) + NAME_EN_FIELD(x) + html.slice(j + 6); };
+if (typeof workerFormBase === 'function') workerFormBase = (base => function (w) { return nameEnInject(base.apply(this, arguments), w); })(workerFormBase);
+if (typeof staffFormBase === 'function') staffFormBase = (base => function (x) { return nameEnInject(base.apply(this, arguments), x); })(staffFormBase);
+if (typeof saveStaffBase === 'function') saveStaffBase = (base => async function (f, x) {
+  const r = await base.apply(this, arguments); if (r === false) return r;
+  try { const d = formData(f); const username = normUser(d.username); const rec = list('staff').find(s => normUser(s.username) === username); if (rec && (rec.nameEn || '') !== (d.nameEn || '').trim()) await Store.update('staff', rec.id, { nameEn: (d.nameEn || '').trim() }); } catch (e) { /* ignore */ }
+  return r;
+})(saveStaffBase);
+/* نافذة «صورتي» تحمل خانة الاسم الإنجليزي أيضًا */
+if (typeof ACTIONS !== 'undefined' && ACTIONS.myPhoto) ACTIONS.myPhoto = (base => function () {
+  const r = base.apply(this, arguments);
+  try {
+    const f = document.querySelector('#mform'); const stack = f && f.querySelector('.stack'); if (!stack) return r;
+    stack.insertAdjacentHTML('afterbegin', `<div class="field"><label>الاسم بالإنجليزي (يظهر في النسخة الإنجليزية)</label><div class="row" style="gap:6px"><input type="text" id="name-en" class="ltr" style="text-align:left" value="${esc(myNameEn())}" placeholder="Mahmoud Fawzy"><button type="button" class="btn a" id="name-en-save">حفظ الاسم</button></div></div>`);
+    stack.querySelector('#name-en-save').addEventListener('click', async () => { await saveMyNameEn(stack.querySelector('#name-en').value); toast('تم حفظ الاسم'); });
+  } catch (e) { /* ignore */ }
+  return r;
+})(ACTIONS.myPhoto);
+if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { nameEnRegister(); nameEnChip(); } catch (e) { /* ignore */ } return r; })(render);
+Object.assign(window, { nameEnOf, myNameEn, saveMyNameEn, nameEnRegister, nameEnChip });
 /* v4.20 — the same Arabic-segment extraction as tools/i18n/extract.py, in JS: the app reads its own index.html and rebuilds the dictionary keys, so the English pack (en.json) only carries the values in extraction order (tools/i18n/pack.py). Keep both in sync. */
 (function (root) {
   const AR = /[\u0600-\u06FF]/; const M = '\u0001';
