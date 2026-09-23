@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-1756-fb1fa1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-1802-31a585";</script>
 
 <script>
 'use strict';
@@ -14505,6 +14505,38 @@ const nfIsTyping = el => !!el && (el.tagName === 'TEXTAREA' || (el.tagName === '
 document.addEventListener('focusin', ev => { if (nfIsTyping(ev.target)) document.body.classList.add('nf-typing'); });
 document.addEventListener('focusout', () => setTimeout(() => { if (!nfIsTyping(document.activeElement)) document.body.classList.remove('nf-typing'); }, 150));
 if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { document.body.classList.toggle('nf-chatpage', !!document.querySelector('#root .chatbox')); });
+/* =====================================================================
+   v4.31 — صورة الكاميرا كانت بتظهر سوداء في «ضبط الصورة» على بعض الموبايلات:
+   صور الموبايل الحديثة كبيرة جدًا (12–50 ميجابكسل) فالمتصفح يفشل في فتحها كـdata URL.
+   الحل: أي صورة تتصغّر أولًا (أطول ضلع 1600 بكسل، مع اتجاه الكاميرا الصحيح) قبل ما تدخل شاشة الضبط أو الحفظ.
+   ===================================================================== */
+const PHOTO_MAX = 1600;
+async function photoDownscale(file) {
+  // createImageBitmap decodes big photos without holding a giant data URL in memory and applies the EXIF rotation
+  let bmp = null;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { bmp = null; }
+  if (!bmp) {
+    // fallback: an object URL is much lighter than a data URL
+    const url = URL.createObjectURL(file);
+    try { bmp = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; }); } finally { setTimeout(() => URL.revokeObjectURL(url), 5000); }
+  }
+  const w = bmp.width, h = bmp.height; const k = Math.min(1, PHOTO_MAX / Math.max(w, h));
+  const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+  const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
+  try { if (bmp.close) bmp.close(); } catch (e) { /* ignore */ }
+  return cv.toDataURL('image/jpeg', 0.88);
+}
+if (typeof fileToDataURL === 'function') fileToDataURL = (base => async function (file) {
+  if (file && /^image\//.test(file.type || '') && !/svg|gif/.test(file.type || '')) { try { return await photoDownscale(file); } catch (e) { console.warn('downscale', e); } }
+  return base.apply(this, arguments);
+})(fileToDataURL);
+/* the cropper tells the person when a picture cannot be opened instead of staying black */
+if (typeof openCropper === 'function') openCropper = (base => function (src, onDone, o) {
+  const r = base.apply(this, arguments);
+  try { const probe = new Image(); probe.onerror = () => toast('الصورة دي مش راضية تفتح — جرّب صورة تانية أو صوّرها من الكاميرا', 'err'); probe.src = src; } catch (e) { /* ignore */ }
+  return r;
+})(openCropper);
+Object.assign(window, { photoDownscale });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
