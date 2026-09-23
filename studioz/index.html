@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-0521-5d74b7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260923-0656-5bf446";</script>
 
 <script>
 'use strict';
@@ -13222,6 +13222,282 @@ vInventory = (base => () => { let html = base(); try { list('materials').forEach
 /* settings: the owner threshold for new-material prices */
 EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
+/* v4.20 — the same Arabic-segment extraction as tools/i18n/extract.py, in JS: the app reads its own index.html and rebuilds the dictionary keys, so the English pack (en.json) only carries the values in extraction order (tools/i18n/pack.py). Keep both in sync. */
+(function (root) {
+  const AR = /[\u0600-\u06FF]/; const M = '\u0001';
+  const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^<>]*?)?)\s*\/?>/g;
+  const ATTR = /([a-zA-Z-]+)\s*=\s*("([^"]*)"|'([^']*)')/g;
+  const MRUN = new RegExp('(?:' + M + '\\s*)+', 'g');
+  function norm(s) { return s.replace(/\\n/g, '\n').replace(/&nbsp;/g, ' ').replace(/\\'/g, "'").replace(/\s+/g, ' ').trim(); }
+  function extract(text) {
+    const segs = new Map();
+    const add = s => { s = norm(s); if (!AR.test(s)) return; s = s.replace(MRUN, m => M + (m.endsWith(' ') ? ' ' : '')); s = s.replace(/^\s+|\s+$/g, ''); if (!AR.test(s) || s.length > 1500) return; if (!segs.has(s)) segs.set(s, true); };
+    const stripInterp = t => { let out = ''; let i = 0; const n = t.length; while (i < n) { const j = t.indexOf('${', i); if (j < 0) { out += t.slice(i); break; } out += t.slice(i, j); let k = j + 2, depth = 1; while (k < n && depth) { const c = t[k]; if (c === '{') depth++; else if (c === '}') depth--; k++; } walk(t.slice(j + 2, k - 1)); out += M; i = k; } return out; };
+    const chunk = t => { if (!AR.test(t)) return; t.split(/["'`\n]/).forEach(p => { if (AR.test(p)) add(p); }); };
+    function walk(t) {
+      const flat = stripInterp(t); let pos = 0; TAG.lastIndex = 0; let m;
+      while ((m = TAG.exec(flat))) { chunk(flat.slice(pos, m.index)); const attrs = m[3] || ''; ATTR.lastIndex = 0; let a; while ((a = ATTR.exec(attrs))) { const v = a[3] !== undefined ? a[3] : a[4]; if (v && AR.test(v)) add(v); } pos = m.index + m[0].length; }
+      chunk(flat.slice(pos));
+    }
+    walk(text);
+    return Array.from(segs.keys());
+  }
+  root.nfI18nExtract = extract;
+})(typeof window !== 'undefined' ? window : globalThis);
+/* =====================================================================
+   v4.20 — Arabic / English for every Ninety app.
+   The app is written in Arabic; English is a dictionary (en.json, built from every Arabic
+   segment in the source) applied to the rendered DOM: text nodes, placeholders, titles,
+   options, toasts, modals, print areas — anything that lands in the document. Dynamic
+   texts match by pattern (the \u0001 markers stand for interpolated values). The language
+   is per device (localStorage nf.lang) and per person (worker/staff `uiLang`), the page
+   direction flips to LTR, and a toggle lives on the login screen and under the user chip.
+   Loads before 99-boot so the first render is already in the chosen language.
+   ===================================================================== */
+const I18N = { lang: 'ar', dict: null, exact: null, pats: null, ready: false, loading: null, base: new WeakMap() };
+const I18N_AR = /[\u0600-\u06FF]/;
+const I18N_M = '\u0001';
+function i18nLang() { return I18N.lang; }
+function i18nNorm(s) { return String(s).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(); }
+function i18nCompile(dict) {
+  const exact = new Map(); const pats = new Map(); // pats: first char → [{re, en, n}]
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reg = (k, en) => {
+    if (!k.includes(I18N_M)) { exact.set(k, en); return; }
+    const parts = k.split(I18N_M); const n = parts.length - 1;
+    if (parts.join('').replace(/[\s\p{P}]/gu, '').length < 2) return; // a bare marker with punctuation would match anything
+    const AL = '[\u0600-\u06FF]';
+    const lit = parts.map((t, i) => { let r = esc(t); const short = t.replace(/\s/g, '').length <= 3; if (short && i === n && n > 0 && new RegExp('^' + AL).test(t)) r = '(?<!' + AL + ')' + r; if (short && i === 0 && n > 0 && new RegExp(AL + '$').test(t)) r = r + '(?!' + AL + ')'; return r; }); // tiny edge literals ("كم…") must not match inside a word
+    const re = new RegExp('^' + lit.join('([\\s\\S]*?)') + '$');
+    const key = parts[0] ? parts[0].charAt(0) : '';
+    if (!pats.has(key)) pats.set(key, []); pats.get(key).push({ re, en: en.split(I18N_M), n, len: k.length });
+  };
+  Object.keys(dict).forEach(k => {
+    const en = dict[k]; if (!en) return; reg(k, en);
+    const m = k.match(/^(- |## |• |\d+[.)] )/); if (m) { const e2 = en.replace(/^(- |## |• |\d+[.)] )/, ''); reg(k.slice(m[0].length), e2); } // list/heading lines render without their markdown prefix
+  });
+  pats.forEach(list => list.sort((a, b) => b.len - a.len)); // longest literal first
+  I18N.dict = dict; I18N.exact = exact; I18N.pats = pats;
+}
+function i18nTr(text, depth) {
+  if (!I18N.exact || !I18N_AR.test(text)) return null;
+  const s = i18nNorm(text); if (!s) return null;
+  const hit = I18N.exact.get(s); if (hit) return hit;
+  depth = depth || 0; if (depth > 2) return null;
+  const lists = [I18N.pats.get(s.charAt(0)) || [], I18N.pats.get('') || []];
+  for (const list of lists) for (const p of list) {
+    const m = s.match(p.re); if (!m) continue;
+    let out = p.en[0]; let bad = false;
+    for (let i = 1; i <= p.n; i++) { const g = m[i] || ''; let t = g; if (I18N_AR.test(g)) { t = i18nTr(g, depth + 1); if (!t) { if (g.trim().split(/\s+/).length > 4) { bad = true; break; } t = g; } } out += t + (p.en[i] || ''); }
+    if (!bad && i18nMostlyEnglish(out)) return out; // a short Arabic value (a name) may stay; a long untranslated stretch means this pattern is not the one
+  }
+  // run fallback: "الخميس 5 مايو 2026" / "متصل — آخر مزامنة 06:07" → every Arabic run (or its pieces between separators) translates on its own
+  let ok = true; const rep = s.replace(/[\u0600-\u06FF][^\n]*[\u0600-\u06FF]|[\u0600-\u06FF]/g, run => { const t = i18nRun(run); if (t == null) { ok = false; return run; } return t; });
+  return ok && i18nMostlyEnglish(rep) ? rep : null;
+}
+function i18nMostlyEnglish(t) { const ar = (t.match(/[\u0600-\u06FF]/g) || []).length; const la = (t.match(/[A-Za-z]/g) || []).length; return ar === 0 || ar <= la; }
+function i18nRun(run) {
+  const ex = I18N.exact.get(run.trim()); if (ex) return ex;
+  if (!/[\u0600-\u06FF]/.test(run)) return run;
+  const parts = run.split(/(\s*[—·:|/()،,؛\-]+\s*|\s+\d[\d.,:%]*\s+|\s+[A-Za-z][\w.-]*\s+)/); if (parts.length < 2) return null;
+  let out = '';
+  for (let i = 0; i < parts.length; i++) { const p = parts[i]; if (i % 2 === 1 || !/[\u0600-\u06FF]/.test(p)) { out += p; continue; } const t = p.trim() ? I18N.exact.get(p.trim()) : p; if (!t) return null; out += p.replace(p.trim(), t); }
+  return out;
+}
+/* a sentence split across inline children ("… from <b>10:00</b> to <b>18:00</b>") translates as one text; the inline values keep their tags */
+const I18N_INLINE = /^(B|I|STRONG|EM|SPAN|U|SMALL|CODE|MARK|SUB|SUP)$/;
+function i18nComposite(el) {
+  if (!el || el.nodeType !== 1 || el.__trc) return; el.__trc = true;
+  const kids = Array.from(el.childNodes); if (!kids.some(k => k.nodeType === 1)) return;
+  if (!kids.every(k => k.nodeType === 3 || (k.nodeType === 1 && I18N_INLINE.test(k.nodeName) && !k.children.length))) return;
+  const text = kids.map(k => k.nodeType === 3 ? k.nodeValue : k.textContent).join(''); if (!I18N_AR.test(text)) return;
+  let t = i18nTr(text); if (!t) return;
+  const vals = kids.filter(k => k.nodeType === 1).map(k => ({ tag: k.nodeName.toLowerCase(), cls: k.className, txt: (k.textContent || '').trim(), en: I18N_AR.test(k.textContent || '') ? (i18nTr(k.textContent) || k.textContent.trim()) : (k.textContent || '').trim() }));
+  const escH = x => x.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  let html = escH(t);
+  vals.forEach(v => { if (!v.en) return; const i = html.indexOf(escH(v.en)); if (i >= 0) html = html.slice(0, i) + '<' + v.tag + (v.cls ? ' class="' + escH(v.cls) + '"' : '') + '>' + escH(v.en) + '</' + v.tag + '>' + html.slice(i + escH(v.en).length); });
+  el.innerHTML = html;
+}
+const I18N_ATTRS = ['placeholder', 'title', 'aria-label', 'alt', 'data-tip', 'data-label'];
+function i18nNode(node) {
+  if (node.nodeType === 3) {
+    const v = node.nodeValue; if (!v || !I18N_AR.test(v)) return;
+    if (node.__trv === v) return;
+    const p = node.parentNode; if (!p) return;
+    const tag = p.nodeName; if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA') return;
+    if (p.closest && p.closest('[contenteditable="true"],[contenteditable=""],.notr')) return;
+    if (p.nodeType === 1 && p.children.length && !p.__trc && Array.from(p.childNodes).every(k => k.nodeType === 3 || (k.nodeType === 1 && I18N_INLINE.test(k.nodeName) && !k.children.length))) { i18nComposite(p); if (!node.parentNode) return; }
+    const t = i18nTr(v); if (!t) return;
+    const lead = v.match(/^\s*/)[0], tail = v.match(/\s*$/)[0];
+    if (!I18N.base.has(node)) I18N.base.set(node, v);
+    node.__trv = lead + t + tail; node.nodeValue = node.__trv;
+    return;
+  }
+  if (node.nodeType !== 1) return;
+  const el = node;
+  if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE') return;
+  I18N_ATTRS.forEach(a => { const v = el.getAttribute(a); if (v && I18N_AR.test(v)) { const t = i18nTr(v); if (t) el.setAttribute(a, t); } });
+  if ((el.nodeName === 'INPUT') && /^(button|submit|reset)$/i.test(el.type) && I18N_AR.test(el.value)) { const t = i18nTr(el.value); if (t) el.value = t; }
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, null);
+  let n; const texts = []; const els = [];
+  while ((n = w.nextNode())) { if (n.nodeType === 3) texts.push(n); else els.push(n); }
+  els.forEach(e => { I18N_ATTRS.forEach(a => { const v = e.getAttribute(a); if (v && I18N_AR.test(v)) { const t = i18nTr(v); if (t) e.setAttribute(a, t); } }); if (e.nodeName === 'INPUT' && /^(button|submit|reset)$/i.test(e.type) && I18N_AR.test(e.value)) { const t = i18nTr(e.value); if (t) e.value = t; } });
+  texts.forEach(i18nNode);
+}
+let i18nBusy = false;
+function i18nApply(root) {
+  if (I18N.lang !== 'en' || !I18N.exact) return;
+  i18nBusy = true;
+  try { i18nNode(root || document.documentElement); if (document.title && I18N_AR.test(document.title)) { const t = i18nTr(document.title); if (t) document.title = t; } } finally { i18nBusy = false; }
+  i18nToggleUI();
+}
+function i18nObserve() {
+  if (I18N.obs) return;
+  I18N.obs = new MutationObserver(recs => {
+    if (I18N.lang !== 'en' || !I18N.exact || i18nBusy) return;
+    i18nBusy = true;
+    try {
+      recs.forEach(r => {
+        if (r.type === 'characterData') { i18nNode(r.target); return; }
+        if (r.type === 'attributes') { const el = r.target, a = r.attributeName, v = el.getAttribute(a); if (v && I18N_AR.test(v)) { const t = i18nTr(v); if (t) el.setAttribute(a, t); } return; }
+        r.addedNodes.forEach(i18nNode);
+      });
+    } finally { i18nBusy = false; }
+    i18nToggleUI();
+  });
+  I18N.obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: I18N_ATTRS });
+}
+/* dictionary file: en.json next to index.html (part of the app shell; fetched only when English is chosen) */
+function i18nChk(k) { let h = 2166136261; for (const ch of k) { h = Math.imul(h ^ ch.codePointAt(0), 16777619) >>> 0; } const n = h % 1296; const d = '0123456789abcdefghijklmnopqrstuvwxyz'; return d[Math.floor(n / 36)] + d[n % 36]; }
+/* the pack is values only: keys come from this app's own source (index.html) through the same extraction as the build */
+function i18nBuildDict(pack, source) {
+  const dict = {}; if (pack && pack.v && typeof nfI18nExtract === 'function' && source) {
+    const keys = nfI18nExtract(source).map(k => k.replace(/\{\{[^}]+\}\}/g, I18N_M)); let miss = 0;
+    keys.forEach((k, i) => { const e = pack.v[i]; if (!e) return; if (e[0] !== i18nChk(k)) { miss++; return; } dict[k] = e[1]; });
+    if (miss) console.warn('i18n: ' + miss + ' entries did not line up with this build');
+  }
+  if (pack && pack.x) Object.keys(pack.x).forEach(k => { dict[k] = pack.x[k]; });
+  return dict;
+}
+function i18nLoad() {
+  if (I18N.exact) return Promise.resolve(true);
+  if (I18N.loading) return I18N.loading;
+  const inline = window.NF_I18N_EN; if (inline) { i18nCompile(inline); return Promise.resolve(true); }
+  I18N.loading = Promise.all([fetch('./en.json', { cache: 'force-cache' }).then(r => r.ok ? r.json() : null), fetch('./index.html', { cache: 'force-cache' }).then(r => r.ok ? r.text() : '').catch(() => '')])
+    .then(([pack, html]) => { if (!pack) return false; const dict = pack.v ? i18nBuildDict(pack, html || document.documentElement.outerHTML) : pack; i18nCompile(dict); return true; }).catch(() => false).finally(() => { I18N.loading = null; });
+  return I18N.loading;
+}
+function i18nDir() {
+  const en = I18N.lang === 'en';
+  document.documentElement.setAttribute('dir', en ? 'ltr' : 'rtl'); document.documentElement.setAttribute('lang', en ? 'en' : 'ar');
+  document.documentElement.classList.toggle('nf-en', en);
+}
+async function i18nSet(lang, opts) {
+  lang = lang === 'en' ? 'en' : 'ar'; opts = opts || {};
+  if (lang === 'en' && !(await i18nLoad())) { if (typeof toast === 'function') toast('English pack not available offline yet — try again when online', 'err'); return false; }
+  I18N.lang = lang; try { localStorage.setItem('nf.lang', lang); } catch (e) { /* private mode */ }
+  i18nDir();
+  if (lang === 'en') { i18nObserve(); }
+  if (!opts.silent && typeof render === 'function') { try { render(true); } catch (e) { /* not booted yet */ } }
+  if (lang === 'ar') { // restore texts the observer changed outside the re-rendered tree (head, toasts host)
+    document.querySelectorAll('title').forEach(t => { const n = t.firstChild; if (n && I18N.base.has(n)) n.nodeValue = I18N.base.get(n); });
+  }
+  if (lang === 'en') i18nApply();
+  if (!opts.noSave) i18nSaveMine(lang);
+  return true;
+}
+/* remember the choice on the person's own record so it follows them to other devices and Ninety apps */
+function i18nSaveMine(lang) {
+  try {
+    const st = typeof S !== 'undefined' && S.session; if (!st || typeof Store === 'undefined' || !S.canWrite) return;
+    if (st.workerId && typeof byId === 'function' && byId('workers', st.workerId)) { const w = byId('workers', st.workerId); if (w.uiLang !== lang) Promise.resolve(Store.update('workers', st.workerId, { uiLang: lang })).catch(() => { }); }
+    else if (st.staff && st.id && typeof byId === 'function' && byId('staff', st.id)) { const u = byId('staff', st.id); if (u.uiLang !== lang) Promise.resolve(Store.update('staff', st.id, { uiLang: lang })).catch(() => { }); }
+  } catch (e) { /* offline or read-only */ }
+}
+let i18nSeenSession = null;
+function i18nFollowSession() {
+  try {
+    const st = typeof S !== 'undefined' && S.session; const key = st ? (st.workerId || st.id || '') : '';
+    if (key === i18nSeenSession) return; i18nSeenSession = key; if (!st) return;
+    const rec = (st.workerId && typeof byId === 'function' && byId('workers', st.workerId)) || (st.staff && st.id && typeof byId === 'function' && byId('staff', st.id));
+    if (rec && rec.uiLang && rec.uiLang !== I18N.lang) i18nSet(rec.uiLang, { noSave: true });
+  } catch (e) { /* ignore */ }
+}
+/* toggle: on the login box and under the user chip in the sidebar */
+function i18nToggleHTML() {
+  const en = I18N.lang === 'en';
+  return `<button type="button" class="langsw notr" data-action="langToggle" title="${en ? 'التبديل إلى العربية' : 'Switch to English'}"><span class="${en ? '' : 'on'}">عربي</span><span class="sep">|</span><span class="${en ? 'on' : ''}">English</span></button>`;
+}
+function i18nToggleUI() {
+  const box = document.querySelector('#root .login .loginbox'); if (box && !box.querySelector('.langsw')) box.insertAdjacentHTML('beforeend', `<div class="langrow">${i18nToggleHTML()}</div>`);
+  const chip = document.querySelector('#root .side .userchip'); if (chip && !chip.parentNode.querySelector('.langsw')) chip.insertAdjacentHTML('afterend', `<div class="langrow inside">${i18nToggleHTML()}</div>`);
+  const kiosk = document.querySelector('#root .kiosk'); if (kiosk && !kiosk.querySelector('.langsw')) kiosk.insertAdjacentHTML('afterbegin', `<div class="langrow kiosk">${i18nToggleHTML()}</div>`);
+}
+if (typeof ACTIONS !== 'undefined') ACTIONS.langToggle = () => { i18nSet(I18N.lang === 'en' ? 'ar' : 'en'); };
+/* native dialogs carry Arabic strings straight from the code */
+(function () {
+  const wrap = name => { const base = window[name]; if (typeof base !== 'function') return; window[name] = function (msg, ...rest) { if (I18N.lang === 'en' && typeof msg === 'string') { const t = i18nTr(msg); if (t) msg = t; } return base.call(window, msg, ...rest); }; };
+  ['alert', 'confirm', 'prompt'].forEach(wrap);
+})();
+/* the base afterRender forces rtl on every draw */
+if (typeof afterRender === 'function') { afterRender = (base => function () { const r = base.apply(this, arguments); i18nDir(); return r; })(afterRender); }
+/* render hook: apply after every draw + keep the toggle present + follow the signed-in person's choice */
+if (typeof render === 'function') {
+  render = (base => function (full) { const r = base.apply(this, arguments); try { i18nFollowSession(); if (I18N.lang === 'en') { i18nMirrorCSS(); } if (I18N.lang === 'en') i18nApply(document.getElementById('root') || document.body); else i18nToggleUI(); } catch (e) { console.warn('i18n', e); } return r; })(render);
+}
+/* the first draw waits for the dictionary when English was chosen on this device */
+if (typeof boot === 'function') { boot = (base => async function () { if (I18N.bootReady) { try { await I18N.bootReady; } catch (e) { /* ignore */ } } return base.apply(this, arguments); })(boot); }
+/* styles: the toggle, and the LTR mirror of the layout */
+document.head.insertAdjacentHTML('beforeend', `<style id="i18ncss">
+.langrow{display:flex;justify-content:center;margin-top:14px}
+.langrow.inside{margin:0 14px 8px;justify-content:flex-start}
+.langrow.kiosk{justify-content:flex-end;margin:0 0 8px}
+.langsw{display:inline-flex;align-items:center;gap:8px;border:1px solid currentColor;background:transparent;color:inherit;opacity:.8;border-radius:999px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer}
+.langsw .on{font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.langsw:hover{opacity:1}
+.langsw .sep{opacity:.4}
+html[dir=ltr] .app,html[dir=ltr] .overlay,html[dir=ltr] .kiosk,html[dir=ltr] .login,html[dir=ltr] .tabbar,html[dir=ltr] .nfv,html[dir=ltr] .nfv-pagen,html[dir=ltr] body,html[dir=ltr] .toasts,html[dir=ltr] #printhost{direction:ltr}
+html[dir=ltr] .ltr{text-align:left!important}
+html[dir=ltr] input.ltr,html[dir=ltr] .inp.ltr{text-align:left!important}
+html[dir=ltr] .nfv-pagen{left:auto;right:0}
+</style>`);
+/* LTR mirror of every stylesheet rule that uses a physical side (right/left), generated once from the loaded CSS */
+function i18nMirrorCSS() {
+  if (document.getElementById('i18nmirror')) return;
+  const PAIRS = [['left', 'right', 'auto'], ['margin-left', 'margin-right', '0'], ['padding-left', 'padding-right', '0'], ['border-left', 'border-right', '0'], ['border-left-width', 'border-right-width', null], ['border-left-color', 'border-right-color', null], ['border-left-style', 'border-right-style', null], ['border-top-left-radius', 'border-top-right-radius', null], ['border-bottom-left-radius', 'border-bottom-right-radius', null]];
+  const swapVal = v => v === 'left' ? 'right' : v === 'right' ? 'left' : v;
+  const mirrorDecl = st => {
+    const out = []; const seen = new Set();
+    PAIRS.forEach(([l, r, reset]) => {
+      const vl = st.getPropertyValue(l), vr = st.getPropertyValue(r); if (!vl && !vr) return;
+      const pl = st.getPropertyPriority(l) ? ' !important' : '', pr = st.getPropertyPriority(r) ? ' !important' : '';
+      if ((l === 'left') && ((vl && !vr && /50%/.test(vl)) || (vr && !vl && /50%/.test(vr)))) return; // centred with translate(-50%) — leave
+      if (vr) out.push(l + ':' + vr + pr); else if (vl && reset !== null) out.push(l + ':' + reset + pl);
+      if (vl) out.push(r + ':' + vl + pl); else if (vr && reset !== null) out.push(r + ':' + reset + pr);
+      seen.add(l); seen.add(r);
+    });
+    ['text-align', 'float', 'clear'].forEach(p => { const v = st.getPropertyValue(p); if (v === 'left' || v === 'right') out.push(p + ':' + swapVal(v) + (st.getPropertyPriority(p) ? ' !important' : '')); });
+    const d = st.getPropertyValue('direction'); if (d === 'rtl') out.push('direction:ltr');
+    return out.join(';');
+  };
+  const skipSel = /leaflet|langsw|\.ltr\b|#i18n|\.nf-en/;
+  const walk = (rules, into) => {
+    for (const rule of rules) {
+      if (rule.type === 1) { if (skipSel.test(rule.selectorText)) continue; const d = mirrorDecl(rule.style); if (d) into.push(rule.selectorText.split(',').map(x => x.trim()).map(x => /^html\b/.test(x) ? x.replace(/^html/, 'html[dir=ltr]') : 'html[dir=ltr] ' + x).join(',') + '{' + d + '}'); }
+      else if (rule.type === 4) { const inner = []; walk(rule.cssRules, inner); if (inner.length) into.push('@media ' + rule.conditionText + '{' + inner.join('\n') + '}'); }
+    }
+  };
+  const css = [];
+  for (const sh of document.styleSheets) { try { if (sh.ownerNode && sh.ownerNode.id === 'i18ncss') continue; walk(sh.cssRules, css); } catch (e) { /* cross-origin */ } }
+  const st = document.createElement('style'); st.id = 'i18nmirror'; st.textContent = css.join('\n'); document.head.appendChild(st);
+}
+/* boot: the language chosen on this device */
+(function () {
+  let saved = 'ar'; try { saved = localStorage.getItem('nf.lang') || 'ar'; } catch (e) { /* ignore */ }
+  const q = (location.search.match(/[?&]lang=(en|ar)/) || [])[1]; if (q) saved = q;
+  if (saved === 'en') { I18N.lang = 'en'; i18nDir(); i18nObserve(); I18N.bootReady = i18nLoad().then(ok => { if (ok) i18nApply(); else { I18N.lang = 'ar'; i18nDir(); } }); }
+})();
+Object.assign(window, { I18N, i18nTr, i18nSet, i18nApply, i18nLang, i18nLoad });
 /* =====================================================================
    v4.19 — one login for all Ninety apps (factory · studio · construction).
    The apps share one origin (github.io), so the browser already holds the
