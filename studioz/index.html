@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0413-1b6a43";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0426-d79e2c";</script>
 
 <script>
 'use strict';
@@ -14813,7 +14813,7 @@ saveTrip = (base => async function (f, t) {
 vTripDetail = (base => id => {
   let html = base(id); const t = byId('trips', id); if (!t) return html;
   const btn = (l, lab) => l && l.lat != null ? `<a class="btn sm" href="${mapsLink(l.lat, l.lng)}" target="_blank" rel="noopener">${icon('map')}${lab}: ${esc(l.name)}</a>` : '';
-  const b = btn(t.fromLoc, 'من') + btn(t.toLoc, 'إلى'); if (!b) return html;
+  const b = btn(t.fromLoc, 'من') + btn(t.toLoc, 'إلى'); if (!b || (t.toLoc && t.toLoc.lat != null)) return html; /* v4.39b: «المسار للوجهة» already shows it */
   const card = `<div class="card"><div class="cardhead"><h3>الأماكن على الخريطة</h3></div><div class="row" style="gap:8px;flex-wrap:wrap">${b}</div></div>`;
   const i = html.indexOf('<div class="card">'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
 })(vTripDetail);
@@ -15075,6 +15075,11 @@ if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
   if (!more || !first || first === more) return;
   const mark = document.createComment('x'); bar.replaceChild(mark, more); bar.replaceChild(more, first); bar.replaceChild(first, mark);
 });
+/* v4.39b — «المسار للوجهة» card: use the place chosen in «إلى» (with its coordinates) before the older sources */
+tripDest = (base => function (t) {
+  const l = t && t.toLoc; if (l && l.lat != null && l.lat !== '' && l.lng != null) { const k = String(l.key || ''); const kind = k.startsWith('sf:') ? 'مصنع خدمي' : k.startsWith('sup:') ? 'مورد' : k.startsWith('ord:') ? 'موقع المشروع' : k.startsWith('site:') ? 'موقع عمل' : 'الوجهة'; const sup = k.startsWith('sup:') ? byId('suppliers', k.slice(4)) : k.startsWith('sf:') ? byId('servfactories', k.split(':')[1]) : null; return { name: l.name, lat: +l.lat, lng: +l.lng, kind, phone: sup && sup.phone || '' }; }
+  return base.apply(this, arguments);
+})(tripDest);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
