@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0552-902d8c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0605-21adbd";</script>
 
 <script>
 'use strict';
@@ -15212,6 +15212,60 @@ vRegulation = (base => function (gate) {
 /* the change log table shows the description */
 regParamsTable = (base => function () { let h = base.apply(this, arguments); try { regChanges().forEach(c => { if (c.desc && c.paramId === 'text') h = h.replace(/(<td[^>]*>)text(<\/td>)/, `$1${esc(c.desc)}$2`); }); } catch (e) { /* ignore */ } return h; })(regParamsTable);
 Object.assign(window, { missingPunchDays, regChangesSince });
+/* =====================================================================
+   v4.42 — (1) السواق لما يبدأ المشوار: يطلع له زرار كبير «افتح الطريق في جوجل ماب» للوجهة
+           (ولما يدوس «التوجه للمصنع»: الطريق للمصنع). الكيلومترات والوقت بيتحسبوا من العداد (بداية/نهاية)
+           وجهاز GPS العربية ووقت البدء/الانتهاء — جوجل ماب مش بيرجّع بيانات الرحلة لأي برنامج تاني.
+           (2) تنبيه «المكلَّف لم يشاهد المهمة — صُعِّدت»: أول ما الشخص يعمل أكشن (فتح المهمة، غيّر حالتها،
+           رد في الشات، أو السواق بدأ المشوار) التنبيه بيتشال من الإشعارات ومن شات المهمة عند كل اللي وصلهم.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.navgo{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border-radius:14px;background:#1a73e8;color:#fff!important;font-weight:800;font-size:17px;text-decoration:none;margin-top:6px}
+.navgo svg{width:22px;height:22px}
+</style>`);
+const navLink = (to, from) => `https://www.google.com/maps/dir/?api=1${from ? `&origin=${from.lat},${from.lng}` : ''}&destination=${to.lat},${to.lng}&travelmode=driving&dir_action=navigate`;
+function tripNavPrompt(t, target, label) {
+  if (!target || target.lat == null) return;
+  openModal({ title: `${label} — ${t.number}`, footer: null, body: `<div class="stack" style="gap:10px"><div class="small">${esc(target.name || '')}</div><a class="navgo" href="${navLink(target)}" target="_blank" rel="noopener" data-navgo="1">${icon('map')}افتح الطريق في جوجل ماب</a><div class="tiny muted">بعد ما توصل ارجع للبرنامج ودوس الخطوة اللي بعدها. الكيلومترات بتتحسب من العداد وGPS العربية.</div><button type="button" class="btn" data-action="closemodal">مش دلوقتي</button></div>` });
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-navgo]')) setTimeout(() => { try { closeModal(); } catch (x) { /* ignore */ } }, 300); });
+const tripNavDest = t => (typeof tripDest === 'function' ? tripDest(t) : null) || (t.toLoc && t.toLoc.lat != null ? t.toLoc : null);
+const tripNavHome = t => (t.fromLoc && t.fromLoc.lat != null ? t.fromLoc : (typeof factoryZone === 'function' ? factoryZone() : null));
+const isTripDriver = t => t && t.driverId && t.driverId === myDriverId();
+/* after «start» → navigate to the destination; after «depart» → navigate back to the factory */
+(() => { const base = ACTIONS.tripStart; ACTIONS.tripStart = async id => { const t0 = byId('trips', id); const r = await base(id); const t = byId('trips', id); if (t && t0 && t0.status !== 'started' && t.status === 'started' && (isTripDriver(t) || canFleet())) { await tripMarkSeen(t); tripNavPrompt(t, tripNavDest(t), 'اتحركت ✓'); } return r; }; })();
+(() => { const base = ACTIONS.tripLeg; ACTIONS.tripLeg = async id => { const t0 = byId('trips', id); const n0 = t0 ? tripLegs(t0).length : 0; const r = await base(id); const t = byId('trips', id); if (!t) return r; const legs = tripLegs(t); if (legs.length > n0) { const last = legs[legs.length - 1]; if (last.key === 'depart') tripNavPrompt(t, tripNavHome(t), 'راجع للمصنع'); } await tripMarkSeen(t); return r; }; })();
+/* the driver acting on the trip counts as having seen its task */
+async function tripMarkSeen(t) { const tk = t && byId('tasks', `trip_${t.id}`); if (!tk || !tk.assigneeId || !isTripDriver(t) || (tk.seenAt || {})[tk.assigneeId]) return; try { await Store.update('tasks', tk.id, { seenAt: Object.assign({}, tk.seenAt || {}, { [tk.assigneeId]: nowISO() }) }, { silent: true }); } catch (e) { /* ignore */ } }
+vTripDetail = (base => id => { const html = base(id); const t = byId('trips', id); if (t && isTripDriver(t)) setTimeout(() => tripMarkSeen(t), 0); return html; })(vTripDetail);
+/* ---------------- (2) clear the «didn't see the task» alert once the person acted ---------------- */
+const ESC_RX = /لم يشاهد المهمة/;
+function escAcked(t) {
+  if (!t || !t.assigneeId) return false; if ((t.seenAt || {})[t.assigneeId]) return true; if (t.status && !['open'].includes(t.status)) return true;
+  if (taskThread(t).some(m => !m.sys && (m.by === t.assigneeId || m.by === 'w:' + t.assigneeId))) return true;
+  if (t.tripId) { const tr = byId('trips', t.tripId); if (tr && ['started', 'done'].includes(tr.status)) return true; }
+  return false;
+}
+const canFixTask = t => writable() && (isAdmin() || ['manager', 'hr', 'office', 'head', 'vice'].includes(role()) || (t.assigneeId && myIds().includes(t.assigneeId)));
+let _escBusy = false;
+async function escCleanup() {
+  if (_escBusy || !S.session || !writable()) return; _escBusy = true;
+  try {
+    for (const t of list('tasks')) {
+      const hasWarn = taskThread(t).some(m => m.sys && ESC_RX.test(m.text || ''));
+      if (!(t.escalation || hasWarn) || !escAcked(t)) continue;
+      if (canFixTask(t)) { try { await Store.update('tasks', t.id, { escalation: null, thread: taskThread(t).filter(m => !(m.sys && ESC_RX.test(m.text || ''))) }, { silent: true }); } catch (e) { /* ignore */ } }
+      /* the alert copies that went to supervisors */
+      for (const x of list('tasks').filter(x => /^esc\d_/.test(x.id) && x.id.includes(`_${t.id}_`) && x.status !== 'done')) {
+        const mine = (x.assigneeId && myIds().includes(x.assigneeId)) || (x.toRole && x.toRole === role()) || isAdmin();
+        if (mine) { try { await Store.update('tasks', x.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', proof: { note: `${assigneeName(t.assigneeId)} شاف المهمة / عمل أكشن`, at: nowISO() } }, { silent: true }); } catch (e) { /* ignore */ } }
+      }
+    }
+  } finally { _escBusy = false; }
+}
+setInterval(escCleanup, 30000); document.addEventListener('nf:ready', () => setTimeout(escCleanup, 3000));
+if (typeof RENDER_HOOKS !== 'undefined') { let last = 0; RENDER_HOOKS.push(() => { const n = Date.now(); if (n - last > 15000) { last = n; setTimeout(escCleanup, 500); } }); }
+Object.assign(window, { escCleanup, tripNavPrompt });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
