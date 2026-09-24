@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0605-21adbd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0655-3f1828";</script>
 
 <script>
 'use strict';
@@ -15266,6 +15266,88 @@ async function escCleanup() {
 setInterval(escCleanup, 30000); document.addEventListener('nf:ready', () => setTimeout(escCleanup, 3000));
 if (typeof RENDER_HOOKS !== 'undefined') { let last = 0; RENDER_HOOKS.push(() => { const n = Date.now(); if (n - last > 15000) { last = n; setTimeout(escCleanup, 500); } }); }
 Object.assign(window, { escCleanup, tripNavPrompt });
+/* =====================================================================
+   v4.43 — (المصنع) كل موظف يشوف حضوره وانصرافه يوم بيوم في «بوابتي» — للقراءة فقط.
+   أي تعديل = «طلب تعديل حضور» → رئيس القسم ← مدير المصنع ← مدير الحسابات والموارد البشرية،
+   وبعد آخر اعتماد السيستم يعدّل اليوم لوحده ويكتب عليه «اتعدّل بطلب».
+   (المالك ومدير الحسابات والموارد البشرية لسه يقدروا يعدّلوا من شاشة الحضور زي الأول.)
+   ===================================================================== */
+REQ_TYPES.attedit = 'تعديل حضور';
+DEFAULT_CHAINS.attedit = ['head', 'manager', 'hr'];
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.myatt table{font-size:12.5px}.myatt td,.myatt th{padding:7px 6px;white-space:nowrap}
+.myatt tr.absent td{color:var(--crit-ink,#b3261e)}.myatt tr.muted td{color:var(--muted)}
+.myatt .fixed{font-size:10.5px;color:var(--good-ink,#1e7a3c);display:block}.myatt .pend{font-size:10.5px;color:var(--warn-ink,#9a6a00);display:block}
+.myatt .kp{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.myatt .kp div{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}.myatt .kp b{display:block;font-size:18px}
+.myatt .kp span{font-size:11px;color:var(--muted)}
+@media (max-width:600px){.myatt .kp{grid-template-columns:repeat(2,minmax(0,1fr))}.myatt .hide-sm{display:none}.myatt .btn .bt{display:none}.myatt td,.myatt th{padding:7px 4px}.myatt td.st{white-space:normal;min-width:70px}}
+.myatt td.st .badge{display:inline-block;margin-top:2px}
+</style>`);
+const attEditOn = () => !isStuSys();
+const attEditPending = (wid, date) => list('requests').find(r => r.type === 'attedit' && r.workerId === wid && r.from === date && r.status === 'pending');
+function myAttCard(w) {
+  const f = S.ui.filter.meatt ||= { ym: monthOf(todayISO()) }; const ym = f.ym; const rows = attMonthRows(w, ym); const today = todayISO();
+  const s = hrMonthSummary(w, ym); const miss = typeof missingPunchDays === 'function' ? missingPunchDays(w, ym).length : s.missing;
+  const days = monthDates(ym).filter(d => d <= today).reverse();
+  const tr = days.map(d => {
+    const r = rows[d]; const c = classifyDay(w, d, r); if (c.kind === 'before') return '';
+    const cls = c.kind === 'absent' ? 'absent' : ['off', 'holiday'].includes(c.kind) ? 'muted' : '';
+    const one = r && ((r.in && !r.out) || (!r.in && r.out)) && d < today;
+    const pend = attEditPending(w.id, d);
+    const note = r && r.editReqId ? '<span class="fixed">اتعدّل بطلب معتمد</span>' : r && (r.reqId || r.outFixed) && (r.method === 'request' || r.outMethod === 'request' || r.outFixed) ? '<span class="fixed">اتصلّح بطلب</span>' : '';
+    const noBtn = ['off', 'holiday'].includes(c.kind) && !r;
+    const btn = noBtn ? '' : pend ? '<span class="pend">قيد الاعتماد</span>' : `<button class="btn xs" data-action="attEditAsk" data-arg="${d}">${icon('edit')}<span class="bt">طلب تعديل</span></button>`;
+    return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ' <span class="badge warn" style="padding:0 5px">ناقص بصمة</span>' : ''}${note}</td><td class="ltr">${esc((r && r.in) || '—')}</td><td class="ltr">${esc((r && r.out) || '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td><td>${btn}</td></tr>`;
+  }).join('');
+  return `<div class="card myatt" id="myattcard"><div class="cardhead"><h3>${icon('attendance')}حضوري</h3><div class="grow"></div>${monthNavBar('meatt')}</div>
+    <div class="kp"><div><b class="num">${s.present + (s.half ? ' + ' + s.half + '½' : '')}</b><span>أيام حضور</span></div><div><b class="num">${s.absent}</b><span>غياب</span></div><div><b class="num">${s.late}</b><span>تأخير (دقيقة)</span></div><div><b class="num">${miss}</b><span>نسيان بصمة</span></div></div>
+    ${tr ? `<div class="tablewrap"><table><thead><tr><th>اليوم</th><th>الحالة</th><th>حضور</th><th>انصراف</th><th class="n hide-sm">ساعات</th><th class="n hide-sm">تأخير</th><th></th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="empty small">لا يوجد حضور مسجّل في الشهر ده</div>'}
+    <div class="tiny muted" style="margin-top:8px">السجل للقراءة فقط. لو في غلط في يوم دوس «طلب تعديل» — الطلب بيروح لرئيس القسم ثم مدير المصنع ثم مدير الحسابات والموارد البشرية، وبعد آخر موافقة اليوم بيتعدّل لوحده.</div></div>`;
+}
+vMe = (base => function () {
+  const html = base.apply(this, arguments); if (!attEditOn()) return html;
+  const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html;
+  return html + myAttCard(w);
+})(vMe);
+ACTIONS.attEditAsk = date => {
+  const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w || !date || date > todayISO()) return;
+  if (attEditPending(w.id, date)) { toast('في طلب تعديل لليوم ده لسه قيد الاعتماد', 'err'); return; }
+  const r0 = attendanceFor(date)[w.id] || {}; const sh = shiftFor(w);
+  openModal({ title: `طلب تعديل حضور — ${fmtDate(date)} (${dayName(date)})`, submitLabel: 'إرسال الطلب', body: `<div class="form">
+    <div class="small full" style="margin-bottom:4px">المسجّل دلوقتي: حضور <b class="ltr">${esc(r0.in || '—')}</b> · انصراف <b class="ltr">${esc(r0.out || '—')}</b></div>
+    ${field('وقت الحضور الصحيح', inp('in', r0.in || sh.start || '', 'type="time"'))}${field('وقت الانصراف الصحيح', inp('out', r0.out || sh.end || '', 'type="time"'))}
+    ${field('السبب', '<textarea id="f-reason" name="reason" required placeholder="مثلاً: نسيت أبصم انصراف — كنت في موقع تركيب"></textarea>', 'full')}
+    <div class="tiny muted full">الطلب بيروح لرئيس القسم ← مدير المصنع ← مدير الحسابات والموارد البشرية.</div></div>`,
+    onSubmit: async f => {
+      const d = formData(f); const nin = d.in || null, nout = d.out || null; const reason = (d.reason || '').trim();
+      if (!reason) { toast('اكتب السبب', 'err'); return false; }
+      if (!nin && !nout) { toast('اكتب وقت الحضور أو الانصراف', 'err'); return false; }
+      if (nin && nout && nout <= nin) { toast('وقت الانصراف لازم يكون بعد الحضور', 'err'); return false; }
+      if (nin === (r0.in || null) && nout === (r0.out || null)) { toast('مفيش تغيير عن المسجّل', 'err'); return false; }
+      const me = S.session || {}; const now = nowISO();
+      const r = { id: uid(), type: 'attedit', workerId: w.id, deptId: w.deptId || null, from: date, to: date, newIn: nin, newOut: nout, oldIn: r0.in || null, oldOut: r0.out || null, reason, status: 'pending', requesterId: w.id, requesterName: w.name, createdBy: me.id || ('w:' + w.id), createdByName: me.name || w.name, createdAt: now, chain: normalizeChain(chainFor('attedit'), w), step: 0, stepAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || w.name, role: role(), kind: 'system', text: `طلب تعديل حضور ${fmtDate(date)} — ${attEditLine({ newIn: nin, newOut: nout, oldIn: r0.in, oldOut: r0.out })}${reason ? ' — ' + reason : ''}` }] };
+      await Store.save('requests', r, { silent: true });
+      try { pushSend(reqStepTargets(r), `تعديل حضور — ${w.name}`, `${fmtDate(date)} · ${attEditLine(r)} · ${reason}`.slice(0, 140), '/#/approvals', 'req-' + r.id); } catch (e) { /* ignore */ }
+      toast('تم إرسال الطلب لرئيس القسم'); rerender();
+    } });
+};
+const attEditLine = r => [r.newIn && r.newIn !== r.oldIn ? `حضور ${r.newIn}${r.oldIn ? ' بدل ' + r.oldIn : ''}` : '', r.newOut && r.newOut !== r.oldOut ? `انصراف ${r.newOut}${r.oldOut ? ' بدل ' + r.oldOut : ''}` : ''].filter(Boolean).join(' · ') || '—';
+reqDesc = (base => r => (r && r.type === 'attedit' ? `تعديل حضور ${fmtDate(r.from)}: ${attEditLine(r)}` : base(r)))(reqDesc);
+/* final approval → the day is corrected automatically */
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r.type !== 'attedit') return base(r, w, patch, opts);
+  const wk = w || byId('workers', r.workerId); if (!wk || !r.from) return;
+  const cur = attendanceFor(r.from)[wk.id] || {};
+  const row0 = Object.assign({}, cur, { s: 'P', src: cur.src || 'request', editReqId: r.id, editPrev: { in: cur.in || null, out: cur.out || null }, editAt: nowISO() });
+  if (r.newIn) { row0.in = r.newIn; row0.method = 'request'; }
+  if (r.newOut) { row0.out = r.newOut; row0.outMethod = 'request'; row0.outFixPending = null; }
+  let row = computeAttRow(row0, wk); if (row.in && row.out && typeof autoAllocRow === 'function') row = autoAllocRow(wk, row);
+  await setAtt(r.from, wk, row);
+})(applyRequestEffects);
+/* the generic «طلب جديد» form doesn't offer it (it needs the day picked from «حضوري») */
+requestFormBase = (base => function () { return base.apply(this, arguments).replace(/<option value="attedit"[^>]*>[^<]*<\/option>/, ''); })(requestFormBase);
+Object.assign(window, { myAttCard });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
