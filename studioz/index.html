@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-1536-fd3451";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-2132-b2400b";</script>
 
 <script>
 'use strict';
@@ -15923,6 +15923,27 @@ document.addEventListener('submit', ev => {
   for (const [el, max] of [[la, 90], [ln, 180]]) { if (!el || el.value === '') continue; const v = fixCoordValue(el.value, max); if (v == null) continue; if (isNaN(v)) { ev.preventDefault(); ev.stopImmediatePropagation(); toast(`${max === 90 ? 'خط العرض' : 'خط الطول'} غلط (${el.value}) — الصق اللوكيشن في خانة «الصق رابط Google Maps أو الإحداثيات»`, 'err'); return; } el.value = v; }
 }, true);
 Object.assign(window, { parseDmsPair, packedDms });
+/* =====================================================================
+   v4.51 — شاشة Ninety الرئيسية (المالك): زرار «فتح السيستم» كان محتاج كذا ضغطة على الموبايل.
+   السبب: أي تحديث بيانات لايف (حضور، مواقع، مهام…) كان بيعيد رسم الشاشة كلها، فلو الرسم حصل
+   بين لمس الصباع ورفعه المتصفح بيلغي الضغطة.
+   · الشاشة مابتتعادش لو محتواها ماتغيّرش.
+   · وطول ما الصباع على الشاشة الرسم بيستنى لحد ما الضغطة تخلص.
+   ===================================================================== */
+let _nhLast = '', _nhTouch = 0, _nhPend = false;
+const nhFlush = () => { _nhTouch = 0; if (_nhPend) { _nhPend = false; setTimeout(() => { if (!_nhTouch) render(false); }, 400); } };
+document.addEventListener('pointerdown', e => { if (e.target && e.target.closest && e.target.closest('#nhome')) _nhTouch = Date.now(); }, true);
+document.addEventListener('touchstart', e => { if (e.target && e.target.closest && e.target.closest('#nhome')) _nhTouch = Date.now(); }, { capture: true, passive: true });
+['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(n => document.addEventListener(n, () => { if (_nhTouch) setTimeout(nhFlush, 0); }, { capture: true, passive: true }));
+render = (base => function (full) {
+  let due = false; try { due = typeof ninetyHomeDue === 'function' && ninetyHomeDue(); } catch (e) { due = false; }
+  if (!due) { _nhLast = ''; return base.apply(this, arguments); }
+  const root = document.getElementById('root'); const shown = !!(root && root.querySelector('#nhome'));
+  if (shown && _nhTouch && Date.now() - _nhTouch < 2500) { _nhPend = true; return; }
+  let h = ''; try { h = ninetyHomeHTML(); } catch (e) { h = ''; }
+  if (shown && h && h === _nhLast) return;
+  const r = base.apply(this, arguments); _nhLast = h; return r;
+})(render);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
