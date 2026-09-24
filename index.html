@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0426-d79e2c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0501-5f73ff";</script>
 
 <script>
 'use strict';
@@ -15080,6 +15080,19 @@ tripDest = (base => function (t) {
   const l = t && t.toLoc; if (l && l.lat != null && l.lat !== '' && l.lng != null) { const k = String(l.key || ''); const kind = k.startsWith('sf:') ? 'مصنع خدمي' : k.startsWith('sup:') ? 'مورد' : k.startsWith('ord:') ? 'موقع المشروع' : k.startsWith('site:') ? 'موقع عمل' : 'الوجهة'; const sup = k.startsWith('sup:') ? byId('suppliers', k.slice(4)) : k.startsWith('sf:') ? byId('servfactories', k.split(':')[1]) : null; return { name: l.name, lat: +l.lat, lng: +l.lng, kind, phone: sup && sup.phone || '' }; }
   return base.apply(this, arguments);
 })(tripDest);
+/* v4.39c — editing an approved trip (new driver / time / vehicle) now moves the driver's task too.
+   Before, the task stayed with the old driver (and he got the «didn't open the task» escalation). */
+saveTrip = (base => async function (f, t) {
+  const r = await base.apply(this, arguments); if (r === false || !t || !t.id) return r;
+  const tr = byId('trips', t.id); const tk = tr && byId('tasks', `trip_${tr.id}`); if (!tr || !tk || tk.status === 'done' || !tr.driverId) return r;
+  const desc = `${TRIP_KINDS[tr.kind] || ''}\n${tr.from || ''} ← ${tr.to || ''} · ${fmtDate(tr.date)} ${tr.time || ''} · ${vehicleName(tr.vehicleId)}\nابدأ المشوار من «بوابتي» أو «حركة النقل» وأنهه بصورة عند التسليم/الاستلام.`;
+  if (tk.assigneeId !== tr.driverId || tk.dueDate !== tr.date || tk.desc !== desc) {
+    const moved = tk.assigneeId !== tr.driverId;
+    await Store.save('tasks', Object.assign({}, tk, { assigneeId: tr.driverId, title: `مشوار ${tr.number}: ${tr.purpose}`, desc, dueDate: tr.date, orderId: tr.orderId || null, updatedAt: nowISO() }), { silent: true });
+    if (moved) toast(`المهمة اتنقلت لـ ${assigneeName(tr.driverId)}`);
+  }
+  return r;
+})(saveTrip);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
