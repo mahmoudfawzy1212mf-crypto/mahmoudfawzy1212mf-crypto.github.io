@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-1002-997eb7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-1406-48fb72";</script>
 
 <script>
 'use strict';
@@ -15690,6 +15690,175 @@ vVehicle = (base => function (id) { const h = base.apply(this, arguments); if (!
   return h + `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>مصروفات العربية (كاش / زيت / صيانة)</h3><span class="badge">${fmtMoney(sum(ex, e => +e.amount || 0))} ${CUR()}</span></div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من</th><th class="n">المبلغ</th></tr></thead><tbody>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(catLabel(e.cat))}${e.note ? `<div class="tiny muted">${esc(e.note)}</div>` : ''}</td><td class="small">${esc(acctLabel(e.account))}</td><td class="n">${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody></table></div></div>`; })(vVehicle);
 document.addEventListener('nf:ready', () => setTimeout(() => { try { quotaEnsure(monthOf(todayISO())); } catch (e) { /* ignore */ } }, 4000));
 Object.assign(window, { walletBalance, supplierWallet, moneyDue, acctPurchaseOut });
+/* =====================================================================
+   v4.47 — (المصنع) مخزن المنتجات الجاهزة + التسليمات
+   · الأصناف من كتالوج المنتجات (المنتج + اللون/الموديل) — رصيد، محجوز لعملاء، متاح، حد أدنى.
+   · دخول: استلام من الإنتاج (للستوك أو محجوز لأمر تشغيل/عميل) بصورة · مرتجع · جرد/تسوية.
+   · خروج: «إذن تسليم» (DN) ← مشوار «تسليم للعميل» في حركة النقل ← لما المشوار يخلص بصورة الاستلام الإذن يتقفل «اتسلّم» والرصيد يتخصم لوحده.
+     أو «اتسلّم من المصنع» لو العميل استلم بنفسه.
+   · أمين المخزن يستلم ويعمل الأذون؛ مدير المصنع يتابع؛ مدير الحركة يشوف التسليمات؛ المبيعات تشوف المتاح لبراندها بس؛
+     القيمة (سعر المنتج × الكمية) للمالك ومدير الحسابات والموارد البشرية بس.
+   ===================================================================== */
+const fgOn = () => !isStuSys();
+if (!COLS.includes('fgs')) COLS.push('fgs'); S.data.fgs = S.data.fgs || new Map();
+Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('fgs').onSnapshot(snap => { S.data.fgs = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.fgs = true; rerender(); }, e => console.warn('snapshot fgs', e))); })(Store.subscribeAll);
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.fgthumb{width:40px;height:40px;border-radius:8px;object-fit:cover;border:1px solid var(--line);background:var(--surface-2)}
+.fgrow td{vertical-align:middle}.fgnum{font-weight:700;font-size:15px}
+.fglines{display:grid;gap:6px}.fglines .fl{display:grid;grid-template-columns:2fr 1fr 80px 28px;gap:6px;align-items:center}
+@media (max-width:600px){.fglines .fl{grid-template-columns:1fr 1fr 70px 28px}}
+</style>`);
+const fgCanWrite = () => writable() && (isAdmin() || ['store', 'manager', 'hr', 'office'].includes(role()));
+const fgCanDeliver = () => writable() && (isAdmin() || ['store', 'manager', 'fleet', 'hr', 'office'].includes(role()));
+const fgSeesValue = () => isAdmin() || role() === 'hr';
+const fgBrands = () => { if (role() === 'bdd' && typeof crmBrandsOf === 'function') { const b = crmBrandsOf(); return b && b.length ? b : null; } return null; };
+const fgKey = (productId, variant) => `${productId}|${(variant || '').trim()}`;
+const fgMoves = () => list('fgs').filter(x => x.type === 'mv');
+const fgDns = () => list('fgs').filter(x => x.type === 'dn');
+const fgProd = pid => byId('products', pid) || null;
+const fgName = (pid, v) => { const p = fgProd(pid); return `${p ? `${p.code || ''} ${p.name || ''}`.trim() : 'منتج'}${v ? ' — ' + v : ''}`; };
+const fgThumb = pid => { const p = fgProd(pid); const f = p && typeof filesOf === 'function' ? filesOf('product', p.id).find(x => x.thumb) : null; return (p && (p.thumb || p.image)) || (f && f.thumb) || ''; };
+const fgSign = m => (m.kind === 'out' ? -1 : 1) * (+m.qty || 0);
+/* per stock key: on hand, reserved for orders, pending in open delivery notes, available */
+function fgStock() {
+  const map = {};
+  const g = (k, pid, v) => map[k] ||= { key: k, productId: pid, variant: v || '', onHand: 0, byOrder: {}, pendingFree: 0, pendingOrder: {} };
+  fgMoves().forEach(m => { const r = g(m.key, m.productId, m.variant); r.onHand += fgSign(m); if (m.orderId) r.byOrder[m.orderId] = (r.byOrder[m.orderId] || 0) + fgSign(m); });
+  fgDns().filter(d => ['draft', 'out'].includes(d.status)).forEach(d => (d.items || []).forEach(it => { const r = g(it.key, it.productId, it.variant); if (d.orderId && (r.byOrder[d.orderId] || 0) > 0) r.pendingOrder[d.orderId] = (r.pendingOrder[d.orderId] || 0) + (+it.qty || 0); else r.pendingFree += +it.qty || 0; }));
+  Object.values(map).forEach(r => { r.reserved = r2(sum(Object.values(r.byOrder), q => Math.max(0, q))); r.available = r2(r.onHand - r.reserved - r.pendingFree); r.onHand = r2(r.onHand); const mn = byId('fgs', 'min_' + r.key); r.min = mn ? +mn.min || 0 : 0; });
+  return map;
+}
+function fgVisibleRows() { const bs = fgBrands(); return Object.values(fgStock()).filter(r => r.onHand > 0.001 || r.min > 0 || r.reserved > 0).filter(r => { if (!bs) return true; const p = fgProd(r.productId); return p && bs.includes(p.brandId); }); }
+const nextDnNo = () => { const y = todayISO().slice(2, 4); const n = fgDns().filter(d => (d.number || '').startsWith(`DN-${y}-`)).length + 1; return `DN-${y}-${String(n).padStart(3, '0')}`; };
+function prodOptions(sel) { const bs = fgBrands(); return sortBy(list('products').filter(p => p.status !== 'inactive' && (!bs || bs.includes(p.brandId))), p => (p.brandId || '') + (p.code || '')).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(brandName(p.brandId))} · ${esc(p.code || '')} ${esc(p.name || '')}</option>`).join(''); }
+function orderOptions(sel) { return sortBy(list('orders').filter(o => o.status !== 'cancelled' && o.status !== 'delivered'), o => o.code || '').map(o => `<option value="${o.id}" ${o.id === sel ? 'selected' : ''}>${esc(o.code || '')} — ${esc(o.title || '')} · ${esc(clientName(o.clientId))}</option>`).join(''); }
+async function fgPhoto(f, sel, ownerKind, ownerId, note) { const file = (f.querySelector(sel) || {}).files?.[0]; if (!file) return { thumb: null, fileIds: [] }; let thumb = null, fileIds = []; try { const doc = await proofAttach(file, { kind: 'fg', ownerKind, ownerId, note: note || '' }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } } return { thumb, fileIds }; }
+async function fgMove(m) { const doc = Object.assign({ id: uid(), type: 'mv', date: todayISO(), month: monthOf(todayISO()), at: nowISO(), byName: S.session?.name || '' }, m, { key: fgKey(m.productId, m.variant) }); await Store.save('fgs', doc, { silent: true }); return doc; }
+
+/* ---------- in: from production (stock or for a client order) ---------- */
+ACTIONS.fgIn = orderId => {
+  if (!fgCanWrite()) return; const o = orderId ? byId('orders', orderId) : null; const pre = o ? orderItems(o)[0] : null;
+  openModal({ title: 'استلام منتج جاهز للمخزن', submitLabel: 'استلام', body: `<div class="form">
+    ${field('المنتج', `<select name="productId" required>${prodOptions(pre && pre.productId)}</select>`, 'full')}${field('اللون / الموديل', inp('variant', '', 'placeholder="مثلاً: أخضر زيتي"'))}${field('العدد', inp('qty', pre ? pre.qty || '' : '', 'type="number" step="1" min="1" required inputmode="numeric"'))}
+    ${field('لمين؟', `<select name="orderId"><option value="">ستوك — متاح للبيع</option>${orderOptions(orderId)}</select>`, 'full')}
+    <div class="field full"><label>صورة المنتج في المخزن</label><input type="file" id="fg-file" accept="image/*" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}</div>`,
+    onSubmit: async f => {
+      const d = formData(f); const q = Math.round(num(d.qty)); if (!d.productId || !(q > 0)) { toast('اختار المنتج واكتب العدد', 'err'); return false; }
+      const ph = await fgPhoto(f, '#fg-file', 'fg', d.productId, 'استلام'); if (!ph.thumb) { toast('صورة المنتج في المخزن مطلوبة', 'err'); return false; }
+      const oo = d.orderId ? byId('orders', d.orderId) : null;
+      await fgMove({ kind: 'in', productId: d.productId, variant: (d.variant || '').trim(), qty: q, orderId: oo ? oo.id : null, clientId: oo ? oo.clientId : null, note: d.note || '', thumb: ph.thumb, fileIds: ph.fileIds });
+      if (oo) { try { await notifyRole('manager', `دخل المخزن جاهز: ${fgName(d.productId, d.variant)} × ${q}`, `محجوز لأمر ${oo.code} — ${clientName(oo.clientId)}`, { id: `fgin_${uid()}`, orderId: oo.id }); } catch (e) { /* ignore */ } }
+      toast(oo ? `اتسجل ومحجوز لـ ${oo.code}` : 'اتسجل في الستوك');
+    } });
+};
+/* ---------- delivery note ---------- */
+function dnLineHTML(it = {}) { return `<div class="fl"><select name="dn-p">${prodOptions(it.productId)}</select><input name="dn-v" placeholder="اللون / الموديل" value="${esc(it.variant || '')}"><input name="dn-q" type="number" min="1" step="1" placeholder="العدد" value="${it.qty ?? ''}"><button type="button" class="iconbtn" data-dn="del">${icon('x')}</button></div>`; }
+ACTIONS.dnNew = orderId => {
+  if (!fgCanDeliver()) return; const o = orderId ? byId('orders', orderId) : null;
+  const lines = o ? orderItems(o).map(it => ({ productId: it.productId, qty: it.qty })) : [{}];
+  openModal({ title: 'إذن تسليم جديد', wide: true, submitLabel: 'حفظ الإذن', body: `<div class="form">${field('رقم الإذن', inp('number', nextDnNo(), 'class="code" readonly'))}${field('أمر التشغيل (اختياري)', `<select name="orderId" id="dn-order"><option value="">— بيع من الستوك —</option>${orderOptions(orderId)}</select>`)}
+    ${field('العميل', inp('clientName', o ? clientName(o.clientId) : '', 'required'))}${field('العنوان / الموقع', inp('address', '', ''))}
+    <div class="field full"><label>الأصناف</label><div class="fglines" id="dnlines">${lines.map(dnLineHTML).join('')}</div><button type="button" class="btn sm" data-dn="add" style="margin-top:6px">${icon('plus')}صنف</button></div>${field('ملاحظة', inp('note', ''), 'full')}</div>`,
+    onOpen: f => { f.addEventListener('click', ev => { const b = ev.target.closest('[data-dn]'); if (!b) return; ev.preventDefault(); if (b.dataset.dn === 'add') f.querySelector('#dnlines').insertAdjacentHTML('beforeend', dnLineHTML()); else if (f.querySelectorAll('#dnlines .fl').length > 1) b.closest('.fl').remove(); }); const os = f.querySelector('#dn-order'); os.addEventListener('change', () => { const oo = byId('orders', os.value); if (oo) f.querySelector('[name=clientName]').value = clientName(oo.clientId); }); },
+    onSubmit: async f => {
+      const d = formData(f); const ps = [...f.querySelectorAll('[name=dn-p]')].map(x => x.value), vs = [...f.querySelectorAll('[name=dn-v]')].map(x => x.value.trim()), qs = [...f.querySelectorAll('[name=dn-q]')].map(x => Math.round(num(x.value)));
+      const items = ps.map((p, i) => ({ productId: p, variant: vs[i], qty: qs[i], key: fgKey(p, vs[i]) })).filter(x => x.productId && x.qty > 0);
+      if (!items.length) { toast('ضيف صنف واحد على الأقل بالعدد', 'err'); return false; } if (!(d.clientName || '').trim()) { toast('اكتب اسم العميل', 'err'); return false; }
+      const st = fgStock(); for (const it of items) { const r = st[it.key] || { available: 0, byOrder: {}, pendingOrder: {} }; const res = d.orderId ? Math.max(0, (r.byOrder[d.orderId] || 0) - (r.pendingOrder[d.orderId] || 0)) : 0; if (it.qty > r2(res + Math.max(0, r.available))) { toast(`${fgName(it.productId, it.variant)}: المتاح ${fmtNum(res + Math.max(0, r.available))} بس`, 'err'); return false; } }
+      const oo = d.orderId ? byId('orders', d.orderId) : null;
+      const dn = { id: uid(), type: 'dn', number: d.number || nextDnNo(), orderId: oo ? oo.id : null, clientId: oo ? oo.clientId : null, clientName: d.clientName.trim(), address: d.address || '', items, note: d.note || '', status: 'draft', createdAt: nowISO(), createdBy: S.session?.id || null, byName: S.session?.name || '' };
+      await Store.save('fgs', dn, { silent: true });
+      try { await notifyRole('fleet', `إذن تسليم ${dn.number} — محتاج مشوار`, `${dn.clientName}${dn.address ? ' · ' + dn.address : ''}\n${items.map(it => `${fgName(it.productId, it.variant)} × ${it.qty}`).join('، ')}`, { id: `dn_${dn.id}`, priority: 'high', fields: { link: `/#/fg/${dn.id}` } }); } catch (e) { /* ignore */ }
+      toast(`اتعمل ${dn.number} واتبعت لمدير الحركة`); go('fg/' + dn.id);
+    } });
+};
+/* delivery trip for a DN */
+ACTIONS.tripNew = (base => arg => {
+  const [k, id] = (arg || '').split(':'); if (k !== 'dn') return base(arg); if (!canFleet()) return; const dn = byId('fgs', id); if (!dn) return;
+  const before = new Set(list('trips').map(t => t.id));
+  openModal({ title: `مشوار تسليم — ${dn.number}`, wide: true, body: tripForm({ kind: 'delivery', orderId: dn.orderId || '', purpose: `تسليم ${dn.number} — ${dn.clientName}`, to: dn.address || dn.clientName, notes: dn.items.map(it => `${fgName(it.productId, it.variant)} × ${it.qty}`).join('، ') }), onSubmit: async f => {
+    const r = await saveTrip(f, {}); if (r === false) return false;
+    const t = list('trips').find(x => !before.has(x.id)); if (t) { await Store.update('trips', t.id, { dnId: dn.id }, { silent: true }); await Store.update('fgs', dn.id, { tripId: t.id, status: 'out', outAt: nowISO() }, { silent: true }); const tk = byId('tasks', `dn_${dn.id}`); if (tk && tk.status !== 'done') await Store.update('tasks', tk.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' }); }
+    return r;
+  } });
+})(ACTIONS.tripNew);
+async function dnDeliver(dn, proof) {
+  if (!dn || dn.status === 'delivered') return;
+  for (let i = 0; i < (dn.items || []).length; i++) { const it = dn.items[i]; const mid = `dnout_${dn.id}_${i}`; if (!byId('fgs', mid)) await Store.save('fgs', { id: mid, type: 'mv', kind: 'out', key: fgKey(it.productId, it.variant), productId: it.productId, variant: it.variant || '', qty: +it.qty || 0, orderId: dn.orderId || null, clientId: dn.clientId || null, dnId: dn.id, date: todayISO(), month: monthOf(todayISO()), at: nowISO(), byName: (proof && proof.byName) || S.session?.name || '', note: `تسليم ${dn.number}` }, { silent: true }); }
+  await Store.update('fgs', dn.id, { status: 'delivered', deliveredAt: nowISO(), proof: proof || null }, { silent: true });
+}
+/* the delivery trip ended with a photo → the note closes and stock goes out (run by any client that may write fgs) */
+let _dnSyncAt = 0;
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+  if (!fgOn() || !fgCanDeliver() || Date.now() - _dnSyncAt < 8000) return; _dnSyncAt = Date.now();
+  fgDns().filter(d => d.status === 'out' && d.tripId).forEach(d => { const t = byId('trips', d.tripId); if (t && t.status === 'done') dnDeliver(d, { thumb: (t.proof && t.proof.thumb) || null, note: (t.proof && t.proof.note) || '', byName: (t.proof && t.proof.byName) || '', at: t.endedAt || nowISO(), tripId: t.id }).catch(() => { }); });
+});
+ACTIONS.dnPickup = async id => {
+  const dn = byId('fgs', id); if (!dn || !fgCanDeliver() || dn.status === 'delivered') return;
+  const pr = await proofDialog({ title: `اتسلّم من المصنع — ${dn.number}`, intro: 'العميل استلم بنفسه من المصنع — صوّر محضر الاستلام أو المنتج مع العميل.', kind: 'delivery', ownerKind: 'fg', ownerId: dn.id, requireFile: true, fileLabel: 'صورة الاستلام / المحضر', noteLabel: 'مين استلم؟' });
+  if (!pr) return; await dnDeliver(dn, { thumb: pr.thumb, note: pr.note, byName: pr.byName, at: pr.at, fileIds: pr.fileIds }); toast('الإذن اتقفل — اتسلّم');
+};
+ACTIONS.dnCancel = async id => { const dn = byId('fgs', id); if (!dn || !fgCanDeliver() || dn.status === 'delivered') return; if (!(await confirmDlg(`إلغاء ${dn.number}؟`, 'إلغاء الإذن'))) return; await Store.update('fgs', id, { status: 'cancelled', cancelledAt: nowISO() }, { silent: true }); };
+ACTIONS.fgReturn = id => {
+  const dn = byId('fgs', id); if (!dn || !fgCanWrite() || dn.status !== 'delivered') return;
+  openModal({ title: `مرتجع من ${dn.number}`, submitLabel: 'تسجيل المرتجع', body: `<div class="form">${field('الصنف', `<select name="i">${dn.items.map((it, i) => `<option value="${i}">${esc(fgName(it.productId, it.variant))} (اتسلّم ${it.qty})</option>`).join('')}</select>`, 'full')}${field('العدد', inp('qty', '', 'type="number" min="1" step="1" required'))}${field('يرجع', `<select name="to"><option value="order">محجوز للعميل تاني</option><option value="free">للستوك المتاح</option></select>`)}<div class="field full"><label>صورة</label><input type="file" id="fr-file" accept="image/*" capture="environment"></div>${field('السبب', inp('note', '', 'required'), 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); const it = dn.items[+d.i]; const q = Math.round(num(d.qty)); if (!it || !(q > 0) || q > +it.qty) { toast('راجع العدد', 'err'); return false; } if (!(d.note || '').trim()) { toast('اكتب السبب', 'err'); return false; } const ph = await fgPhoto(f, '#fr-file', 'fg', dn.id, 'مرتجع'); await fgMove({ kind: 'ret', productId: it.productId, variant: it.variant, qty: q, orderId: d.to === 'order' ? dn.orderId : null, clientId: dn.clientId, dnId: dn.id, note: d.note, thumb: ph.thumb, fileIds: ph.fileIds }); toast('اتسجل المرتجع'); } });
+};
+ACTIONS.fgAdjust = key => {
+  if (!(isAdmin() || role() === 'store' || role() === 'manager') || !writable()) return; const r = fgStock()[key]; if (!r) return;
+  openModal({ title: `جرد — ${fgName(r.productId, r.variant)}`, body: `<div class="form"><div class="small full">الرصيد في السيستم: <b>${fmtNum(r.onHand)}</b></div>${field('العدد الفعلي في المخزن', inp('actual', r.onHand, 'type="number" min="0" step="1" required'))}${field('الحد الأدنى (تنبيه)', inp('min', r.min || '', 'type="number" min="0" step="1"'))}${field('السبب', inp('note', ''), 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); const diff = Math.round(num(d.actual)) - r.onHand; if (diff && !(d.note || '').trim()) { toast('اكتب سبب الفرق', 'err'); return false; } if (diff) await fgMove({ kind: 'adj', productId: r.productId, variant: r.variant, qty: diff, note: `جرد: ${d.note}` }); await Store.save('fgs', { id: 'min_' + key, type: 'min', key, min: Math.round(num(d.min)) || 0 }, { silent: true }); toast('تم'); } });
+};
+
+/* ---------- the page ---------- */
+VIEW_TITLES.fg = 'مخزن المنتجات الجاهزة';
+(() => { const i = NAV.findIndex(n => n.id === 'inventory'); const entry = { id: 'fg', label: 'المنتجات الجاهزة والتسليم', icon: 'inventory', count: () => fgDns().filter(d => d.status === 'draft').length, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+setTimeout(() => { if (!fgOn()) return; ['manager', 'vice', 'store', 'fleet', 'bdd', 'hr', 'office'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('fg')) { const i = ROLE_VIEWS[r].indexOf('inventory'); if (i >= 0) ROLE_VIEWS[r].splice(i + 1, 0, 'fg'); else ROLE_VIEWS[r].push('fg'); } }); }, 0);
+canSee = (base => view => (view === 'fg' ? (fgOn() && !!S.session && (isAdmin() || ['manager', 'vice', 'store', 'fleet', 'bdd', 'hr', 'office'].includes(role()))) : base(view)))(canSee);
+const DN_ST = { draft: ['مستني مشوار', 'warn'], out: ['مع السواق', 'acc'], delivered: ['اتسلّم', 'good'], cancelled: ['ملغي', ''] };
+function vFgList() {
+  const f = S.ui.filter.fg ||= { tab: 'stock', brand: '' }; const bs = fgBrands(); const val = fgSeesValue();
+  const tabs = [['stock', 'الرصيد'], ['dn', 'أذون التسليم'], ['log', 'الحركة']];
+  let body = '';
+  if (f.tab === 'stock') {
+    let rows = fgVisibleRows(); if (f.brand) rows = rows.filter(r => (fgProd(r.productId) || {}).brandId === f.brand); rows = sortBy(rows, r => fgName(r.productId, r.variant));
+    const totVal = val ? sum(rows, r => r.onHand * (+(fgProd(r.productId) || {}).price || 0)) : 0;
+    body = rows.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th></th><th>المنتج</th><th>البراند</th><th class="n">في المخزن</th><th class="n">محجوز لعملاء</th><th class="n">متاح</th>${val ? '<th class="n">القيمة</th>' : ''}<th></th></tr></thead><tbody>${rows.map(r => { const p = fgProd(r.productId) || {}; const low = r.min && r.available < r.min; const th = fgThumb(r.productId); return `<tr class="fgrow"><td>${th ? `<img class="fgthumb" src="${th}">` : ''}</td><td><b>${esc(fgName(r.productId, r.variant))}</b>${low ? ' <span class="badge crit" style="padding:0 6px">أقل من الحد الأدنى</span>' : ''}${Object.keys(r.byOrder).filter(k => r.byOrder[k] > 0).length && role() !== 'bdd' ? `<div class="tiny muted">${Object.keys(r.byOrder).filter(k => r.byOrder[k] > 0).map(k => { const o = byId('orders', k); return `${o ? o.code : ''} (${fmtNum(r.byOrder[k])})`; }).join(' · ')}</div>` : ''}</td><td class="small">${esc(brandName(p.brandId))}</td><td class="n fgnum">${fmtNum(r.onHand)}</td><td class="n">${r.reserved ? fmtNum(r.reserved) : '—'}</td><td class="n fgnum" style="color:${r.available > 0 ? 'var(--good-ink)' : 'var(--muted)'}">${fmtNum(Math.max(0, r.available))}</td>${val ? `<td class="n">${fmtMoney(r.onHand * (+p.price || 0))}</td>` : ''}<td>${isAdmin() || ['store', 'manager'].includes(role()) ? `<button class="btn xs" data-action="fgAdjust" data-arg="${esc(r.key)}">جرد</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>${val ? `<div class="small" style="margin-top:8px">قيمة المخزون (بسعر البيع): <b>${fmtMoney(totVal)} ${CUR()}</b></div>` : ''}</div>` : `<div class="empty"><b>المخزن فاضي</b>${fgCanWrite() ? 'استلم أول منتج جاهز من «استلام من الإنتاج».' : ''}</div>`;
+  } else if (f.tab === 'dn') {
+    const dns = sortBy(fgDns().filter(d => !bs || d.items.some(it => bs.includes((fgProd(it.productId) || {}).brandId))), d => d.createdAt || '', true);
+    body = dns.length ? `<div class="list">${dns.map(d => `<div class="item" data-action="go" data-arg="fg/${d.id}"><div class="main"><div class="title"><span class="code">${esc(d.number)}</span><span>${esc(d.clientName || '')}</span>${badge(DN_ST, d.status)}</div><div class="meta"><span>${d.items.map(it => `${esc(fgName(it.productId, it.variant))} × ${it.qty}`).join('، ')}</span>${d.orderId ? `<span>${esc((byId('orders', d.orderId) || {}).code || '')}</span>` : ''}<span>${fmtDate((d.createdAt || '').slice(0, 10))}</span></div></div></div>`).join('')}</div>` : '<div class="empty"><b>مفيش أذون تسليم</b></div>';
+  } else {
+    const ym = (S.ui.filter.fglog ||= { ym: monthOf(todayISO()) }).ym; const mv = sortBy(fgMoves().filter(m => m.month === ym && (!bs || bs.includes((fgProd(m.productId) || {}).brandId))), m => m.at || '', true);
+    const KIND = { in: ['دخول المخزن', 'good'], out: ['تسليم', 'acc'], ret: ['مرتجع', 'warn'], adj: ['جرد', ''] };
+    const tIn = sum(mv.filter(m => m.kind === 'in'), m => +m.qty || 0), tOut = sum(mv.filter(m => m.kind === 'out'), m => +m.qty || 0);
+    body = `<div class="toolbar">${monthNavBar('fglog')}<div class="grow"></div><span class="small">دخل <b>${fmtNum(tIn)}</b> · اتسلّم <b>${fmtNum(tOut)}</b></span></div>${mv.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>الحركة</th><th>المنتج</th><th class="n">العدد</th><th>لـ</th><th>مين</th><th></th></tr></thead><tbody>${mv.map(m => `<tr><td>${fmtDate(m.date)}</td><td>${badge(KIND, m.kind)}</td><td>${esc(fgName(m.productId, m.variant))}${m.note ? `<div class="tiny muted">${esc(m.note)}</div>` : ''}</td><td class="n">${fmtNum(m.qty)}</td><td class="small">${m.orderId ? esc((byId('orders', m.orderId) || {}).code || '') : 'ستوك'}</td><td class="small">${esc(m.byName || '')}</td><td>${m.thumb ? `<img class="fgthumb" src="${m.thumb}">` : ''}</td></tr>`).join('')}</tbody></table></div></div>` : '<div class="muted small">مفيش حركة الشهر ده</div>'}`;
+  }
+  const brandsSel = (bs ? S.settings.brands.filter(b => bs.includes(b.id)) : S.settings.brands);
+  return `<div class="toolbar"><div class="seg">${tabs.map(t => `<button class="${f.tab === t[0] ? 'on' : ''}" data-action="fgTab" data-arg="${t[0]}">${t[1]}</button>`).join('')}</div>${f.tab === 'stock' && brandsSel.length > 1 ? `<select class="sel" data-fgbrand="1"><option value="">كل البراندات</option>${brandsSel.map(b => `<option value="${b.id}" ${f.brand === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>` : ''}<div class="grow"></div>${fgCanWrite() ? `<button class="btn sm" data-action="fgIn">${icon('plus')}استلام من الإنتاج</button>` : ''}${fgCanDeliver() ? `<button class="btn sm p" data-action="dnNew">${icon('map')}إذن تسليم</button>` : ''}</div>${body}`;
+}
+ACTIONS.fgTab = t => { (S.ui.filter.fg ||= {}).tab = t; render(false); };
+document.addEventListener('change', ev => { if (ev.target && ev.target.dataset && ev.target.dataset.fgbrand) { (S.ui.filter.fg ||= {}).brand = ev.target.value; render(false); } });
+function vDn(id) {
+  const d = byId('fgs', id); if (!d || d.type !== 'dn') return '<div class="empty"><b>الإذن مش موجود</b></div>'; const t = d.tripId ? byId('trips', d.tripId) : null; const o = d.orderId ? byId('orders', d.orderId) : null;
+  return `<div class="toolbar"><a class="btn sm" href="#/fg">${icon('back')}المنتجات الجاهزة</a><div class="grow"></div>${d.status === 'draft' && canFleet() ? `<button class="btn sm p" data-action="tripNew" data-arg="dn:${d.id}">${icon('map')}مشوار تسليم</button>` : ''}${['draft', 'out'].includes(d.status) && fgCanDeliver() ? `<button class="btn sm" data-action="dnPickup" data-arg="${d.id}">اتسلّم من المصنع</button><button class="btn sm ghost" data-action="dnCancel" data-arg="${d.id}">إلغاء</button>` : ''}${d.status === 'delivered' && fgCanWrite() ? `<button class="btn sm" data-action="fgReturn" data-arg="${d.id}">مرتجع</button>` : ''}<button class="btn sm" data-action="dnPrint" data-arg="${d.id}">${icon('print')}طباعة</button></div>
+  <div class="card"><div class="cardhead"><h3><span class="code">${esc(d.number)}</span> — ${esc(d.clientName || '')}</h3><div class="grow"></div>${badge(DN_ST, d.status)}</div>
+    <div class="grid g3" style="gap:10px;font-size:13px;margin-bottom:10px"><div><div class="tiny muted">أمر التشغيل</div>${o && role() !== 'bdd' ? `<a href="#/orders/${o.id}">${esc(o.code)}</a>` : o ? esc(o.code) : 'بيع من الستوك'}</div><div><div class="tiny muted">العنوان</div>${esc(d.address || '—')}</div><div><div class="tiny muted">اتعمل</div>${fmtDate((d.createdAt || '').slice(0, 10))} · ${esc(d.byName || '')}</div></div>
+    <div class="tablewrap"><table><thead><tr><th></th><th>الصنف</th><th class="n">العدد</th></tr></thead><tbody>${d.items.map(it => { const th = fgThumb(it.productId); return `<tr><td>${th ? `<img class="fgthumb" src="${th}">` : ''}</td><td>${esc(fgName(it.productId, it.variant))}</td><td class="n fgnum">${fmtNum(it.qty)}</td></tr>`; }).join('')}</tbody></table></div>${d.note ? `<div class="small" style="margin-top:8px">${esc(d.note)}</div>` : ''}</div>
+  ${t ? `<div class="card"><div class="cardhead"><h3>المشوار</h3></div>${typeof tripItem === 'function' ? tripItem(t, { compact: true }) : `<a href="#/fleet/${t.id}">${esc(t.number)}</a>`}</div>` : ''}
+  ${d.status === 'delivered' ? `<div class="card"><div class="cardhead"><h3>${icon('check')}اتسلّم ${fmtDate((d.deliveredAt || '').slice(0, 10))}</h3></div>${d.proof && d.proof.thumb ? `<img src="${d.proof.thumb}" style="max-width:260px;border-radius:10px;border:1px solid var(--line)">` : ''}${d.proof && d.proof.note ? `<div class="small" style="margin-top:6px">${esc(d.proof.note)}</div>` : ''}</div>` : ''}`;
+}
+ACTIONS.dnPrint = id => { const d = byId('fgs', id); if (!d) return; openModal({ title: `إذن تسليم ${d.number}`, wide: true, footer: `<button type="button" class="btn p" data-action="doPrint">${icon('print')}طباعة</button><button type="button" class="btn" data-action="closemodal">إغلاق</button>`, body: `<div class="report" id="printarea">${typeof reportHead === 'function' ? reportHead(`إذن تسليم ${d.number}`, fmtDate((d.createdAt || '').slice(0, 10))) : `<h2>إذن تسليم ${esc(d.number)}</h2>`}<table><tbody><tr><th style="width:120px">العميل</th><td>${esc(d.clientName || '')}</td></tr><tr><th>العنوان</th><td>${esc(d.address || '')}</td></tr>${d.orderId ? `<tr><th>أمر التشغيل</th><td>${esc((byId('orders', d.orderId) || {}).code || '')}</td></tr>` : ''}</tbody></table><table style="margin-top:10px"><thead><tr><th>#</th><th>الصنف</th><th>العدد</th></tr></thead><tbody>${d.items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(fgName(it.productId, it.variant))}</td><td>${fmtNum(it.qty)}</td></tr>`).join('')}</tbody></table><div style="display:flex;justify-content:space-between;margin-top:40px"><div>توقيع أمين المخزن: ..................</div><div>توقيع المستلم: ..................</div></div></div>` }); };
+EXTRA_VIEWS.fg = r => (r.id ? vDn(r.id) : vFgList());
+/* order page: what of this order is ready in the warehouse + its delivery notes */
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+  if (!fgOn() || S.route.view !== 'orders' || !S.route.id || !(isAdmin() || ['manager', 'store', 'fleet', 'office', 'hr', 'vice'].includes(role()))) return;
+  const v = document.getElementById('view'); if (!v || v.querySelector('#fgordercard')) return; const oid = S.route.id;
+  const st = Object.values(fgStock()).filter(r => (r.byOrder[oid] || 0) > 0); const dns = fgDns().filter(d => d.orderId === oid);
+  if (!st.length && !dns.length && !fgCanWrite()) return;
+  const html = `<div class="card" id="fgordercard"><div class="cardhead"><h3>${icon('inventory')}في مخزن المنتجات الجاهزة</h3><div class="grow"></div>${fgCanWrite() ? `<button class="btn sm" data-action="fgIn" data-arg="${oid}">استلام جاهز</button>` : ''}${fgCanDeliver() && st.length ? `<button class="btn sm p" data-action="dnNew" data-arg="${oid}">إذن تسليم</button>` : ''}</div>${st.length ? st.map(r => `<div class="small">${esc(fgName(r.productId, r.variant))}: <b>${fmtNum(r.byOrder[oid])}</b> محجوز</div>`).join('') : '<div class="muted small">لسه مفيش حاجة جاهزة في المخزن للأمر ده</div>'}${dns.length ? `<div class="sep"></div>${dns.map(d => `<div class="small"><a href="#/fg/${d.id}"><span class="code">${esc(d.number)}</span></a> ${badge(DN_ST, d.status)}</div>`).join('')}` : ''}</div>`;
+  const first = v.querySelector('.card'); if (first) first.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('beforeend', html);
+});
+Object.assign(window, { fgStock, dnDeliver });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
