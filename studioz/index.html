@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-1406-48fb72";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-1501-519a6f";</script>
 
 <script>
 'use strict';
@@ -15859,6 +15859,30 @@ if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
   const first = v.querySelector('.card'); if (first) first.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('beforeend', html);
 });
 Object.assign(window, { fgStock, dnDeliver });
+/* =====================================================================
+   v4.48 — طلب شراء الخامات: خانة «المورد المقترح» (اختياري) — رئيس القسم يختار المورد اللي عايز يشتري منه
+   من الموردين المسجّلين أو يكتب اسم مورد جديد. بيتنقل لأمر الشراء كمورد مبدئي، والمشتريات تقدر تغيّره.
+   ===================================================================== */
+needForm = (base => function (p) {
+  const h = base.apply(this, arguments); p = p || {};
+  const sups = sortBy(list('suppliers').filter(s => s.status !== 'inactive'), s => s.name || '');
+  const cur = p.prefSupplierId || p.supplierId || '';
+  const fld = `${field('المورد المقترح (اختياري)', `<select name="prefSupplierId" id="f-prefSup"><option value="">— المشتريات تختار —</option>${sups.map(s => `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${esc(s.name)}${s.phone ? ' — ' + esc(s.phone) : ''}</option>`).join('')}<option value="__new" ${!cur && p.prefSupplier ? 'selected' : ''}>مورد مش متسجل…</option></select>`)}${field('اسم المورد الجديد', inp('prefSupplierName', !cur ? (p.prefSupplier || '') : '', 'placeholder="اسم المورد ورقمه لو معاك"'), 'nsup')}`;
+  const i = h.indexOf('<div class="field full"><label>البنود المطلوبة'); return i < 0 ? h.replace(/<\/div>\s*$/, fld + '</div>') : h.slice(0, i) + fld + h.slice(i);
+})(needForm);
+/* show the «new supplier name» box only when chosen */
+document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'f-prefSup') { const f = ev.target.closest('form'); const nf = f && f.querySelector('[name=prefSupplierName]'); if (nf) nf.closest('.field').hidden = ev.target.value !== '__new'; } });
+new MutationObserver(() => { const s = document.getElementById('f-prefSup'); if (s && !s.dataset.w) { s.dataset.w = 1; const nf = s.closest('form').querySelector('[name=prefSupplierName]'); if (nf) nf.closest('.field').hidden = s.value !== '__new'; } }).observe(document.documentElement, { childList: true, subtree: true });
+saveNeed = (base => async function (f, p) {
+  const d = formData(f); const r = await base.apply(this, arguments); if (r === false) return r;
+  const doc = (p && p.id && byId('purchases', p.id)) || list('purchases').find(x => x.number === d.number && x.kind === 'need'); if (!doc) return r;
+  const s = d.prefSupplierId && d.prefSupplierId !== '__new' ? byId('suppliers', d.prefSupplierId) : null; const nm = d.prefSupplierId === '__new' ? (d.prefSupplierName || '').trim() : '';
+  const patch = { prefSupplierId: s ? s.id : null, prefSupplier: s ? s.name : nm };
+  if (['need', 'need_ok'].includes(doc.status) && !(doc.items || []).length) { if (s) Object.assign(patch, { supplierId: s.id, supplier: s.name }); else if (nm) Object.assign(patch, { supplierId: null, supplier: nm }); }
+  await Store.update('purchases', doc.id, patch, { silent: true });
+  return r;
+})(saveNeed);
+needCard = (base => function (p) { const h = base.apply(this, arguments); if (!h || !p.prefSupplier) return h; const line = `<div class="small" style="margin-top:6px">${icon('clients')}المورد المقترح من القسم: <b>${esc(p.prefSupplier)}</b>${p.prefSupplierId ? '' : ' <span class="badge warn" style="padding:0 6px">مش متسجل</span>'}</div>`; const i = h.indexOf('<table class="tbl"'); return i < 0 ? h : h.slice(0, i) + line + h.slice(i); })(needCard);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
