@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0655-3f1828";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0712-6b4a5a";</script>
 
 <script>
 'use strict';
@@ -15348,6 +15348,33 @@ applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
 /* the generic «طلب جديد» form doesn't offer it (it needs the day picked from «حضوري») */
 requestFormBase = (base => function () { return base.apply(this, arguments).replace(/<option value="attedit"[^>]*>[^<]*<\/option>/, ''); })(requestFormBase);
 Object.assign(window, { myAttCard });
+/* =====================================================================
+   v4.44 — (المصنع) مسؤول الحسابات: حسابات أوامر الشراء + متابعة المصروفات فقط.
+   - بيشوف أسعار وإجماليات أوامر الشراء وعروض الموردين والسداد (كانت مخفية عنه).
+   - مايشوفش أوامر التشغيل ولا التشغيل الخارجي ولا المخزون ولا لوحة المتابعة ولا تقارير الإنتاج ولا تكلفة أي مشروع.
+   - أي أمر شراء جاهز بيوصله يعتمده (موجود من v4.9)، وبعد اعتماده:
+     يظهر للمالك عشان يحوّل للمورد + يظهر لمدير الحسابات والموارد البشرية (إشعار ومهمة متابعة).
+   ===================================================================== */
+setTimeout(() => {
+  if (isStuSys() || !Array.isArray(ROLE_VIEWS.acc)) return;
+  ROLE_VIEWS.acc = ROLE_VIEWS.acc.filter(v => !['orders', 'dashboard', 'reports', 'projectcosts', 'projects', 'boards', 'clients', 'quotes', 'invoices', 'accounts', 'external', 'inventory'].includes(v));
+  ['purchases', 'expenses'].reverse().forEach(v => { const i = ROLE_VIEWS.acc.indexOf(v); if (i >= 0) ROLE_VIEWS.acc.splice(i, 1); ROLE_VIEWS.acc.unshift(v); });
+  if (typeof ROLE_HINTS !== 'undefined') ROLE_HINTS.acc = 'مسؤول الحسابات: يعتمد أوامر الشراء الجاهزة (الأسعار والمورد) قبل تحويل المالك، ويتابع المصروفات وسداد الموردين — بدون أوامر التشغيل وتكلفة المشاريع.';
+}, 0);
+/* he reviews the PO money (prices, totals, supplier offers, payments) — v4.7 had hidden all prices from him.
+   The Accounts & HR manager sees PO money on the purchasing pages too (elsewhere he still asks the owner's one-hour price permission). */
+(() => { const base = FINANCE_ROLES.includes; FINANCE_ROLES.includes = function (r) { return base.call(this, r) || (!isStuSys() && (r === 'acc' || (r === 'hr' && ['purchases', 'suppliers'].includes(S.route && S.route.view)))); }; })();
+/* after the accounts officer approves a PO → the Accounts & HR manager sees it too (the owner is already notified to transfer) */
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  const res = await base(r, w, patch, opts);
+  if (r && r.type === 'po' && !isStuSys()) {
+    const p = r.purchaseId ? byId('purchases', r.purchaseId) : null;
+    if (p && p.status === 'transfer') { try { await notifyRole('hr', `أمر شراء معتمد من الحسابات — ${p.number}`, `${p.supplier || ''} — ${fmtMoney(poPayable(p))} ${CUR()}\nبانتظار تحويل المالك للمورد. التفاصيل وعروض الأسعار على صفحة الأمر.`, { id: `po_hr_${p.id}`, fields: { purchaseId: p.id, link: `/#/purchases/${p.id}` } }); if (typeof pushSend === 'function') pushSend(['role:hr'], `أمر شراء معتمد — ${p.number}`, `${p.supplier || ''} — ${fmtMoney(poPayable(p))} ${CUR()} · بانتظار التحويل`, `/#/purchases/${p.id}`, 'po-hr-' + p.id).catch(() => { }); } catch (e) { /* ignore */ } }
+  }
+  return res;
+})(applyRequestEffects);
+/* once the owner transfers, the HR follow-up closes by itself */
+(() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => { const r = await base(id); const p = byId('purchases', id); if (p && p.status !== 'transfer') { const t = byId('tasks', `po_hr_${id}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', proof: { note: `تم التحويل ${fmtMoney((p.transfer && p.transfer.amount) || 0)} ${CUR()}`, at: nowISO() } }, { silent: true }); } catch (e) { /* ignore */ } } } return r; }; })();
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
