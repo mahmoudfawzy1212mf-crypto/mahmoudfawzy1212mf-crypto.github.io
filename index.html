@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0712-6b4a5a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0913-c04862";</script>
 
 <script>
 'use strict';
@@ -15359,8 +15359,14 @@ setTimeout(() => {
   if (isStuSys() || !Array.isArray(ROLE_VIEWS.acc)) return;
   ROLE_VIEWS.acc = ROLE_VIEWS.acc.filter(v => !['orders', 'dashboard', 'reports', 'projectcosts', 'projects', 'boards', 'clients', 'quotes', 'invoices', 'accounts', 'external', 'inventory'].includes(v));
   ['purchases', 'expenses'].reverse().forEach(v => { const i = ROLE_VIEWS.acc.indexOf(v); if (i >= 0) ROLE_VIEWS.acc.splice(i, 1); ROLE_VIEWS.acc.unshift(v); });
+  /* v4.45 — estimates (مقايسات أوامر التشغيل) no longer pass by him: Accounts & HR manager → owner */
+  DEFAULT_CHAINS.estimate = ['hr', 'admin'];
+  if (typeof ROLE_POWERS !== 'undefined') ROLE_POWERS.acc = ['يعتمد أوامر الشراء الجاهزة ويشوف أسعارها', 'يتابع المصروفات وسداد الموردين', 'بدون أوامر التشغيل وتكلفة المشاريع والمقايسات'];
+  if (typeof ROLE_GUIDES !== 'undefined') ROLE_GUIDES.acc = { title: 'دليل مسؤول الحسابات', steps: ['«الطلبات»: اعتمد أوامر الشراء اللي بتوصلك — راجع المورد والأسعار والإجمالي.', 'بعد اعتمادك الأمر بيظهر لمدير الحسابات والموارد البشرية وللمالك عشان التحويل للمورد.', '«المشتريات» و«الموردون»: حسابات أوامر الشراء والسداد.', '«المصروفات»: سجّل وتابع المصروفات.'] };
   if (typeof ROLE_HINTS !== 'undefined') ROLE_HINTS.acc = 'مسؤول الحسابات: يعتمد أوامر الشراء الجاهزة (الأسعار والمورد) قبل تحويل المالك، ويتابع المصروفات وسداد الموردين — بدون أوامر التشغيل وتكلفة المشاريع.';
 }, 0);
+/* estimates are not his any more (v4.45) */
+canDo = (base => (act, ctx) => { if (act === 'estimate' && role() === 'acc' && !isStuSys()) return false; return base(act, ctx); })(canDo);
 /* he reviews the PO money (prices, totals, supplier offers, payments) — v4.7 had hidden all prices from him.
    The Accounts & HR manager sees PO money on the purchasing pages too (elsewhere he still asks the owner's one-hour price permission). */
 (() => { const base = FINANCE_ROLES.includes; FINANCE_ROLES.includes = function (r) { return base.call(this, r) || (!isStuSys() && (r === 'acc' || (r === 'hr' && ['purchases', 'suppliers'].includes(S.route && S.route.view)))); }; })();
