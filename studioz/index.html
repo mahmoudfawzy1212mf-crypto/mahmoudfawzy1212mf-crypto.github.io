@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0913-c04862";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-1002-997eb7";</script>
 
 <script>
 'use strict';
@@ -15381,6 +15381,315 @@ applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
 })(applyRequestEffects);
 /* once the owner transfers, the HR follow-up closes by itself */
 (() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => { const r = await base(id); const p = byId('purchases', id); if (p && p.status !== 'transfer') { const t = byId('tasks', `po_hr_${id}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', proof: { note: `تم التحويل ${fmtMoney((p.transfer && p.transfer.amount) || 0)} ${CUR()}`, at: nowISO() } }, { silent: true }); } catch (e) { /* ignore */ } } } return r; }; })();
+/* =====================================================================
+   v4.46 — (المصنع) الفلوس: حسابات الدخول + العُهد + محافظ الموردين + مصاريف التشغيل (اتفاق 24 سبتمبر)
+   1) حسابات الدخول: حساب محمود الشخصي / حساب Ninety / حساب LOF — كل دفعة عميل تتسجل على حساب منهم.
+   2) العُهد: لكل شخص عهدة (سعيد: Office Cash + Factory Cash، محمود البحيري، أحمد عبد الظاهر، بهاء، هيثم).
+      المالك يحوّل للعهدة (تحويل موثّق بصورة) — صاحب العهدة يصرف منها بصورة الإيصال.
+   3) طلب مبلغ للعهدة → يوصل المالك على طول (قايمة «مستحق عليك تحويله»).
+   4) كل شخص يشوف عهدته بس؛ المالك وسعيد يشوفوا كل العهد.
+   5) صفحة «الفلوس»: أرصدة الحسابات (المالك بس) + العهد + المستحق التحويل.
+   6) محفظة لكل مورد: التحويلات بأوامر الشراء، المستلم، الفرق، المجمّد.
+   7) مصاريف التشغيل (إيجار/كهرباء/مية/غاز/شاي وسكر/السكن): مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.
+   8) السكن: أكتر من سكن، إيجار وكهرباء ومية مربوطين بكل سكن.
+   9) كوتة الشاي والسكر الشهرية لموظفين المصنع.
+   ===================================================================== */
+const moneyOn = () => !isStuSys();
+const OWNER_ACCTS_DEF = [{ id: 'personal', name: 'حساب محمود الشخصي' }, { id: 'ninety', name: 'حساب Ninety' }, { id: 'lof', name: 'حساب LOF' }];
+const ownerAccts = () => { const a = S.settings.money && S.settings.money.accounts; return Array.isArray(a) && a.length ? a : OWNER_ACCTS_DEF; };
+const wallets = () => { const w = S.settings.money && S.settings.money.wallets; return Array.isArray(w) ? w.filter(x => x && x.id && !x.off) : []; };
+const walletOf = id => wallets().find(w => w.id === id) || null;
+const homes = () => { const h = S.settings.money && S.settings.money.homes; return Array.isArray(h) ? h.filter(x => x && x.id && !x.off) : []; };
+const homeName = id => (homes().find(h => h.id === id) || {}).name || '';
+const acctLabel = id => { const o = ownerAccts().find(a => a.id === id); if (o) return o.name; const w = walletOf(id); if (w) return `عهدة ${w.name}`; return typeof acctName === 'function' ? acctName(id) : id; };
+const myWalletIds = () => { const me = S.session && S.session.workerId; return me ? wallets().filter(w => w.holder === me).map(w => w.id) : []; };
+const seesAllWallets = () => isAdmin() || role() === 'hr';
+const seesMoneyOps = () => isAdmin() || ['hr', 'acc'].includes(role());
+const canOpex = () => writable() && (isAdmin() || ['hr', 'acc'].includes(role()));
+
+/* ---------- data: one extra collection «money» (transfers + monthly quota lists) ---------- */
+if (!COLS.includes('money')) COLS.push('money'); S.data.money = S.data.money || new Map();
+Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('money').onSnapshot(snap => { S.data.money = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.money = true; rerender(); }, e => console.warn('snapshot money', e))); })(Store.subscribeAll);
+
+/* ---------- expense categories for operations / wallets ---------- */
+const MONEY_CATS = [['rent_factory', 'إيجار المصنع'], ['electricity', 'كهرباء المصنع'], ['water', 'مياه المصنع'], ['gas', 'أنابيب غاز'], ['tea', 'شاي وسكر'], ['home_rent', 'إيجار سكن'], ['home_elec', 'كهرباء سكن'], ['home_water', 'مياه سكن'], ['fuel_cash', 'بنزين كاش (Octane واقف)'], ['oil', 'تغيير زيت'], ['car_maint', 'صيانة عربيات'], ['office_salaries', 'مرتبات المكتب (الاستوديو)'], ['office_rent', 'إيجار المكتب (الاستوديو)']];
+const OPEX_CATS = ['rent_factory', 'electricity', 'water', 'gas', 'tea', 'home_rent', 'home_elec', 'home_water', 'other'];
+const HOME_CATS = ['home_rent', 'home_elec', 'home_water'];
+const CAR_CATS = ['fuel_cash', 'oil', 'car_maint'];
+const SPEND_CATS = ['materials', 'fuel_cash', 'oil', 'car_maint', 'transport', 'salaries', 'office_salaries', 'office_rent', 'rent_factory', 'electricity', 'water', 'gas', 'tea', 'home_rent', 'home_elec', 'home_water', 'other'];
+setTimeout(() => {
+  if (!moneyOn()) return;
+  MONEY_CATS.forEach(([id, name]) => { if (!ACCT_DEFAULTS.expenseCats.some(c => c.id === id)) ACCT_DEFAULTS.expenseCats.push({ id, name }); });
+  if (!ACCT_DEFAULTS.expenseCats.some(c => c.id === 'other')) ACCT_DEFAULTS.expenseCats.push({ id: 'other', name: 'أخرى' });
+  /* the «accounts» of the ledger = the owner's 3 accounts + every custody wallet */
+  Object.defineProperty(ACCT_DEFAULTS, 'accounts', { configurable: true, enumerable: true, get: () => ownerAccts().map(a => ({ id: a.id, name: a.name, opening: +a.opening || 0 })).concat(wallets().map(w => ({ id: w.id, name: `عهدة ${w.name}`, opening: 0, wallet: true }))) });
+}, 0);
+const catLabel = id => (MONEY_CATS.find(c => c[0] === id) || [])[1] || (typeof catName === 'function' ? catName(id) : id);
+
+/* ---------- balances ---------- */
+const xfers = () => list('money').filter(m => m.type === 'xfer');
+function walletBalance(wid) {
+  const inn = sum(xfers().filter(x => x.to === wid), x => +x.amount || 0); const out = sum(xfers().filter(x => x.from === wid), x => +x.amount || 0);
+  const spent = sum(list('expenses').filter(e => e.account === wid), e => +e.amount || 0);
+  return { in: r2(inn), out: r2(out), spent: r2(spent), balance: r2(inn - out - spent) };
+}
+acctBalances = (base => function () { const acc = base.apply(this, arguments); if (!moneyOn()) return acc; const find = id => acc.find(a => a.id === id); xfers().forEach(x => { const f = find(x.from), t = find(x.to); if (f) { f.out += +x.amount || 0; } if (t) { t.in += +x.amount || 0; } }); acc.forEach(a => { a.balance = r2(a.opening + a.in - a.out); }); return acc; })(acctBalances);
+/* existing ledger entries that used «cash»: salaries & advances are paid by سعيد from Factory Cash */
+const FACTORY_WALLET = () => (wallets().find(w => w.kind === 'factory') || {}).id || null;
+acctOnPayrollLock = (base => async function (ym, rows) { await base.apply(this, arguments); const fw = moneyOn() && FACTORY_WALLET(); if (fw && byId('expenses', 'pay_' + ym)) await Store.update('expenses', 'pay_' + ym, { account: fw, holderId: walletOf(fw).holder }); })(acctOnPayrollLock);
+acctAdvanceOut = (base => async function (a) { await base.apply(this, arguments); const fw = moneyOn() && FACTORY_WALLET(); if (fw && a && byId('expenses', 'adv_' + a.id)) await Store.update('expenses', 'adv_' + a.id, { account: fw, holderId: walletOf(fw).holder }); })(acctAdvanceOut);
+/* an expense out of a wallet is readable by its holder */
+Store.save = (base => async function (col, doc, o) { if (col === 'expenses' && doc && doc.account && !doc.holderId) { const w = walletOf(doc.account); if (w) doc = Object.assign({}, doc, { holderId: w.holder }); } return base.call(this, col, doc, o); })(Store.save);
+
+/* ---------- 1) client payments: which account received it ---------- */
+const PAY_TITLES = /^(تسجيل دفعة|تسجيل تحويل العميل|تسجيل سداد) — (.+)$/;
+function payDefaultAcct(ref) { const o = list('orders').find(x => x.code === ref) || null; const inv = !o ? list('invoices').find(x => x.number === ref) : null; const b = (o || inv || {}).brandId; return b === 'lof' ? 'lof' : 'ninety'; }
+openModal = (base => function (o) {
+  if (o && moneyOn() && typeof o.title === 'string' && PAY_TITLES.test(o.title) && typeof o.body === 'string' && o.onSubmit) {
+    const ref = PAY_TITLES.exec(o.title)[2].trim(); const def = payDefaultAcct(ref);
+    const sel = field('دخلت على حساب', `<select id="f-inAcct" name="inAcct">${ownerAccts().map(a => `<option value="${esc(a.id)}" ${a.id === def ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`);
+    const i = o.body.lastIndexOf('</div>'); const body = i < 0 ? o.body + sel : o.body.slice(0, i) + sel + o.body.slice(i);
+    const sub = o.onSubmit; o = Object.assign({}, o, { body, onSubmit: async f => { S._inAcct = (f.querySelector('[name=inAcct]') || {}).value || def; try { return await sub(f); } finally { S._inAcct = null; } } });
+  }
+  return base.call(this, o);
+})(openModal);
+Store.update = (base => async function (col, id, patch, o) { if (S._inAcct && (col === 'orders' || col === 'invoices') && patch && Array.isArray(patch.payments)) patch = Object.assign({}, patch, { payments: patch.payments.map(p => p && !p.account ? Object.assign({}, p, { account: S._inAcct }) : p) }); return base.call(this, col, id, patch, o); })(Store.update);
+
+/* ---------- shared: a dialog with source account + amount + receipt ---------- */
+function srcOptions(sel, withWallets = true) { return `<optgroup label="حساباتك">${ownerAccts().map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</optgroup>${withWallets && wallets().length ? `<optgroup label="من عهدة">${wallets().map(w => `<option value="${esc(w.id)}" ${w.id === sel ? 'selected' : ''}>عهدة ${esc(w.name)} — رصيد ${fmtMoney(walletBalance(w.id).balance)}</option>`).join('')}</optgroup>` : ''}`; }
+function moneyDialog({ title, intro, amount, amountLabel, fields = '', fileLabel = 'صورة التحويل / الإيصال', fileRequired = true, submitLabel = 'تسجيل', ownerKind = 'money', ownerId = '' }) {
+  return new Promise(resolve => {
+    let done = false; const fin = v => { if (!done) { done = true; clearInterval(iv); resolve(v); } };
+    openModal({ title, submitLabel, body: `<div class="form">${intro ? `<div class="banner info full" style="margin:0">${icon('info')}<span>${intro}</span></div>` : ''}${amount !== undefined ? field(amountLabel || `المبلغ (${CUR()})`, inp('amount', amount ?? '', 'type="number" step="any" min="0" required inputmode="decimal"')) : ''}${fields}
+      <div class="field full"><label>${esc(fileLabel)}${fileRequired ? '' : ' (اختياري)'}</label><input type="file" id="md-file" name="file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const file = (f.querySelector('#md-file') || {}).files?.[0];
+        if (amount !== undefined && !(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; }
+        if (fileRequired && !file) { toast('الصورة مطلوبة للتوثيق', 'err'); return false; }
+        const res = Object.assign({}, d, { amount: num(d.amount), fileIds: [], thumb: null });
+        if (file) { try { const doc = await proofAttach(file, { kind: 'money', ownerKind, ownerId, note: d.note || '' }); if (doc) { res.fileIds.push(doc.id); res.thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!res.thumb) { try { res.thumb = await fileToThumb(file); } catch (e) { /* ignore */ } } }
+        fin(res); return true;
+      } });
+    const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300);
+  });
+}
+async function saveXfer(x) { const w = walletOf(x.to) || walletOf(x.from); const doc = Object.assign({ id: uid(), type: 'xfer', date: todayISO(), month: monthOf(todayISO()), at: nowISO(), byName: S.session?.name || '', workerId: w ? w.holder : null }, x); await Store.save('money', doc, { silent: true }); return doc; }
+function notifyHolder(w, title, body, url) { if (!w || !w.holder) return; try { Store.save('tasks', { id: `mn_${uid()}`, title, desc: body || '', assigneeId: w.holder, deptId: null, status: 'open', kind: 'notice', source: 'money', priority: 'normal', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), link: url || '/#/me' }, { silent: true }); } catch (e) { /* ignore */ } if (typeof pushSend === 'function') pushSend([w.holder], title, body || '', url || '/#/me', 'money').catch(() => { }); }
+
+/* ---------- 2+3) custody: request money / owner transfers / holder spends ---------- */
+REQ_TYPES.fund = 'طلب مبلغ للعهدة'; DEFAULT_CHAINS.fund = ['admin'];
+REQ_TYPES.opex = 'مصروف تشغيل'; DEFAULT_CHAINS.opex = ['hr'];
+ACTIONS.fundAsk = wid => {
+  const mine = wallets().filter(w => myWalletIds().includes(w.id) || isAdmin()); if (!mine.length) return; const w0 = walletOf(wid) || mine[0];
+  openModal({ title: 'طلب مبلغ للعهدة', submitLabel: 'إرسال للمالك', body: `<div class="form">${mine.length > 1 ? field('العهدة', `<select name="walletId">${mine.map(w => `<option value="${w.id}" ${w.id === w0.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field(`المبلغ (${CUR()})`, inp('amount', '', 'type="number" step="any" min="0" required inputmode="decimal"'))}
+    ${field('هتعمل بيه إيه', `<select name="cat">${SPEND_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('العربية (لو للعربيات)', `<select name="vehicleId"><option value="">—</option>${list('vehicles').map(v => `<option value="${v.id}">${esc(v.name || v.plate || v.id)}</option>`).join('')}</select>`)}${field('التفاصيل', '<textarea name="reason" required placeholder="مثلاً: تغيير زيت عربية النقل + فلتر"></textarea>', 'full')}
+    <div class="tiny muted full">الطلب بيوصل المالك على طول — أول ما يحوّل المبلغ بيدخل عهدتك ويوصلك إشعار.</div></div>`,
+    onSubmit: async f => {
+      const d = formData(f); const w = walletOf(d.walletId); if (!w || !(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب هتعمل بيه إيه', 'err'); return false; }
+      const me = S.session || {}; const now = nowISO();
+      const r = { id: uid(), type: 'fund', walletId: w.id, amount: num(d.amount), cat: d.cat, vehicleId: d.vehicleId || null, reason: d.reason.trim(), requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب ${fmtMoney(num(d.amount))} ${CUR()} لعهدة ${w.name} — ${catLabel(d.cat)}` }] };
+      await Store.save('requests', r, { silent: true });
+      if (typeof notifyOwner === 'function') await notifyOwner(`طلب مبلغ للعهدة — ${w.name}: ${fmtMoney(r.amount)} ${CUR()}`, `${catLabel(r.cat)} — ${r.reason}`, { id: `fund_${r.id}`, reqId: r.id });
+      toast('الطلب اتبعت للمالك'); rerender();
+    } });
+};
+/* owner pays a custody request */
+ACTIONS.fundPay = async id => {
+  const r = byId('requests', id); if (!r || !isAdmin() || r.status !== 'pending') return; const w = walletOf(r.walletId); if (!w) return;
+  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
+  if (!res) return;
+  await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
+  await decideRequest(r.id, 'approved', res.note || '');
+};
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r && r.type === 'fund') {
+    const r1 = byId('requests', r.id) || r; const wl = walletOf(r1.walletId); if (!wl) return; const xid = `fund_${r1.id}`;
+    if (!byId('money', xid)) await saveXfer({ id: xid, from: r1.payFrom || 'personal', to: wl.id, amount: +r1.paidAmount || +r1.amount || 0, reqId: r1.id, cat: r1.cat, note: r1.reason || '', thumb: r1.payThumb || null, fileIds: r1.payFileIds || [] });
+    const t = byId('tasks', `fund_${r1.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' });
+    notifyHolder(wl, `اتحوّل ${fmtMoney(+r1.paidAmount || +r1.amount)} ${CUR()} لعهدتك`, `${wl.name} — ${catLabel(r1.cat)}. سجّل المصروف بصورة الإيصال من «بوابتي ← عهدتي».`);
+    return;
+  }
+  if (r && r.type === 'opex') {
+    const res = await base(r, w, patch, opts);
+    if (typeof notifyOwner === 'function') await notifyOwner(`مصروف تشغيل معتمد — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}: ${fmtMoney(r.amount)} ${CUR()}`, `${fmtMonth(r.month)} — ${r.payee || ''} ${r.note || ''}\nوافق عليه مدير الحسابات — حوّل من صفحة «الفلوس».`, { id: `opex_${r.id}`, reqId: r.id });
+    return res;
+  }
+  return base(r, w, patch, opts);
+})(applyRequestEffects);
+reqDesc = (base => r => { if (r && r.type === 'fund') { const w = walletOf(r.walletId); return `طلب ${fmtMoney(r.amount)} ${CUR()} لعهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`; } if (r && r.type === 'opex') return `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''} (${fmtMonth(r.month)}): ${fmtMoney(r.amount)} ${CUR()}`; return base(r); })(reqDesc);
+/* owner transfers to a wallet without a request / takes back the rest */
+ACTIONS.walletFund = async wid => {
+  if (!isAdmin()) return; const w = walletOf(wid); if (!w) return;
+  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, amount: '', fields: field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`) + field('الغرض', `<select name="cat">${SPEND_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`), submitLabel: 'تم التحويل' });
+  if (!res) return; await saveXfer({ from: res.from, to: w.id, amount: res.amount, cat: res.cat, note: res.note || '', thumb: res.thumb, fileIds: res.fileIds });
+  notifyHolder(w, `اتحوّل ${fmtMoney(res.amount)} ${CUR()} لعهدتك`, `${w.name} — ${catLabel(res.cat)}`); toast('تم تسجيل التحويل');
+};
+ACTIONS.walletBack = async wid => {
+  if (!isAdmin()) return; const w = walletOf(wid); if (!w) return; const bal = walletBalance(w.id).balance;
+  const res = await moneyDialog({ title: `استرداد من عهدة ${w.name}`, intro: `الرصيد الحالي ${fmtMoney(bal)} ${CUR()}`, amount: bal > 0 ? bal : '', fields: field('رجع على', `<select name="to">${srcOptions('personal', false)}</select>`), fileRequired: false, submitLabel: 'تسجيل' });
+  if (!res) return; await saveXfer({ from: w.id, to: res.to, amount: res.amount, note: res.note || 'استرداد الباقي', thumb: res.thumb, fileIds: res.fileIds }); toast('تم');
+};
+/* holder spends from his wallet (receipt photo required) */
+ACTIONS.walletSpend = async wid => {
+  const ids = isAdmin() || role() === 'hr' ? wallets().map(w => w.id) : myWalletIds(); if (!ids.length) return; const w0 = walletOf(wid) || walletOf(ids[0]);
+  const fields = `${ids.length > 1 ? field('من عهدة', `<select name="walletId">${ids.map(id => `<option value="${id}" ${id === w0.id ? 'selected' : ''}>${esc(walletOf(id).name)} — ${fmtMoney(walletBalance(id).balance)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field('التاريخ', inp('date', todayISO(), 'type="date"'))}
+    ${field('البند', `<select name="cat">${SPEND_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('العربية (للبنزين والزيت والصيانة)', `<select name="vehicleId"><option value="">—</option>${list('vehicles').map(v => `<option value="${v.id}">${esc(v.name || v.plate || v.id)}</option>`).join('')}</select>`)}
+    ${homes().length ? field('السكن (لو مصروف سكن)', `<select name="homeId"><option value="">—</option>${homes().map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`) : ''}${field('اتدفع لمين', inp('payee', ''))}`;
+  const res = await moneyDialog({ title: 'تسجيل مصروف من العهدة', intro: 'صورة الإيصال أو الفاتورة إلزامية.', amount: '', fields, fileLabel: 'صورة الإيصال / الفاتورة', submitLabel: 'تسجيل المصروف', ownerKind: 'expense' });
+  if (!res) return; const w = walletOf(res.walletId); if (!w) return; const bal = walletBalance(w.id).balance;
+  if (res.amount > bal + 0.5) { toast(`رصيد العهدة ${fmtMoney(bal)} ${CUR()} — اطلب مبلغ الأول`, 'err'); return; }
+  if (CAR_CATS.includes(res.cat) && !res.vehicleId) { toast('اختار العربية', 'err'); return; }
+  if (HOME_CATS.includes(res.cat) && !res.homeId) { toast('اختار السكن', 'err'); return; }
+  await Store.save('expenses', { id: uid(), date: res.date || todayISO(), month: monthOf(res.date || todayISO()), amount: res.amount, cat: res.cat, account: w.id, holderId: w.holder, orderId: null, vehicleId: res.vehicleId || null, homeId: res.homeId || null, payee: res.payee || '', ref: '', note: res.note || '', src: 'wallet', fileIds: res.fileIds, thumb: res.thumb, byName: S.session?.name || '', createdAt: nowISO() });
+  toast('تم تسجيل المصروف من العهدة');
+};
+
+/* ---------- 6) supplier wallet ---------- */
+function supplierWallet(s) {
+  const pos = list('purchases').filter(p => (p.supplierId && p.supplierId === s.id) || (!p.supplierId && (p.supplier || '').trim() === (s.name || '').trim()));
+  const ids = new Set(pos.map(p => p.id)); const pays = sortBy(list('expenses').filter(e => e.purchaseId && ids.has(e.purchaseId)), e => e.date || '', true);
+  const paid = r2(sum(pays, e => +e.amount || 0));
+  const received = r2(sum(pos.filter(p => ['received', 'partial'].includes(p.status)), p => poTotal(p) - (typeof poRejectedValue === 'function' ? poRejectedValue(p) : 0)));
+  const pending = r2(sum(pos.filter(p => ['transfer', 'ordered', 'arrived'].includes(p.status)), p => poTotal(p)));
+  const hold = r2(sum(pos, p => (typeof poHold === 'function' ? poHold(p) : 0)));
+  return { pos, pays, paid, received, pending, hold, balance: r2(paid - received) };
+}
+function supplierWalletCard(s) {
+  const x = supplierWallet(s); const bal = x.balance;
+  return `<div class="card" id="supwallet"><div class="cardhead"><h3>${icon('money')}محفظة المورد</h3><div class="grow"></div><span class="badge ${bal > 0.5 ? 'warn' : bal < -0.5 ? 'crit' : 'good'}">${bal > 0.5 ? `معاه لينا ${fmtMoney(bal)}` : bal < -0.5 ? `علينا له ${fmtMoney(-bal)}` : 'متسوّي'}</span></div>
+    <div class="grid g4" style="gap:10px;margin-bottom:10px">${[['اتحوّل له', x.paid], ['قيمة المستلم', x.received], ['لسه ماوصلش', x.pending], ['مجمّد (مرفوض)', x.hold]].map(([l, v]) => `<div><div class="tiny muted">${l}</div><b class="num">${fmtMoney(v)}</b></div>`).join('')}</div>
+    ${x.pays.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>أمر الشراء</th><th>من</th><th class="n">المبلغ</th><th></th></tr></thead><tbody>${x.pays.map(e => { const p = byId('purchases', e.purchaseId); const th = e.thumb || (p && p.transfer && p.transfer.thumb); return `<tr><td>${fmtDate(e.date)}</td><td><a href="#/purchases/${e.purchaseId}"><span class="code">${esc(p ? p.number : '')}</span></a></td><td class="small">${esc(acctLabel(e.account))}</td><td class="n"><b>${fmtMoney(e.amount)}</b></td><td>${th ? `<img src="${th}" style="width:34px;height:34px;object-fit:cover;border-radius:6px">` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted small">لسه مفيش تحويلات للمورد ده</div>'}</div>`;
+}
+EXTRA_VIEWS.suppliers = (base => r => { let h = base(r); if (!r.id || !moneyOn() || !seesMoneyOps()) return h; const s = byId('suppliers', r.id); if (!s) return h; const i = h.indexOf('<div class="card"'); const card = supplierWalletCard(s); return i < 0 ? h + card : h.slice(0, i) + card + h.slice(i); })(EXTRA_VIEWS.suppliers);
+/* PO transfer: pick where the money came from; the payment becomes a ledger entry (account = source) */
+async function acctPurchaseOut(p, amt) {
+  if (!p || !(+amt)) return; const src = S._poSrc || 'personal'; const n = list('expenses').filter(e => e.purchaseId === p.id).length + 1;
+  await Store.save('expenses', { id: `pot_${p.id}_${n}`, date: todayISO(), month: monthOf(todayISO()), amount: +amt, cat: 'materials', account: src, orderId: null, payee: p.supplier || '', supplierId: p.supplierId || null, ref: p.number, note: `تحويل للمورد — ${p.number}`, src: 'purchase', purchaseId: p.id, thumb: (p.transfer && p.transfer.thumb) || null, byName: S.session?.name || '', createdAt: nowISO() }, { silent: true });
+}
+(() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => {
+  const p = byId('purchases', id); if (!p || !isAdmin() || !moneyOn()) return base(id);
+  const src = await new Promise(res => { let d = false; const fin = v => { if (!d) { d = true; clearInterval(iv); res(v); } }; openModal({ title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, submitLabel: 'التالي: صورة التحويل', body: `<div class="form">${field('التحويل من', `<select name="src">${srcOptions('personal')}</select>`, 'full')}</div>`, onSubmit: f => { fin(formData(f).src || 'personal'); return true; } }); const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300); });
+  if (!src) return; const w = walletOf(src); if (w && walletBalance(w.id).balance + 0.5 < poPayable(p)) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; }
+  await new Promise(r => setTimeout(r, 350)); S._poSrc = src;
+  try { await base(id); } finally { S._poSrc = null; }
+  const p2 = byId('purchases', id); if (p2 && p2.transfer && !p2.transfer.source) await Store.update('purchases', id, { transfer: Object.assign({}, p2.transfer, { source: src, sourceName: acctLabel(src) }) });
+  const e = list('expenses').find(x => x.purchaseId === id && x.src === 'purchase' && !x.thumb); if (e && p2 && p2.transfer && p2.transfer.thumb) await Store.update('expenses', e.id, { thumb: p2.transfer.thumb });
+}; })();
+
+/* ---------- 7+8) operating expenses + homes ---------- */
+ACTIONS.opexNew = () => {
+  if (!canOpex()) return;
+  openModal({ title: 'مصروف تشغيل', submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">${field('البند', `<select name="cat" id="f-ocat">${OPEX_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('عن شهر', inp('month', monthOf(todayISO()), 'type="month"'))}
+    ${field('السكن', `<select name="homeId" id="f-ohome"><option value="">—</option>${homes().map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`)}${field(`المبلغ (${CUR()})`, inp('amount', '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('المستفيد (شركة الكهربا، صاحب السكن…)', inp('payee', ''))}
+    <div class="field full"><label>صورة الفاتورة / الإيصال</label><input type="file" id="ox-file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}
+    <div class="tiny muted full">مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.</div></div>`,
+    onOpen: f => { const sync = () => { const c = f.querySelector('#f-ocat').value; const hf = f.querySelector('#f-ohome').closest('.field'); if (hf) hf.hidden = !HOME_CATS.includes(c); }; f.querySelector('#f-ocat').addEventListener('change', sync); sync(); },
+    onSubmit: async f => {
+      const d = formData(f); if (!(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (HOME_CATS.includes(d.cat) && !d.homeId) { toast('اختار السكن', 'err'); return false; }
+      const file = (f.querySelector('#ox-file') || {}).files?.[0]; if (!file) { toast('صورة الفاتورة أو الإيصال مطلوبة', 'err'); return false; }
+      const me = S.session || {}; const now = nowISO(); const id = uid(); let thumb = null, fileIds = [];
+      try { const doc = await proofAttach(file, { kind: 'invoice', ownerKind: 'request', ownerId: id, note: catLabel(d.cat) }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } }
+      const r = { id, type: 'opex', cat: d.cat, month: d.month || monthOf(todayISO()), homeId: HOME_CATS.includes(d.cat) ? d.homeId : null, amount: num(d.amount), payee: d.payee || '', note: d.note || '', reason: `${catLabel(d.cat)}${d.homeId && HOME_CATS.includes(d.cat) ? ' — ' + homeName(d.homeId) : ''} — ${fmtMonth(d.month)}`, thumb, fileIds, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `مصروف تشغيل ${catLabel(d.cat)} ${fmtMoney(num(d.amount))} ${CUR()}` }] };
+      await Store.save('requests', r, { silent: true });
+      try { await notifyRole('hr', `مصروف تشغيل للموافقة — ${catLabel(r.cat)}: ${fmtMoney(r.amount)} ${CUR()}`, `${r.reason}\n${r.payee || ''}`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
+      toast('اتبعت لمدير الحسابات'); rerender();
+    } });
+};
+ACTIONS.opexPay = async id => {
+  const r = byId('requests', id); if (!r || !isAdmin() || r.status !== 'approved' || r.paidAt) return;
+  const res = await moneyDialog({ title: `تحويل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, intro: `${fmtMonth(r.month)} — ${esc(r.payee || '')} — وافق عليه ${esc(r.decidedByName || 'مدير الحسابات')}`, amount: r.amount, fields: field('التحويل من', `<select name="src">${srcOptions('personal')}</select>`), fileRequired: false, submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
+  if (!res) return; const w = walletOf(res.src); if (w && walletBalance(w.id).balance + 0.5 < res.amount) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; }
+  await Store.save('expenses', { id: `opx_${r.id}`, date: todayISO(), month: r.month || monthOf(todayISO()), amount: res.amount, cat: r.cat, account: res.src, homeId: r.homeId || null, orderId: null, payee: r.payee || '', ref: '', note: `مصروف تشغيل — ${r.reason || ''}${res.note ? ' · ' + res.note : ''}`, src: 'opex', reqId: r.id, fileIds: (r.fileIds || []).concat(res.fileIds || []), thumb: r.thumb || res.thumb || null, byName: S.session?.name || '', createdAt: nowISO() });
+  await Store.update('requests', r.id, { paidAt: nowISO(), paidFrom: res.src, paidAmount: res.amount });
+  const t = byId('tasks', `opex_${r.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' });
+  toast('تم تسجيل التحويل');
+};
+ACTIONS.homeNew = () => { if (!(isAdmin() || role() === 'hr')) return; openModal({ title: 'سكن جديد', body: `<div class="form">${field('الاسم', inp('name', '', 'required placeholder="سكن 1 — العبور"'))}${field('العنوان', inp('address', ''))}${field(`الإيجار الشهري (${CUR()})`, inp('rent', '', 'type="number" step="any" min="0"'))}${field('ملاحظة (مين ساكن…)', inp('note', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!(d.name || '').trim()) return false; const m = Object.assign({}, S.settings.money || {}); m.homes = (m.homes || []).concat([{ id: 'h' + uid().slice(0, 6), name: d.name.trim(), address: d.address || '', rent: num(d.rent) || 0, note: d.note || '' }]); await Store.saveSettings(Object.assign({}, S.settings, { money: m })); toast('تم إضافة السكن'); } }); };
+ACTIONS.walletNew = () => { if (!isAdmin()) return; const ws = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.role && w.role !== 'none' && w.role !== 'employee'), w => w.name); openModal({ title: 'عهدة جديدة', body: `<div class="form">${field('اسم العهدة', inp('name', '', 'required'))}${field('صاحبها', `<select name="holder">${ws.map(w => `<option value="${w.id}">${esc(w.name)} — ${esc(ROLES[w.role] || '')}</option>`).join('')}</select>`)}${field('الغرض', inp('note', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!(d.name || '').trim() || !d.holder) return false; const m = Object.assign({}, S.settings.money || {}); m.wallets = (m.wallets || []).concat([{ id: 'w_' + uid().slice(0, 8), name: d.name.trim(), holder: d.holder, note: d.note || '' }]); await Store.saveSettings(Object.assign({}, S.settings, { money: m })); toast('تم إضافة العهدة'); } }); };
+
+/* ---------- 9) monthly tea & sugar quota ---------- */
+const quotaDoc = ym => byId('money', `quota_${ym}`);
+async function quotaEnsure(ym) {
+  if (!moneyOn() || quotaDoc(ym) || !(isAdmin() || role() === 'hr') || !writable()) return;
+  const people = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.workplace !== 'office' && w.role !== 'kiosk'), w => w.name).map(w => ({ id: w.id, name: w.name, dept: typeof deptName === 'function' ? deptName(w.deptId) : '' }));
+  if (!people.length) return; await Store.save('money', { id: `quota_${ym}`, type: 'quota', month: ym, people, got: {}, createdAt: nowISO() }, { silent: true });
+}
+ACTIONS.quotaTick = async arg => { const [ym, wid] = arg.split(':'); const q = quotaDoc(ym); if (!q || !seesMoneyOps() || !writable()) return; const got = Object.assign({}, q.got || {}); if (got[wid]) delete got[wid]; else got[wid] = { at: nowISO(), byName: S.session?.name || '' }; await Store.update('money', q.id, { got }, { silent: true }); rerender(); };
+function quotaCard(ym) {
+  const q = quotaDoc(ym); if (!q) return `<div class="card"><div class="cardhead"><h3>☕ كوتة الشاي والسكر — ${fmtMonth(ym)}</h3></div><div class="muted small">${isAdmin() || role() === 'hr' ? 'مفيش موظفين في المصنع لسه.' : 'مدير الحسابات بيجهز قايمة الشهر.'}</div></div>`;
+  const got = q.got || {}; const n = (q.people || []).filter(p => got[p.id]).length;
+  return `<div class="card"><div class="cardhead"><h3>☕ كوتة الشاي والسكر — ${fmtMonth(ym)}</h3><div class="grow"></div><span class="badge ${n === (q.people || []).length ? 'good' : 'warn'}">استلم ${n} من ${(q.people || []).length}</span></div><div class="tiny muted" style="margin-bottom:8px">كل موظف في المصنع: باكو شاي + كيس سكر في الشهر. دوس على الاسم لما يستلم.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${(q.people || []).map(p => `<button class="btn xs ${got[p.id] ? 'p' : ''}" data-action="quotaTick" data-arg="${ym}:${p.id}" title="${got[p.id] ? 'استلم ' + fmtDate((got[p.id].at || '').slice(0, 10)) : 'لسه ماستلمش'}">${got[p.id] ? '✓ ' : ''}${esc(p.name)}</button>`).join('')}</div></div>`;
+}
+
+/* ---------- the «الفلوس» page ---------- */
+VIEW_TITLES.money = 'الفلوس — الحسابات والعهد';
+(() => { const i = NAV.findIndex(n => n.id === 'accounts'); const entry = { id: 'money', label: 'الفلوس والعهد', icon: 'money', count: () => (isAdmin() ? moneyDue().length : 0), countCls: 'warn' }; if (i >= 0) NAV.splice(i, 0, entry); else NAV.push(entry); })();
+setTimeout(() => { if (!moneyOn()) return; ['hr', 'acc', 'manager', 'fleet', 'purch'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('money')) ROLE_VIEWS[r].unshift('money'); }); }, 0);
+canSee = (base => view => (view === 'money' ? (moneyOn() && !!S.session && (isAdmin() || ['hr', 'acc'].includes(role()) || myWalletIds().length > 0)) : base(view)))(canSee);
+function moneyDue() {
+  if (!moneyOn()) return []; const out = [];
+  list('purchases').filter(p => p.status === 'transfer').forEach(p => out.push({ kind: 'po', id: p.id, label: `أمر شراء ${p.number} — ${p.supplier || ''}`, sub: 'معتمد من الحسابات', amount: poPayable(p), action: 'poTransfer', href: `purchases/${p.id}` }));
+  list('requests').filter(r => r.type === 'fund' && r.status === 'pending').forEach(r => { const w = walletOf(r.walletId); out.push({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: `${r.requesterName || ''}: ${r.reason || ''}`, amount: +r.amount || 0, action: 'fundPay' }); });
+  list('requests').filter(r => r.type === 'opex' && r.status === 'approved' && !r.paidAt).forEach(r => out.push({ kind: 'opex', id: r.id, label: `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, sub: `${fmtMonth(r.month)} · ${r.payee || ''}`, amount: +r.amount || 0, action: 'opexPay' }));
+  return out;
+}
+function walletRows(ids) { return ids.map(id => { const w = walletOf(id); const b = walletBalance(id); const ym = monthOf(todayISO()); const mSpent = sum(list('expenses').filter(e => e.account === id && e.month === ym), e => +e.amount || 0); return `<tr class="click" data-action="go" data-arg="money/${id}"><td><b>${esc(w.name)}</b><div class="tiny muted">${esc(assigneeName(w.holder) || '')}${w.note ? ' · ' + esc(w.note) : ''}</div></td><td class="n">${fmtMoney(b.in)}</td><td class="n">${fmtMoney(mSpent)}</td><td class="n"><b style="color:${b.balance < 0 ? 'var(--crit-ink)' : 'inherit'}">${fmtMoney(b.balance)}</b></td></tr>`; }).join(''); }
+function opexSummary(ym) {
+  const prev = monthOf(addDays(ym + '-01', -1)); const cats = OPEX_CATS.filter(c => c !== 'other').concat(['fuel_cash', 'oil', 'car_maint']);
+  const tot = (m, c) => r2(sum(list('expenses').filter(e => e.month === m && e.cat === c), e => +e.amount || 0));
+  const rows = cats.map(c => ({ c, a: tot(ym, c), b: tot(prev, c) })).filter(x => x.a || x.b);
+  const pend = sortBy(list('requests').filter(r => r.type === 'opex' && (r.status === 'pending' || (r.status === 'approved' && !r.paidAt))), r => r.createdAt || '', true);
+  const hm = homes().map(h => { const c = r2(sum(list('expenses').filter(e => e.homeId === h.id && e.month === ym), e => +e.amount || 0)); return `<tr><td><b>${esc(h.name)}</b><div class="tiny muted">${esc(h.address || '')}${h.note ? ' · ' + esc(h.note) : ''}</div></td><td class="n">${fmtMoney(h.rent || 0)}</td><td class="n"><b>${fmtMoney(c)}</b></td></tr>`; }).join('');
+  return `<div class="card"><div class="cardhead"><h3>مصاريف التشغيل — ${fmtMonth(ym)}</h3><div class="grow"></div>${canOpex() ? `<button class="btn sm p" data-action="opexNew">${icon('plus')}مصروف تشغيل</button>` : ''}</div>
+    ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>البند</th><th class="n">${fmtMonth(ym)}</th><th class="n">${fmtMonth(prev)}</th><th class="n">الفرق</th></tr></thead><tbody>${rows.map(x => { const d = x.b ? Math.round((x.a - x.b) / x.b * 100) : null; return `<tr><td>${esc(catLabel(x.c))}</td><td class="n"><b>${fmtMoney(x.a)}</b></td><td class="n">${fmtMoney(x.b)}</td><td class="n" style="color:${d > 0 ? 'var(--crit-ink)' : 'var(--good-ink)'}">${d == null ? '—' : (d > 0 ? '+' : '') + d + '٪'}</td></tr>`; }).join('')}<tr><td><b>الإجمالي</b></td><td class="n"><b>${fmtMoney(sum(rows, x => x.a))}</b></td><td class="n">${fmtMoney(sum(rows, x => x.b))}</td><td></td></tr></tbody></table></div>` : '<div class="muted small">لسه مفيش مصاريف تشغيل متسجلة الشهر ده</div>'}
+    ${pend.length ? `<div class="sep"></div><div class="small bold" style="margin-bottom:6px">في الطريق</div><div class="list">${pend.map(r => `<div class="item" data-action="go" data-arg="requests" style="padding:8px 12px"><div class="main"><div class="small">${esc(catLabel(r.cat))}${r.homeId ? ' · ' + esc(homeName(r.homeId)) : ''} — ${fmtMonth(r.month)}</div><div class="tiny muted">${r.status === 'pending' ? 'عند مدير الحسابات' : 'معتمد — بانتظار تحويل المالك'}</div></div><b class="num">${fmtMoney(r.amount)}</b></div>`).join('')}</div>` : ''}</div>
+    <div class="card"><div class="cardhead"><h3>السكن</h3><div class="grow"></div>${isAdmin() || role() === 'hr' ? `<button class="btn sm" data-action="homeNew">${icon('plus')}سكن</button>` : ''}</div>${hm ? `<div class="tablewrap"><table><thead><tr><th>السكن</th><th class="n">الإيجار الشهري</th><th class="n">تكلفة ${fmtMonth(ym)}</th></tr></thead><tbody>${hm}</tbody></table></div><div class="tiny muted" style="margin-top:6px">تكلفة الشهر = الإيجار + الكهربا + المية اللي اتسجلوا على السكن.</div>` : '<div class="muted small">ضيف السكن (الاسم والعنوان والإيجار) — وبعدها الكهربا والمية بيتسجلوا عليه.</div>'}</div>`;
+}
+function vMoney(r) {
+  if (!moneyOn()) return '<div class="empty">—</div>';
+  if (r && r.id && walletOf(r.id)) return vWallet(r.id);
+  const f = S.ui.filter.money ||= { ym: monthOf(todayISO()) }; const ym = f.ym; quotaEnsure(ym);
+  let h = `<div class="toolbar">${monthNavBar('money')}<div class="grow"></div>${myWalletIds().length ? `<button class="btn sm" data-action="walletSpend">${icon('plus')}مصروف من عهدتي</button><button class="btn sm" data-action="fundAsk">${icon('money')}طلب مبلغ</button>` : ''}</div><div class="stack">`;
+  if (isAdmin()) {
+    const bal = acctBalances().filter(a => ownerAccts().some(o => o.id === a.id)); const due = moneyDue();
+    h += `<div class="kpis">${bal.map(a => `<div class="kpi acc" style="cursor:default"><span class="stripe"></span><div class="l">${esc(a.name)}</div><div class="v num">${fmtMoney(a.balance)}</div><div class="s">دخل ${fmtMoney(a.in)} · طلع ${fmtMoney(a.out)}</div></div>`).join('')}<div class="kpi ${due.length ? 'warn' : ''}" style="cursor:default"><span class="stripe"></span><div class="l">مستحق عليك تحويله</div><div class="v num">${fmtMoney(sum(due, x => x.amount))}</div><div class="s">${due.length} بند</div></div></div>
+    <div class="card"><div class="cardhead"><h3>مستحق عليك تحويله</h3><span class="muted small">${due.length}</span></div>${due.length ? `<div class="list">${due.map(x => `<div class="item" style="padding:10px 12px"><div class="main"><div class="title"><span class="badge ${x.kind === 'po' ? 'acc' : x.kind === 'fund' ? 'warn' : ''}" style="padding:0 6px">${x.kind === 'po' ? 'مورد' : x.kind === 'fund' ? 'عهدة' : 'تشغيل'}</span> ${esc(x.label)}</div><div class="meta"><span>${esc(x.sub || '')}</span></div></div><b class="num" style="margin-inline-end:8px">${fmtMoney(x.amount)}</b><button class="btn sm p" data-action="${x.action}" data-arg="${x.id}" data-stop="1">حوّلت</button></div>`).join('')}</div>` : '<div class="muted small">مفيش حاجة مستنية تحويل</div>'}</div>`;
+  }
+  if (seesAllWallets() || myWalletIds().length) {
+    const ids = seesAllWallets() ? wallets().map(w => w.id) : myWalletIds();
+    h += `<div class="card"><div class="cardhead"><h3>العُهد</h3><div class="grow"></div>${isAdmin() ? `<button class="btn sm" data-action="walletNew">${icon('plus')}عهدة</button>` : ''}</div>${ids.length ? `<div class="tablewrap"><table><thead><tr><th>العهدة</th><th class="n">اتحوّل لها</th><th class="n">اتصرف ${fmtMonth(monthOf(todayISO()))}</th><th class="n">الرصيد</th></tr></thead><tbody>${walletRows(ids)}</tbody></table></div>` : '<div class="muted small">مفيش عهد متسجلة</div>'}</div>`;
+  }
+  if (!seesMoneyOps()) return h + '</div>';
+  h += opexSummary(ym) + quotaCard(ym);
+  const sups = sortBy(list('suppliers').map(s => ({ s, x: supplierWallet(s) })).filter(o => o.x.paid || o.x.pending), o => -(o.x.paid + o.x.pending));
+  h += `<div class="card"><div class="cardhead"><h3>محافظ الموردين</h3><span class="muted small">${sups.length}</span></div>${sups.length ? `<div class="tablewrap"><table><thead><tr><th>المورد</th><th class="n">اتحوّل له</th><th class="n">قيمة المستلم</th><th class="n">الفرق</th><th class="n">مجمّد</th></tr></thead><tbody>${sups.map(({ s, x }) => `<tr class="click" data-action="go" data-arg="suppliers/${s.id}"><td>${esc(s.name)}</td><td class="n">${fmtMoney(x.paid)}</td><td class="n">${fmtMoney(x.received)}</td><td class="n"><b>${fmtMoney(x.balance)}</b></td><td class="n">${x.hold ? fmtMoney(x.hold) : ''}</td></tr>`).join('')}</tbody></table></div><div class="tiny muted" style="margin-top:6px">الفرق موجب = المورد معاه فلوس لينا (اتحوّل له أكتر من اللي استلمناه).</div>` : '<div class="muted small">لسه مفيش تحويلات لموردين</div>'}</div>`;
+  return h + '</div>';
+}
+function walletMoves(id) {
+  const ins = xfers().filter(x => x.to === id).map(x => ({ date: x.date, in: +x.amount || 0, label: `تحويل من ${acctLabel(x.from)}${x.cat ? ' — ' + catLabel(x.cat) : ''}`, note: x.note, thumb: x.thumb }));
+  const outs = xfers().filter(x => x.from === id).map(x => ({ date: x.date, out: +x.amount || 0, label: `رجع على ${acctLabel(x.to)}`, note: x.note, thumb: x.thumb }));
+  const sp = list('expenses').filter(e => e.account === id).map(e => ({ date: e.date, out: +e.amount || 0, label: `${catLabel(e.cat)}${e.vehicleId ? ' — ' + vehicleName(e.vehicleId) : ''}${e.homeId ? ' — ' + homeName(e.homeId) : ''}${e.purchaseId ? ' — ' + ((byId('purchases', e.purchaseId) || {}).number || '') : ''}`, note: [e.payee, e.note].filter(Boolean).join(' · '), thumb: e.thumb, by: e.byName }));
+  return sortBy(ins.concat(outs, sp), m => m.date || '', true);
+}
+function walletMovesTable(id, lim) { const mv = walletMoves(id).slice(0, lim || 500); return mv.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البيان</th><th class="n">داخل</th><th class="n">خارج</th><th></th></tr></thead><tbody>${mv.map(m => `<tr><td>${fmtDate(m.date)}</td><td>${esc(m.label)}${m.note ? `<div class="tiny muted">${esc(m.note)}</div>` : ''}</td><td class="n" style="color:var(--good-ink)">${m.in ? fmtMoney(m.in) : ''}</td><td class="n">${m.out ? fmtMoney(m.out) : ''}</td><td>${m.thumb ? `<img src="${m.thumb}" style="width:34px;height:34px;object-fit:cover;border-radius:6px">` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لسه مفيش حركة</div>'; }
+function vWallet(id) {
+  const w = walletOf(id); if (!w || !(seesAllWallets() || myWalletIds().includes(id))) return '<div class="empty"><b>مش متاح</b></div>'; const b = walletBalance(id);
+  return `<div class="toolbar"><a class="btn sm" href="#/money">${icon('back')}الفلوس</a><div class="grow"></div>${myWalletIds().includes(id) || isAdmin() ? `<button class="btn sm" data-action="walletSpend" data-arg="${id}">${icon('plus')}مصروف</button>` : ''}${myWalletIds().includes(id) ? `<button class="btn sm" data-action="fundAsk" data-arg="${id}">${icon('money')}طلب مبلغ</button>` : ''}${isAdmin() ? `<button class="btn sm p" data-action="walletFund" data-arg="${id}">تحويل للعهدة</button><button class="btn sm" data-action="walletBack" data-arg="${id}">استرداد</button>` : ''}</div>
+  <div class="kpis"><div class="kpi acc" style="cursor:default"><span class="stripe"></span><div class="l">رصيد عهدة ${esc(w.name)}</div><div class="v num">${fmtMoney(b.balance)}</div><div class="s">${esc(assigneeName(w.holder) || '')}</div></div><div class="kpi" style="cursor:default"><span class="stripe"></span><div class="l">اتحوّل لها</div><div class="v num">${fmtMoney(b.in)}</div></div><div class="kpi" style="cursor:default"><span class="stripe"></span><div class="l">اتصرف منها</div><div class="v num">${fmtMoney(b.spent + b.out)}</div></div></div>
+  <div class="card" style="margin-top:12px"><div class="cardhead"><h3>الحركة</h3></div>${walletMovesTable(id)}</div>`;
+}
+EXTRA_VIEWS.money = r => vMoney(r);
+/* «بوابتي»: my custody card */
+vMe = (base => function () { const html = base.apply(this, arguments); if (!moneyOn()) return html; const ids = myWalletIds(); if (!ids.length) return html; const pend = list('requests').filter(r => r.type === 'fund' && r.status === 'pending' && ids.includes(r.walletId));
+  return html + `<div class="card" id="mywallet"><div class="cardhead"><h3>${icon('money')}عهدتي</h3><div class="grow"></div><button class="btn sm" data-action="walletSpend">${icon('plus')}مصروف</button><button class="btn sm p" data-action="fundAsk">طلب مبلغ</button></div>
+    <div class="grid g${Math.min(ids.length, 3)}" style="gap:10px;margin-bottom:8px">${ids.map(id => `<div class="kpi acc" data-action="go" data-arg="money/${id}"><span class="stripe"></span><div class="l">${esc(walletOf(id).name)}</div><div class="v num">${fmtMoney(walletBalance(id).balance)}</div></div>`).join('')}</div>
+    ${pend.length ? `<div class="banner warn">${icon('alert')}<span>${pend.length} طلب مبلغ مستني تحويل المالك (${fmtMoney(sum(pend, r => +r.amount || 0))} ${CUR()})</span></div>` : ''}${walletMovesTable(ids[0], 8)}</div>`; })(vMe);
+/* vehicle file: what was spent on it from custody (cash fuel, oil, maintenance) */
+vVehicle = (base => function (id) { const h = base.apply(this, arguments); if (!moneyOn() || !(isAdmin() || ['manager', 'fleet', 'hr', 'acc'].includes(role()))) return h; const ex = sortBy(list('expenses').filter(e => e.vehicleId === id), e => e.date || '', true); if (!ex.length) return h;
+  return h + `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>مصروفات العربية (كاش / زيت / صيانة)</h3><span class="badge">${fmtMoney(sum(ex, e => +e.amount || 0))} ${CUR()}</span></div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من</th><th class="n">المبلغ</th></tr></thead><tbody>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(catLabel(e.cat))}${e.note ? `<div class="tiny muted">${esc(e.note)}</div>` : ''}</td><td class="small">${esc(acctLabel(e.account))}</td><td class="n">${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody></table></div></div>`; })(vVehicle);
+document.addEventListener('nf:ready', () => setTimeout(() => { try { quotaEnsure(monthOf(todayISO())); } catch (e) { /* ignore */ } }, 4000));
+Object.assign(window, { walletBalance, supplierWallet, moneyDue, acctPurchaseOut });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
