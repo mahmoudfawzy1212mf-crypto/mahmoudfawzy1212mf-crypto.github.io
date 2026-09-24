@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-1501-519a6f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-1512-f78e92";</script>
 
 <script>
 'use strict';
@@ -15883,6 +15883,10 @@ saveNeed = (base => async function (f, p) {
   return r;
 })(saveNeed);
 needCard = (base => function (p) { const h = base.apply(this, arguments); if (!h || !p.prefSupplier) return h; const line = `<div class="small" style="margin-top:6px">${icon('clients')}المورد المقترح من القسم: <b>${esc(p.prefSupplier)}</b>${p.prefSupplierId ? '' : ' <span class="badge warn" style="padding:0 6px">مش متسجل</span>'}</div>`; const i = h.indexOf('<table class="tbl"'); return i < 0 ? h : h.slice(0, i) + line + h.slice(i); })(needCard);
+/* v4.49 — purchasing sees the department's suggested supplier: in the PO form, the needs list and the approval notification */
+poForm = (base => function (p) { const h = base.apply(this, arguments); if (!p || !p.prefSupplier) return h; const note = `<div class="banner info full" style="margin:0 0 6px">${icon('clients')}<span>المورد المقترح من القسم: <b>${esc(p.prefSupplier)}</b>${p.prefSupplierId ? '' : ' (مش متسجل — سجّله من «الموردون» لو هتشتري منه)'}</span></div>`; const i = h.indexOf('<div class="form">'); return i < 0 ? note + h : h.slice(0, i + 18) + note + h.slice(i + 18); })(poForm);
+vPurchases = (base => function () { let h = base.apply(this, arguments); list('purchases').filter(p => p.prefSupplier && (p.kind === 'need' || ['need', 'need_ok'].includes(p.status))).forEach(p => { const k = `href="#/purchases/${p.id}"`; const i = h.indexOf(k); if (i < 0) return; const j = h.indexOf('<div class="meta">', i); if (j < 0) return; h = h.slice(0, j + 18) + `<span>${icon('clients')}مقترح: ${esc(p.prefSupplier)}</span>` + h.slice(j + 18); }); return h; })(vPurchases);
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => { const res = await base(r, w, patch, opts); if (r && r.type === 'need') { const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; const t = p && byId('tasks', `needok_${p.id}`); if (p && p.prefSupplier && t && !/المورد المقترح/.test(t.desc || '')) { try { await Store.update('tasks', t.id, { desc: `${t.desc || ''}\nالمورد المقترح من القسم: ${p.prefSupplier}${p.prefSupplierId ? '' : ' (مش متسجل)'}` }, { silent: true }); } catch (e) { /* ignore */ } } } return res; })(applyRequestEffects);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
