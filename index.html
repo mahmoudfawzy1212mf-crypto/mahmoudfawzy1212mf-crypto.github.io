@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0536-d5d96c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0552-902d8c";</script>
 
 <script>
 'use strict';
@@ -15159,6 +15159,59 @@ document.addEventListener('submit', ev => { if (!ev.target || ev.target.id !== '
 /* vehicle form: optional per-vehicle rates */
 vehForm = (base => function (v) { v = v || {}; const h = base.apply(this, arguments); const extra = `${field(`نصيب العربية لكل كم — لو مختلف (${CUR()})`, inp('vehPerKm', v.vehPerKm ?? '', 'type="number" step="0.01" min="0" placeholder="الافتراضي من الإعدادات"'))}${field(`نصيب الزيت لكل كم — لو مختلف (${CUR()})`, inp('oilPerKm', v.oilPerKm ?? '', 'type="number" step="0.01" min="0" placeholder="الافتراضي من الإعدادات"'))}`; const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i); })(vehForm);
 Object.assign(window, { tripEstimate });
+/* =====================================================================
+   v4.41 — (1) جزاء نسيان البصمة (حضور أو انصراف) — في «رابعًا: الجزاءات» باللائحة:
+           5 مرات في الشهر = خصم نص يوم، 10 مرات = خصم يوم، أكتر من 10 = خصم يومين (الأرقام بنود قابلة للتعديل).
+           بدل القاعدة القديمة (نص يوم أول مرة + يوم عند كل تكرار). المصنع فقط — الاستوديو له قاعدته.
+           (2) أي تعديل في اللائحة يرفع رقم الإصدار، والموظف أول ما يفتح السيستم تظهر له رسالة
+           «في تعديل في اللائحة» بالبند ووصف التعديل، ويوافق على الإصدار الجديد.
+   ===================================================================== */
+const isStuSys = () => { try { return !!STU_ON; } catch (e) { return false; } };
+const MISS_DEF = { missingT1Count: 5, missingT1Days: 0.5, missingT2Count: 10, missingT2Days: 1, missingT3Days: 2 };
+const missPol = () => { const p = S.settings.policy || {}; const o = {}; Object.keys(MISS_DEF).forEach(k => { o[k] = p[k] != null && p[k] !== '' ? +p[k] : MISS_DEF[k]; }); return o; };
+/* regulation parameters: the three tiers replace the two old «missing punch» numbers */
+/* runs after the whole app script has loaded (STU_ON is defined further down) */
+setTimeout(() => {
+  if (isStuSys()) return;
+  ['missingPunchDays', 'missingPunchRepeatDays'].forEach(id => { const i = REG_PARAMS.findIndex(p => p.id === id); if (i >= 0) REG_PARAMS.splice(i, 1); });
+  const mp = (id, label, unit) => P(id, 'رابعًا: الجزاءات', label, unit, s => { const v = (s.policy || {})[id]; return v != null && v !== '' ? v : MISS_DEF[id]; }, (s, v) => { (s.policy ||= {})[id] = v; });
+  REG_PARAMS.push(mp('missingT1Count', 'نسيان البصمة — عدد مرات الخصم الأول في الشهر', 'times'), mp('missingT1Days', 'نسيان البصمة — الخصم الأول', 'day'), mp('missingT2Count', 'نسيان البصمة — عدد مرات الخصم الثاني', 'times'), mp('missingT2Days', 'نسيان البصمة — الخصم الثاني', 'day'), mp('missingT3Days', 'نسيان البصمة — أكتر من الخصم الثاني', 'day'));
+}, 0);
+/* the monthly penalty: count the days with only one punch (in without out, or out without in) */
+function missingPunchDays(w, ym) {
+  const rows = attMonthRows(w, ym); const today = todayISO(); const out = [];
+  monthDates(ym).forEach(d => { const r = rows[d]; if (!r || d >= today) return; if ((r.in && !r.out) || (!r.in && r.out)) out.push(d); });
+  return out;
+}
+computeAutoPenalties = (base => function (w, ym) {
+  const res = base.apply(this, arguments); if (isStuSys()) return res;
+  const out = res.filter(p => p.kind !== 'missing'); const days = missingPunchDays(w, ym); const n = days.length; const m = missPol();
+  const d = n > m.missingT2Count ? m.missingT3Days : n >= m.missingT2Count ? m.missingT2Days : n >= m.missingT1Count ? m.missingT1Days : 0;
+  if (d > 0) out.push({ id: `${ym}_${w.id}_missing`, workerId: w.id, deptId: w.deptId || null, date: days[n - 1], month: ym, kind: 'missing', days: d, minutes: 0, amount: 0, auto: true, reason: `نسيان البصمة ${n} مرات في الشهر (${days.map(x => x.slice(8, 10) + '/' + x.slice(5, 7)).join('، ')}) — حسب اللائحة`, status: 'active' });
+  return out;
+})(computeAutoPenalties);
+/* every change to a clause raises the version (employees re-confirm) and keeps a readable description */
+regParamApply = async function (id, value, meta = {}) {
+  const p = regParam(id); if (!p) return false; const s = clone(S.settings); const from = regGet(id, s); p.set(s, value);
+  const cur = regulation(); const v = (+cur.version || 1) + 1; const txt = x => { const tmp = S.settings; try { S.settings = s; return x === undefined ? '—' : (p.unit === 'day' ? arDays(x) : p.unit === 'times' ? `${fmtNum(x)} مرات` : String(x)); } finally { S.settings = tmp; } };
+  const desc = meta.desc || `${p.sec} — ${p.label}: بقى ${txt(value)} بدل ${txt(from)}`;
+  const reg = Object.assign({}, cur, { version: v, changes: regChanges().concat([{ at: nowISO(), v, paramId: id, sec: p.sec, from, to: value, desc, byName: meta.byName || S.session?.name || '', reqId: meta.reqId || null, note: meta.note || '' }]).slice(-200), updatedAt: nowISO() });
+  s.regulation = reg; if (s.regPolicyApplied) s.regPolicyApplied = v;
+  await Store.saveSettings(s); return true;
+};
+/* what changed since this employee last confirmed */
+function regChangesSince(ackV) { return regChanges().filter(c => (+c.v || 0) > (+ackV || 0) && (c.desc || c.paramId)); }
+const regChangeLine = c => { if (c.desc) return c.desc; const p = regParam(c.paramId); return p ? `${p.sec} — ${p.label}: بقى ${c.to} بدل ${c.from ?? '—'}` : String(c.paramId || ''); };
+vRegulation = (base => function (gate) {
+  let html = base.apply(this, arguments); if (!gate) return html;
+  const m = myRecord(); const prev = m && m.rec && m.rec.regAck ? +m.rec.regAck.v || 0 : 0; if (!prev) return html;
+  const ch = regChangesSince(prev); if (!ch.length) return html;
+  const card = `<div class="card" style="max-width:860px;border-inline-start:4px solid var(--warn,#c28a1e)"><div class="cardhead"><h3>${icon('alert')} في تعديل في اللائحة</h3><span class="badge warn">الإصدار ${esc(String(regulation().version))}</span></div><div class="small ink2" style="margin-bottom:8px">من آخر مرة وافقت (الإصدار ${prev}) اتعدّل الآتي — اقرأه وبعدين وافق في آخر الصفحة:</div><ul style="margin:0;padding-inline-start:18px;line-height:1.9">${ch.map(c => `<li><b>${esc(regChangeLine(c))}</b> <span class="tiny muted">${fmtDate((c.at || '').slice(0, 10))}</span></li>`).join('')}</ul></div>`;
+  const i = html.indexOf('<div class="card" style="max-width:860px">'); return i < 0 ? card + html : html.slice(0, i) + card + html.slice(i);
+})(vRegulation);
+/* the change log table shows the description */
+regParamsTable = (base => function () { let h = base.apply(this, arguments); try { regChanges().forEach(c => { if (c.desc && c.paramId === 'text') h = h.replace(/(<td[^>]*>)text(<\/td>)/, `$1${esc(c.desc)}$2`); }); } catch (e) { /* ignore */ } return h; })(regParamsTable);
+Object.assign(window, { missingPunchDays, regChangesSince });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
