@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-1512-f78e92";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-1536-fd3451";</script>
 
 <script>
 'use strict';
@@ -15887,6 +15887,42 @@ needCard = (base => function (p) { const h = base.apply(this, arguments); if (!h
 poForm = (base => function (p) { const h = base.apply(this, arguments); if (!p || !p.prefSupplier) return h; const note = `<div class="banner info full" style="margin:0 0 6px">${icon('clients')}<span>المورد المقترح من القسم: <b>${esc(p.prefSupplier)}</b>${p.prefSupplierId ? '' : ' (مش متسجل — سجّله من «الموردون» لو هتشتري منه)'}</span></div>`; const i = h.indexOf('<div class="form">'); return i < 0 ? note + h : h.slice(0, i + 18) + note + h.slice(i + 18); })(poForm);
 vPurchases = (base => function () { let h = base.apply(this, arguments); list('purchases').filter(p => p.prefSupplier && (p.kind === 'need' || ['need', 'need_ok'].includes(p.status))).forEach(p => { const k = `href="#/purchases/${p.id}"`; const i = h.indexOf(k); if (i < 0) return; const j = h.indexOf('<div class="meta">', i); if (j < 0) return; h = h.slice(0, j + 18) + `<span>${icon('clients')}مقترح: ${esc(p.prefSupplier)}</span>` + h.slice(j + 18); }); return h; })(vPurchases);
 applyRequestEffects = (base => async (r, w, patch, opts = {}) => { const res = await base(r, w, patch, opts); if (r && r.type === 'need') { const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; const t = p && byId('tasks', `needok_${p.id}`); if (p && p.prefSupplier && t && !/المورد المقترح/.test(t.desc || '')) { try { await Store.update('tasks', t.id, { desc: `${t.desc || ''}\nالمورد المقترح من القسم: ${p.prefSupplier}${p.prefSupplierId ? '' : ' (مش متسجل)'}` }, { silent: true }); } catch (e) { /* ignore */ } } } return res; })(applyRequestEffects);
+/* =====================================================================
+   v4.50 — الإحداثيات بالدرجات والدقايق والثواني (زي 30°09'23.95"N 31°23'14.89"E من جوجل إيرث/الموبايل)
+   · خانة «الصق رابط Google Maps أو الإحداثيات» + خانات خط العرض/الطول بقت تفهم الصيغة دي وتحوّلها لرقم عشري.
+   · خانات خط العرض/الطول بقت نص (مش number) عشان الموبايل مايشيلش الرموز ويسيب أرقام غلط زي 312314.89.
+   · رقم مكتوب بالشكل ده (درجة+دقيقة+ثانية لازقين) بيتحوّل لوحده؛ وأي خط عرض > 90 أو طول > 180 مايتحفظش.
+   ===================================================================== */
+const DMS_ONE = /(-?\d{1,3})\s*[°º˚]\s*(\d{1,2})?\s*['′’]?\s*(\d{1,2}(?:[.,]\d+)?)?\s*(?:["″”]|'')?\s*([NSEWشجقغ])?/i;
+function dmsToDec(m) { if (!m) return null; const d = Math.abs(+m[1]), mi = +(m[2] || 0), se = +String(m[3] || 0).replace(',', '.'); if (mi >= 60 || se >= 60) return null; let v = d + mi / 60 + se / 3600; const h = (m[4] || '').toUpperCase(); if (String(m[1]).startsWith('-') || ['S', 'W', 'ج', 'غ'].includes(h)) v = -v; return Math.round(v * 1e6) / 1e6; }
+function parseDmsPair(txt) {
+  const s = arDigits(txt || ''); if (!/[°º˚]/.test(s)) return null;
+  const re = new RegExp(DMS_ONE.source, 'gi'); const ms = [...s.matchAll(re)].filter(m => m[1] !== undefined); if (ms.length < 2) return null;
+  let a = { v: dmsToDec(ms[0]), h: (ms[0][4] || '').toUpperCase() }, b = { v: dmsToDec(ms[1]), h: (ms[1][4] || '').toUpperCase() }; if (a.v == null || b.v == null) return null;
+  if (['E', 'W', 'ق', 'غ'].includes(a.h) || ['N', 'S', 'ش', 'ج'].includes(b.h)) [a, b] = [b, a];
+  if (Math.abs(a.v) > 90 || Math.abs(b.v) > 180) return null; return { lat: a.v, lng: b.v };
+}
+/* 312314.89 = 31°23'14.89" typed/pasted without the symbols */
+function packedDms(v) { const n = Math.abs(+v); if (!(n > 180) || n > 1805959.99) return null; const d = Math.floor(n / 10000), mi = Math.floor((n % 10000) / 100), se = n % 100; if (mi >= 60 || se >= 60 || d > 180) return null; return Math.round((d + mi / 60 + se / 3600) * 1e6) / 1e6 * (+v < 0 ? -1 : 1); }
+function fixCoordValue(raw, max) { const s = arDigits(String(raw || '')).trim(); if (!s) return null; if (/[°º˚]/.test(s)) { const m = DMS_ONE.exec(s); const v = dmsToDec(m); return v != null && Math.abs(v) <= max ? v : NaN; } const n = +s.replace(',', '.'); if (isNaN(n)) return NaN; if (Math.abs(n) <= max) return null; const p = packedDms(n); return p != null && Math.abs(p) <= max ? p : NaN; }
+parseCoords = (base => function (txt) { return base.apply(this, arguments) || parseDmsPair(txt); })(parseCoords);
+/* lat/lng inputs: text (keeps the symbols) + convert on the fly */
+const coordInputsFix = root => (root || document).querySelectorAll('input[name=lat],input[name=lng]').forEach(el => { if (el.dataset.cfix) return; el.dataset.cfix = 1; if (el.type === 'number') { el.type = 'text'; el.setAttribute('inputmode', 'decimal'); } });
+new MutationObserver(() => coordInputsFix()).observe(document.documentElement, { childList: true, subtree: true });
+document.addEventListener('change', ev => {
+  const el = ev.target; if (!el || !['lat', 'lng'].includes(el.name)) return; const f = el.closest('form');
+  const pair = parseDmsPair(el.value); if (pair && f) { const la = f.querySelector('[name=lat]'), ln = f.querySelector('[name=lng]'); if (la) la.value = pair.lat; if (ln) ln.value = pair.lng; if (typeof mapSetPoint === 'function') { try { mapSetPoint(f, pair.lat, pair.lng); } catch (e) { /* ignore */ } } toast('اتحوّلت الإحداثيات ✓'); return; }
+  const v = fixCoordValue(el.value, el.name === 'lat' ? 90 : 180); if (v == null) return;
+  if (isNaN(v)) { toast(el.name === 'lat' ? 'خط العرض لازم يكون بين -90 و 90 — الصق اللوكيشن في خانة «الصق رابط Google Maps أو الإحداثيات»' : 'خط الطول لازم يكون بين -180 و 180', 'err'); return; }
+  el.value = v; toast('اتحوّلت الإحداثيات ✓');
+  if (f && typeof mapSetPoint === 'function') { const la = +((f.querySelector('[name=lat]') || {}).value), ln = +((f.querySelector('[name=lng]') || {}).value); if (Math.abs(la) <= 90 && Math.abs(ln) <= 180 && la && ln) { try { mapSetPoint(f, la, ln); } catch (e) { /* ignore */ } } }
+}, true);
+/* never save impossible coordinates */
+document.addEventListener('submit', ev => {
+  const f = ev.target; if (!f || !f.querySelector) return; const la = f.querySelector('[name=lat]'), ln = f.querySelector('[name=lng]'); if (!la && !ln) return;
+  for (const [el, max] of [[la, 90], [ln, 180]]) { if (!el || el.value === '') continue; const v = fixCoordValue(el.value, max); if (v == null) continue; if (isNaN(v)) { ev.preventDefault(); ev.stopImmediatePropagation(); toast(`${max === 90 ? 'خط العرض' : 'خط الطول'} غلط (${el.value}) — الصق اللوكيشن في خانة «الصق رابط Google Maps أو الإحداثيات»`, 'err'); return; } el.value = v; }
+}, true);
+Object.assign(window, { parseDmsPair, packedDms });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
