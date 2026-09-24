@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0512-097038";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0536-d5d96c";</script>
 
 <script>
 'use strict';
@@ -15102,6 +15102,63 @@ tripRouteCard = (base => function (t) {
   h = h.replace(/<div class="tiny muted" style="margin-top:4px">تقدير من المصنع بمعامل طريق[^<]*<\/div>/, '');
   return h;
 })(tripRouteCard);
+/* =====================================================================
+   v4.40 — تكلفة المشوار (اتفاق 24 سبتمبر):
+   نصيب العربية (إهلاك/كم) + البنزين + نصيب الزيت (/كم) + نصيب الصيانة (/كم) + وقت السواق (أجر ساعته)
+   = التكلفة المباشرة، وعليها هامش ربح 15٪ (قابل للتعديل) = تكلفة المشوار — دي اللي بتتحمّل على أمر التشغيل.
+   قبل المشوار: تقدير بنفس المعادلة (المسافة ذهاب وعودة، والوقت من متوسط سرعة)؛ بعده: الفعلي من العداد والوقود والوقت.
+   الأرقام من الإعدادات ← «حركة النقل والوقود»، ولكل عربية أرقام خاصة لو اتكتبت في ملفها.
+   ===================================================================== */
+const tripCostCfg = () => { const f = S.settings.fleet || {}; return { vehPerKm: f.vehPerKm != null ? +f.vehPerKm : 1, oilPerKm: f.oilPerKm != null ? +f.oilPerKm : 0.5, marginPct: f.marginPct != null ? +f.marginPct : 15, avgSpeed: f.avgSpeed ? +f.avgSpeed : 35 }; };
+const vehRate = (v, k, def) => v && v[k] != null && v[k] !== '' ? +v[k] : def;
+/* the actual cost after the trip (km from odometer/GPS, fuel from Octane logs or estimated, hours from start/end) */
+tripCost = (base => function (t) {
+  const b = base.apply(this, arguments); const c = tripCostCfg(); const v = byId('vehicles', t.vehicleId);
+  const veh = r2(b.km * vehRate(v, 'vehPerKm', c.vehPerKm)); const oil = r2(b.km * vehRate(v, 'oilPerKm', c.oilPerKm));
+  const direct = r2(b.fuel + b.maint + b.driver + veh + oil); const margin = r2(direct * c.marginPct / 100);
+  return Object.assign({}, b, { veh, oil, direct, marginPct: c.marginPct, margin, total: r2(direct + margin) });
+})(tripCost);
+/* the estimate before the trip: same formula for a given distance (round trip) */
+function tripEstimate(t, km) {
+  const c = tripCostCfg(), fc = fleetCfg(); const v = byId('vehicles', t.vehicleId); const w = byId('workers', t.driverId);
+  const fuel = r2(km / 100 * (+(v && v.consumption) || +fc.consumption || 12) * (+fc.fuelPrice || 0));
+  const maint = r2(km * (v && v.maintPerKm ? +v.maintPerKm : +fc.maintPerKm || 0)); const veh = r2(km * vehRate(v, 'vehPerKm', c.vehPerKm)); const oil = r2(km * vehRate(v, 'oilPerKm', c.oilPerKm));
+  const hours = r2(km / (c.avgSpeed || 35) + 0.5); const driver = r2(hours * (w && typeof hourlyRate === 'function' ? hourlyRate(w) : 0));
+  const direct = r2(fuel + maint + veh + oil + driver); const margin = r2(direct * c.marginPct / 100);
+  return { km, fuel, maint, veh, oil, driver, hours, direct, marginPct: c.marginPct, margin, total: r2(direct + margin) };
+}
+const costSees = t => !tripCostHidden(t) && (isAdmin() || ['manager', 'acc', 'hr'].includes(role()) || (typeof seesFinance === 'function' && seesFinance()));
+const costRows = x => [['نصيب العربية', x.veh], [`البنزين${x.fuelEst ? ' (تقديري)' : ''}`, x.fuel], ['نصيب الزيت', x.oil], ['نصيب الصيانة', x.maint], [`وقت السواق${x.hours ? ` (${fmtNum(x.hours)} س)` : ''}`, x.driver]];
+function tripCostCardHTML(t, x, est) {
+  return `<div class="card"><div class="cardhead"><h3>تكلفة المشوار${est ? ' — تقديرية' : ''}</h3><span class="badge ${est ? '' : 'good'}">${fmtNum(x.km)} كم${est ? ' ذهاب وعودة' : ''}</span></div><div class="tablewrap"><table><tbody>${costRows(x).map(([l, v]) => `<tr><td>${esc(l)}</td><td class="n">${fmtMoney(v)}</td></tr>`).join('')}<tr><td><b>التكلفة المباشرة</b></td><td class="n"><b>${fmtMoney(x.direct)}</b></td></tr><tr><td>هامش ربح ${fmtNum(x.marginPct)}٪</td><td class="n">${fmtMoney(x.margin)}</td></tr><tr><td><b>تكلفة المشوار</b></td><td class="n"><b>${fmtMoney(x.total)} ${CUR()}</b></td></tr></tbody></table></div>${est ? '<div class="tiny muted" style="margin-top:6px">تقدير قبل المشوار (المسافة بمعامل طريق 1.3 والوقت من متوسط السرعة) — الفعلي بيتحسب بعد المشوار من العداد والوقود والوقت.</div>' : `${t.orderId ? `<div class="tiny muted" style="margin-top:6px">محمّلة على <a href="#/orders/${t.orderId}">${esc(byId('orders', t.orderId)?.code || '')}</a></div>` : ''}`}</div>`;
+}
+/* route card: the estimate uses the new formula (drivers still don't see money) */
+tripRouteCard = (base => function (t) {
+  let h = base.apply(this, arguments); if (!costSees(t)) return h;
+  const dest = typeof tripDest === 'function' ? tripDest(t) : null; const fz = factoryZone(); const km = dest && fz ? roadKm(fz, dest) : null; if (km == null) return h;
+  const e = tripEstimate(t, r2(km * 2));
+  return h.replace(/(<div class="tiny muted">تكلفة النقل التقديرية<\/div><b class="num">)[^<]*(<\/b>)/, `$1${fmtMoney(e.total)}$2`).replace(/تقدير من المصنع بمعامل طريق 1\.3 — الفعلي من العداد والوقود بعد المشوار/, `تقدير: عربية + بنزين + زيت + صيانة + وقت السواق + هامش ${fmtNum(e.marginPct)}٪ — الفعلي بعد المشوار`);
+})(tripRouteCard);
+/* trip page: the full breakdown (estimate before / actual after) replaces the old one-line cost */
+vTripDetail = (base => id => {
+  let html = base(id); const t = byId('trips', id); if (!t) return html;
+  html = html.replace(/<div class="sep"><\/div><div class="small"><b>تكلفة المشوار:<\/b>[\s\S]*?<\/div>/, '');
+  if (!costSees(t)) return html;
+  let card = '';
+  if (t.status === 'done') card = tripCostCardHTML(t, tripCost(t), false);
+  else { const dest = typeof tripDest === 'function' ? tripDest(t) : null; const fz = factoryZone(); const km = dest && fz ? roadKm(fz, dest) : null; if (km != null) card = tripCostCardHTML(t, tripEstimate(t, r2(km * 2)), true); }
+  if (!card) return html; const i = html.indexOf('<div class="card"><div class="cardhead"><h3>العداد والتكلفة'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+})(vTripDetail);
+/* order accounts: the transport line shows the new parts */
+orderAccountsCard = (base => function (o) { let h = base.apply(this, arguments); return h.replace(/وقود ([\d.,]+)( تقديري)? \+ صيانة ([\d.,]+) \+ سائق ([\d.,]+)\)/g, (m) => m.replace(/\)$/, ' + عربية وزيت + هامش)')); })(orderAccountsCard);
+/* settings: the new rates */
+EXTRA_SETTINGS.fleet.render = (base => () => { const c = tripCostCfg(); let h = base(); const extra = `${field(`نصيب العربية لكل كم — إهلاك (${CUR()})`, inp('vehPerKm', c.vehPerKm, 'type="number" step="0.01" min="0"'))}${field(`نصيب الزيت لكل كم (${CUR()})`, inp('oilPerKm', c.oilPerKm, 'type="number" step="0.01" min="0"'))}${field('هامش الربح على تكلفة المشوار (٪)', inp('marginPct', c.marginPct, 'type="number" step="0.5" min="0"'))}${field('متوسط السرعة للتقدير (كم/ساعة)', inp('avgSpeed', c.avgSpeed, 'type="number" step="1" min="5"'))}`;
+  h = h.replace('</div><p class="tiny muted"', extra + '</div><p class="tiny muted"');
+  return h.replace(/<p class="tiny muted" style="margin-top:8px">تكلفة المشوار =[\s\S]*?<\/p>/, '<p class="tiny muted" style="margin-top:8px">تكلفة المشوار = نصيب العربية × كم + البنزين (فعلي من Octane أو تقديري = كم × الاستهلاك × سعر اللتر) + نصيب الزيت × كم + نصيب الصيانة × كم + وقت السواق × أجر ساعته، وعلى الإجمالي هامش الربح — وبتتحمّل على أمر التشغيل المرتبط. لكل عربية أرقام خاصة من ملفها.</p>'); })(EXTRA_SETTINGS.fleet.render);
+document.addEventListener('submit', ev => { if (!ev.target || ev.target.id !== 'fleetform' || !isAdmin()) return; const d = formData(ev.target); S.settings.fleet = Object.assign({}, S.settings.fleet || {}, { vehPerKm: num(d.vehPerKm), oilPerKm: num(d.oilPerKm), marginPct: num(d.marginPct), avgSpeed: num(d.avgSpeed) || 35 }); }, true);
+/* vehicle form: optional per-vehicle rates */
+vehForm = (base => function (v) { v = v || {}; const h = base.apply(this, arguments); const extra = `${field(`نصيب العربية لكل كم — لو مختلف (${CUR()})`, inp('vehPerKm', v.vehPerKm ?? '', 'type="number" step="0.01" min="0" placeholder="الافتراضي من الإعدادات"'))}${field(`نصيب الزيت لكل كم — لو مختلف (${CUR()})`, inp('oilPerKm', v.oilPerKm ?? '', 'type="number" step="0.01" min="0" placeholder="الافتراضي من الإعدادات"'))}`; const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i); })(vehForm);
+Object.assign(window, { tripEstimate });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
