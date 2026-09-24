@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0501-5f73ff";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0512-097038";</script>
 
 <script>
 'use strict';
@@ -15093,6 +15093,15 @@ saveTrip = (base => async function (f, t) {
   }
   return r;
 })(saveTrip);
+/* v4.39d — drivers don't see the trip's estimated transport cost (including the fleet manager when he is the trip's driver);
+   the owner / factory manager / accounts still see it */
+const tripCostHidden = t => !isAdmin() && !['manager', 'acc', 'hr'].includes(role()) && (role() === 'driver' || (t && t.driverId && t.driverId === myDriverId()));
+tripRouteCard = (base => function (t) {
+  let h = base.apply(this, arguments); if (!tripCostHidden(t)) return h;
+  h = h.replace(/<div><div class="tiny muted">تكلفة النقل التقديرية<\/div><b class="num">[^<]*<\/b>[^<]*<\/div>/, '');
+  h = h.replace(/<div class="tiny muted" style="margin-top:4px">تقدير من المصنع بمعامل طريق[^<]*<\/div>/, '');
+  return h;
+})(tripRouteCard);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
