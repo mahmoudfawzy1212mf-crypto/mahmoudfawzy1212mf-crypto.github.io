@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-0221-9e0375";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0250-c1f7a4";</script>
 
 <script>
 'use strict';
@@ -15022,6 +15022,33 @@ vPurchaseDetail = (base => id => {
   if (t && t0 && t0.status !== 'done' && t.status === 'done' && t.kind === 'return' && t.purchaseId && !t.notTaken) { const p = byId('purchases', t.purchaseId); if (p) { await notifyRole('store', `${t.number}: البديل وصل — ${p.number}`, 'سجّل الاستلام من صفحة الطلب (ومعاك رئيس القسم).', { id: `tret_st_${t.id}`, priority: 'high', fields: { purchaseId: p.id } }); if (p.deptId) await notifyRole('head', `${t.number}: البديل وصل — ${p.number}`, 'اعتمد المطابقة الفنية من صفحة الطلب.', { id: `tret_hd_${t.id}`, priority: 'high', fields: { deptId: p.deptId, purchaseId: p.id } }); } }
   return r; }; })();
 Object.assign(window, { tripAskConfirm, tripGeoCheck });
+/* =====================================================================
+   v4.37 — شريط أعلى الشاشة على الموبايل: الأزرار كانت أكتر من العرض، فالشريط بقى يتمرر
+   وكان بيقص زرار Ninety والأرقام اللي على الجرس/Ninety، والعنوان يتقطع.
+   الحل (≤ 600px): زرار «الوضع الليلي/النهاري» و«شرح البرنامج» ينتقلوا للقائمة الجانبية،
+   والباقي أصغر شوية ويظهر كامل من غير تمرير.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+@media (max-width:600px){
+  .topbar .tb-actions{overflow:visible!important;gap:5px!important;flex:0 0 auto!important;padding-top:4px}
+  .topbar .tb-actions .themebtn,.topbar .tb-actions .helpbtn{display:none!important}
+  .topbar .tb-actions .bellbtn,.topbar .tb-actions .nfhomebtn,.topbar .tb-actions .frzbtn,.topbar .tb-actions .nfsysbtn{height:36px}
+  .topbar .tb-actions .bellbtn,.topbar .tb-actions .nfhomebtn,.topbar .tb-actions .frzbtn{width:36px}
+  .topbar h1{min-width:0}
+  .side .mobextra{display:grid}
+}
+.side .mobextra{display:none;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.side .mobextra button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 8px;font:inherit;font-size:12.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.side .mobextra svg{width:16px;height:16px}
+</style>`);
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+  const side = document.querySelector('.side'); if (!side || side.querySelector('.mobextra')) return;
+  const hasTheme = !!document.querySelector('.topbar [data-action="themeToggle"]'), hasHelp = !!document.querySelector('.topbar [data-action="helpOpen"]');
+  if (!hasTheme && !hasHelp) return;
+  const nav = side.querySelector('#nav') || side.querySelector('.nav');
+  const html = `<div class="mobextra">${hasTheme ? `<button type="button" data-action="themeToggle">${icon('sun')}الوضع الليلي / النهاري</button>` : ''}${hasHelp ? `<button type="button" data-action="helpOpen">${icon('play')}شرح البرنامج</button>` : ''}</div>`;
+  if (nav) nav.insertAdjacentHTML('beforebegin', html); else side.insertAdjacentHTML('beforeend', html);
+});
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
