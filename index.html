@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260923-2014-d8732c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260924-0221-9e0375";</script>
 
 <script>
 'use strict';
@@ -14806,7 +14806,7 @@ saveTrip = (base => async function (f, t) {
   if (!(formData(f).to || '').trim()) { toast('اختر المكان اللي رايح له («إلى»)', 'err'); return false; }
   const num0 = d.number; const r = await base.apply(this, arguments); if (r === false) return r;
   const tr = t && t.id ? byId('trips', t.id) : list('trips').find(x => x.number === num0);
-  if (tr) await Store.update('trips', tr.id, { fromLoc: loc('from'), toLoc: loc('to') }, { silent: true });
+  if (tr) await Store.update('trips', tr.id, { fromLoc: loc('from'), toLoc: loc('to'), pipe2: true /* v4.36 trip steps */ }, { silent: true });
   return r;
 })(saveTrip);
 /* trip page: open each end in Google Maps (for the driver) */
@@ -14887,6 +14887,141 @@ matOptions = (base => function (sel) { const h = base.apply(this, arguments); tr
   } });
 }; })();
 Object.assign(window, { nfItemTechAsk });
+/* =====================================================================
+   v4.36 — خطوات مشوار الاستلام (اتفاق 24 سبتمبر):
+   بدء المهمة (من مكان «من» — المصنع/الموقع) ← الوصول للجهة ← الاستلام من الجهة بصورة ← تأكيد المصنع
+   (رئيس القسم الطالب، ولو القسم بلا رئيس مدير المصنع: «مطابق / مش مطابق») ← تم استلام الأوردر ← التوجه للمصنع
+   ← الوصول للمصنع ← الاستلام في المصنع (أمين المخزن + رئيس القسم — دورة الاستلام الثنائي الموجودة).
+   الرفض في المصنع ← المشتريات تتابع مع المورد (نتيجة المتابعة) ← «مشوار إرجاع» بنفس الخطوات:
+   انطلاق ← وصول ← تسليم المرتجع بصورة ← استلام البديل بصورة ← تأكيد ← تم ← التوجه للمصنع ← الوصول.
+   السيستم بيقارن موقع السواق عند البدء والوصول بلوكيشن المكان — لو بعيد يتبلغ مدير الحركة.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.tcf img{max-width:220px;border-radius:10px;border:1px solid var(--line);display:block;margin:6px 0}
+.leg .far{color:var(--crit-ink,#b35c5c);font-size:11.5px}
+</style>`);
+TRIP_KINDS.return = 'إرجاع مرفوض + استلام البديل';
+const PICK_KINDS = ['materials', 'pickup_ext', 'return'];
+const OLD_LEG_DEFS = { materials: LEG_DEFS.materials, pickup_ext: LEG_DEFS.pickup_ext };
+LEG_DEFS.materials = [['start', 'بدء المهمة — انطلاق'], ['arrive', 'الوصول للمورد'], ['received', 'الاستلام من المورد (صورة)'], ['confirm', 'تأكيد المصنع'], ['taken', 'تم استلام الأوردر'], ['depart', 'التوجه للمصنع'], ['back', 'الوصول للمصنع']];
+LEG_DEFS.pickup_ext = [['start', 'بدء المهمة — انطلاق'], ['arrive', 'الوصول للمصنع الخدمي'], ['received', 'الاستلام من المصنع الخدمي (صورة)'], ['confirm', 'تأكيد المصنع'], ['taken', 'تم استلام الأوردر'], ['depart', 'التوجه للمصنع'], ['back', 'الوصول للمصنع']];
+LEG_DEFS.return = [['start', 'بدء المهمة — انطلاق'], ['arrive', 'الوصول للجهة'], ['handover', 'تسليم المرتجع (صورة)'], ['received', 'استلام البديل (صورة)'], ['confirm', 'تأكيد المصنع'], ['taken', 'تم استلام البديل'], ['depart', 'التوجه للمصنع'], ['back', 'الوصول للمصنع']];
+/* trips finished before this change keep the steps they were done with */
+const tripLegacy = t => !!t && !t.pipe2 && t.status === 'done' && !!OLD_LEG_DEFS[t.kind] && !tripLegs(t).some(l => ['confirm', 'taken', 'depart'].includes(l.key));
+legsWithState = (base => t => { if (!tripLegacy(t)) return base(t); const cur = LEG_DEFS[t.kind]; LEG_DEFS[t.kind] = OLD_LEG_DEFS[t.kind]; try { return base(t); } finally { LEG_DEFS[t.kind] = cur; } })(legsWithState);
+REQ_TYPES.tripconfirm = 'تأكيد استلام السواق من الجهة (مطابق؟)'; DEFAULT_CHAINS.tripconfirm = ['head'];
+const legOf = (t, k) => tripLegs(t).find(l => l.key === k) || null;
+/* whose confirmation: the requesting department head, else the factory manager */
+function tripConfirmDept(t) {
+  let dept = null; if (t.purchaseId) dept = (byId('purchases', t.purchaseId) || {}).deptId || null;
+  if (!dept && t.extId) { const x = byId('extorders', t.extId); dept = (x && (x.deptId || (x.orderId && typeof currentStage === 'function' && byId('orders', x.orderId) ? (currentStage(byId('orders', x.orderId)) || {}).deptId : null))) || null; }
+  const d = dept && S.settings.departments.find(z => z.id === dept); return d && !d.admin && typeof deptHeads === 'function' && deptHeads(d.id).length ? d.id : null;
+}
+async function tripAskConfirm(t) {
+  t = byId('trips', t.id) || t; if (t.confirmReqId && byId('requests', t.confirmReqId)?.status === 'pending') return;
+  const rec = legOf(t, 'received') || {}; const dept = tripConfirmDept(t); const me = S.session || {};
+  const what = t.purchaseId ? (byId('purchases', t.purchaseId) || {}).number : t.extId ? (byId('extorders', t.extId) || {}).number : '';
+  const r = { id: uid(), type: 'tripconfirm', tripId: t.id, purchaseId: t.purchaseId || null, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: dept, reason: `${t.number}${what ? ` — ${what}` : ''} · ${t.to || ''}: ${rec.note || 'استلم السواق'}${rec.status === 'issue' ? ' (السواق شايف مشكلة)' : ''} — مطابق؟`, thumb: rec.thumb || null, note: rec.note || '', status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: dept ? ['head'] : ['manager'], step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: 'السواق صوّر اللي استلمه — مستني التأكيد قبل ما يتحرك' }] };
+  await Store.save('requests', r, { silent: true }); await Store.update('trips', t.id, { confirmReqId: r.id }, { silent: true });
+  const title = `السواق مستني تأكيدك — ${t.number}`, body = `${r.reason}\nافتح «الطلبات» وشوف الصورة، ثم «موافقة» = مطابق أو «رفض» = مش مطابق مع السبب.`;
+  if (dept) await notifyRole('head', title, body, { id: `tcf_${t.id}`, priority: 'urgent', fields: { deptId: dept } }); else await notifyRole('manager', title, body, { id: `tcf_${t.id}`, priority: 'urgent' });
+}
+const _driverTask = async (t, title, desc, prio) => { if (!t.driverId) return; await Store.save('tasks', { id: `tmsg_${t.id}_${Date.now().toString(36)}`, title, desc, assigneeId: t.driverId, deptId: null, orderId: t.orderId || null, dueDate: todayISO(), priority: prio || 'high', status: 'open', kind: 'update', source: 'trip', tripId: t.id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); };
+const canWriteTrip = t => isAdmin() || ['manager', 'fleet'].includes(role()) || (t && t.driverId && t.driverId === myDriverId());
+/* the confirmation lives on the request; the driver's (or fleet's) app writes it onto the trip */
+async function tripSyncConfirm(t) {
+  t = t && byId('trips', t.id); if (!t || !t.confirmReqId || legOf(t, 'confirm') || !canWriteTrip(t)) return false;
+  const r = byId('requests', t.confirmReqId); if (!r || !['approved', 'rejected'].includes(r.status)) return false;
+  const last = (r.thread || []).slice().reverse().find(m => m.kind !== 'system') || {}; const by = r.decidedByName || last.byName || '';
+  const ok = r.status === 'approved'; await Store.update('trips', t.id, Object.assign({ legs: tripLegs(t).concat([{ key: 'confirm', at: r.decidedAt || nowISO(), ok, byName: by, note: ok ? 'مطابق' : (r.decisionNote || last.text || 'مش مطابق') }]) }, ok ? {} : { notTaken: true }), { silent: true });
+  return true;
+}
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r.type !== 'tripconfirm') return base(r, w, patch, opts);
+  const t = byId('trips', r.tripId); if (!t) return; const by = S.session?.name || '';
+  await _driverTask(t, `اتأكد — كمّل ${t.number}`, `${by}: مطابق. دوس «تم استلام الأوردر» واتحرك للمصنع.`);
+  if (canWriteTrip(t)) await tripSyncConfirm(t);
+})(applyRequestEffects);
+decideRequest = (base => async (id, status, note, opts = {}) => {
+  const r0 = byId('requests', id); const ok = await base(id, status, note, opts); if (ok === false) return ok; const r = byId('requests', id);
+  if (r && r.type === 'tripconfirm' && r.status === 'rejected' && r0 && r0.status === 'pending') { const t = byId('trips', r.tripId); if (t) {
+    const by = S.session?.name || '';
+    await _driverTask(t, `ماتستلمش — ${t.number}`, `${by}: مش مطابق${note ? ` — ${note}` : ''}. ماتحمّلش الأوردر؛ دوس «تم» واتحرك للمصنع. المشتريات هتتواصل مع الجهة.`, 'urgent');
+    if (t.purchaseId) await notifyRole('purch', `رفض عند الاستلام من الجهة — ${(byId('purchases', t.purchaseId) || {}).number || ''}`, `${t.number}: ${note || 'مش مطابق'}\nتواصل مع المورد بالعرض والصورة وسجّل النتيجة.`, { id: `tcf_no_${t.id}`, priority: 'urgent', fields: { purchaseId: t.purchaseId } });
+    await notifyRole('fleet', `${t.number}: الجهة رفضت — السواق راجع فاضي`, note || '', { id: `tcf_no_f_${t.id}`, priority: 'high' });
+    if (canWriteTrip(t)) await tripSyncConfirm(t);
+  } }
+  return ok;
+})(decideRequest);
+if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { list('trips').filter(t => t.status === 'started' && t.confirmReqId && !legOf(t, 'confirm') && canWriteTrip(t)).forEach(t => { const r = byId('requests', t.confirmReqId); if (r && r.status !== 'pending' && !t._syncing) { t._syncing = true; tripSyncConfirm(t).then(ch => { if (ch) rerender(); }); } }); } catch (e) { /* ignore */ } });
+/* the approver sees the driver's photo inside the request */
+ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if (!r || r.type !== 'tripconfirm') return; const mb = document.querySelector('#mform .mb'); if (mb && !mb.querySelector('.tcf')) mb.insertAdjacentHTML('afterbegin', `<div class="tcf">${r.thumb ? `<img src="${esc(r.thumb)}" alt="" data-action="lightboxSrc" data-arg="${esc(r.thumb)}">` : ''}<div class="small">${esc(r.note || '')}</div></div>`); })(ACTIONS.reqOpen);
+/* driver's next step */
+ACTIONS.tripLeg = (base => async id => {
+  let t = byId('trips', id); if (!t) return; if (await tripSyncConfirm(t)) { t = byId('trips', id); const c = legOf(t, 'confirm'); toast(c.ok ? 'اتأكد ✓ — دوس «تم استلام الأوردر»' : 'المصنع رفض — ماتحمّلش ودوس «تم»', c.ok ? '' : 'err'); return; }
+  const nx = tripNextLeg(t); if (!nx) return base(id);
+  if (!(isAdmin() || canFleet() || t.driverId === myDriverId())) return;
+  if (nx.key === 'confirm') { if (!t.confirmReqId) await tripAskConfirm(t); toast('مستني تأكيد رئيس القسم على الصورة — هيوصلك إشعار', 'err'); return; }
+  if (['handover', 'taken', 'depart'].includes(nx.key)) {
+    if (t.status !== 'started') { toast('ابدأ المشوار أولًا', 'err'); return; }
+    let pr = null; if (nx.key === 'handover') { pr = await proofDialog({ title: `${nx.label} — ${t.number}`, intro: 'صورة المرتجع وهو بيتسلّم للجهة + اسم اللي استلم', kind: 'proof', ownerKind: 'trip', ownerId: id, requireNote: true, noteLabel: 'مين استلم ومين مضى' }); if (!pr) return; }
+    toast('جارٍ تحديد موقعك…'); const p = await posNow();
+    const rec = { key: nx.key, at: nowISO(), pos: p, thumb: pr ? pr.thumb || null : null, note: pr ? pr.note : (nx.key === 'taken' && t.notTaken ? 'ماتحمّلش — رفض المصنع' : '') };
+    await Store.update('trips', id, { legs: tripLegs(t).concat([rec]), track: (t.track || []).concat(p ? [p] : []) });
+    if (nx.key === 'handover' && t.purchaseId) await notifyRole('purch', `السواق سلّم المرتجع — ${(byId('purchases', t.purchaseId) || {}).number || ''}`, `${t.number}: ${pr.note}`, { id: `tho_${t.id}`, fields: { purchaseId: t.purchaseId } });
+    toast(`${nx.label} ✓`); return;
+  }
+  const r = await base(id);
+  const t2 = byId('trips', id); if (t2 && PICK_KINDS.includes(t2.kind) && legOf(t2, 'received') && !legOf(t2, 'confirm') && !t2.confirmReqId) await tripAskConfirm(t2);
+  await tripGeoCheck(id); return r;
+})(ACTIONS.tripLeg);
+/* the start/end buttons also get the location check */
+['tripStart', 'tripEnd'].forEach(k => { const base = ACTIONS[k]; ACTIONS[k] = async id => { const r = await base(id); await tripGeoCheck(id); return r; }; });
+/* is the driver where he should be? start → «من», arrive → «إلى», back → the factory («من») */
+async function tripGeoCheck(id) {
+  const t = byId('trips', id); if (!t) return; let legs = tripLegs(t); let changed = false;
+  /* a quick second save can be overwritten by the server echo of the first — rebuild the start step from the trip itself */
+  if (t.startedAt && !legs.some(l => l.key === 'start')) { legs = [{ key: 'start', at: t.startedAt, pos: t.startPos || null, km: t.startKm ?? null, thumb: (t.startOdo || {}).thumb || null }].concat(legs); changed = true; }
+  const fz = typeof factoryZone === 'function' ? factoryZone() : null; const from = t.fromLoc && t.fromLoc.lat != null ? t.fromLoc : fz; const to = t.toLoc && t.toLoc.lat != null ? t.toLoc : null;
+  const out = legs.map(l => {
+    if (l.geo !== undefined || !['start', 'arrive', 'back'].includes(l.key)) return l; changed = true;
+    const target = l.key === 'arrive' ? to : from; if (!target || !l.pos) return Object.assign({}, l, { geo: null });
+    const dist = Math.round(haversine(l.pos, target)); const limit = 500 + Math.min(300, (+l.pos.acc || 0));
+    return Object.assign({}, l, { geo: { dist, far: dist > limit, place: target.name || '' } });
+  });
+  if (!changed) return; await Store.update('trips', id, { legs: out }, { silent: true });
+  const bad = out.filter((l, i) => l.geo && l.geo.far && !(legs[i].geo)); for (const l of bad) await notifyRole('fleet', `${t.number}: السواق ${l.key === 'start' ? 'بدأ' : 'سجّل الوصول'} بعيد عن ${l.geo.place || 'المكان'}`, `المسافة ≈ ${fmtNum(Math.round(l.geo.dist / 10) * 10)} متر — ${assigneeName(t.driverId)}`, { id: `tgeo_${t.id}_${l.key}`, priority: 'high' });
+  if (out.some(l => l.key === 'back') && !legs.some(l => l.key === 'back' && l.geo !== undefined) && t.extId && PICK_KINDS.includes(t.kind) && !t.notTaken) await notifyRole('store', `${t.number}: العربية وصلت بشغل ${(byId('extorders', t.extId) || {}).number || ''}`, 'استلمه من «التشغيل الخارجي» مع رئيس القسم.', { id: `text_${t.id}`, priority: 'high' });
+}
+/* legs list: show the distance warning */
+legsHTML = (base => t => { let h = base(t); try { tripLegs(t).filter(l => l.geo && l.geo.far).forEach(l => { const lab = (legDefs(t).find(d => d[0] === l.key) || [])[1]; if (lab) h = h.replace(`<div class="t">${esc(lab)}</div>`, `<div class="t">${esc(lab)} <span class="far">⚠ بعيد ≈ ${fmtNum(Math.round(l.geo.dist / 10) * 10)} م عن ${esc(l.geo.place || 'المكان')}</span></div>`); }); tripLegs(t).filter(l => l.key === 'confirm').forEach(l => { const lab = (legDefs(t).find(d => d[0] === 'confirm') || [])[1]; if (lab) h = h.replace(`<div class="t">${esc(lab)}</div>`, `<div class="t">${esc(lab)} — ${l.ok ? '✓ مطابق' : '✗ مش مطابق'} (${esc(l.byName || '')})</div>`); }); } catch (e) { /* ignore */ } return h; })(legsHTML);
+/* trip page: the confirmation card (photo + مطابق / مش مطابق) and the factory receipt state */
+vTripDetail = (base => id => {
+  let html = base(id); const t = byId('trips', id); if (!t || !PICK_KINDS.includes(t.kind)) return html; const cards = [];
+  const rec = legOf(t, 'received'); const r = t.confirmReqId ? byId('requests', t.confirmReqId) : null; const cf = legOf(t, 'confirm');
+  if (rec) cards.push(`<div class="card tcf"><div class="cardhead"><h3>اللي استلمه السواق</h3>${cf ? (cf.ok ? '<span class="badge good">مطابق ✓</span>' : '<span class="badge crit">مش مطابق</span>') : '<span class="badge warn">مستني التأكيد</span>'}</div>${rec.thumb ? `<img src="${esc(rec.thumb)}" alt="" data-action="lightboxSrc" data-arg="${esc(rec.thumb)}">` : ''}<div class="small">${esc(rec.note || '')}</div>${cf ? `<div class="small muted">${esc(cf.byName || '')}: ${esc(cf.note || '')}</div>` : ''}${r && r.status === 'pending' && typeof awaitingMe === 'function' && awaitingMe(r) ? `<div class="row" style="gap:8px;margin-top:8px"><button class="btn p" data-action="reqDecide" data-arg="${r.id}:approved">${icon('check')}مطابق</button><button class="btn" data-action="reqDecide" data-arg="${r.id}:rejected">${icon('x')}مش مطابق</button></div>` : ''}</div>`);
+  const ho = legOf(t, 'handover'); if (ho && ho.thumb) cards.push(`<div class="card tcf"><div class="cardhead"><h3>تسليم المرتجع</h3></div><img src="${esc(ho.thumb)}" alt="" data-action="lightboxSrc" data-arg="${esc(ho.thumb)}"><div class="small">${esc(ho.note || '')}</div></div>`);
+  if (t.status === 'done' && t.purchaseId && !t.notTaken) { const p = byId('purchases', t.purchaseId); if (p) { const rc = p.receipts || {}; const st = p.status === 'received' ? '<span class="badge good">اتسلم في المصنع ✓</span>' : p.rejection && !p.rejection.resolution ? '<span class="badge crit">اترفض في المصنع — عند المشتريات</span>' : `<span class="badge warn">أمين المخزن ${rc.store ? '✓' : '…'} · رئيس القسم ${rc.head ? '✓' : '…'}</span>`; cards.push(`<div class="card"><div class="cardhead"><h3>الاستلام في المصنع</h3>${st}<div class="grow"></div><a class="btn xs" href="#/purchases/${p.id}">${esc(p.number)}</a></div></div>`); } }
+  if (!cards.length) return html; const i = html.indexOf('<div class="card">'); return i < 0 ? html + cards.join('') : html.slice(0, i) + cards.join('') + html.slice(i);
+})(vTripDetail);
+/* ---------------- return trip (مشوار إرجاع) from a rejected purchase ---------------- */
+ACTIONS.tripNew = (base => arg => {
+  const [k, id] = (arg || '').split(':'); if (k !== 'ret') return base(arg); if (!canFleet()) return;
+  const p = byId('purchases', id); if (!p) return; const s = supplierOf(p); const items = (p.rejection && p.rejection.items || []).map(r => `${r.name} × ${fmtNum(r.rejected)}`).join('، ');
+  openModal({ title: `مشوار إرجاع — ${p.number}`, wide: true, body: tripForm({ kind: 'return', purchaseId: p.id, orderId: p.orderId || '', purpose: `إرجاع المرفوض من ${p.number} إلى ${p.supplier || ''}${p.rejection && p.rejection.resolution && p.rejection.resolution.kind === 'replace' ? ' + استلام البديل' : ''}`, to: s ? s.name : (p.supplier || ''), toLoc: s ? { key: `sup:${s.id}` } : null, notes: items ? `المرتجع: ${items}` : '' }), onSubmit: f => saveTrip(f, {}) });
+})(ACTIONS.tripNew);
+ACTIONS.poReturnAsk = async id => { const p = byId('purchases', id); if (!p) return; await notifyRole('fleet', `مطلوب مشوار إرجاع — ${p.number}`, `المشتريات اتفقت مع ${p.supplier || 'المورد'}${p.rejection && p.rejection.resolution ? ` (${p.rejection.resolution.note || ''})` : ''}. افتح الطلب ← «مشوار إرجاع».`, { id: `po_retask_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); toast('اتبعت لمدير الحركة'); };
+vPurchaseDetail = (base => id => {
+  let html = base(id); const p = byId('purchases', id); if (!p || !p.rejection) return html; const openRet = list('trips').some(t => t.purchaseId === p.id && t.kind === 'return' && !['done', 'cancelled', 'rejected'].includes(t.status));
+  const btn = openRet ? '<span class="badge acc">مشوار الإرجاع متعمل</span>' : canFleet() ? `<button class="btn sm p" data-action="tripNew" data-arg="ret:${p.id}">${icon('fleet')}مشوار إرجاع (تكليف سواق)</button>` : (canDo('purchases') || isAdmin()) ? `<button class="btn sm" data-action="poReturnAsk" data-arg="${p.id}">${icon('fleet')}اطلب مشوار إرجاع من مدير الحركة</button>` : '';
+  if (!btn) return html; const card = `<div class="card"><div class="cardhead"><h3>المرفوض في الاستلام</h3><div class="grow"></div>${btn}</div><div class="small">${(p.rejection.items || []).map(r => `${esc(r.name)} × ${fmtNum(r.rejected)}`).join('، ')} — ${esc(p.rejection.reason || '')}</div></div>`;
+  const i = html.indexOf('<div class="card'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+})(vPurchaseDetail);
+/* a finished return trip with a replacement → the two-person factory receipt again */
+(() => { const base = ACTIONS.tripEnd; ACTIONS.tripEnd = async id => { const t0 = byId('trips', id); const r = await base(id); const t = byId('trips', id);
+  if (t && t0 && t0.status !== 'done' && t.status === 'done' && t.kind === 'return' && t.purchaseId && !t.notTaken) { const p = byId('purchases', t.purchaseId); if (p) { await notifyRole('store', `${t.number}: البديل وصل — ${p.number}`, 'سجّل الاستلام من صفحة الطلب (ومعاك رئيس القسم).', { id: `tret_st_${t.id}`, priority: 'high', fields: { purchaseId: p.id } }); if (p.deptId) await notifyRole('head', `${t.number}: البديل وصل — ${p.number}`, 'اعتمد المطابقة الفنية من صفحة الطلب.', { id: `tret_hd_${t.id}`, priority: 'high', fields: { deptId: p.deptId, purchaseId: p.id } }); } }
+  return r; }; })();
+Object.assign(window, { tripAskConfirm, tripGeoCheck });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
