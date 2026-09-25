@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-0911-5c3f58";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1045-091d6e";</script>
 
 <script>
 'use strict';
@@ -16300,6 +16300,140 @@ ACTIONS.bdDept = id => {
       ${open.length ? `<div class="list">${open.map(o => { const s = (o.stages || {})[id] || {}; const rel = orderReleased(o); return `<div class="item" data-action="go" data-arg="orders/${o.id}"><div class="main"><div class="title"><span class="code">${esc(o.code)}</span><span>${esc(o.title || '')}</span></div><div class="meta"><span>${esc(clientName(o.clientId))}</span>${o.dueDate ? `<span>تسليم ${fmtDate(o.dueDate)}</span>` : ''}<span>${!rel ? 'مستني الاعتماد' : s.status === 'active' ? `جاري ${+s.progress || 0}%` : s.status === 'done' ? 'خلص عند القسم ✓' : 'في الانتظار'}</span></div></div></div>`; }).join('')}</div>` : '<div class="muted small">مفيش أوامر بتعدّي على القسم ده دلوقتي</div>'}` });
 };
 document.addEventListener('click', ev => { const a = ev.target.closest && ev.target.closest('#modalroot [data-action="go"]'); if (a && typeof closeModal === 'function') setTimeout(closeModal, 0); });
+/* =====================================================================
+   v4.61 — سيستم التركيبات (اتفاق 25 سبتمبر):
+   «بند تركيب» على أمر التشغيل: إيه اللي هيتركب + يوم وساعة + الفنيين + محتاجين عربية وإيه الحمولة
+   · الفنيين: تكليف لكل واحد (مهمة) باليوم والمكان والشغل
+   · حركة النقل: إشعار بمشوار تركيب + زرار «اعمل المشوار» على البند (مشوار نوع «نقل فريق تركيب» متعبّي)
+   · رئيس قسم التركيبات + مدير المصنع: صفحة «التركيبات» (الجاي/المتأخر/اللي اتعمل) + كارت على الأمر
+   · البصمة: الفنيين بيتضافوا لفريق مرحلة التركيب (نفس نظام اعتماد الفريق والموقع)
+   · النسبة: كل بند يتقفل بيزوّد نسبة التركيبات؛ لما كل البنود تخلص المرحلة تتقفل
+   المسؤولين: تركيبات Ninety Aluminum ← رئيس الألومنيوم · تركيبات elmen ← رئيس النجارة + رئيس الدهانات ·
+   تركيبات LOF ← مدير المصنع بس (فنيين الألومنيوم أول القايمة)
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.instit{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}.instit.done{opacity:.7}.instit.late{border-color:#d98c8c}
+.instit .hd{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.instit .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.instday{margin:14px 0 6px;font-weight:700}.instday small{color:var(--muted);font-weight:400}
+</style>`);
+const INST_ST = { planned: ['متخطط', 'warn'], done: ['اتركب ✓', 'good'], cancelled: ['اتلغى', ''] };
+const instDeptsOf = o => (o.route || []).filter(d => INSTALL_DEPT(d));
+const instCan = d => typeof writable === 'function' && writable() && (isAdmin() || role() === 'manager' || (role() === 'head' && myDepts().includes(d)));
+const instSeesPage = () => !!S.session && (isAdmin() || ['manager', 'vice'].includes(role()) || (role() === 'head' && myDepts().some(d => INSTALL_DEPT(d))));
+const instScopeOk = d => isAdmin() || ['manager', 'vice'].includes(role()) || (role() === 'head' && myDepts().includes(d));
+const instItems = o => (o.installs || []);
+const instAll = () => { const out = []; list('orders').forEach(o => { if (o.status === 'cancelled') return; instItems(o).forEach(it => { if (instScopeOk(it.deptId)) out.push({ o, it }); }); }); return out; };
+const instTrip = it => list('trips').find(t => t.installId === it.id && t.status !== 'cancelled') || null;
+const instWName = id => (byId('workers', id) || {}).name || '?';
+const instLate = it => it.status === 'planned' && it.date && it.date < todayISO();
+/* team list: the natural crew of each installation dept on top */
+const INST_CREW = { inst_alu: ['inst_alu', 'alu'], inst_lof: ['inst_lof', 'alu'], inst_elm: ['inst_elm', 'carp', 'paint'] };
+function instWorkers(deptId) { const pri = INST_CREW[deptId] || [deptId]; const office = ['acct', 'purch', 'store', 'fleet', 'mgmt', 'sales', 'tech']; return sortBy(list('workers').filter(w => w.status !== 'inactive' && !['admin', 'driver', 'kiosk', 'acc', 'hr', 'bdd', 'purch', 'store', 'fleet', 'office', 'tech', 'vice'].includes(w.role) && !office.includes(w.deptId)), w => { const i = pri.indexOf(w.deptId); return `${i < 0 ? 9 : i}${w.name || ''}`; }); }
+
+/* ---------- order page card ---------- */
+function instCard(o) {
+  const ds = instDeptsOf(o).filter(instScopeOk); if (!ds.length) return '';
+  const items = sortBy(instItems(o).filter(it => ds.includes(it.deptId)), it => `${it.status === 'planned' ? 0 : 1}${it.date || ''}${it.time || ''}`);
+  const can = ds.some(instCan);
+  return `<div class="card" id="instcard"><div class="cardhead"><h3>${icon('map')}بنود التركيب</h3><span class="small muted">${items.filter(i => i.status === 'done').length}/${items.filter(i => i.status !== 'cancelled').length} اتركب</span><div class="grow"></div>${can && isOpen(o) ? `<button class="btn sm p" data-action="instNew" data-arg="${o.id}">${icon('plus')}بند تركيب</button>` : ''}</div>
+    ${items.length ? items.map(it => instItemHTML(o, it)).join('') : `<div class="small muted">مفيش بنود تركيب لسه — ضيف «بند تركيب» باليوم والفنيين، والتكليفات والمشوار بينزلوا لوحدهم.</div>`}</div>`;
+}
+function instItemHTML(o, it, showOrder) {
+  const tr = instTrip(it); const can = instCan(it.deptId);
+  return `<div class="instit ${it.status === 'done' ? 'done' : ''} ${instLate(it) ? 'late' : ''}"><div class="hd"><b>${esc(it.title)}</b>${badge(INST_ST, it.status)}${instLate(it) ? '<span class="badge crit">متأخر</span>' : ''}<span class="small muted">${esc(deptName(it.deptId))}</span></div>
+    ${showOrder ? `<div class="small" style="margin-top:4px"><a href="#/orders/${o.id}"><span class="code">${esc(o.code)}</span> ${esc(o.title || '')}</a></div>` : ''}
+    <div class="small" style="margin-top:4px">${icon('calendar')}${fmtDate(it.date)}${it.time ? ' · الساعة ' + esc(it.time) : ''}${o.site && o.site.address ? ` · ${esc(o.site.address)}` : ''}</div>
+    <div class="small" style="margin-top:2px">${icon('workers')}${(it.team || []).map(id => esc(instWName(id))).join('، ') || '—'}</div>
+    ${it.needCar ? `<div class="small" style="margin-top:2px">${icon('map')}${tr ? `مشوار <a href="#/fleet/${tr.id}">${esc(tr.number || '')}</a>${tr.status ? ' — ' + esc((typeof TRIP_STATUS !== 'undefined' && TRIP_STATUS[tr.status] ? TRIP_STATUS[tr.status][0] : tr.status)) : ''}` : '<span class="badge warn">محتاج عربية — حركة النقل لسه ماعملتش المشوار</span>'}${it.load ? ` · الحمولة: ${esc(it.load)}` : ''}</div>` : ''}
+    ${it.notes ? `<div class="tiny muted" style="margin-top:4px">${esc(it.notes)}</div>` : ''}
+    ${it.status === 'done' ? `<div class="tiny muted" style="margin-top:4px">اتقفل ${fmtDate((it.doneAt || '').slice(0, 10))} · ${esc(it.doneByName || '')}${it.doneNote ? ' — ' + esc(it.doneNote) : ''}</div>` : ''}
+    ${it.status === 'planned' ? `<div class="acts">${it.needCar && !tr && typeof canFleet === 'function' && canFleet() ? `<button class="btn xs p" data-action="tripNew" data-arg="inst:${o.id}:${it.id}">${icon('map')}اعمل المشوار</button>` : ''}${can ? `<button class="btn xs p" data-action="instDone" data-arg="${o.id}:${it.id}">${icon('check')}اتركب</button><button class="btn xs" data-action="instEdit" data-arg="${o.id}:${it.id}">${icon('edit')}تعديل</button><button class="btn xs ghost" data-action="instCancel" data-arg="${o.id}:${it.id}">إلغاء</button>` : ''}</div>` : ''}</div>`;
+}
+RENDER_HOOKS.push(() => { if (S.route.view !== 'orders' || !S.route.id) return; const o = byId('orders', S.route.id); if (!o) return; const v = document.getElementById('view'); if (!v || v.querySelector('#instcard')) return; const h = instCard(o); if (!h) return; const anchor = v.querySelector('#paintcard') || v.querySelector('#fgordercard'); if (anchor) anchor.insertAdjacentHTML('beforebegin', h); else v.insertAdjacentHTML('beforeend', h); });
+
+/* ---------- add / edit ---------- */
+function instForm(o, it) {
+  const ds = instDeptsOf(o).filter(instCan); const dep = it.deptId || ds[0]; const team = new Set(it.team || []);
+  return `<div class="form">${ds.length > 1 ? field('قسم التركيبات', `<select name="deptId" id="f-instDept">${ds.map(d => `<option value="${d}" ${d === dep ? 'selected' : ''}>${esc(deptName(d))}</option>`).join('')}</select>`) : `<input type="hidden" name="deptId" value="${esc(dep)}">`}
+    ${field('إيه اللي هيتركب', inp('title', it.title || '', 'required placeholder="مثال: تركيب قواطيع حمامات الدور الأول"'), 'full')}
+    ${field('اليوم', inp('date', it.date || todayISO(), 'type="date" required'))}${field('الساعة', inp('time', it.time || '09:00', 'type="time"'))}
+    <div class="field full"><label>الفنيين</label><div class="row" style="gap:6px;max-height:34vh;overflow:auto" id="instws">${instWorkers(dep).map(w => `<label class="check ${team.has(w.id) ? 'on' : ''}"><input type="checkbox" name="w-${w.id}" ${team.has(w.id) ? 'checked' : ''}> ${esc(w.name)} <span class="tiny muted">${esc(deptName(w.deptId) || '')}</span></label>`).join('')}</div></div>
+    <label class="check full ${it.needCar ? 'on' : ''}"><input type="checkbox" name="needCar" ${it.needCar ? 'checked' : ''}> محتاجين عربية (ينزل مشوار لحركة النقل)</label>
+    ${field('الحمولة (لو فيه عربية)', inp('load', it.load || '', 'placeholder="مثال: 6 قواطيع + الإكسسوارات"'), 'full')}
+    ${field('ملاحظات', `<textarea name="notes">${esc(it.notes || '')}</textarea>`, 'full')}</div>`;
+}
+document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'f-instDept') { const box = $('#instws'); if (!box) return; const sel = new Set($$('#instws input:checked').map(i => i.name.slice(2))); box.innerHTML = instWorkers(ev.target.value).map(w => `<label class="check ${sel.has(w.id) ? 'on' : ''}"><input type="checkbox" name="w-${w.id}" ${sel.has(w.id) ? 'checked' : ''}> ${esc(w.name)} <span class="tiny muted">${esc(deptName(w.deptId) || '')}</span></label>`).join(''); } });
+document.addEventListener('change', ev => { const c = ev.target; if (c && c.type === 'checkbox' && c.closest('#instws, .instform')) { const l = c.closest('label'); if (l) l.classList.toggle('on', c.checked); } });
+async function instSave(o, prev, d) {
+  const me = S.session || {}; const now = nowISO(); const team = list('workers').filter(w => d['w-' + w.id]).map(w => w.id);
+  const it = Object.assign({}, prev || { id: uid(), status: 'planned', createdAt: now, byName: me.name || '' }, { deptId: d.deptId, title: d.title.trim(), date: d.date, time: d.time || '', team, needCar: !!d.needCar, load: (d.load || '').trim(), notes: (d.notes || '').trim(), updatedAt: now });
+  const cur = byId('orders', o.id) || o; const items = instItems(cur).filter(x => x.id !== it.id).concat([it]);
+  /* the installation stage: crew + dates (site punch) and the base % before the first item */
+  const st = Object.assign({ status: 'pending' }, (cur.stages || {})[it.deptId] || {}); const live = items.filter(x => x.deptId === it.deptId && x.status !== 'cancelled');
+  const crew = Array.from(new Set((st.team || []).concat(team))); const dates = live.map(x => x.date).filter(Boolean).sort();
+  const stPatch = Object.assign({}, st, { team: crew, plannedStart: dates[0] || st.plannedStart || null, plannedEnd: dates[dates.length - 1] || st.plannedEnd || null });
+  if (st.instBase == null) stPatch.instBase = +st.progress || 0;
+  if (crew.length && (st.team || []).join() !== crew.join()) { if (isAdmin() || role() === 'manager' || !(typeof teamApprovalRequired === 'function' && teamApprovalRequired())) Object.assign(stPatch, { teamStatus: 'approved' }); else Object.assign(stPatch, { teamStatus: 'pending', teamBy: me.id || null, teamByName: me.name || '', teamAt: now }); }
+  await Store.update('orders', o.id, { installs: items, stages: { [it.deptId]: stPatch } });
+  /* one task per technician */
+  const site = cur.site && cur.site.address ? cur.site.address : clientName(cur.clientId);
+  for (const wid of team) { const tid = `inst_${it.id}_${wid}`; await Store.save('tasks', Object.assign({}, byId('tasks', tid) || {}, { id: tid, title: `تركيب: ${it.title} — ${cur.code}`, desc: `${fmtDate(it.date)}${it.time ? ' الساعة ' + it.time : ''} · ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.needCar ? '\nفيه عربية من المصنع' + (it.load ? ' — الحمولة: ' + it.load : '') : ''}${it.notes ? '\n' + it.notes : ''}`, assigneeId: wid, deptId: it.deptId, orderId: cur.id, dueDate: it.date, priority: 'normal', status: (byId('tasks', tid) || {}).status || 'open', kind: 'install', installId: it.id, createdBy: me.id || null, createdByName: me.name || '', createdAt: (byId('tasks', tid) || {}).createdAt || now, updatedAt: now }), { silent: true }); }
+  if (prev) for (const wid of (prev.team || [])) if (!team.includes(wid)) { const t = byId('tasks', `inst_${it.id}_${wid}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'cancelled', updatedAt: now }, { silent: true }); }
+  /* fleet: a heads-up task with the details (they create the trip from the item) */
+  if (it.needCar && !instTrip(it) && typeof notifyRole === 'function') { try { await notifyRole('fleet', `مشوار تركيب — ${cur.code} — ${fmtDate(it.date)}${it.time ? ' ' + it.time : ''}`, `${it.title}\nالمكان: ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.load ? '\nالحمولة: ' + it.load : ''}\nافتح أمر التشغيل ← «بنود التركيب» ← «اعمل المشوار».`, { id: `insttrip_${it.id}`, orderId: cur.id, fields: { kind: 'notice', link: `/#/orders/${cur.id}` } }); } catch (e) { /* ignore */ } }
+  if (!isAdmin() && role() !== 'manager' && typeof notifyRole === 'function') { try { await notifyRole('manager', `بند تركيب ${prev ? 'اتعدّل' : 'جديد'} — ${cur.code}`, `${it.title} · ${fmtDate(it.date)} · ${me.name || ''}`, { id: `instmgr_${it.id}_${prev ? 'e' : 'n'}`, orderId: cur.id, fields: { kind: 'notice', link: `/#/orders/${cur.id}` } }); } catch (e) { /* ignore */ } }
+  await instRecalc(cur.id, it.deptId);
+  return it;
+}
+ACTIONS.instNew = oid => { const o = byId('orders', oid); if (!o || !instDeptsOf(o).some(instCan)) return; openModal({ title: `بند تركيب — ${o.code}`, wide: true, cls: 'instform', body: instForm(o, {}), submitLabel: 'حفظ ونزّل التكليفات', onSubmit: async f => { const d = formData(f); if (!(d.title || '').trim() || !d.date) { toast('اكتب إيه اللي هيتركب واليوم', 'err'); return false; } await instSave(o, null, d); toast('اتسجل البند ونزلت التكليفات ✓'); } }); };
+ACTIONS.instEdit = arg => { const [oid, iid] = String(arg).split(':'); const o = byId('orders', oid); const it = o && instItems(o).find(x => x.id === iid); if (!it || !instCan(it.deptId)) return; openModal({ title: `تعديل بند تركيب — ${o.code}`, wide: true, cls: 'instform', body: instForm(o, it), onSubmit: async f => { const d = formData(f); if (!(d.title || '').trim() || !d.date) { toast('اكتب إيه اللي هيتركب واليوم', 'err'); return false; } await instSave(o, it, d); toast('اتحفظ ✓'); } }); };
+async function instSetStatus(oid, iid, patch) { const o = byId('orders', oid); if (!o) return null; const items = instItems(o).map(x => (x.id === iid ? Object.assign({}, x, patch) : x)); await Store.update('orders', oid, { installs: items }); return items.find(x => x.id === iid); }
+async function instCloseTasks(it, status) { for (const wid of (it.team || [])) { const t = byId('tasks', `inst_${it.id}_${wid}`); if (t && !['done', 'cancelled'].includes(t.status)) await Store.update('tasks', t.id, { status, doneAt: status === 'done' ? nowISO() : null, doneByName: S.session?.name || '' }, { silent: true }); } const ft = byId('tasks', `insttrip_${it.id}`); if (ft && ft.status !== 'done' && status === 'cancelled') await Store.update('tasks', ft.id, { status: 'done', doneAt: nowISO() }, { silent: true }); }
+ACTIONS.instDone = arg => {
+  const [oid, iid] = String(arg).split(':'); const o = byId('orders', oid); const it = o && instItems(o).find(x => x.id === iid); if (!it || !instCan(it.deptId)) return;
+  openModal({ title: `اتركب — ${it.title}`, body: `<div class="form">${field('ملاحظة (اختياري)', '<textarea name="note" placeholder="مثلاً: فاضل تركيب مقبض واحد"></textarea>', 'full')}<div class="tiny muted full">صور الشغل بعد التركيب بتترفع من «التوثيق» في صفحة الأمر أو من تكليف الفني.</div></div>`, submitLabel: 'اتركب ✓',
+    onSubmit: async f => { const d = formData(f); const done = await instSetStatus(oid, iid, { status: 'done', doneAt: nowISO(), doneBy: S.session?.id || null, doneByName: S.session?.name || '', doneNote: (d.note || '').trim() }); if (done) await instCloseTasks(done, 'done'); await instRecalc(oid, it.deptId); toast('اتقفل البند ✓'); } });
+};
+ACTIONS.instCancel = async arg => { const [oid, iid] = String(arg).split(':'); const o = byId('orders', oid); const it = o && instItems(o).find(x => x.id === iid); if (!it || !instCan(it.deptId)) return; if (!(await confirmDlg(`إلغاء «${it.title}»؟ التكليفات هتتلغي.`, 'إلغاء البند'))) return; const c = await instSetStatus(oid, iid, { status: 'cancelled', cancelledAt: nowISO(), cancelledBy: S.session?.name || '' }); if (c) await instCloseTasks(c, 'cancelled'); await instRecalc(oid, it.deptId); toast('اتلغى'); };
+/* stage %: base (before the first item) + the rest split over the items */
+async function instRecalc(oid, deptId) {
+  const o = byId('orders', oid); if (!o) return; const live = instItems(o).filter(x => x.deptId === deptId && x.status !== 'cancelled'); if (!live.length) return;
+  const st = Object.assign({ status: 'pending' }, (o.stages || {})[deptId] || {}); const base = +st.instBase || 0; const done = live.filter(x => x.status === 'done').length;
+  const pct = Math.min(100, Math.round(base + (100 - base) * done / live.length));
+  if (pct >= 100 && st.status !== 'done' && typeof stageUpdate === 'function') { await stageUpdate(oid, deptId, 'done'); return; }
+  const patch = Object.assign({}, st, { progress: pct }); if (st.status === 'pending' && done) Object.assign(patch, { status: 'active', start: st.start || todayISO() });
+  if (st.status === 'done' && pct < 100) Object.assign(patch, { status: 'active', end: null });
+  await Store.update('orders', oid, { stages: { [deptId]: patch } });
+}
+/* fleet: the trip form pre-filled from the item; the trip carries installId */
+ACTIONS.tripNew = (base => arg => {
+  const [k, oid, iid] = (arg || '').split(':'); if (k !== 'inst') return base(arg); if (typeof canFleet === 'function' && !canFleet()) return;
+  const o = byId('orders', oid); const it = o && instItems(o).find(x => x.id === iid); if (!it) return; const before = new Set(list('trips').map(t => t.id));
+  openModal({ title: `مشوار تركيب — ${o.code}`, wide: true, body: tripForm({ kind: 'install', orderId: o.id, date: it.date, time: it.time || '08:00', purpose: `تركيب: ${it.title} — ${o.code}`, to: (o.site && o.site.address) || clientName(o.clientId), notes: `الفريق: ${(it.team || []).map(instWName).join('، ')}${it.load ? ' · الحمولة: ' + it.load : ''}` }),
+    onSubmit: async f => { const r = await saveTrip(f, {}); if (r === false) return false; const t = list('trips').find(x => !before.has(x.id)); if (t) { await Store.update('trips', t.id, { installId: it.id }, { silent: true }); const ft = byId('tasks', `insttrip_${it.id}`); if (ft && ft.status !== 'done') await Store.update('tasks', ft.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' }, { silent: true }); } return r; } });
+})(ACTIONS.tripNew);
+
+/* ---------- the page ---------- */
+VIEW_TITLES.installs = 'التركيبات';
+(() => { const i = NAV.findIndex(n => n.id === 'boards'); const entry = { id: 'installs', label: 'التركيبات', icon: 'map', count: () => instAll().filter(x => instLate(x.it)).length, countCls: 'crit' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+setTimeout(() => { if (typeof isStuSys === 'function' && isStuSys()) return; ['manager', 'vice', 'head'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('installs')) ROLE_VIEWS[r].push('installs'); }); }, 0);
+canSee = (base => view => (view === 'installs' ? (!(typeof isStuSys === 'function' && isStuSys()) && instSeesPage()) : base(view)))(canSee);
+ACTIONS.instTab = t => { (S.ui.filter.inst ||= {}).tab = t; render(false); };
+function vInstalls() {
+  if (!instSeesPage()) return '<div class="card qlock"><h3>الصفحة دي مش متاحة لك</h3></div>';
+  const f = S.ui.filter.inst ||= { tab: 'next' }; const all = instAll(); const today = todayISO();
+  const tabs = [['next', 'الجاي'], ['late', 'متأخر'], ['done', 'اتعمل']];
+  let rows = f.tab === 'late' ? all.filter(x => instLate(x.it)) : f.tab === 'done' ? all.filter(x => x.it.status === 'done') : all.filter(x => x.it.status === 'planned' && (x.it.date || '') >= today);
+  rows = sortBy(rows, x => `${x.it.date || ''}${x.it.time || ''}`, f.tab === 'done');
+  const byDay = {}; rows.forEach(x => { (byDay[x.it.date || '—'] ||= []).push(x); });
+  const dayLbl = d => d === today ? 'النهارده' : d === addDays(today, 1) ? 'بكره' : '';
+  const orders = list('orders').filter(o => isOpen(o) && instDeptsOf(o).some(instCan));
+  const body = rows.length ? Object.entries(byDay).map(([d, xs]) => `<div class="instday">${fmtDate(d)} <small>${dayLbl(d)} · ${xs.length} بند</small></div>${xs.map(x => instItemHTML(x.o, x.it, true)).join('')}`).join('') : `<div class="empty"><b>${f.tab === 'late' ? 'مفيش بنود متأخرة ✓' : f.tab === 'done' ? 'مفيش بنود اتقفلت لسه' : 'مفيش تركيبات جاية'}</b>${f.tab === 'next' && orders.length ? 'ضيف بند تركيب من صفحة أمر التشغيل' : ''}</div>`;
+  return `<div class="toolbar"><div class="seg">${tabs.map(t => `<button class="${f.tab === t[0] ? 'on' : ''}" data-action="instTab" data-arg="${t[0]}">${t[1]}${t[0] === 'late' && all.filter(x => instLate(x.it)).length ? ` (${all.filter(x => instLate(x.it)).length})` : ''}</button>`).join('')}</div><div class="grow"></div>${orders.length ? `<select class="sel" id="inst-neword"><option value="">+ بند تركيب على…</option>${orders.map(o => `<option value="${o.id}">${esc(o.code)} — ${esc(o.title || '')}</option>`).join('')}</select>` : ''}</div>${body}`;
+}
+document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'inst-neword' && ev.target.value) { const id = ev.target.value; ev.target.value = ''; ACTIONS.instNew(id); } });
+EXTRA_VIEWS.installs = () => vInstalls();
+Object.assign(window, { instRecalc, instAll });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
