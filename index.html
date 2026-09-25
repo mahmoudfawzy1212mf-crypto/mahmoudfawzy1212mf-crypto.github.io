@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1759-462b17";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1855-44e743";</script>
 
 <script>
 'use strict';
@@ -18542,6 +18542,177 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     window.nfQuoteVectorPdf = q => (q && q.brandId === 'lof') ? window.nfLofVectorPdf(q) : pdfB(q);
     window.nfQuoteVectorCanvas = (q, w) => (q && q.brandId === 'lof') ? window.nfLofVectorCanvas(q, w) : cvB(q, w);
   }
+})();
+/* =====================================================================
+   v4.78 — خط إنتاج lōf (المرحلة 1): أجزاء المنتج + سيناريو لكل خامة + متابعة الأجزاء في أمر الشغل + الشغل الخارجي
+   · صفحة منتج lōf: كارت «أجزاء المنتج» — كل جزء: الاسم، الخامة، الكمية، طريقة القص (برّه/جوه)، RAL، نوع الخشب، ملاحظة.
+     المسار بيتحدد من الخامة (حديد أسود / مجلفن جاهز / ألومنيوم شيت / ألومنيوم علب / خشب / كلادنج / إكسسوارات).
+   · أمر شغل lōf: كارت «متابعة الأجزاء» — كل جزء قدامه مرحلته الحالية وأزرار (تم / رجوع / تخطي للمراحل الاختيارية).
+     مراحل «برّه» (ليزر / روتري / جلفنة): زرار «أمر خارجي» بيعمل أمر تشغيل خارجي واحد لكل القطع الواقفة على نفس المرحلة
+     ومربوط بالأمر؛ حالة الأمر الخارجي بتظهر جنب القطعة. التجميع ← فحص نهائي ← تغليف ← جاهز: مايتفتحش غير لما كل الأجزاء تخلص.
+   · الصلاحيات زي ما هي: تعديل الأجزاء = نفس زرار تعديل المنتج (canFiles)، تحديث المراحل = stage.update لقسم المرحلة أو orders.edit،
+     الأمر الخارجي = canExt. مفيش صلاحية جديدة.
+   ===================================================================== */
+(function () {
+  if (window.__NF_LOFPIPE__) return; window.__NF_LOFPIPE__ = 1;
+  const S_ = (k, n, d, o) => Object.assign({ k, n, d: d || null }, o || {});
+  const cutStep = (p, extName) => (p && p.cut === 'in') ? S_('cut', 'قص في المصنع', 'metal', { qc: 'العدد والمقاسات' }) : S_('cut', extName, null, { ext: 1, qc: 'استلام القص: العدد والمقاسات' });
+  const MATS = {
+    black: { n: 'حديد أسود (بيتجلفن)', cut: 1, steps: p => [cutStep(p, 'قص ليزر'), S_('bend', 'ثني وتشكيل', 'metal'), S_('weld', 'لحام وتجميع وتشطيب اللحام', 'metal', { qc: 'الأبعاد واللحام' }), S_('galv', 'جلفنة', null, { ext: 1, qc: 'استلام الجلفنة: العدد والتغطية' }), S_('postgalv', 'تشطيب بعد الجلفنة', 'metal'), S_('degas', 'فرن قبل الرش', 'paint', { opt: 1 }), S_('paint', 'دهان إلكتروستاتيك', 'paint', { qc: 'السماكة والالتصاق واللون' })] },
+    galv: { n: 'حديد / صاج مجلفن جاهز', cut: 1, steps: p => [cutStep(p, 'قص ليزر'), S_('bend', 'ثني وتشكيل', 'metal'), S_('weld', 'لحام', 'metal'), S_('touch', 'تشطيب اللحام + ترميم زنك', 'metal', { qc: 'اللحام والترميم' }), S_('degas', 'تحضير السطح + فرن قبل الرش', 'paint', { opt: 1 }), S_('paint', 'دهان إلكتروستاتيك', 'paint', { qc: 'السماكة والالتصاق واللون' })] },
+    alu_sheet: { n: 'ألومنيوم شيت', cut: 1, steps: p => [Object.assign(cutStep(p, 'قص CNC ليزر'), p && p.cut === 'in' ? { d: 'alu' } : {}), S_('bend', 'ثني', 'alu', { opt: 1 }), S_('weld', 'تنضيف الأكسيد + تجميع ولحام', 'alu'), S_('weldfin', 'تشطيب اللحام والمنتج', 'alu', { qc: 'الأبعاد واللحام' }), S_('paint', 'دهان إلكتروستاتيك', 'paint', { qc: 'السماكة والالتصاق واللون' })] },
+    alu_tube: { n: 'ألومنيوم علب وقطاعات', cut: 1, steps: p => [Object.assign(cutStep(p, 'قص ليزر روتري CNC'), p && p.cut === 'in' ? { d: 'alu' } : {}), S_('weld', 'تجميع ولحام', 'alu'), S_('weldfin', 'تشطيب اللحام', 'alu', { qc: 'الأبعاد واللحام' }), S_('paint', 'دهان إلكتروستاتيك', 'paint', { qc: 'السماكة والالتصاق واللون' })] },
+    wood: { n: 'خشب طبيعي', wood: 1, steps: () => [S_('recv', 'استلام وقياس الرطوبة', 'carp', { qc: 'الرطوبة 10–12%' }), S_('plane', 'تخانة ورابوه', 'carp'), S_('cut', 'قص وتجهيز مقاسات العروق', 'carp'), S_('bleach', 'فتح لون', 'paint', { opt: 1 }), S_('stain', 'بطانة زيتية باللون', 'paint'), S_('sealer', 'سيلر مائي Sirca', 'paint'), S_('varnish', 'ورنيش مائي Sirca', 'paint', { qc: 'اللون مطابق للعيّنة' })] },
+    clad: { n: 'كلادنج', steps: () => [S_('recv', 'استلام (رقم دفعة ولون واحد)', 'store', { qc: 'الدفعة واللون' }), S_('cut', 'قص وتشطيب الحروف', 'carp'), S_('drill', 'تخريم أماكن التثبيت', 'carp')] },
+    hw: { n: 'إكسسوارات ومسامير (شراء)', steps: () => [S_('buy', 'طلب شراء', 'purch'), S_('recv', 'استلام ومراجعة العدد', 'store', { qc: 'العدد والنوع (ستانلس)' })] }
+  };
+  const MERGE = [S_('asm', 'التجميع', 'metal'), S_('final', 'فحص نهائي وتصوير', 'metal', { qc: 'الفحص النهائي' }), S_('pack', 'تغليف', 'metal'), S_('ready', 'جاهز للتوريد', 'metal')];
+  const WOODS = ['أرو', 'بيتش باين'];
+  const partSteps = p => (MATS[p.material] || MATS.black).steps(p);
+  const isLof = x => x && x.brandId === 'lof';
+  const lofParts = p => (p && Array.isArray(p.parts)) ? p.parts.filter(x => x && x.name) : [];
+  const canEditParts = () => typeof canFiles === 'function' && canFiles();
+  const canStep = st => !!st && (canDo('orders.edit') || (st.ext ? (typeof canExt === 'function' && canExt()) : canDo('stage.update', { deptId: st.d })));
+  const stepLabel = st => `${st.ext ? '🔸 ' : ''}${esc(st.n)}${st.d && !st.ext ? ` <span class="tiny muted">(${esc(deptName(st.d))})</span>` : st.ext ? ' <span class="tiny muted">(برّه)</span>' : ''}`;
+  window.LOF_MATS = MATS;
+
+  /* ---------------- product page: parts card + editor ---------------- */
+  function partsCard(p) {
+    const parts = lofParts(p); const edit = canEditParts();
+    const rows = parts.map(x => { const m = MATS[x.material] || MATS.black; const sts = partSteps(x); const extra = [x.cut && m.cut ? (x.cut === 'in' ? 'قص جوه' : 'قص برّه') : '', x.wood ? x.wood : '', x.ral ? 'RAL ' + x.ral : '', x.note || ''].filter(Boolean).join(' · ');
+      return `<tr><td><b>${esc(x.name)}</b>${extra ? `<div class="tiny muted">${esc(extra)}</div>` : ''}</td><td>${esc(m.n)}</td><td class="n num">${fmtNum(x.qty || 1)}</td><td class="tiny" style="line-height:1.7">${sts.map(s => `<span style="white-space:nowrap">${s.ext ? '🔸' : ''}${esc(s.n)}${s.opt ? ' <span class="muted">(اختياري)</span>' : ''}</span>`).join(' ← ')} ← <b>التجميع</b></td></tr>`; }).join('');
+    return `<div class="card" id="lofparts"><div class="cardhead"><h3>أجزاء المنتج وخط الإنتاج</h3><span class="muted small">${parts.length} جزء</span><div class="grow"></div>${edit ? `<button class="btn sm" data-action="lofPartsEdit" data-arg="${p.id}">${icon('edit')}${parts.length ? 'تعديل الأجزاء' : 'إضافة الأجزاء'}</button>` : ''}</div>
+      ${parts.length ? `<div class="tablewrap"><table><thead><tr><th>الجزء</th><th>الخامة</th><th class="n">العدد / منتج</th><th>المسار</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="tiny muted" style="margin-top:6px">كل الأجزاء بتتقابل في: التجميع ← فحص نهائي وتصوير ← تغليف ← جاهز للتوريد. 🔸 = شغل برّه المصنع.</div>`
+        : `<div class="empty small">المكتب الفني لسه ماسجّلش أجزاء المنتج. سجّل كل جزء وخامته علشان أوامر الشغل تتابع كل جزء في مساره.</div>`}</div>`;
+  }
+  const partRow = (x, i) => { const m = MATS[x.material] || null; return `<div class="lofpr" data-i="${i}" style="border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:8px">
+      <div class="row" style="gap:6px;flex-wrap:wrap"><input name="pn" placeholder="اسم الجزء — مثال: الهيكل" value="${esc(x.name || '')}" style="flex:2;min-width:140px">
+        <select name="pm" style="flex:2;min-width:150px">${Object.entries(MATS).map(([k, v]) => `<option value="${k}" ${x.material === k ? 'selected' : ''}>${esc(v.n)}</option>`).join('')}</select>
+        <input name="pq" type="number" min="0" step="any" placeholder="العدد" value="${esc(x.qty ?? 1)}" style="width:70px">
+        <button type="button" class="btn xs ghost" data-lofpr="del" title="حذف">${icon('x')}</button></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">
+        <select name="pc" class="lofcut" style="flex:1;min-width:120px;${m && !m.cut ? 'display:none' : ''}"><option value="out" ${x.cut !== 'in' ? 'selected' : ''}>القص برّه (ليزر / روتري)</option><option value="in" ${x.cut === 'in' ? 'selected' : ''}>القص جوه المصنع</option></select>
+        <select name="pw" class="lofwood" style="flex:1;min-width:110px;${m && m.wood ? '' : 'display:none'}"><option value="">نوع الخشب</option>${WOODS.map(w => `<option ${x.wood === w ? 'selected' : ''}>${w}</option>`).join('')}</select>
+        <input name="pr" placeholder="لون RAL" value="${esc(x.ral || '')}" style="width:100px" dir="ltr">
+        <input name="po" placeholder="ملاحظة (سُمك، مقاس…)" value="${esc(x.note || '')}" style="flex:2;min-width:140px"></div></div>`; };
+  ACTIONS.lofPartsEdit = id => {
+    const p = byId('products', id); if (!p || !canEditParts()) return;
+    const parts = lofParts(p); const init = parts.length ? parts : [{ material: 'black', qty: 1 }];
+    openModal({ title: `أجزاء المنتج — ${p.name}`, wide: true, body: `<div class="tiny muted" style="margin-bottom:8px">سجّل كل جزء في المنتج وخامته — المسار بيتحدد لوحده من الخامة. مثال بنش: الهيكل (حديد أسود) + لوح القعدة (صاج مجلفن) + العوارض (خشب) + المسامير (إكسسوارات).</div><div id="lofprs">${init.map(partRow).join('')}</div><button type="button" class="btn sm" data-lofpr="add">${icon('plus')}جزء</button>`,
+      onOpen: f => {
+        const sync = row => { const m = MATS[row.querySelector('[name=pm]').value] || {}; row.querySelector('.lofcut').style.display = m.cut ? '' : 'none'; row.querySelector('.lofwood').style.display = m.wood ? '' : 'none'; };
+        f.addEventListener('change', e => { const r = e.target.closest('.lofpr'); if (r && e.target.name === 'pm') sync(r); });
+        f.addEventListener('click', e => { const b = e.target.closest('[data-lofpr]'); if (!b) return; e.preventDefault(); if (b.dataset.lofpr === 'add') { $('#lofprs', f).insertAdjacentHTML('beforeend', partRow({ material: 'black', qty: 1 }, $$('.lofpr', f).length)); } else { const r = b.closest('.lofpr'); if (r) r.remove(); } });
+      },
+      onSubmit: async f => {
+        const old = lofParts(p); const out = [];
+        $$('.lofpr', f).forEach(r => { const v = n => (r.querySelector(`[name=${n}]`) || {}).value || ''; const name = v('pn').trim(); if (!name) return; const i = +r.dataset.i; const prev = old[i]; const material = v('pm'); const m = MATS[material] || {};
+          out.push({ id: prev && prev.id ? prev.id : 'pt_' + uid().slice(-7), name, material, qty: +v('pq') || 1, cut: m.cut ? v('pc') || 'out' : null, wood: m.wood ? v('pw') || null : null, ral: v('pr').trim() || null, note: v('po').trim() || null }); });
+        await Store.update('products', id, { parts: out }); toast('اتحفظت أجزاء المنتج');
+      } });
+  };
+  if (typeof vProductDetail === 'function') vProductDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const p = byId('products', id);
+    if (!p || !isLof(p) || (typeof isBdd === 'function' && isBdd())) return html;
+    const card = partsCard(p); const mk = '<div class="card"><div class="cardhead"><h3>الرسومات التنفيذية';
+    return html.includes(mk) ? html.replace(mk, card + mk) : html + card;
+  })(vProductDetail);
+
+  /* ---------------- order page: parts tracking ---------------- */
+  function orderUnits(o) {
+    const out = []; (o.items || []).forEach((it, ii) => { if (!it || !it.productId) return; const p = byId('products', it.productId); if (!p) return;
+      lofParts(p).forEach(x => out.push({ key: `${ii}_${x.id}`, it, p, part: x, qty: (+x.qty || 1) * (+it.qty || 1), steps: partSteps(x) })); });
+    return out;
+  }
+  const trackOf = (o, key) => ((o.lofTrack || {}).parts || {})[key] || { i: 0 };
+  const mergeOf = o => (o.lofTrack || {}).merge || { i: 0 };
+  const unitDone = (o, u) => trackOf(o, u.key).i >= u.steps.length;
+  async function saveTrack(o, key, t) { await Store.update('orders', o.id, { lofTrack: { parts: { [key]: t } } }); }
+  const logEntry = (k, act, note) => ({ k, act, at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '', note: note || undefined });
+  function extBadge(o, u, st) { const t = trackOf(o, u.key); const xid = (t.ext || {})[st.k]; const x = xid && byId('extorders', xid); if (!x) return ''; const s = (typeof EXT_STATUS !== 'undefined' && EXT_STATUS[x.status]) || [x.status, '']; return ` <a class="badge ${s[1]}" href="#/external/${x.id}">${esc(x.number || '')} · ${esc(s[0])}</a>`; }
+  function unitRow(o, u) {
+    const t = trackOf(o, u.key); const done = t.i >= u.steps.length; const st = u.steps[t.i]; const m = MATS[u.part.material] || MATS.black;
+    const pct = Math.round(Math.min(t.i, u.steps.length) / u.steps.length * 100); const open = isOpen(o);
+    const acts = []; if (open && !done && canStep(st)) {
+      if (st.ext && !(t.ext || {})[st.k] && typeof canExt === 'function' && canExt()) acts.push(`<button class="btn xs a" data-action="lofExt" data-arg="${o.id}|${st.k}|${u.key}">${icon('plus')}أمر خارجي</button>`);
+      acts.push(`<button class="btn xs p" data-action="lofStep" data-arg="${o.id}|${u.key}|done">${icon('check')}${st.ext ? 'تم الاستلام' : 'تم'}</button>`);
+      if (st.opt) acts.push(`<button class="btn xs ghost" data-action="lofStep" data-arg="${o.id}|${u.key}|skip">تخطي</button>`);
+    }
+    if (open && t.i > 0 && (canDo('orders.edit') || canStep(u.steps[Math.min(t.i, u.steps.length) - 1]))) acts.push(`<button class="btn xs ghost" data-action="lofStep" data-arg="${o.id}|${u.key}|back" title="رجوع خطوة">↩</button>`);
+    return `<div class="item" style="align-items:flex-start"><div class="main"><div class="title">${esc(u.part.name)} <span class="tiny muted">× ${fmtNum(u.qty)} · ${esc(m.n)}${u.part.ral ? ' · RAL ' + esc(u.part.ral) : ''}</span></div>
+        <div class="meta" style="flex-wrap:wrap">${done ? `<span class="badge good">${icon('check')}خلص — مستني التجميع</span>` : `<span class="badge acc">${t.i + 1}/${u.steps.length}</span> <span>${stepLabel(st)}${st.qc ? ` <span class="tiny" style="color:var(--warn-ink)">✅ فحص: ${esc(st.qc)}</span>` : ''}${st.ext ? extBadge(o, u, st) : ''}</span>`}</div>
+        <div class="progress ${done ? 'done' : ''}" style="margin-top:6px;height:5px"><i style="width:${pct}%"></i></div></div><div class="row" style="gap:4px;flex-wrap:wrap;justify-content:flex-end">${acts.join('')}</div></div>`;
+  }
+  function trackCard(o) {
+    const units = orderUnits(o); const prods = (o.items || []).filter(it => it && it.productId).map(it => byId('products', it.productId)).filter(Boolean);
+    if (!prods.length) return '';
+    const noParts = prods.filter(p => !lofParts(p).length);
+    if (!units.length) return `<div class="card"><div class="cardhead"><h3>متابعة الأجزاء (خط إنتاج lōf)</h3></div><div class="empty small">منتجات الأمر لسه مالهاش أجزاء. المكتب الفني يضيفها من صفحة المنتج (كارت «أجزاء المنتج وخط الإنتاج»): ${prods.map(p => `<a href="#/products/${p.id}">${esc(p.name)}</a>`).join('، ')}</div></div>`;
+    const nDone = units.filter(u => unitDone(o, u)).length; const allDone = nDone === units.length; const mg = mergeOf(o); const mDone = mg.i >= MERGE.length;
+    /* grouped "send to external" buttons: parts waiting on the same outside step without an external order */
+    const waiting = {}; units.forEach(u => { const t = trackOf(o, u.key); const st = u.steps[t.i]; if (st && st.ext && !(t.ext || {})[st.k]) (waiting[st.k] = waiting[st.k] || { n: st.n, list: [] }).list.push(u); });
+    const grp = isOpen(o) && typeof canExt === 'function' && canExt() ? Object.entries(waiting).filter(([, v]) => v.list.length > 1).map(([k, v]) => `<button class="btn sm a" data-action="lofExt" data-arg="${o.id}|${k}|">${icon('plus')}أمر خارجي واحد: ${esc(v.n)} (${v.list.length} جزء)</button>`).join('') : '';
+    const byProd = {}; units.forEach(u => { const k = u.key.split('_')[0]; (byProd[k] = byProd[k] || { p: u.p, it: u.it, list: [] }).list.push(u); });
+    const mst = MERGE[mg.i]; const mActs = [];
+    if (isOpen(o) && allDone && !mDone && canStep(mst)) mActs.push(`<button class="btn sm p" data-action="lofMerge" data-arg="${o.id}|done">${icon('check')}تم: ${esc(mst.n)}</button>`);
+    if (isOpen(o) && mg.i > 0 && canDo('orders.edit')) mActs.push(`<button class="btn sm ghost" data-action="lofMerge" data-arg="${o.id}|back">↩ رجوع</button>`);
+    return `<div class="card" id="loftrack"><div class="cardhead"><h3>متابعة الأجزاء (خط إنتاج lōf)</h3><span class="muted small">${nDone} من ${units.length} جزء خلص</span><div class="grow"></div>${grp}</div>
+      ${Object.values(byProd).map(g => `<div class="tiny muted" style="margin:8px 0 2px"><a href="#/products/${g.p.id}"><b>${esc(g.p.name)}</b></a> × ${fmtNum(g.it.qty || 1)}</div><div class="list">${g.list.map(u => unitRow(o, u)).join('')}</div>`).join('')}
+      ${noParts.length ? `<div class="tiny" style="color:var(--warn-ink);margin-top:6px">منتجات مالهاش أجزاء لسه: ${noParts.map(p => `<a href="#/products/${p.id}">${esc(p.name)}</a>`).join('، ')}</div>` : ''}
+      <div class="sep"></div><div class="row" style="flex-wrap:wrap;gap:6px;align-items:center"><b class="small">نقطة التقابل:</b>${MERGE.map((s, i) => `<span class="badge ${i < mg.i ? 'good' : i === mg.i && allDone && !mDone ? 'acc' : ''}">${i < mg.i ? '✓ ' : ''}${esc(s.n)}</span>`).join('<span class="muted">←</span>')}</div>
+      ${!allDone ? `<div class="tiny muted" style="margin-top:6px">التجميع بيتفتح لما كل الأجزاء تخلص — فاضل ${units.length - nDone} جزء.</div>` : mDone ? `<div class="small" style="color:var(--good-ink);margin-top:6px">${icon('check')} المنتج جاهز للتوريد</div>` : `${mst && mst.qc ? `<div class="tiny" style="color:var(--warn-ink);margin-top:6px">✅ فحص: ${esc(mst.qc)}</div>` : ''}`}
+      ${mActs.length ? `<div class="row" style="margin-top:8px;gap:6px">${mActs.join('')}</div>` : ''}</div>`;
+  }
+  ACTIONS.lofStep = async arg => {
+    const [oid, key, act] = String(arg).split('|'); const o = byId('orders', oid); if (!o || !isOpen(o)) return;
+    const u = orderUnits(o).find(x => x.key === key); if (!u) return; const t = Object.assign({ i: 0, log: [] }, trackOf(o, key)); t.log = (t.log || []).slice(-40);
+    const st = u.steps[t.i];
+    if (act === 'back') { if (t.i <= 0) return; const prev = u.steps[Math.min(t.i, u.steps.length) - 1]; if (!(canDo('orders.edit') || canStep(prev))) return; t.i = Math.min(t.i, u.steps.length) - 1; t.log.push(logEntry(prev.k, 'back')); await saveTrack(o, key, t); toast(`رجع لـ: ${prev.n}`); return; }
+    if (!st || !canStep(st)) return;
+    if (typeof orderReleased === 'function' && typeof gateRequired === 'function' && gateRequired() && !orderReleased(o)) { toast('لا يبدأ التشغيل قبل موافقة المالك وتسجيل تحويل العميل', 'err'); return; }
+    if (act === 'skip') { if (!st.opt) return; t.log.push(logEntry(st.k, 'skip')); t.i++; await saveTrack(o, key, t); toast(`اتخطّت: ${st.n}`); return; }
+    const finish = async note => { t.log.push(logEntry(st.k, 'done', note)); t.i++; await saveTrack(o, key, t); toast(t.i >= u.steps.length ? `${u.part.name}: خلص — مستني التجميع` : `${u.part.name} ← ${u.steps[t.i].n}`); };
+    if (st.qc) { openModal({ title: `✅ فحص — ${u.part.name}`, body: `<div class="small" style="margin-bottom:8px"><b>${esc(st.n)}</b></div><div class="small">نقطة الفحص: <b>${esc(st.qc)}</b></div>${field('ملاحظة الفحص (اختياري)', `<input name="note" placeholder="مثال: 24 قطعة مطابقة">`, 'full')}`, submitLabel: 'الفحص تمام — نقل للمرحلة اللي بعدها', onSubmit: async f => { await finish((formData(f).note || '').trim()); } }); return; }
+    await finish();
+  };
+  ACTIONS.lofMerge = async arg => {
+    const [oid, act] = String(arg).split('|'); const o = byId('orders', oid); if (!o || !isOpen(o)) return;
+    const units = orderUnits(o); const mg = Object.assign({ i: 0, log: [] }, mergeOf(o)); mg.log = (mg.log || []).slice(-40);
+    if (act === 'back') { if (!canDo('orders.edit') || mg.i <= 0) return; mg.i--; mg.log.push(logEntry(MERGE[mg.i].k, 'back')); await Store.update('orders', oid, { lofTrack: { merge: mg } }); return; }
+    if (!units.every(u => unitDone(o, u))) { toast('لسه فيه أجزاء ماخلصتش', 'err'); return; }
+    const st = MERGE[mg.i]; if (!st || !canStep(st)) return;
+    const finish = async note => { mg.log.push(logEntry(st.k, 'done', note)); mg.i++; await Store.update('orders', oid, { lofTrack: { merge: mg } }); toast(mg.i >= MERGE.length ? 'المنتج جاهز للتوريد' : `← ${MERGE[mg.i].n}`); };
+    if (st.qc) { openModal({ title: `✅ ${st.n}`, body: `${field('ملاحظة الفحص (اختياري)', `<input name="note">`, 'full')}`, submitLabel: 'الفحص تمام', onSubmit: async f => { await finish((formData(f).note || '').trim()); } }); return; }
+    await finish();
+  };
+  /* one external order for all parts waiting on the same outside step (or one part) */
+  ACTIONS.lofExt = arg => {
+    const [oid, stepK, onlyKey] = String(arg).split('|'); const o = byId('orders', oid); if (!o || !isOpen(o) || typeof canExt !== 'function' || !canExt()) return;
+    const sfs = sortBy(list('servfactories'), f => f.name); if (!sfs.length) { toast('أضف مصنع خدمي الأول من صفحة «التشغيل الخارجي»', 'err'); return; }
+    const cands = orderUnits(o).filter(u => { const t = trackOf(o, u.key); const st = u.steps[t.i]; return st && st.ext && st.k === stepK && !(t.ext || {})[stepK]; });
+    if (!cands.length) return; const stN = cands[0].steps[trackOf(o, cands[0].key).i].n;
+    openModal({ title: `أمر تشغيل خارجي — ${stN}`, wide: true,
+      body: `<div class="form">${field('المصنع الخدمي', `<select name="sf" required>${opts(sfs, '')}</select>`)}${field('الموعد المطلوب', `<input name="needBy" type="date">`)}
+        <div class="field full"><label>القطع اللي هتخرج</label>${cands.map(u => `<label class="row small" style="gap:6px;margin-bottom:4px"><input type="checkbox" name="u_${esc(u.key)}" ${!onlyKey || onlyKey === u.key ? 'checked' : ''}> ${esc(u.p.name)} — ${esc(u.part.name)} <span class="muted">× ${fmtNum(u.qty)}${u.part.note ? ' · ' + esc(u.part.note) : ''}</span></label>`).join('')}</div>
+        ${field('ملاحظات للمصنع', `<textarea name="desc" placeholder="السُمك، الخامة، ملفات القص…"></textarea>`, 'full')}</div>
+        <div class="tiny muted">الأمر هيتسجّل في «التشغيل الخارجي» مربوط بأمر الشغل ${esc(o.code || '')}، ومن هناك: العرض والموافقة والدفعة والاستلام زي المعتاد. ملفات القص ارفعها من صفحة الأمر الخارجي.</div>`,
+      submitLabel: 'إنشاء الأمر الخارجي',
+      onSubmit: async f => {
+        const d = formData(f); const sel = cands.filter(u => f.querySelector(`[name="u_${u.key}"]`)?.checked); if (!sel.length) { toast('اختار قطعة واحدة على الأقل', 'err'); return false; }
+        const id = uid(); const doc = { id, number: nextExtNo(), orderId: o.id, servFactoryId: d.sf, branchId: null, title: `${stN} — ${o.code || ''} ${o.title || ''}`.trim(), desc: d.desc || '', materialMode: 'ours', needBy: d.needBy || null, items: sel.map(u => ({ desc: `${u.p.name} — ${u.part.name}${u.part.note ? ' (' + u.part.note + ')' : ''}`, qty: u.qty, unit: 'قطعة' })), status: 'draft', lofStep: stepK, lofKeys: sel.map(u => u.key), createdAt: nowISO(), createdBy: S.session?.id || null };
+        await Store.save('extorders', doc);
+        for (const u of sel) { const t = Object.assign({ i: 0 }, trackOf(o, u.key)); t.ext = Object.assign({}, t.ext || {}, { [stepK]: id }); await saveTrack(byId('orders', o.id) || o, u.key, t); }
+        toast(`اتعمل ${doc.number} — ${sel.length} قطعة`);
+      } });
+  };
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const o = byId('orders', id); if (!o || !isLof(o)) return html;
+    const card = trackCard(o); if (!card) return html;
+    const i1 = html.indexOf('<div class="card"'); const i2 = i1 >= 0 ? html.indexOf('<div class="card"', i1 + 10) : -1; /* right after the order's main card */
+    return i2 > 0 ? html.slice(0, i2) + card + html.slice(i2) : html + card;
+  })(vOrderDetail);
+  Object.assign(window, { lofOrderUnits: orderUnits, lofPartSteps: partSteps });
 })();
 </script>
 
