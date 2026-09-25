@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1207-4a01e1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1221-515c8c";</script>
 
 <script>
 'use strict';
@@ -16553,6 +16553,46 @@ RENDER_HOOKS.push(() => {
   v.insertAdjacentHTML('afterbegin', `<div class="banner info" id="instso" style="margin-bottom:10px;flex-wrap:wrap;gap:6px">${icon('map')}<span style="flex:1;min-width:200px">فنيين التركيب يقدروا يبصموا حضور وانصراف من المصنع أو من موقع المشروع. الانصراف من الموقع مسموح بعد الساعة</span><input id="instso-t" type="time" value="${esc(instSiteOutAt())}" class="inp" style="width:110px"><button class="btn sm" data-action="instSoSave">حفظ</button></div>`);
 });
 ACTIONS.instSoSave = async () => { if (!(isAdmin() || role() === 'manager')) return; const t = (document.getElementById('instso-t') || {}).value || ''; if (!/^\d{2}:\d{2}$/.test(t)) { toast('اكتب الساعة صح', 'err'); return; } await Store.saveSettings({ instSiteOut: t }); toast(`تمام — الانصراف من الموقع بعد الساعة ${t}`); };
+/* =====================================================================
+   v4.65 — خانة «موقع المشروع» بقت ظاهرة:
+   · في صفحة أمر التشغيل (اللي فيه تركيبات): كارت «موقع المشروع» دايمًا ظاهر — لو مش متسجل
+     بيقول كده وفيه زرار «حدد موقع المشروع» (رابط جوجل ماب / أنا في الموقع الآن / إحداثيات + النطاق).
+   · في صفحة التركيبات: تنبيه بالمشاريع اللي عليها تركيب ومالهاش موقع + زرار تحديد لكل واحد.
+   · نفس صلاحية «تعديل أمر التشغيل» (canDo('orders.edit')) — مفيش صلاحيات جديدة.
+   ===================================================================== */
+const osNeedsSite = o => !!o && (((o.route || []).some(d => INSTALL_DEPT(d))) || ((o.installs || []).length > 0) || Object.keys(o.stages || {}).some(d => INSTALL_DEPT(d)));
+const osCan = () => typeof canDo === 'function' && canDo('orders.edit');
+ACTIONS.orderSiteSet = id => {
+  const o = byId('orders', id); if (!o || !osCan()) return;
+  openModal({ title: `موقع المشروع — ${o.code}`, wide: true, submitLabel: 'حفظ الموقع',
+    body: `<div class="form">${orderSiteFields(o)}</div><p class="tiny muted" style="margin-top:8px">أسهل طريقة: افتح جوجل ماب على الموبايل ← دوس مطوّل على مكان المشروع ← «مشاركة» ← انسخ الرابط والصقه هنا. أو لو إنت في الموقع دلوقتي دوس «أنا في الموقع الآن».</p>`,
+    onOpen: f => { if (typeof wireSiteForm === 'function') wireSiteForm(f); },
+    onSubmit: async f => {
+      const d = formData(f); const site = readOrderSite(d);
+      if (!site || site.lat == null) { toast('حدد مكان المشروع (الصق رابط جوجل ماب أو دوس «أنا في الموقع الآن»)', 'err'); return false; }
+      await Store.update('orders', id, { site }); toast('تم حفظ موقع المشروع ✓ — فنيين التركيب يقدروا يبصموا من هناك'); rerender();
+    } });
+};
+RENDER_HOOKS.push(() => {
+  if (!S.route) return; const v = document.getElementById('view'); if (!v) return;
+  /* order page */
+  if (S.route.view === 'orders' && S.route.id) {
+    const o = byId('orders', S.route.id); if (!o || !osNeedsSite(o)) return;
+    const card = Array.from(v.querySelectorAll('.card')).find(c => { const h = c.querySelector('.cardhead h3'); return h && h.textContent.trim() === 'موقع المشروع'; });
+    if (card) { if (osCan() && !card.querySelector('[data-action="orderSiteSet"]')) { const hd = card.querySelector('.cardhead'); hd.insertAdjacentHTML('beforeend', `<button class="btn sm" data-action="orderSiteSet" data-arg="${o.id}">${icon('edit')}${orderSite(o) ? 'تعديل الموقع' : 'حدد الموقع'}</button>`); } return; }
+    if (v.querySelector('#ossite')) return;
+    const html = `<div class="card" id="ossite"><div class="cardhead"><h3>موقع المشروع</h3><div class="grow"></div><span class="badge warn">مش متسجل</span></div><p class="small" style="margin:0 0 8px">من غير موقع المشروع فنيين التركيب مش هيعرفوا يبصموا حضور أو انصراف من الموقع.</p>${osCan() ? `<button class="btn p" data-action="orderSiteSet" data-arg="${o.id}">${icon('map')}حدد موقع المشروع</button>` : '<p class="tiny muted">اطلب من مدير المصنع يحدده.</p>'}</div>`;
+    const first = v.querySelector('.card'); if (first) first.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('beforeend', html);
+    return;
+  }
+  /* installs page: projects with installs but no site */
+  if (S.route.view === 'installs' && osCan() && !v.querySelector('#osmiss')) {
+    const miss = list('orders').filter(o => isOpen(o) && !orderSite(o) && ((o.installs || []).some(it => it.status === 'planned') || Object.entries(o.stages || {}).some(([d, st]) => INSTALL_DEPT(d) && st && st.status === 'active')));
+    if (!miss.length) return;
+    const html = `<div class="banner warn" id="osmiss" style="margin-bottom:10px;flex-direction:column;align-items:stretch;gap:6px"><div>${icon('alert')} مشاريع عليها تركيب ومالهاش موقع على الخريطة — الفنيين مش هيعرفوا يبصموا منها:</div>${miss.map(o => `<div class="row" style="gap:6px;align-items:center"><span class="code">${esc(o.code)}</span><span style="flex:1">${esc(o.title || '')}</span><button class="btn xs p" data-action="orderSiteSet" data-arg="${o.id}">حدد الموقع</button></div>`).join('')}</div>`;
+    const so = v.querySelector('#instso'); if (so) so.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
+  }
+});
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
