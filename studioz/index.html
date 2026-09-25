@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1248-d8ced3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1311-280f9a";</script>
 
 <script>
 'use strict';
@@ -7577,7 +7577,7 @@ function roleSelectHTML(w) {
 function permMatrixHTML() {
   const roles = ['admin', 'vice', 'manager', 'hr', 'acc', 'purch', 'store', 'tech', 'head', 'office', 'fleet', 'driver', 'employee', 'viewer'];
   const views = [['dashboard', 'لوحة المتابعة'], ['orders', 'أوامر التشغيل'], ['boards', 'لوحات الأقسام'], ['products', 'المنتجات والرسومات'], ['external', 'التشغيل الخارجي'], ['fleet', 'حركة النقل'], ['projects', 'مدير المشاريع'], ['tasks', 'المهام'], ['clients', 'العملاء'], ['quotes', 'عروض الأسعار'], ['inventory', 'المخزون'], ['purchases', 'المشتريات'], ['suppliers', 'الموردون'], ['workers', 'الموظفون'], ['attendance', 'الحضور'], ['requests', 'الطلبات'], ['penalties', 'الجزاءات والسلف'], ['payroll', 'الرواتب'], ['accounts', 'الحسابات'], ['expenses', 'المصروفات'], ['reports', 'التقارير'], ['org', 'الهيكل التنظيمي'], ['settings', 'الإعدادات']];
-  const sees = (rl, v) => { if (v === 'products') return rl === 'admin' || rl === 'tech'; const a = ROLE_VIEWS[rl] === undefined ? ROLE_VIEWS.viewer : ROLE_VIEWS[rl]; return a === null || a.includes(v); };
+  const sees = (rl, v) => { if (v === 'products') return rl === 'admin' || rl === 'tech' || rl === 'bdd'; const a = ROLE_VIEWS[rl] === undefined ? ROLE_VIEWS.viewer : ROLE_VIEWS[rl]; return a === null || a.includes(v); };
   const money = rl => FINANCE_ROLES.includes(rl);
   return `<div class="card" style="margin-top:14px"><div class="cardhead"><h3>مصفوفة الصلاحيات</h3><span class="muted small">✓ يرى الشاشة · ج.م يرى الأرقام المالية</span></div><div class="tablewrap"><table style="font-size:12px"><thead><tr><th>الشاشة</th>${roles.map(r => `<th style="text-align:center;white-space:normal;min-width:70px">${esc(ROLES[r] || r)}</th>`).join('')}</tr></thead><tbody>
     <tr><td><b>الأرقام المالية</b></td>${roles.map(r => `<td style="text-align:center">${money(r) ? '<span class="badge good">ج.م</span>' : '—'}</td>`).join('')}</tr>
@@ -16594,6 +16594,106 @@ RENDER_HOOKS.push(() => {
   }
 });
 /* =====================================================================
+   v4.69 — (بالرقم السري) المدير التجاري يشوف صفحة «المنتجات» لمنتجات LOF بس:
+   · يظهر: الصورة (صور المعاينة/صفحة الكتالوج فقط)، الكود، الاسم، المقاسات، التشطيب، الخامات، السعر.
+   · مايظهرش: أي رسومات تنفيذية / موديل 3D / معاينة تفاعلية / ملاحظات تصنيع / أوامر / تعديل / رفع.
+     والسيرفر (RLS) مابيرجعلوش ملفات النوع drawing/model/html أصلًا.
+   · «لستة منتجات» حسب قسم الكتالوج (Garden / Site / Hospitality …) → PDF (طباعة ← حفظ PDF) أو Excel
+     (شيت لكل قسم) — للمدير التجاري والمالك والمكتب الفني.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.bpgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.bpc{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);display:flex;flex-direction:column;color:inherit;text-decoration:none}
+.bpc .im{aspect-ratio:4/3;background:var(--surface-2,var(--surface));display:grid;place-items:center;overflow:hidden}.bpc .im img{width:100%;height:100%;object-fit:cover}.bpc .im svg{width:30px;height:30px;opacity:.35}
+.bpc .bd{padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:2px}.bpc .bd .pr{font-weight:700;color:var(--accent)}
+.bpbig{width:100%;max-height:360px;object-fit:contain;border-radius:10px;background:var(--surface-2,var(--surface))}
+#printhost .pl{font-family:inherit;direction:rtl;color:#111}#printhost .pl h1{font-size:20px;margin:0}#printhost .pl .hd{display:flex;align-items:center;gap:14px;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+#printhost .pl h2{font-size:15px;margin:16px 0 8px;padding:4px 8px;background:#f1f1f1;border-radius:6px;break-after:avoid}
+#printhost .pl table{width:100%;border-collapse:collapse;font-size:11.5px}#printhost .pl td,#printhost .pl th{border:1px solid #ccc;padding:5px 6px;vertical-align:middle;text-align:right}#printhost .pl th{background:#fafafa}
+#printhost .pl td.im{width:74px}#printhost .pl td.im img{width:70px;height:52px;object-fit:cover;border-radius:4px}#printhost .pl tr{break-inside:avoid}#printhost .pl .ft{margin-top:10px;font-size:10px;color:#666}
+</style>`);
+const BP_HIDDEN_KINDS = ['drawing', 'model', 'html'];
+const bpImgFiles = p => filesOf('product', p.id).filter(f => !BP_HIDDEN_KINDS.includes(f.kind));
+const bpCover = p => { const fs = bpImgFiles(p); const c = p.coverFileId ? fs.find(f => f.id === p.coverFileId) : null; if (c && c.thumb) return c.thumb; const t = fs.find(f => f.thumb); return t ? t.thumb : null; };
+const bpBrand = () => (typeof CRM_BRAND === 'function' ? CRM_BRAND() : 'lof');
+const bpProducts = b => sortBy(list('products').filter(p => p.brandId === b && p.status !== 'archived' && p.kind !== 'project' && !(typeof isFamilyItem === 'function' && isFamilyItem(p))), p => p.code || p.name);
+const bpColl = p => (typeof productCollection === 'function' ? productCollection(p) : '') || '';
+const bpCollName = (b, id) => (id && typeof collName === 'function' ? collName(b, id) : '') || 'بدون قسم';
+const bpPrice = p => (+p.price ? `${fmtMoney(+p.price)} ${CUR()}` : '');
+const bpCanList = () => isBdd() || isAdmin() || role() === 'tech';
+
+canSee = (base => view => (view === 'products' && isBdd() ? true : base(view)))(canSee);
+setTimeout(() => { if (Array.isArray(ROLE_VIEWS.bdd) && !ROLE_VIEWS.bdd.includes('products')) ROLE_VIEWS.bdd.push('products'); }, 0);
+
+function vBddProducts() {
+  const b = bpBrand(); const f = S.ui.filter.bprod ||= { coll: '' }; const q = (S.ui.search.products || '').toLowerCase();
+  let arr = bpProducts(b); if (f.coll) arr = arr.filter(p => (bpColl(p) || '_') === f.coll); if (q) arr = arr.filter(p => `${p.code} ${p.name} ${p.dims || ''}`.toLowerCase().includes(q));
+  const colls = (typeof brandCollections === 'function' ? brandCollections(b) : []).concat([{ id: '_', name: 'بدون قسم' }]);
+  return `<div class="toolbar"><div class="seg"><button class="${!f.coll ? 'on' : ''}" data-action="bpFilter" data-arg="">الكل</button>${colls.map(c => `<button class="${f.coll === c.id ? 'on' : ''}" data-action="bpFilter" data-arg="${esc(c.id)}">${esc(c.name)}</button>`).join('')}</div><div class="grow"></div><div class="search">${icon('search')}<input placeholder="بحث بالكود أو الاسم" data-search="products" value="${esc(S.ui.search.products || '')}"></div><button class="btn p" data-action="bpList">${icon('print')}لستة منتجات</button></div>
+    ${arr.length ? `<div class="bpgrid">${arr.map(p => { const c = bpCover(p); return `<a class="bpc" href="#/products/${p.id}"><div class="im">${c ? `<img src="${esc(c)}" alt="" loading="lazy">` : icon('inventory')}</div><div class="bd"><span class="code">${esc(p.code || '')}</span><b>${esc(p.name || '')}</b>${p.dims ? `<span class="muted tiny">${esc(p.dims)}</span>` : ''}${bpPrice(p) ? `<span class="pr">${bpPrice(p)}</span>` : '<span class="tiny muted">السعر مش متسجل</span>'}</div></a>`; }).join('')}</div>` : '<div class="empty"><b>مفيش منتجات</b></div>'}`;
+}
+function vBddProductDetail(id) {
+  const p = byId('products', id); const b = bpBrand(); if (!p || p.brandId !== b) return '<div class="empty"><b>المنتج غير موجود</b></div>';
+  const imgs = bpImgFiles(p).filter(f => f.thumb); const c = bpCover(p);
+  return `<div class="card"><div class="cardhead">${brandChip(p.brandId)}<h2 style="margin:0">${esc(p.name)}</h2><div class="grow"></div><span class="code">${esc(p.code || '')}</span></div>
+    ${c ? `<img class="bpbig" src="${esc(c)}" alt="">` : ''}
+    <div class="grid g4" style="gap:10px 14px;font-size:13px;margin-top:12px">
+      <div><div class="tiny muted">القسم</div>${esc(bpCollName(b, bpColl(p)))}</div>
+      ${p.dims ? `<div><div class="tiny muted">المقاسات</div>${esc(p.dims)}</div>` : ''}
+      ${p.finish ? `<div><div class="tiny muted">التشطيب</div>${esc(p.finish)}</div>` : ''}
+      <div><div class="tiny muted">السعر</div><b>${bpPrice(p) || '—'}</b></div></div>
+    ${p.desc ? `<div class="sep"></div><div class="small" style="white-space:pre-wrap">${esc(p.desc)}</div>` : ''}
+    ${p.materials ? `<div class="sep"></div><div class="tiny muted">الخامات</div><div class="small" style="white-space:pre-wrap">${esc(p.materials)}</div>` : ''}
+    ${imgs.length > 1 ? `<div class="sep"></div><div class="bpgrid">${imgs.slice(0, 8).map(f => `<div class="bpc"><div class="im"><img src="${esc(f.thumb)}" alt="" loading="lazy" data-action="lightboxSrc" data-arg="${esc(f.thumb)}"></div></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+vProducts = (base => function () { return isBdd() ? vBddProducts() : base.apply(this, arguments); })(vProducts);
+vProductDetail = (base => function (id) { return isBdd() ? vBddProductDetail(id) : base.apply(this, arguments); })(vProductDetail);
+ACTIONS.bpFilter = v => { (S.ui.filter.bprod ||= {}).coll = v; render(false); };
+/* owner / technical office: the list button on the normal products page */
+RENDER_HOOKS.push(() => {
+  if (!S.route || S.route.view !== 'products' || S.route.id || isBdd() || !bpCanList()) return; const tb = document.querySelector('#view .toolbar'); if (!tb || tb.querySelector('[data-action="bpList"]')) return;
+  tb.insertAdjacentHTML('beforeend', `<button class="btn" data-action="bpList">${icon('print')}لستة منتجات</button>`);
+});
+
+/* ---- product list: PDF / Excel ---- */
+function bpRows(b, coll) {
+  const all = bpProducts(b); const colls = (typeof brandCollections === 'function' ? brandCollections(b) : []).map(c => c.id).concat(['']);
+  const groups = []; colls.forEach(id => { if (coll && coll !== (id || '_')) return; const items = all.filter(p => bpColl(p) === id || (!id && !colls.includes(bpColl(p)))); if (items.length) groups.push({ id, name: bpCollName(b, id), items }); });
+  return groups;
+}
+ACTIONS.bpList = () => {
+  if (!bpCanList()) return; const b = isBdd() ? bpBrand() : ((S.ui.filter.products || {}).brand || bpBrand());
+  const colls = (typeof brandCollections === 'function' ? brandCollections(b) : []);
+  openModal({ title: 'لستة منتجات', body: `<div class="form">${field('البراند', `<b>${esc((S.settings.brands.find(x => x.id === b) || {}).name || b)}</b>`)}
+      ${field('القسم', `<select id="bp-coll"><option value="">كل الأقسام</option>${colls.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}<option value="_">بدون قسم</option></select>`)}
+      <label class="field full" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bp-price" checked> إظهار السعر</label></div>`,
+    footer: `<button type="button" class="btn" data-action="closemodal">إلغاء</button><button type="button" class="btn" data-action="bpXlsx" data-arg="${esc(b)}">${icon('layers')}Excel</button><button type="button" class="btn p" data-action="bpPdf" data-arg="${esc(b)}">${icon('print')}PDF</button>` });
+};
+const bpOpts = () => ({ coll: ($('#bp-coll') || {}).value || '', price: !!($('#bp-price') || {}).checked });
+ACTIONS.bpPdf = b => {
+  const o = bpOpts(); const groups = bpRows(b, o.coll); if (!groups.length) { toast('مفيش منتجات في القسم ده', 'err'); return; } closeModal();
+  const bn = (S.settings.brands.find(x => x.id === b) || {}).name || b;
+  const html = `<div class="pl"><div class="hd">${typeof brandLogoHTML === 'function' ? brandLogoHTML(b, 44) : ''}<div><h1>لستة منتجات ${esc(bn)}</h1><div style="font-size:11px;color:#555">${esc(o.coll ? bpCollName(b, o.coll === '_' ? '' : o.coll) : 'كل الأقسام')} · ${fmtDate(todayISO())}</div></div></div>
+    ${groups.map(g => `<h2>${esc(g.name)} (${g.items.length})</h2><table><thead><tr><th></th><th>الكود</th><th>المنتج</th><th>المقاسات</th><th>التشطيب</th>${o.price ? '<th>السعر</th>' : ''}</tr></thead><tbody>${g.items.map(p => { const c = bpCover(p); return `<tr><td class="im">${c ? `<img src="${esc(c)}" alt="">` : ''}</td><td>${esc(p.code || '')}</td><td><b>${esc(p.name || '')}</b>${p.materials ? `<div style="font-size:10px;color:#555">${esc(String(p.materials).slice(0, 120))}</div>` : ''}</td><td>${esc(p.dims || '')}</td><td>${esc(p.finish || '')}</td>${o.price ? `<td>${bpPrice(p) || '—'}</td>` : ''}</tr>`; }).join('')}</tbody></table>`).join('')}
+    <div class="ft">${o.price ? 'الأسعار استرشادية وقابلة للتغيير — ' : ''}${esc(bn)}</div></div>`;
+  printHTML(html); toast('من شاشة الطباعة اختار «حفظ كـ PDF»');
+};
+ACTIONS.bpXlsx = async b => {
+  const o = bpOpts(); const groups = bpRows(b, o.coll); if (!groups.length) { toast('مفيش منتجات في القسم ده', 'err'); return; }
+  const ok = typeof loadXLSX === 'function' ? await loadXLSX() : false; if (!ok || !window.XLSX) { toast('تعذّر تحميل Excel — جرّب تاني', 'err'); return; }
+  const wb = XLSX.utils.book_new(); const used = new Set();
+  groups.forEach(g => {
+    const rows = [['الكود', 'المنتج', 'المقاسات', 'التشطيب', 'الخامات'].concat(o.price ? ['السعر (' + CUR() + ')'] : [])].concat(g.items.map(p => [p.code || '', p.name || '', p.dims || '', p.finish || '', p.materials || ''].concat(o.price ? [+p.price || ''] : [])));
+    const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 24 }, { wch: 22 }, { wch: 40 }, { wch: 14 }]; ws['!views'] = [{ RTL: true }];
+    let nm = String(g.name).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet'; while (used.has(nm)) nm = nm.slice(0, 28) + '_' + used.size; used.add(nm);
+    XLSX.utils.book_append_sheet(wb, ws, nm);
+  });
+  wb.Workbook = { Views: [{ RTL: true }] };
+  const bn = (S.settings.brands.find(x => x.id === b) || {}).name || b;
+  XLSX.writeFile(wb, `${bn}-products-${todayISO()}.xlsx`); closeModal(); toast('اتنزل ملف Excel ✓');
+};
+/* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
    or window.NF_CO === 'studioz'. Same code base, different: branding · modules (no
@@ -17669,6 +17769,47 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     .replace('للمهندسين والإداريين الذين يعملون عن بُعد: البصمة والمهام والملفات تصلهم في أي مكان', 'المهندس الذي يعمل من البيت بإذن الآرت دايركتور يبصم من أي مكان');
   if (typeof workerFormJobs === 'function') workerFormJobs = (base => function () { return stuWording(base.apply(this, arguments)); })(workerFormJobs);
 }
+/* =====================================================================
+   v4.x — quotation: send to the client by WhatsApp or e-mail (25 Sep 2026)
+   Buttons on the quotation page open WhatsApp (wa.me, the client's mobile) or the mail app (mailto, the client's registered e-mail)
+   with a ready message: quotation no., subject, total, validity and the quotation PDF link (from the «ملف العرض» card).
+   A draft quotation becomes «مرسل» once the message is opened; the channel and time are kept on the quotation (sentVia / sentAt).
+   ===================================================================== */
+(function () {
+  /* a PDF saved as a link (Google Drive …) opens directly */
+  if (typeof Files !== 'undefined' && Files.url) { const _u = Files.url; Files.url = async f => (f && (f.store === 'link' || f.kind === 'link') && f.url) ? f.url : _u(f); }
+  const qsCan = () => writable() && (typeof canDo !== 'function' || canDo('sales'));
+  function qsTotal(q) { const sub = quoteSub(q); const after = sub - (+q.discount || 0); const vat = q.vat ? after * (+S.settings.vat || 0) / 100 : 0; return { sub, after, vat, total: after + vat }; }
+  async function qsPdfUrl(q) {
+    const f = typeof quotePdfOf === 'function' ? quotePdfOf(q) : null; if (!f) return '';
+    if ((f.store === 'link' || f.kind === 'link') && f.url) return f.url;
+    if (f.store === 'sb' && typeof sbOn === 'function' && sbOn()) { try { const { data } = await S.sb.storage.from('files').createSignedUrl(f.ref, 60 * 60 * 24 * 30); if (data && data.signedUrl) return data.signedUrl; } catch (e) { console.warn(e); } }
+    try { const u = await Files.url(f); return u && /^https?:/.test(u) ? u : ''; } catch (e) { return ''; }
+  }
+  function qsMessage(q, c, link) {
+    const t = qsTotal(q); const who = c.contact || c.name || ''; const b = brandName(q.brandId);
+    return `السلام عليكم ${who}،\n\nمرفق عرض السعر رقم ${q.number}${q.subject ? `\nبخصوص: ${q.subject}` : ''}\nالإجمالي: ${fmtMoney(t.total)} ${CUR()}${q.vat ? ` (شامل ضريبة القيمة المضافة ${+S.settings.vat}٪)` : ''}${q.validUntil ? `\nالعرض ساري حتى ${fmtDate(q.validUntil)}` : ''}${link ? `\n\nملف عرض السعر (PDF):\n${link}` : ''}\n\nلأي استفسار نحن في الخدمة.\n${S.session?.name || ''}\n${b && b !== '—' ? b : 'Ninety Fabrication'}`;
+  }
+  async function qsMarkSent(q, via) { const patch = { sentVia: via, sentAt: nowISO(), sentBy: S.session?.name || '' }; if (q.status === 'draft') patch.status = 'sent'; try { await Store.update('quotations', q.id, patch); } catch (e) { console.warn(e); } }
+  function qsNeed(c, what) { const lbl = what === 'phone' ? 'رقم موبايل' : 'بريد إلكتروني'; openModal({ title: `لا يوجد ${lbl} للعميل`, body: `<p class="small">سجّل ${lbl} العميل <b>${esc(c.name || '')}</b> في ملفه أولًا، ثم اضغط الإرسال مرة أخرى.</p>`, submitLabel: 'تعديل بيانات العميل', onSubmit: () => { setTimeout(() => ACTIONS.clientEdit && ACTIONS.clientEdit(c.id), 50); } }); }
+  ACTIONS.quoteSendWa = async id => {
+    const q = byId('quotations', id); if (!q) return; const c = byId('clients', q.clientId) || {}; if (!c.phone) { qsNeed(c, 'phone'); return; }
+    const link = await qsPdfUrl(q); const msg = qsMessage(q, c, link);
+    openModal({ title: `إرسال ${q.number} واتساب`, body: `<p class="small">تُفتح واتساب بالرسالة جاهزة على رقم العميل <span class="ltr">${esc(c.phone)}</span> — اضغط إرسال هناك.${link ? '' : ' <b style="color:var(--crit-ink)">لم يُرفع ملف PDF للعرض بعد — الرسالة بدون رابط الملف.</b>'}</p><textarea class="inp" id="f-qsmsg" style="width:100%;min-height:220px;font-size:13px">${esc(msg)}</textarea>`, submitLabel: 'فتح واتساب', onSubmit: async f => { const m = ($('#f-qsmsg', f)?.value || msg); window.open(waLink(c.phone, m), '_blank'); await qsMarkSent(q, 'whatsapp'); toast('تم فتح واتساب — الحالة: مرسل'); } });
+  };
+  ACTIONS.quoteSendMail = async id => {
+    const q = byId('quotations', id); if (!q) return; const c = byId('clients', q.clientId) || {}; const to = String(c.email || '').trim(); if (!to) { qsNeed(c, 'email'); return; }
+    const link = await qsPdfUrl(q); const msg = qsMessage(q, c, link); const subj = `عرض سعر ${q.number}${q.subject ? ' — ' + q.subject : ''}`;
+    openModal({ title: `إرسال ${q.number} بالإيميل`, body: `<p class="small">يُفتح برنامج البريد (Outlook / Gmail) برسالة جاهزة إلى <span class="ltr">${esc(to)}</span>.${link ? '' : ' <b style="color:var(--crit-ink)">لم يُرفع ملف PDF للعرض بعد — الرسالة بدون رابط الملف.</b>'}</p><div class="field full"><label>الموضوع</label><input class="inp" id="f-qssubj" value="${esc(subj)}"></div><textarea class="inp" id="f-qsmsg" style="width:100%;min-height:220px;font-size:13px;margin-top:8px">${esc(msg)}</textarea>`, submitLabel: 'فتح البريد', onSubmit: async f => { const m = ($('#f-qsmsg', f)?.value || msg); const s = ($('#f-qssubj', f)?.value || subj); location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(s)}&body=${encodeURIComponent(m)}`; await qsMarkSent(q, 'email'); toast('تم فتح البريد — الحالة: مرسل'); } });
+  };
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function (id) {
+    const html = base.apply(this, arguments); const q = byId('quotations', id); if (!q || !qsCan()) return html;
+    const c = byId('clients', q.clientId) || {};
+    const sent = q.sentAt ? `<span class="muted small">آخر إرسال: ${q.sentVia === 'email' ? 'إيميل' : 'واتساب'} · ${fmtDate(q.sentAt.slice(0, 10))}${q.sentBy ? ' · ' + esc(q.sentBy) : ''}</span>` : '';
+    const card = `<div class="card no-print"><div class="cardhead"><h3>${icon('send')} إرسال عرض السعر للعميل</h3><div class="grow"></div>${sent}</div><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm p" data-action="quoteSendWa" data-arg="${q.id}">${icon('wa')}واتساب${c.phone ? ` <span class="ltr tiny">${esc(c.phone)}</span>` : ''}</button><button class="btn sm a" data-action="quoteSendMail" data-arg="${q.id}">${icon('send')}إيميل${c.email ? ` <span class="ltr tiny">${esc(c.email)}</span>` : ''}</button>${!c.phone || !c.email ? `<span class="muted small">${!c.phone && !c.email ? 'لا يوجد موبايل ولا إيميل للعميل' : !c.phone ? 'لا يوجد موبايل للعميل' : 'لا يوجد إيميل للعميل'} — <button class="btn xs ghost" data-action="clientEdit" data-arg="${c.id}">أضفه</button></span>` : ''}</div></div>`;
+    return card + html;
+  })(vQuoteDetailBase);
+})();
 </script>
 
 </body>
