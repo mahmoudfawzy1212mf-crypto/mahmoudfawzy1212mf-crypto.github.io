@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-0904-10ba1c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-0911-5c3f58";</script>
 
 <script>
 'use strict';
@@ -16260,6 +16260,46 @@ document.addEventListener('click', ev => {
   const prev = navPrev(); if (!prev || prev === location.hash) return;
   ev.preventDefault(); ev.stopImmediatePropagation(); history.back();
 }, true);
+/* =====================================================================
+   v4.60 — لوحات الأقسام تفاعلية:
+   · الأوامر اللي لسه ماتعتمدتش للتشغيل (مستنية موافقة المالك + تحويل العميل) بقت بتظهر في عمود كل قسم
+     تحت «مستني الاعتماد» باهتة وتفتح الأمر — للإدارة بس (رئيس القسم بيشوف المعتمد بس زي ما هو).
+   · اسم القسم / عدد الحضور بيفتح شاشة القسم: الفريق النهارده (حاضر/غايب/لسه) + أوامر القسم.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.board .col .ch.bdh{cursor:pointer}.board .col .ch.bdh:active{opacity:.7}
+.tcard.wait{opacity:.62;border-style:dashed}.tcard.wait .gb{margin-top:6px}
+.bdteam{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.bdteam .p{display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px;cursor:pointer}
+.bdteam .p i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--line)}.bdteam .p i.P{background:#4f8a6d}.bdteam .p i.H{background:#d9b97a}.bdteam .p i.A,.bdteam .p i.L{background:#d98c8c}
+</style>`);
+const bdSeesWaiting = () => role() !== 'head' && typeof gateRequired === 'function' && gateRequired();
+const bdWaiting = d => list('orders').filter(o => isOpen(o) && o.status !== 'hold' && typeof orderReleased === 'function' && !orderReleased(o) && orderTouchesDept(o, d));
+RENDER_HOOKS.push(() => {
+  if (!S.route || S.route.view !== 'boards') return; const v = document.getElementById('view'); if (!v) return;
+  let anyWait = false;
+  v.querySelectorAll('.board .col').forEach(col => {
+    if (col.dataset.bdept) return; const ch = col.querySelector('.ch'); const nm = ch && ch.querySelector('span') ? ch.querySelector('span').textContent.trim() : ''; const d = prodDepts().find(x => x.name === nm); if (!d) return;
+    col.dataset.bdept = d.id; ch.classList.add('bdh'); ch.setAttribute('data-action', 'bdDept'); ch.setAttribute('data-arg', d.id); ch.querySelector('span').textContent = nm + ' ›';
+    if (!bdSeesWaiting()) return; const w = bdWaiting(d.id); if (!w.length) return; anyWait = true;
+    const cb = col.querySelector('.cb'); if (!cb) return; cb.querySelectorAll('.muted.small').forEach(e => { if (/لا توجد أوامر/.test(e.textContent)) e.remove(); });
+    cb.insertAdjacentHTML('beforeend', `<div class="tiny muted" style="padding:6px 4px 0">مستني الاعتماد للتشغيل (${w.length})</div>` + w.map(o => `<div class="tcard wait" data-action="go" data-arg="orders/${o.id}"><div class="t"><span class="code">${esc(o.code)}</span> ${esc(o.title || '')}</div><div class="m">${typeof brandChip === 'function' ? brandChip(o.brandId) : ''}<span>${esc(clientName(o.clientId))}</span>${o.dueDate ? `<span>${fmtDate(o.dueDate)}</span>` : ''}</div><div class="gb">${typeof gateBadge === 'function' ? gateBadge(o) : ''}</div></div>`).join(''));
+    const cnt = ch.querySelector('.cnt'); if (cnt) cnt.textContent = `${cnt.textContent} · ${w.length}⏳`;
+  });
+  if (anyWait) { const t = v.querySelector('.toolbar .muted.small'); if (t && !t.dataset.bdw) { t.dataset.bdw = 1; t.textContent = 'الأوامر الباهتة لسه مستنية موافقتك وتحويل العميل قبل ما تنزل للأقسام · دوس على اسم القسم تشوف فريقه وأوامره'; } }
+});
+ACTIONS.bdDept = id => {
+  const d = prodDepts().find(x => x.id === id); if (!d) return; const att = attendanceFor(todayISO());
+  const team = sortBy(list('workers').filter(w => w.deptId === id && w.status !== 'inactive'), w => w.name || '');
+  const open = list('orders').filter(o => isOpen(o) && orderTouchesDept(o, id) && (role() !== 'head' || orderReleased(o)));
+  const stLbl = s => (s && ATT[s]) || 'لسه ماسجلش';
+  const pres = team.filter(w => ['P', 'H'].includes((att[w.id] || {}).s)).length;
+  openModal({ title: d.name, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>${canSee('attendance') ? `<a class="btn" href="#/attendance" data-action="closemodal">الحضور</a>` : ''}`,
+    body: `<div class="small" style="margin-bottom:8px">الفريق النهارده: <b>${pres}/${team.length}</b> حاضر</div>
+      ${team.length ? `<div class="bdteam">${team.map(w => { const s = (att[w.id] || {}).s || ''; return `<div class="p" ${canSee('workers') ? `data-action="go" data-arg="workers/${w.id}"` : ''}><i class="${s}"></i><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(w.name)}</span><span class="tiny muted">${stLbl(s)}</span></div>`; }).join('')}</div>` : '<div class="muted small">مفيش موظفين في القسم ده</div>'}
+      <h4 style="margin:14px 0 6px">أوامر التشغيل اللي بتعدّي على القسم (${open.length})</h4>
+      ${open.length ? `<div class="list">${open.map(o => { const s = (o.stages || {})[id] || {}; const rel = orderReleased(o); return `<div class="item" data-action="go" data-arg="orders/${o.id}"><div class="main"><div class="title"><span class="code">${esc(o.code)}</span><span>${esc(o.title || '')}</span></div><div class="meta"><span>${esc(clientName(o.clientId))}</span>${o.dueDate ? `<span>تسليم ${fmtDate(o.dueDate)}</span>` : ''}<span>${!rel ? 'مستني الاعتماد' : s.status === 'active' ? `جاري ${+s.progress || 0}%` : s.status === 'done' ? 'خلص عند القسم ✓' : 'في الانتظار'}</span></div></div></div>`; }).join('')}</div>` : '<div class="muted small">مفيش أوامر بتعدّي على القسم ده دلوقتي</div>'}` });
+};
+document.addEventListener('click', ev => { const a = ev.target.closest && ev.target.closest('#modalroot [data-action="go"]'); if (a && typeof closeModal === 'function') setTimeout(closeModal, 0); });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
