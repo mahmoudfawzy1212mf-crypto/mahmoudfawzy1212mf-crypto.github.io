@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1153-6090df";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1207-4a01e1";</script>
 
 <script>
 'use strict';
@@ -16485,8 +16485,7 @@ ACTIONS.pushTest = async () => {
    · في يوم التركيب (الفني على فريق مرحلة تركيب، أو عليه بند تركيب في صفحة التركيبات بتاريخ النهارده)
      الحضور والانصراف مقبولين من المصنع أو من موقع المشروع (دبوس موقع المشروع في أمر التشغيل).
    · الانصراف من الموقع بعد الساعة ٤:٠٠ (قابلة للتعديل: settings.instSiteOut) عادي ومش بيتحسب انصراف بدري (row.siteOut).
-     قبلها: البصمة بتتسجل كـ«انصراف بدري من الموقع» وبيطلع طلب لرئيس قسم التركيبات يعتمده
-     (قسم من غير رئيس ← مدير المصنع). الرفض بيعلّم اليوم ويبلغ الحسابات/HR.
+     قبلها (تعديل المالك): الانصراف من الموقع مرفوض ← «ابصم الانصراف من المصنع».
    ===================================================================== */
 REQ_TYPES.siteout = 'انصراف بدري من موقع التركيب'; DEFAULT_CHAINS.siteout = ['head'];
 const instSiteOutAt = () => String((S.settings && S.settings.instSiteOut) || '16:00');
@@ -16509,7 +16508,18 @@ zonesFor = (base => (w, date) => {
 
 /* leaving an install site after the cut-off (or an approved early site leave) is not an early departure */
 computeAttRow = (base => (row, w) => { const r = base(row, w); if (r && (r.siteOut || r.siteEarly === 'ok')) r.early = 0; return r; })(computeAttRow);
-/* after a check-out from an install site before the cut-off → approval request */
+/* before the cut-off a check-out from an install site is refused → check out at the factory */
+punchGeo = (base => async (w, method) => {
+  const gp = await base(w, method); if (!w || !gp || gp.blocked) return gp;
+  try {
+    const cur = (attendanceFor(todayISO()) || {})[w.id] || {}; if (!cur.in) return gp; // check-in: factory or site, both fine
+    const g = gp.geo || {}; if (!g.zone || g.inside === false) return gp;
+    const site = instPunchSites(w, todayISO()).find(s => s.name === g.zone); if (!site) return gp;
+    if (nowTm() >= instSiteOutAt()) return gp;
+    return Object.assign({}, gp, { blocked: true, msg: `الانصراف من موقع التركيب مسموح بعد الساعة ${instSiteOutAt()} بس — ابصم الانصراف من المصنع` });
+  } catch (e) { return gp; }
+})(punchGeo);
+/* after a check-out from an install site (after the cut-off) → not an early departure */
 kioskPunchBase = (base => async (w, opts = {}) => {
   const date = todayISO(); const before = (attendanceFor(date) || {})[w && w.id] || {};
   const res = await base(w, opts); if (!w || !res || res.blocked) return res;
@@ -16517,16 +16527,7 @@ kioskPunchBase = (base => async (w, opts = {}) => {
     const cur = (attendanceFor(date) || {})[w.id] || {}; if (!before.in || !cur.out || cur.siteEarlyReq) return res;
     const g = cur.geoOut || {}; if (!g.zone || g.inside === false) return res;
     const site = instPunchSites(w, date).find(s => s.name === g.zone); if (!site) return res;
-    if (String(cur.out) >= instSiteOutAt()) { S._attBypass = true; try { await setAtt(date, w, Object.assign({}, cur, { siteOut: site.orderId, early: 0 })); } finally { S._attBypass = false; } return res; }
-    const me = S.session || {}; const now = nowISO(); const hasHead = typeof deptHeads === 'function' && deptHeads(site.deptId).length;
-    const o = byId('orders', site.orderId);
-    const r = { id: uid(), type: 'siteout', workerId: w.id, deptId: site.deptId, from: date, to: date, orderId: site.orderId, out: cur.out, siteName: site.name,
-      reason: `انصراف ${cur.out} من موقع ${site.name} (قبل الساعة ${instSiteOutAt()})`, requesterId: w.id, requesterName: w.name, status: 'pending', chain: hasHead ? ['head'] : ['manager'], step: 0, stepAt: now,
-      createdBy: me.id || null, createdByName: me.name || w.name, createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: w.name, role: role(), kind: 'system', text: `بصم انصراف ${cur.out} من موقع التركيب ${o ? o.code : ''} — قبل ميعاد انصراف الموقع` }] };
-    await Store.save('requests', r);
-    S._attBypass = true; try { await setAtt(date, w, Object.assign({}, cur, { siteEarly: 'pending', siteEarlyReq: r.id })); } finally { S._attBypass = false; }
-    if (typeof pushSend === 'function' && typeof reqStepTargets === 'function') pushSend(reqStepTargets(r), `انصراف بدري من الموقع — ${w.name}`, `${cur.out} · ${site.name}`.slice(0, 140), '/#/approvals', 'req-' + r.id).catch(() => { });
-    if (!opts.silent) toast(`الانصراف قبل الساعة ${instSiteOutAt()} من الموقع — اتبعت لرئيس القسم يعتمده`);
+    if (String(cur.out) >= instSiteOutAt()) { S._attBypass = true; try { await setAtt(date, w, Object.assign({}, cur, { siteOut: site.orderId, early: 0 })); } finally { S._attBypass = false; } }
   } catch (e) { console.warn('siteout', e); }
   return res;
 })(kioskPunchBase);
