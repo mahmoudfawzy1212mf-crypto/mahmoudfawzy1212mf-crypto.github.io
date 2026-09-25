@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1109-48a7d1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1153-6090df";</script>
 
 <script>
 'use strict';
@@ -16480,6 +16480,78 @@ ACTIONS.pushTest = async () => {
     toast(`اتبعت ✓ ${ok.join('، ') || '—'}${bad.length ? ` · فشل: ${bad.join('، ')}` : ''} — اقفل الشاشة واستنى ثواني`, bad.length && !ok.length ? 'err' : undefined);
   } catch (e) { toast('تعذّر إرسال التجربة: ' + (e.message || e), 'err'); }
 };
+/* =====================================================================
+   v4.63 — بصمة فنيين التركيبات:
+   · في يوم التركيب (الفني على فريق مرحلة تركيب، أو عليه بند تركيب في صفحة التركيبات بتاريخ النهارده)
+     الحضور والانصراف مقبولين من المصنع أو من موقع المشروع (دبوس موقع المشروع في أمر التشغيل).
+   · الانصراف من الموقع بعد الساعة ٤:٠٠ (قابلة للتعديل: settings.instSiteOut) عادي ومش بيتحسب انصراف بدري (row.siteOut).
+     قبلها: البصمة بتتسجل كـ«انصراف بدري من الموقع» وبيطلع طلب لرئيس قسم التركيبات يعتمده
+     (قسم من غير رئيس ← مدير المصنع). الرفض بيعلّم اليوم ويبلغ الحسابات/HR.
+   ===================================================================== */
+REQ_TYPES.siteout = 'انصراف بدري من موقع التركيب'; DEFAULT_CHAINS.siteout = ['head'];
+const instSiteOutAt = () => String((S.settings && S.settings.instSiteOut) || '16:00');
+/* install sites the worker is booked on for `date` */
+function instPunchSites(w, date) {
+  if (!w) return []; date = date || todayISO(); const out = []; const seen = new Set();
+  const add = (o, deptId) => { const st = typeof orderSite === 'function' ? orderSite(o) : null; if (!st) return; const id = 'o:' + o.id + ':' + deptId; if (seen.has(id)) return; seen.add(id); out.push({ id, name: `${o.code} — ${st.address || o.title}`, lat: +st.lat, lng: +st.lng, radius: +st.radius || 100, orderId: o.id, deptId, project: true, inst: true }); };
+  try { if (typeof assignmentsFor === 'function') assignmentsFor(w, date).forEach(a => { if (INSTALL_DEPT(a.deptId)) add(a.o, a.deptId); }); } catch (e) { /* ignore */ }
+  try { if (typeof instItems === 'function') list('orders').forEach(o => { if (!isOpen(o) || o.status === 'hold') return; instItems(o).forEach(it => { if (it.status !== 'cancelled' && it.date === date && (it.team || []).includes(w.id)) add(o, it.deptId); }); }); } catch (e) { /* ignore */ }
+  return out;
+}
+zonesFor = (base => (w, date) => {
+  const z = base(w, date); if (!w || z.unrestricted) return z;
+  const sites = instPunchSites(w, date); if (!sites.length) return z;
+  const zones = (z.zones || []).slice(); const has = id => zones.some(x => x.id === id);
+  const fz = factoryZone(); if (fz && !has('factory')) zones.push(fz);
+  sites.forEach(s => { if (!has(s.id)) zones.push(s); });
+  return Object.assign({}, z, { zones, instDay: true });
+})(zonesFor);
+
+/* leaving an install site after the cut-off (or an approved early site leave) is not an early departure */
+computeAttRow = (base => (row, w) => { const r = base(row, w); if (r && (r.siteOut || r.siteEarly === 'ok')) r.early = 0; return r; })(computeAttRow);
+/* after a check-out from an install site before the cut-off → approval request */
+kioskPunchBase = (base => async (w, opts = {}) => {
+  const date = todayISO(); const before = (attendanceFor(date) || {})[w && w.id] || {};
+  const res = await base(w, opts); if (!w || !res || res.blocked) return res;
+  try {
+    const cur = (attendanceFor(date) || {})[w.id] || {}; if (!before.in || !cur.out || cur.siteEarlyReq) return res;
+    const g = cur.geoOut || {}; if (!g.zone || g.inside === false) return res;
+    const site = instPunchSites(w, date).find(s => s.name === g.zone); if (!site) return res;
+    if (String(cur.out) >= instSiteOutAt()) { S._attBypass = true; try { await setAtt(date, w, Object.assign({}, cur, { siteOut: site.orderId, early: 0 })); } finally { S._attBypass = false; } return res; }
+    const me = S.session || {}; const now = nowISO(); const hasHead = typeof deptHeads === 'function' && deptHeads(site.deptId).length;
+    const o = byId('orders', site.orderId);
+    const r = { id: uid(), type: 'siteout', workerId: w.id, deptId: site.deptId, from: date, to: date, orderId: site.orderId, out: cur.out, siteName: site.name,
+      reason: `انصراف ${cur.out} من موقع ${site.name} (قبل الساعة ${instSiteOutAt()})`, requesterId: w.id, requesterName: w.name, status: 'pending', chain: hasHead ? ['head'] : ['manager'], step: 0, stepAt: now,
+      createdBy: me.id || null, createdByName: me.name || w.name, createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: w.name, role: role(), kind: 'system', text: `بصم انصراف ${cur.out} من موقع التركيب ${o ? o.code : ''} — قبل ميعاد انصراف الموقع` }] };
+    await Store.save('requests', r);
+    S._attBypass = true; try { await setAtt(date, w, Object.assign({}, cur, { siteEarly: 'pending', siteEarlyReq: r.id })); } finally { S._attBypass = false; }
+    if (typeof pushSend === 'function' && typeof reqStepTargets === 'function') pushSend(reqStepTargets(r), `انصراف بدري من الموقع — ${w.name}`, `${cur.out} · ${site.name}`.slice(0, 140), '/#/approvals', 'req-' + r.id).catch(() => { });
+    if (!opts.silent) toast(`الانصراف قبل الساعة ${instSiteOutAt()} من الموقع — اتبعت لرئيس القسم يعتمده`);
+  } catch (e) { console.warn('siteout', e); }
+  return res;
+})(kioskPunchBase);
+
+async function siteOutMark(r, v) {
+  const w = byId('workers', r.workerId); if (!w || !r.from) return; const cur = (attendanceFor(r.from) || {})[w.id]; if (!cur) return;
+  S._attBypass = true; try { await setAtt(r.from, w, Object.assign({}, cur, { siteEarly: v }, v === 'ok' ? { early: 0 } : {})); } catch (e) { /* the request itself is the record */ } finally { S._attBypass = false; }
+}
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r && r.type === 'siteout') { await siteOutMark(r, 'ok'); return; }
+  return base(r, w, patch, opts);
+})(applyRequestEffects);
+decideRequest = (base => async (id, status, note, opts = {}) => {
+  const r0 = await base(id, status, note, opts); if (r0 === false) return r0;
+  try { const r = byId('requests', id); if (r && r.type === 'siteout' && r.status === 'rejected') { await siteOutMark(r, 'rejected'); const w = byId('workers', r.workerId); if (typeof notifyRole === 'function') await notifyRole('hr', `انصراف بدري من الموقع مرفوض — ${w ? w.name : ''}`, `${fmtDate(r.from)} · ${r.reason || ''}${note ? '\nالسبب: ' + note : ''}`, { id: `siteoutx_${r.id}` }); } } catch (e) { /* ignore */ }
+  return r0;
+})(decideRequest);
+reqDesc = (base => r => (r && r.type === 'siteout' ? `${(byId('workers', r.workerId) || {}).name || r.requesterName || ''} — ${r.reason || ''}` : base(r)))(reqDesc);
+
+/* cut-off setting on the installs page (admin / factory manager) */
+RENDER_HOOKS.push(() => {
+  if (!S.route || S.route.view !== 'installs' || !(isAdmin() || role() === 'manager')) return; const v = document.getElementById('view'); if (!v || v.querySelector('#instso')) return;
+  v.insertAdjacentHTML('afterbegin', `<div class="banner info" id="instso" style="margin-bottom:10px;flex-wrap:wrap;gap:6px">${icon('map')}<span style="flex:1;min-width:200px">فنيين التركيب يقدروا يبصموا حضور وانصراف من المصنع أو من موقع المشروع. الانصراف من الموقع مسموح بعد الساعة</span><input id="instso-t" type="time" value="${esc(instSiteOutAt())}" class="inp" style="width:110px"><button class="btn sm" data-action="instSoSave">حفظ</button></div>`);
+});
+ACTIONS.instSoSave = async () => { if (!(isAdmin() || role() === 'manager')) return; const t = (document.getElementById('instso-t') || {}).value || ''; if (!/^\d{2}:\d{2}$/.test(t)) { toast('اكتب الساعة صح', 'err'); return; } await Store.saveSettings({ instSiteOut: t }); toast(`تمام — الانصراف من الموقع بعد الساعة ${t}`); };
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
