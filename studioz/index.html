@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260924-2132-b2400b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-0606-363a7d";</script>
 
 <script>
 'use strict';
@@ -15944,6 +15944,185 @@ render = (base => function (full) {
   if (shown && h && h === _nhLast) return;
   const r = base.apply(this, arguments); _nhLast = h; return r;
 })(render);
+/* =====================================================================
+   v4.52 — تسعير الدهانات (قسم الدهانات): سعر المتر المربع لكل نوع تشطيب ودرجة خامة
+   · 4 أنواع: دوكو عادي / دوكو شروزيه / استر عادي / استر شروزيه (الشروزيه = + مرحلة تفتيح الخشب)
+   · 3 درجات خامة: عادي / تركي / إيطالي — المراحل والكميات واحدة، السعر بيختلف
+   · كل مرحلة: الوقت في المتر + مين (أسطى/مساعد) + الخامة وكميتها في المتر
+   · التكلفة = خامات + مصنعية (دقايق × أجر الساعة) + مصاريف تشغيل ٪
+   · المقايسة: «بند دهان» يحسب لوحده · أمر التشغيل: كارت «مراحل الدهان» بعلامة على كل مرحلة
+   البيانات: مجموعة finish — cfg (المراحل والكميات، يشوفها الكل) و prices (الأسعار، للي بيعملوا مقايسات بس)
+   ===================================================================== */
+if (!COLS.includes('finish')) COLS.push('finish'); S.data.finish = S.data.finish || new Map();
+Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('finish').onSnapshot(snap => { S.data.finish = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.finish = true; rerender(); }, e => console.warn('snapshot finish', e))); })(Store.subscribeAll);
+const FIN_GRADES = [['normal', 'عادي'], ['turkish', 'تركي'], ['italian', 'إيطالي']];
+const FIN_WHO = { master: 'أسطى', helper: 'مساعد' };
+const finStg = (name, min, who, mat, qty) => ({ name, min, who, mat: mat || '', qty: qty || 0 });
+const FIN_BLEACH = [finStg('تفتيح الخشب', 8, 'master', 'bleach', 0.10), finStg('معادلة وصنفرة بعد التفتيح', 10, 'helper')];
+const FIN_DUCO = [finStg('معجون الحروف والعيوب', 10, 'master', 'putty', 0.10), finStg('برايمر (أندركوت) أول', 6, 'master', 'primer', 0.20), finStg('صنفرة (240)', 12, 'helper'), finStg('برايمر تاني', 6, 'master', 'primer', 0.18), finStg('صنفرة ناعمة (320–400)', 12, 'helper'), finStg('وش لون أول', 6, 'master', 'duco', 0.15), finStg('صنفرة خفيفة (600)', 8, 'helper'), finStg('وش لون نهائي', 6, 'master', 'duco', 0.15), finStg('مراجعة وتنظيف', 5, 'helper')];
+const FIN_ESTER = [finStg('صبغة (لو فيه لون)', 6, 'master', 'stain', 0.08), finStg('سيلر أول', 6, 'master', 'sealer', 0.18), finStg('صنفرة (320)', 12, 'helper'), finStg('سيلر تاني', 6, 'master', 'sealer', 0.15), finStg('صنفرة ناعمة (400)', 12, 'helper'), finStg('وش استر نهائي', 6, 'master', 'ester', 0.14)];
+const FIN_DEFAULT_CFG = {
+  mats: [{ id: 'putty', name: 'معجون بوليستر', unit: 'كجم' }, { id: 'primer', name: 'برايمر أبيض (أندركوت)', unit: 'لتر' }, { id: 'duco', name: 'دوكو لون', unit: 'كجم' }, { id: 'sealer', name: 'سيلر شفاف', unit: 'لتر' }, { id: 'ester', name: 'استر شفاف', unit: 'لتر' }, { id: 'stain', name: 'صبغة', unit: 'لتر' }, { id: 'bleach', name: 'مفتّح خشب', unit: 'لتر' }, { id: 'thinner', name: 'تنر', unit: 'لتر' }, { id: 'sand', name: 'ورق صنفرة (للمتر)', unit: 'م²' }],
+  systems: [
+    { id: 'duco', name: 'دوكو عادي', base: 'MDF', stages: [finStg('صنفرة وتنظيف (180)', 10, 'helper')].concat(FIN_DUCO), extra: [{ mat: 'thinner', qty: 0.12 }, { mat: 'sand', qty: 1 }] },
+    { id: 'duco_ch', name: 'دوكو شروزيه', base: 'MDF', stages: [finStg('صنفرة وتنظيف (180)', 10, 'helper')].concat(FIN_BLEACH, FIN_DUCO), extra: [{ mat: 'thinner', qty: 0.12 }, { mat: 'sand', qty: 1.25 }] },
+    { id: 'ester', name: 'استر عادي', base: 'خشب طبيعي أو قشرة', stages: [finStg('صنفرة الخشب (150–180)', 12, 'helper')].concat(FIN_ESTER), extra: [{ mat: 'thinner', qty: 0.10 }, { mat: 'sand', qty: 1 }] },
+    { id: 'ester_ch', name: 'استر شروزيه', base: 'خشب طبيعي أو قشرة', stages: [finStg('صنفرة الخشب (150–180)', 12, 'helper')].concat(FIN_BLEACH, FIN_ESTER), extra: [{ mat: 'thinner', qty: 0.10 }, { mat: 'sand', qty: 1.25 }] }
+  ]
+};
+const FIN_DEFAULT_PRICES = { prices: { putty: { normal: 180, turkish: 300, italian: 500 }, primer: { normal: 220, turkish: 400, italian: 750 }, duco: { normal: 300, turkish: 550, italian: 1000 }, sealer: { normal: 200, turkish: 380, italian: 700 }, ester: { normal: 260, turkish: 480, italian: 900 }, stain: { normal: 250, turkish: 400, italian: 700 }, bleach: { normal: 350, turkish: 500, italian: 800 }, thinner: { normal: 110, turkish: 150, italian: 250 }, sand: { normal: 40, turkish: 40, italian: 40 } }, rates: { master: 110, helper: 60 }, overheadPct: 15, estimated: true };
+const finOn = () => !(typeof isStuSys === 'function' && isStuSys());
+const finCfg = () => { const d = S.data.finish && S.data.finish.get('cfg'); return d && Array.isArray(d.systems) && d.systems.length ? d : FIN_DEFAULT_CFG; };
+const finPrices = () => { const d = S.data.finish && S.data.finish.get('prices'); return d && d.prices ? d : FIN_DEFAULT_PRICES; };
+const finSeesPrice = () => !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech', 'head'].includes(role()));
+const finEditPrice = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'hr');
+const finEditCfg = () => typeof writable === 'function' && writable() && (isAdmin() || ['hr', 'manager', 'head', 'tech'].includes(role()));
+const finSeesPage = () => finOn() && !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech', 'head', 'manager', 'vice'].includes(role()));
+const finSys = id => finCfg().systems.find(s => s.id === id);
+const finMat = id => finCfg().mats.find(m => m.id === id);
+const finGradeName = g => (FIN_GRADES.find(x => x[0] === g) || [0, g])[1];
+const finPrice = (mat, g) => { const p = (finPrices().prices || {})[mat] || {}; return +p[g] || 0; };
+/* cost of one m² */
+function finCost(sysId, grade) {
+  const s = finSys(sysId); const P = finPrices(); const rate = w => +((P.rates || {})[w]) || 0;
+  if (!s) return null; const lines = [];
+  (s.stages || []).forEach(st => { const lab = r2((+st.min || 0) / 60 * rate(st.who)); const mc = st.mat ? r2((+st.qty || 0) * finPrice(st.mat, grade)) : 0; lines.push({ name: st.name, min: +st.min || 0, who: st.who, mat: st.mat, qty: +st.qty || 0, labor: lab, matCost: mc }); });
+  (s.extra || []).forEach(x => { if (!x.mat) return; lines.push({ name: (finMat(x.mat) || {}).name || x.mat, extra: true, min: 0, who: '', mat: x.mat, qty: +x.qty || 0, labor: 0, matCost: r2((+x.qty || 0) * finPrice(x.mat, grade)) }); });
+  const mat = r2(sum(lines, l => l.matCost)), labor = r2(sum(lines, l => l.labor)); const oh = r2((mat + labor) * (+P.overheadPct || 0) / 100);
+  const minM = sum(lines.filter(l => l.who === 'master'), l => l.min), minH = sum(lines.filter(l => l.who === 'helper'), l => l.min);
+  return { sys: s, grade, lines, mat, labor, overhead: oh, total: r2(mat + labor + oh), minM, minH, minutes: minM + minH };
+}
+/* material need for an area (for the store / purchase) */
+function finNeeds(sysId, area) { const s = finSys(sysId); const m = {}; if (!s) return []; (s.stages || []).concat(s.extra || []).forEach(x => { if (!x.mat || x.mat === 'sand') return; m[x.mat] = (m[x.mat] || 0) + (+x.qty || 0) * (+area || 0); }); return Object.entries(m).map(([k, q]) => ({ mat: k, name: (finMat(k) || {}).name || k, unit: (finMat(k) || {}).unit || '', qty: Math.round(q * 100) / 100 })); }
+const finMoney = n => `${fmtMoney(Math.round(+n || 0))} ${CUR()}`;
+const finMin = m => { m = Math.round(+m || 0); return m >= 60 ? `${Math.floor(m / 60)} س ${m % 60 ? (m % 60) + ' د' : ''}` : `${m} د`; };
+
+/* ---------- the page ---------- */
+VIEW_TITLES.finish = 'تسعير الدهانات';
+(() => { const i = NAV.findIndex(n => n.id === 'projectcosts'); const entry = { id: 'finish', label: 'تسعير الدهانات', icon: 'layers' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+setTimeout(() => { if (!finOn()) return; ['hr', 'bdd', 'office', 'tech', 'head', 'manager', 'vice'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('finish')) ROLE_VIEWS[r].push('finish'); }); }, 0);
+canSee = (base => view => (view === 'finish' ? finSeesPage() : base(view)))(canSee);
+function vFinish() {
+  if (!finSeesPage()) return '<div class="card qlock"><h3>الصفحة دي مش متاحة لك</h3></div>';
+  const C = finCfg(), P = finPrices(), sp = finSeesPrice();
+  const note = P.estimated ? `<div class="banner warn">${icon('info')}<span>الأسعار والكميات دي <b>تقديرية مبدئية</b> — تتعدّل بعروض الموردين الحقيقية وبتجربة فعلية (ادهن 10 متر ووزن الخامة قبل وبعد).</span></div>` : '';
+  const table = sp ? `<div class="card"><div class="cardhead"><h3>تكلفة المتر المربع على المصنع</h3><div class="grow"></div><span class="small muted">خامات + مصنعية + ${fmtNum(P.overheadPct || 0)}٪ مصاريف تشغيل · دوس على أي رقم تشوف التقسيمة</span></div>
+    <div class="tablewrap"><table class="fintbl"><thead><tr><th>نوع التشطيب</th>${FIN_GRADES.map(g => `<th class="n">${g[1]}</th>`).join('')}<th class="n">الوقت للمتر</th></tr></thead><tbody>${C.systems.map(s => { const c0 = finCost(s.id, 'normal'); return `<tr><td><b>${esc(s.name)}</b>${s.base ? `<div class="tiny muted">${esc(s.base)}</div>` : ''}</td>${FIN_GRADES.map(g => { const c = finCost(s.id, g[0]); return `<td class="n"><a href="javascript:void 0" data-action="finBreak" data-arg="${s.id}|${g[0]}"><b>${finMoney(c.total)}</b></a><div class="tiny muted">خامات ${fmtMoney(Math.round(c.mat))} · مصنعية ${fmtMoney(Math.round(c.labor))}</div></td>`; }).join('')}<td class="n small">${finMin(c0.minutes)}</td></tr>`; }).join('')}</tbody></table></div>
+    <div class="finalc"><b>حاسبة سريعة:</b><select id="fc-sys">${C.systems.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="fc-g">${FIN_GRADES.map(g => `<option value="${g[0]}">${g[1]}</option>`).join('')}</select><input id="fc-a" type="number" min="0" step="any" inputmode="decimal" placeholder="المساحة م²"><span id="fc-out" class="num"></span></div></div>` : '';
+  const sysCards = C.systems.map(s => { const c = finCost(s.id, 'normal'); return `<div class="card"><div class="cardhead"><h3>${esc(s.name)}</h3>${s.base ? `<span class="badge">${esc(s.base)}</span>` : ''}<span class="small muted">${(s.stages || []).length} مرحلة · ${finMin(c.minutes)} للمتر (أسطى ${finMin(c.minM)} · مساعد ${finMin(c.minH)})</span><div class="grow"></div>${finEditCfg() ? `<button class="btn sm" data-action="finSysEdit" data-arg="${s.id}">${icon('edit')}تعديل المراحل</button>` : ''}</div>
+    <div class="tablewrap"><table><thead><tr><th>#</th><th>المرحلة</th><th class="n">الوقت للمتر</th><th>مين</th><th>الخامة</th><th class="n">الكمية للمتر</th></tr></thead><tbody>${(s.stages || []).map((st, i) => `<tr><td class="tiny muted">${i + 1}</td><td>${esc(st.name)}</td><td class="n">${fmtNum(st.min)} د</td><td>${FIN_WHO[st.who] || '—'}</td><td>${st.mat ? esc((finMat(st.mat) || {}).name || st.mat) : '—'}</td><td class="n">${st.mat ? `${fmtNum(st.qty)} ${esc((finMat(st.mat) || {}).unit || '')}` : ''}</td></tr>`).join('')}${(s.extra || []).map(x => `<tr class="muted"><td></td><td>خامة للشغل كله</td><td></td><td></td><td>${esc((finMat(x.mat) || {}).name || x.mat)}</td><td class="n">${fmtNum(x.qty)} ${esc((finMat(x.mat) || {}).unit || '')}</td></tr>`).join('')}</tbody></table></div></div>`; }).join('');
+  const matCard = sp ? `<div class="card"><div class="cardhead"><h3>أسعار الخامات والمصنعية</h3><div class="grow"></div>${finEditPrice() ? `<button class="btn sm" data-action="finPricesEdit">${icon('edit')}تعديل الأسعار</button>` : ''}</div>
+    <div class="tablewrap"><table><thead><tr><th>الخامة</th><th>الوحدة</th>${FIN_GRADES.map(g => `<th class="n">${g[1]}</th>`).join('')}</tr></thead><tbody>${C.mats.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.unit || '')}</td>${FIN_GRADES.map(g => `<td class="n">${fmtMoney(finPrice(m.id, g[0]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="small" style="margin-top:8px">أجر ساعة الأسطى: <b>${fmtMoney((P.rates || {}).master || 0)}</b> · أجر ساعة المساعد: <b>${fmtMoney((P.rates || {}).helper || 0)}</b> · مصاريف التشغيل: <b>${fmtNum(P.overheadPct || 0)}٪</b> <span class="muted">(كمبروسر، كابينة رش، كهربا، هالك)</span></div></div>` : `<div class="card"><div class="small muted">${icon('shield')}الأسعار والتكاليف ظاهرة للإدارة واللي بيعملوا المقايسات بس.</div></div>`;
+  return `<div class="toolbar"><div class="small muted">المتر = متر مربع لكل وش (الضلفة وشين + الحروف)</div><div class="grow"></div>${finEditCfg() ? `<button class="btn sm" data-action="finSysNew">${icon('plus')}نوع تشطيب جديد</button>` : ''}</div>${note}${table}${sysCards}${matCard}`;
+}
+EXTRA_VIEWS.finish = () => vFinish();
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.fintbl td.n a{color:inherit;text-decoration:none}.fintbl td.n a:hover b{color:var(--accent);text-decoration:underline}
+.finalc{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}.finalc select,.finalc input{width:auto;min-width:120px}.finalc #fc-out{font-weight:700}
+.finrow{display:grid;grid-template-columns:2fr 70px 90px 1.3fr 80px 30px;gap:6px;margin-bottom:6px;align-items:center}.finrow.x{grid-template-columns:2fr 1.3fr 80px 30px}
+.finadd{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding:8px;border:1px dashed var(--line);border-radius:10px}.finadd select,.finadd input{width:auto;min-width:110px}
+.paintjob{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}.paintjob .stg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.paintjob .stg button{border:1px solid var(--line);background:var(--surface-2);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}.paintjob .stg button.on{background:color-mix(in srgb,#4f8a6d 18%,var(--surface));border-color:#4f8a6d}
+.paintjob .bar{height:6px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:6px}.paintjob .bar i{display:block;height:100%;background:#4f8a6d}
+@media(max-width:700px){.finrow{grid-template-columns:1fr 60px 80px;}.finrow select[name$=mat],.finrow input[name$=qty]{grid-column:span 1}}
+</style>`);
+document.addEventListener('input', ev => { if (!['fc-a', 'fc-sys', 'fc-g'].includes(ev.target && ev.target.id)) return; const s = $('#fc-sys'), g = $('#fc-g'), a = $('#fc-a'), o = $('#fc-out'); if (!s || !g || !a || !o) return; const area = num(a.value); if (!area) { o.textContent = ''; return; } const c = finCost(s.value, g.value); o.textContent = `= ${finMoney(c.total * area)} (خامات ${fmtMoney(Math.round(c.mat * area))} · مصنعية ${fmtMoney(Math.round(c.labor * area))} · ${finMin(c.minutes * area)} شغل)`; });
+document.addEventListener('change', ev => { if (['fc-sys', 'fc-g'].includes(ev.target && ev.target.id)) ev.target.dispatchEvent(new Event('input', { bubbles: true })); });
+ACTIONS.finBreak = arg => {
+  const [sid, g] = String(arg || '').split('|'); const c = finCost(sid, g); if (!c || !finSeesPrice()) return; const P = finPrices();
+  openModal({ title: `${c.sys.name} — خامات ${finGradeName(g)}: تقسيمة المتر المربع`, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>`, body: `<div class="tablewrap"><table><thead><tr><th>المرحلة</th><th class="n">الوقت</th><th>مين</th><th class="n">مصنعية</th><th>الخامة</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">تكلفة الخامة</th></tr></thead><tbody>${c.lines.map(l => { const m = finMat(l.mat) || {}; return `<tr${l.extra ? ' class="muted"' : ''}><td>${esc(l.extra ? 'للشغل كله' : l.name)}</td><td class="n">${l.min ? l.min + ' د' : ''}</td><td>${FIN_WHO[l.who] || ''}</td><td class="n">${l.labor ? fmtNum(l.labor) : ''}</td><td>${l.mat ? esc(m.name || l.mat) : '—'}</td><td class="n">${l.mat ? `${fmtNum(l.qty)} ${esc(m.unit || '')}` : ''}</td><td class="n">${l.mat ? fmtMoney(finPrice(l.mat, g)) : ''}</td><td class="n">${l.matCost ? fmtNum(l.matCost) : ''}</td></tr>`; }).join('')}</tbody>
+    <tfoot><tr><td>المجموع</td><td class="n">${finMin(c.minutes)}</td><td></td><td class="n">${finMoney(c.labor)}</td><td colspan="3"></td><td class="n">${finMoney(c.mat)}</td></tr><tr><td colspan="7">مصاريف تشغيل ${fmtNum(P.overheadPct || 0)}٪</td><td class="n">${finMoney(c.overhead)}</td></tr><tr><td colspan="7"><b>تكلفة المتر المربع</b></td><td class="n"><b>${finMoney(c.total)}</b></td></tr></tfoot></table></div>
+    <div class="small muted" style="margin-top:8px">أسطى ${finMin(c.minM)} × ${fmtMoney((P.rates || {}).master || 0)}/ساعة · مساعد ${finMin(c.minH)} × ${fmtMoney((P.rates || {}).helper || 0)}/ساعة. دي تكلفة على المصنع — سعر البيع = التكلفة + هامش الربح.</div>` });
+};
+/* edit the stages of a finish type */
+function finRow(st, i) { const mats = finCfg().mats; return `<div class="finrow" data-i="${i}"><input name="st-name" value="${esc(st.name || '')}" placeholder="اسم المرحلة"><input name="st-min" type="number" min="0" step="any" value="${st.min ?? ''}" placeholder="دقايق"><select name="st-who"><option value="master" ${st.who === 'master' ? 'selected' : ''}>أسطى</option><option value="helper" ${st.who === 'helper' ? 'selected' : ''}>مساعد</option></select><select name="st-mat"><option value="">— من غير خامة —</option>${mats.map(m => `<option value="${m.id}" ${m.id === st.mat ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select><input name="st-qty" type="number" min="0" step="any" value="${st.mat ? st.qty : ''}" placeholder="الكمية"><button type="button" class="iconbtn" data-finrm="1" title="حذف">${icon('x')}</button></div>`; }
+function finXRow(x) { const mats = finCfg().mats; return `<div class="finrow x"><span class="small">خامة للشغل كله</span><select name="x-mat">${mats.map(m => `<option value="${m.id}" ${m.id === x.mat ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select><input name="x-qty" type="number" min="0" step="any" value="${x.qty ?? ''}"><button type="button" class="iconbtn" data-finrm="1">${icon('x')}</button></div>`; }
+function finSysForm(s) {
+  return `<div class="form">${field('اسم نوع التشطيب', inp('name', s.name || '', 'required'))}${field('يتعمل على', inp('base', s.base || '', 'placeholder="MDF / خشب طبيعي / قشرة"'))}<div class="field full"><label>المراحل بالترتيب — الوقت والكمية للمتر المربع الواحد</label><div class="tiny muted" style="margin-bottom:6px">المرحلة · الدقايق · مين · الخامة · الكمية</div><div id="finrows">${(s.stages || []).map(finRow).join('')}</div><button type="button" class="btn xs" data-finaddrow="1">${icon('plus')}مرحلة</button></div>
+    <div class="field full"><label>خامات بتتصرف على الشغل كله (تنر، صنفرة…)</label><div id="finx">${(s.extra || []).map(finXRow).join('')}</div><button type="button" class="btn xs" data-finaddx="1">${icon('plus')}خامة</button></div></div>`;
+}
+function finReadSys(f) {
+  const stages = $$('#finrows .finrow', f).map(r => ({ name: r.querySelector('[name=st-name]').value.trim(), min: num(r.querySelector('[name=st-min]').value) || 0, who: r.querySelector('[name=st-who]').value, mat: r.querySelector('[name=st-mat]').value, qty: num(r.querySelector('[name=st-qty]').value) || 0 })).filter(x => x.name).map(x => (x.mat ? x : Object.assign(x, { qty: 0 })));
+  const extra = $$('#finx .finrow', f).map(r => ({ mat: r.querySelector('[name=x-mat]').value, qty: num(r.querySelector('[name=x-qty]').value) || 0 })).filter(x => x.mat && x.qty);
+  return { stages, extra };
+}
+document.addEventListener('click', ev => {
+  const t = ev.target.closest && ev.target.closest('[data-finrm],[data-finaddrow],[data-finaddx]'); if (!t) return; ev.preventDefault();
+  if (t.dataset.finrm) { t.closest('.finrow').remove(); return; }
+  if (t.dataset.finaddrow) $('#finrows').insertAdjacentHTML('beforeend', finRow({ who: 'master' }, $$('#finrows .finrow').length));
+  if (t.dataset.finaddx) $('#finx').insertAdjacentHTML('beforeend', finXRow({ mat: 'thinner' }));
+});
+async function finSaveCfg(cfg) { const cur = finCfg(); await Store.save('finish', Object.assign({ id: 'cfg' }, JSON.parse(JSON.stringify(cur)), cfg, { id: 'cfg', updatedAt: nowISO(), byName: (S.session && S.session.name) || '' }), { silent: true }); }
+ACTIONS.finSysEdit = id => {
+  const s = finSys(id); if (!s || !finEditCfg()) return;
+  openModal({ title: `مراحل ${s.name}`, wide: true, body: finSysForm(s), extra: isAdmin() || role() === 'hr' ? `<button type="button" class="btn ghost" data-action="finSysDel" data-arg="${s.id}">${icon('trash')}حذف النوع</button>` : '', onSubmit: async f => { const d = formData(f); const r = finReadSys(f); if (!r.stages.length) { toast('لازم مرحلة واحدة على الأقل', 'err'); return false; } const cfg = JSON.parse(JSON.stringify(finCfg())); const i = cfg.systems.findIndex(x => x.id === id); cfg.systems[i] = Object.assign({}, cfg.systems[i], { name: d.name.trim() || s.name, base: (d.base || '').trim(), stages: r.stages, extra: r.extra }); await finSaveCfg({ systems: cfg.systems, mats: cfg.mats }); toast('اتحفظت المراحل ✓'); } });
+};
+ACTIONS.finSysNew = () => {
+  if (!finEditCfg()) return; const C = finCfg();
+  openModal({ title: 'نوع تشطيب جديد', body: `<div class="form">${field('الاسم', inp('name', '', 'required placeholder="مثال: دوكو هاي جلوس"'))}${field('ابدأ من مراحل', `<select name="from"><option value="">— فاضي —</option>${C.systems.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`)}</div>`, onSubmit: async f => { const d = formData(f); if (!d.name.trim()) return false; const cfg = JSON.parse(JSON.stringify(C)); const src = cfg.systems.find(s => s.id === d.from); const id = 'f' + uid().slice(-6); cfg.systems.push({ id, name: d.name.trim(), base: src ? src.base : '', stages: src ? src.stages : [finStg('صنفرة', 10, 'helper')], extra: src ? src.extra : [] }); await finSaveCfg({ systems: cfg.systems, mats: cfg.mats }); toast('اتضاف ✓'); setTimeout(() => ACTIONS.finSysEdit(id), 60); } });
+};
+ACTIONS.finSysDel = async id => { const s = finSys(id); if (!s) return; if (!(await confirmDlg(`حذف «${s.name}»؟`, 'حذف'))) return; const cfg = JSON.parse(JSON.stringify(finCfg())); cfg.systems = cfg.systems.filter(x => x.id !== id); await finSaveCfg({ systems: cfg.systems, mats: cfg.mats }); closeModal(); toast('اتحذف'); };
+/* prices: materials × grade + labor rates + overhead */
+function finMatRow(m) { return `<div class="finrow" style="grid-template-columns:2fr 80px repeat(3,90px) 30px"><input type="hidden" name="m-id" value="${esc(m.id || '')}"><input name="m-name" value="${esc(m.name || '')}" placeholder="اسم الخامة"><input name="m-unit" value="${esc(m.unit || '')}" placeholder="لتر"> ${FIN_GRADES.map(g => `<input name="m-${g[0]}" type="number" min="0" step="any" value="${m.id ? finPrice(m.id, g[0]) || '' : ''}" placeholder="${g[1]}">`).join('')}<button type="button" class="iconbtn" data-finrm="1">${icon('x')}</button></div>`; }
+ACTIONS.finPricesEdit = () => {
+  if (!finEditPrice()) return; const C = finCfg(), P = finPrices();
+  openModal({ title: 'أسعار الخامات والمصنعية', wide: true, body: `<div class="form"><div class="field full"><label>الخامات — السعر للوحدة بعد خلط المصلّب (عادي · تركي · إيطالي)</label><div id="finmats">${C.mats.map(finMatRow).join('')}</div><button type="button" class="btn xs" data-finaddmat="1">${icon('plus')}خامة</button></div>
+    ${field(`أجر ساعة الأسطى (${CUR()})`, inp('master', (P.rates || {}).master ?? '', 'type="number" min="0" step="any"'))}${field(`أجر ساعة المساعد (${CUR()})`, inp('helper', (P.rates || {}).helper ?? '', 'type="number" min="0" step="any"'))}${field('مصاريف التشغيل ٪', inp('overheadPct', P.overheadPct ?? 15, 'type="number" min="0" step="any"'))}
+    <label class="check full"><input type="checkbox" name="real" ${P.estimated ? '' : 'checked'}> الأسعار دي حقيقية من الموردين (يشيل تنبيه «تقديرية»)</label></div>`,
+  onSubmit: async f => {
+    const d = formData(f); const mats = [], prices = {};
+    $$('#finmats .finrow', f).forEach(r => { const name = r.querySelector('[name=m-name]').value.trim(); if (!name) return; const id = r.querySelector('[name=m-id]').value || ('m' + uid().slice(-6)); mats.push({ id, name, unit: r.querySelector('[name=m-unit]').value.trim() }); prices[id] = {}; FIN_GRADES.forEach(g => { prices[id][g[0]] = num(r.querySelector(`[name=m-${g[0]}]`).value) || 0; }); });
+    await finSaveCfg({ mats, systems: finCfg().systems });
+    await Store.save('finish', { id: 'prices', prices, rates: { master: num(d.master) || 0, helper: num(d.helper) || 0 }, overheadPct: num(d.overheadPct) || 0, estimated: !d.real, updatedAt: nowISO(), byName: (S.session && S.session.name) || '' }, { silent: true });
+    toast('اتحفظت الأسعار ✓');
+  } });
+};
+document.addEventListener('click', ev => { const t = ev.target.closest && ev.target.closest('[data-finaddmat]'); if (!t) return; ev.preventDefault(); $('#finmats').insertAdjacentHTML('beforeend', finMatRow({})); });
+
+/* ---------- estimate: «بند دهان» ---------- */
+estimateEditor = (base => function (e) {
+  const h = base.apply(this, arguments); if (!finOn() || !finSeesPrice()) return h; const C = finCfg();
+  return h + `<div class="finadd"><b class="small">${icon('layers')}بند دهان:</b><select id="fa-sys">${C.systems.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="fa-g">${FIN_GRADES.map(g => `<option value="${g[0]}">خامات ${g[1]}</option>`).join('')}</select><input id="fa-a" type="number" min="0" step="any" inputmode="decimal" placeholder="المساحة م²"><button type="button" class="btn xs p" data-finest="1">${icon('plus')}إضافة</button><span class="tiny muted" id="fa-hint"></span></div>`;
+})(estimateEditor);
+document.addEventListener('input', ev => { if (!['fa-sys', 'fa-g', 'fa-a'].includes(ev.target && ev.target.id)) return; const hnt = $('#fa-hint'); if (!hnt) return; const c = finCost($('#fa-sys').value, $('#fa-g').value); hnt.textContent = c ? `${finMoney(c.total)} للمتر` : ''; });
+document.addEventListener('change', ev => { if (['fa-sys', 'fa-g'].includes(ev.target && ev.target.id)) ev.target.dispatchEvent(new Event('input', { bubbles: true })); });
+document.addEventListener('click', ev => {
+  const b = ev.target.closest && ev.target.closest('[data-finest]'); if (!b) return; ev.preventDefault();
+  const f = b.closest('form'); const tbl = f && $('#esttbl', f); if (!tbl) return; const area = num($('#fa-a', f).value); if (!area) { toast('اكتب المساحة بالمتر المربع', 'err'); return; }
+  const c = finCost($('#fa-sys', f).value, $('#fa-g', f).value); if (!c) return; const desc = `دهان ${c.sys.name} — خامات ${finGradeName(c.grade)}`;
+  let row = $$('tbody tr', tbl).find(tr => { const d = tr.querySelector('[name^=est-desc-]'); return d && !d.value.trim(); });
+  if (!row) { const n = $$('tbody tr', tbl).length; tbl.querySelector('tbody').insertAdjacentHTML('beforeend', `<tr><td><input name="est-desc-${n}"></td><td><input name="est-qty-${n}" type="number" step="any" min="0"></td><td><input name="est-unit-${n}"></td><td><input name="est-cost-${n}" type="number" step="any" min="0"></td><td class="n num">0</td></tr>`); row = tbl.querySelector('tbody tr:last-child'); }
+  row.querySelector('[name^=est-desc-]').value = desc; row.querySelector('[name^=est-qty-]').value = area; row.querySelector('[name^=est-unit-]').value = 'م²'; row.querySelector('[name^=est-cost-]').value = Math.round(c.total);
+  const cell = row.querySelector('td.n'); if (cell) cell.textContent = fmtMoney(Math.round(c.total) * area);
+  tbl.dispatchEvent(new Event('input', { bubbles: true })); $('#fa-a', f).value = ''; toast('اتضاف بند الدهان ✓');
+});
+
+/* ---------- order page: «مراحل الدهان» ---------- */
+const finCanJob = () => typeof writable === 'function' && writable() && (isAdmin() || ['hr', 'manager', 'head', 'tech', 'office'].includes(role()));
+const finCanTick = () => typeof writable === 'function' && writable() && (isAdmin() || ['manager', 'head'].includes(role()));
+function paintCard(o) {
+  const jobs = o.paint || []; if (!jobs.length && !finCanJob()) return ''; const sp = finSeesPrice();
+  const body = jobs.map(j => { const s = finSys(j.sys) || { name: j.sysName || j.sys, stages: j.stages || [] }; const stages = j.stages || s.stages || []; const done = j.done || {}; const n = stages.filter((st, i) => done[i]).length; const pct = stages.length ? Math.round(n / stages.length * 100) : 0; const c = sp ? finCost(j.sys, j.grade) : null; const needs = finNeeds(j.sys, j.area);
+    return `<div class="paintjob"><div class="row" style="gap:8px;flex-wrap:wrap"><b>${esc(s.name)}</b><span class="badge">خامات ${finGradeName(j.grade)}</span><span class="small">${fmtNum(j.area)} م²</span>${j.desc ? `<span class="small muted">${esc(j.desc)}</span>` : ''}<div class="grow"></div><span class="small">${n}/${stages.length} مرحلة</span>${c ? `<span class="small">التكلفة التقديرية <b>${finMoney(c.total * j.area)}</b></span>` : ''}${finCanJob() ? `<button class="iconbtn" data-action="paintDel" data-arg="${o.id}|${j.id}" title="حذف">${icon('trash')}</button>` : ''}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="stg">${stages.map((st, i) => `<button type="button" class="${done[i] ? 'on' : ''}" ${finCanTick() ? `data-action="paintTick" data-arg="${o.id}|${j.id}|${i}"` : 'disabled'} title="${done[i] ? esc(`${done[i].byName || ''} · ${fmtDate((done[i].at || '').slice(0, 10))}`) : ''}">${done[i] ? '✓ ' : ''}${esc(st.name)}</button>`).join('')}</div>
+      ${needs.length ? `<div class="tiny muted" style="margin-top:8px">الخامات المتوقعة: ${needs.map(x => `${esc(x.name)} ${fmtNum(x.qty)} ${esc(x.unit)}`).join(' · ')} · وقت الشغل حوالي ${finMin((finCost(j.sys, j.grade) || { minutes: 0 }).minutes * j.area)}</div>` : ''}</div>`; }).join('');
+  return `<div class="card" id="paintcard"><div class="cardhead"><h3>${icon('layers')}مراحل الدهان</h3><div class="grow"></div>${finCanJob() ? `<button class="btn sm" data-action="paintNew" data-arg="${o.id}">${icon('plus')}شغل دهان</button>` : ''}</div>${body || '<div class="small muted">مفيش شغل دهان على الأمر ده — ضيف نوع التشطيب والمساحة، والمراحل تنزل لرئيس القسم يعلّم عليها.</div>'}</div>`;
+}
+RENDER_HOOKS.push(() => { if (!finOn() || S.route.view !== 'orders' || !S.route.id) return; const o = byId('orders', S.route.id); if (!o) return; const v = document.getElementById('view'); if (!v || v.querySelector('#paintcard')) return; const h = paintCard(o); if (!h) return; const fg = v.querySelector('#fgordercard'); if (fg) fg.insertAdjacentHTML('beforebegin', h); else v.insertAdjacentHTML('beforeend', h); });
+ACTIONS.paintNew = oid => {
+  const o = byId('orders', oid); if (!o || !finCanJob()) return; const C = finCfg();
+  openModal({ title: `شغل دهان — ${o.code}`, body: `<div class="form">${field('نوع التشطيب', `<select name="sys">${C.systems.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`)}${field('درجة الخامات', `<select name="grade">${FIN_GRADES.map(g => `<option value="${g[0]}">${g[1]}</option>`).join('')}</select>`)}${field('المساحة (م²)', inp('area', '', 'type="number" min="0" step="any" inputmode="decimal" required'))}${field('على إيه', inp('desc', '', 'placeholder="مثال: ضلف المطبخ + الدولاب"'))}</div>`,
+    onSubmit: async f => { const d = formData(f); const area = num(d.area); if (!area) { toast('اكتب المساحة', 'err'); return false; } const s = finSys(d.sys); const job = { id: uid(), sys: d.sys, sysName: s ? s.name : d.sys, grade: d.grade, area, desc: (d.desc || '').trim(), stages: s ? JSON.parse(JSON.stringify(s.stages)) : [], done: {}, at: nowISO(), byName: (S.session && S.session.name) || '' }; await Store.update('orders', oid, { paint: (o.paint || []).concat([job]) }); toast('اتضاف شغل الدهان ✓'); } });
+};
+ACTIONS.paintTick = async arg => {
+  const [oid, jid, i] = String(arg || '').split('|'); const o = byId('orders', oid); if (!o || !finCanTick()) return; const jobs = JSON.parse(JSON.stringify(o.paint || [])); const j = jobs.find(x => x.id === jid); if (!j) return;
+  j.done = j.done || {}; if (j.done[i]) delete j.done[i]; else j.done[i] = { at: nowISO(), by: (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '' };
+  await Store.update('orders', oid, { paint: jobs });
+};
+ACTIONS.paintDel = async arg => { const [oid, jid] = String(arg || '').split('|'); const o = byId('orders', oid); if (!o || !finCanJob()) return; if (!(await confirmDlg('حذف شغل الدهان ده؟', 'حذف'))) return; await Store.update('orders', oid, { paint: (o.paint || []).filter(x => x.id !== jid) }); };
+Object.assign(window, { finCost, finNeeds, finCfg, finPrices });
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
