@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1045-091d6e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1109-48a7d1";</script>
 
 <script>
 'use strict';
@@ -16434,6 +16434,52 @@ function vInstalls() {
 document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'inst-neword' && ev.target.value) { const id = ev.target.value; ev.target.value = ''; ACTIONS.instNew(id); } });
 EXTRA_VIEWS.installs = () => vInstalls();
 Object.assign(window, { instRecalc, instAll });
+/* =====================================================================
+   v4.62 — الإشعارات على الآيفون والساعة بتفضل شغالة:
+   · كل ما التطبيق يتفتح أو يرجع للشاشة (مش بس عند تسجيل الدخول) بنراجع اشتراك الإشعارات على الجهاز؛
+     لو الآيفون غيّره أو شاله بنجدده ونسجله تاني فورًا (ده سبب «وصل مرة وبعدها وقف»).
+   · في «بوابتي»: سطر حالة الإشعارات + زرار «إشعار تجريبي» يبعت لكل أجهزتك ويقولك وصل لمين.
+   · السيرفر (push v3) بيسجل آخر توصيل ناجح/فاشل لكل جهاز، ومدة صلاحية الإشعار بقت 24 ساعة بأولوية عالية.
+   ===================================================================== */
+const PUSH_REFRESH_MS = 6 * 3600e3;
+let _pushRefreshing = false;
+async function pushRefresh(force) {
+  if (_pushRefreshing || !S.session || typeof pushAvailable !== 'function' || !pushAvailable() || Notification.permission !== 'granted') return;
+  _pushRefreshing = true;
+  try {
+    const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
+    const k = 'nf.pushep.' + (S.session.id || ''); let prevEp = '', prevAt = 0;
+    try { const o = JSON.parse(localStorage.getItem(k) || '{}'); prevEp = o.ep || ''; prevAt = +o.at || 0; } catch (e) { /* ignore */ }
+    if (!sub) { const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); const key = v.data && v.data.publicKey; if (!key) return; sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) }); }
+    const ep = sub.endpoint; if (!force && ep === prevEp && Date.now() - prevAt < PUSH_REFRESH_MS) return;
+    const r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), personId: S.session.id || '', ua: navigator.userAgent, replace: prevEp && prevEp !== ep ? prevEp : undefined } });
+    if (r.error) return;
+    try { localStorage.setItem(k, JSON.stringify({ ep, at: Date.now() })); localStorage.setItem('nf.push.' + (S.session.id || ''), '1'); } catch (e) { /* ignore */ }
+  } catch (e) { console.warn('pushRefresh', e); } finally { _pushRefreshing = false; }
+}
+document.addEventListener('nf:ready', () => setTimeout(() => pushRefresh(false), 2000));
+document.addEventListener('nf:login', () => setTimeout(() => pushRefresh(true), 3000));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(() => pushRefresh(false), 1200); });
+setTimeout(() => pushRefresh(false), 6000);
+/* manual enable also records the endpoint so the refresh knows it */
+ACTIONS.pushEnable = (base => async (...a) => { const r = await base(...a); pushRefresh(true); return r; })(ACTIONS.pushEnable);
+
+/* ---- status row + test button in «بوابتي» (والمالك على لوحة المتابعة) ---- */
+RENDER_HOOKS.push(() => {
+  if (!S.session || !(/^#\/me/.test(location.hash) || (/^#\/dashboard/.test(location.hash) && isAdmin()))) return; const v = document.getElementById('view'); if (!v || v.querySelector('#pushok') || v.querySelector('#pushrow')) return;
+  if (typeof pushAvailable !== 'function' || !pushAvailable() || Notification.permission !== 'granted') return;
+  v.insertAdjacentHTML('afterbegin', `<div class="pushrow on" id="pushok"><span class="dot"></span><span style="flex:1">الإشعارات شغالة على الجهاز ده — لو عايز تتأكد إنها بتوصل للموبايل والساعة دوس «إشعار تجريبي».</span><button class="btn xs" data-action="pushTest">إشعار تجريبي</button></div>`);
+});
+ACTIONS.pushTest = async () => {
+  if (!pushAvailable()) return; await pushRefresh(true);
+  try {
+    const r = await S.sb.functions.invoke('push', { body: { action: 'test' } }); if (r.error) throw r.error;
+    const res = (r.data && r.data.results) || [];
+    if (!res.length) { toast('مفيش أجهزة مربوطة بحسابك — دوس «تفعيل الإشعارات»', 'err'); return; }
+    const ok = res.filter(x => x.ok).map(x => x.device), bad = res.filter(x => !x.ok).map(x => x.device);
+    toast(`اتبعت ✓ ${ok.join('، ') || '—'}${bad.length ? ` · فشل: ${bad.join('، ')}` : ''} — اقفل الشاشة واستنى ثواني`, bad.length && !ok.length ? 'err' : undefined);
+  } catch (e) { toast('تعذّر إرسال التجربة: ' + (e.message || e), 'err'); }
+};
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
