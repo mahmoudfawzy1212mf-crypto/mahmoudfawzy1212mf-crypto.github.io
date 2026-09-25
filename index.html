@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-0820-45807d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-0827-e16545";</script>
 
 <script>
 'use strict';
@@ -13802,11 +13802,14 @@ boot();
 const cctvCfg = () => Object.assign({ cameras: [], zones: [], idleMinutes: 20, awayMinutes: 15, silentMinutes: 10, demo: false }, (S.settings && S.settings.cctv) || {});
 const cctvDemoOn = () => !!cctvCfg().demo || !(typeof sbOn === 'function' && sbOn());
 const cctvZoneName = z => { if (!z) return 'غير محدد'; const d = S.settings.departments.find(x => x.id === z); if (d) return d.name; const zz = (cctvCfg().zones || []).find(x => x.id === z); return zz ? zz.name : z; };
-const cctvRoles = ['admin', 'manager', 'vice', 'hr', 'head'];
+/* v4.57: المراقبة للمالك ومدير المصنع ومدير الحسابات ونائب رئيس مجلس الإدارة بس (رؤساء الأقسام لأ) */
+const cctvRoles = ['admin', 'manager', 'vice', 'hr'];
 const canCctv = () => !!S.session && (isAdmin() || cctvRoles.includes(role()));
 VIEW_TITLES.cctv = 'المراقبة — الكاميرات';
 (() => { const i = NAV.findIndex(n => n.id === 'attendance'); const entry = { id: 'cctv', label: 'المراقبة (كاميرات)', icon: 'camera', count: () => (S.cctvAlerts || []).length, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
-['manager', 'vice', 'hr', 'head'].forEach(r => { if (ROLE_VIEWS[r] && !ROLE_VIEWS[r].includes('cctv')) ROLE_VIEWS[r].push('cctv'); });
+['manager', 'vice', 'hr'].forEach(r => { if (ROLE_VIEWS[r] && !ROLE_VIEWS[r].includes('cctv')) ROLE_VIEWS[r].push('cctv'); });
+setTimeout(() => Object.keys(ROLE_VIEWS).forEach(r => { if (!cctvRoles.includes(r) && Array.isArray(ROLE_VIEWS[r])) ROLE_VIEWS[r] = ROLE_VIEWS[r].filter(v => v !== 'cctv'); }), 0);
+canSee = (base => view => (view === 'cctv' ? canCctv() && base(view) : base(view)))(canSee);
 /* ---------- data: today's aggregate (server) or the demo generator (local) ---------- */
 S.cctv = S.cctv || { day: null, date: null, at: 0, loading: false };
 async function cctvLoad(date, force) {
@@ -13884,7 +13887,7 @@ ACTIONS.cctvOpen = wid => {
 let _cctvTick = 0; const _cctvSent = {};
 setInterval(async () => { if (!S.session || !canCctv() || document.hidden || Date.now() - _cctvTick < 5 * 60000) return; _cctvTick = Date.now(); if (!cctvCfg().cameras.length) return; const day = await cctvLoad(todayISO(), true); const an = cctvAnalyse(day); S.cctvAlerts = an.alerts; if (S.route.view === 'cctv') render(false);
   if (cctvDemoOn() || !(isAdmin() || role() === 'manager')) return;
-  for (const a of an.alerts) { if (!a.w || !['idle', 'away', 'unseen'].includes(a.kind)) continue; const k = a.w.id + ':' + a.kind; if (_cctvSent[k] && Date.now() - _cctvSent[k] < 3600000) continue; _cctvSent[k] = Date.now(); const h = deptHeads(a.w.deptId)[0]; try { await notifyRole('head', `كاميرات: ${a.text}`, 'افتح «المراقبة» وشوف حركته النهارده.', { id: `cctv_${a.w.id}_${todayISO()}_${a.kind}`, priority: 'high', fields: Object.assign({ deptId: a.w.deptId || null, kind: 'notice', link: '/#/cctv' }, h ? { assigneeId: h.id, toRole: null } : {}) }); } catch (e) { /* ignore */ } }
+  for (const a of an.alerts) { if (!a.w || !['idle', 'away', 'unseen'].includes(a.kind)) continue; const k = a.w.id + ':' + a.kind; if (_cctvSent[k] && Date.now() - _cctvSent[k] < 3600000) continue; _cctvSent[k] = Date.now(); try { await notifyRole('manager', `كاميرات: ${a.text}`, 'افتح «المراقبة» وشوف حركته النهارده.', { id: `cctv_${a.w.id}_${todayISO()}_${a.kind}`, priority: 'high', fields: { deptId: a.w.deptId || null, kind: 'notice', link: '/#/cctv' } }); } catch (e) { /* ignore */ } }
 }, 60000);
 /* ---------- settings ---------- */
 const camRow = c => `<div class="nl" style="grid-template-columns:70px 1.5fr 1.2fr 28px"><input name="c-ch" placeholder="قناة" value="${esc(c.channel ?? '')}"><input name="c-name" placeholder="اسم الكاميرا (بوابة، ممر النجارة…)" value="${esc(c.name || '')}"><select name="c-zone"><option value="">— المنطقة —</option>${opts(S.settings.departments, c.zone || '')}<option value="gate" ${c.zone === 'gate' ? 'selected' : ''}>البوابة</option><option value="yard" ${c.zone === 'yard' ? 'selected' : ''}>الساحة</option><option value="store" ${c.zone === 'store' ? 'selected' : ''}>المخزن</option></select><button type="button" class="iconbtn" data-cam="del">${icon('x')}</button></div>`;
