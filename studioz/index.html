@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1340-08dcd8";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1404-c528f9";</script>
 
 <script>
 'use strict';
@@ -17972,6 +17972,175 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { clearTimeout(t); go(); }); else { clearTimeout(t); go(); }
     } catch (e) { console.warn('lof quote print', e); return base.apply(this, arguments); }
   }; })(ACTIONS.printQuote);
+})();
+/* =====================================================================
+   v4.73 — عرض السعر «Priced Works Summary» + الإرسال PDF (مش لينك درايف)
+   · كل عروض المصنع (غير lōf) بتطلع بشكل Priced Works Summary الإنجليزي: لوجو NINETY + بيانات الشركة،
+     Client / Attention / Project / Location / Reference / Drawings / Source / Currency، البنود متقسمة لأقسام
+     (Div # 01 …) بعنوان بولد + «BY NINETY FABRICATION / BY ELMEN» + الوصف، Sub-total لكل قسم، ملخص + ضريبة،
+     Notes (= شروط العرض + الصلاحية)، فوتر ورقم صفحة في الـ PDF.
+   · الفورم: خانات Project / Location / Attention / Drawings / Source + زرار «+ قسم» (سطر عنوان قسم بين البنود).
+   · «واتساب» / «إيميل» في صفحة العرض: بيجهّز PDF للعرض (lōf بالتمبلت بتاعه) — الموبايل: قايمة المشاركة بالملف
+     مرفق؛ الكمبيوتر: الملف بيتنزل + واتساب ويب / الإيميل بيتفتح بالرسالة. الرسالة بسيطة ومن غير اسم الموظف.
+   ===================================================================== */
+(function () {
+  if (window.__NF_QPDF__) return; window.__NF_QPDF__ = 1;
+  const H2P = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+  let _h2p = null;
+  const loadH2P = () => { if (window.html2pdf) return Promise.resolve(true); if (_h2p) return _h2p; _h2p = new Promise(res => { const s = document.createElement('script'); s.src = H2P; s.onload = () => res(!!window.html2pdf); s.onerror = () => { _h2p = null; res(false); }; document.head.appendChild(s); }); return _h2p; };
+  const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = n => (+n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const cur = () => { const c = (S.settings && S.settings.currency) || ''; return (!c || /ج|جنيه|EGP/i.test(c)) ? 'EGP' : c; };
+  const vatPct = () => (+S.settings.vat > 0 ? +S.settings.vat : 14);
+  const longDate = iso => { if (!iso) return ''; const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); };
+  const dmy = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || ''); };
+  const rtl = s => (/[؀-ۿ]/.test(String(s || '')) ? ' dir="rtl" style="text-align:right;unicode-bidi:plaintext"' : '');
+  const BY = { alu: 'NINETY FABRICATION', elm: 'ELMEN', lof: 'LŌF' };
+  const byOf = (q, it) => { const p = it.productId ? byId('products', it.productId) : null; const b = (p && p.brandId) || it.brandId || q.brandId; return it.by || BY[b] || String(brandName(b) || '').toUpperCase(); };
+  const unitTxt = u => { const s = String(u || '').trim(); if (/^(م2|م²|m2|m²|متر مربع)$/i.test(s)) return 'm<sup>2</sup>'; if (/^(م\.?ط|m|متر طولي|lm)$/i.test(s)) return 'm'; if (!s || /^(قطعة|عدد|وحدة|pcs?|piece|unit|no\.?)$/i.test(s)) return 'Unit'; if (/^(طقم|set)$/i.test(s)) return 'Set'; return h(s); };
+  const split = it => { const p = it.productId ? byId('products', it.productId) : null; const raw = String(it.desc || ''); const m = raw.split(/\n| — | \| /); const title = (p && (p.nameEn || '')) || m[0] || ''; const rest = (p && p.descEn) || (p && p.nameEn ? raw : m.slice(1).join(' — ')); return { title, rest }; };
+  /* items → divisions (a line with sec:true starts a new division) */
+  function divisions(q) {
+    const out = []; let cur0 = null;
+    (q.items || []).forEach(it => { if (it.sec) { cur0 = { name: it.desc || '', items: [] }; out.push(cur0); return; } if (!cur0) { cur0 = { name: '', items: [] }; out.push(cur0); } cur0.items.push(it); });
+    return out.filter(d => d.items.length);
+  }
+  const CSS = `<style>
+.pws,.pws *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pws{direction:ltr;text-align:left;width:210mm;margin:0 auto;padding:0 14mm;background:#fff;color:#222;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8.6pt;line-height:1.35}
+.pws .hd{display:flex;justify-content:space-between;align-items:center;padding:10mm 0 4mm;border-bottom:.8pt solid #222}
+.pws .hd img{height:12mm;width:auto;display:block}.pws .hd .co{text-align:right;font-size:8pt;color:#555;line-height:1.45}.pws .hd .co b{color:#111;font-size:9pt}
+.pws h1{font-size:19pt;margin:7mm 0 0;color:#111;font-weight:700}.pws .sub{font-size:10.5pt;color:#666;margin:1mm 0 5mm}
+.pws .info{display:grid;grid-template-columns:23mm 1fr 23mm 1fr;border-top:.6pt solid #999;border-bottom:.6pt solid #999;padding:2.5mm 0;row-gap:1.6mm;margin-bottom:7mm}
+.pws .info .k{color:#777;font-weight:700;font-size:7.8pt;padding-top:.4mm}.pws .info .v{color:#222;font-size:9pt}
+.pws h2{font-size:10.5pt;margin:6mm 0 2mm;color:#111;font-weight:700}
+.pws table{width:100%;border-collapse:collapse}.pws thead th{background:#262626;color:#fff;font-weight:700;font-size:8pt;padding:2mm 2mm;text-align:left}
+.pws th.r,.pws td.r{text-align:right}.pws td{padding:2.6mm 2mm;vertical-align:top;border-bottom:.5pt solid #ddd}
+.pws tr.it{break-inside:avoid;page-break-inside:avoid}.pws tr.it:nth-child(even) td{background:#fafafa}
+.pws td.no{width:11mm;color:#333}.pws td.d{width:auto}.pws td.d b{display:block;font-size:9pt;color:#111}.pws td.d .by{display:block;font-weight:700;font-size:7pt;color:#111;margin:.4mm 0 .5mm}.pws td.d .x{color:#666;font-size:7.8pt}
+.pws td.u{width:13mm}.pws td.q{width:14mm}.pws td.rt{width:25mm}.pws td.tt{width:24mm}
+.pws tr.st td{background:#f2f2f2;font-weight:700;font-size:9pt;border-top:.8pt solid #222;border-bottom:.6pt solid #ccc}
+.pws .sum{display:flex;justify-content:flex-end;margin-top:4mm;break-inside:avoid;page-break-inside:avoid}.pws .sum table{width:98mm}.pws .sum td{padding:2mm 2mm;font-size:8.6pt}.pws .sum td.r{text-align:right}
+.pws .sum tr.tx td{font-weight:700;border-top:.8pt solid #222}.pws .sum tr.gr td{font-weight:700;font-size:11pt;background:#f2f2f2;border-top:.8pt solid #222;border-bottom:.8pt solid #222}
+.pws .notes{margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.pws .notes h3{font-size:10pt;margin:0 0 2mm;color:#111}.pws .notes div{font-size:7.9pt;color:#333;margin-bottom:.7mm}
+.pws .pf{display:none}
+@media print{.pws .pf{display:flex;position:fixed;bottom:6mm;left:14mm;right:14mm;justify-content:space-between;font-size:7pt;color:#888;border-top:.5pt solid #ccc;padding-top:1.5mm}}
+</style>`;
+  function footTxt(q, c) { const proj = q.project || q.subject || ''; const cl = c ? (c.nameEn || c.name || '') : ''; return `Priced Works Summary - ${proj}  |  Prepared by Ninety Fabrication${cl && !/[؀-ۿ]/.test(cl) ? ' for ' + cl : ''}  |  ${longDate(q.date)}`; }
+  window.nfQuoteHTML = function (q, c, sub, after, vat) {
+    const divs = divisions(q); const proj = q.project || q.subject || '—';
+    const client = c ? (c.nameEn || c.name || '—') : '—'; const att = q.attention || (c && c.contact) || '';
+    const info = [['Client', client], ['Reference', q.number || ''], ['Attention', att], ['Drawings', q.drawings || ''], ['Project', proj], ['Source', q.source || ''], ['Location', q.location || ''], ['Currency', cur()]];
+    const rows = (d, di) => d.items.map((it, i) => { const s = split(it); const tot = (+it.qty || 0) * (+it.price || 0); return `<tr class="it"><td class="no">${di + 1}.${i + 1}</td><td class="d"><b${rtl(s.title)}>${h(s.title)}</b><span class="by">BY ${h(byOf(q, it))}</span>${s.rest ? `<span class="x"${rtl(s.rest)}>${h(s.rest)}</span>` : ''}</td><td class="u">${unitTxt(it.unit)}</td><td class="q">${money(it.qty)}</td><td class="rt r">${money(it.price)}</td><td class="tt r">${money(tot)}</td></tr>`; }).join('');
+    const dsub = d => d.items.reduce((s, it) => s + (+it.qty || 0) * (+it.price || 0), 0);
+    const dname = (d, i) => `Div # ${String(i + 1).padStart(2, '0')}${d.name ? ' - ' + h(d.name) : ''}`;
+    const notes = String(q.terms || '').split(/\n+/).map(s => s.trim()).filter(Boolean).map((s, i) => /^\d+[.)]/.test(s) ? s : `${i + 1}. ${s}`);
+    if (q.validUntil && !notes.some(n => /valid|صلاحي|ساري/i.test(n))) notes.push(`Validity until ${dmy(q.validUntil)}.`);
+    return CSS + `<div class="pws" lang="en">
+      <div class="hd"><img src="${LOGO_SRC}" alt="NINETY"><div class="co"><b>Ninety Fabrication</b><br>Fifth Settlement, New Cairo, Egypt<br>info@ninetystudioz.com &nbsp;|&nbsp; +20 111 454 5017</div></div>
+      <h1>Priced Works Summary</h1><div class="sub"${rtl(q.subject)}>${h(proj)}${q.subject && q.subject !== proj ? ' | ' + h(q.subject) : ''}</div>
+      <div class="info">${info.map(([k, v]) => `<div class="k">${k}</div><div class="v"${rtl(v)}>${h(v || '—')}</div>`).join('')}</div>
+      ${divs.map((d, di) => `<h2${rtl(d.name)}>${dname(d, di)}</h2><table><thead><tr><th>Item</th><th>Description</th><th>Unit</th><th>Qty</th><th class="r">Unit rate (${cur()})</th><th class="r">Total (${cur()})</th></tr></thead><tbody>${rows(d, di)}<tr class="st"><td></td><td colspan="4">Sub-total - Div # ${String(di + 1).padStart(2, '0')}</td><td class="r">${money(dsub(d))}</td></tr></tbody></table>`).join('')}
+      <div class="sum"><table><tbody>${divs.length > 1 ? divs.map((d, i) => `<tr><td>Sub-total Div # ${String(i + 1).padStart(2, '0')}</td><td class="r">${money(dsub(d))}</td></tr>`).join('') : ''}
+        ${+q.discount ? `<tr><td>Discount</td><td class="r">- ${money(q.discount)}</td></tr>` : ''}
+        <tr class="tx"><td>Total excluding VAT (${cur()})</td><td class="r">${money(after)}</td></tr>
+        ${q.vat ? `<tr><td>VAT ${vatPct()}%</td><td class="r">${money(vat)}</td></tr>` : ''}
+        <tr class="gr"><td>Total ${q.vat ? 'including VAT' : ''} (${cur()})</td><td class="r">${money(after + vat)}</td></tr></tbody></table></div>
+      ${notes.length ? `<div class="notes"><h3>Notes</h3>${notes.map(n => `<div${rtl(n)}>${h(n)}</div>`).join('')}</div>` : ''}
+      <div class="pf"><span>${h(footTxt(q, c))}</span></div>
+    </div>`;
+  };
+  /* every non-lōf quotation uses the Priced Works Summary (screen + print) */
+  quotePrint = (base => function (q, c, sub, after, vat) { if (q && q.brandId !== 'lof') { try { return window.nfQuoteHTML(q, c, sub, after, vat); } catch (e) { console.warn('pws', e); } } return base.apply(this, arguments); })(quotePrint);
+  const qTotals = q => { const sub = quoteSub(q); const after = sub - (+q.discount || 0); const vat = q.vat ? after * vatPct() / 100 : 0; return { sub, after, vat }; };
+  const qHTML = q => { const c = byId('clients', q.clientId); const t = qTotals(q); return q.brandId === 'lof' && typeof window.lofQuoteHTML === 'function' ? window.lofQuoteHTML(q, c, t.sub, t.after, t.vat) : window.nfQuoteHTML(q, c, t.sub, t.after, t.vat); };
+  ACTIONS.printQuote = (base => id => { const q = byId('quotations', id); if (!q || q.brandId === 'lof') return base(id); if (typeof printHTML === 'function') printHTML(qHTML(q)); else base(id); })(ACTIONS.printQuote);
+
+  /* ---- PDF ---- */
+  const pdfName = q => `${q.number || 'Quotation'} - ${(q.project || q.subject || '').replace(/[\\/:*?"<>|]+/g, ' ').trim()}`.slice(0, 90).trim() + '.pdf';
+  async function quotePdfBlob(q) {
+    /* isolated iframe: the app's modern CSS (color-mix / color()) breaks html2canvas */
+    const host = document.createElement('iframe'); host.style.cssText = 'position:fixed;left:-10000px;top:0;width:820px;height:1200px;border:0;background:#fff'; document.body.appendChild(host);
+    const idoc = host.contentDocument; idoc.open(); idoc.write(`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}</style></head><body>${qHTML(q)}</body></html>`); idoc.close();
+    const ok = await new Promise(res => { const sc = idoc.createElement('script'); sc.src = H2P; sc.onload = () => res(!!host.contentWindow.html2pdf); sc.onerror = () => res(false); idoc.head.appendChild(sc); });
+    if (!ok) { host.remove(); throw new Error('تعذّر تحميل مولّد الـ PDF — اتأكد من النت'); }
+    try { await Promise.all([...idoc.images].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; }))); } catch (e) { /* ignore */ }
+    try {
+      const el = idoc.querySelector('.pws,.lofq') || idoc.body; const isLof = q.brandId === 'lof'; const c = byId('clients', q.clientId);
+      const opts = host.contentWindow.JSON.parse(JSON.stringify({ margin: isLof ? [0, 0, 0, 0] : [0, 0, 14, 0], filename: pdfName(q), image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr.it', '.sum', '.notes', '.terms', '.sign'] } })); // same-realm arrays (html2pdf checks instanceof Array)
+      const w = host.contentWindow.html2pdf().set(opts).from(el).toPdf();
+      if (!isLof) await w.get('pdf').then(pdf => { const n = pdf.internal.getNumberOfPages(); const ft = footTxt(q, c).replace(/[^\x20-\x7E]/g, ''); for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setDrawColor(210); pdf.line(14, 283, 196, 283); pdf.setFontSize(7); pdf.setTextColor(140); pdf.text(ft, 14, 287); pdf.text(`Page ${i}`, 196, 287, { align: 'right' }); } });
+      const b0 = await w.output('blob'); const ab = await b0.arrayBuffer(); return new Blob([new Uint8Array(ab)], { type: 'application/pdf' }); // copy into this realm before the iframe goes away
+    } finally { host.remove(); }
+  }
+  window.nfQuotePdfBlob = quotePdfBlob;
+
+  /* ---- message (simple, no employee name, no emoji) ---- */
+  function qMessage(q) {
+    const c = byId('clients', q.clientId) || {}; const who = String(q.attention || c.contact || '').trim(); const proj = q.project || q.subject || '';
+    const sign = q.brandId === 'lof' ? 'lōf outdoor furniture' : 'Ninety Fabrication';
+    return `${who ? `أهلاً ${who}،` : 'أهلاً،'}\n${proj ? `مرفق عرض السعر الخاص بمشروع ${proj}.` : `مرفق عرض السعر رقم ${q.number || ''}.`}\nلو في أي استفسار إحنا متاحين.\n${sign}`;
+  }
+  window.nfQuoteMessage = qMessage;
+  async function markSent(q, via) { const patch = { sentVia: via, sentAt: nowISO(), sentBy: S.session?.name || '' }; if (q.status === 'draft') patch.status = 'sent'; try { await Store.update('quotations', q.id, patch); } catch (e) { console.warn(e); } }
+  const canShareFiles = () => { try { return !!(navigator.canShare && navigator.share && navigator.canShare({ files: [new File([new Blob(['x'], { type: 'application/pdf' })], 'x.pdf', { type: 'application/pdf' })] })); } catch (e) { return false; } };
+  const isMobile = () => /iPhone|iPad|Android/i.test(navigator.userAgent);
+  function download(blob, name) { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+  let _prep = null; // { id, blob, name }
+  function openSend(id, via) {
+    const q = byId('quotations', id); if (!q) return; const c = byId('clients', q.clientId) || {};
+    const to = via === 'email' ? String(c.email || '').trim() : String(c.phone || '').trim(); const share = isMobile() && canShareFiles();
+    const subj = `عرض سعر ${q.number || ''}${(q.project || q.subject) ? ' — ' + (q.project || q.subject) : ''}`;
+    _prep = null;
+    openModal({ title: `إرسال ${q.number || ''} ${via === 'email' ? 'بالإيميل' : 'واتساب'}`, wide: true, submitLabel: share ? 'مشاركة الـ PDF' : (via === 'email' ? 'تنزيل الـ PDF وفتح الإيميل' : 'تنزيل الـ PDF وفتح واتساب'),
+      body: `<div class="small" id="qs-st" style="margin-bottom:8px">${icon('bell')} بيتجهّز ملف الـ PDF…</div>
+        ${via === 'email' ? `<div class="field full"><label>الموضوع</label><input class="inp" id="qs-subj" value="${esc(subj)}"></div>` : ''}
+        <div class="field full"><label>الرسالة</label><textarea class="inp" id="qs-msg" style="width:100%;min-height:120px;font-size:13px">${esc(qMessage(q))}</textarea></div>
+        <p class="tiny muted" style="margin-top:6px">${share ? 'هتفتح قايمة المشاركة — اختار واتساب أو الإيميل والملف هيتبعت مرفق مع الرسالة.' : `الملف هيتنزل على الجهاز و${via === 'email' ? 'برنامج الإيميل' : 'واتساب ويب'} هيتفتح بالرسالة${to ? ` لـ <span class="ltr">${esc(to)}</span>` : ''} — اسحب الملف على المحادثة.`}</p>`,
+      onOpen: f => { quotePdfBlob(q).then(blob => { _prep = { id, blob, name: pdfName(q) }; const st = $('#qs-st', f); if (st) st.innerHTML = `${icon('check')} الملف جاهز: <b class="ltr">${esc(pdfName(q))}</b> (${Math.max(1, Math.round(blob.size / 1024))} KB)`; }).catch(e => { const st = $('#qs-st', f); if (st) st.innerHTML = `<span style="color:var(--crit-ink)">${esc(e.message || e)}</span>`; }); },
+      onSubmit: async f => {
+        if (!_prep || _prep.id !== id) { toast('الملف لسه بيتجهّز — ثانية واحدة', 'err'); return false; }
+        const msg = ($('#qs-msg', f) || {}).value || qMessage(q); const s = ($('#qs-subj', f) || {}).value || subj;
+        if (share) {
+          const file = new File([_prep.blob], _prep.name, { type: 'application/pdf' });
+          try { if (navigator.clipboard) navigator.clipboard.writeText(msg).catch(() => { }); } catch (e) { /* ignore */ }
+          try { await navigator.share({ files: [file], text: msg, title: s }); } catch (e) { if (e && e.name === 'AbortError') return false; toast('المشاركة ماتمتش: ' + (e.message || e), 'err'); return false; }
+          await markSent(q, via); toast('اتبعت ✓ — الحالة: مرسل'); return true;
+        }
+        download(_prep.blob, _prep.name);
+        if (via === 'email') location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(s)}&body=${encodeURIComponent(msg)}`;
+        else window.open(to && typeof waLink === 'function' ? waLink(to, msg) : `https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+        await markSent(q, via === 'email' ? 'email' : 'whatsapp'); toast('الملف اتنزل — اسحبه على المحادثة. الحالة: مرسل'); return true;
+      } });
+  }
+  ACTIONS.quoteSendWa = id => openSend(id, 'whatsapp');
+  ACTIONS.quoteSendMail = id => openSend(id, 'email');
+  ACTIONS.quotePdf = async id => { const q = byId('quotations', id); if (!q) return; toast('بيتجهّز الـ PDF…'); try { download(await quotePdfBlob(q), pdfName(q)); } catch (e) { toast(e.message || String(e), 'err'); } };
+
+  /* ---- form: extra fields + «+ قسم» section rows ---- */
+  const SEC_CSS = '<style>#lines .line.lsec{grid-template-columns:36px minmax(0,1fr) 32px;background:var(--surface-2,var(--surface));border-radius:8px}#lines .line.lsec input[name=l-desc]{font-weight:700}#lines .line.lsec .lsl{font-size:11px;color:var(--muted);align-self:center;text-align:center}</style>';
+  (document.body || document.head).insertAdjacentHTML('beforeend', SEC_CSS);
+  const secRow = it => `<div class="line lsec" data-sec="1"><span class="lsl">قسم</span><input type="hidden" name="l-img" value=""><input type="hidden" name="l-pid" value=""><input name="l-desc" placeholder="اسم القسم — مثال: Internal Glass Partitions" value="${esc(it.desc || '')}"><input type="hidden" name="l-qty" value="0"><input type="hidden" name="l-unit" value=""><input type="hidden" name="l-price" value="0"><button type="button" class="del" data-line="del" title="حذف">${icon('x')}</button></div>`;
+  lineRows = (base => items => { const arr = items || []; if (!arr.some(x => x && x.sec)) return base(arr); return arr.map(it => (it && it.sec ? secRow(it) : base([it]))).join(''); })(lineRows);
+  readLines = (base => f => { const rows = $$('#lines .line', f); const plain = base(f); let k = 0; const out = []; rows.forEach(l => { const d = (l.querySelector('[name=l-desc]') || {}).value; if (!String(d || '').trim()) return; if (l.dataset.sec) { k++; out.push({ sec: true, desc: d.trim(), qty: 0, price: 0, unit: '' }); } else { const x = plain[k++]; if (x) out.push(x); } }); return out; })(readLines);
+  const EXTRA = [['project', 'Project (اسم المشروع بالإنجليزي)', 'مثال: Coworker - Maadi'], ['location', 'Location', 'مثال: Maadi, Cairo - Egypt'], ['attention', 'Attention (المسؤول عند العميل)', 'مثال: Eng. Hesham Abdel Khalek'], ['drawings', 'Drawings', 'مثال: Sakan Architecture, P.03 - P.10'], ['source', 'Source', 'مثال: Coworker Maadi BOQ (partitions)']];
+  wireQuoteForm = (base => f => {
+    base(f); const q = (f.dataset.qid && byId('quotations', f.dataset.qid)) || {};
+    const subj = f.querySelector('[name=subject]'); const at = subj && subj.closest('.field');
+    if (at && !f.querySelector('[name=project]')) at.insertAdjacentHTML('afterend', `<details class="full" style="margin:2px 0 4px"${EXTRA.some(([k]) => q[k]) ? ' open' : ''}><summary class="small" style="cursor:pointer;font-weight:700">بيانات العرض الإنجليزي (Project / Location / Attention / Drawings / Source)</summary><div class="form" style="margin-top:6px">${EXTRA.map(([k, l, ph]) => field(l, `<input class="inp" name="${k}" dir="ltr" placeholder="${esc(ph)}" value="${esc(q[k] || '')}">`)).join('')}</div></details>`);
+    const add = f.querySelector('[data-line="add"]'); if (add && !f.querySelector('[data-line="sec"]')) { add.insertAdjacentHTML('beforebegin', `<button type="button" class="btn sm ghost" data-line="sec">${icon('plus')}قسم</button> `); add.parentElement.insertAdjacentHTML('afterend', '<div class="tiny muted" style="margin-top:4px">عشان يبقى للبند عنوان بولد ووصف تحته في العرض: اكتب العنوان ثم | ثم الوصف — مثال: Glass partition 10 mm | Matt-black aluminium frames…</div>'); }
+    f.addEventListener('click', e => { const b = e.target.closest('[data-line="sec"]'); if (!b) return; e.preventDefault(); e.stopPropagation(); const box = $('#lines', f); const empty = $$('.line', box).filter(l => !l.dataset.sec && !l.querySelector('[name=l-desc]').value.trim()); empty.forEach(l => l.remove()); box.insertAdjacentHTML('beforeend', secRow({}) + lineRows([{}])); const inp = box.querySelector('.line.lsec:last-of-type [name=l-desc]') || $$('.line.lsec [name=l-desc]', box).pop(); if (inp) inp.focus(); }, true);
+  })(wireQuoteForm);
+  ACTIONS.quoteEdit = (base => id => { base(id); const f = $('#mform'); if (f) { f.dataset.qid = id; const q = byId('quotations', id) || {}; EXTRA.forEach(([k]) => { const i = f.querySelector(`[name=${k}]`); if (i && !i.value) i.value = q[k] || ''; }); if (EXTRA.some(([k]) => q[k])) { const d = f.querySelector('details'); if (d) d.open = true; } } })(ACTIONS.quoteEdit);
+  saveQuote = (base => async (f, q) => {
+    const extra = {}; EXTRA.forEach(([k]) => { const i = f.querySelector(`[name=${k}]`); if (i) extra[k] = i.value.trim(); });
+    const num0 = (f.querySelector('[name=number]') || {}).value; const r = await base(f, q); if (r === false) return r;
+    const doc = q && q.id ? byId('quotations', q.id) : sortBy(list('quotations').filter(x => x.number === num0), x => x.createdAt || x.updatedAt || '', true)[0];
+    if (doc && Object.keys(extra).some(k => (doc[k] || '') !== extra[k])) { try { await Store.update('quotations', doc.id, extra); } catch (e) { console.warn(e); } }
+    return r;
+  })(saveQuote);
+  /* PDF download button on the quotation page */
+  RENDER_HOOKS.push(() => { if (!S.route || S.route.view !== 'quotes' || !S.route.id) return; const b = document.querySelector('#view [data-action="quoteSendMail"]'); if (!b || b.parentElement.querySelector('[data-action="quotePdf"]')) return; b.insertAdjacentHTML('afterend', `<button class="btn sm" data-action="quotePdf" data-arg="${esc(S.route.id)}">${icon('print')}PDF</button>`); });
 })();
 </script>
 
