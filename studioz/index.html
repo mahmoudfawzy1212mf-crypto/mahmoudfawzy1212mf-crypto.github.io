@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-0852-04be9c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-0904-10ba1c";</script>
 
 <script>
 'use strict';
@@ -16227,6 +16227,39 @@ vMe = (base => function () {
   const card = `<div class="card" id="finmecard"><div class="cardhead"><h3>${icon('layers')}تسعير الدهانات</h3><div class="grow"></div>${open ? `<a class="btn sm" href="#/finish">افتح الصفحة</a>` : pe ? '<span class="badge warn">طلب التعديل مستني المالك</span>' : `<button class="btn sm p" data-action="finEditAsk">طلب تعديل</button>`}</div><div class="small muted">${open ? (pl ? 'اتبعت للاعتماد — مستني موافقة المالك.' : 'الصفحة مفتوحة لك دلوقتي تعدّل المراحل والأسعار.') : 'التسعير معتمد والصفحة مقفولة. لو محتاج تعدّل مرحلة أو سعر، ابعت طلب تعديل للمالك.'}</div></div>`;
   const i = html.indexOf('<div class="card'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
 })(vMe);
+/* =====================================================================
+   v4.59 — زرار «رجوع» حقيقي: يرجعك للصفحة اللي كنت فيها قبل كده (لوحة المتابعة، إشعار، مهمة، أمر تشغيل…)
+   مش لقائمة ثابتة. زراير «كل الطلبات / كل الأوامر…» اللي فوق بقت «رجوع» لو جيت من صفحة تانية،
+   وأي صفحة تفاصيل مفيهاش زرار رجوع بقى فيها واحد.
+   ===================================================================== */
+const _navStack = [location.hash || '#/dashboard'];
+window.addEventListener('hashchange', () => {
+  const h = location.hash || '#/dashboard';
+  if (_navStack.length > 1 && _navStack[_navStack.length - 2] === h) _navStack.pop();
+  else if (_navStack[_navStack.length - 1] !== h) _navStack.push(h);
+  if (_navStack.length > 60) _navStack.shift();
+});
+const navPrev = () => (_navStack.length > 1 ? _navStack[_navStack.length - 2] : '');
+const _backIco = () => (typeof icon === 'function' ? icon('back') : '');
+const _navLbl = h => { const v = String(h || '').replace(/^#\/?/, '').split('/')[0]; return (typeof VIEW_TITLES !== 'undefined' && VIEW_TITLES[v]) || ''; };
+RENDER_HOOKS.push(() => {
+  const tb = document.getElementById('topbar'); if (!tb) return; const prev = navPrev(); const bi = _backIco();
+  let found = false;
+  tb.querySelectorAll('a.btn[href^="#/"]').forEach(a => {
+    if (!bi || !a.innerHTML.startsWith(bi)) return; found = true;
+    if (a.dataset.navback) return; a.dataset.navback = '1';
+    if (prev && prev !== a.getAttribute('href') && prev !== location.hash) { const sp = a.querySelector('span'); if (sp) { a.title = sp.textContent; sp.textContent = 'رجوع'; } }
+  });
+  /* detail page with no back button at all → add one */
+  if (!found && S.route && S.route.id && prev && prev !== location.hash) {
+    const box = tb.querySelector('.tb-actions'); if (box && !box.querySelector('[data-navback]')) box.insertAdjacentHTML('afterbegin', `<a class="btn ghost" data-navback="1" href="${esc(prev)}" title="${esc(_navLbl(prev))}">${bi}<span>رجوع</span></a>`);
+  }
+});
+document.addEventListener('click', ev => {
+  const a = ev.target.closest && ev.target.closest('[data-navback]'); if (!a) return;
+  const prev = navPrev(); if (!prev || prev === location.hash) return;
+  ev.preventDefault(); ev.stopImmediatePropagation(); history.back();
+}, true);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
