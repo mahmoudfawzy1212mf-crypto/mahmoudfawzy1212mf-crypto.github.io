@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-0827-e16545";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-0852-04be9c";</script>
 
 <script>
 'use strict';
@@ -15992,10 +15992,17 @@ const finCfg = () => {
 const finPrices = () => { const d = S.data.finish && S.data.finish.get('prices'); return d && d.prices ? d : FIN_DEFAULT_PRICES; };
 /* v4.53: رئيس قسم الدهانات (رئيس قسم في قسم paint) بيشوف الصفحة ويعدّل المراحل والأسعار — رؤساء الأقسام التانية لأ */
 const finPaintHead = () => !!S.session && role() === 'head' && (((typeof myDepts === 'function' && myDepts()) || []).includes('paint') || ((byId('workers', S.session.workerId || '') || {}).deptId === 'paint'));
-const finSeesPrice = () => !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech'].includes(role()) || finPaintHead());
-const finEditPrice = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'hr' || finPaintHead());
-const finEditCfg = () => typeof writable === 'function' && writable() && (isAdmin() || ['hr', 'manager', 'tech'].includes(role()) || finPaintHead());
-const finSeesPage = () => finOn() && !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech', 'manager', 'vice'].includes(role()) || finPaintHead());
+/* v4.58: صفحة الدهانات لرئيس القسم مفتوحة وقت الإعداد/التعديل بس — بعد اعتماد المالك بتتقفل، وبيطلب تعديل عشان تتفتح تاني. ومابيشوفش تكلفة الدهانات على أي مشروع */
+const finAccess = () => Object.assign({ open: true, state: 'setup' }, (S.data.finish && S.data.finish.get('access')) || {});
+const finPendReq = t => list('requests').filter(r => r.type === t && r.status === 'pending').sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0] || null;
+const finHeadOpen = () => finAccess().open !== false;
+const finHeadCanEdit = () => finHeadOpen() && !finPendReq('finlock');
+const finSeesPrice = () => !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech'].includes(role()) || (finPaintHead() && finHeadOpen()));
+/* تكلفة الدهانات على المشروع (كارت أمر التشغيل + بند المقايسة) — رئيس قسم الدهانات لأ */
+const finSeesProjectCost = () => finSeesPrice() && !finPaintHead();
+const finEditPrice = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'hr' || (finPaintHead() && finHeadCanEdit()));
+const finEditCfg = () => typeof writable === 'function' && writable() && (isAdmin() || ['hr', 'manager', 'tech'].includes(role()) || (finPaintHead() && finHeadCanEdit()));
+const finSeesPage = () => finOn() && !!S.session && (isAdmin() || ['hr', 'bdd', 'office', 'tech', 'manager', 'vice'].includes(role()) || (finPaintHead() && finHeadOpen()));
 const finSys = id => finCfg().systems.find(s => s.id === id);
 const finMat = id => finCfg().mats.find(m => m.id === id);
 const finGradeName = g => (FIN_GRADES.find(x => x[0] === g) || [0, g])[1];
@@ -16044,7 +16051,7 @@ function vFinish() {
   const matCard = sp ? `<div class="card"><div class="cardhead"><h3>أسعار الخامات والمصنعية</h3><div class="grow"></div>${finEditPrice() ? `<button class="btn sm" data-action="finPricesEdit">${icon('edit')}تعديل الأسعار</button>` : ''}</div>
     <div class="tablewrap"><table><thead><tr><th>الخامة</th><th>الوحدة</th>${FIN_GRADES.map(g => `<th class="n">${g[1]}</th>`).join('')}</tr></thead><tbody>${C.mats.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.unit || '')}</td>${FIN_GRADES.map(g => `<td class="n">${fmtMoney(finPrice(m.id, g[0]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
     <div class="small" style="margin-top:8px">أجر ساعة الأسطى: <b>${fmtMoney((P.rates || {}).master || 0)}</b> · أجر ساعة المساعد: <b>${fmtMoney((P.rates || {}).helper || 0)}</b> · مصاريف التشغيل: <b>${fmtNum(P.overheadPct || 0)}٪</b> <span class="muted">(كمبروسر، كابينة رش، كهربا، هالك)</span></div></div>` : `<div class="card"><div class="small muted">${icon('shield')}الأسعار والتكاليف ظاهرة للإدارة واللي بيعملوا المقايسات بس.</div></div>`;
-  return `<div class="toolbar"><div class="small muted">المتر = متر مربع لكل وش (الضلفة وشين + الحروف)</div><div class="grow"></div>${finEditCfg() ? `<button class="btn sm" data-action="finSysNew">${icon('plus')}نوع تشطيب جديد</button>` : ''}</div>${note}${table}${sysCards}${finSheenCard(sp)}${matCard}`;
+  return `<div class="toolbar"><div class="small muted">المتر = متر مربع لكل وش (الضلفة وشين + الحروف)</div><div class="grow"></div>${finEditCfg() ? `<button class="btn sm" data-action="finSysNew">${icon('plus')}نوع تشطيب جديد</button>` : ''}</div>${finAccessCard()}${note}${table}${sysCards}${finSheenCard(sp)}${matCard}`;
 }
 EXTRA_VIEWS.finish = () => vFinish();
 ACTIONS.finSheenPick = id => { S.ui.finSheen = id; render(false); };
@@ -16134,7 +16141,7 @@ document.addEventListener('click', ev => { const t = ev.target.closest && ev.tar
 
 /* ---------- estimate: «بند دهان» ---------- */
 estimateEditor = (base => function (e) {
-  const h = base.apply(this, arguments); if (!finOn() || !finSeesPrice()) return h; const C = finCfg();
+  const h = base.apply(this, arguments); if (!finOn() || !finSeesProjectCost()) return h; const C = finCfg();
   return h + `<div class="finadd"><b class="small">${icon('layers')}بند دهان:</b><select id="fa-sys">${C.systems.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="fa-g">${FIN_GRADES.map(g => `<option value="${g[0]}">خامات ${g[1]}</option>`).join('')}</select><select id="fa-sh">${finSheens().map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select><input id="fa-a" type="number" min="0" step="any" inputmode="decimal" placeholder="المساحة م²"><button type="button" class="btn xs p" data-finest="1">${icon('plus')}إضافة</button><span class="tiny muted" id="fa-hint"></span></div>`;
 })(estimateEditor);
 document.addEventListener('input', ev => { if (!['fa-sys', 'fa-g', 'fa-a', 'fa-sh'].includes(ev.target && ev.target.id)) return; const hnt = $('#fa-hint'); if (!hnt) return; const c = finCost($('#fa-sys').value, $('#fa-g').value, ($('#fa-sh') || {}).value); hnt.textContent = c ? `${finMoney(c.total)} للمتر` : ''; });
@@ -16154,7 +16161,7 @@ document.addEventListener('click', ev => {
 const finCanJob = () => typeof writable === 'function' && writable() && (isAdmin() || ['hr', 'manager', 'head', 'tech', 'office'].includes(role()));
 const finCanTick = () => typeof writable === 'function' && writable() && (isAdmin() || ['manager', 'head'].includes(role()));
 function paintCard(o) {
-  const jobs = o.paint || []; if (!jobs.length && !finCanJob()) return ''; const sp = finSeesPrice();
+  const jobs = o.paint || []; if (!jobs.length && !finCanJob()) return ''; const sp = finSeesProjectCost();
   const body = jobs.map(j => { const s = finSys(j.sys) || { name: j.sysName || j.sys, stages: j.stages || [] }; const stages = j.stages || s.stages || []; const done = j.done || {}; const n = stages.filter((st, i) => done[i]).length; const pct = stages.length ? Math.round(n / stages.length * 100) : 0; const c = sp ? finCost(j.sys, j.grade, j.sheen) : null; const needs = finNeeds(j.sys, j.area, j.sheen);
     return `<div class="paintjob"><div class="row" style="gap:8px;flex-wrap:wrap"><b>${esc(s.name)}</b>${j.sheen ? `<span class="badge">${esc(finSheenName(j.sheen))}</span>` : ''}<span class="badge">خامات ${finGradeName(j.grade)}</span><span class="small">${fmtNum(j.area)} م²</span>${j.desc ? `<span class="small muted">${esc(j.desc)}</span>` : ''}<div class="grow"></div><span class="small">${n}/${stages.length} مرحلة</span>${c ? `<span class="small">التكلفة التقديرية <b>${finMoney(c.total * j.area)}</b></span>` : ''}${finCanJob() ? `<button class="iconbtn" data-action="paintDel" data-arg="${o.id}|${j.id}" title="حذف">${icon('trash')}</button>` : ''}</div>
       <div class="bar"><i style="width:${pct}%"></i></div>
@@ -16175,6 +16182,51 @@ ACTIONS.paintTick = async arg => {
 };
 ACTIONS.paintDel = async arg => { const [oid, jid] = String(arg || '').split('|'); const o = byId('orders', oid); if (!o || !finCanJob()) return; if (!(await confirmDlg('حذف شغل الدهان ده؟', 'حذف'))) return; await Store.update('orders', oid, { paint: (o.paint || []).filter(x => x.id !== jid) }); };
 Object.assign(window, { finCost, finNeeds, finCfg, finPrices });
+
+/* ---------- v4.58: قفل/فتح صفحة الدهانات لرئيس القسم (المالك بس) ---------- */
+REQ_TYPES.finlock = 'اعتماد تسعير الدهانات'; REQ_TYPES.finedit = 'طلب تعديل تسعير الدهانات';
+DEFAULT_CHAINS.finlock = ['admin']; DEFAULT_CHAINS.finedit = ['admin'];
+function finAccessCard() {
+  const a = finAccess(); const pl = finPendReq('finlock'), pe = finPendReq('finedit');
+  if (finPaintHead()) {
+    if (pl) return `<div class="banner info">${icon('clock' in ICONS ? 'clock' : 'info')}<span>بعت التسعير للاعتماد — مستني موافقة المالك. التعديل مقفول لحد ما يرد.</span></div>`;
+    return `<div class="banner info">${icon('info')}<span>${a.state === 'editing' ? 'المالك فتحلك الصفحة للتعديل.' : 'ظبّط المراحل وأسعار المتر المسطح.'} لما تخلص ابعتها للاعتماد — بعد الموافقة الصفحة بتتقفل، ولو احتجت تعديل تطلبه من «بوابتي».</span><div class="grow"></div><button class="btn sm p" data-action="finLockAsk">${icon('check')}خلصت — ابعت للاعتماد</button></div>`;
+  }
+  if (!isAdmin()) return '';
+  const st = a.open === false ? 'مقفولة عند رئيس قسم الدهانات' : a.state === 'editing' ? 'مفتوحة لرئيس القسم للتعديل' : 'مفتوحة لرئيس القسم (إعداد)';
+  return `<div class="banner ${a.open === false ? '' : 'warn'}">${icon('shield')}<span>صفحة الدهانات: <b>${st}</b>${pl ? ' · <b>فيه طلب اعتماد مستنيك</b>' : ''}${pe ? ' · <b>فيه طلب تعديل مستنيك</b>' : ''}</span><div class="grow"></div>${pl || pe ? `<button class="btn sm" data-action="reqOpen" data-arg="${(pl || pe).id}">افتح الطلب</button>` : ''}${a.open === false ? `<button class="btn sm" data-action="finAccessSet" data-arg="open">افتحها له</button>` : `<button class="btn sm" data-action="finAccessSet" data-arg="lock">اقفلها عنه</button>`}</div>`;
+}
+async function finSetAccess(open, reqId) { await Store.save('finish', { id: 'access', open: !!open, state: open ? 'editing' : 'locked', reqId: reqId || null, at: nowISO(), byName: (S.session && S.session.name) || '' }, { silent: true }); }
+ACTIONS.finAccessSet = async v => { if (!isAdmin()) return; await finSetAccess(v === 'open'); toast(v === 'open' ? 'اتفتحت لرئيس قسم الدهانات' : 'اتقفلت عن رئيس قسم الدهانات'); rerender(); };
+function finReq(type, reason, text) {
+  const me = S.session || {}; const now = nowISO();
+  return { id: uid(), type, reason: reason || '', requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: me.workerId || null, deptId: 'paint', status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text }] };
+}
+ACTIONS.finLockAsk = async () => {
+  if (!finPaintHead() || finPendReq('finlock')) return; if (!(await confirmDlg('تبعت تسعير الدهانات للمالك يعتمده؟ بعد الموافقة الصفحة هتتقفل عندك.', 'ابعت', false))) return;
+  const C = finCfg(); const sum1 = C.systems.map(s => `${s.name}: ${Math.round(finCost(s.id, 'normal').total)}`).join(' · ');
+  const r = finReq('finlock', `تكلفة المتر (خامات عادي، مط): ${sum1}`, 'رئيس قسم الدهانات خلّص تسعير الدهانات وبعته للاعتماد');
+  await Store.save('requests', r, { silent: true });
+  if (typeof notifyOwner === 'function') await notifyOwner('اعتماد تسعير الدهانات', `${r.requesterName} خلّص المراحل والأسعار — راجع صفحة «تسعير الدهانات» ووافق عشان تتقفل عنده.`, { id: `finlock_${r.id}`, reqId: r.id });
+  toast('اتبعت للمالك ✓'); rerender();
+};
+ACTIONS.finEditAsk = () => {
+  if (!finPaintHead() || finPendReq('finedit')) return;
+  openModal({ title: 'طلب تعديل تسعير الدهانات', submitLabel: 'ابعت للمالك', body: `<div class="form">${field('عايز تعدّل إيه وليه', '<textarea name="reason" required placeholder="مثلاً: سعر الدوكو الإيطالي زاد، وعايز أزود مرحلة سيلر تالتة في الاستر"></textarea>', 'full')}<div class="tiny muted full">لو المالك وافق الصفحة هتتفتحلك تعدّل وبعدين تبعتها للاعتماد تاني.</div></div>`,
+    onSubmit: async f => { const d = formData(f); if (!(d.reason || '').trim()) { toast('اكتب عايز تعدّل إيه', 'err'); return false; } const r = finReq('finedit', d.reason.trim(), `طلب تعديل تسعير الدهانات: ${d.reason.trim()}`); await Store.save('requests', r, { silent: true }); if (typeof notifyOwner === 'function') await notifyOwner('طلب تعديل تسعير الدهانات', `${r.requesterName}: ${r.reason}`, { id: `finedit_${r.id}`, reqId: r.id }); toast('اتبعت للمالك ✓'); rerender(); } });
+};
+applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+  if (r && (r.type === 'finlock' || r.type === 'finedit')) { if (isAdmin()) await finSetAccess(r.type === 'finedit', r.id); const t = byId('tasks', `${r.type}_${r.id}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } return; }
+  return base(r, w, patch, opts);
+})(applyRequestEffects);
+reqDesc = (base => r => (r && r.type === 'finlock' ? `اعتماد تسعير الدهانات — ${r.reason || ''}` : r && r.type === 'finedit' ? `طلب تعديل تسعير الدهانات — ${r.reason || ''}` : base(r)))(reqDesc);
+/* بوابتي لرئيس قسم الدهانات: الحالة + زرار طلب التعديل */
+vMe = (base => function () {
+  const html = base.apply(this, arguments); if (!finOn() || !finPaintHead()) return html;
+  const pe = finPendReq('finedit'), pl = finPendReq('finlock'); const open = finHeadOpen();
+  const card = `<div class="card" id="finmecard"><div class="cardhead"><h3>${icon('layers')}تسعير الدهانات</h3><div class="grow"></div>${open ? `<a class="btn sm" href="#/finish">افتح الصفحة</a>` : pe ? '<span class="badge warn">طلب التعديل مستني المالك</span>' : `<button class="btn sm p" data-action="finEditAsk">طلب تعديل</button>`}</div><div class="small muted">${open ? (pl ? 'اتبعت للاعتماد — مستني موافقة المالك.' : 'الصفحة مفتوحة لك دلوقتي تعدّل المراحل والأسعار.') : 'التسعير معتمد والصفحة مقفولة. لو محتاج تعدّل مرحلة أو سعر، ابعت طلب تعديل للمالك.'}</div></div>`;
+  const i = html.indexOf('<div class="card'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+})(vMe);
 /* =====================================================================
    Ninety Studioz — company variant (v4.17)
    Active only when the build config says company:'studioz' (window.NF_CONFIG.company)
