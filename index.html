@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1323-af1120";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1331-0d17cc";</script>
 
 <script>
 'use strict';
@@ -11298,9 +11298,14 @@ RENDER_HOOKS.push(() => {
   if (!S.session) { _notifPrimed = false; _lastMsgSeen = {}; return; }
   const me = myIds(); const cur = {}; const fresh = [];
   list('tasks').forEach(t => { const th = taskThread(t); if (!th.length) return; const party = taskMine(t) || taskParties(t).some(p => me.includes(p.id)); if (!party) return; const last = th[th.length - 1]; cur[t.id] = last.id; if (_notifPrimed && _lastMsgSeen[t.id] !== last.id && !me.includes(last.by) && !(location.hash === `#/tasks/${t.id}` && !document.hidden)) fresh.push({ t, last }); });
-  _lastMsgSeen = cur; _notifPrimed = true;
-  if (!fresh.length || fresh.length > 5) return; // a bulk load / restore is not a conversation
-  const { t, last } = fresh[0]; nfSound(); nfToast(fresh.length > 1 ? `${fresh.length} رسائل جديدة` : `${last.byName || 'رسالة'} — ${t.title}`.slice(0, 80), last.text ? last.text.slice(0, 80) : (last.audioFileId ? '🎤 رسالة صوتية' : '📷 صورة'), `#/tasks/${t.id}`);
+  Object.assign(_lastMsgSeen, cur); _notifPrimed = true; // v4.71: merge (a task that briefly drops out of the list and comes back is not a new message)
+  /* v4.71: each message pops up once only (remembered on this device) and only if it's recent */
+  let shown = {}; try { shown = JSON.parse(localStorage.getItem('nf.toasted') || '{}'); } catch (e) { /* ignore */ }
+  const fresh2 = fresh.filter(x => !shown[x.last.id] && (!x.last.at || Date.now() - new Date(x.last.at).getTime() < 15 * 60e3));
+  fresh.forEach(x => { shown[x.last.id] = Date.now(); }); const ks = Object.keys(shown); if (ks.length > 300) ks.sort((a, b) => shown[a] - shown[b]).slice(0, ks.length - 300).forEach(k => delete shown[k]);
+  try { localStorage.setItem('nf.toasted', JSON.stringify(shown)); } catch (e) { /* ignore */ }
+  if (!fresh2.length || fresh2.length > 5) return; // a bulk load / restore is not a conversation
+  const { t, last } = fresh2[0]; fresh.length = 0; fresh2.forEach(x => fresh.push(x)); nfSound(); nfToast(fresh.length > 1 ? `${fresh.length} رسائل جديدة` : `${last.byName || 'رسالة'} — ${t.title}`.slice(0, 80), last.text ? last.text.slice(0, 80) : (last.audioFileId ? '🎤 رسالة صوتية' : '📷 صورة'), `#/tasks/${t.id}`);
   const b = document.querySelector('.bellbtn'); if (b) { b.classList.add('ring'); setTimeout(() => b.classList.remove('ring'), 700); }
 });
 /* ---------- Web Push ---------- */
@@ -16464,14 +16469,10 @@ setTimeout(() => pushRefresh(false), 6000);
 /* manual enable also records the endpoint so the refresh knows it */
 ACTIONS.pushEnable = (base => async (...a) => { const r = await base(...a); pushRefresh(true); return r; })(ACTIONS.pushEnable);
 
-/* ---- status row + test button in «بوابتي» (والمالك على لوحة المتابعة) ---- */
-RENDER_HOOKS.push(() => {
-  if (!S.session || !(/^#\/me/.test(location.hash) || (/^#\/dashboard/.test(location.hash) && isAdmin()))) return; const v = document.getElementById('view'); if (!v || v.querySelector('#pushok') || v.querySelector('#pushrow')) return;
-  if (typeof pushAvailable !== 'function' || !pushAvailable() || Notification.permission !== 'granted') return;
-  v.insertAdjacentHTML('afterbegin', `<div class="pushrow on" id="pushok"><span class="dot"></span><span style="flex:1">الإشعارات شغالة على الجهاز ده — لو عايز تتأكد إنها بتوصل للموبايل والساعة دوس «إشعار تجريبي».</span><button class="btn xs" data-action="pushTest">إشعار تجريبي</button></div>`);
-});
+/* ---- v4.71 (طلب المالك): سطر «الإشعارات شغالة» اتشال من الصفحات — زرار «إشعار تجريبي» بقى جوه قايمة الجرس ---- */
+ACTIONS.bellOpen = (base => (...a) => { const r = base(...a); try { const p = document.getElementById('bellpop'); if (p && !p.querySelector('[data-action="pushTest"]') && typeof pushAvailable === 'function' && pushAvailable() && Notification.permission === 'granted') p.insertAdjacentHTML('beforeend', `<div style="padding:8px 10px;border-top:1px solid var(--line)"><button class="btn sm" data-action="pushTest">${icon('bell')}إشعار تجريبي للموبايل والساعة</button></div>`); } catch (e) { /* ignore */ } return r; })(ACTIONS.bellOpen);
 ACTIONS.pushTest = async () => {
-  if (!pushAvailable()) return; await pushRefresh(true);
+  const bp = document.getElementById('bellpop'); if (bp) bp.remove(); if (!pushAvailable()) return; await pushRefresh(true);
   try {
     const r = await S.sb.functions.invoke('push', { body: { action: 'test' } }); if (r.error) throw r.error;
     const res = (r.data && r.data.results) || [];
