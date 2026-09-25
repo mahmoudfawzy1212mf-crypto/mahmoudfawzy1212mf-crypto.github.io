@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1458-94cac7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260925-1759-462b17";</script>
 
 <script>
 'use strict';
@@ -17889,8 +17889,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
 
   function itemView(it) {
     var p = get('products', it.productId);
-    var title = (p && (p.nameEn || p.name)) || String(it.desc || '').split(/ — |\n/)[0] || 'Item';
-    var desc = (p && p.descEn) || it.desc || '';
+    var title = it.titleEn || (p && (p.nameEn || p.name)) || String(it.desc || '').split(/ — |\n/)[0] || 'Item';
+    var desc = it.descEn || (p && p.descEn) || it.desc || '';
     var pic = it.img || cover(p);
     return { title: title, desc: desc, pic: pic, qty: +it.qty || 0, unit: it.unit || '', price: +it.price || 0, total: (+it.qty || 0) * (+it.price || 0) };
   }
@@ -17925,6 +17925,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       views.map(function (v, i) { return '<tr><td class="qty">' + (i + 1) + '</td><td class="th">' + (v.pic ? '<img src="' + h(v.pic) + '" alt="">' : '') + '</td><td class="t desc"' + auto(v.desc) + '><b' + auto(v.title) + '>' + h(v.title) + '</b>' + descCell(v) + '</td><td class="qty">' + money(v.qty) + (v.unit && !/^(قطعة|pcs?|piece|unit)$/i.test(v.unit) ? ' ' + h(v.unit) : '') + '</td><td class="num">' + money(v.price) + '</td><td class="num">' + money(v.total) + '</td></tr>'; }).join('') +
       totalsRows(q, sub, after, vat, 4).replace(/colspan="2"/g, 'colspan="3"').replace(/colspan="4"/g, 'colspan="3"') + '</tbody></table>';
   }
+  window.__lofq = { LOGO: LOGO, QR: QR, cfg: cfg, itemView: itemView, dmy: dmy }; // v4.77: shared with the vector (jsPDF/canvas) renderer
   window.lofQuoteHTML = function (q, c, sub, after, vat) {
     var k = cfg(); var views = (q.items || []).map(itemView); var n = views.length;
     var pic = n <= 2 ? 46 : n === 3 ? 42 : 36;
@@ -17940,7 +17941,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       '<div class="title"><h1>Quotation <small>PRICE OFFER</small></h1><div class="pill">' + h(q.number || '') + '</div></div>' +
       '<div class="meta">' +
         '<div><span class="k">Client</span><span class="v"' + auto(client) + '>' + h(client) + '</span>' + (clientMore ? '<span style="font-size:8.5pt;color:#555;display:block"' + auto(clientMore) + '>' + h(clientMore) + '</span>' : '') + '</div>' +
-        '<div><span class="k">Project</span><span class="v"' + auto(q.subject) + '>' + h(q.subject || '—') + '</span></div>' +
+        '<div><span class="k">Project</span><span class="v"' + auto(q.project || q.subject) + '>' + h(q.project || q.subject || '—') + '</span></div>' +
         '<div><span class="k">Date</span><span class="v">' + h(dmy(q.date)) + '</span></div>' +
         '<div><span class="k">Valid until</span><span class="v">' + h(dmy(q.validUntil) || '—') + '</span></div>' +
       '</div>' +
@@ -18343,6 +18344,204 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const q = byId('quotations', id); if (!q || !window.nfQuoteVectorOk(q)) return base(id);
     try { const blob = await window.nfQuoteVectorPdf(q); const u = URL.createObjectURL(blob); const w = window.open(u, '_blank'); if (!w) { const a = document.createElement('a'); a.href = u; a.download = (H().pdfName ? H().pdfName(q) : 'Quotation.pdf'); document.body.appendChild(a); a.click(); a.remove(); } setTimeout(() => URL.revokeObjectURL(u), 120000); } catch (e) { toast(e.message || String(e), 'err'); base(id); }
   })(ACTIONS.printQuote);
+})();
+/* =====================================================================
+   v4.77 — عرض سعر lōf بالتمبلت المعتمد، بس PDF نصّي حقيقي (مش صورة)
+   · نفس تصميم تمبلت lōf (99zz2): لوجو lōf + بيانات التواصل، Quotation + رقم العرض، Client/Project/Date/Valid until،
+     جدول عمود لكل منتج (≤4) أو صفوف (أكتر من 4)، Total offer / Discount / Sales Tax / Total، Delivery & Payment،
+     Terms and Conditions، QR + التوقيع، الفوتر.
+   · بيترسم بـ Helvetica على jsPDF (الملف اللي بيتبعت) وعلى canvas (المعاينة) → نفس الشكل بالظبط، مفيش كلام فوق بعض.
+   · صف/عمود الصور بيختفي لو مفيش ولا صورة في العرض.
+   · لو فيه عربي في المحتوى → بيرجع للطريقة القديمة.
+   ===================================================================== */
+(function () {
+  if (window.__NF_LOFVEC__) return; window.__NF_LOFVEC__ = 1;
+  const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  let _js = null;
+  const loadJsPDF = () => { if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(true); if (_js) return _js; _js = new Promise(res => { const s = document.createElement('script'); s.src = JSPDF; s.onload = () => res(!!(window.jspdf && window.jspdf.jsPDF)); s.onerror = () => { _js = null; res(false); }; document.head.appendChild(s); }); return _js; };
+  const AR = /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/;
+  const K = () => window.__lofq || null;
+  const MM = 2.8346, PW = 595.28, PH = 841.89, L = 16 * MM, R = PW - 16 * MM, W = R - L, TOP = 11 * MM, BOTTOM = PH - 20 * MM;
+  const C = { ink: '#111111', t3: '#333333', t4: '#444444', t5: '#555555', t6: '#666666', t7: '#777777', t8: '#888888', bd: '#d5d5d5', lbl: '#f3f3f3', dd: '#dddddd' };
+  const PIECE = /^(قطعة|عدد|وحدة|pcs?|piece|unit|no\.?)$/i;
+  const unitLatin = u => { const s = String(u || '').trim(); if (!s || PIECE.test(s)) return ''; if (/^(م2|م²|m2|m²|متر مربع)$/i.test(s)) return 'm²'; if (/^(م\.?ط|m|متر طولي|lm)$/i.test(s)) return 'm'; if (/^(طقم|set)$/i.test(s)) return 'Set'; return s; };
+  const money = n => (+n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const cur = () => { const c = (S.settings && S.settings.currency) || ''; return (!c || /ج|جنيه|EGP/i.test(c)) ? 'EGP' : c; };
+  const vatPct = () => (+S.settings.vat > 0 ? +S.settings.vat : 14);
+  /* WinAnsi only; ō is drawn as o + macron by T() */
+  const clean = s => String(s == null ? '' : s).replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/ /g, ' ').replace(/[‐-‒]/g, '-').replace(/[^\x09\x0A\x20-\x7E -ÿ–—•…€ōŌ]/g, '');
+
+  function model(q) {
+    const k = K(); if (!k) return null;
+    const c = byId('clients', q.clientId) || null; const cfg = k.cfg();
+    const sub = typeof quoteSub === 'function' ? quoteSub(q) : (q.items || []).reduce((s, it) => s + (+it.qty || 0) * (+it.price || 0), 0);
+    const after = sub - (+q.discount || 0); const vat = q.vat ? after * vatPct() / 100 : 0;
+    const views = (q.items || []).filter(it => !it.sec).map(it => { const v = k.itemView(it); v.unitL = unitLatin(it.unit); return v; });
+    return { q, c, cfg, sub, after, vat, views, client: c ? (c.nameEn || c.name || '-') : '-', clientMore: c ? [c.contact, c.phone].filter(Boolean).join(' · ') : '', project: q.project || q.subject || '-', date: k.dmy(q.date), valid: k.dmy(q.validUntil) || '-' };
+  }
+  window.nfLofVectorOk = function (q) {
+    if (!q || q.brandId !== 'lof' || !K()) return false;
+    const m = model(q); if (!m || !m.views.length) return false;
+    const all = [m.client, m.clientMore, m.project, q.terms, ...m.cfg.terms, m.cfg.company, m.cfg.signatory, ...m.views.flatMap(v => [v.title, v.desc, v.unitL])].join(' ');
+    return !AR.test(all);
+  };
+
+  /* ---------- images ---------- */
+  const imgCache = new Map();
+  function loadImg(src, cors) { if (!src) return Promise.resolve(null); if (imgCache.has(src)) return imgCache.get(src); const p = new Promise(res => { const im = new Image(); if (cors) im.crossOrigin = 'anonymous'; const t = setTimeout(() => res(null), 7000); im.onload = () => { clearTimeout(t); res(im); }; im.onerror = () => { clearTimeout(t); res(null); }; im.src = src; }); imgCache.set(src, p); return p; }
+  function toData(im, fmt, scale) { try { const cv = document.createElement('canvas'); const s = scale || 1; cv.width = Math.max(1, Math.round((im.naturalWidth || im.width) * s)); cv.height = Math.max(1, Math.round((im.naturalHeight || im.height) * s)); const x = cv.getContext('2d'); if (fmt === 'JPEG') { x.fillStyle = '#fff'; x.fillRect(0, 0, cv.width, cv.height); } x.drawImage(im, 0, 0, cv.width, cv.height); return cv.toDataURL(fmt === 'JPEG' ? 'image/jpeg' : 'image/png', 0.9); } catch (e) { return null; } }
+  async function assets(m) {
+    const k = K(); const out = { logo: null, qr: null, pics: [] };
+    const svg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(k.LOGO.replace('<svg ', '<svg width="1004" height="868" '));
+    const lg = await loadImg(svg); if (lg) out.logo = { el: lg, data: toData(lg, 'PNG', 0.6), fmt: 'PNG', ar: 868 / 1004 };
+    const qr = await loadImg(k.QR); if (qr) out.qr = { el: qr, data: k.QR, fmt: 'JPEG', ar: (qr.naturalHeight || 1) / (qr.naturalWidth || 1) };
+    out.pics = await Promise.all(m.views.map(async v => { if (!v.pic) return null; const im = await loadImg(v.pic, !/^data:/.test(v.pic)); if (!im) return null; const d = /^data:image\/(png|jpe?g)/i.test(v.pic) ? v.pic : toData(im, 'JPEG', Math.min(1, 900 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1))); if (!d) return null; return { el: im, data: d, fmt: /^data:image\/png/i.test(d) ? 'PNG' : 'JPEG', ar: (im.naturalHeight || 1) / (im.naturalWidth || 1) }; }));
+    return out;
+  }
+
+  /* ---------- layout (P = painter) ---------- */
+  function draw(m, P, A) {
+    const k = m.cfg; const CUR = cur();
+    const wOf = (s, size, bold) => P.width(String(s).replace(/ō/g, 'o').replace(/Ō/g, 'O'), size, bold);
+    /* text with ō → o + macron */
+    const T = (s, x, y, size, bold, color, align) => {
+      s = clean(s); const tw = wOf(s, size, bold); let xx = align === 'right' ? x - tw : align === 'center' ? x - tw / 2 : x;
+      if (!/[ōŌ]/.test(s)) { P.text(s, xx, y, size, bold, color); return; }
+      s.split(/([ōŌ])/).forEach(seg => { if (!seg) return; if (seg === 'ō' || seg === 'Ō') { const o = seg === 'ō' ? 'o' : 'O'; P.text(o, xx, y, size, bold, color); const ow = P.width(o, size, bold); const my = y - size * (seg === 'ō' ? 0.66 : 0.86); P.line(xx + ow * 0.15, my, xx + ow * 0.85, my, size * 0.07, color); xx += ow; } else { P.text(seg, xx, y, size, bold, color); xx += P.width(seg, size, bold); } });
+    };
+    const wrap = (s, size, bold, maxW) => { const out = []; String(s || '').split(/\n/).forEach(par => { const words = par.split(/\s+/).filter(Boolean); let ln = ''; words.forEach(w0 => { let w = w0; const tryL = ln ? ln + ' ' + w : w; if (wOf(clean(tryL), size, bold) <= maxW) { ln = tryL; return; } if (ln) out.push(ln); while (wOf(clean(w), size, bold) > maxW && w.length > 1) { let q = w.length - 1; while (q > 1 && wOf(clean(w.slice(0, q)), size, bold) > maxW) q--; out.push(w.slice(0, q)); w = w.slice(q); } ln = w; }); if (ln) out.push(ln); if (!words.length) out.push(''); }); return out; };
+    const box = (x, y, w, h, fill, stroke) => { if (fill) P.rect(x, y, w, h, fill); P.line(x, y, x + w, y, 0.6, stroke || C.bd); P.line(x, y + h, x + w, y + h, 0.6, stroke || C.bd); P.line(x, y, x, y + h, 0.6, stroke || C.bd); P.line(x + w, y, x + w, y + h, 0.6, stroke || C.bd); };
+    const img = (a, x, y, w, h) => { if (!a) return; let iw = w, ih = w * a.ar; if (ih > h) { ih = h; iw = h / a.ar; } P.image(a, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); };
+    let page = 0, y = 0;
+    const footer = () => { const fy = PH - 7 * MM - 8; P.line(L, fy - 8.5, R, fy - 8.5, 0.8, C.ink); T(`${k.company}  ·  ${k.email}  ·  ${k.phones.join(' / ')}`, L, fy, 8, false, C.t6); T(`${m.q.number || ''}  ·  ${m.date}`, R, fy, 8, false, C.t6, 'right'); };
+    const newPage = () => { page++; P.page(); footer(); y = TOP; };
+    newPage();
+    /* header */
+    if (A.logo) P.image(A.logo, L, TOP, 27 * MM, 27 * MM * A.logo.ar);
+    const hb = TOP + 2 * MM + 8; const lh = 8.5 * 1.55;
+    T(k.company, R, hb, 9, true, C.ink, 'right');
+    const kv = (key, val, yy) => { T(val, R, yy, 8.5, false, C.t4, 'right'); T(key + '  ', R - wOf(clean(val), 8.5, false), yy, 8.5, false, C.t8, 'right'); };
+    kv('E', k.email, hb + lh); kv('T', k.phones.join('  ·  '), hb + 2 * lh); kv('Facebook / Instagram', k.social, hb + 3 * lh);
+    const logoB = TOP + (A.logo ? 27 * MM * A.logo.ar : 40);
+    y = Math.max(logoB, hb + 3 * lh + 3) + 3.5 * MM; P.line(L, y, R, y, 1.6, C.ink);
+    /* title + pill */
+    const tb = y + 3 * MM + 19; T('Quotation', L, tb, 22, true, C.ink); T('P R I C E   O F F E R', L, tb + 12, 7.6, false, C.t6);
+    const num = String(m.q.number || ''); if (num) { const pw = wOf(num, 10.5, true) + 10 * MM, ph = 19; const px = R - pw, py = tb - 15; P.roundRect(px, py, pw, ph, ph / 2, 1.2, C.ink); T(num, px + pw / 2, py + 13, 10.5, true, C.ink, 'center'); }
+    y = tb + 12 + 3.5 * MM;
+    /* meta */
+    const gap = 6 * MM, unitW = (W - 3 * gap) / 4.1; const cw = [unitW, unitW * 1.5, unitW * 0.8, unitW * 0.8];
+    const meta = [['Client', m.client, m.clientMore], ['Project', m.project], ['Date', m.date], ['Valid until', m.valid]];
+    let mx = L, mb = y; const cols = meta.map((mm, i) => { const lines = wrap(mm[1], 10, true, cw[i]); const more = mm[2] ? wrap(mm[2], 8.5, false, cw[i]) : []; const h = 10 + lines.length * 13 + more.length * 11.5; return { x: 0, lines, more, h }; });
+    const mh = Math.max(...cols.map(c0 => c0.h)) + 3;
+    meta.forEach((mm, i) => { const c0 = cols[i]; T(mm[0], mx, y + 8, 8.5, false, C.t7); c0.lines.forEach((ln, j) => T(ln, mx, y + 21 + j * 13, 10, true, C.ink)); c0.more.forEach((ln, j) => T(ln, mx, y + 21 + c0.lines.length * 13 - 1.5 + j * 11.5, 8.5, false, C.t5)); P.line(mx, y + mh, mx + cw[i], y + mh, 0.5, C.dd); mx += cw[i] + gap; });
+    mb = y + mh; y = mb + 4 * MM;
+    /* description cell: "a — b — c" → a / **b** / c */
+    const descLines = (v, maxW) => { const parts = String(v.desc || '').split(' — '); const out = []; if (parts.length >= 2) { wrap(parts[0], 8.8, false, maxW).forEach(t => out.push({ t, b: false })); wrap(parts[1], 9.2, true, maxW).forEach(t => out.push({ t, b: true })); if (parts.length > 2) wrap(parts.slice(2).join(' — '), 8.8, false, maxW).forEach(t => out.push({ t, b: false })); } else wrap(v.desc, 8.8, false, maxW).forEach(t => out.push({ t, b: false })); return out.filter(o => o.t !== '' || out.length === 1); };
+    const LD = 12.3, PADY = 1.8 * MM, PADX = 2.5 * MM, n = m.views.length;
+    const anyPic = A.pics.some(Boolean);
+    const totals = () => { const r = [['Total offer', money(m.sub) + ' ' + CUR, 0]]; if (+m.q.discount) r.push(['Discount', '- ' + money(m.q.discount) + ' ' + CUR, 0]); if (m.q.vat) r.push([vatPct() + '% Sales Tax', money(m.vat) + ' ' + CUR, 0]); r.push([m.q.vat ? 'Total including Sales Tax' : 'Total', money(m.after + m.vat) + ' ' + CUR, 1]); return r; };
+    const drawTotals = (lw) => { totals().forEach(([l, v, g]) => { const h = g ? 22 : 19.5; if (y + h > BOTTOM) newPage(); if (g) { box(L, y, W, h, C.ink, C.ink); T(l, L + PADX, y + 14.5, 11, true, '#ffffff'); T(v, R - PADX, y + 14.5, 11, true, '#ffffff', 'right'); } else { box(L, y, lw, h, C.lbl); box(L + lw, y, W - lw, h, '#ffffff'); T(l, L + PADX, y + 13, 8.8, true, C.ink); T(v, R - PADX, y + 13, 9.5, true, C.ink, 'right'); } y += h; }); };
+    if (n <= 4) {
+      const lblW = 30 * MM, colW = (W - lblW) / n;
+      /* header */
+      const hl = m.views.map((v, i) => wrap(`${i + 1}. ${v.title}`, 9.5, true, colW - 2 * PADX)); const hh = Math.max(1, ...hl.map(a => a.length)) * 13 + 2 * PADY + 2;
+      box(L, y, W, hh, C.ink, C.ink); T('Item', L + PADX, y + PADY + 10, 9.5, true, '#ffffff'); hl.forEach((ls, i) => ls.forEach((ln, j) => T(ln, L + lblW + i * colW + PADX, y + PADY + 10 + j * 13, 9.5, true, '#ffffff'))); y += hh;
+      const labelCell = (txt, h) => { box(L, y, lblW, h, C.lbl); const ls = wrap(txt, 8.8, true, lblW - 2 * PADX); const th = ls.length * 11.5; ls.forEach((ln, j) => T(ln, L + PADX, y + (h - th) / 2 + 9 + j * 11.5, 8.8, true, C.t4)); };
+      if (anyPic) { const ph = (n <= 2 ? 46 : n === 3 ? 42 : 36) * MM, h = ph + 5 * MM; labelCell('Picture', h); m.views.forEach((v, i) => { const x = L + lblW + i * colW; box(x, y, colW, h, '#ffffff'); img(A.pics[i], x + 2.5 * MM, y + 2.5 * MM, colW - 5 * MM, ph); }); y += h; }
+      const dl = m.views.map(v => descLines(v, colW - 2 * PADX)); const dh = Math.max(1, ...dl.map(a => a.length)) * LD + 2 * PADY + 2;
+      labelCell('Description', dh); dl.forEach((ls, i) => { const x = L + lblW + i * colW; box(x, y, colW, dh, '#ffffff'); ls.forEach((o, j) => T(o.t, x + PADX, y + PADY + 9.5 + j * LD, o.b ? 9.2 : 8.8, o.b, o.b ? C.ink : C.t3)); }); y += dh;
+      const numRow = (label, f, align) => { const h = 24; labelCell(label, h); m.views.forEach((v, i) => { const x = L + lblW + i * colW; box(x, y, colW, h, '#ffffff'); const t = f(v); T(t, align === 'center' ? x + colW / 2 : x + colW - PADX, y + 15.5, 9.5, false, C.ink, align); }); y += h; };
+      numRow(`Unit price (${CUR})`, v => money(v.price), 'right');
+      numRow('No. of units', v => money(v.qty) + (v.unitL ? ' ' + v.unitL : ''), 'center');
+      numRow(`Total price (${CUR})`, v => money(v.total), 'right');
+      drawTotals(n > 1 ? lblW + colW : lblW);
+    } else {
+      const cNo = 8 * MM, cPic = anyPic ? 24 * MM : 0, cQty = 16 * MM, cUp = 27 * MM, cTot = 27 * MM, cD = W - cNo - cPic - cQty - cUp - cTot;
+      const X = { no: L, pic: L + cNo, d: L + cNo + cPic, qty: L + cNo + cPic + cD, up: L + cNo + cPic + cD + cQty, tot: L + cNo + cPic + cD + cQty + cUp };
+      const head = () => { const hU = wrap(`Unit price (${CUR})`, 9.5, true, cUp - 2 * PADX), hT = wrap(`Total (${CUR})`, 9.5, true, cTot - 2 * PADX); const hh = Math.max(hU.length, hT.length) * 12 + 2 * PADY + 2; box(L, y, W, hh, C.ink, C.ink); const b = y + PADY + 10; T('#', X.no + PADX, b, 9.5, true, '#ffffff'); if (cPic) T('Picture', X.pic + PADX, b, 9.5, true, '#ffffff'); T('Item / Description', X.d + PADX, b, 9.5, true, '#ffffff'); T('Qty', X.qty + cQty / 2, b, 9.5, true, '#ffffff', 'center'); hU.forEach((ln, j) => T(ln, X.up + cUp - PADX, b + j * 12, 9.5, true, '#ffffff', 'right')); hT.forEach((ln, j) => T(ln, X.tot + cTot - PADX, b + j * 12, 9.5, true, '#ffffff', 'right')); y += hh; };
+      head();
+      m.views.forEach((v, i) => {
+        const tl = wrap(v.title, 9.5, true, cD - 2 * PADX); const same = String(v.desc || '').trim() === String(v.title || '').trim(); const dl = same ? [] : descLines(v, cD - 2 * PADX);
+        const th = tl.length * 12.5 + dl.length * LD; const h = Math.max(th + 2 * PADY + 2, cPic && A.pics[i] ? 20 * MM + 3 * MM : 0, 24);
+        if (y + h > BOTTOM) { newPage(); head(); }
+        [[X.no, cNo], [X.pic, cPic], [X.d, cD], [X.qty, cQty], [X.up, cUp], [X.tot, cTot]].forEach(([x, w]) => { if (w) box(x, y, w, h, '#ffffff'); });
+        const b = y + PADY + 10;
+        T(String(i + 1), X.no + cNo / 2, b, 9.5, false, C.ink, 'center');
+        if (cPic && A.pics[i]) img(A.pics[i], X.pic + 1.5 * MM, y + 1.5 * MM, cPic - 3 * MM, h - 3 * MM);
+        tl.forEach((ln, j) => T(ln, X.d + PADX, b + j * 12.5, 9.5, true, C.ink));
+        dl.forEach((o, j) => T(o.t, X.d + PADX, b + tl.length * 12.5 + j * LD, o.b ? 9.2 : 8.8, o.b, o.b ? C.ink : C.t3));
+        T(money(v.qty) + (v.unitL ? ' ' + v.unitL : ''), X.qty + cQty / 2, b, 9.5, false, C.ink, 'center');
+        T(money(v.price), X.up + cUp - PADX, b, 9.5, false, C.ink, 'right');
+        T(money(v.total), X.tot + cTot - PADX, b, 9.5, false, C.ink, 'right');
+        y += h;
+      });
+      drawTotals(cNo + cPic + cD);
+    }
+    /* terms */
+    y += 5 * MM;
+    const g2 = 8 * MM, w1 = (W - g2) / 2.35, w2 = W - g2 - w1, x2 = L + w1 + g2;
+    const dp = wrap(m.q.terms || '-', 9.2, false, w1); const tc = k.terms.map((t, i) => ({ n: `${i + 1}.`, ls: wrap(t, 9.2, false, w2 - 4.5 * MM) }));
+    const tH = 15 + Math.max(dp.length * 13.3, tc.reduce((s, t) => s + t.ls.length * 13.3 + 1.7, 0));
+    if (y + tH + 12 > BOTTOM) newPage();
+    const h3 = (t, x, w) => { T(t, x, y + 10, 9.8, true, C.ink); P.line(x, y + 13.5, x + w, y + 13.5, 0.8, C.ink); };
+    h3('Delivery & Payment', L, w1); h3('Terms and Conditions', x2, w2);
+    dp.forEach((ln, j) => T(ln, L, y + 27 + j * 13.3, 9.2, false, C.t3));
+    let ty = y + 27; tc.forEach(t => { T(t.n, x2 + 4.5 * MM - 3, ty, 9.2, false, C.t3, 'right'); t.ls.forEach((ln, j) => T(ln, x2 + 4.5 * MM, ty + j * 13.3, 9.2, false, C.t3)); ty += t.ls.length * 13.3 + 1.7; });
+    y += tH + 12;
+    /* sign + QR */
+    const sH = 11 * MM + 4; if (y + 7 * MM + sH > BOTTOM) newPage(); else y += 7 * MM;
+    if (A.qr) { const qh = 11 * MM, qw = qh / A.qr.ar; P.image(A.qr, L, y, qw, qh); T('Scan to follow', L + qw + 3 * MM, y + qh / 2 - 1.5, 8, false, C.t6); T('lōf on Instagram / Facebook', L + qw + 3 * MM, y + qh / 2 + 8.5, 8, false, C.t6); }
+    const sw = 60 * MM, sx = R - sw; T(k.signatory, sx, y + 2, 9.2, true, C.ink); T('Name / Signature', sx, y + 14, 8.5, false, C.t7); P.dash(sx, y + 9 * MM + 6, R, y + 9 * MM + 6, 0.8, '#999999');
+    return page;
+  }
+
+  /* ---------- painters ---------- */
+  const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  window.nfLofVectorPdf = async function (q) {
+    if (!(await loadJsPDF())) throw new Error('تعذّر تحميل مولّد الـ PDF — اتأكد من النت');
+    const m = model(q); const A = await assets(m);
+    const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait', compress: true }); let first = true; const ids = new Map();
+    const font = (size, bold) => { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); };
+    const P = {
+      page: () => { if (first) first = false; else doc.addPage('a4', 'portrait'); },
+      width: (s, size, bold) => { font(size, bold); return doc.getTextWidth(s); },
+      text: (s, x, y, size, bold, color) => { font(size, bold); doc.setTextColor(...rgb(color)); doc.text(s, x, y); },
+      rect: (x, y, w, h, fill) => { doc.setFillColor(...rgb(fill)); doc.rect(x, y, w, h, 'F'); },
+      line: (x1, y1, x2, y2, w, color) => { doc.setLineDashPattern([], 0); doc.setLineWidth(w); doc.setDrawColor(...rgb(color)); doc.line(x1, y1, x2, y2); },
+      dash: (x1, y1, x2, y2, w, color) => { doc.setLineWidth(w); doc.setDrawColor(...rgb(color)); doc.setLineDashPattern([1, 1.6], 0); doc.line(x1, y1, x2, y2); doc.setLineDashPattern([], 0); },
+      roundRect: (x, y, w, h, r, lw, color) => { doc.setLineDashPattern([], 0); doc.setLineWidth(lw); doc.setDrawColor(...rgb(color)); doc.roundedRect(x, y, w, h, r, r, 'S'); },
+      image: (a, x, y, w, h) => { if (!a || !a.data) return; try { if (!ids.has(a)) ids.set(a, 'im' + ids.size); doc.addImage(a.data, a.fmt, x, y, w, h, ids.get(a), 'FAST'); } catch (e) { console.warn('lof pdf img', e); } }
+    };
+    draw(m, P, A);
+    doc.setProperties({ title: `Quotation ${q.number || ''} - ${m.project}`, author: m.cfg.company.replace(/ō/g, 'o'), creator: 'lof outdoor furniture' });
+    return doc.output('blob');
+  };
+  const FAM = 'Helvetica, Arial, "Liberation Sans", sans-serif';
+  window.nfLofVectorCanvas = async function (q, cssW) {
+    const m = model(q); const A = await assets(m);
+    const dpr = Math.min(3, window.devicePixelRatio || 1); const k = (cssW * dpr) / PW; const pages = []; let ctx = null;
+    const mctx = document.createElement('canvas').getContext('2d'); const setF = (c, size, bold) => { c.font = `${bold ? 'bold ' : ''}${size * k}px ${FAM}`; };
+    const P = {
+      page: () => { const cv = document.createElement('canvas'); cv.width = Math.round(PW * k); cv.height = Math.round(PH * k); cv.style.cssText = `width:${cssW}px;height:${Math.round(cssW * PH / PW)}px;display:block;background:#fff;margin:0 0 10px;box-shadow:0 1px 4px rgba(0,0,0,.18);border-radius:2px`; ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); pages.push(cv); },
+      width: (s, size, bold) => { setF(mctx, size, bold); return mctx.measureText(s).width / k; },
+      text: (s, x, y, size, bold, color) => { setF(ctx, size, bold); ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.direction = 'ltr'; ctx.fillText(s, x * k, y * k); },
+      rect: (x, y, w, h, fill) => { ctx.fillStyle = fill; ctx.fillRect(x * k, y * k, w * k, h * k); },
+      line: (x1, y1, x2, y2, w, color) => { ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = Math.max(0.5, w * k); ctx.beginPath(); ctx.moveTo(x1 * k, y1 * k); ctx.lineTo(x2 * k, y2 * k); ctx.stroke(); },
+      dash: (x1, y1, x2, y2, w, color) => { ctx.setLineDash([1 * k, 1.6 * k]); ctx.strokeStyle = color; ctx.lineWidth = Math.max(0.5, w * k); ctx.beginPath(); ctx.moveTo(x1 * k, y1 * k); ctx.lineTo(x2 * k, y2 * k); ctx.stroke(); ctx.setLineDash([]); },
+      roundRect: (x, y, w, h, r, lw, color) => { ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = lw * k; ctx.beginPath(); const X = x * k, Y = y * k, Wd = w * k, Hd = h * k, Rr = r * k; ctx.moveTo(X + Rr, Y); ctx.arcTo(X + Wd, Y, X + Wd, Y + Hd, Rr); ctx.arcTo(X + Wd, Y + Hd, X, Y + Hd, Rr); ctx.arcTo(X, Y + Hd, X, Y, Rr); ctx.arcTo(X, Y, X + Wd, Y, Rr); ctx.closePath(); ctx.stroke(); },
+      image: (a, x, y, w, h) => { if (a && a.el) try { ctx.drawImage(a.el, x * k, y * k, w * k, h * k); } catch (e) { /* ignore */ } }
+    };
+    draw(m, P, A);
+    return pages;
+  };
+
+  /* route lōf through the shared vector hooks (99zz4: preview / print / PDF) */
+  const okB = window.nfQuoteVectorOk, pdfB = window.nfQuoteVectorPdf, cvB = window.nfQuoteVectorCanvas;
+  if (okB && pdfB && cvB) {
+    window.nfQuoteVectorOk = q => (q && q.brandId === 'lof') ? window.nfLofVectorOk(q) : okB(q);
+    window.nfQuoteVectorPdf = q => (q && q.brandId === 'lof') ? window.nfLofVectorPdf(q) : pdfB(q);
+    window.nfQuoteVectorCanvas = (q, w) => (q && q.brandId === 'lof') ? window.nfLofVectorCanvas(q, w) : cvB(q, w);
+  }
 })();
 </script>
 
