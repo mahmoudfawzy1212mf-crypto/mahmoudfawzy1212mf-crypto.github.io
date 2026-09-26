@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-0405-de1752";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-0557-821676";</script>
 
 <script>
 'use strict';
@@ -4920,7 +4920,7 @@ const AI_ERR = { not_deployed: 'وظيفة المساعد الذكي غير من
 const aiErr = e => AI_ERR[e && e.code] || AI_ERR.upstream_error;
 /* ---------------- data snapshot (role-scoped) ---------------- */
 function aiContextBase() {
-  const today = todayISO(); const fin = isAdmin(); const sales = isAdmin() || role() === 'office'; const wages = isAdmin() || role() === 'hr';
+  const today = todayISO(); const fin = isAdmin(); const sales = typeof nfFinRole === 'function' ? nfFinRole() : isAdmin(); /* v4.80: أرقام الأوامر والتحصيل للمالك/الموارد/المدير التجاري بس (كان: موظف المكتب) */ const wages = isAdmin() || role() === 'hr';
   const stageOf = s => ({ dept: s.deptId, status: s.status, progress: +s.progress || 0, start: s.start || null, end: s.end || null, plannedStart: s.plannedStart || null, plannedEnd: s.plannedEnd || null, team: (s.team || []).length, teamStatus: s.teamStatus || null });
   const orders = sortBy(list('orders').filter(o => isOpen(o)), o => o.dueDate || '9').slice(0, 40).map(o => { const c = fin ? orderCosts(o) : null; return Object.assign({ id: o.id, code: o.code, title: (o.title || '').slice(0, 60), brand: o.brandId, client: clientName(o.clientId), status: o.status, priority: o.priority || 'normal', orderDate: o.orderDate, dueDate: o.dueDate, daysLeft: o.dueDate ? daysBetween(today, o.dueDate) : null, progress: orderProgress(o), route: o.route, stages: orderStages(o).map(stageOf), site: o.site ? (o.site.address || '') : null, risks: orderRisks(o).map(r => r.t) }, sales ? { value: +o.value || 0, paid: orderPaid(o), balance: r2((+o.value || 0) - orderPaid(o)) } : {}, c ? { cost: { materials: c.materials, labor: c.labor, expenses: c.expenses, total: c.total, profit: c.profit, margin: c.margin } } : {}); });
   const purchases = list('purchases').filter(p => ['draft', 'ordered'].includes(p.status)).slice(0, 30).map(p => Object.assign({ id: p.id, number: p.number, supplier: p.supplier, status: p.status, date: p.date, expected: p.expected || null, orderId: p.orderId || null, items: (p.items || []).slice(0, 8).map(it => ({ materialId: it.materialId, name: it.name || byId('materials', it.materialId)?.name, qty: it.qty, unit: it.unit })) }, sales ? { total: poTotal(p), paid: +p.paid || 0 } : {}));
@@ -18761,6 +18761,57 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const tag = () => { const box = [...document.querySelectorAll('.overlay.sub')].pop(); if (!box) return; box.querySelectorAll('.pc[data-pid]').forEach(el => { if (el.dataset.enTag) return; el.dataset.enTag = 1; const p = byId('products', el.dataset.pid); if (!p) return; const miss = []; if (!(typeof productCover === 'function' && productCover(p))) miss.push('مفيش صورة'); if (!enName(p) || !enDesc(p)) miss.push('مفيش إنجليزي'); if (miss.length) el.querySelector('.bd').insertAdjacentHTML('beforeend', `<div class="tiny" style="color:var(--warn-ink)">${miss.join(' · ')}</div>`); else el.querySelector('.bd').insertAdjacentHTML('beforeend', `<div class="tiny" style="color:var(--good-ink)">✓ صورة + إنجليزي</div>`); }); };
     tag(); const box = [...document.querySelectorAll('.overlay.sub')].pop(); if (box && window.MutationObserver) new MutationObserver(tag).observe(box, { childList: true, subtree: true });
   })(pickCatalogLine);
+})();
+/* =====================================================================
+   v4.80 — الفلوس متوصلش غير للمصرَّح لهم (بالرقم السري — 26 سبتمبر)
+   · قيمة التعاقد + دفعات العملاء (orders.value / orders.payments) وسعر بيع المنتج (products.price)
+     اتنقلوا على السيرفر لمجموعتين منفصلتين «orderfin» و«prodprice» — مقفولين من السيرفر (RLS) للمالك/الموارد (hr)/المدير التجاري (bdd) بس.
+     trigger على السيرفر (nf_money_split) بيفصلهم تلقائيًا من أي كتابة، ولو الكاتب مش مصرَّح له بيتجاهل القيم.
+   · هنا في التطبيق: المصرَّح لهم بيتركّب عندهم الرقم على الأمر/المنتج في الذاكرة (overlay) فكل الشاشات تفضل زي ما هي.
+     غير المصرَّح لهم: أي نسخة قديمة محفوظة على الجهاز بتتمسح، والدفعات بتتحول لعلامات «تحويل مسجّل» من غير مبالغ
+     (عدد التحويلات بس — depositCount) علشان بوابة «اعتماد التشغيل» تفضل شغالة للإنتاج.
+   · المساعد الذكي: الأرقام دي متتقالش غير للمصرَّح لهم (21-ai).
+   ===================================================================== */
+(function () {
+  if (window.__NF_MONEYSPLIT__) return; window.__NF_MONEYSPLIT__ = 1;
+  ['orderfin', 'prodprice'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  const finRole = () => !!S.session && (isAdmin() || ['hr', 'bdd'].includes(role()));
+  window.nfFinRole = finRole;
+  const live = () => !!S.db;
+  const PH = n => Array.from({ length: n }, (_, i) => ({ id: 'ph' + i, _ph: 1, receiptFileId: '_hidden', amount: 0 }));
+  const realDeps = o => (Array.isArray(o.payments) ? o.payments.filter(p => p && p.receiptFileId).length : 0);
+  function finOverlay() {
+    if (!live()) return;
+    const fin = finRole(); const of = S.data.orderfin, pp = S.data.prodprice;
+    S.data.orders.forEach((o, id) => {
+      if (!o) return; const f = fin && of ? of.get(id) : null;
+      if (f) { if ('value' in f) o.value = f.value; if ('payments' in f) o.payments = Array.isArray(f.payments) ? f.payments : []; return; }
+      if (fin) { if (!Array.isArray(o.payments) && +o.depositCount > 0) o.payments = PH(+o.depositCount); return; }
+      const n = o.depositCount !== undefined ? (+o.depositCount || 0) : realDeps(o);
+      if ('value' in o) delete o.value;
+      if (!Array.isArray(o.payments) || o.payments.some(p => p && !p._ph) || o.payments.length !== n) o.payments = PH(n);
+    });
+    S.data.products.forEach((p, id) => {
+      if (!p) return; const f = fin && pp ? pp.get(id) : null;
+      if (f) { if ('price' in f) p.price = f.price; return; }
+      if (!fin && 'price' in p) delete p.price;
+    });
+  }
+  window.nfFinOverlay = finOverlay;
+  render = (base => function () { try { finOverlay(); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
+  /* subscribe to the two private collections (RLS returns nothing to anyone else) */
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () {
+    base.call(this); const db = S.db; if (!db) return;
+    for (const c of ['orderfin', 'prodprice']) S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, () => { }));
+  })(Store.subscribeAll);
+  /* an authorized write → keep the private copy in step locally (the server trigger does the real split) */
+  const mirror = (col, id) => {
+    if (!live() || !finRole()) return; const d = S.data[col] && S.data[col].get(id); if (!d) return;
+    if (col === 'orders') { const f = Object.assign({}, S.data.orderfin.get(id) || { id }); let ch = false; if ('value' in d) { f.value = d.value; ch = true; } if (Array.isArray(d.payments) && !d.payments.some(p => p && p._ph)) { f.payments = d.payments; ch = true; } if (ch) { f.brandId = d.brandId || f.brandId || null; S.data.orderfin.set(id, f); } }
+    if (col === 'products' && 'price' in d) { const f = Object.assign({}, S.data.prodprice.get(id) || { id }, { price: d.price, brandId: d.brandId || null }); S.data.prodprice.set(id, f); }
+  };
+  Store.save = (base => async function (col, doc, opts) { const r = await base.apply(this, arguments); if (col === 'orders' || col === 'products') { try { mirror(col, (r && r.id) || (doc && doc.id)); } catch (e) { /* ignore */ } } return r; })(Store.save);
+  Store.update = (base => async function (col, id, patch, opts) { const r = await base.apply(this, arguments); if (col === 'orders' || col === 'products') { try { mirror(col, id); } catch (e) { /* ignore */ } } return r; })(Store.update);
 })();
 </script>
 
