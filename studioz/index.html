@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1047-fabdf6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1257-986f18";</script>
 
 <script>
 'use strict';
@@ -19019,6 +19019,221 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     } catch (e) { /* ignore */ }
     return base.apply(this, arguments);
   })(render);
+})();
+/* =====================================================================
+   v4.87 — خطة التشغيل: مراحل متوازية + جدول زمني + شات مع المساعد (المالك بعت «ابدأ» — 26 سبتمبر)
+   · كل مرحلة ليها «بتبدأ إمتى»: بعد اللي قبلها (بعد ما كل المراحل اللي قبلها تخلص) / مع مرحلة رقم N / بعد بداية مرحلة N بكذا يوم.
+   · فوق المراحل: جدول زمني (بارات) + المدة الكلية مقارنة بلو كله ورا بعض.
+   · شات «اتكلم مع المساعد»: بيشوف الخطة الحالية + منتجات الأمر + شغل الأقسام، ويرد بشرح + كارت اقتراح (قبل ← بعد)
+     و«طبّق» / «تجاهل»، والمتغيّر بيتلوّن، وفيه «رجوع». أزرار جاهزة. من غير مفتاح AI: اقتراح التوازي بقواعد محلية.
+   · عند الاعتماد: مواعيد المهام بالجدول المتوازي + plannedStart/End على مراحل الأمر؛ الشات بيتحفظ مع الخطة.
+   · مفيش تغيير صلاحيات: نفس اللي بيفتح خطة التشغيل.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PLANCHAT__) return; window.__NF_PLANCHAT__ = 1;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.rplan .stg .st2{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px}
+.rplan .stg .st2 select{max-width:210px}.rplan .stg .st2 input{width:56px}
+.rplan .stg.chg{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.rpg{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--surface-2,var(--surface));margin:6px 0 4px}
+.rpg .tt{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;font-size:13px;margin-bottom:6px}.rpg .tt b{font-size:16px}
+.rpg .row2{display:grid;grid-template-columns:minmax(90px,170px) 1fr;gap:8px;align-items:center;margin:3px 0;font-size:11.5px}
+.rpg .row2 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rpg .trk{position:relative;height:14px;background:var(--surface);border-radius:7px;border:1px solid var(--line)}
+.rpg .bar{position:absolute;top:1px;bottom:1px;border-radius:6px;background:var(--accent);opacity:.85;min-width:4px}
+.rpg .bar.par{background:var(--good-ink)}
+.rpchat{border:1px solid var(--line);border-radius:14px;margin:8px 0;background:var(--surface);overflow:hidden}
+.rpchat .hd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px}
+.rpchat svg{width:18px;height:18px;flex:none}.rpchat .hd>svg{color:var(--accent)}
+.rpchat .msgs{max-height:300px;overflow:auto;padding:8px 12px;display:flex;flex-direction:column;gap:8px}
+.rpchat .m{max-width:92%;padding:8px 10px;border-radius:12px;font-size:13px;white-space:pre-wrap;line-height:1.55}
+.rpchat .m.me{align-self:flex-start;background:var(--accent-soft)}.rpchat .m.ai{align-self:flex-end;background:var(--surface-2,var(--surface));border:1px solid var(--line)}
+.rpchat .sug{border:1px solid var(--accent);border-radius:12px;padding:8px 10px;margin-top:6px;background:var(--surface)}
+.rpchat .sug ul{margin:4px 0;padding-inline-start:18px}.rpchat .sug .act{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.rpchat .chips{display:flex;gap:6px;flex-wrap:wrap;padding:6px 12px}
+.rpchat .chips button{border:1px solid var(--line);background:var(--surface-2,var(--surface));border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;color:inherit}
+.rpchat .in{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line)}.rpchat .in textarea{flex:1;min-height:40px;max-height:120px;resize:vertical}
+</style>`);
+  const $s = (sel, r) => (r || document).querySelector(sel); const $$s = (sel, r) => [...(r || document).querySelectorAll(sel)];
+  const FAB = ['metal', 'carp', 'alu', 'uphol', 'wood'];
+  /* ---------- schedule ---------- */
+  function schedule(stages) {
+    const out = []; let seqEnd = 0;
+    stages.forEach((s, i) => {
+      const d = Math.max(0, +s.days || 0); const st = s.start || {}; let start;
+      const ref = Number.isInteger(+st.ref) && +st.ref >= 0 && +st.ref < i ? +st.ref : null;
+      if (st.mode === 'with' && ref != null) start = out[ref].start;
+      else if (st.mode === 'lag' && ref != null) start = out[ref].start + Math.max(0, +st.lag || 0);
+      else start = out.reduce((m, x) => Math.max(m, x.end), 0);
+      out.push({ start, end: start + d, par: st.mode === 'with' || st.mode === 'lag' }); seqEnd += d;
+    });
+    return { rows: out, total: out.reduce((m, x) => Math.max(m, x.end), 0), seq: seqEnd };
+  }
+  window.nfPlanSchedule = schedule;
+  /* ---------- per-stage «starts when» control ---------- */
+  function startCtl(i, st) {
+    st = st || {}; const refs = Array.from({ length: i }, (_, k) => k);
+    const optsHtml = [`<option value="after" ${!st.mode || st.mode === 'after' ? 'selected' : ''}>بعد اللي قبلها</option>`]
+      .concat(refs.map(k => `<option value="with:${k}" ${st.mode === 'with' && +st.ref === k ? 'selected' : ''}>مع مرحلة ${k + 1}</option>`))
+      .concat(refs.map(k => `<option value="lag:${k}" ${st.mode === 'lag' && +st.ref === k ? 'selected' : ''}>بعد بداية مرحلة ${k + 1} بـ…</option>`)).join('');
+    return `<div class="st2"><span class="muted">بتبدأ:</span><select name="s-start">${optsHtml}</select><span class="lagw" style="${st.mode === 'lag' ? '' : 'display:none'}"><input name="s-lag" type="number" min="0" step="0.5" value="${st.lag || 1}"> يوم</span><span class="muted tiny sched"></span></div>`;
+  }
+  function enhance(root, stagesData) {
+    $$s('#rpstages .stg', root).forEach((el, i) => {
+      const cur = el.querySelector('.st2'); let st = null;
+      if (cur) { st = readStart(el); cur.remove(); } else if (stagesData && stagesData[i]) st = stagesData[i].start;
+      const b = el.querySelector('.h .badge'); if (b) b.textContent = i + 1;
+      el.querySelector('.h').insertAdjacentHTML('afterend', startCtl(i, st));
+    });
+    drawGantt(root);
+  }
+  function readStart(el) {
+    const s = el.querySelector('[name=s-start]'); if (!s) return null; const [mode, ref] = String(s.value || 'after').split(':');
+    if (mode === 'after') return { mode: 'after' };
+    return { mode, ref: +ref, lag: mode === 'lag' ? (+(el.querySelector('[name=s-lag]') || {}).value || 0) : 0 };
+  }
+  readPlan = (base => function (f) {
+    const p = base.apply(this, arguments);
+    const els = $$s('#rpstages .stg', f).filter(el => (el.querySelector('[name=s-name]') || {}).value.trim());
+    p.stages.forEach((s, i) => { const st = els[i] ? readStart(els[i]) : null; if (st) s.start = st; });
+    if (S._rpChat && S._rpChat.length) p.chat = S._rpChat.slice(-40);
+    return p;
+  })(readPlan);
+  function drawGantt(root) {
+    const f = root.closest ? (root.closest('#mform') || root) : root; const box = $s('#rpgantt', f); if (!box) return;
+    const p = readPlan(f); const sc = schedule(p.stages); const T = Math.max(1, sc.total);
+    const els = $$s('#rpstages .stg', f).filter(el => (el.querySelector('[name=s-name]') || {}).value.trim());
+    els.forEach((el, i) => { const r = sc.rows[i]; const t = el.querySelector('.sched'); if (t && r) t.textContent = `يوم ${fmtNum(r.start + 1)} ← ${fmtNum(r.end)}`; });
+    box.innerHTML = `<div class="tt"><span>المدة الكلية: <b>${fmtNum(sc.total)} يوم</b></span>${sc.seq > sc.total ? `<span class="muted">(لو كله ورا بعض: ${fmtNum(sc.seq)} يوم — وفّرنا ${fmtNum(sc.seq - sc.total)} يوم)</span>` : `<span class="muted">كل المراحل ورا بعض</span>`}</div>` +
+      p.stages.map((s, i) => { const r = sc.rows[i]; return `<div class="row2"><span class="nm">${i + 1}. ${esc(s.name.split(' — ')[0])}</span><div class="trk"><div class="bar ${r.par ? 'par' : ''}" style="right:${(r.start / T * 100).toFixed(2)}%;width:${(Math.max(r.end - r.start, 0.15) / T * 100).toFixed(2)}%" title="يوم ${r.start + 1} ← ${r.end}"></div></div></div>`; }).join('');
+  }
+  /* ---------- plan html: gantt + chat panel ---------- */
+  routePlanHTML = (base => function (o, plan) {
+    S._rpPlan = plan; S._rpOrder = o && o.id; S._rpChat = Array.isArray(plan && plan.chat) ? plan.chat.slice() : []; S._rpUndo = [];
+    let h = base.apply(this, arguments);
+    const chat = `<div class="rpchat" id="rpchat"><div class="hd">${icon('star')}<span>اتكلم مع المساعد</span><div class="grow"></div><button type="button" class="btn xs ghost" data-rpx="undo" id="rpundo" style="display:none">${icon('back')}رجوع</button></div>
+      <div class="msgs" id="rpmsgs">${S._rpChat.map(msgHTML).join('') || `<div class="muted small">اكتب أي تعديل على الخطة، أو اسأل إيه المراحل اللي ممكن تشتغل مع بعض علشان نقلل المدة.</div>`}</div>
+      <div class="chips"><button type="button" data-rpx="q:par">إيه اللي ممكن يتوازى؟</button><button type="button" data-rpx="q:min">قلّل المدة لأقل حاجة</button><button type="button" data-rpx="q:miss">راجع المهام الناقصة</button></div>
+      <div class="in"><textarea id="rpask" placeholder="مثال: قلّل التغليف ليوم واحد، أو ضيف مرحلة دهان بعد اللحام"></textarea><button type="button" class="btn p" data-rpx="send">${icon('send')}</button></div></div>`;
+    const i = h.indexOf('<h3 style="margin:8px 0 4px">المراحل والمهام</h3>');
+    const g = `<div class="rpg" id="rpgantt"></div>`;
+    return i < 0 ? chat + g + h : h.slice(0, i) + chat + h.slice(i).replace('<div id="rpstages">', g + '<div id="rpstages">');
+  })(routePlanHTML);
+  const msgHTML = m => `<div class="m ${m.role === 'me' ? 'me' : 'ai'}">${esc(m.text || '')}</div>`;
+  /* init when the plan body appears (AI can take a while) */
+  ACTIONS.routePlan = (base => async function () {
+    const r = base.apply(this, arguments); let n = 0;
+    const iv = setInterval(() => { const f = $s('#mform'); const st = f && $s('#rpstages', f); if (st && !st.dataset.px) { st.dataset.px = 1; enhance(f, (S._rpPlan || {}).stages); watch(f); clearInterval(iv); } if (++n > 240 || !f) clearInterval(iv); }, 250);
+    return r;
+  })(ACTIONS.routePlan);
+  function watch(f) {
+    const st = $s('#rpstages', f);
+    new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes, ...m.removedNodes].some(x => x.classList && x.classList.contains('stg')))) enhance(f); }).observe(st, { childList: true });
+    f.addEventListener('input', e => { if (e.target.closest('#rpstages')) drawGantt(f); });
+    f.addEventListener('change', e => { const s = e.target.closest('[name=s-start]'); if (s) { const w = s.parentElement.querySelector('.lagw'); if (w) w.style.display = s.value.startsWith('lag') ? '' : 'none'; } if (e.target.closest('#rpstages')) drawGantt(f); });
+    f.addEventListener('keydown', e => { if (e.target.id === 'rpask' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(f); } });
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-rpx]'); if (!b) return; const f = b.closest('#mform'); if (!f) return; e.preventDefault(); e.stopPropagation();
+    const a = b.dataset.rpx;
+    if (a === 'send') send(f);
+    else if (a === 'undo') undo(f);
+    else if (a.startsWith('q:')) { const q = { par: 'إيه المراحل اللي ممكن تشتغل مع بعض علشان نقلل المدة؟', min: 'قلّل المدة الكلية لأقل حاجة ممكنة من غير ما تبوّظ الترتيب المنطقي.', miss: 'راجع المهام: فيه مهام ناقصة أو مكررة في أي مرحلة؟' }[a.slice(2)]; const ta = $s('#rpask', f); if (ta) ta.value = q; send(f); }
+    else if (a.startsWith('apply:')) applySug(f, +a.slice(6), b);
+    else if (a.startsWith('skip:')) { const c = b.closest('.sug'); if (c) c.innerHTML = '<span class="muted small">اتجاهل الاقتراح</span>'; }
+  }, true);
+  /* ---------- chat ---------- */
+  const SUGS = [];
+  function pushMsg(f, m) { S._rpChat.push(Object.assign({ at: nowISO() }, m)); const box = $s('#rpmsgs', f); if (!box) return; if (box.children.length === 1 && !box.firstElementChild.classList.contains('m')) box.innerHTML = ''; box.insertAdjacentHTML('beforeend', msgHTML(m)); box.scrollTop = box.scrollHeight; return box.lastElementChild; }
+  function orderCtx(o) {
+    const ps = typeof orderProducts === 'function' ? orderProducts(o) : []; const items = typeof orderItems === 'function' ? orderItems(o) : [];
+    const prod = (ps.length ? ps : [{ name: o.title }]).slice(0, 25).map(p => `- ${p.code || ''} ${p.name} | كمية ${(items.find(it => it.productId === p.id) || {}).qty || o.qty || 1} | مقاسات ${p.dims || '—'} | خامات ${p.materials || '—'}`).join('\n');
+    const load = (S.settings.departments || []).map(d => { const n = list('orders').filter(x => x.id !== o.id && isOpen(x) && ((x.stages || {})[d.id] || {}).status === 'active').length; return `${d.id}: ${d.name} (شغال على ${n} أمر حاليًا)`; }).join('، ');
+    return { prod, load };
+  }
+  const planTxt = p => p.stages.map((s, i) => `${i}: [${s.deptId || 'عام'}] ${s.name} — ${s.days} يوم — تبدأ: ${!s.start || s.start.mode === 'after' ? 'بعد اللي قبلها' : s.start.mode === 'with' ? 'مع مرحلة ' + s.start.ref : 'بعد بداية مرحلة ' + s.start.ref + ' بـ' + s.start.lag + ' يوم'} — المهام: ${(s.tasks || []).map(t => t.title).join('؛ ')}`).join('\n');
+  async function send(f) {
+    const ta = $s('#rpask', f); const q = (ta && ta.value || '').trim(); if (!q) return; ta.value = '';
+    pushMsg(f, { role: 'me', text: q }); const wait = pushMsg(f, { role: 'ai', text: '⏳ بفكر…' }); S._rpChat.pop();
+    const o = byId('orders', S._rpOrder) || {}; const p = readPlan(f); const sc = schedule(p.stages);
+    let res = null;
+    if (typeof aiAvailable === 'function' && aiAvailable()) {
+      const ctx = orderCtx(o);
+      const prompt = `أنت مهندس تخطيط إنتاج في مصنع Ninety Fabrication (أثاث خارجي ومعادن وخشب وألومنيوم). صاحب المصنع بيراجع خطة تشغيل أمر ${o.code || ''} — ${o.title || ''} (براند ${o.brandId || ''}) وبيكلمك بالعامية المصرية.
+المنتجات:
+${ctx.prod}
+الأقسام وشغلها الحالي: ${ctx.load}
+الخطة الحالية (رقم المرحلة يبدأ من 0) — المدة الكلية ${sc.total} يوم:
+${planTxt(p)}
+طلبه: «${q}»
+قواعد لازم تلتزم بيها: التركيب بعد التغليف والنقل؛ الدهان بعد اللحام/التصنيع لنفس الجزء؛ الأجزاء من خامات مختلفة (حديد أسود، مجلفن، خشب، ألومنيوم) ممكن تتصنع مع بعض في أقسام مختلفة؛ المشتريات ممكن تبدأ بعد بداية المكتب الفني بيوم؛ ماتحطش مرحلتين على نفس القسم في نفس الوقت إلا لو هو طلب؛ حافظ على المهام اللي مش مطلوب تغييرها.
+start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها تخلص، أو {"mode":"with","ref":رقم مرحلة قبلها} = تبدأ معاها، أو {"mode":"lag","ref":رقم,"lag":أيام} = بعد بدايتها بكذا يوم. ref لازم يكون رقم مرحلة قبلها في الترتيب الجديد.
+لو السؤال مجرد استفسار ومفيش تعديل مطلوب، رجّع stages = null.
+أجب بـJSON فقط:
+{"reply":"رد قصير بالعامية المصرية","changes":["سطر لكل تغيير بشكل: المرحلة: قبل ← بعد"],"stages":[{"deptId":"...","name":"...","days":2,"start":{"mode":"after"},"tasks":[{"title":"..."}]}]}`;
+      try { const r = await aiText(prompt, {}); const j = parseJsonLoose(r.text); if (j && (j.reply || j.stages)) res = j; } catch (e) { console.warn('plan chat', e); }
+      if (!res) { const loc = localSuggest(p, q); res = loc.stages ? Object.assign(loc, { reply: 'المساعد الذكي مش متاح دلوقتي — ده اقتراح بالقواعد: ' + loc.reply }) : { reply: 'معرفتش أوصل للمساعد دلوقتي — جرّب تاني بعد شوية.', changes: [], stages: null }; }
+    } else res = localSuggest(p, q);
+    if (Array.isArray(res.stages)) res.stages = cleanStages(res.stages, p);
+    const idx = SUGS.push(res) - 1; const nsc = res.stages ? schedule(res.stages) : null;
+    const text = String(res.reply || '').trim() || (res.stages ? 'ده اقتراحي:' : 'تمام.');
+    wait.outerHTML = `<div class="m ai">${esc(text)}${res.stages ? `<div class="sug"><b>الاقتراح</b> — المدة: ${fmtNum(sc.total)} ← <b>${fmtNum(nsc.total)} يوم</b>${(res.changes || []).length ? `<ul>${res.changes.slice(0, 12).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}<div class="act"><button type="button" class="btn sm p" data-rpx="apply:${idx}">${icon('check')}طبّق</button><button type="button" class="btn sm ghost" data-rpx="skip:${idx}">تجاهل</button></div></div>` : ''}</div>`;
+    S._rpChat.push({ role: 'ai', text: text + (res.stages ? `\n(اقتراح: ${sc.total} ← ${nsc.total} يوم)` : ''), at: nowISO() });
+    const box = $s('#rpmsgs', f); if (box) box.scrollTop = box.scrollHeight;
+  }
+  function cleanStages(arr, cur) {
+    const d = id => (S.settings.departments || []).some(x => x.id === id);
+    return arr.filter(s => s && s.name).map((s, i) => {
+      const st = s.start || {}; let start = { mode: 'after' };
+      if ((st.mode === 'with' || st.mode === 'lag') && Number.isInteger(+st.ref) && +st.ref >= 0 && +st.ref < i) start = { mode: st.mode, ref: +st.ref, lag: st.mode === 'lag' ? Math.max(0, +st.lag || 0) : 0 };
+      const old = cur.stages.find(x => x.name === s.name);
+      return { deptId: s.deptId && d(s.deptId) ? s.deptId : null, name: String(s.name), days: +s.days > 0 ? +s.days : (old ? old.days : 1), start, tasks: Array.isArray(s.tasks) && s.tasks.length ? s.tasks.map(t => ({ title: String(t.title || t) })).filter(t => t.title) : (old ? old.tasks : []) };
+    });
+  }
+  /* rules-only suggestion when no AI key */
+  function localSuggest(p, q) {
+    if (!/توازي|يتوازى|مع بعض|قلل|قلّل|المدة|أقل/.test(q)) return { reply: 'المساعد الذكي مش متفعّل هنا — أقدر بس أقترح المراحل اللي تشتغل مع بعض. اسألني «إيه اللي ممكن يتوازى؟».', stages: null };
+    const st = p.stages.map(s => Object.assign({}, s, { start: s.start || { mode: 'after' } })); const ch = [];
+    const tech = st.findIndex(s => s.deptId === 'tech'); const pur = st.findIndex(s => s.deptId === 'purch');
+    if (tech >= 0 && pur > tech && st[pur].start.mode === 'after') { st[pur].start = { mode: 'lag', ref: tech, lag: 1 }; ch.push(`${st[pur].name}: بعد اللي قبلها ← بعد بداية المكتب الفني بيوم`); }
+    const fab = st.map((s, i) => ({ s, i })).filter(x => FAB.includes(x.s.deptId));
+    if (fab.length > 1) fab.slice(1).forEach(x => { if (x.s.deptId !== fab[0].s.deptId && x.s.start.mode === 'after') { x.s.start = { mode: 'with', ref: fab[0].i }; ch.push(`${x.s.name}: بعد اللي قبلها ← مع ${fab[0].s.name}`); } });
+    return ch.length ? { reply: 'دي المراحل اللي ممكن تشتغل مع بعض من غير ما تبوّظ الترتيب:', changes: ch, stages: st } : { reply: 'الخطة دي مفيهاش مراحل تقدر تتوازى بأمان — كل مرحلة محتاجة اللي قبلها تخلص.', stages: null };
+  }
+  function renderStages(f, stages, changed) {
+    const box = $s('#rpstages', f); if (!box) return; box.innerHTML = stages.map(stageHTML).join('');
+    enhance(f, stages); $$s('#rpstages .stg', f).forEach((el, i) => { if (changed && changed.has(i)) el.classList.add('chg'); });
+  }
+  function applySug(f, idx, btn) {
+    const s = SUGS[idx]; if (!s || !s.stages) return; const cur = readPlan(f).stages; S._rpUndo.push(cur);
+    const changed = new Set(); s.stages.forEach((x, i) => { const c = cur[i]; if (!c || c.name !== x.name || +c.days !== +x.days || JSON.stringify(c.start || { mode: 'after' }) !== JSON.stringify(x.start) || (c.deptId || null) !== x.deptId || (c.tasks || []).length !== (x.tasks || []).length) changed.add(i); });
+    renderStages(f, s.stages, changed); const u = $s('#rpundo', f); if (u) u.style.display = '';
+    const c = btn.closest('.sug'); if (c) c.innerHTML = `<span style="color:var(--good-ink)">✓ اتطبّق — المراحل المتغيّرة متلوّنة</span>`;
+    S._rpChat.push({ role: 'ai', text: '✓ اتطبّق الاقتراح', at: nowISO() });
+  }
+  function undo(f) { const prev = S._rpUndo.pop(); if (!prev) return; renderStages(f, prev, null); const u = $s('#rpundo', f); if (u && !S._rpUndo.length) u.style.display = 'none'; toast('رجعنا للخطة اللي قبل كده'); }
+  /* ---------- approval: dates follow the parallel schedule ---------- */
+  applyRoutePlanBase = (base => async function (o, p) {
+    const r = await base.apply(this, arguments);
+    try {
+      const sc = schedule(p.stages); const day0 = o.orderDate && o.orderDate > todayISO() ? o.orderDate : todayISO();
+      const ts = list('tasks').filter(t => t.orderId === o.id && t.source === 'route' && Number.isInteger(t.stage) && String(t.id).startsWith(`rp_${o.id}_`));
+      for (const t of ts) { const row = sc.rows[t.stage]; if (!row) continue; const due = addDays(day0, Math.max(1, Math.ceil(row.end))); if (t.dueDate !== due) await Store.update('tasks', t.id, { dueDate: due, startDate: addDays(day0, Math.floor(row.start)) }, { silent: true }); }
+      const cur = byId('orders', o.id) || o; const stp = {};
+      p.stages.forEach((s, i) => { if (!s.deptId || !(cur.route || []).includes(s.deptId)) return; const row = sc.rows[i]; const a = addDays(day0, Math.floor(row.start)), b = addDays(day0, Math.max(1, Math.ceil(row.end))); const prev = stp[s.deptId]; stp[s.deptId] = prev ? { plannedStart: prev.plannedStart < a ? prev.plannedStart : a, plannedEnd: prev.plannedEnd > b ? prev.plannedEnd : b } : { plannedStart: a, plannedEnd: b }; });
+      const stages = {}; Object.keys(stp).forEach(d => { stages[d] = Object.assign({}, (cur.stages || {})[d] || {}, stp[d]); });
+      const rp = Object.assign({}, cur.routePlan || {}, { total: sc.total, seq: sc.seq, chat: (p.chat || []).slice(-40) });
+      await Store.update('orders', o.id, Object.keys(stages).length ? { stages, routePlan: rp } : { routePlan: rp }, { silent: true });
+      if (sc.seq > sc.total) toast(`الجدول متوازي: ${fmtNum(sc.total)} يوم بدل ${fmtNum(sc.seq)}`);
+    } catch (e) { console.warn('parallel schedule', e); }
+    return r;
+  })(applyRoutePlanBase);
+  /* the draft keeps the chat too */
+  applyRoutePlan = (base => async function (o, p) {
+    const r = await base.apply(this, arguments);
+    try { if (!isAdmin() && p && p.chat && p.chat.length) { const cur = byId('orders', o.id); if (cur && cur.routeDraft) await Store.update('orders', o.id, { routeDraft: Object.assign({}, cur.routeDraft, { chat: p.chat.slice(-40) }) }, { silent: true }); } } catch (e) { /* ignore */ }
+    return r;
+  })(applyRoutePlan);
 })();
 </script>
 
