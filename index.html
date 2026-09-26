@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-0633-665bde";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-0642-117dff";</script>
 
 <script>
 'use strict';
@@ -18826,6 +18826,122 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     if (col === 'files' && S._pricedUp && doc && typeof doc === 'object') { const owner = (doc.orderId && byId('orders', doc.orderId)) || (doc.productId && byId('products', doc.productId)) || null; doc.priced = true; if (owner && owner.brandId && !doc.brandId) doc.brandId = owner.brandId; }
     return base.apply(this, arguments);
   })(Store.save);
+})();
+/* =====================================================================
+   v4.82 — CRM lōf: «عروض الأسعار» + «العملاء» + زرار «عرض سعر جديد» (المالك بعت «ابدأ» — 26 سبتمبر)
+   · صفحة CRM lōf: زرار كبير «عرض سعر جديد» فوق، وتبويبين جداد:
+       «عروض الأسعار» — كل عروض lōf (بحث + فلتر بالحالة) والإجمالي للي مسموح لهم بالأسعار.
+       «العملاء» — عملاء lōf بس (عروضهم وأوامرهم وفرصهم، اتصال/واتساب، «عرض سعر» لكل عميل).
+     التبويب القديم «العملاء والتعاقدات» بقى اسمه «التعاقدات والفواتير».
+   · «عرض سعر جديد» → اختيار: «من الكتالوج» (القسم: Garden / Site / Hospitality ← المنتجات بصورها وبياناتها الإنجليزي)
+     أو «مشروع خاص» (بند بصورة ووصف وكمية وسعر). بعدها فورم العرض العادي بالبند جاهز.
+   · اختيار العميل في عرض سعر من صفحة CRM بيعرض عملاء البراند ده بس، والعميل الجديد بيتسجل على البراند.
+   · مفيش أي تغيير في الصلاحيات: مين يشوف الصفحة ومين يعمل عرض زي ما هو (المالك + المدير التجاري).
+   ===================================================================== */
+(function () {
+  if (window.__NF_LOFCRM__) return; window.__NF_LOFCRM__ = 1;
+  const LB = 'lof';
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.lqbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.lqbig{display:inline-flex;align-items:center;gap:10px;padding:12px 22px;border-radius:14px;font-size:15px;font-weight:700;background:var(--cb-accent,var(--accent));color:#fff;border:0;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.lqbig svg{width:20px;height:20px}
+.lqch{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:560px){.lqch{grid-template-columns:1fr}}
+.lqopt{border:1.5px solid var(--line);border-radius:16px;padding:16px;background:var(--surface);cursor:pointer;text-align:right;display:flex;flex-direction:column;gap:6px}
+.lqopt:hover{border-color:var(--cb-accent,var(--accent))}.lqopt .t{font-weight:800;font-size:15px}.lqopt .s{font-size:12px;color:var(--muted)}
+.lqopt .ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}.lqopt .ic svg{width:20px;height:20px}
+.lqcats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:6px}
+.lqcat{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);cursor:pointer;text-align:right;padding:0;display:flex;flex-direction:column}
+.lqcat:hover{border-color:var(--cb-accent,var(--accent))}.lqcat .im{aspect-ratio:4/3;background:var(--surface-2,var(--surface));display:grid;place-items:center;overflow:hidden}.lqcat .im img{width:100%;height:100%;object-fit:cover}
+.lqcat .bd{padding:8px 10px}.lqcat .bd b{display:block;font-size:13px}.lqcat .bd span{font-size:11px;color:var(--muted)}
+</style>`);
+  const canQuote = () => writable() && (isAdmin() || role() === 'bdd');
+  const seesQ = () => typeof priceAllowed === 'function' ? priceAllowed() : isAdmin();
+  const qTotal = q => { try { return typeof quoteTotal === 'function' ? quoteTotal(q) : (+q.total || 0); } catch (e) { return +q.total || 0; } };
+  const lofQuotes = () => list('quotations').filter(q => (q.brandId || LB) === LB);
+  function lofClients() {
+    const ids = new Set(); lofQuotes().forEach(q => q.clientId && ids.add(q.clientId));
+    list('orders').filter(o => o.brandId === LB).forEach(o => o.clientId && ids.add(o.clientId));
+    list('leads').filter(l => (l.brandId || LB) === LB && l.clientId).forEach(l => ids.add(l.clientId));
+    return list('clients').filter(c => c.brandId === LB || (!c.brandId && ids.has(c.id)));
+  }
+  window.nfLofClients = lofClients;
+  /* ---------- the «new quote» chooser ---------- */
+  ACTIONS.lofQuoteNew = cid => {
+    if (!canQuote()) return; const colls = brandCollections(LB);
+    const prods = list('products').filter(p => p.brandId === LB && p.status !== 'archived');
+    const catCard = c => { const arr = prods.filter(p => productCollection(p) === c.id); const cov = arr.map(p => productCover(p)).find(Boolean); return `<button type="button" class="lqcat" data-action="lofQuoteGo" data-arg="cat:${esc(c.id)}:${esc(cid || '')}"><div class="im">${cov ? `<img src="${esc(cov)}" alt="">` : `<span class="muted">${icon('inventory')}</span>`}</div><div class="bd"><b>${esc(c.name)}</b><span>${arr.length} منتج</span></div></button>`; };
+    openModal({ title: 'عرض سعر جديد — lōf', wide: true, footer: null, body: `<div class="lqch">
+      <div class="lqopt" style="cursor:default"><div class="ic">${icon('inventory')}</div><div class="t">من الكتالوج</div><div class="s">اختار القسم، وبعدين المنتجات. كل منتج بيتنقل بصورته واسمه ووصفه الإنجليزي وسعره.</div>
+        <div class="lqcats">${colls.map(catCard).join('')}<button type="button" class="lqcat" data-action="lofQuoteGo" data-arg="cat::${esc(cid || '')}"><div class="im"><span class="muted">${icon('search')}</span></div><div class="bd"><b>كل المنتجات</b><span>${prods.length} منتج</span></div></button></div></div>
+      <button type="button" class="lqopt" data-action="lofQuoteGo" data-arg="custom::${esc(cid || '')}"><div class="ic">${icon('camera')}</div><div class="t">مشروع خاص</div><div class="s">منتج مش في الكتالوج: حط صورته ووصفه والكمية والسعر. تقدر تضيف بنود تانية بعد كده من الكتالوج أو بنود خاصة.</div></button>
+    </div>` });
+  };
+  ACTIONS.lofQuoteGo = arg => {
+    const [kind, coll, cid] = String(arg || '').split(':'); closeModal();
+    S.ui.crmBrand = LB; ACTIONS.quoteNew(cid || undefined);
+    setTimeout(() => {
+      const f = document.getElementById('mform'); if (!f) return;
+      const br = f.querySelector('[name=brandId]'); if (br && br.value !== LB && [...br.options].some(o => o.value === LB)) { br.value = LB; br.dispatchEvent(new Event('change', { bubbles: true })); }
+      const recalc = () => { const l = f.querySelector('#lines input'); if (l) l.dispatchEvent(new Event('input', { bubbles: true })); };
+      if (kind === 'custom') customLineDialog(f, recalc, null);
+      else { pickCatalogLine(f, recalc, LB); const box = [...document.querySelectorAll('.overlay.sub')].pop(); const b = box && box.querySelector(`[data-coll="${coll || ''}"]`); if (b) b.click(); }
+    }, 60);
+  };
+  /* ---------- client picker / new client inside a brand CRM ---------- */
+  const crmCtx = () => { const v = String((S.route || {}).view || ''); return v.startsWith('crm-') ? v.slice(4) : ''; };
+  clientPicker = (base => function (sel) {
+    const b = crmCtx(); if (!b) return base.apply(this, arguments);
+    const arr = b === LB ? lofClients() : list('clients').filter(c => c.brandId === b);
+    return `<input id="f-clientName" name="clientName" list="clientlist" value="${esc(sel ? clientName(sel) : '')}" placeholder="اكتب اسم العميل أو اختاره (عملاء ${esc(brandKit(b).name)})"><datalist id="clientlist">${arr.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`;
+  })(clientPicker);
+  resolveClient = (base => async function (name, type) {
+    const b = crmCtx(); if (!b) return base.apply(this, arguments);
+    const n = String(name || '').trim(); if (!n) return null;
+    const pool = b === LB ? lofClients() : list('clients').filter(c => c.brandId === b);
+    const ex = pool.find(c => c.name.trim().toLowerCase() === n.toLowerCase()) || list('clients').find(c => c.name.trim().toLowerCase() === n.toLowerCase()); if (ex) return ex.id;
+    const c = await Store.save('clients', { id: uid(), name: n, type: type || 'شركة', phone: '', brandId: b, createdAt: nowISO() }, { silent: true }); return c.id;
+  })(resolveClient);
+  /* ---------- tab bodies ---------- */
+  function quotesBody() {
+    const f = S.ui.filter.lofq ||= { q: '', st: '' }; let arr = sortBy(lofQuotes(), q => (q.date || '') + (q.number || ''), true);
+    const counts = {}; arr.forEach(q => { counts[q.status || 'draft'] = (counts[q.status || 'draft'] || 0) + 1; });
+    if (f.st) arr = arr.filter(q => (q.status || 'draft') === f.st);
+    if (f.q) { const s = f.q.toLowerCase(); arr = arr.filter(q => `${q.number} ${q.subject || ''} ${q.project || ''} ${clientName(q.clientId)}`.toLowerCase().includes(s)); }
+    const money = seesQ();
+    const sts = Object.keys(QUOTE_STATUS).filter(k => counts[k]);
+    return `<div class="toolbar"><input class="inp" placeholder="بحث برقم العرض أو العميل أو المشروع…" value="${esc(f.q)}" data-filter="lofq:q" style="max-width:260px">
+      <div class="seg"><button class="${!f.st ? 'on' : ''}" data-action="lofqSt" data-arg="">الكل ${lofQuotes().length}</button>${sts.map(k => `<button class="${f.st === k ? 'on' : ''}" data-action="lofqSt" data-arg="${k}">${esc(QUOTE_STATUS[k][0])} ${counts[k]}</button>`).join('')}</div></div>
+      ${arr.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>العرض</th><th>العميل</th><th>المشروع</th><th>التاريخ</th><th>الحالة</th>${money ? '<th class="n">الإجمالي</th>' : ''}</tr></thead><tbody>${arr.map(q => `<tr style="cursor:pointer" data-action="go" data-arg="quotes/${q.id}"><td><span class="code">${esc(q.number || '')}</span></td><td>${esc(clientName(q.clientId) || '—')}</td><td class="small">${esc((q.project || q.subject || '').slice(0, 70))}</td><td>${fmtDate(q.date)}</td><td>${badge(QUOTE_STATUS, q.status || 'draft')}</td>${money ? `<td class="n">${fmtMoney(qTotal(q))}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>`
+      : `<div class="empty"><b>${f.q || f.st ? 'مفيش عروض بالبحث ده' : 'لسه مفيش عروض أسعار lōf'}</b>${canQuote() ? `<button class="btn p" data-action="lofQuoteNew">${icon('plus')}عرض سعر جديد</button>` : ''}</div>`}`;
+  }
+  ACTIONS.lofqSt = arg => { (S.ui.filter.lofq ||= { q: '', st: '' }).st = arg || ''; render(false); };
+  function clientsBody() {
+    const f = S.ui.filter.lofc ||= { q: '' }; let arr = lofClients();
+    if (f.q) { const s = f.q.toLowerCase(); arr = arr.filter(c => `${c.name} ${c.contact || ''} ${c.phone || ''} ${c.email || ''}`.toLowerCase().includes(s)); }
+    const qs = lofQuotes(), os = list('orders').filter(o => o.brandId === LB), ls = list('leads').filter(l => (l.brandId || LB) === LB);
+    const row = c => { const nq = qs.filter(q => q.clientId === c.id), no = os.filter(o => o.clientId === c.id), nl = ls.filter(l => l.clientId === c.id && !['won', 'lost', 'delivered'].includes(l.stage)); const last = sortBy(nq, q => q.date || '', true)[0];
+      const ph = String(c.phone || '').replace(/[^\d+]/g, '');
+      return `<tr><td><a href="#/clients/${c.id}"><b>${esc(c.name)}</b></a><div class="tiny muted">${esc(c.contact || '')}${c.type ? ` · ${esc(c.type)}` : ''}</div></td><td class="small" dir="ltr" style="text-align:right">${esc(c.phone || '')}</td><td class="n">${nq.length}</td><td class="n">${no.length}</td><td class="n">${nl.length}</td><td class="small">${last ? `<a href="#/quotes/${last.id}"><span class="code">${esc(last.number)}</span></a> ${fmtDate(last.date)}` : '—'}</td><td class="row" style="gap:4px;justify-content:flex-end">${ph ? `<a class="btn xs ghost" href="https://wa.me/${ph.replace(/^0/, '20').replace(/^\+/, '')}" target="_blank" rel="noopener">${icon('wa')}</a><a class="btn xs ghost" href="tel:${esc(ph)}">اتصال</a>` : ''}${canQuote() ? `<button class="btn xs" data-action="lofQuoteNew" data-arg="${c.id}">${icon('plus')}عرض سعر</button>` : ''}</td></tr>`; };
+    return `<div class="toolbar"><input class="inp" placeholder="بحث بالاسم أو التليفون…" value="${esc(f.q)}" data-filter="lofc:q" style="max-width:240px"><span class="muted small">${arr.length} عميل lōf</span><div class="grow"></div>${canCrm() ? `<button class="btn sm" data-action="clientNew">${icon('plus')}عميل جديد</button>` : ''}</div>
+      ${arr.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>العميل</th><th>التليفون</th><th class="n">عروض</th><th class="n">أوامر</th><th class="n">فرص مفتوحة</th><th>آخر عرض</th><th></th></tr></thead><tbody>${sortBy(arr, c => c.name).map(row).join('')}</tbody></table></div></div>` : `<div class="empty"><b>${f.q ? 'مفيش عملاء بالبحث ده' : 'لسه مفيش عملاء lōf'}</b></div>`}`;
+  }
+  /* ---------- page: big button + new tabs ---------- */
+  const TABS = [['board', 'لوحة الفرص'], ['quotes', 'عروض الأسعار'], ['lofclients', 'العملاء'], ['follow', 'المتابعات'], ['clients', 'التعاقدات والفواتير'], ['after', 'ما بعد البيع'], ['report', 'التقارير']];
+  vCrmBrand = (base => function (b) {
+    if (b !== LB || S.route.id) return base.apply(this, arguments);
+    const f = S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' }; const mine = ['quotes', 'lofclients'].includes(f.tab); const keep = f.tab;
+    if (mine) f.tab = 'board';
+    let html; try { html = base.apply(this, arguments); } finally { f.tab = keep; }
+    const t0 = html.indexOf('<div class="tabs" style="margin:10px 0">'); if (t0 < 0) return html;
+    const t1 = html.indexOf('</div>', t0) + 6;
+    const tabs = `<div class="tabs" style="margin:10px 0">${TABS.map(([k, n]) => `<button class="${f.tab === k ? 'on' : ''}" data-action="crmTab" data-arg="${k}">${n}</button>`).join('')}</div>`;
+    const big = canQuote() ? `<div class="lqbar"><button class="lqbig" data-action="lofQuoteNew">${icon('plus')}عرض سعر جديد</button><span class="muted small">من الكتالوج أو مشروع خاص</span></div>` : '';
+    let head = html.slice(0, t0); const rest = html.slice(t1); const k = head.indexOf('<div class="kpis">'); head = k < 0 ? head + big : head.slice(0, k) + big + head.slice(k);
+    if (!mine) return head + tabs + rest;
+    const end = html.lastIndexOf('</div>');
+    return head + tabs + (f.tab === 'quotes' ? quotesBody() : clientsBody()) + html.slice(end);
+  })(vCrmBrand);
 })();
 </script>
 
