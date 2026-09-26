@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1633-fec28b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1642-fdc35e";</script>
 
 <script>
 'use strict';
@@ -19395,8 +19395,27 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   try { if (typeof ACCT_DEFAULTS !== 'undefined' && !ACCT_DEFAULTS.expenseCats.some(c => c.id === CAT.id)) ACCT_DEFAULTS.expenseCats.splice(ACCT_DEFAULTS.expenseCats.length - 1, 0, CAT); } catch (e) { /* ignore */ }
   render = (base => function () { try { const a = S.settings && S.settings.accounting; if (a && Array.isArray(a.expenseCats) && a.expenseCats.length && !a.expenseCats.some(c => c.id === CAT.id)) a.expenseCats.push(Object.assign({}, CAT)); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
   /* ------------ nav + access ------------ */
-  VIEW_TITLES.piecejobs = 'اتفاقات القطعة — التنجيد';
-  (() => { const i = NAV.findIndex(n => n.id === 'external'); const entry = { id: 'piecejobs', label: 'اتفاقات القطعة (التنجيد)', icon: 'layers', count: () => canPJ() ? list('piecejobs').filter(myTurn).length : 0, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  VIEW_TITLES.piecejobs = 'قسم التنجيد — اتفاقات القطعة';
+  /* v4.93 (المالك): مش في القايمة الجانبية — جوّه قسم التنجيد نفسه (لوحات الأقسام)، وللحسابات كارت في الرئيسية + زرار في المهمة */
+  const waitingMe = () => list('piecejobs').filter(myTurn).length;
+  const toPay = () => canPay() ? list('piecejobs').filter(j => ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0 && (j.status === 'delivered' || (+j.advance > 0 && !(j.payments || []).some(p => p.kind === 'advance')))).length : 0;
+  const deptBox = () => { const w = waitingMe(), act = list('piecejobs').filter(j => j.status === 'approved').length; return `<a class="pjdept" href="#/piecejobs">${icon('layers')}<span>اتفاقات القطعة — الصنايعية</span>${w ? `<span class="badge warn">${w} مستني</span>` : ''}${act ? `<span class="muted tiny">${act} شغال</span>` : ''}</a>`; };
+  if (typeof vBoards === 'function') vBoards = (base => function () {
+    const h = base.apply(this, arguments); if (!canPJ()) return h; const nm = esc(deptName(DEP));
+    const key = `<div class="col"><div class="ch"><span>${nm}</span>`; const a = h.indexOf(key); if (a < 0) return h; const b = h.indexOf('</div>', a + key.length); if (b < 0) return h;
+    return h.slice(0, b + 6) + deptBox() + h.slice(b + 6);
+  })(vBoards);
+  if (typeof vDashboard === 'function') vDashboard = (base => function () {
+    const h = base.apply(this, arguments); if (!canPJ() || isUpHead()) return h; const w = waitingMe(), pay = toPay(); if (!w && !pay && !['acc', 'hr'].includes(role())) return h;
+    return pjCard() + h;
+  })(vDashboard);
+  const pjCard = () => { const w = waitingMe(), pay = toPay(); return `<div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">${icon('layers')}<b>قسم التنجيد — اتفاقات القطعة</b>${w ? `<span class="badge warn">${w} مستني موافقتك</span>` : ''}${pay ? `<span class="badge warn">${pay} مستني صرف</span>` : ''}${!w && !pay ? '<span class="muted small">مفيش حاجة مستنياك</span>' : ''}<div class="grow"></div><a class="btn sm" href="#/piecejobs">افتح</a></div></div>`; };
+  /* the tasks page is the landing page for accounts: show the card there too (not in a task's detail) */
+  if (typeof vTasks === 'function') vTasks = (base => function () { const h = base.apply(this, arguments); if (S.route.id || !canPJ() || isUpHead()) return h; if (!waitingMe() && !toPay() && !['acc', 'hr'].includes(role())) return h; return pjCard() + h; })(vTasks);
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    const h = base.apply(this, arguments); if (!t || !t.pieceJobId || !canPJ()) return h; const j = byId('piecejobs', t.pieceJobId);
+    return `<div class="banner warn" style="margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>اتفاق قطعة ${esc((j && j.code) || '')} — قسم التنجيد</span><div class="grow"></div><a class="btn sm p" href="#/piecejobs/${esc(t.pieceJobId)}">افتح الاتفاق</a></div>` + h;
+  })(vTaskDetail);
   ['manager', 'acc', 'hr', 'head'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('piecejobs')) ROLE_VIEWS[r].push('piecejobs'); });
   canSee = (base => function (view) { if (view === 'piecejobs') return canPJ(); return base.apply(this, arguments); })(canSee);
   (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
@@ -19408,6 +19427,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 .pjcards{display:grid;gap:8px}.pjcard{display:block;border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface);cursor:pointer;color:inherit;text-decoration:none}
 .pjcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pjcard .code{font-weight:700}.pjphoto{max-width:260px;max-height:200px;border-radius:12px;border:1px solid var(--line);cursor:zoom-in}
 .pjlog div{padding:4px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+.pjdept{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 4px 8px;padding:8px 10px;border:1px dashed var(--line);border-radius:12px;font-size:12.5px;color:inherit;text-decoration:none;background:var(--surface)}.pjdept svg{width:16px;height:16px}
 @media (max-width:600px){.pjitems .pjr{grid-template-columns:minmax(0,1fr) 58px 86px 30px}}
 </style>`);
   /* ------------ notifications (no amounts in tasks — tasks are readable by more people) ------------ */
@@ -19450,7 +19470,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const rows = tabRows(tab);
     const tot = R2(sum(rows.filter(j => ['approved', 'delivered', 'paid'].includes(j.status)), jTotal)), paid = R2(sum(rows, jPaid));
     const kp = rows.length ? `<div class="row small muted" style="gap:14px;margin-bottom:8px;flex-wrap:wrap"><span>${rows.length} اتفاق</span>${tot ? `<span>المعتمد: <b>${fmtMoney(tot)}</b></span>` : ''}${paid ? `<span>اتصرف: <b>${fmtMoney(paid)}</b></span>` : ''}</div>` : '';
-    return tabs + kp + (rows.length ? `<div class="pjcards">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>${tab === 'mine' ? 'مفيش حاجة مستنياك' : 'مفيش اتفاقات هنا'}</b>${isUpHead() && writable() ? 'افتح اتفاق جديد من زرار «اتفاق قطعة» فوق' : ''}</div>`);
+    const back = canSee('boards') ? `<a class="btn sm ghost" href="#/boards" style="margin-bottom:8px">${icon('back')}لوحة قسم ${esc(deptName(DEP))}</a>` : '';
+    return back + tabs + kp + (rows.length ? `<div class="pjcards">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>${tab === 'mine' ? 'مفيش حاجة مستنياك' : 'مفيش اتفاقات هنا'}</b>${isUpHead() && writable() ? 'افتح اتفاق جديد من زرار «اتفاق قطعة» فوق' : ''}</div>`);
   }
   document.addEventListener('click', e => { const b = e.target.closest('[data-pjtab]'); if (!b) return; S._pjTab = b.dataset.pjtab; render(true); });
   /* ------------ detail ------------ */
@@ -19499,7 +19520,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   EXTRA_VIEWS.piecejobs = r => { if (!canPJ()) return `<div class="empty"><b>مش متاحة</b></div>`; return r.id ? vPieceDetail(r.id) : vPieceList(); };
   EXTRA_TITLES.piecejobs = (r, addBtn) => {
     const acts = []; if (!r.id && writable()) { if (isUpHead() || isAdmin()) acts.push(addBtn('اتفاق قطعة', 'pjNew')); if (S._pjTab === 'crafters' || isUpHead() || ['manager', 'acc', 'hr'].includes(role()) || isAdmin()) acts.push(`<button class="btn" data-action="crafterNew" data-arg="">${icon('plus')}<span>صنايعي</span></button>`); }
-    return { title: r.id ? `اتفاق قطعة ${(byId('piecejobs', r.id) || {}).code || ''}` : 'اتفاقات القطعة — التنجيد', sub: r.id ? '' : 'الصنايعية بالقطعة: الرقم بيعدّي على رئيس القسم ← مدير المصنع ← مسؤول الحسابات ← مدير الحسابات', actions: acts.join('') };
+    return { title: r.id ? `اتفاق قطعة ${(byId('piecejobs', r.id) || {}).code || ''}` : `قسم ${deptName(DEP)} — اتفاقات القطعة`, sub: r.id ? '' : 'الصنايعية بالقطعة: الرقم بيعدّي على رئيس القسم ← مدير المصنع ← مسؤول الحسابات ← مدير الحسابات', actions: acts.join('') };
   };
   ACTIONS.pjPhoto = id => { const j = byId('piecejobs', id); if (j && j.photo && typeof lightbox === 'function') lightbox(j.photo, j.code); };
   /* ------------ crafters ------------ */
