@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1444-136bfe";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1453-b6e082";</script>
 
 <script>
 'use strict';
@@ -19322,7 +19322,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
    v4.89 — (المصنع) أمين المخزن (store — عبدالرحمن سيد صالح): إضافة وتعديل الخامات (بالرقم السري — 26 سبتمبر)
    · زرار «+ خامة» في صفحة المخزن + تعديل بيانات أي خامة (الكود/الاسم/التصنيف/الوحدة/الرصيد الافتتاحي/الحد الأدنى/المكان/الصورة/الموردين).
    · من غير ما يشوف تكلفة الوحدة ولا أسعار الموردين — الخانات مستخبية، والأرقام المتسجلة مابتتغيرش لما يحفظ.
-   · الحذف للمالك بس (زي ما هو). السيرفر: nf_can_write كان أصلًا بيسمح لـ store يكتب materials وmovements.
+   · v4.90 (بالرقم السري): وكمان يحذف الخامة (زرار «حذف» في شاشة التعديل — بتروح سلة المحذوفات 30 يوم، وحركاتها القديمة بتفضل). السيرفر: nf_can_write كان أصلًا بيسمح لـ store يكتب materials وmovements.
    ===================================================================== */
 (function () {
   if (window.__NF_STOREMAT__) return; window.__NF_STOREMAT__ = 1;
@@ -19335,6 +19335,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     return t;
   })(viewTitleBase);
   const strip = () => { if (!noCost()) return; const f = document.querySelector('#mform'); if (!f) return; f.classList.add('nfnocost'); const c = f.querySelector('[name=cost]'); if (c) (c.closest('.field') || c).remove(); };
+  /* v4.90: زرار «حذف» في تعديل الخامة لأمين المخزن */
+  let editing = false;
+  openModal = (base => function (o) {
+    if (editing && o && !o.extra && canMatStore() && writable() && /^تعديل /.test(o.title || '')) { const id = S._matEditId; if (id) o = Object.assign({}, o, { extra: `<div class="grow"></div><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-action="materialDelete" data-arg="${esc(id)}">${icon('trash')}حذف</button>` }); }
+    return base.call(this, o);
+  })(openModal);
+  if (ACTIONS.materialEdit) ACTIONS.materialEdit = (base => function (id) { editing = true; S._matEditId = id; try { return base.apply(this, arguments); } finally { editing = false; } })(ACTIONS.materialEdit);
   ['materialNew', 'materialEdit'].forEach(a => { if (ACTIONS[a]) ACTIONS[a] = (base => function () { const r = base.apply(this, arguments); try { strip(); } catch (e) { /* ignore */ } return r; })(ACTIONS[a]); });
   Store.save = (base => function (col, doc, opts) {
     if (col === 'materials' && doc && typeof doc === 'object' && noCost()) { const old = byId('materials', doc.id); if (old) doc.cost = old.cost; else delete doc.cost; }
