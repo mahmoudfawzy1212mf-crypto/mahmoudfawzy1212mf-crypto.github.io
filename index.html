@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1616-e3e91a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1633-fec28b";</script>
 
 <script>
 'use strict';
@@ -19360,6 +19360,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
    · الأرقام: المالك + مدير المصنع + الحسابات (acc/hr) + رئيس القسم ده بس — مقفولة من السيرفر (nf_v491_piecework):
      docs_select piecejobs/crafters، nf_can_write، وtrigger nf_piecejob_guard (ترتيب الموافقة + السعر بيتقفل بعد الإرسال).
      المهام/الإشعارات مفيهاش أي مبلغ.
+   · v4.92 (المالك): الاتفاق مصنعية بس — الصنايعية بيشتغلوا جوّه المصنع على مكنّا وبخاماتنا (الخامات بتتصرف من المخزن على المشروع زي أي قسم).
+     الصرف (مقدم + دفعات) قبل ما كل القطع تتسلّم مايعدّيش 75% من قيمة المصنعية — الـ25% الباقية بعد التسليم الكامل (العميل + السيرفر).
    ===================================================================== */
 (function () {
   if (window.__NF_PIECE__) return; window.__NF_PIECE__ = 1;
@@ -19381,6 +19383,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const jTotal = j => R2(sum(j.items || [], it => (+it.qty || 0) * (+it.price || 0)));
   const jEarned = j => R2(sum(j.items || [], it => Math.min(+it.qty || 0, +it.done || 0) * (+it.price || 0)));
   const jPaid = j => R2(sum(j.payments || [], p => +p.amount || 0));
+  const CAP = 0.75; const capOf = j => R2(jTotal(j) * CAP);
+  const payRoom = j => R2(Math.max(0, (allDelivered(j) || j.status === 'delivered' ? jTotal(j) : capOf(j)) - jPaid(j)));
   const allDelivered = j => (j.items || []).length > 0 && (j.items || []).every(it => (+it.done || 0) >= (+it.qty || 0));
   const myTurn = j => { if (!S.session || !writable()) return false; if (['draft', 'returned'].includes(j.status)) return isUpHead() || isAdmin(); if (j.status !== 'pending') return false; const c = CHAIN[j.step]; return !!c && (isAdmin() || role() === c.role); };
   const itemsTxt = j => (j.items || []).map(it => `${it.name} ×${fmtNum(it.qty)}`).join('، ');
@@ -19460,7 +19464,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (myTurn(j) && ['draft', 'returned'].includes(j.status)) { acts.push(`<button class="btn" data-action="pjEdit" data-arg="${esc(j.id)}">${icon('edit')}تعديل</button>`, `<button class="btn p" data-action="pjSubmit" data-arg="${esc(j.id)}">${icon('send')}إرسال للاعتماد</button>`, `<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjDelete" data-arg="${esc(j.id)}">${icon('trash')}حذف</button>`); }
     if (myTurn(j) && j.status === 'pending') acts.push(`<button class="btn p" data-action="pjAct" data-arg="${esc(j.id)}:approve">${icon('check')}موافقة</button>`, `<button class="btn" data-action="pjAct" data-arg="${esc(j.id)}:return">${icon('back')}رجّعه بملاحظة</button>`, `<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjAct" data-arg="${esc(j.id)}:reject">${icon('x')}رفض</button>`);
     if (writable() && canDeliver() && j.status === 'approved') acts.push(`<button class="btn p" data-action="pjDeliver" data-arg="${esc(j.id)}">${icon('check')}تسجيل استلام قطع</button>`);
-    if (writable() && canPay() && ['approved', 'delivered'].includes(j.status) && paid < tot) acts.push(`<button class="btn p" data-action="pjPay" data-arg="${esc(j.id)}">${icon('money')}صرف للصنايعي</button>`);
+    if (writable() && canPay() && ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0) acts.push(`<button class="btn p" data-action="pjPay" data-arg="${esc(j.id)}">${icon('money')}صرف للصنايعي</button>`);
     if (writable() && isAdmin() && !['paid', 'cancelled', 'rejected'].includes(j.status)) acts.push(`<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjCancel" data-arg="${esc(j.id)}">إلغاء الاتفاق</button>`);
     const c = byId('crafters', j.crafterId) || {};
     const lastNote = [...(j.log || [])].reverse().find(l => ['return', 'reject'].includes(l.action));
@@ -19480,6 +19484,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         <div class="card"><div class="cardhead"><h3>الفلوس</h3></div><div class="small" style="display:grid;gap:6px">
           <div>إجمالي الاتفاق: <b>${fmtMoney(tot)}</b></div>
           ${+j.advance ? `<div>المقدم المتفق عليه: <b>${fmtMoney(j.advance)}</b></div>` : ''}
+          ${!allDelivered(j) && !['delivered', 'paid'].includes(j.status) ? `<div class="muted">أقصى صرف قبل التسليم الكامل (75%): <b>${fmtMoney(capOf(j))}</b> — الـ25% الباقية بعد تسليم كل القطع</div>` : ''}
+          <div class="muted tiny">مصنعية بس — الخامات والمكن على المصنع</div>
           <div>قيمة اللي اتسلّم: <b>${fmtMoney(earned)}</b></div>
           <div>اتصرف: <b>${fmtMoney(paid)}</b></div>
           <div>فاضل للصنايعي: <b style="${tot - paid > 0 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(R2(tot - paid))}</b>${earned - paid > 0 ? ` <span class="muted">(منهم ${fmtMoney(R2(earned - paid))} على قطع اتسلمت)</span>` : ''}</div>
@@ -19509,7 +19515,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       ${field('المشروع / أمر الشغل', `<select name="orderId"><option value="">— بدون مشروع —</option>${ords.map(o => `<option value="${esc(o.id)}" ${o.id === j.orderId ? 'selected' : ''}>${esc(o.code || '')} — ${esc((o.title || '').slice(0, 50))}</option>`).join('')}</select>`, 'full')}
       ${field('الصنايعي', `<div class="row" style="gap:6px"><select name="crafterId" id="pj-crafter" style="flex:1"><option value="">— اختار —</option>${crs.map(c => `<option value="${esc(c.id)}" ${c.id === j.crafterId ? 'selected' : ''}>${esc(c.name)}${c.trade ? ' — ' + esc(c.trade) : ''}</option>`).join('')}</select><button type="button" class="btn sm" id="pj-newcr">${icon('plus')}جديد</button></div>`, 'full')}
       <div class="field full"><label>القطع والسعر المتفق عليه</label><div class="pjitems" id="pjitems"><div class="pjr pjh"><span>القطعة</span><span>العدد</span><span>سعر القطعة</span><span></span></div>${(j.items && j.items.length ? j.items : [{}]).map(itemRow).join('')}</div><button type="button" class="btn sm" data-pji="add">${icon('plus')}قطعة</button><div class="pjtot" id="pjtot"></div></div>
-      ${field(`مقدم قبل البدء (${CUR()}) — اختياري`, inp('advance', j.advance || '', 'type="number" min="0" step="any" inputmode="decimal" placeholder="0 = الفلوس بعد التسليم"'))}
+      <div class="full small muted" style="margin:-2px 0 4px">الاتفاق ده مصنعية بس — الشغل جوّه المصنع على مكنّا، والخامات كلها علينا (بتتصرف من المخزن على المشروع). الصرف قبل التسليم الكامل مايعدّيش 75% من المصنعية.</div>
+      ${field(`مقدم قبل البدء (${CUR()}) — اختياري، لحد 75%`, inp('advance', j.advance || '', 'type="number" min="0" step="any" inputmode="decimal" placeholder="0 = الفلوس بعد الشغل"'))}
       ${field('ميعاد التسليم', inp('dueDate', j.dueDate || '', 'type="date"'))}
       ${field('ملاحظات', `<textarea name="notes" placeholder="الخامة، القماش، أي تفاصيل متفق عليها">${esc(j.notes || '')}</textarea>`, 'full')}
       <div class="field full"><label>صورة / رسمة (اختياري)</label><div class="row" style="gap:8px;align-items:center"><input type="file" id="pj-photo-file" accept="image/*" hidden><button type="button" class="btn sm" id="pj-photo-pick">${icon('camera')}<span>${j.photo ? 'تغيير الصورة' : 'اختر صورة'}</span></button><span id="pj-photo-prev">${j.photo ? `<img src="${esc(j.photo)}" style="height:48px;border-radius:8px">` : ''}</span><input type="hidden" name="photo" id="pj-photo" value="${esc(j.photo || '')}"></div></div>
@@ -19539,7 +19546,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         if (!draft && items.some(it => !(it.qty > 0) || !(it.price > 0))) { toast('كل قطعة لازم يبقى لها عدد وسعر', 'err'); return false; }
         if (!draft && !d.crafterId) { toast('اختار الصنايعي', 'err'); return false; }
         const o = d.orderId ? byId('orders', d.orderId) : null; const total = R2(sum(items, it => it.qty * it.price)); const adv = num(d.advance);
-        if (adv > total) { toast('المقدم أكبر من إجمالي الاتفاق', 'err'); return false; }
+        if (adv > R2(total * CAP) + 0.001) { toast(`المقدم مايعدّيش 75% من المصنعية (${fmtMoney(R2(total * CAP))})`, 'err'); return false; }
         const base = isNew ? { id: uid(), code: nextCode(), deptId: DEP, headWid: S.session?.workerId || null, headName: S.session?.name || '', createdAt: nowISO(), createdBy: S.session?.id || null, log: [logEntry('create')], payments: [], round: 0 } : Object.assign({}, j, { log: (j.log || []).concat([logEntry('edit')]) });
         const doc = Object.assign(base, { orderId: o ? o.id : null, orderCode: o ? o.code || '' : '', orderTitle: o ? o.title || '' : '', crafterId: d.crafterId || null, crafterName: crName(d.crafterId), items: items.map(it => Object.assign(it, { done: 0 })), total, advance: adv, dueDate: d.dueDate || null, notes: d.notes || '', photo: d.photo || '', updatedAt: nowISO() });
         if (draft) { doc.status = j && j.status === 'returned' ? 'returned' : 'draft'; doc.step = 0; await Store.save('piecejobs', doc); toast('اتحفظت مسودة'); go('piecejobs/' + doc.id); return; }
@@ -19599,9 +19606,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   ACTIONS.pjPay = id => {
     const j = byId('piecejobs', id); if (!j || !canPay() || !['approved', 'delivered'].includes(j.status)) return;
     const tot = jTotal(j), paid = jPaid(j), earned = jEarned(j); const advLeft = R2(Math.max(0, (+j.advance || 0) - sum((j.payments || []).filter(p => p.kind === 'advance'), p => +p.amount || 0)));
-    const sugg = j.status === 'approved' && earned <= paid && advLeft > 0 ? advLeft : R2(Math.max(0, (earned || tot) - paid));
+    const room = payRoom(j); const sugg = R2(Math.min(room, j.status === 'approved' && earned <= paid && advLeft > 0 ? advLeft : Math.max(0, (earned || tot) - paid)));
+    if (!(room > 0)) { toast(j.status === 'approved' ? `اتصرف 75% من المصنعية — الباقي بعد تسليم كل القطع` : 'مفيش فلوس فاضلة', 'err'); return; }
     const accts = (typeof acctCfg === 'function' ? acctCfg().accounts : [{ id: 'cash', name: 'الخزينة' }]);
-    openModal({ title: `صرف للصنايعي — ${j.code}`, submitLabel: 'تسجيل الصرف', body: `<div class="form"><div class="full small">الاتفاق ${fmtMoney(tot)} · اتسلّم بـ ${fmtMoney(earned)} · اتصرف ${fmtMoney(paid)} · فاضل ${fmtMoney(R2(tot - paid))}</div>
+    openModal({ title: `صرف للصنايعي — ${j.code}`, submitLabel: 'تسجيل الصرف', body: `<div class="form"><div class="full small">الاتفاق ${fmtMoney(tot)} · اتسلّم بـ ${fmtMoney(earned)} · اتصرف ${fmtMoney(paid)} · فاضل ${fmtMoney(R2(tot - paid))}<br>المسموح دلوقتي: <b>${fmtMoney(room)}</b>${j.status === 'approved' ? ' (لحد 75% قبل التسليم الكامل)' : ''}</div>
       ${field('النوع', `<select name="kind"><option value="advance" ${advLeft > 0 && earned <= paid ? 'selected' : ''}>مقدم</option><option value="pay" ${!(advLeft > 0 && earned <= paid) ? 'selected' : ''}>دفعة / تسوية</option></select>`)}
       ${field(`المبلغ (${CUR()})`, inp('amount', sugg || '', 'type="number" min="0" step="any" inputmode="decimal" required'))}
       ${field('من حساب', `<select name="account">${opts(accts, accts[0] && accts[0].id)}</select>`)}
@@ -19609,7 +19617,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       ${field('ملاحظة', inp('note', ''), 'full')}</div>`,
       onSubmit: async f => {
         const d = formData(f); const amt = R2(num(d.amount)); const cur = Object.assign({}, byId('piecejobs', id)); const left = R2(jTotal(cur) - jPaid(cur));
-        if (!(amt > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (amt > left + 0.001) { toast(`المبلغ أكبر من الفاضل (${fmtMoney(left)})`, 'err'); return false; }
+        if (!(amt > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (amt > left + 0.001) { toast(`المبلغ أكبر من الفاضل (${fmtMoney(left)})`, 'err'); return false; } const rm = payRoom(cur); if (amt > rm + 0.001) { toast(`مايعدّيش 75% من المصنعية قبل التسليم الكامل — المسموح ${fmtMoney(rm)}`, 'err'); return false; }
         const pid = uid(); const date = d.date || todayISO();
         const exp = { id: `pjx_${cur.id}_${pid}`, date, month: monthOf(date), amount: amt, cat: CAT.id, account: d.account || 'cash', orderId: cur.orderId || null, payee: cur.crafterName || crName(cur.crafterId), ref: cur.code, note: `أجور تنجيد بالقطعة ${cur.code} — ${d.kind === 'advance' ? 'مقدم' : 'دفعة'}${d.note ? ' — ' + d.note : ''}`, src: 'piecejob', pieceJobId: cur.id, byName: S.session?.name || '', createdAt: nowISO() };
         await Store.save('expenses', exp);
@@ -19620,7 +19628,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       } });
   };
   ACTIONS.pjCancel = async id => { const j = byId('piecejobs', id); if (!j || !isAdmin()) return; if (!(await confirmDlg(`إلغاء الاتفاق ${j.code}؟ الصرف اللي اتسجل بيفضل في المصروفات.`, 'إلغاء الاتفاق'))) return; await closeTurn(j); await Store.save('piecejobs', Object.assign({}, j, { status: 'cancelled', cancelledAt: nowISO(), log: (j.log || []).concat([logEntry('cancel')]) })); toast('اتلغى'); };
-  window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats };
+  window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats, payRoom, CAP };
 })();
 </script>
 
