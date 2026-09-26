@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-0557-821676";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-0633-665bde";</script>
 
 <script>
 'use strict';
@@ -18771,6 +18771,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
      غير المصرَّح لهم: أي نسخة قديمة محفوظة على الجهاز بتتمسح، والدفعات بتتحول لعلامات «تحويل مسجّل» من غير مبالغ
      (عدد التحويلات بس — depositCount) علشان بوابة «اعتماد التشغيل» تفضل شغالة للإنتاج.
    · المساعد الذكي: الأرقام دي متتقالش غير للمصرَّح لهم (21-ai).
+   v4.81: ملفات الأسعار المرفوعة + سلة المحذوفات + سجل تعديلات العروض اتقفلوا من السيرفر (nf_v481_*).
    ===================================================================== */
 (function () {
   if (window.__NF_MONEYSPLIT__) return; window.__NF_MONEYSPLIT__ = 1;
@@ -18812,6 +18813,19 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   };
   Store.save = (base => async function (col, doc, opts) { const r = await base.apply(this, arguments); if (col === 'orders' || col === 'products') { try { mirror(col, (r && r.id) || (doc && doc.id)); } catch (e) { /* ignore */ } } return r; })(Store.save);
   Store.update = (base => async function (col, id, patch, opts) { const r = await base.apply(this, arguments); if (col === 'orders' || col === 'products') { try { mirror(col, id); } catch (e) { /* ignore */ } } return r; })(Store.update);
+  /* v4.81: «ملف فيه أسعار» في رفع الملفات (للمالك/الموارد/المدير التجاري) — السيرفر بيقفله (nf_file_ok) لنفس الناس، والمدير التجاري لبراندها بس */
+  openModal = (base => function (o) {
+    if (o && typeof o.title === 'string' && /^رفع رسومات/.test(o.title) && typeof o.body === 'string' && o.onSubmit && finRole()) {
+      const chk = `<label class="check full" style="margin:0"><input type="checkbox" name="priced" value="1"> ملف فيه أسعار — يظهر للمالك ومدير الحسابات والمدير التجاري بس</label>`;
+      const i = o.body.lastIndexOf('<div class="full" id="upprog">'); const body = i < 0 ? o.body + chk : o.body.slice(0, i) + chk + o.body.slice(i);
+      const sub = o.onSubmit; o = Object.assign({}, o, { body, onSubmit: async f => { S._pricedUp = !!(f.querySelector('[name=priced]') || {}).checked; try { return await sub(f); } finally { S._pricedUp = false; } } });
+    }
+    return base.call(this, o);
+  })(openModal);
+  Store.save = (base => function (col, doc, opts) {
+    if (col === 'files' && S._pricedUp && doc && typeof doc === 'object') { const owner = (doc.orderId && byId('orders', doc.orderId)) || (doc.productId && byId('products', doc.productId)) || null; doc.priced = true; if (owner && owner.brandId && !doc.brandId) doc.brandId = owner.brandId; }
+    return base.apply(this, arguments);
+  })(Store.save);
 })();
 </script>
 
