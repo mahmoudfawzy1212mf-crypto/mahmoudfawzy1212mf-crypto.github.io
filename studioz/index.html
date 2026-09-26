@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260925-1855-44e743";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-0405-de1752";</script>
 
 <script>
 'use strict';
@@ -18713,6 +18713,54 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     return i2 > 0 ? html.slice(0, i2) + card + html.slice(i2) : html + card;
   })(vOrderDetail);
   Object.assign(window, { lofOrderUnits: orderUnits, lofPartSteps: partSteps });
+})();
+/* =====================================================================
+   v4.79 — منتجات الكتالوج في عروض lōf: الصورة + البيانات الإنجليزي بتتنقل للعرض لوحدها
+   · فورم المنتج: خانتين جداد «الاسم بالإنجليزي» و«وصف العرض بالإنجليزي» (نفس اللي بيطلع في عرض السعر).
+   · «من الكتالوج» في عرض سعر lōf: البند بياخد صورة المنتج + الاسم والوصف الإنجليزي + السعر؛ لو المنتج ناقصه
+     صورة أو بيانات إنجليزي بيظهر تنبيه يقول الناقص إيه (علشان العرض يطلع بالتمبلت الجديد لازم يبقى إنجليزي).
+   · كروت اختيار المنتج بتوضح «مفيش صورة» / «مفيش إنجليزي».
+   ===================================================================== */
+(function () {
+  if (window.__NF_QCATEN__) return; window.__NF_QCATEN__ = 1;
+  const AR = /[؀-ۿ]/;
+  const enName = p => (p && p.nameEn && !AR.test(p.nameEn)) ? String(p.nameEn).trim() : '';
+  const enDesc = p => (p && p.descEn && !AR.test(p.descEn)) ? String(p.descEn).trim() : '';
+  const latinDims = p => (p && p.dims && !AR.test(p.dims)) ? String(p.dims).trim() : '';
+  /* ---- product form: English name + quotation description ---- */
+  if (typeof productForm === 'function') productForm = (base => function (p) {
+    const h = base.apply(this, arguments); p = p || {};
+    const extra = field('الاسم بالإنجليزي (بيظهر في عرض السعر)', `<input name="nameEn" dir="ltr" value="${esc(p.nameEn || '')}" placeholder="e.g. Outdoor Bench">`) +
+      field('وصف العرض بالإنجليزي', `<textarea name="descEn" dir="ltr" rows="2" placeholder="e.g. Supply of bench — 2.00 m × 0.34 m × 0.65 m — Beech wood 70 mm with galvanized steel 6 mm">${esc(p.descEn || '')}</textarea>`, 'full') +
+      `<div class="tiny muted full" style="margin-top:-4px">اكتب الوصف بالشكل ده: «وصف عام — المقاسات — الخامات». الجزء التاني (المقاسات) بيطلع بولد في عرض lōf.</div>`;
+    const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i);
+  })(productForm);
+  if (typeof saveProduct === 'function') saveProduct = (base => async function (f, p) {
+    const d = formData(f); const r = await base.apply(this, arguments); if (r === false) return r;
+    const doc = p && p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(d.code || '').trim().toLowerCase() && (x.name || '') === (d.name || x.name || ''));
+    if (doc && d.nameEn !== undefined) { const patch = {}; if ((doc.nameEn || '') !== (d.nameEn || '').trim()) patch.nameEn = (d.nameEn || '').trim(); if ((doc.descEn || '') !== (d.descEn || '').trim()) patch.descEn = (d.descEn || '').trim(); if (Object.keys(patch).length) await Store.update('products', doc.id, patch, { silent: true }); }
+    return r;
+  })(saveProduct);
+  /* ---- catalog line for lōf quotes: English data + picture ---- */
+  if (typeof appendLine === 'function') appendLine = (base => function (f, it, recalc) {
+    const p = it && it.productId ? byId('products', it.productId) : null;
+    const brand = (f && f.querySelector('[name=brandId]') || {}).value || (p && p.brandId);
+    if (p && brand === 'lof') {
+      const nm = enName(p), ds = enDesc(p);
+      it = Object.assign({}, it, { desc: ds || [nm || p.name, latinDims(p)].filter(Boolean).join(' — '), img: it.img || (typeof productCover === 'function' ? productCover(p) || '' : '') });
+      const miss = []; if (!it.img) miss.push('صورة'); if (!nm) miss.push('اسم إنجليزي'); if (!ds) miss.push('وصف إنجليزي');
+      const r = base.call(this, f, it, recalc);
+      if (miss.length) setTimeout(() => toast(`${p.code || p.name}: ناقصه ${miss.join(' و')} — ضيفه من صفحة المنتج (تعديل) علشان العرض يطلع كامل`, 'err'), 400);
+      return r;
+    }
+    return base.apply(this, arguments);
+  })(appendLine);
+  /* ---- picker cards: show what's missing for lōf products ---- */
+  if (typeof pickCatalogLine === 'function') pickCatalogLine = (base => function (f, recalc, b) {
+    base.apply(this, arguments); if (b !== 'lof') return;
+    const tag = () => { const box = [...document.querySelectorAll('.overlay.sub')].pop(); if (!box) return; box.querySelectorAll('.pc[data-pid]').forEach(el => { if (el.dataset.enTag) return; el.dataset.enTag = 1; const p = byId('products', el.dataset.pid); if (!p) return; const miss = []; if (!(typeof productCover === 'function' && productCover(p))) miss.push('مفيش صورة'); if (!enName(p) || !enDesc(p)) miss.push('مفيش إنجليزي'); if (miss.length) el.querySelector('.bd').insertAdjacentHTML('beforeend', `<div class="tiny" style="color:var(--warn-ink)">${miss.join(' · ')}</div>`); else el.querySelector('.bd').insertAdjacentHTML('beforeend', `<div class="tiny" style="color:var(--good-ink)">✓ صورة + إنجليزي</div>`); }); };
+    tag(); const box = [...document.querySelectorAll('.overlay.sub')].pop(); if (box && window.MutationObserver) new MutationObserver(tag).observe(box, { childList: true, subtree: true });
+  })(pickCatalogLine);
 })();
 </script>
 
