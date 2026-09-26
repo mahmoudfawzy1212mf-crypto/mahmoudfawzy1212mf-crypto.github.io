@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1257-986f18";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1316-63ad0f";</script>
 
 <script>
 'use strict';
@@ -19057,15 +19057,16 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const $s = (sel, r) => (r || document).querySelector(sel); const $$s = (sel, r) => [...(r || document).querySelectorAll(sel)];
   const FAB = ['metal', 'carp', 'alu', 'uphol', 'wood'];
   /* ---------- schedule ---------- */
-  function schedule(stages) {
-    const out = []; let seqEnd = 0;
+  function schedule(stages, day0) {
+    const out = []; let seqEnd = 0; day0 = day0 || S._rpDay0 || null;
     stages.forEach((s, i) => {
       const d = Math.max(0, +s.days || 0); const st = s.start || {}; let start;
       const ref = Number.isInteger(+st.ref) && +st.ref >= 0 && +st.ref < i ? +st.ref : null;
       if (st.mode === 'with' && ref != null) start = out[ref].start;
       else if (st.mode === 'lag' && ref != null) start = out[ref].start + Math.max(0, +st.lag || 0);
+      else if (st.mode === 'date' && st.date && day0) start = Math.max(0, daysBetween(day0, st.date));
       else start = out.reduce((m, x) => Math.max(m, x.end), 0);
-      out.push({ start, end: start + d, par: st.mode === 'with' || st.mode === 'lag' }); seqEnd += d;
+      out.push({ start, end: start + d, par: st.mode === 'with' || st.mode === 'lag' || st.mode === 'date' }); seqEnd += d;
     });
     return { rows: out, total: out.reduce((m, x) => Math.max(m, x.end), 0), seq: seqEnd };
   }
@@ -19075,8 +19076,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     st = st || {}; const refs = Array.from({ length: i }, (_, k) => k);
     const optsHtml = [`<option value="after" ${!st.mode || st.mode === 'after' ? 'selected' : ''}>بعد اللي قبلها</option>`]
       .concat(refs.map(k => `<option value="with:${k}" ${st.mode === 'with' && +st.ref === k ? 'selected' : ''}>مع مرحلة ${k + 1}</option>`))
-      .concat(refs.map(k => `<option value="lag:${k}" ${st.mode === 'lag' && +st.ref === k ? 'selected' : ''}>بعد بداية مرحلة ${k + 1} بـ…</option>`)).join('');
-    return `<div class="st2"><span class="muted">بتبدأ:</span><select name="s-start">${optsHtml}</select><span class="lagw" style="${st.mode === 'lag' ? '' : 'display:none'}"><input name="s-lag" type="number" min="0" step="0.5" value="${st.lag || 1}"> يوم</span><span class="muted tiny sched"></span></div>`;
+      .concat(refs.map(k => `<option value="lag:${k}" ${st.mode === 'lag' && +st.ref === k ? 'selected' : ''}>بعد بداية مرحلة ${k + 1} بـ…</option>`)).concat([`<option value="date" ${st.mode === 'date' ? 'selected' : ''}>في تاريخ…</option>`]).join('');
+    return `<div class="st2"><span class="muted">بتبدأ:</span><select name="s-start">${optsHtml}</select><span class="lagw" style="${st.mode === 'lag' ? '' : 'display:none'}"><input name="s-lag" type="number" min="0" step="0.5" value="${st.lag || 1}"> يوم</span><span class="datew" style="${st.mode === 'date' ? '' : 'display:none'}"><input name="s-date" type="date" value="${esc(st.date || '')}" style="width:auto"></span><span class="muted tiny sched"></span></div>`;
   }
   function enhance(root, stagesData) {
     $$s('#rpstages .stg', root).forEach((el, i) => {
@@ -19090,6 +19091,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   function readStart(el) {
     const s = el.querySelector('[name=s-start]'); if (!s) return null; const [mode, ref] = String(s.value || 'after').split(':');
     if (mode === 'after') return { mode: 'after' };
+    if (mode === 'date') { const dv = (el.querySelector('[name=s-date]') || {}).value || ''; return dv ? { mode: 'date', date: dv } : { mode: 'after' }; }
     return { mode, ref: +ref, lag: mode === 'lag' ? (+(el.querySelector('[name=s-lag]') || {}).value || 0) : 0 };
   }
   readPlan = (base => function (f) {
@@ -19104,12 +19106,15 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const p = readPlan(f); const sc = schedule(p.stages); const T = Math.max(1, sc.total);
     const els = $$s('#rpstages .stg', f).filter(el => (el.querySelector('[name=s-name]') || {}).value.trim());
     els.forEach((el, i) => { const r = sc.rows[i]; const t = el.querySelector('.sched'); if (t && r) t.textContent = `يوم ${fmtNum(r.start + 1)} ← ${fmtNum(r.end)}`; });
-    box.innerHTML = `<div class="tt"><span>المدة الكلية: <b>${fmtNum(sc.total)} يوم</b></span>${sc.seq > sc.total ? `<span class="muted">(لو كله ورا بعض: ${fmtNum(sc.seq)} يوم — وفّرنا ${fmtNum(sc.seq - sc.total)} يوم)</span>` : `<span class="muted">كل المراحل ورا بعض</span>`}</div>` +
+    const o = byId('orders', S._rpOrder) || {}; const endD = S._rpDay0 ? addDays(S._rpDay0, Math.ceil(sc.total)) : '';
+    const dl = endD ? `<span>التسليم المتوقع: <b>${fmtDate(endD)}</b>${S._rpBaseEnd && S._rpBaseEnd !== endD ? ` <span class="muted">(كان ${fmtDate(S._rpBaseEnd)})</span>` : ''}</span>${o.dueDate && endD > o.dueDate ? `<span style="color:var(--crit-ink);font-weight:600">⚠ بعد ميعاد التسليم للعميل ${fmtDate(o.dueDate)}</span>` : ''}` : '';
+    box.innerHTML = `<div class="tt">${dl}<span>المدة الكلية: <b>${fmtNum(sc.total)} يوم</b></span>${sc.seq > sc.total ? `<span class="muted">(لو كله ورا بعض: ${fmtNum(sc.seq)} يوم — وفّرنا ${fmtNum(sc.seq - sc.total)} يوم)</span>` : `<span class="muted">كل المراحل ورا بعض</span>`}</div>` +
       p.stages.map((s, i) => { const r = sc.rows[i]; return `<div class="row2"><span class="nm">${i + 1}. ${esc(s.name.split(' — ')[0])}</span><div class="trk"><div class="bar ${r.par ? 'par' : ''}" style="right:${(r.start / T * 100).toFixed(2)}%;width:${(Math.max(r.end - r.start, 0.15) / T * 100).toFixed(2)}%" title="يوم ${r.start + 1} ← ${r.end}"></div></div></div>`; }).join('');
   }
   /* ---------- plan html: gantt + chat panel ---------- */
   routePlanHTML = (base => function (o, plan) {
     S._rpPlan = plan; S._rpOrder = o && o.id; S._rpChat = Array.isArray(plan && plan.chat) ? plan.chat.slice() : []; S._rpUndo = [];
+    S._rpDay0 = o && o.orderDate && o.orderDate > todayISO() ? o.orderDate : todayISO(); S._rpBaseEnd = null;
     let h = base.apply(this, arguments);
     const chat = `<div class="rpchat" id="rpchat"><div class="hd">${icon('star')}<span>اتكلم مع المساعد</span><div class="grow"></div><button type="button" class="btn xs ghost" data-rpx="undo" id="rpundo" style="display:none">${icon('back')}رجوع</button></div>
       <div class="msgs" id="rpmsgs">${S._rpChat.map(msgHTML).join('') || `<div class="muted small">اكتب أي تعديل على الخطة، أو اسأل إيه المراحل اللي ممكن تشتغل مع بعض علشان نقلل المدة.</div>`}</div>
@@ -19119,6 +19124,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const g = `<div class="rpg" id="rpgantt"></div>`;
     return i < 0 ? chat + g + h : h.slice(0, i) + chat + h.slice(i).replace('<div id="rpstages">', g + '<div id="rpstages">');
   })(routePlanHTML);
+  window.nfPlanUI = { enhance: (f, st) => enhance(f, st), watch: f => watch(f), draw: f => drawGantt(f), chatHTML: () => `<div class="rpchat" id="rpchat"><div class="hd">${icon('star')}<span>اتكلم مع المساعد</span><div class="grow"></div><button type="button" class="btn xs ghost" data-rpx="undo" id="rpundo" style="display:none">${icon('back')}رجوع</button></div><div class="msgs" id="rpmsgs">${(S._rpChat || []).map(msgHTML).join('') || `<div class="muted small">اكتب أي تعديل على الجدول، أو اسأل إيه اللي ممكن يتوازى علشان نلحق التسليم.</div>`}</div><div class="chips"><button type="button" data-rpx="q:par">إيه اللي ممكن يتوازى؟</button><button type="button" data-rpx="q:min">قلّل المدة لأقل حاجة</button></div><div class="in"><textarea id="rpask" placeholder="مثال: أخّر الدهان يومين، أو خلّي التغليف يوم واحد"></textarea><button type="button" class="btn p" data-rpx="send">${icon('send')}</button></div></div>` };
   const msgHTML = m => `<div class="m ${m.role === 'me' ? 'me' : 'ai'}">${esc(m.text || '')}</div>`;
   /* init when the plan body appears (AI can take a while) */
   ACTIONS.routePlan = (base => async function () {
@@ -19130,7 +19136,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const st = $s('#rpstages', f);
     new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes, ...m.removedNodes].some(x => x.classList && x.classList.contains('stg')))) enhance(f); }).observe(st, { childList: true });
     f.addEventListener('input', e => { if (e.target.closest('#rpstages')) drawGantt(f); });
-    f.addEventListener('change', e => { const s = e.target.closest('[name=s-start]'); if (s) { const w = s.parentElement.querySelector('.lagw'); if (w) w.style.display = s.value.startsWith('lag') ? '' : 'none'; } if (e.target.closest('#rpstages')) drawGantt(f); });
+    f.addEventListener('change', e => { const s = e.target.closest('[name=s-start]'); if (s) { const w = s.parentElement.querySelector('.lagw'); if (w) w.style.display = s.value.startsWith('lag') ? '' : 'none'; const dw = s.parentElement.querySelector('.datew'); if (dw) dw.style.display = s.value === 'date' ? '' : 'none'; } if (e.target.closest('#rpstages')) drawGantt(f); });
     f.addEventListener('keydown', e => { if (e.target.id === 'rpask' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(f); } });
   }
   document.addEventListener('click', e => {
@@ -19151,7 +19157,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const load = (S.settings.departments || []).map(d => { const n = list('orders').filter(x => x.id !== o.id && isOpen(x) && ((x.stages || {})[d.id] || {}).status === 'active').length; return `${d.id}: ${d.name} (شغال على ${n} أمر حاليًا)`; }).join('، ');
     return { prod, load };
   }
-  const planTxt = p => p.stages.map((s, i) => `${i}: [${s.deptId || 'عام'}] ${s.name} — ${s.days} يوم — تبدأ: ${!s.start || s.start.mode === 'after' ? 'بعد اللي قبلها' : s.start.mode === 'with' ? 'مع مرحلة ' + s.start.ref : 'بعد بداية مرحلة ' + s.start.ref + ' بـ' + s.start.lag + ' يوم'} — المهام: ${(s.tasks || []).map(t => t.title).join('؛ ')}`).join('\n');
+  const planTxt = p => p.stages.map((s, i) => `${i}: [${s.deptId || 'عام'}] ${s.name} — ${s.days} يوم — تبدأ: ${!s.start || s.start.mode === 'after' ? 'بعد اللي قبلها' : s.start.mode === 'with' ? 'مع مرحلة ' + s.start.ref : s.start.mode === 'date' ? 'في تاريخ ' + s.start.date : 'بعد بداية مرحلة ' + s.start.ref + ' بـ' + s.start.lag + ' يوم'} — المهام: ${(s.tasks || []).map(t => t.title).join('؛ ')}`).join('\n');
   async function send(f) {
     const ta = $s('#rpask', f); const q = (ta && ta.value || '').trim(); if (!q) return; ta.value = '';
     pushMsg(f, { role: 'me', text: q }); const wait = pushMsg(f, { role: 'ai', text: '⏳ بفكر…' }); S._rpChat.pop();
@@ -19167,7 +19173,7 @@ ${ctx.prod}
 ${planTxt(p)}
 طلبه: «${q}»
 قواعد لازم تلتزم بيها: التركيب بعد التغليف والنقل؛ الدهان بعد اللحام/التصنيع لنفس الجزء؛ الأجزاء من خامات مختلفة (حديد أسود، مجلفن، خشب، ألومنيوم) ممكن تتصنع مع بعض في أقسام مختلفة؛ المشتريات ممكن تبدأ بعد بداية المكتب الفني بيوم؛ ماتحطش مرحلتين على نفس القسم في نفس الوقت إلا لو هو طلب؛ حافظ على المهام اللي مش مطلوب تغييرها.
-start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها تخلص، أو {"mode":"with","ref":رقم مرحلة قبلها} = تبدأ معاها، أو {"mode":"lag","ref":رقم,"lag":أيام} = بعد بدايتها بكذا يوم. ref لازم يكون رقم مرحلة قبلها في الترتيب الجديد.
+start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها تخلص، أو {"mode":"with","ref":رقم مرحلة قبلها} = تبدأ معاها، أو {"mode":"lag","ref":رقم,"lag":أيام} = بعد بدايتها بكذا يوم. ref لازم يكون رقم مرحلة قبلها في الترتيب الجديد. أو {"mode":"date","date":"YYYY-MM-DD"} = تبدأ في تاريخ محدد (النهارده ${todayISO()}).
 لو السؤال مجرد استفسار ومفيش تعديل مطلوب، رجّع stages = null.
 أجب بـJSON فقط:
 {"reply":"رد قصير بالعامية المصرية","changes":["سطر لكل تغيير بشكل: المرحلة: قبل ← بعد"],"stages":[{"deptId":"...","name":"...","days":2,"start":{"mode":"after"},"tasks":[{"title":"..."}]}]}`;
@@ -19186,6 +19192,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     return arr.filter(s => s && s.name).map((s, i) => {
       const st = s.start || {}; let start = { mode: 'after' };
       if ((st.mode === 'with' || st.mode === 'lag') && Number.isInteger(+st.ref) && +st.ref >= 0 && +st.ref < i) start = { mode: st.mode, ref: +st.ref, lag: st.mode === 'lag' ? Math.max(0, +st.lag || 0) : 0 };
+      else if (st.mode === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(String(st.date || ''))) start = { mode: 'date', date: st.date };
       const old = cur.stages.find(x => x.name === s.name);
       return { deptId: s.deptId && d(s.deptId) ? s.deptId : null, name: String(s.name), days: +s.days > 0 ? +s.days : (old ? old.days : 1), start, tasks: Array.isArray(s.tasks) && s.tasks.length ? s.tasks.map(t => ({ title: String(t.title || t) })).filter(t => t.title) : (old ? old.tasks : []) };
     });
@@ -19216,13 +19223,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   applyRoutePlanBase = (base => async function (o, p) {
     const r = await base.apply(this, arguments);
     try {
-      const sc = schedule(p.stages); const day0 = o.orderDate && o.orderDate > todayISO() ? o.orderDate : todayISO();
+      const day0 = o.orderDate && o.orderDate > todayISO() ? o.orderDate : todayISO(); const sc = schedule(p.stages, day0);
       const ts = list('tasks').filter(t => t.orderId === o.id && t.source === 'route' && Number.isInteger(t.stage) && String(t.id).startsWith(`rp_${o.id}_`));
       for (const t of ts) { const row = sc.rows[t.stage]; if (!row) continue; const due = addDays(day0, Math.max(1, Math.ceil(row.end))); if (t.dueDate !== due) await Store.update('tasks', t.id, { dueDate: due, startDate: addDays(day0, Math.floor(row.start)) }, { silent: true }); }
       const cur = byId('orders', o.id) || o; const stp = {};
       p.stages.forEach((s, i) => { if (!s.deptId || !(cur.route || []).includes(s.deptId)) return; const row = sc.rows[i]; const a = addDays(day0, Math.floor(row.start)), b = addDays(day0, Math.max(1, Math.ceil(row.end))); const prev = stp[s.deptId]; stp[s.deptId] = prev ? { plannedStart: prev.plannedStart < a ? prev.plannedStart : a, plannedEnd: prev.plannedEnd > b ? prev.plannedEnd : b } : { plannedStart: a, plannedEnd: b }; });
       const stages = {}; Object.keys(stp).forEach(d => { stages[d] = Object.assign({}, (cur.stages || {})[d] || {}, stp[d]); });
-      const rp = Object.assign({}, cur.routePlan || {}, { total: sc.total, seq: sc.seq, chat: (p.chat || []).slice(-40) });
+      const rp = Object.assign({}, cur.routePlan || {}, { total: sc.total, seq: sc.seq, day0, chat: (p.chat || []).slice(-40) });
       await Store.update('orders', o.id, Object.keys(stages).length ? { stages, routePlan: rp } : { routePlan: rp }, { silent: true });
       if (sc.seq > sc.total) toast(`الجدول متوازي: ${fmtNum(sc.total)} يوم بدل ${fmtNum(sc.seq)}`);
     } catch (e) { console.warn('parallel schedule', e); }
@@ -19234,6 +19241,82 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     try { if (!isAdmin() && p && p.chat && p.chat.length) { const cur = byId('orders', o.id); if (cur && cur.routeDraft) await Store.update('orders', o.id, { routeDraft: Object.assign({}, cur.routeDraft, { chat: p.chat.slice(-40) }) }, { silent: true }); } } catch (e) { /* ignore */ }
     return r;
   })(applyRoutePlan);
+})();
+/* =====================================================================
+   v4.88 — تعديل الجدول الزمني للمشروع بعد الاعتماد (المالك «Ok» — 26 سبتمبر) — للمالك بس
+   · من التايم لاين (الضغط على شريط المرحلة ← «تعديل الجدول») أو من صفحة المشروع: شاشة «جدول المشروع».
+   · كل مرحلة: المدة بـ − / + (أو كتابة الرقم)، «بتبدأ إمتى» (بعد اللي قبلها / مع مرحلة / بعد بداية مرحلة بكذا يوم / في تاريخ).
+   · المراحل اللي بعدها بتتزحزح لوحدها + «التسليم المتوقع: قبل ← بعد» + تحذير لو عدّى ميعاد العميل. نفس الشات بتاع خطة التشغيل.
+   · الحفظ: مواعيد مهام كل مرحلة + plannedStart/End على مراحل الأمر + إشعار لرؤساء الأقسام اللي موعدهم اتغيّر
+     + سطر في سجل الجدول (مين غيّر إيه وإمتى). أمر من غير خطة تشغيل: الجدول بيتبني من مواعيد مراحل الأمر.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SCHEDEDIT__) return; window.__NF_SCHEDEDIT__ = 1;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.rpsched .tasks,.rpsched [data-rp],.rpsched .stg .h select[name=s-dept]{display:none}
+.rpsched .stg .h input[name=s-name]{pointer-events:none;background:transparent;border-color:transparent;font-weight:700}
+.rpsched .sdb{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2,var(--surface));cursor:pointer;font-size:17px;line-height:1;color:inherit}
+.rpsched .schlog{font-size:12px;margin-top:10px}.rpsched .schlog div{padding:3px 0;border-bottom:1px dashed var(--line)}
+</style>`);
+  const canEdit = () => writable() && isAdmin();
+  const day0Of = o => (o.routePlan && o.routePlan.day0) || (o.orderDate && o.orderDate > (o.createdAt || '').slice(0, 10) ? o.orderDate : '') || (o.routePlan && (o.routePlan.at || '').slice(0, 10)) || todayISO();
+  function stagesOf(o) {
+    if (o.routePlan && Array.isArray(o.routePlan.stages) && o.routePlan.stages.length) return { kind: 'plan', day0: day0Of(o), stages: JSON.parse(JSON.stringify(o.routePlan.stages)) };
+    if (o.schedPlan && Array.isArray(o.schedPlan.stages) && o.schedPlan.stages.length) return { kind: 'sched', day0: o.schedPlan.day0, stages: JSON.parse(JSON.stringify(o.schedPlan.stages)) };
+    const st = orderStages(o).filter(s => s.status !== 'skipped'); const starts = st.map(s => s.plannedStart || s.start).filter(Boolean).sort();
+    const day0 = starts[0] || todayISO();
+    return { kind: 'sched', day0, stages: st.map(s => { const a = s.plannedStart || s.start || null, b = s.plannedEnd || s.end || null; const days = a && b ? Math.max(1, daysBetween(a, b)) : 2; return { deptId: s.deptId, name: deptName(s.deptId), days, start: a ? { mode: 'date', date: a } : { mode: 'after' }, tasks: [] }; }) };
+  }
+  ACTIONS.schedEdit = oid => {
+    const o = byId('orders', oid); if (!o || !canEdit()) return; const src = stagesOf(o);
+    S._rpOrder = o.id; S._rpDay0 = src.day0; S._rpPlan = { stages: src.stages }; S._rpUndo = [];
+    S._rpChat = ((o.routePlan && o.routePlan.chat) || (o.schedPlan && o.schedPlan.chat) || []).slice();
+    const sc0 = nfPlanSchedule(src.stages, src.day0); S._rpBaseEnd = addDays(src.day0, Math.ceil(sc0.total));
+    const log = ((src.kind === 'plan' ? o.routePlan.log : (o.schedPlan || {}).log) || []).slice(-8).reverse();
+    openModal({ title: `جدول المشروع — ${o.code}`, wide: true, submitLabel: 'حفظ الجدول',
+      body: `<div class="rplan rpsched"><div class="tiny muted" style="margin-bottom:6px">غيّر مدة أي مرحلة أو إمتى تبدأ — اللي بعدها بيتزحزح لوحده. البداية: ${fmtDate(src.day0)}</div>${nfPlanUI.chatHTML()}<div class="rpg" id="rpgantt"></div><div id="rpstages">${src.stages.map(stageHTML).join('')}</div>${log.length ? `<div class="schlog"><b>سجل التعديلات</b>${log.map(l => `<div>${fmtDate((l.at || '').slice(0, 10))} — ${esc(l.byName || '')}: ${esc((l.changes || []).join('، ') || 'تعديل')}</div>`).join('')}</div>` : ''}</div>`,
+      onOpen: f => { nfPlanUI.enhance(f, src.stages); addSteppers(f); nfPlanUI.watch(f); new MutationObserver(() => addSteppers(f)).observe($('#rpstages', f), { childList: true }); },
+      onSubmit: async f => { await saveSched(o.id, src, readPlan(f)); }
+    });
+  };
+  function addSteppers(f) {
+    $$('#rpstages .stg', f).forEach(el => { const inp = el.querySelector('[name=s-days]'); if (!inp || inp.dataset.stp) return; inp.dataset.stp = 1; inp.insertAdjacentHTML('beforebegin', `<button type="button" class="sdb" data-sd="-1">−</button>`); inp.insertAdjacentHTML('afterend', `<button type="button" class="sdb" data-sd="1">+</button>`); });
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-sd]'); if (!b || !b.closest('.rpsched')) return; e.preventDefault(); e.stopPropagation();
+    const inp = b.parentElement.querySelector('[name=s-days]'); if (!inp) return; inp.value = Math.max(0.5, (+inp.value || 0) + (+b.dataset.sd)); inp.dispatchEvent(new Event('input', { bubbles: true }));
+  }, true);
+  async function saveSched(oid, src, p) {
+    const o = byId('orders', oid); if (!o) return; const me = S.session || {}; const day0 = src.day0;
+    const oldSc = nfPlanSchedule(src.stages, day0), sc = nfPlanSchedule(p.stages, day0);
+    const dateOf = (sc2, i) => ({ a: addDays(day0, Math.floor(sc2.rows[i].start)), b: addDays(day0, Math.max(1, Math.ceil(sc2.rows[i].end))) });
+    const changes = [];
+    p.stages.forEach((s, i) => { const old = src.stages[i]; if (!old) return; const n0 = dateOf(oldSc, i), n1 = dateOf(sc, i); const nm = s.name.split(' — ')[0];
+      if (+old.days !== +s.days) changes.push(`${nm}: ${fmtNum(old.days)} ← ${fmtNum(s.days)} يوم`); else if (n0.a !== n1.a) changes.push(`${nm}: تبدأ ${fmtDate(n0.a)} ← ${fmtDate(n1.a)}`); });
+    const endOld = addDays(day0, Math.ceil(oldSc.total)), endNew = addDays(day0, Math.ceil(sc.total)); if (endOld !== endNew) changes.push(`التسليم المتوقع ${fmtDate(endOld)} ← ${fmtDate(endNew)}`);
+    /* tasks of each plan stage */
+    if (src.kind === 'plan') { const ts = list('tasks').filter(t => t.orderId === o.id && t.source === 'route' && Number.isInteger(t.stage) && String(t.id).startsWith(`rp_${o.id}_`) && t.status !== 'done');
+      for (const t of ts) { const r = sc.rows[t.stage]; if (!r) continue; const d = dateOf(sc, t.stage); if (t.dueDate !== d.b || t.startDate !== d.a) await Store.update('tasks', t.id, { dueDate: d.b, startDate: d.a }, { silent: true }); } }
+    /* dept stage windows */
+    const win = {}; p.stages.forEach((s, i) => { if (!s.deptId || !(o.route || []).includes(s.deptId)) return; const d = dateOf(sc, i); const w = win[s.deptId]; win[s.deptId] = w ? { plannedStart: w.plannedStart < d.a ? w.plannedStart : d.a, plannedEnd: w.plannedEnd > d.b ? w.plannedEnd : d.b } : { plannedStart: d.a, plannedEnd: d.b }; });
+    const stages = {}, moved = []; Object.keys(win).forEach(d => { const cur = (o.stages || {})[d] || {}; if (cur.plannedStart !== win[d].plannedStart || cur.plannedEnd !== win[d].plannedEnd) { moved.push({ d, from: cur.plannedStart ? `${fmtDate(cur.plannedStart)} ← ${fmtDate(cur.plannedEnd || cur.plannedStart)}` : '—', to: `${fmtDate(win[d].plannedStart)} ← ${fmtDate(win[d].plannedEnd)}` }); } stages[d] = Object.assign({}, cur, win[d]); });
+    const entry = { at: nowISO(), by: me.id || null, byName: me.name || '', changes: changes.slice(0, 12) };
+    const patch = { stages };
+    if (src.kind === 'plan') { const merged = p.stages.map((s, i) => Object.assign({}, (o.routePlan.stages || [])[i] || {}, { days: s.days, start: s.start || { mode: 'after' } })); patch.routePlan = Object.assign({}, o.routePlan, { stages: merged, day0, total: sc.total, seq: sc.seq, chat: (p.chat || o.routePlan.chat || []).slice(-40), log: (o.routePlan.log || []).concat([entry]).slice(-30) }); }
+    else patch.schedPlan = { stages: p.stages.map(s => ({ deptId: s.deptId, name: s.name, days: s.days, start: s.start || { mode: 'after' }, tasks: [] })), day0, total: sc.total, chat: (p.chat || []).slice(-40), log: ((o.schedPlan || {}).log || []).concat([entry]).slice(-30) };
+    await Store.update('orders', o.id, patch);
+    /* the heads of every department whose window moved */
+    for (const m of moved) { for (const hh of (typeof deptHeads === 'function' ? deptHeads(m.d) : [])) { const h = hh && hh.id ? hh.id : hh; if (!h) continue; const id = `sch_${o.id}_${m.d}_${h}_${Date.now().toString(36)}`; await Store.save('tasks', { id, title: `موعد مرحلتك في ${o.code} اتغيّر`, desc: `${deptName(m.d)}: ${m.from}\nالموعد الجديد: ${m.to}\n(تعديل الجدول من ${me.name || 'المالك'})`, assigneeId: h, deptId: m.d, orderId: o.id, kind: 'update', priority: 'high', status: 'open', source: 'schedule', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } }
+    toast(changes.length ? `اتحفظ الجدول — ${changes.length} تعديل${moved.length ? ` · اتبلّغ ${moved.length} قسم` : ''}` : 'مفيش تغيير في الجدول');
+  }
+  window.nfSchedSave = saveSched;
+  /* entry points: the stage popover on the timeline + the project page */
+  if (ACTIONS.gStage) ACTIONS.gStage = (base => function (arg, btn) { const r = base.apply(this, arguments); try { if (canEdit()) { const oid = String(arg).split('|')[0]; const pop = [...document.querySelectorAll('.gpop')].pop(); if (pop && !pop.querySelector('[data-action=schedEdit]')) pop.insertAdjacentHTML('beforeend', `<div style="margin-top:8px"><button class="btn sm p" data-action="schedEdit" data-arg="${esc(oid)}">${icon('edit')}تعديل الجدول</button></div>`); } } catch (e) { /* ignore */ } return r; })(ACTIONS.gStage);
+  if (typeof vProjectDetail === 'function') vProjectDetail = (base => function (o) {
+    const h = base.apply(this, arguments); if (!o || !canEdit() || !isOpen(o)) return h;
+    const btn = `<div class="row" style="justify-content:flex-end;margin-bottom:8px"><button class="btn sm" data-action="schedEdit" data-arg="${esc(o.id)}">${icon('edit')}تعديل الجدول الزمني</button></div>`;
+    return btn + h;
+  })(vProjectDetail);
 })();
 </script>
 
