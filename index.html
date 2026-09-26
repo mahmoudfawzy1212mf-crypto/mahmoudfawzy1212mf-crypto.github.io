@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1642-fdc35e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260926-1707-03fb68";</script>
 
 <script>
 'use strict';
@@ -4498,10 +4498,10 @@ function leaveBalances(w, year) {
   const casualUsed = types.filter(t => t.fromAnnual).reduce((a, t) => a + (usedYear[t.id] || 0), 0);
   return types.map(t => {
     const custom = t.id === 'annual' && w.annualDays !== undefined && w.annualDays !== '' && w.annualDays !== null ? +w.annualDays : null;
-    const service = w.joined ? monthsBetween(w.joined, today) : 999; const eligible = service >= (+t.afterMonths || 0);
+    const svc0 = (w.serviceFrom || w.joined); const service = svc0 ? monthsBetween(svc0, today) : 999; const eligible = service >= (+t.afterMonths || 0);
     let ent, remaining = null; const u = usedYear[t.id] || 0;
     if (t.noBalance) { ent = 0; }
-    else if (t.accrual === 'monthly' && custom == null) { const months = w.joined ? monthsBetween(w.joined, today) : 12; ent = eligible ? months : 0; const used = t.carry ? (usedAll[t.id] || 0) : u; remaining = Math.max(0, ent - used - (t.id === 'annual' ? casualUsed : 0)); }
+    else if (t.accrual === 'monthly' && custom == null) { const months = svc0 ? monthsBetween(svc0, today) : 12; ent = eligible ? months : 0; const used = t.carry ? (usedAll[t.id] || 0) : u; remaining = Math.max(0, ent - used - (t.id === 'annual' ? casualUsed : 0)); }
     else { ent = custom != null ? custom : (+t.days || 0); if (ent > 0) remaining = (eligible ? ent : 0) - u - (t.id === 'annual' ? casualUsed : 0); }
     return { type: t, entitlement: ent, used: u, remaining, eligible, serviceMonths: service };
   });
@@ -12388,7 +12388,7 @@ function vWorkerDetailCost(id) { let html = vWorkerDetailSusp(id); const w = byI
 DEFAULT_CHAINS.advance = ['head', 'manager', 'hr', 'admin'];
 REQ_TYPES.abssettle = 'تسوية غياب (لفتح السلف)'; DEFAULT_CHAINS.abssettle = ['head', 'manager'];
 const advPolicy = () => Object.assign({ advanceFromDay: 10, advanceToDay: 28, advanceMaxPct: 50, advanceMinMonths: 3, absenceAllowedPerMonth: 2, probationWeeklyPct: 25 }, S.settings.policy || {});
-function serviceMonths(w) { if (!w.joined) return 99; const a = new Date(w.joined), b = new Date(todayISO()); return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0); }
+function serviceMonths(w) { const j0 = w.serviceFrom || w.joined; if (!j0) return 99; const a = new Date(j0), b = new Date(todayISO()); return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0); }
 const onProbation = w => !!w.probation && (!w.probationUntil || w.probationUntil >= todayISO());
 function advanceLimit(w, ym) { const pol = advPolicy(); const s = hrMonthSummary(w, ym || monthOf(todayISO())); const earned = (s.present + s.half * 0.5) * dailyRate(w); return { limit: r2(earned * (+pol.advanceMaxPct || 50) / 100), earned: r2(earned), days: s.present + s.half * 0.5, absent: s.absent }; }
 function advanceOpenBalance(w) { return r2(sum(list('advances').filter(a => a.workerId === w.id && a.status !== 'closed'), a => Math.max(0, (+a.amount || 0) - (+a.paid || 0)))); }
@@ -19650,6 +19650,81 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   };
   ACTIONS.pjCancel = async id => { const j = byId('piecejobs', id); if (!j || !isAdmin()) return; if (!(await confirmDlg(`إلغاء الاتفاق ${j.code}؟ الصرف اللي اتسجل بيفضل في المصروفات.`, 'إلغاء الاتفاق'))) return; await closeTurn(j); await Store.save('piecejobs', Object.assign({}, j, { status: 'cancelled', cancelledAt: nowISO(), log: (j.log || []).concat([logEntry('cancel')]) })); toast('اتلغى'); };
   window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats, payRoom, CAP };
+})();
+/* =====================================================================
+   v4.94 — (المصنع) الإجازات والغياب حسب كلام المالك (بالرقم السري — 26 سبتمبر)
+   · «الأقدمية محسوبة من» (workers.serviceFrom): الموظفين الحاليين اتحسبوا مكمّلين 3 شهور (serviceFrom = 2026-06-26)
+     — بتُستخدم لشروط الإجازات والسلف بس؛ تاريخ التعيين الحقيقي (joined) زي ما هو للحضور والمرتبات.
+   · سلّم الغياب كل شهر (بدل «كل غياب = 3 أيام»):
+       اليوم الأول = اعتيادي مدفوع من الرصيد (لوحده، طلبه أو غاب) — لو واخد اعتيادي متوافق عليه في الشهر هي دي اليوم الأول.
+       اليوم التاني = خصم يوم بيوم (أجر اليوم بس، من غير جزاء).
+       اليوم التالت وبعده = كل يوم بيومين (أجر اليوم + يوم جزاء).
+     لو مفيش رصيد/مش مستحق: اليوم الأول بيبقى خصم يوم بيوم.
+   · غياب الخميس/السبت من غير إذن قبلها بـ24 ساعة: على قاعدته الخاصة زي ما هو (34-hr-rules).
+   · مش في سيستم الاستوديو (ليه لايحته).
+   ===================================================================== */
+(function () {
+  if (window.__NF_ABSLADDER__) return; window.__NF_ABSLADDER__ = 1;
+  const on = () => !(typeof isStuSys === 'function' && isStuSys()) && (S.settings && S.settings.policy || {}).absenceLadder !== false;
+  const baseClassify = classifyDay; const baseBalances = leaveBalances;
+  let cache = {}, cacheTick = 0;
+  render = (base => function () { cache = {}; cacheTick++; return base.apply(this, arguments); })(render);
+  const ymAdd = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  /* raw annual balance (approved leave only) */
+  function rawAnnual(w) { const y = todayISO().slice(0, 4); const r = baseBalances(w, y).find(x => x.type.id === 'annual'); return r || null; }
+  function autoBefore(w, ym) { if (!w.joined) return 0; let n = 0; for (let m = monthOf(w.joined); m < ym; m = ymAdd(m, 1)) n += Object.values(monthPlan(w, m)).filter(v => v === 'annual').length; return n; }
+  function monthPlan(w, ym) {
+    const key = w.id + '|' + ym; if (cache[key]) return cache[key]; cache[key] = {};
+    const rows = attMonthRows(w, ym); const dates = monthDates(ym); let annualTaken = 0, unpaidTaken = 0; const abs = [];
+    dates.forEach(d => { const r = rows[d]; const c = baseClassify(w, d, r); if (c.kind === 'absent') abs.push(d); else if (c.kind === 'leave' && r) { if (r.leaveType === 'annual') annualTaken++; else if (c.paid === false) unpaidTaken++; } });
+    const plan = {}; if (!abs.length) return (cache[key] = plan);
+    const ra = rawAnnual(w); const avail = ra && ra.eligible ? (ra.remaining == null ? 99 : ra.remaining) - autoBefore(w, ym) : 0;
+    let slot = Math.min(2, annualTaken + unpaidTaken); let paidLeft = annualTaken > 0 ? 0 : (avail > 0 ? 1 : 0);
+    abs.sort().forEach(d => { if (slot === 0 && paidLeft > 0) { plan[d] = 'annual'; paidLeft--; } else if (slot <= 1) plan[d] = 'unpaid'; else plan[d] = 'double'; slot++; });
+    return (cache[key] = plan);
+  }
+  window.nfAbsencePlan = monthPlan;
+  /* the first absence of the month shows (and is paid) as annual leave */
+  classifyDay = function (w, date, row) {
+    const c = baseClassify.apply(this, arguments); if (c.kind !== 'absent' || !on() || !w || !w.id) return c;
+    const p = monthPlan(w, monthOf(date))[date];
+    if (p === 'annual') return { kind: 'leave', paid: true, auto: true, label: 'اعتيادي — أول غياب في الشهر (من الرصيد)' };
+    if (p === 'unpaid') return Object.assign({}, c, { label: 'غياب — يُخصم يوم بيوم', ladder: 'unpaid' });
+    if (p === 'double') return Object.assign({}, c, { label: 'غياب — يُخصم بيومين', ladder: 'double' });
+    return c;
+  };
+  if (typeof absencePenaltyFor === 'function') absencePenaltyFor = (base => function (w, ym, date, pol) {
+    const r = base.apply(this, arguments); if (!on()) return r;
+    const ts = (typeof hrRule !== 'function' || hrRule('thuSatEnabled') !== false) && typeof thuSatViolations === 'function' && thuSatViolations(w, ym).length && !(typeof thuSatWaived === 'function' && thuSatWaived(w, ym));
+    if (ts) return r;
+    const p = monthPlan(w, ym)[date];
+    if (p === 'double') return { days: 1, reason: 'غياب — اليوم التالت أو أكتر في الشهر (يُخصم اليوم بيومين)' };
+    return null; /* unpaid: the day's pay only (payroll), annual: paid */
+  })(absencePenaltyFor);
+  /* the balance counts the automatic annual days */
+  leaveBalances = function (w, year) {
+    const res = baseBalances.apply(this, arguments); if (!on() || !w || !w.joined) return res;
+    const a = res.find(x => x.type.id === 'annual'); if (!a) return res;
+    const cur = monthOf(todayISO()); let all = 0, yr = 0; for (let m = monthOf(w.joined); m <= cur; m = ymAdd(m, 1)) { const n = Object.values(monthPlan(w, m)).filter(v => v === 'annual').length; all += n; if (m.startsWith(String(year))) yr += n; }
+    if (all) { a.used = (+a.used || 0) + yr; if (a.remaining != null) a.remaining = Math.max(0, a.remaining - all); a.auto = all; }
+    return res;
+  };
+  /* the regulation text: the absence line */
+  const LADDER_TXT = 'الغياب في الشهر: اليوم الأول يُحسب إجازة اعتيادية مدفوعة من الرصيد، واليوم التاني يُخصم يومًا بيوم، واليوم التالت وأي يوم بعده يُخصم اليوم بيومين.';
+  if (typeof regulationHTML === 'function') regulationHTML = (base => function (txt) {
+    if (on()) txt = String(txt || '').split('\n').map(l => /absenceTotalDays|الغياب بدون إذن يُخصم اليوم/.test(l) ? '- ' + LADDER_TXT : l).join('\n');
+    return base.call(this, txt);
+  })(regulationHTML);
+  /* worker file: «الأقدمية محسوبة من» */
+  if (typeof workerForm === 'function') workerForm = (base => function (w) {
+    const html = base.apply(this, arguments); if (stuSys() || !(typeof canEditHr === 'function' ? canEditHr() : isAdmin())) return html;
+    const fld = field('الأقدمية محسوبة من (للإجازات والسلف)', inp('serviceFrom', (w && w.serviceFrom) || '', 'type="date"') + '<div class="hint">لو فاضية = تاريخ التعيين</div>');
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + fld : html.slice(0, i) + fld + html.slice(i);
+  })(workerForm);
+  if (typeof workerFromForm === 'function') workerFromForm = (base => async function (f, w) {
+    const doc = await base.apply(this, arguments); if (!doc || stuSys()) return doc; const el = f.querySelector('[name=serviceFrom]'); if (el) doc.serviceFrom = el.value || null; return doc;
+  })(workerFromForm);
+  function stuSys() { return typeof isStuSys === 'function' && isStuSys(); }
 })();
 </script>
 
