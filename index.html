@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0504-1eee34";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0517-7c2519";</script>
 
 <script>
 'use strict';
@@ -19747,7 +19747,9 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      عبدالظاهر لو بهاء مش موجود — policy.advPayerAltId) ويرفع الصورة ← السيرفر يتأكد إن المستلم محفظة واحد منهم والمبلغ = المجموع
      ← الدفعة «اتموّلت» وسلفها بقت للي استلم يوزّعها (advpay.payerId). عهدة: اتموّل / اتوزّع / باقي.
    · v4.98/b: نوع «كارت فوري» (إنستاباي ← استخدام كارت) — رقم الكارت كامل (مرتين + فحص Luhn) + اسم صاحبه، علشان المحوِّل ينسخهم
-     في إنستاباي (زرار نسخ الرقم ونسخ الاسم)؛ في القوايم بيبان مخفي •••• آخر ٤. السيرفر يطابق آخر ٤ أرقام والاسم من الصورة. المحوّلين (بهاء/أحمد) ليهم «طريقة استلام تانية» (wallet.alt) — أي واحدة منهم تتقبل في الدفعة.
+     في إنستاباي (زرار نسخ الرقم ونسخ الاسم)؛ في القوايم بيبان مخفي •••• آخر ٤. السيرفر يطابق آخر ٤ أرقام والاسم من الصورة.
+   · v4.99 (العُهد): تمويل الدفعة = تحويل من حساب محمود الشخصي لعهدة المستلم (money xfer advb_<batch>، من السيرفر)، وكل سلفة
+     بيحوّلها = مصروف «سلف للعاملين» من عهدته (بدل حساب «تحويلات محمود» — القديم فاضل للسجل). المحوّلين (بهاء/أحمد) ليهم «طريقة استلام تانية» (wallet.alt) — أي واحدة منهم تتقبل في الدفعة.
    ===================================================================== */
 (function () {
   if (window.__NF_ADVWALLET__) return; window.__NF_ADVWALLET__ = 1;
@@ -19917,7 +19919,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (tab === 'wallets') return bar + walletsHTML();
     if (tab === 'batches') return bar + batchesHTML();
     const rows = sortBy(list('advpay').filter(p => p.status === tab && (tab !== 'topay' || mine(p) || ['hr', 'acc'].includes(role()))), p => p.paidAt || p.createdAt || '', tab === 'paid');
-    return bar + (tab === 'topay' && isPayer() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل من الفلوس اللي وصلتك من محمود على الرقم الظاهر بالظبط وبنفس المبلغ، وبعدين ارفع صورة التحويل — السيستم هيقرأ الرقم والمبلغ ورقم العملية لوحده.</span></div>` : '') + (rows.length ? `<div class="apgrid">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>مفيش حاجة هنا</b></div>`);
+    return bar + (tab === 'topay' && isPayer() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل من عهدتك (الفلوس اللي وصلتك من محمود) على الرقم الظاهر بالظبط وبنفس المبلغ، وبعدين ارفع صورة التحويل — السيستم هيقرأ الرقم والمبلغ ورقم العملية لوحده.</span></div>` : '') + (rows.length ? `<div class="apgrid">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>مفيش حاجة هنا</b></div>`);
   };
   EXTRA_TITLES.advpay = () => ({ title: 'تحويل السلف', sub: 'السلف بتتحول على محفظة الموظف المسجّلة بس — مفيش سلف كاش' });
   document.addEventListener('click', e => { const b = e.target.closest('[data-aptab]'); if (!b) return; S._apTab = b.dataset.aptab; render(true); });
@@ -19990,7 +19992,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (b.status === 'open' && canWalletAdmin() && writable() && items.length) acts.push(`<button class="btn p sm" data-action="abSend" data-arg="${esc(b.id)}">${icon('send')}ابعت الدفعة لمحمود</button>`);
     if (['sent', 'review'].includes(b.status) && isAdmin() && writable()) acts.push(`<label class="btn p sm">${icon('camera')}ارفع صورة تحويلك<input type="file" accept="image/*" hidden data-abup="${esc(b.id)}"></label><button class="btn sm" data-action="abApprove" data-arg="${esc(b.id)}">اعتماد يدوي</button>${b.status === 'review' ? `<button class="btn sm ghost" data-action="abRetry" data-arg="${esc(b.id)}">صورة تانية</button>` : ''}`);
     const payers = ['sent', 'review'].includes(b.status) && isAdmin() ? `<div class="small" style="display:grid;gap:4px">${payerIds().map((p, i) => { const w = walletOf(p); const mline = (m, lbl) => `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted">${lbl}</span><span class="wlbig" style="font-size:16px">${esc(wFull(m))}</span><span class="muted tiny">${esc((WT[m.type] || [''])[0])}</span>${wCopy(m) ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(wCopy(m))}">نسخ</button>` : ''}${m.type === 'card' ? `<b>${esc(m.holder || '')}</b><button class="btn xs" data-action="apCopy" data-arg="${esc(m.holder || '')}">نسخ الاسم</button>` : ''}</div>`; return w ? `<div><b>${i ? 'البديل' : 'المحوِّل'}: ${esc(w.workerName || '')}</b>${mline(w, 'أساسي:')}${w.alt ? mline(w.alt, 'أو:') : ''}</div>` : `<div><span class="badge crit">${i ? 'البديل' : 'المحوِّل'} لسه ماسجلش رقمه</span></div>`; }).join('')}</div>` : '';
-    const dist = b.status === 'funded' ? (() => { const paid = Math.round(sum(items.filter(p => p.status === 'paid'), p => +p.paidAmount || +p.amount || 0) * 100) / 100; const fund = +b.fundedAmount || total; return `<div class="small">اتموّلت لـ <b>${esc(b.fundedToName || '')}</b> · رقم العملية <b class="ltr">${esc(b.ref || '')}</b> · ${fmtDate((b.fundedAt || '').slice(0, 10))}${b.manual ? ' · <span class="badge warn">يدوي</span>' : ''}<br>العهدة: اتموّل <b>${fmtMoney(fund)}</b> · اتوزّع <b>${fmtMoney(paid)}</b> · باقي معاه <b style="${fund - paid > 0.01 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(Math.round((fund - paid) * 100) / 100)}</b></div>`; })() : '';
+    const dist = b.status === 'funded' ? (() => { const paid = Math.round(sum(items.filter(p => p.status === 'paid'), p => +p.paidAmount || +p.amount || 0) * 100) / 100; const fund = +b.fundedAmount || total; return `<div class="small">اتموّلت لـ <b>${esc(b.fundedToName || '')}</b>${b.custodyId ? ` · دخلت <a href="#/money/${esc(b.custodyId)}">عهدة ${esc(b.custodyName || '')}</a>` : ''} · رقم العملية <b class="ltr">${esc(b.ref || '')}</b> · ${fmtDate((b.fundedAt || '').slice(0, 10))}${b.manual ? ' · <span class="badge warn">يدوي</span>' : ''}<br>العهدة: اتموّل <b>${fmtMoney(fund)}</b> · اتوزّع <b>${fmtMoney(paid)}</b> · باقي معاه <b style="${fund - paid > 0.01 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(Math.round((fund - paid) * 100) / 100)}</b></div>`; })() : '';
     return `<div class="apcard"><div class="t"><b class="ltr">${esc(b.code || '')}</b><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div><b>${fmtMoney(total)} ${CUR()}</b></div>
       <div class="small">${items.map(p => `${esc(p.workerName || '')} <b>${fmtMoney(p.amount)}</b>${b.status === 'funded' ? ` <span class="muted tiny">(${p.status === 'paid' ? 'اتحوّلت' : p.status === 'review' ? 'مراجعة' : 'لسه'})</span>` : ''}`).join(' · ') || '<span class="muted">لسه مفيش سلف</span>'}</div>
       ${b.sentByName ? `<div class="tiny muted">بعتها ${esc(b.sentByName)} · ${fmtDate((b.sentAt || '').slice(0, 10))}</div>` : ''}
@@ -20001,7 +20003,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   function batchesHTML() {
     const bs = sortBy(list('advbatch').filter(b => isAdmin() || ['hr', 'acc'].includes(role()) || (b.status === 'funded' && b.fundedTo === myWid())), b => ({ open: 0, sent: 1, review: 1, funded: 2 }[b.status] || 3) + (b.sentAt || b.createdAt || ''));
-    const intro = role() === 'hr' ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>كل سلفة بتوافق عليها بتدخل الدفعة المفتوحة. لما تخلّص، دوس «ابعت الدفعة لمحمود» — هيوصله إشعار بالأسماء والمجموع.</span></div>` : isAdmin() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل مجموع الدفعة لبهاء (أو أحمد لو بهاء مش موجود) وارفع صورة التحويل — السيستم بيعرف حوّلت لمين وبيتأكد من المبلغ.</span></div>` : '';
+    const intro = role() === 'hr' ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>كل سلفة بتوافق عليها بتدخل الدفعة المفتوحة. لما تخلّص، دوس «ابعت الدفعة لمحمود» — هيوصله إشعار بالأسماء والمجموع.</span></div>` : isAdmin() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل مجموع الدفعة لبهاء (أو أحمد لو بهاء مش موجود) وارفع صورة التحويل — السيستم بيعرف حوّلت لمين وبيتأكد من المبلغ، والمبلغ بيدخل عهدته على طول، وكل سلفة بيحوّلها بتتخصم منها.</span></div>` : '';
     return intro + (bs.length ? `<div class="apgrid">${bs.map(batchCard).join('')}</div>` : `<div class="empty"><b>مفيش دفعات لسه</b></div>`);
   }
   /* worker page + my portal: the transfers number */
