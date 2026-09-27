@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0517-7c2519";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0551-3b6f4d";</script>
 
 <script>
 'use strict';
@@ -20015,6 +20015,256 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   if (typeof vWorkerDetail === 'function') vWorkerDetail = (base => function (id) { const h = base.apply(this, arguments); if (stu() || !(canWalletAdmin() || role() === 'acc')) return h; return walletCard(id, false) + h; })(vWorkerDetail);
   if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); if (stu() || !S.session || !S.session.workerId) return h; return walletCard(S.session.workerId, true) + h; })(vMe);
+})();
+/* =====================================================================
+   v5.00 — (المصنع) تحويلات الموردين (بـ«ابدأ» من محمود، 27 سبتمبر):
+   1) «أرقام تحويل المورد» (مجموعة suppay — id = المورد): فودافون/اتصالات/أورنج/وي كاش، إنستاباي (رقم أو عنوان)،
+      كارت فوري (الرقم + الاسم)، حساب بنك (البنك + اسم صاحب الحساب + رقم الحساب/IBAN). الرقم مرتين واللصق مقفول.
+      أول تسجيل مباشر؛ بعد كده أي إضافة/تغيير/حذف = طلب يوافق عليه سعيد (hr) أو المالك. بتشوفها: المالك/hr/الحسابات/المشتريات
+      بس (أمين المخزن لأ) — السيرفر بيحميها (docs_select + nf_can_write + nf_suppay_guard).
+   2) تحويل المالك لأمر الشراء: شاشة فيها أرقام المورد بأزرار نسخ + اختيار حوّلت على أنهي + صورة التحويل ← السيرفر (advpay
+      action supread) يقرأ الصورة ويتأكد إن المستلم رقم المورد والمبلغ = المطلوب ويطلّع رقم العملية (اختلاف = تحذير قبل التسجيل).
+   3) بعد التحويل: زرار «ابعت التحويل للمورد واتساب» + «مشاركة الصورة» عند المالك/الحسابات/المشتريات، وبيتسجّل مين بعت وإمتى.
+   4) «آجل — التحويل لاحقاً»: الأمر يكمّل (المشتريات تطلب والسواق يستلم) والمبلغ يفضل «علينا للمورد» — مستحقات آجلة في
+      «الفلوس» بميعاد (أحمر لو عدّى) + إشعار للمالك يوم الميعاد؛ الدفع كله أو على دفعات بنفس خطوات التحويل.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUPPAY__) return; window.__NF_SUPPAY__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const ST = { vf: ['فودافون كاش', '010'], et: ['اتصالات كاش', '011'], or: ['أورنج كاش', '012'], we: ['وي كاش', '015'], ip: ['إنستاباي', ''], card: ['كارت فوري', ''], bank: ['حساب بنك', ''] };
+  if (!COLS.includes('suppay')) COLS.push('suppay'); S.data.suppay = S.data.suppay || new Map();
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () {
+    base.call(this); const db = S.db; if (!db) return;
+    S.unsub.push(db.collection('suppay').onSnapshot(snap => { S.data.suppay = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.suppay = true; rerender(); }, () => { }));
+  })(Store.subscribeAll);
+  const canSupPay = () => !!S.session && !stu() && (isAdmin() || ['hr', 'acc', 'purch'].includes(role()));
+  const canApprove = () => !!S.session && !stu() && (isAdmin() || role() === 'hr');
+  const canWa = () => !!S.session && !stu() && (isAdmin() || ['acc', 'purch'].includes(role()));
+  const payOf = sid => (sid && byId('suppay', sid)) || null;
+  const methodsOf = sid => ((payOf(sid) || {}).methods || []).filter(Boolean);
+  const cardFmt = c => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
+  const mShow = m => !m ? '' : m.type === 'card' ? cardFmt(m.card) : m.type === 'bank' ? `${m.bank || ''} — ${m.account || ''}` : (m.number || m.ipa || '');
+  const mCopy = m => !m ? '' : (m.type === 'card' ? m.card : m.type === 'bank' ? m.account : (m.number || m.ipa)) || '';
+  const mLabel = m => !m ? '' : `${(ST[m.type] || [''])[0]} ${mShow(m)}${m.holder ? ' — ' + m.holder : ''}`.trim();
+  const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9a-zA-Z@._-]/g, '');
+  const luhn = n => { let t = 0; for (let i = 0; i < n.length; i++) { let d = +n[n.length - 1 - i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; } return t % 10 === 0; };
+  const remaining = p => r2(poPayable(p) - (+p.paid || 0));
+  window.nfSupPayOf = payOf;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.spm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px dashed var(--line)}.spm:last-child{border-bottom:0}
+.spm .v{font-weight:800;direction:ltr;letter-spacing:.5px}.spm label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.sppay{border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:6px;margin-top:8px}
+</style>`);
+
+  /* ------------ the double-typed form ------------ */
+  function formHTML(intro) {
+    return `<div class="form">${intro ? `<div class="full small">${intro}</div>` : ''}
+      ${field('النوع', `<select name="stype" id="sp-type">${Object.keys(ST).map(k => `<option value="${k}">${ST[k][0]}</option>`).join('')}</select>`)}
+      <div class="field" id="sp-ipmode" style="display:none"><label>إنستاباي بـ</label><select name="ipmode"><option value="num">رقم الموبايل</option><option value="ipa">عنوان إنستاباي (name@instapay)</option></select></div>
+      <div class="field" id="sp-bank" style="display:none"><label>اسم البنك</label><input name="bank" autocomplete="off" placeholder="مثلاً البنك الأهلي"></div>
+      <div class="field full" id="sp-holder" style="display:none"><label id="sp-hl">اسم صاحب الحساب</label><input name="holder" autocomplete="off" spellcheck="false"></div>
+      <div class="field full"><label id="sp-l1">الرقم</label><input name="w1" id="sp-1" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="01xxxxxxxxx"></div>
+      <div class="field full"><label id="sp-l2">اكتب الرقم تاني (بإيدك — اللصق مقفول)</label><input name="w2" id="sp-2" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="نفس الرقم"></div>
+      <div class="full tiny muted">بعد التسجيل أي تغيير أو إضافة بيروح لمدير الحسابات أو المالك يوافق عليه — علشان محدش يبدّل رقم مورد.</div></div>`;
+  }
+  function wireForm(f) {
+    const t = $('#sp-type', f), a = $('#sp-1', f), b = $('#sp-2', f);
+    const mode = () => (t.value === 'ip' && (f.querySelector('[name=ipmode]') || {}).value === 'ipa') ? 'ipa' : 'num';
+    const upd = () => {
+      const k = t.value, ipa = mode() === 'ipa', card = k === 'card', bank = k === 'bank';
+      $('#sp-ipmode', f).style.display = k === 'ip' ? '' : 'none'; $('#sp-bank', f).style.display = bank ? '' : 'none'; $('#sp-holder', f).style.display = card || bank ? '' : 'none';
+      $('#sp-hl', f).textContent = card ? 'اسم صاحب الكارت (اللي بيتكتب في إنستاباي)' : 'اسم صاحب الحساب';
+      const l = card ? 'رقم كارت فوري' : bank ? 'رقم الحساب أو الـ IBAN' : ipa ? 'عنوان إنستاباي' : 'الرقم';
+      $('#sp-l1', f).textContent = l; $('#sp-l2', f).textContent = `اكتب ${l} تاني (بإيدك — اللصق مقفول)`;
+      [a, b].forEach(x => { x.inputMode = ipa || bank ? 'text' : 'numeric'; x.placeholder = card ? '16 رقم' : bank ? 'EG00 0000 …' : ipa ? 'name@instapay' : '01xxxxxxxxx'; });
+    };
+    t.addEventListener('change', upd); f.addEventListener('change', e => { if (e.target.name === 'ipmode') upd(); });
+    ['paste', 'drop', 'dragover'].forEach(ev => b.addEventListener(ev, e => { e.preventDefault(); if (ev !== 'dragover') toast('اكتبه بإيدك — اللصق مقفول هنا', 'err'); }));
+    ['copy', 'cut'].forEach(ev => a.addEventListener(ev, e => e.preventDefault()));
+    b.addEventListener('contextmenu', e => e.preventDefault());
+    b.addEventListener('beforeinput', e => { if (['insertFromPaste', 'insertFromDrop', 'insertReplacementText'].includes(e.inputType)) e.preventDefault(); });
+    f._spMode = mode; upd();
+  }
+  async function readForm(f) {
+    const d = formData(f); const type = d.stype; const ipa = f._spMode && f._spMode() === 'ipa';
+    const norm = v => type === 'bank' ? String(v || '').toUpperCase().replace(/[٠-٩]/g, x => '٠١٢٣٤٥٦٧٨٩'.indexOf(x)).replace(/[^0-9A-Z]/g, '') : ipa ? String(v || '').trim().toLowerCase() : digits(v);
+    const v1 = norm(d.w1), v2 = norm(d.w2);
+    if (!v1 || !v2) { toast('اكتبه في الخانتين', 'err'); return null; }
+    if (v1 !== v2) { toast('الخانتين مش زي بعض — راجعهم', 'err'); return null; }
+    const base = { id: uid(), type, number: null, ipa: null, card: null, bank: null, account: null, holder: null, at: nowISO(), byName: S.session?.name || '' };
+    const holder = String(d.holder || '').trim().replace(/\s+/g, ' ');
+    if (type === 'bank') { if (!/^[0-9A-Z]{6,34}$/.test(v1)) { toast('رقم الحساب أو الـ IBAN مش مظبوط', 'err'); return null; } if (String(d.bank || '').trim().length < 2) { toast('اكتب اسم البنك', 'err'); return null; } if (holder.length < 3) { toast('اكتب اسم صاحب الحساب', 'err'); return null; } return Object.assign(base, { account: v1, bank: String(d.bank).trim(), holder }); }
+    if (type === 'card') { if (!/^\d{16,19}$/.test(v1)) { toast('رقم الكارت لازم يبقى 16 رقم', 'err'); return null; } if (holder.length < 3) { toast('اكتب اسم صاحب الكارت', 'err'); return null; } if (!luhn(v1) && !(await confirmDlg(`رقم الكارت ${cardFmt(v1)} شكله مش مظبوط. متأكد منه؟`, 'أيوه متأكد', false))) return null; return Object.assign(base, { card: v1, holder }); }
+    if (ipa) { if (!/^[a-z0-9._-]+@instapay$/.test(v1)) { toast('عنوان إنستاباي لازم يبقى زي name@instapay', 'err'); return null; } return Object.assign(base, { ipa: v1 }); }
+    if (!/^01[0125]\d{8}$/.test(v1)) { toast('الرقم لازم يبقى موبايل مصري 11 رقم', 'err'); return null; }
+    return Object.assign(base, { number: v1 });
+  }
+  /* save a new methods list: direct (first time / hr / owner) or as a change request */
+  async function proposeMethods(s, methods, what) {
+    const cur = payOf(s.id); const now = nowISO(); const me = S.session || {};
+    const direct = canApprove() || !cur || !(cur.methods || []).length;
+    const doc = Object.assign({ id: s.id, supplierId: s.id, supplierName: s.name || '', methods: [], history: [] }, cur || {});
+    if (direct) {
+      const hist = (doc.history || []).concat(cur && (cur.methods || []).length ? [{ methods: cur.methods, until: now, byName: me.name || '', what }] : []).slice(-15);
+      await Store.save('suppay', Object.assign(doc, { supplierName: s.name || '', methods, pending: null, at: now, byName: me.name || '', history: hist }));
+      toast('اتسجّل');
+    } else {
+      await Store.save('suppay', Object.assign(doc, { pending: { methods, what, at: now, by: me.id || null, byName: me.name || '' } }));
+      try { await Store.save('tasks', { id: `spp_${s.id}_${Date.now().toString(36)}`, title: `طلب تغيير أرقام تحويل المورد — ${s.name || ''}`, desc: `${what} — راجع الطلب من صفحة المورد`, toRole: 'hr', assigneeId: null, deptId: null, priority: 'high', status: 'open', kind: 'update', source: 'suppay', supplierId: s.id, link: `/#/suppliers/${s.id}`, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+      toast('اتبعت الطلب لمدير الحسابات يوافق عليه');
+    }
+  }
+  ACTIONS.supPayAdd = sid => {
+    const s = byId('suppliers', sid); if (!s || !canSupPay() || !writable()) return; const cur = payOf(sid);
+    const req = !canApprove() && cur && (cur.methods || []).length;
+    if (cur && cur.pending) { toast('فيه طلب تغيير لسه مستني الموافقة', 'err'); return; }
+    openModal({ title: `${req ? 'طلب إضافة' : 'إضافة'} رقم تحويل — ${s.name || ''}`, submitLabel: req ? 'ابعت الطلب' : 'حفظ', body: formHTML(req ? 'الطلب هيروح لمدير الحسابات يوافق عليه.' : ''), onOpen: f => wireForm(f),
+      onSubmit: async f => { const v = await readForm(f); if (!v) return false; if (methodsOf(sid).some(m => mCopy(m) === mCopy(v))) { toast('الرقم ده متسجّل قبل كده', 'err'); return false; } await proposeMethods(s, methodsOf(sid).concat([v]), `إضافة ${mLabel(v)}`); } });
+  };
+  ACTIONS.supPayDel = async arg => {
+    const [sid, mid] = String(arg).split(':'); const s = byId('suppliers', sid); const m = methodsOf(sid).find(x => x.id === mid); if (!s || !m || !canSupPay() || !writable()) return;
+    const cur = payOf(sid); if (cur && cur.pending) { toast('فيه طلب تغيير لسه مستني الموافقة', 'err'); return; }
+    if (!(await confirmDlg(`${canApprove() ? 'تشيل' : 'تطلب شيل'} ${mLabel(m)}؟`, canApprove() ? 'شيل' : 'ابعت الطلب', true))) return;
+    await proposeMethods(s, methodsOf(sid).filter(x => x.id !== mid), `شيل ${mLabel(m)}`);
+  };
+  ACTIONS.supPayDecide = async arg => {
+    const [sid, ok] = String(arg).split(':'); const cur = payOf(sid); if (!cur || !cur.pending || !canApprove()) return; const now = nowISO(); const me = S.session || {};
+    if (ok === '1') await Store.save('suppay', Object.assign({}, cur, { methods: cur.pending.methods || [], pending: null, at: now, byName: me.name || '', history: (cur.history || []).concat([{ methods: cur.methods || [], until: now, byName: me.name || '', what: cur.pending.what || '', askedBy: cur.pending.byName || '' }]).slice(-15) }));
+    else await Store.save('suppay', Object.assign({}, cur, { pending: null, rejectedAt: now, rejectedBy: me.name || '' }));
+    toast(ok === '1' ? 'اتوافق' : 'اترفض');
+  };
+  ACTIONS.spCopy = async v => { try { await navigator.clipboard.writeText(v); toast('اتنسخ'); } catch (e) { toast(v); } };
+  const copyBtns = m => `${mCopy(m) ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(mCopy(m))}">نسخ الرقم</button>` : ''}${m.holder ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(m.holder)}">نسخ الاسم</button>` : ''}`;
+  function supPayCard(s) {
+    const cur = payOf(s.id); const ms = methodsOf(s.id); const pend = cur && cur.pending;
+    return `<div class="card" id="suppaycard"><div class="cardhead"><h3>${icon('money')}أرقام تحويل المورد</h3><div class="grow"></div>${writable() && !pend ? `<button class="btn sm" data-action="supPayAdd" data-arg="${esc(s.id)}">${icon('plus')}${!canApprove() && ms.length ? 'طلب إضافة رقم' : 'رقم تحويل'}</button>` : ''}</div>
+      ${ms.length ? ms.map(m => `<div class="spm"><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v">${esc(mShow(m))}</span>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}<div class="grow"></div>${writable() && !pend ? `<button class="btn xs ghost" data-action="supPayDel" data-arg="${esc(s.id)}:${esc(m.id)}">${canApprove() ? 'شيل' : 'طلب شيل'}</button>` : ''}</div>`).join('') : '<div class="small muted">مفيش أرقام تحويل لسه — المالك مش هيعرف يحوّل غير لما تتسجّل.</div>'}
+      ${pend ? `<div class="banner warn small" style="margin-top:8px;display:block"><b>طلب تغيير</b> من ${esc(pend.byName || '')} — ${esc(pend.what || '')}<div style="margin-top:4px">بعد الموافقة: ${(pend.methods || []).map(m => `<span class="ltr">${esc(mLabel(m))}</span>`).join(' · ') || 'مفيش أرقام'}</div>${canApprove() && writable() ? `<div class="row" style="gap:6px;margin-top:6px"><button class="btn xs p" data-action="supPayDecide" data-arg="${esc(s.id)}:1">وافق</button><button class="btn xs" data-action="supPayDecide" data-arg="${esc(s.id)}:0">ارفض</button></div>` : ''}</div>` : ''}</div>`;
+  }
+  if (EXTRA_VIEWS.suppliers) EXTRA_VIEWS.suppliers = (base => r => { let h = base(r); if (!r || !r.id || !canSupPay()) return h; const s = byId('suppliers', r.id); if (!s) return h; const i = h.indexOf('<div class="card"'); const card = supPayCard(s); return i < 0 ? h + card : h.slice(0, i) + card + h.slice(i); })(EXTRA_VIEWS.suppliers);
+
+  /* ------------ the transfer dialog (owner) ------------ */
+  async function callFn(body) { if (typeof window.nfAdvPayCall === 'function') return window.nfAdvPayCall(body); if (!S.sb || !S.sb.functions) throw new Error('offline'); const r = await S.sb.functions.invoke('advpay', { body }); if (r.error) throw new Error(r.error.message); return r.data; }
+  async function shrink(fileObj) { const src = await fileToDataURL(fileObj); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1800 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.88)); }; im.onerror = rej; im.src = src; }); }
+  function transferDialog(p, o) {
+    const s = supplierOf(p); const ms = s ? methodsOf(s.id) : [];
+    return new Promise(resolve => {
+      let done = false; const fin = v => { if (done) return; done = true; clearInterval(iv); resolve(v); };
+      S._spDefer = () => { closeModal(); fin({ mode: 'defer' }); };
+      openModal({ title: o.title, submitLabel: 'حوّلت — سجّل التحويل',
+        body: `<div class="form">
+          <div class="full"><div class="tiny muted" style="margin-bottom:4px">حوّل على رقم من دول واختار حوّلت على أنهي:</div>${ms.length ? ms.map((m, i) => `<div class="spm"><label><input type="radio" name="mid" value="${esc(m.id)}" ${i === 0 ? 'checked' : ''}><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v">${esc(mShow(m))}</span></label>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}</div>`).join('') : `<div class="banner warn small">المورد مالوش أرقام تحويل مسجّلة — اطلب من المشتريات يسجّلها من صفحة المورد. تقدر تسجّل التحويل برضه.</div><input type="hidden" name="mid" value="">`}</div>
+          ${o.fixed ? `<div class="field"><label>المبلغ</label><b class="num" style="font-size:18px">${fmtMoney(o.amount)} ${CUR()}</b><input type="hidden" name="amount" value="${o.amount}"></div>` : field(`المبلغ (${CUR()}) — الباقي ${fmtMoney(o.amount)}`, inp('amount', o.amount, 'type="number" step="any" min="0" inputmode="decimal"'))}
+          ${o.src ? field('التحويل من', `<select name="src">${typeof srcOptions === 'function' ? srcOptions('personal') : '<option value="personal">حساب محمود الشخصي</option>'}</select>`) : ''}
+          <div class="field full"><label>صورة التحويل</label><input type="file" id="sp-file" accept="image/*"></div>
+          ${field('ملاحظة', inp('note', ''), 'full')}
+          <div class="full tiny muted">السيستم بيقرأ الصورة ويتأكد إن المستلم رقم المورد والمبلغ مظبوط ويطلّع رقم العملية.</div></div>`,
+        extra: o.allowDefer ? `<div class="grow"></div><button type="button" class="btn" onclick="window.__nfSpDefer&&window.__nfSpDefer()">آجل — التحويل لاحقاً</button>` : '',
+        onSubmit: async f => {
+          const d = formData(f); const file = ($('#sp-file', f) || {}).files?.[0]; const amount = num(d.amount);
+          if (!(amount > 0)) { toast('اكتب المبلغ', 'err'); return false; }
+          if (!o.fixed && amount > o.amount + 0.5) { toast(`الباقي ${fmtMoney(o.amount)} بس`, 'err'); return false; }
+          if (!file) { toast('صورة التحويل مطلوبة', 'err'); return false; }
+          toast('بيقرأ صورة التحويل…');
+          let fileIds = [], thumb = null; try { const doc = await proofAttach(file, { kind: 'transfer', ownerKind: 'purchase', ownerId: p.id, note: d.note || '' }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } }
+          let r = null; try { r = await callFn({ action: 'supread', poId: p.id, amount, image: await shrink(file) }); } catch (e) { r = { ok: false, issues: ['مقدرتش أقرأ الصورة — ' + (e.message || e)] }; }
+          const m = ms.find(x => x.id === (r && r.methodId)) || ms.find(x => x.id === d.mid) || null;
+          fin({ mode: 'paid', amount, src: d.src || null, note: d.note || '', fileIds, thumb, methodId: m ? m.id : null, methodLabel: m ? mLabel(m) : '', ref: (r && r.ref) || '', proofUrl: (r && r.proofUrl) || null, proofPath: (r && r.proofPath) || null, aiOk: !!(r && r.ok), issues: (r && r.issues) || [], read: (r && r.read) || null });
+          return true;
+        } });
+      window.__nfSpDefer = () => S._spDefer && S._spDefer();
+      const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300);
+    });
+  }
+  async function confirmIssues(r) { if (!r.issues || !r.issues.length) return true; return await confirmDlg(`صورة التحويل مش مطابقة:\n${r.issues.join('\n')}\n\nتسجّل التحويل برضه؟`, 'أيوه سجّل', false); }
+  const trfInfo = r => ({ methodId: r.methodId, methodLabel: r.methodLabel, ref: r.ref || '', proofUrl: r.proofUrl, proofPath: r.proofPath, aiOk: r.aiOk, aiIssues: r.issues || [] });
+  const notify = (roleId, title, body, id) => { try { if (typeof notifyRole === 'function') notifyRole(roleId, title, body, { id }); } catch (e) { /* ignore */ } };
+  function pickupTask(p) {
+    const s = supplierOf(p);
+    return Store.save('tasks', { id: `po_pickup_${p.id}`, title: `مشوار نقل: استلام توريد ${p.number} من ${p.supplier || 'المورد'}`, desc: `${(p.items || []).map(it => `${it.name || byId('materials', it.materialId)?.name || ''} × ${fmtNum(it.qty)} ${it.unit || ''}`).join('، ')}\n${s && s.location ? `الموقع: ${s.location}` : ''}${s && s.lat != null && typeof mapsLink === 'function' ? ` — ${mapsLink(s.lat, s.lng)}` : ''}\nكلّف عربية وسائقًا من «حركة النقل». السائق يسلّم لرئيس القسم وأمين المخزن معًا.`, deptId: null, assigneeId: null, orderId: p.orderId || null, dueDate: p.expected || todayISO(), priority: 'high', status: 'open', kind: 'task', source: 'fleet', toRole: 'fleet', purchaseId: p.id, createdBy: null, createdByName: 'السيستم', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true });
+  }
+  async function poDefer(p) {
+    const due = await new Promise(res => { let d = false; const fin = v => { if (!d) { d = true; clearInterval(iv); res(v); } }; openModal({ title: `آجل — ${p.number} · ${p.supplier || ''}`, submitLabel: 'سجّل آجل', body: `<div class="form"><div class="full">المبلغ <b>${fmtMoney(poPayable(p))} ${CUR()}</b> هيفضل علينا للمورد، والأمر يكمّل: المشتريات تطلب والسواق يستلم.</div>${field('ميعاد الدفع (اختياري)', inp('due', '', 'type="date"'))}</div>`, onSubmit: f => { fin({ due: formData(f).due || null }); return true; } }); const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300); });
+    if (!due) return; const me = S.session || {}; const s = supplierOf(p);
+    await Store.update('purchases', p.id, { status: 'ordered', deferred: { at: nowISO(), byName: me.name || '', due: due.due, amount: poPayable(p), payments: [] } });
+    notify('purch', `أمر الشراء ${p.number} آجل — اطلب التوريد من المورد`, `${p.supplier || ''}${s && s.phone ? ` · ${s.phone}` : ''}\nالتحويل هيتعمل لاحقاً.`, `po_def_${p.id}`);
+    notify('acc', `أمر شراء آجل — ${p.number}`, `${p.supplier || ''}${due.due ? ` — ميعاد الدفع ${fmtDate(due.due)}` : ''}`, `po_def_acc_${p.id}`);
+    try { await pickupTask(p); } catch (e) { /* ignore */ }
+    try { const t = byId('tasks', `po_hr_${p.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', proof: { note: 'آجل — التحويل لاحقاً', at: nowISO() } }, { silent: true }); } catch (e) { /* ignore */ }
+    toast('اتسجّل آجل — المشتريات تطلب من المورد');
+  }
+  /* the owner's transfer on an approved PO → our dialog first (methods + copy + screenshot + AI), then the old chain */
+  (() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => {
+    const p = byId('purchases', id); if (!p || stu() || !isAdmin() || p.status !== 'transfer') return base(id);
+    const r = await transferDialog(p, { title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, amount: poPayable(p), fixed: true, allowDefer: true });
+    if (!r) return; if (r.mode === 'defer') return poDefer(p);
+    if (!(await confirmIssues(r))) return;
+    const orig = proofDialog; proofDialog = async () => ({ note: [r.note, r.ref ? `رقم العملية ${r.ref}` : '', r.methodLabel ? `على ${r.methodLabel}` : ''].filter(Boolean).join(' · '), status: null, fileIds: r.fileIds, thumb: r.thumb, at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '' });
+    try { await base(id); } finally { proofDialog = orig; }
+    const p2 = byId('purchases', id); if (p2 && p2.transfer) await Store.update('purchases', id, { transfer: Object.assign({}, p2.transfer, trfInfo(r)) });
+    const e = list('expenses').find(x => x.purchaseId === id && x.src === 'purchase' && !x.trfRef); if (e && r.ref) { try { await Store.update('expenses', e.id, { trfRef: r.ref }); } catch (e2) { /* ignore */ } }
+  }; })();
+  /* a later payment on a deferred PO (whole or part) */
+  ACTIONS.poPayLater = async id => {
+    const p = byId('purchases', id); if (!p || !isAdmin() || !p.deferred || stu()) return; const left = remaining(p); if (left <= 0.5) { toast('الأمر اتسدّد'); return; }
+    const r = await transferDialog(p, { title: `تحويل آجل — ${p.number} · ${p.supplier || ''}`, amount: left, fixed: false, allowDefer: false, src: true });
+    if (!r || r.mode !== 'paid') return; if (!(await confirmIssues(r))) return;
+    const src = r.src || 'personal'; if (typeof walletOf === 'function' && typeof walletBalance === 'function') { const w = walletOf(src); if (w && walletBalance(w.id).balance + 0.5 < r.amount) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; } }
+    const me = S.session || {}; const n = list('expenses').filter(e => e.purchaseId === p.id).length + 1; const now = nowISO();
+    await Store.save('expenses', { id: `pot_${p.id}_${n}`, date: todayISO(), month: monthOf(todayISO()), amount: r.amount, cat: 'materials', account: src, orderId: null, payee: p.supplier || '', supplierId: p.supplierId || null, ref: p.number, note: `تحويل آجل للمورد — ${p.number}${r.ref ? ' · ' + r.ref : ''}`, src: 'purchase', purchaseId: p.id, thumb: r.thumb || null, trfRef: r.ref || null, byName: me.name || '', createdAt: now });
+    const p1 = byId('purchases', id) || p; const pay = Object.assign({ id: uid(), amount: r.amount, at: now, byName: me.name || '', src, srcName: typeof acctLabel === 'function' ? acctLabel(src) : src, thumb: r.thumb || null, fileIds: r.fileIds || [], note: r.note || '' }, trfInfo(r));
+    const paid = r2((+p1.paid || 0) + r.amount); const leftAfter = r2(poPayable(p1) - paid);
+    await Store.update('purchases', id, { paid, deferred: Object.assign({}, p1.deferred, { payments: (p1.deferred.payments || []).concat([pay]), settledAt: leftAfter <= 0.5 ? now : null }) });
+    notify('purch', `اتحوّل ${fmtMoney(r.amount)} ${CUR()} للمورد ${p.supplier || ''} — ${p.number}`, 'ابعت التحويل للمورد واتساب من صفحة الأمر', `po_pl_${pay.id}`);
+    notify('acc', `تحويل آجل ${fmtMoney(r.amount)} ${CUR()} — ${p.number}`, `للمورد ${p.supplier || ''}${leftAfter > 0.5 ? ` — الباقي ${fmtMoney(leftAfter)}` : ' — اتسدّد'}`, `po_pl_acc_${pay.id}`);
+    if (leftAfter <= 0.5) { try { const t = byId('tasks', `podue_${id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: 'السيستم' }, { silent: true }); } catch (e) { /* ignore */ } }
+    toast(leftAfter > 0.5 ? `اتسجّل — الباقي ${fmtMoney(leftAfter)}` : 'اتسجّل — الأمر اتسدّد');
+  };
+
+  /* ------------ WhatsApp to the supplier ------------ */
+  function waMsg(p, x) { return `السلام عليكم ${p.supplier || ''}،\nتم تحويل ${fmtMoney(x.amount)} ${CUR()} — أمر الشراء ${p.number}\n${x.ref ? `رقم العملية: ${x.ref}\n` : ''}التاريخ: ${fmtDate((x.at || '').slice(0, 10))}${x.methodLabel ? `\nعلى: ${x.methodLabel}` : ''}${x.proofUrl ? `\nصورة التحويل: ${x.proofUrl}` : ''}\n— Ninety Fabrication`; }
+  const payX = (p, pid) => pid === 'main' ? (p.transfer ? Object.assign({ id: 'main' }, p.transfer) : null) : ((p.deferred && p.deferred.payments) || []).find(x => x.id === pid) || null;
+  ACTIONS.poWa = arg => {
+    const [id, pid] = String(arg).split(':'); const p = byId('purchases', id); const x = p && payX(p, pid); const s = p && supplierOf(p); if (!x || !canWa()) return;
+    if (!s || !s.phone) { toast('مفيش رقم للمورد في ملفه', 'err'); return; }
+    try { window.open(waLink(s.phone, waMsg(p, x)), '_blank', 'noopener'); } catch (e) { /* ignore */ }
+    const mark = { waAt: nowISO(), waBy: S.session?.name || '' };
+    if (pid === 'main') Store.update('purchases', id, { transfer: Object.assign({}, p.transfer, mark) }).catch(() => { });
+    else Store.update('purchases', id, { deferred: Object.assign({}, p.deferred, { payments: (p.deferred.payments || []).map(y => y.id === pid ? Object.assign({}, y, mark) : y) }) }).catch(() => { });
+  };
+  ACTIONS.poWaShare = async arg => {
+    const [id, pid] = String(arg).split(':'); const p = byId('purchases', id); const x = p && payX(p, pid); if (!x) return;
+    try { let file = null; if (x.proofUrl) { const r = await fetch(x.proofUrl); const blob = await r.blob(); file = new File([blob], `tahweel-${p.number}.jpg`, { type: blob.type || 'image/jpeg' }); } const data = { text: waMsg(p, x).replace(/\nصورة التحويل:.*$/m, '') }; if (file && (!navigator.canShare || navigator.canShare({ files: [file] }))) data.files = [file]; await navigator.share(data); } catch (e) { /* cancelled */ }
+  };
+  const waBtns = (p, pid, x) => canWa() ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn sm p" data-action="poWa" data-arg="${esc(p.id)}:${pid}">${icon('wa')}ابعت التحويل للمورد واتساب</button>${navigator.share ? `<button class="btn sm" data-action="poWaShare" data-arg="${esc(p.id)}:${pid}">مشاركة الصورة</button>` : ''}${x.waAt ? `<span class="tiny muted">اتبعت ${fmtDate(x.waAt.slice(0, 10))} · ${esc(x.waBy || '')}</span>` : ''}</div>` : '';
+  const infoLine = x => `${x.methodLabel ? `<div class="small">على <b class="ltr">${esc(x.methodLabel)}</b>${x.ref ? ` · رقم العملية <b class="ltr">${esc(x.ref)}</b>` : ''} ${x.aiOk ? '<span class="badge good">الصورة مطابقة ✓</span>' : (x.aiIssues && x.aiIssues.length ? '<span class="badge warn">اتسجّل رغم الاختلاف</span>' : '')}</div>` : (x.ref ? `<div class="small">رقم العملية <b class="ltr">${esc(x.ref)}</b></div>` : '')}${x.aiIssues && x.aiIssues.length && !x.aiOk ? `<div class="tiny muted">${x.aiIssues.map(esc).join(' · ')}</div>` : ''}`;
+  function deferredCard(p) {
+    const d = p.deferred; const left = remaining(p); const over = d.due && left > 0.5 && d.due < todayISO();
+    return `<div class="card trfcard"><div class="cardhead"><h3>آجل — التحويل لاحقاً</h3>${left > 0.5 ? `<span class="badge ${over ? 'crit' : 'warn'}">علينا ${fmtMoney(left)} ${CUR()}</span>` : '<span class="badge good">اتسدّد</span>'}<div class="grow"></div>${left > 0.5 && isAdmin() && writable() ? `<button class="btn sm p" data-action="poPayLater" data-arg="${esc(p.id)}">${icon('money')}حوّل دلوقتي</button>` : ''}</div>
+      <div class="small">اتسجّل آجل ${fmtDate((d.at || '').slice(0, 10))} · ${esc(d.byName || '')} · المبلغ ${fmtMoney(poPayable(p))}${d.due ? ` · ميعاد الدفع <b style="${over ? 'color:var(--crit-ink)' : ''}">${fmtDate(d.due)}${over ? ' — متأخر' : ''}</b>` : ''}</div>
+      ${(d.payments || []).map(x => `<div class="sppay"><div class="small"><b>${fmtMoney(x.amount)} ${CUR()}</b> · ${fmtDate((x.at || '').slice(0, 10))} · ${esc(x.byName || '')} · من ${esc(x.srcName || '')}</div>${infoLine(x)}${x.thumb ? `<img class="trfthumb" src="${esc(x.thumb)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')">` : ''}${waBtns(p, x.id, x)}</div>`).join('')}</div>`;
+  }
+  if (typeof transferCard === 'function') transferCard = (base => p => {
+    let h = base(p); if (stu() || !p) return h;
+    if (p.transfer && (canWa() || role() === 'hr')) { const add = infoLine(p.transfer) + waBtns(p, 'main', p.transfer); const i = h.lastIndexOf('</div>'); h = i > 0 ? h.slice(0, i) + add + h.slice(i) : h + add; }
+    if (p.deferred && (canSupPay())) h += deferredCard(p);
+    return h;
+  })(transferCard);
+
+  /* ------------ money page: deferred supplier dues + due-date reminder ------------ */
+  if (typeof moneyDue === 'function') moneyDue = (base => function () {
+    const out = base.apply(this, arguments); if (stu()) return out; const today = todayISO();
+    sortBy(list('purchases').filter(p => p.deferred && p.status !== 'cancelled' && remaining(p) > 0.5), p => p.deferred.due || '9999').forEach(p => { const over = p.deferred.due && p.deferred.due < today; out.push({ kind: 'po', id: p.id, label: `آجل — أمر شراء ${p.number} — ${p.supplier || ''}`, sub: p.deferred.due ? `ميعاد الدفع ${fmtDate(p.deferred.due)}${over ? ' — ⚠ متأخر' : ''}` : 'آجل بدون ميعاد', amount: remaining(p), action: 'poPayLater', href: `purchases/${p.id}` }); });
+    return out;
+  })(moneyDue);
+  RENDER_HOOKS.push(() => {
+    if (stu() || S._poDueChecked || !S.session || !(isAdmin() || ['acc', 'hr'].includes(role())) || !writable() || !S.loaded || !S.loaded.purchases) return;
+    S._poDueChecked = true; const today = todayISO();
+    list('purchases').filter(p => p.deferred && p.deferred.due && p.deferred.due <= today && p.status !== 'cancelled' && remaining(p) > 0.5 && !byId('tasks', `podue_${p.id}`)).forEach(p => {
+      Store.save('tasks', { id: `podue_${p.id}`, title: `دفعة آجلة مستحقة للمورد ${p.supplier || ''} — ${p.number}`, desc: 'افتح «الفلوس» ← مستحق عليك تحويله', toRole: 'admin', assigneeId: null, deptId: null, priority: 'high', status: 'open', kind: 'update', source: 'podue', purchaseId: p.id, link: `/#/purchases/${p.id}`, createdBy: null, createdByName: 'السيستم', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }).catch(() => { });
+      try { if (typeof pushSend === 'function') pushSend(['role:admin'], `دفعة آجلة مستحقة — ${p.supplier || ''}`, `${p.number} · ${fmtMoney(remaining(p))} ${CUR()}`, `/#/purchases/${p.id}`, 'podue'); } catch (e) { /* ignore */ }
+    });
+  });
 })();
 </script>
 
