@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260926-1718-1a50bb";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0404-dc268a";</script>
 
 <script>
 'use strict';
@@ -3232,7 +3232,7 @@ function payrollRow(w, ym) {
   const pens = list('penalties').filter(p => p.workerId === w.id && p.month === ym && p.status !== 'waived');
   const penDays = sum(pens.filter(p => p.kind !== 'bonus'), p => p.days); const penAmt = sum(pens.filter(p => p.kind !== 'bonus'), p => p.amount); const bonus = sum(pens.filter(p => p.kind === 'bonus'), p => p.amount);
   const penaltyDed = penDays * dr + penAmt;
-  const advs = list('advances').filter(a => a.workerId === w.id && a.status !== 'closed' && (a.date || '') <= ym + '-31'); const advanceDed = sum(advs, a => Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))));
+  const advs = list('advances').filter(a => a.workerId === w.id && a.status !== 'closed' && (a.date || '') <= ym + '-31' && !['topay', 'review'].includes(a.payStatus)); const advanceDed = sum(advs, a => Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))));
   const net = gross + otPay + bonus - absenceDed - penaltyDed - advanceDed;
   return { wid: w.id, name: w.name, deptId: w.deptId, contract: w.contract || 'daily', dr: r2(dr), basic, allow, paidDays, present: s.present, half: s.half, absent: s.absent, leavePaid: s.leavePaid, leaveUnpaid: s.leaveUnpaid, late: s.late, lateCount: s.lateCount, ot: r2(s.ot), otHoliday: r2(s.otHoliday), otPay: r2(otPay), gross: r2(gross), absenceDays, absenceDed: r2(absenceDed), penDays, penaltyDed: r2(penaltyDed), bonus: r2(bonus), advanceDed: r2(advanceDed), net: r2(net), unrecorded: s.unrecorded, hrs: r2(s.hrs) };
 }
@@ -3515,7 +3515,7 @@ ACTIONS.payLock = async ym => {
   const ws = list('workers').filter(w => w.status !== 'inactive' || (w.leftAt && w.leftAt >= ym)); const rows = {}; ws.forEach(w => { rows[w.id] = payrollRow(w, ym); });
   if (!(await confirmDlg(`اعتماد وقفل رواتب ${fmtMonth(ym)} لعدد ${ws.length} موظف؟ سيتم خصم أقساط السلف المستحقة.`, 'اعتماد', false))) return;
   await Store.save('payrolls', { id: ym, month: ym, rows, lockedAt: nowISO(), byName: S.session?.name || '' }, { silent: true }); await acctOnPayrollLock(ym, rows);
-  for (const a of list('advances')) { if (a.status === 'closed') continue; const r = rows[a.workerId]; if (!r || !r.advanceDed) continue; const due = Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))); if (!due) continue; const paid = (+a.paid || 0) + due; await Store.update('advances', a.id, { paid, status: paid >= (+a.amount || 0) - 0.01 ? 'closed' : 'open', lastMonth: ym }); }
+  for (const a of list('advances')) { if (a.status === 'closed' || ['topay', 'review'].includes(a.payStatus)) continue; const r = rows[a.workerId]; if (!r || !r.advanceDed) continue; const due = Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))); if (!due) continue; const paid = (+a.paid || 0) + due; await Store.update('advances', a.id, { paid, status: paid >= (+a.amount || 0) - 0.01 ? 'closed' : 'open', lastMonth: ym }); }
   toast('تم اعتماد الشهر'); render(false);
 };
 ACTIONS.payUnlock = async ym => { if (!isAdmin()) return; if (!(await confirmDlg('فك قفل هذا الشهر؟ لن تُعاد أقساط السلف المخصومة تلقائيًا.', 'فك القفل'))) return; await Store.remove('payrolls', ym); await acctOnPayrollUnlock(ym); };
@@ -4556,7 +4556,7 @@ function payrollRowReg(w, ym) {
   const penDays = sum(pens.filter(p => p.kind !== 'bonus'), p => p.days); const penAmt = sum(pens.filter(p => p.kind !== 'bonus'), p => p.amount); let bonus = sum(pens.filter(p => p.kind === 'bonus'), p => p.amount);
   const otWeighted = (otHours + x.otEarly) * otm; let otBonus = 0; if (+pol.bonusOtHours > 0 && otWeighted >= +pol.bonusOtHours && +pol.bonusAmount > 0) { otBonus = +pol.bonusAmount; bonus += otBonus; }
   const penaltyDed = penDays * dr + penAmt;
-  const advs = list('advances').filter(a => a.workerId === w.id && a.status !== 'closed' && (a.date || '') <= ym + '-31'); const advanceDed = sum(advs, a => Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))));
+  const advs = list('advances').filter(a => a.workerId === w.id && a.status !== 'closed' && (a.date || '') <= ym + '-31' && !['topay', 'review'].includes(a.payStatus)); const advanceDed = sum(advs, a => Math.min(+a.monthly || 0, Math.max(0, (+a.amount || 0) - (+a.paid || 0))));
   const insuranceDed = +w.healthIns > 0 ? r2(+w.healthIns * (100 - (+pol.healthInsCompanyPct || 50)) / 100) : 0;
   const net = gross + otPay + travelPay + bonus - absenceDed - penaltyDed - advanceDed - insuranceDed;
   return { wid: w.id, name: w.name, deptId: w.deptId, contract: w.contract || 'daily', dr: r2(dr), basic, allow, paidDays, present: s.present, half: s.half, absent: s.absent, leavePaid: s.leavePaid, leaveUnpaid: s.leaveUnpaid, late: s.late, lateCount: s.lateCount, ot: r2(otHours + x.otEarly), otPending: r2(x.otPending), otHoliday: r2(s.otHoliday), otPay: r2(otPay + travelPay), travelPay: r2(travelPay), travelHours: r2(x.travelHours), otBonus, gross: r2(gross), absenceDays, absenceDed: r2(absenceDed), penDays, penaltyDed: r2(penaltyDed), bonus: r2(bonus), advanceDed: r2(advanceDed), insuranceDed, net: r2(net), unrecorded: s.unrecorded, hrs: r2(s.hrs), meals: x.meals };
@@ -19730,6 +19730,195 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const doc = await base.apply(this, arguments); if (!doc || stuSys()) return doc; const el = f.querySelector('[name=serviceFrom]'); if (el) doc.serviceFrom = el.value || null; return doc;
   })(workerFromForm);
   function stuSys() { return typeof isStuSys === 'function' && isStuSys(); }
+})();
+/* =====================================================================
+   v4.96 — (المصنع) السلف بالتحويل على محفظة الموظف بس — مفيش سلف كاش (بالرقم السري — 27 سبتمبر)
+   · «رقم التحويلات» (wallets، id = رقم الموظف): فودافون كاش / اتصالات كاش / أورنج كاش / وي باي / إنستاباي (رقم أو عنوان).
+     الموظف بيكتبه مرتين بإيده (اللصق/السحب مقفولين في خانة التأكيد، والنسخ مقفول من الخانة الأولى). بعد التسجيل بيتقفل —
+     التغيير بطلب (pending) يوافق عليه مدير الحسابات (hr). الموارد/المالك يسجّلوا لأي موظف من ملفه (برضه مرتين).
+     السيرفر: nf_wallet_guard (الموظف مايغيّرش رقم متسجّل)، docs_select wallets = المالك/hr/acc/المحوِّل/صاحبه.
+   · السلفة بعد آخر موافقة: بدل مصروف من الخزنة ← أمر تحويل advpay (status topay) + مهمة للمحوِّل (policy.advPayerId = بهاء).
+     الأقساط مابتتخصمش غير بعد ما التحويل يتقفل (advances.payStatus).
+   · صفحة «تحويل السلف» (#/advpay): بهاء يرفع صورة التحويل بس ← Edge Function advpay يقرأها بالـ AI ويقارن الرقم والمبلغ
+     ويطلّع رقم العملية ← مطابق = اتصرفت (السيرفر بس اللي بيقفلها + مصروف على حساب «تحويلات محمود») / مش مطابق = مراجعة للمالك.
+     بعدها زرار واتساب لرقم الموظف العادي برسالة + لينك صورة التحويل، و«مشاركة الصورة» على الموبايل.
+   ===================================================================== */
+(function () {
+  if (window.__NF_ADVWALLET__) return; window.__NF_ADVWALLET__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const WT = { vf: ['فودافون كاش', '010'], et: ['اتصالات كاش', '011'], or: ['أورنج كاش', '012'], we: ['وي باي', '015'], ip: ['إنستاباي', ''] };
+  const ACC = { id: 'owner_wallet', name: 'تحويلات محمود — محافظ/إنستاباي' };
+  ['wallets', 'advpay'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () {
+    base.call(this); const db = S.db; if (!db) return;
+    for (const c of ['wallets', 'advpay']) S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, () => { }));
+  })(Store.subscribeAll);
+  const payerId = () => ((S.settings && S.settings.policy) || {}).advPayerId || '';
+  const isPayer = () => !!S.session && !!S.session.workerId && S.session.workerId === payerId();
+  const canAdvPay = () => !!S.session && !stu() && (isAdmin() || ['hr', 'acc'].includes(role()) || isPayer());
+  const canWalletAdmin = () => !!S.session && !stu() && (isAdmin() || role() === 'hr');
+  const walletOf = wid => byId('wallets', wid);
+  const wLabel = w => w ? `${(WT[w.type] || [''])[0]} ${w.number || w.ipa || ''}`.trim() : '';
+  const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9a-zA-Z@._-]/g, '');
+  window.nfWalletOf = walletOf;
+  /* accounts: the owner's transfers account (kept in memory like the piecework category) */
+  try { if (typeof ACCT_DEFAULTS !== 'undefined' && !ACCT_DEFAULTS.accounts.some(a => a.id === ACC.id)) ACCT_DEFAULTS.accounts.push(Object.assign({ opening: 0 }, ACC)); } catch (e) { /* ignore */ }
+  render = (base => function () { try { const a = S.settings && S.settings.accounting; if (a && Array.isArray(a.accounts) && a.accounts.length && !a.accounts.some(x => x.id === ACC.id)) a.accounts.push(Object.assign({ opening: 0 }, ACC)); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.wlbig{font-size:20px;font-weight:800;letter-spacing:1px;direction:ltr;display:inline-block}
+.apcard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:grid;gap:8px}
+.apcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.approof{max-width:220px;max-height:260px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in}
+.apgrid{display:grid;gap:10px}
+</style>`);
+  /* ------------ the double-typed form ------------ */
+  function walletFormHTML(cur, intro) {
+    const t = (cur && cur.type) || 'vf'; const ip = t === 'ip'; const val = '';
+    return `<div class="form">${intro ? `<div class="full small">${intro}</div>` : ''}
+      ${field('نوع المحفظة', `<select name="wtype" id="wl-type">${Object.keys(WT).map(k => `<option value="${k}" ${k === t ? 'selected' : ''}>${WT[k][0]}</option>`).join('')}</select>`)}
+      <div class="field" id="wl-ipmode" style="${ip ? '' : 'display:none'}"><label>إنستاباي بـ</label><select name="ipmode"><option value="num">رقم الموبايل</option><option value="ipa">عنوان إنستاباي (name@instapay)</option></select></div>
+      ${field('الرقم', `<input name="w1" id="wl-1" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="01xxxxxxxxx" value="${esc(val)}">`, 'full')}
+      ${field('اكتب الرقم تاني (بإيدك — اللصق مقفول)', `<input name="w2" id="wl-2" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="نفس الرقم">`, 'full')}
+      <div class="full tiny muted">الرقم ده اللي هتتحول عليه السلف. بعد التسجيل مش هتقدر تغيّره غير بطلب يوافق عليه مدير الحسابات.</div></div>`;
+  }
+  function wireWalletForm(f) {
+    const t = $('#wl-type', f), m = $('#wl-ipmode', f), a = $('#wl-1', f), b = $('#wl-2', f);
+    const mode = () => (t.value === 'ip' && (f.querySelector('[name=ipmode]') || {}).value === 'ipa') ? 'ipa' : 'num';
+    const upd = () => { m.style.display = t.value === 'ip' ? '' : 'none'; const ipa = mode() === 'ipa'; [a, b].forEach(x => { x.inputMode = ipa ? 'email' : 'numeric'; x.placeholder = ipa ? 'name@instapay' : '01xxxxxxxxx'; }); };
+    t.addEventListener('change', upd); f.addEventListener('change', e => { if (e.target.name === 'ipmode') upd(); });
+    ['paste', 'drop', 'dragover'].forEach(ev => b.addEventListener(ev, e => { e.preventDefault(); if (ev === 'paste' || ev === 'drop') toast('اكتب الرقم بإيدك — اللصق مقفول هنا', 'err'); }));
+    ['copy', 'cut'].forEach(ev => a.addEventListener(ev, e => e.preventDefault()));
+    b.addEventListener('contextmenu', e => e.preventDefault());
+    b.addEventListener('beforeinput', e => { if (e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop' || e.inputType === 'insertReplacementText') e.preventDefault(); });
+    f._wlMode = mode; upd();
+  }
+  async function readWalletForm(f) {
+    const d = formData(f); const type = d.wtype; const ipa = f._wlMode && f._wlMode() === 'ipa';
+    const v1 = ipa ? String(d.w1 || '').trim().toLowerCase() : digits(d.w1), v2 = ipa ? String(d.w2 || '').trim().toLowerCase() : digits(d.w2);
+    if (!v1 || !v2) { toast('اكتب الرقم في الخانتين', 'err'); return null; }
+    if (v1 !== v2) { toast('الرقمين مش زي بعض — راجعهم', 'err'); return null; }
+    if (ipa) { if (!/^[a-z0-9._-]+@instapay$/.test(v1)) { toast('عنوان إنستاباي لازم يبقى زي name@instapay', 'err'); return null; } return { type, ipa: v1, number: null }; }
+    if (!/^01[0125]\d{8}$/.test(v1)) { toast('الرقم لازم يبقى موبايل مصري 11 رقم يبدأ بـ 010 / 011 / 012 / 015', 'err'); return null; }
+    const pre = (WT[type] || [])[1]; if (pre && !v1.startsWith(pre) && !(await confirmDlg(`${WT[type][0]} عادةً على أرقام ${pre} — الرقم ${v1} على شبكة تانية. متأكد إن المحفظة على الرقم ده؟ (لو نقلت رقمك من شبكة لشبكة يبقى تمام)`, 'أيوه متأكد', false))) return null;
+    return { type, number: v1, ipa: null };
+  }
+  /* self: first registration or a change request · HR/owner: direct set for anyone */
+  ACTIONS.walletSet = async (arg) => {
+    const wid = arg || (S.session && S.session.workerId); if (!wid) return; const self = S.session && S.session.workerId === wid; const w = byId('workers', wid) || {}; const cur = walletOf(wid);
+    if (!self && !canWalletAdmin()) return;
+    const change = !!cur && !canWalletAdmin();
+    openModal({ title: change ? 'طلب تغيير رقم التحويلات' : `رقم التحويلات${self ? '' : ' — ' + (w.name || '')}`, submitLabel: change ? 'ابعت الطلب' : 'حفظ الرقم',
+      body: walletFormHTML(cur, change ? `رقمك الحالي: <b class="ltr">${esc(wLabel(cur))}</b> — الطلب هيروح لمدير الحسابات يوافق عليه.` : (self ? 'اكتب الرقم اللي هتتحول عليه السلف (محفظة موبايل أو إنستاباي). السلف مابقتش بتتصرف كاش.' : '')),
+      extra: self && !cur ? `<div class="grow"></div><button type="button" class="btn ghost" data-action="walletLater">بعدين</button>` : '',
+      onOpen: f => wireWalletForm(f),
+      onSubmit: async f => {
+        const v = await readWalletForm(f); if (!v) return false; const now = nowISO();
+        if (change) { await Store.save('wallets', Object.assign({}, cur, { pending: Object.assign({}, v, { at: now, by: S.session.id || null }) })); await notifyHr(wid, w.name || S.session.name || ''); toast('اتبعت الطلب لمدير الحسابات'); return; }
+        const hist = ((cur && cur.history) || []).concat(cur ? [{ type: cur.type, number: cur.number || null, ipa: cur.ipa || null, until: now, by: S.session.id || null, byName: S.session.name || '' }] : []).slice(-10);
+        await Store.save('wallets', Object.assign({}, { id: wid, workerId: wid, workerName: w.name || (self ? S.session.name : '') || '' }, v, { at: now, by: S.session.id || null, byName: S.session.name || '', history: hist, pending: null }));
+        toast('اتسجّل رقم التحويلات');
+      } });
+  };
+  ACTIONS.walletLater = () => { S._walletLater = true; closeModal(); };
+  async function notifyHr(wid, name) { try { await Store.save('tasks', { id: `wl_${wid}_${Date.now().toString(36)}`, title: `طلب تغيير رقم التحويلات — ${name}`, desc: 'راجع الطلب من «تحويل السلف» ← أرقام الموظفين', toRole: 'hr', assigneeId: null, deptId: null, priority: 'high', status: 'open', kind: 'update', source: 'wallet', walletOf: wid, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } }
+  ACTIONS.walletApprove = async arg => {
+    const [wid, ok] = String(arg).split(':'); const cur = walletOf(wid); if (!cur || !cur.pending || !canWalletAdmin()) return; const now = nowISO();
+    if (ok === '1') { const p = cur.pending; await Store.save('wallets', Object.assign({}, cur, { type: p.type, number: p.number || null, ipa: p.ipa || null, at: now, by: S.session.id || null, byName: S.session.name || '', pending: null, history: (cur.history || []).concat([{ type: cur.type, number: cur.number || null, ipa: cur.ipa || null, until: now, by: S.session.id || null, byName: S.session.name || '' }]).slice(-10) })); toast('اتغيّر الرقم'); }
+    else { await Store.save('wallets', Object.assign({}, cur, { pending: null, rejectedAt: now })); toast('اترفض الطلب'); }
+  };
+  /* ask every employee with an account once per session until the number is registered */
+  RENDER_HOOKS.push(() => {
+    if (stu() || !S.session || !S.session.workerId || S._walletLater || S._walletAsking || !S.loaded.wallets || !writable()) return;
+    if (walletOf(S.session.workerId) || document.querySelector('#mform')) return;
+    const w = byId('workers', S.session.workerId); if (w && typeof regAckOf === 'function' && !regAckOf(w)) return;
+    S._walletAsking = true; setTimeout(() => { S._walletAsking = false; if (!walletOf(S.session.workerId) && !document.querySelector('#mform')) ACTIONS.walletSet(S.session.workerId); }, 400);
+  });
+  /* no advance request without a registered number */
+  if (typeof advanceValidate === 'function') advanceValidate = (base => async function (r, d, w, forKiosk) {
+    if (!stu() && w && !forKiosk && S.session && S.session.workerId === w.id && !walletOf(w.id)) { toast('سجّل رقم التحويلات الأول — السلف بتتحول على محفظتك', 'err'); setTimeout(() => ACTIONS.walletSet(w.id), 300); return false; }
+    return base.apply(this, arguments);
+  })(advanceValidate);
+  /* approved advance → a transfer order instead of a cash expense */
+  if (typeof acctAdvanceOut === 'function') acctAdvanceOut = (base => async function (a) {
+    if (stu() || !S.db) return base.apply(this, arguments);
+    if (!a || !(+a.amount)) return; const w = byId('workers', a.workerId) || {}; const id = 'ap_' + a.id; const wl = walletOf(a.workerId);
+    await Store.save('advpay', { id, advanceId: a.id, workerId: a.workerId, workerName: w.name || '', waPhone: w.phone || w.workPhone || '', amount: +a.amount, status: 'topay', walletShown: wLabel(wl), createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' }, { silent: true });
+    try { await Store.update('advances', a.id, { payStatus: 'topay', advPayId: id }, { silent: true }); } catch (e) { /* ignore */ }
+    const pid = payerId();
+    try { await Store.save('tasks', { id: `apt_${a.id}`, title: `حوّل سلفة — ${w.name || ''}`, desc: 'افتح «تحويل السلف»، حوّل على الرقم المسجّل وارفع صورة التحويل.', assigneeId: pid || null, toRole: pid ? null : 'hr', deptId: null, priority: 'high', status: 'open', kind: 'task', source: 'advpay', advPayId: id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    if (!wl) { try { await Store.save('tasks', { id: `apw_${a.id}`, title: 'سجّل رقم التحويلات علشان سلفتك تتحول', desc: 'من «بوابتي» ← رقم التحويلات', assigneeId: a.workerId, toRole: null, priority: 'high', status: 'open', kind: 'update', source: 'wallet', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } }
+  })(acctAdvanceOut);
+  window.nfAdvPending = a => a && ['topay', 'review'].includes(a.payStatus);
+  /* ------------ the page ------------ */
+  VIEW_TITLES.advpay = 'تحويل السلف';
+  (() => { const i = NAV.findIndex(n => n.id === 'payroll'); const entry = { id: 'advpay', label: 'تحويل السلف', icon: 'money', count: () => canAdvPay() ? list('advpay').filter(p => p.status === 'topay' || (p.status === 'review' && isAdmin())).length : 0, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  ['hr', 'acc', 'purch'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('advpay')) ROLE_VIEWS[r].push('advpay'); });
+  canSee = (base => function (v) { if (v === 'advpay') return canAdvPay(); return base.apply(this, arguments); })(canSee);
+  const TABS = [['topay', 'مستني تحويل'], ['review', 'مراجعة'], ['paid', 'اتحولت'], ['wallets', 'أرقام الموظفين']];
+  function msgFor(p) { return `أهلاً ${p.workerName || ''}،\nاتحولتلك سلفة ${fmtMoney(p.paidAmount || p.amount)} ${CUR()} على ${p.walletShown || 'محفظتك'}.\nرقم العملية: ${p.ref || '—'}${p.proofUrl ? `\nصورة التحويل: ${p.proofUrl}` : ''}\n— Ninety Fabrication`; }
+  function cardHTML(p) {
+    const wl = walletOf(p.workerId); const show = wl ? wLabel(wl) : ''; const num = wl ? (wl.number || wl.ipa || '') : '';
+    const st = { topay: ['مستني تحويل', 'warn'], review: ['مراجعة', 'serious'], paid: ['اتحولت', 'good'], cancelled: ['ملغية', ''] }[p.status] || [p.status, ''];
+    const acts = [];
+    if (p.status === 'topay' && (isPayer() || isAdmin()) && writable()) acts.push(wl ? `<label class="btn p sm">${icon('camera')}ارفع صورة التحويل<input type="file" accept="image/*" hidden data-apup="${esc(p.id)}"></label>` : `<span class="badge crit">الموظف لسه ماسجلش رقمه</span>${canWalletAdmin() ? `<button class="btn sm" data-action="walletSet" data-arg="${esc(p.workerId)}">سجّل له الرقم</button>` : ''}`);
+    if (p.status === 'review' && isAdmin() && writable()) acts.push(`<button class="btn p sm" data-action="apApprove" data-arg="${esc(p.id)}">${icon('check')}اعتمد التحويل يدوي</button><button class="btn sm" data-action="apRetry" data-arg="${esc(p.id)}">يرفع صورة تانية</button>`);
+    if (p.status === 'paid') { if (p.waPhone && typeof waLink === 'function') acts.push(`<a class="btn sm p" target="_blank" rel="noopener" href="${esc(waLink(p.waPhone, msgFor(p)))}">${icon('wa')}ابعت للموظف واتساب</a>`); if (navigator.share) acts.push(`<button class="btn sm" data-action="apShare" data-arg="${esc(p.id)}">مشاركة الصورة</button>`); }
+    return `<div class="apcard"><div class="t"><b>${esc(p.workerName || '')}</b><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div><b>${fmtMoney(p.amount)} ${CUR()}</b></div>
+      ${p.status !== 'paid' ? (wl ? `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted small">${esc((WT[wl.type] || [''])[0])}</span><span class="wlbig">${esc(num)}</span><button class="btn xs" data-action="apCopy" data-arg="${esc(num)}">نسخ الرقم</button></div>` : '') : `<div class="small">على <b class="ltr">${esc(p.walletShown || show)}</b> · رقم العملية <b class="ltr">${esc(p.ref || '')}</b> · ${fmtDate((p.paidAt || '').slice(0, 10))}${p.manual ? ' · <span class="badge warn">اتعتمد يدوي</span>' : ''} · ${esc(p.paidByName || '')}</div>`}
+      ${p.status === 'review' ? `<div class="banner warn small" style="margin:0">${(p.issues || []).map(esc).join('<br>')}</div>` : ''}
+      ${p.proofPath ? `<div><img class="approof" src="${esc(p.proofUrl || '')}" alt="" data-action="apProof" data-arg="${esc(p.id)}" onerror="this.style.display='none'"></div>` : ''}
+      <div class="tiny muted">اتوافق عليها ${fmtDate((p.createdAt || '').slice(0, 10))}${p.createdByName ? ' · ' + esc(p.createdByName) : ''}</div>
+      ${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}</div>`;
+  }
+  function walletsHTML() {
+    const ws = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended'), w => w.name || ''); const pend = list('wallets').filter(x => x.pending);
+    const pendHTML = pend.length && canWalletAdmin() ? `<div class="card" style="margin-bottom:10px"><div class="cardhead"><h3>طلبات تغيير الرقم</h3></div>${pend.map(x => `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed var(--line)"><b>${esc(x.workerName || '')}</b><span class="ltr small">${esc(wLabel(x))}</span> ← <span class="ltr small"><b>${esc(wLabel(x.pending))}</b></span><div class="grow"></div><button class="btn xs p" data-action="walletApprove" data-arg="${esc(x.id)}:1">وافق</button><button class="btn xs" data-action="walletApprove" data-arg="${esc(x.id)}:0">ارفض</button></div>`).join('')}</div>` : '';
+    if (!ws.length) return pendHTML + `<div class="empty"><b>${list('wallets').length} رقم متسجّل</b></div>`;
+    const done = ws.filter(w => walletOf(w.id)).length;
+    return pendHTML + `<div class="small muted" style="margin-bottom:8px">سجّلوا: <b>${done}</b> من ${ws.length}</div><div class="card tight"><div class="tablewrap"><table><thead><tr><th>الموظف</th><th>رقم التحويلات</th><th>اتسجّل</th><th></th></tr></thead><tbody>${ws.map(w => { const x = walletOf(w.id); return `<tr><td><b>${esc(w.name)}</b></td><td class="ltr">${x ? esc(wLabel(x)) : '<span class="badge crit">مش متسجّل</span>'}${x && x.pending ? ' <span class="badge warn">طلب تغيير</span>' : ''}</td><td class="small">${x ? fmtDate((x.at || '').slice(0, 10)) + (x.byName ? ' · ' + esc(x.byName) : '') : ''}</td><td class="n">${canWalletAdmin() && writable() ? `<button class="btn xs" data-action="walletSet" data-arg="${esc(w.id)}">${x ? 'تغيير' : 'سجّل'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+  }
+  EXTRA_VIEWS.advpay = () => {
+    if (!canAdvPay()) return `<div class="empty"><b>مش متاحة</b></div>`;
+    const tabs = TABS.filter(t => t[0] !== 'wallets' || isAdmin() || ['hr', 'acc'].includes(role())); const tab = tabs.some(t => t[0] === S._apTab) ? S._apTab : 'topay';
+    const bar = `<div class="tabs" style="margin-bottom:12px;flex-wrap:wrap">${tabs.map(([k, l]) => { const n = k === 'wallets' ? list('wallets').filter(x => x.pending).length : list('advpay').filter(p => p.status === k).length; return `<button type="button" class="${tab === k ? 'on' : ''}" data-aptab="${k}">${l}${n ? ` <span class="muted">${n}</span>` : ''}</button>`; }).join('')}</div>`;
+    if (tab === 'wallets') return bar + walletsHTML();
+    const rows = sortBy(list('advpay').filter(p => p.status === tab), p => p.paidAt || p.createdAt || '', tab === 'paid');
+    return bar + (tab === 'topay' && isPayer() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل من حساب محمود على الرقم الظاهر بالظبط وبنفس المبلغ، وبعدين ارفع صورة التحويل — السيستم هيقرأ الرقم والمبلغ ورقم العملية لوحده.</span></div>` : '') + (rows.length ? `<div class="apgrid">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>مفيش حاجة هنا</b></div>`);
+  };
+  EXTRA_TITLES.advpay = () => ({ title: 'تحويل السلف', sub: 'السلف بتتحول على محفظة الموظف المسجّلة بس — مفيش سلف كاش' });
+  document.addEventListener('click', e => { const b = e.target.closest('[data-aptab]'); if (!b) return; S._apTab = b.dataset.aptab; render(true); });
+  ACTIONS.apCopy = async num => { try { await navigator.clipboard.writeText(num); toast('اتنسخ الرقم'); } catch (e) { toast(num); } };
+  ACTIONS.apProof = id => { const p = byId('advpay', id); if (p && p.proofUrl && typeof lightbox === 'function') lightbox(p.proofUrl, `${p.workerName || ''} — ${p.ref || ''}`); };
+  ACTIONS.apShare = async id => { const p = byId('advpay', id); if (!p || !p.proofUrl) return; try { const r = await fetch(p.proofUrl); const blob = await r.blob(); const file = new File([blob], `tahweel-${p.ref || p.id}.jpg`, { type: blob.type || 'image/jpeg' }); const data = { files: [file], text: msgFor(p).replace(/\nصورة التحويل:.*$/m, '') }; if (navigator.canShare && !navigator.canShare(data)) delete data.files; await navigator.share(data); } catch (e) { /* cancelled */ } };
+  async function callFn(body) { if (!S.sb || !S.sb.functions) throw new Error('offline'); const r = await S.sb.functions.invoke('advpay', { body }); if (r.error) { let msg = r.error.message; try { const j = await r.error.context.json(); msg = j.error || msg; } catch (e) { /* ignore */ } throw new Error(msg); } return r.data; }
+  window.nfAdvPayCall = callFn;
+  async function shrink(fileObj) { const src = await fileToDataURL(fileObj); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1800 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.88)); }; im.onerror = rej; im.src = src; }); }
+  document.addEventListener('change', async e => {
+    const inp = e.target.closest('[data-apup]'); if (!inp || !inp.files || !inp.files[0]) return; const id = inp.dataset.apup; const p = byId('advpay', id); if (!p) return;
+    toast('بيقرأ صورة التحويل…');
+    try {
+      const image = await shrink(inp.files[0]); const r = await callFn({ action: 'verify', id, image });
+      if (r && r.status === 'paid') {
+        try { await Store.save('tasks', { id: `apd_${p.advanceId}`, title: 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+        try { const t = byId('tasks', `apt_${p.advanceId}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+        const q = Object.assign({}, p, { status: 'paid', ref: r.ref, paidAmount: r.amount, proofUrl: r.proofUrl, walletShown: r.walletShown || p.walletShown });
+        openModal({ title: 'التحويل مطابق ✓', submitLabel: 'تمام', body: `<div class="form"><div class="full">الرقم والمبلغ مطابقين — السلفة اتقفلت «اتحولت».<br>المبلغ: <b>${fmtMoney(r.amount)} ${CUR()}</b> · رقم العملية: <b class="ltr">${esc(r.ref)}</b></div>${q.waPhone && typeof waLink === 'function' ? `<div class="full"><a class="btn p" target="_blank" rel="noopener" href="${esc(waLink(q.waPhone, msgFor(q)))}">${icon('wa')}ابعت للموظف واتساب</a></div>` : '<div class="full muted small">مفيش رقم واتساب مسجّل للموظف</div>'}</div>`, onSubmit: () => { } });
+      } else {
+        try { await Store.save('tasks', { id: `apr_${id}_${Date.now().toString(36)}`, title: `تحويل سلفة محتاج مراجعتك — ${p.workerName || ''}`, desc: 'افتح «تحويل السلف» ← مراجعة (التفاصيل هناك)', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+        openModal({ title: 'التحويل مش مطابق', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">الطلب راح لمحمود يراجعه. لو الصورة غلط، استنى لما يرجّعه وارفع الصح.</div></div>`, onSubmit: () => { } });
+      }
+    } catch (err) { toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { inp.value = ''; }
+  });
+  ACTIONS.apApprove = id => { const p = byId('advpay', id); if (!p || !isAdmin()) return; openModal({ title: `اعتماد التحويل يدوي — ${p.workerName || ''}`, submitLabel: 'اعتمد', body: `<div class="form"><div class="full small">${(p.issues || []).map(esc).join('<br>')}</div>${field('رقم العملية', inp('ref', (p.ai && p.ai.reference) || '', 'class="ltr"'))}${field(`المبلغ (${CUR()})`, inp('amount', p.amount, 'type="number" step="any"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.ref) { toast('اكتب رقم العملية', 'err'); return false; } try { await callFn({ action: 'approve', id, ref: d.ref, amount: num(d.amount) }); toast('اتعتمد'); } catch (e) { toast(e.message, 'err'); return false; } } }); };
+  ACTIONS.apRetry = async id => { try { await callFn({ action: 'retry', id }); toast('رجعت لبهاء يرفع صورة تانية'); } catch (e) { toast(e.message, 'err'); } };
+  /* worker page + my portal: the transfers number */
+  function walletCard(wid, self) {
+    const x = walletOf(wid); if (!x && !self && !canWalletAdmin()) return '';
+    return `<div class="card" style="margin-bottom:12px"><div class="cardhead"><h3>رقم التحويلات (السلف)</h3><div class="grow"></div>${x && x.pending ? '<span class="badge warn">طلب تغيير مستني الموافقة</span>' : ''}</div>
+      ${x ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="wlbig">${esc(x.number || x.ipa || '')}</span><span class="muted">${esc((WT[x.type] || [''])[0])}</span><div class="grow"></div>${writable() && (self || canWalletAdmin()) && !(self && x.pending) ? `<button class="btn sm" data-action="walletSet" data-arg="${esc(wid)}">${canWalletAdmin() ? 'تغيير الرقم' : 'طلب تغيير'}</button>` : ''}</div>`
+        : `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="badge crit">مش متسجّل</span><span class="small muted">السلف بتتحول على الرقم ده بس</span><div class="grow"></div>${writable() ? `<button class="btn sm p" data-action="walletSet" data-arg="${esc(wid)}">سجّل الرقم</button>` : ''}</div>`}</div>`;
+  }
+  if (typeof vWorkerDetail === 'function') vWorkerDetail = (base => function (id) { const h = base.apply(this, arguments); if (stu() || !(canWalletAdmin() || role() === 'acc')) return h; return walletCard(id, false) + h; })(vWorkerDetail);
+  if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); if (stu() || !S.session || !S.session.workerId) return h; return walletCard(S.session.workerId, true) + h; })(vMe);
 })();
 </script>
 
