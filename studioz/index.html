@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0929-1cfa4e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1004-2cde86";</script>
 
 <script>
 'use strict';
@@ -17066,6 +17066,18 @@ const wbS2W = (sx, sy) => ({ x: (sx - WB.pan.x) / WB.zoom, y: (sy - WB.pan.y) / 
 const wbRect = i => ({ x: +i.x || 0, y: +i.y || 0, w: +i.w || 160, h: +i.h || 160 });
 const wbCenter = i => { const r = wbRect(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; };
 const wbInside = (i, fr) => { const c = wbCenter(i), r = wbRect(fr); return c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h; };
+/* v5.07: sketches / text / notes drawn on an image are attached to it (att = image id) and move / scale / copy with it */
+const WB_ATTACHABLE = ['stroke', 'sticky', 'text'];
+const wbInRect = (x, y, r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+function wbAttachFor(it, exceptId) {
+  if (!it || !WB_ATTACHABLE.includes(it.type)) return null;
+  const imgs = wbItems().filter(o => o.type === 'image' && o.id !== exceptId && o.id !== it.id).reverse(); // topmost first
+  for (const im of imgs) { const r = wbRect(im);
+    if (it.type === 'stroke') { const pts = it.points || []; if (!pts.length) continue; const inn = pts.filter(q => wbInRect(q[0], q[1], r)).length; if (inn / pts.length >= 0.5 || wbInRect(pts[0][0], pts[0][1], r) && inn / pts.length >= 0.3) return im.id; }
+    else { const c = wbCenter(it); if (wbInRect(c.x, c.y, r)) return im.id; } }
+  return null;
+}
+const wbKids = imgId => wbItems().filter(o => o.att === imgId && WB_ATTACHABLE.includes(o.type));
 
 if (STU_ON) {
   document.head.insertAdjacentHTML('beforeend', `<style>
@@ -17126,6 +17138,7 @@ if (STU_ON) {
   EXTRA_VIEWS.ideas = r => {
     const b = byId('boards', r.id); if (!b) return '<div class="banner crit">البورد غير موجود</div>'; if (!wbCanSee(b)) return '<div class="banner warn">البورد ده خاص بصاحبه</div>';
     if (WB.id !== b.id) { WB.id = b.id; WB.sel.clear(); WB.tool = 'select'; WB.editing = null; WB.connFrom = null; wbFitSoon(); }
+    if (!(WB.attDone || (WB.attDone = new Set())).has(b.id) && wbCanEdit() && S.loaded && S.loaded.bitems !== false) { WB.attDone.add(b.id); setTimeout(async () => { for (const it of wbItems().filter(o => WB_ATTACHABLE.includes(o.type) && o.att === undefined)) { const a = wbAttachFor(it); if (a) { it.att = a; await wbSave(it, true); } } }, 800); }
     const items = wbItems(); const light = themeCurrent() === 'light';
     return `<div class="wbwrap ${light ? 'light' : ''}" id="wbwrap" data-board="${b.id}"><div class="wbgrid"></div>
       <div class="wbworld" id="wbworld" style="transform:translate(${WB.pan.x}px,${WB.pan.y}px) scale(${WB.zoom})">${wbSvg(items)}${items.filter(i => !['stroke', 'conn'].includes(i.type)).map(wbItemHTML).join('')}</div>
@@ -17156,6 +17169,7 @@ if (STU_ON) {
       ${one && ['sticky', 'text', 'frame', 'link'].includes(one.type) ? `<button type="button" data-action="wbEdit" data-arg="${one.id}" title="تعديل النص">${icon('edit')}</button>` : ''}
       <button type="button" data-action="wbVote" title="تصويت">▲ ${sel.reduce((a, i) => a + Object.values(i.votes || {}).reduce((x, y) => x + y, 0), 0) || ''}</button>
       ${one ? `<button type="button" data-action="wbPanel" data-arg="comments" title="تعليق">${icon('chat')} ${(one.thread || []).length || ''}</button><button type="button" data-action="wbConnStart" data-arg="${one.id}" title="ربط بسهم">↗</button>` : ''}
+      ${one && WB_ATTACHABLE.includes(one.type) ? (one.att && byId('bitems', one.att) ? `<button type="button" data-action="wbDetach" data-arg="${one.id}" title="فك الربط من الصورة">⛓ فك</button>` : (wbAttachFor(one) ? `<button type="button" data-action="wbAttach" data-arg="${one.id}" title="اربط بالصورة">⛓ اربط</button>` : '')) : ''}
       <button type="button" data-action="wbDup" title="نسخ">${icon('copy')}</button>
       ${wbBoard().projectId ? `<button type="button" data-action="wbSendSel" title="ابعت للديزاين بورد">← ديزاين</button>` : ''}
       <button type="button" data-action="wbDelete" title="حذف">${icon('trash')}</button></div>`;
@@ -17187,6 +17201,7 @@ if (STU_ON) {
   async function wbNew(type, x, y, extra = {}) {
     if (!wbCanEdit()) return null; const base = { sticky: { w: 180, h: 180, color: WB_COLORS[0], text: '' }, text: { w: 260, h: 60, text: '', size: 20 }, frame: { w: 640, h: 420, text: 'فريم' }, image: { w: 280, h: 200 }, link: { w: 240, h: 76 } }[type] || { w: 160, h: 160 };
     const it = Object.assign({ id: uid(), type, x: Math.round(x - base.w / 2), y: Math.round(y - base.h / 2), byName: S.session?.name || '', by: stuMe(), z: type === 'frame' ? 0 : 1 }, base, extra);
+    if (WB_ATTACHABLE.includes(type) && it.att === undefined) it.att = wbAttachFor(it);
     await wbSave(it, true); WB.sel = new Set([it.id]); rerender(); return it;
   }
   function wbSelect(ids, add) { if (!add) WB.sel.clear(); ids.forEach(id => WB.sel.add(id)); }
@@ -17205,10 +17220,10 @@ if (STU_ON) {
       const middle = e.button === 1 || (e.button === 0 && e.altKey);
       if (WB.tool === 'pen' && wbCanEdit() && !middle) { WB.stroke = { points: [[Math.round(w.x), Math.round(w.y)]], color: WB.penColor || WB_PEN[1] }; host.setPointerCapture(e.pointerId); return; }
       if (WB.tool === 'conn' && wbCanEdit()) { if (id && !svgEl) { if (!WB.connFrom) { WB.connFrom = id; wbSelect([id]); wbSelRender(); toast('دلوقتي اضغط على العنصر التاني'); } else if (WB.connFrom !== id) { wbNew('conn', 0, 0, { from: WB.connFrom, to: id, w: 0, h: 0 }); WB.connFrom = null; WB.tool = 'select'; } } return; }
-      if (['sticky', 'text', 'frame'].includes(WB.tool) && wbCanEdit() && !node && !middle) { const t = WB.tool; WB.tool = 'select'; wbNew(t, w.x, w.y).then(it => { if (it && t !== 'frame') setTimeout(() => wbEditStart(it.id), 60); }); return; }
+      if (['sticky', 'text', 'frame'].includes(WB.tool) && wbCanEdit() && !middle && (!node || (WB.tool !== 'frame' && (byId('bitems', node.dataset.id) || {}).type === 'image'))) { const t = WB.tool; WB.tool = 'select'; wbNew(t, w.x, w.y).then(it => { if (it && t !== 'frame') setTimeout(() => wbEditStart(it.id), 60); }); return; }
       if (WB.tool === 'image' && wbCanEdit() && !middle) { WB.tool = 'select'; wbPickImage(w); return; }
       if (WB.tool === 'link' && wbCanEdit() && !middle) { WB.tool = 'select'; wbLinkDialog(w); return; }
-      if (e.target.closest('.wbh') && node && wbCanEdit()) { const it = byId('bitems', node.dataset.id); WB.drag = { kind: 'resize', id: it.id, sx, sy, w0: wbRect(it).w, h0: wbRect(it).h }; WB.held.add(it.id); host.setPointerCapture(e.pointerId); return; }
+      if (e.target.closest('.wbh') && node && wbCanEdit()) { const it = byId('bitems', node.dataset.id); const kids = it.type === 'image' ? wbKids(it.id).map(k => ({ id: k.id, pts: k.type === 'stroke' ? (k.points || []).map(q => q.slice()) : null, x: +k.x || 0, y: +k.y || 0 })) : []; kids.forEach(k => WB.held.add(k.id)); WB.drag = { kind: 'resize', id: it.id, sx, sy, w0: wbRect(it).w, h0: wbRect(it).h, ox: wbRect(it).x, oy: wbRect(it).y, kids }; WB.held.add(it.id); host.setPointerCapture(e.pointerId); return; }
       if (id && !middle) {
         if (!WB.sel.has(id)) wbSelect([id], e.shiftKey); else if (e.shiftKey) WB.sel.delete(id);
         wbSelRender();
@@ -17216,8 +17231,9 @@ if (STU_ON) {
         const ids = [...WB.sel].filter(x => { const it = byId('bitems', x); return it && !['conn'].includes(it.type); });
         // a frame carries what sits inside it
         const extra = []; ids.forEach(x => { const it = byId('bitems', x); if (it && it.type === 'frame') wbItems().forEach(o => { if (o.id !== x && !ids.includes(o.id) && !['conn', 'frame'].includes(o.type) && (o.type === 'stroke' ? false : wbInside(o, it))) extra.push(o.id); }); });
+        ids.concat(extra).forEach(x => { const it = byId('bitems', x); if (it && it.type === 'image') wbKids(x).forEach(k => { if (!ids.includes(k.id) && !extra.includes(k.id)) extra.push(k.id); }); });
         const all = ids.concat(extra); const orig = {}; all.forEach(x => { const it = byId('bitems', x); orig[x] = it.type === 'stroke' ? { points: (it.points || []).map(p => p.slice()) } : { x: +it.x || 0, y: +it.y || 0 }; WB.held.add(x); });
-        WB.drag = { kind: 'move', ids: all, sx, sy, orig, moved: false }; host.setPointerCapture(e.pointerId); return;
+        WB.drag = { kind: 'move', ids: all, direct: ids, sx, sy, orig, moved: false }; host.setPointerCapture(e.pointerId); return;
       }
       // empty space: pan (or marquee with shift)
       if (e.shiftKey && !middle) { WB.drag = { kind: 'marq', sx, sy }; host.insertAdjacentHTML('beforeend', `<div class="wbmarq" id="wbmarq" style="left:${sx}px;top:${sy}px;width:0;height:0"></div>`); }
@@ -17232,15 +17248,18 @@ if (STU_ON) {
       if (d.kind === 'pan') { WB.pan = { x: d.px + (sx - d.sx), y: d.py + (sy - d.sy) }; wbApplyView(); return; }
       if (d.kind === 'marq') { const m = $('#wbmarq'); if (m) { m.style.left = Math.min(sx, d.sx) + 'px'; m.style.top = Math.min(sy, d.sy) + 'px'; m.style.width = Math.abs(sx - d.sx) + 'px'; m.style.height = Math.abs(sy - d.sy) + 'px'; } return; }
       const dx = (sx - d.sx) / WB.zoom, dy = (sy - d.sy) / WB.zoom;
-      if (d.kind === 'resize') { const it = byId('bitems', d.id); if (!it) return; it.w = Math.max(40, Math.round(d.w0 + dx)); it.h = Math.max(30, Math.round(d.h0 + dy)); const n = wbNode(d.id); if (n) { n.style.width = it.w + 'px'; n.style.height = it.h + 'px'; } wbRedrawConns(); return; }
+      if (d.kind === 'resize') { const it = byId('bitems', d.id); if (!it) return; it.w = Math.max(40, Math.round(d.w0 + dx)); it.h = Math.max(30, Math.round(d.h0 + dy)); const n = wbNode(d.id); if (n) { n.style.width = it.w + 'px'; n.style.height = it.h + 'px'; }
+        if (d.kids && d.kids.length) { const kx = it.w / d.w0, ky = it.h / d.h0; d.kids.forEach(k => { const o = byId('bitems', k.id); if (!o) return; if (k.pts) { o.points = k.pts.map(q => [Math.round(d.ox + (q[0] - d.ox) * kx), Math.round(d.oy + (q[1] - d.oy) * ky)]); const pn = wbNode(k.id); if (pn) pn.setAttribute('d', 'M' + o.points.map(q => q.join(',')).join(' L')); } else { o.x = Math.round(d.ox + (k.x - d.ox) * kx); o.y = Math.round(d.oy + (k.y - d.oy) * ky); const kn = wbNode(k.id); if (kn) { kn.style.left = o.x + 'px'; kn.style.top = o.y + 'px'; } } }); }
+        wbRedrawConns(); return; }
       if (d.kind === 'move') { if (Math.abs(dx) + Math.abs(dy) > 1) d.moved = true; d.ids.forEach(id => { const it = byId('bitems', id); if (!it) return; const o = d.orig[id]; if (it.type === 'stroke') { it.points = o.points.map(p => [Math.round(p[0] + dx), Math.round(p[1] + dy)]); const n = wbNode(id); if (n) n.setAttribute('d', 'M' + it.points.map(q => q.join(',')).join(' L')); } else { it.x = Math.round(o.x + dx); it.y = Math.round(o.y + dy); const n = wbNode(id); if (n) { n.style.left = it.x + 'px'; n.style.top = it.y + 'px'; } } }); wbRedrawConns(); const bar = document.querySelector('.wbselbar'); if (bar) bar.style.display = 'none'; }
     });
     const up = async e => {
-      if (WB.stroke) { const s = WB.stroke; WB.stroke = null; const p = $('#wblive'); if (p) p.setAttribute('d', ''); if (s.points.length > 2) await wbSave({ id: uid(), type: 'stroke', points: s.points, color: s.color, width: 3, by: stuMe(), byName: S.session?.name || '' }, true); rerender(); return; }
+      if (WB.stroke) { const s = WB.stroke; WB.stroke = null; const p = $('#wblive'); if (p) p.setAttribute('d', ''); if (s.points.length > 2) { const st = { id: uid(), type: 'stroke', points: s.points, color: s.color, width: 3, by: stuMe(), byName: S.session?.name || '' }; st.att = wbAttachFor(st); await wbSave(st, true); } rerender(); return; }
       const d = WB.drag; if (!d) return; WB.drag = null;
       if (d.kind === 'marq') { const m = $('#wbmarq'); const { sx, sy } = pt(e); const a = wbS2W(Math.min(sx, d.sx), Math.min(sy, d.sy)), b = wbS2W(Math.max(sx, d.sx), Math.max(sy, d.sy)); if (m) m.remove(); const ids = wbItems().filter(i => !['conn', 'stroke'].includes(i.type)).filter(i => { const r = wbRect(i); return r.x >= a.x && r.y >= a.y && r.x + r.w <= b.x && r.y + r.h <= b.y; }).map(i => i.id); wbSelect(ids, e.shiftKey); wbSelRender(); return; }
       if (d.kind === 'pan') return;
-      const ids = d.kind === 'resize' ? [d.id] : d.ids; const changed = d.kind === 'resize' || d.moved;
+      const ids = d.kind === 'resize' ? [d.id].concat((d.kids || []).map(k => k.id)) : d.ids; const changed = d.kind === 'resize' || d.moved;
+      if (d.kind === 'move' && d.moved) { const movingImgs = new Set(d.ids.filter(x => (byId('bitems', x) || {}).type === 'image')); (d.direct || []).forEach(x => { const it = byId('bitems', x); if (!it || !WB_ATTACHABLE.includes(it.type) || it.attManual || (it.att && movingImgs.has(it.att))) return; it.att = wbAttachFor(it); }); }
       if (changed) { for (const id of ids) { const it = byId('bitems', id); if (it) await wbSave(it, true); } }
       ids.forEach(id => WB.held.delete(id)); rerender();
     };
@@ -17269,8 +17288,20 @@ if (STU_ON) {
   ACTIONS.wbColor = async c => { for (const id of WB.sel) { const it = byId('bitems', id); if (it) { it.color = c; await wbSave(it, true); } } rerender(); };
   ACTIONS.wbEdit = id => { const it = byId('bitems', id); if (!it || !wbCanEdit()) return; if (it.type === 'link') return wbLinkDialog(null, it); if (it.type === 'frame') { openModal({ title: 'اسم الفريم', body: `<div class="form">${field('الاسم', inp('text', it.text || '', 'required'), 'full')}</div>`, onSubmit: async f => { it.text = formData(f).text; await wbSave(it); } }); return; } wbEditStart(id); };
   ACTIONS.wbVote = async () => { const me = stuMe(); for (const id of WB.sel) { const it = byId('bitems', id); if (!it) continue; it.votes = Object.assign({}, it.votes || {}); if (it.votes[me]) delete it.votes[me]; else it.votes[me] = 1; await wbSave(it, true); } rerender(); };
-  ACTIONS.wbDup = async () => { const made = []; for (const id of WB.sel) { const it = byId('bitems', id); if (!it || it.type === 'conn') continue; const c = Object.assign(clone(it), { id: uid(), x: (+it.x || 0) + 30, y: (+it.y || 0) + 30, votes: {}, thread: [], by: stuMe(), byName: S.session?.name || '' }); if (it.type === 'stroke') c.points = (it.points || []).map(p => [p[0] + 30, p[1] + 30]); await wbSave(c, true); made.push(c.id); } WB.sel = new Set(made); rerender(); };
-  ACTIONS.wbDelete = async () => { if (!WB.sel.size || !wbCanEdit()) return; const ids = [...WB.sel]; WB.sel.clear(); for (const id of ids) { const it = byId('bitems', id); if (!it) continue; await Store.remove('bitems', id); for (const c of wbItems().filter(x => x.type === 'conn' && (x.from === id || x.to === id))) await Store.remove('bitems', c.id); } toast('اتحذف'); };
+  ACTIONS.wbDup = async () => { const made = []; const map = {}; const src = [...WB.sel]; const selSet = new Set(src); const todo = src.slice(); src.forEach(id => { const it = byId('bitems', id); if (it && it.type === 'image') wbKids(id).forEach(k => { if (!selSet.has(k.id)) todo.push(k.id); }); });
+    const imgsFirst = todo.sort((a, b) => ((byId('bitems', a) || {}).type === 'image' ? 0 : 1) - ((byId('bitems', b) || {}).type === 'image' ? 0 : 1));
+    for (const id of imgsFirst) { const it = byId('bitems', id); if (!it || it.type === 'conn') continue; const c = Object.assign(clone(it), { id: uid(), x: (+it.x || 0) + 30, y: (+it.y || 0) + 30, votes: {}, thread: [], by: stuMe(), byName: S.session?.name || '' }); if (it.type === 'stroke') c.points = (it.points || []).map(p => [p[0] + 30, p[1] + 30]); map[id] = c.id; if (it.att) c.att = map[it.att] || it.att; await wbSave(c, true); if (selSet.has(id)) made.push(c.id); } WB.sel = new Set(made); rerender(); };
+  ACTIONS.wbDelete = async () => { if (!WB.sel.size || !wbCanEdit()) return; const ids = [...WB.sel];
+    const orphans = []; ids.forEach(id => { const it = byId('bitems', id); if (it && it.type === 'image') wbKids(id).forEach(k => { if (!ids.includes(k.id) && !orphans.includes(k.id)) orphans.push(k.id); }); });
+    if (orphans.length) {
+      const choice = await new Promise(res => { let done = false; const fin = v => { if (!done) { done = true; clearInterval(iv); res(v); } }; window.__wbDelOnly = () => { fin('img'); closeModal(); };
+        openModal({ title: 'مسح الصورة', submitLabel: 'امسح الصورة واللي عليها', body: `<div class="form"><div class="full">على الصورة ${orphans.length} اسكتش / كلام مربوط بيها.</div></div>`, extra: `<div class="grow"></div><button type="button" class="btn" onclick="window.__wbDelOnly&&window.__wbDelOnly()">الصورة بس (سيب الاسكتش)</button>`, onSubmit: () => { fin('all'); return true; } });
+        const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300); });
+      if (!choice) return;
+      if (choice === 'all') ids.push(...orphans); else for (const k of orphans) { const o = byId('bitems', k); if (o) { o.att = null; await wbSave(o, true); } } }
+    WB.sel.clear(); for (const id of ids) { const it = byId('bitems', id); if (!it) continue; await Store.remove('bitems', id); for (const c of wbItems().filter(x => x.type === 'conn' && (x.from === id || x.to === id))) await Store.remove('bitems', c.id); } toast('اتحذف'); };
+  ACTIONS.wbDetach = async id => { const it = byId('bitems', id); if (!it || !wbCanEdit()) return; it.att = null; it.attManual = true; await wbSave(it, true); toast('اتفك من الصورة'); rerender(); };
+  ACTIONS.wbAttach = async id => { const it = byId('bitems', id); if (!it || !wbCanEdit()) return; const a = wbAttachFor(it); if (!a) { toast('حطه فوق الصورة الأول', 'err'); return; } it.att = a; it.attManual = false; await wbSave(it, true); toast('اتربط بالصورة'); rerender(); };
   ACTIONS.wbConnStart = id => { WB.tool = 'conn'; WB.connFrom = id; wbToolsRender(); toast('اضغط على العنصر اللي عايز توصله'); };
   ACTIONS.wbComment = async id => { const it = byId('bitems', id); const inp0 = $('#wbcin'); const text = (inp0 && inp0.value.trim()) || ''; if (!it || !text) return; it.thread = (it.thread || []).concat([{ id: uid(), at: nowISO(), by: stuMe(), byName: S.session?.name || '', text }]); await wbSave(it, true); inp0.value = ''; stuMentionNotify(text, `تعليق على «${(it.text || it.type).slice(0, 30)}» في ${wbBoard().title}`, `#/ideas/${WB.id}`); rerender(); };
   ACTIONS.wbTimerStart = () => { if (!wbCanEdit()) return; openModal({ title: 'تايمر السيشن', body: `<div class="form">${field('الدقائق', inp('min', '10', 'type="number" min="1" max="180"'))}</div>`, submitLabel: 'ابدأ', onSubmit: async f => { const m = Math.max(1, +formData(f).min || 10); await Store.save('boards', Object.assign({}, wbBoard(), { timer: { end: new Date(Date.now() + m * 60000).toISOString(), min: m, by: S.session?.name || '' } })); } }); };
