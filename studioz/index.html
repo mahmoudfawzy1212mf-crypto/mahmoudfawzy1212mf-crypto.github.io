@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1731-cd2e9a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1754-864960";</script>
 
 <script>
 'use strict';
@@ -21207,6 +21207,171 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const doc = await base.apply(this, arguments); if (doc && doc.id && cb) { const patch = { maint: cb.checked, maintMode: cb.checked ? (mode ? mode.value : 'both') : null }; if (codes) patch.deptCodes = codes; await Store.update('suppliers', doc.id, patch); } return doc; })(saveSupplier);
   if (typeof vSuppliers === 'function') vSuppliers = (base => function () { let h = base.apply(this, arguments); list('suppliers').filter(s => s.maint).forEach(s => { const key = `data-arg="suppliers/${s.id}"`; const i = h.indexOf(key); if (i < 0) return; const j = h.indexOf('</div>', h.indexOf('<div class="title">', i)); if (j < 0) return; h = h.slice(0, j) + ` <span class="badge acc">صيانة${s.maintMode === 'onsite' ? ' — بيجي المصنع' : s.maintMode === 'shop' ? ' — عنده' : ''}</span>` + h.slice(j); }); return h; })(vSuppliers);
   window.nfEquip = { nextEqCode, avail, pmDue, pmState };
+})();
+/* =====================================================================
+   v5.14 — زرار «المساعد» العائم (فوق زرار +): كلام أو كتابة → يدخلك على الصفحة على طول
+   · محمود: «أدوس عليها أتكلم معاه أو أبعت له تكست: دخلني على مشروع الفلاني بتاع شركة كذا عايز أشوف المشتريات بتاعته».
+   · محلي أولًا (من غير تكلفة): أسماء/أكواد المشاريع + العملاء، الموردين، الموظفين، الأصناف، المعدات + كلمات الأقسام
+     (مشتريات / خامات المشروع / مهام / معدات / مخزن / طلبات / حضور …) → يفتح الصفحة. أكتر من نتيجة قريبة → يسألك تختار.
+   · سؤال أو طلب مش واضح → المساعد الذكي (نفس aiText/Edge) يرد + زرار «افتح» لو فيه صفحة.
+   · الصوت: SpeechRecognition (ar-EG) — كروم وسفاري؛ لو مش مدعوم يظهر تنبيه يستخدم مايك الكيبورد.
+   · بيحترم الصلاحيات: canSee(view) + البيانات اللي المستخدم أصلًا شايفها.
+   · المشتريات بقت تتفلتر على مشروع (S.ui.filter.purchases.orderId) مع شريط «متفلتر على … — إلغاء».
+   ===================================================================== */
+(function () {
+  if (window.__NF_AIFAB__) return; window.__NF_AIFAB__ = 1;
+  const SPARK = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>';
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.aifab{position:fixed;left:22px;bottom:calc(84px + env(safe-area-inset-bottom,0px));width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--accent);box-shadow:0 8px 20px -8px rgba(0,0,0,.45);z-index:60;display:grid;place-items:center;cursor:pointer}
+.aifab:active{transform:scale(.96)}
+@media (max-width:900px){.aifab{left:16px;bottom:calc(136px + env(safe-area-inset-bottom,0px));width:44px;height:44px}}
+body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage .aifab,body.stuboard .aifab,body:has(.side.open) .aifab{display:none}
+.aipanel{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));width:min(420px,calc(100vw - 24px));max-height:min(70vh,560px);background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 40px -12px rgba(0,0,0,.55);z-index:70;display:flex;flex-direction:column;overflow:hidden}
+.aipanel .aih{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:700}.aipanel .aih .grow{flex:1}
+.aipanel .aim{flex:1;overflow:auto;padding:10px 12px;display:grid;gap:8px;align-content:start}
+.aipanel .msg{padding:8px 10px;border-radius:12px;font-size:14px;line-height:1.5;max-width:92%}.aipanel .msg.me{background:color-mix(in srgb,var(--accent) 14%,var(--surface));justify-self:start}.aipanel .msg.bot{background:var(--surface-2,rgba(127,127,127,.08));justify-self:end}
+.aipanel .msg .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.aipanel .aii{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line);align-items:center}.aipanel .aii input{flex:1;min-width:0}
+.aipanel .mic.on{background:var(--crit,#b35c5c);color:#fff;border-color:transparent}
+.aipanel .hints{display:flex;flex-wrap:wrap;gap:6px}.aipanel .hints button{font-size:12px}
+.pofilt{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+</style>`);
+
+  /* ---------- text normalisation + matching ---------- */
+  const norm = s => String(s || '').toLowerCase().replace(/[ً-ْـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const STOP = new Set(['عايز', 'عاوز', 'اشوف', 'شوف', 'افتح', 'افتحلي', 'دخلني', 'دخلنى', 'ودخلني', 'على', 'علي', 'عن', 'في', 'من', 'بتاع', 'بتاعت', 'بتاعه', 'بتاعته', 'بتاعها', 'بتوع', 'شركه', 'شركة', 'مشروع', 'المشروع', 'ايه', 'اللي', 'الي', 'هات', 'ممكن', 'لو', 'سمحت', 'يا', 'و', 'ال', 'ده', 'دي', 'دا', 'الفلاني', 'كده', 'كل', 'صفحه', 'صفحة', 'لي', 'ليا', 'مع', 'عند', 'اعرض', 'وريني']);
+  const strip = w => w.replace(/^(وال|بال|فال|كال|لل|ال|و)(?=\S{3,})/, '');
+  const toks = s => norm(s).split(' ').map(strip).filter(w => w.length >= 2 && !STOP.has(w));
+  const scoreName = (qt, name) => { const nt = toks(name); if (!nt.length) return 0; let hit = 0; nt.forEach(w => { if (w.length < 3 && !/\d/.test(w)) return; if (qt.some(q => q === w || (w.length >= 4 && q.length >= 4 && (q.startsWith(w) || w.startsWith(q))))) hit++; }); return hit ? hit + (hit / nt.length) * 0.5 : 0; };
+  const SECTIONS = [
+    { k: 'purchases', re: /مشتري|شراء|امر شرا|اوامر شرا|\bpo\b/ },
+    { k: 'issues', re: /اذن صرف|اذونات|صرف خام|خامات المشروع|خامات مشروع/ },
+    { k: 'equip', re: /معدات|معده|العده|عدد|صيانه|ماكين/ },
+    { k: 'suppliers', re: /مورد/ },
+    { k: 'inventory', re: /مخزن|مخزون|خامه|خامات|صنف|اصناف/ },
+    { k: 'tasks', re: /مهام|مهمه|تاسك/ },
+    { k: 'requests', re: /طلبات|اعتماد|موافقه/ },
+    { k: 'workers', re: /موظف|عامل|عمال|الموظفين/ },
+    { k: 'attendance', re: /حضور|غياب|بصمه/ },
+    { k: 'expenses', re: /مصروف/ },
+    { k: 'quotes', re: /عرض سعر|عروض اسعار|عروض الاسعار/ },
+    { k: 'invoices', re: /فاتور/ },
+    { k: 'fleet', re: /نقل|عربي|سواق/ },
+    { k: 'orders', re: /اوامر التشغيل|امر تشغيل|المشاريع|مشاريع/ },
+    { k: 'dashboard', re: /الرئيسيه|لوحه|داشبورد/ },
+  ];
+  const seeView = v => { try { return typeof canSee === 'function' ? canSee(v) : true; } catch (e) { return false; } };
+  const clientOf = o => { const c = o && o.clientId && byId('clients', o.clientId); return c ? c.name || '' : (o && o.clientName) || ''; };
+  const ent = (col, label, nameFn) => list(col).filter(x => x && !x.deleted).map(x => ({ col, x, label: label(x), name: nameFn(x) }));
+  function candidates(qt, raw) {
+    const out = [];
+    const push = (arr, kind, w) => arr.forEach(e => { let s = scoreName(qt, e.name); const code = (e.x.code || e.x.number || '').toLowerCase(); if (code && raw.includes(code.toLowerCase())) s += 3; if (s > 0) out.push(Object.assign({ kind, s: s * w }, e)); });
+    if (seeView('orders')) push(ent('orders', o => `${o.code || ''} — ${o.title || ''}${clientOf(o) ? ' (' + clientOf(o) + ')' : ''}`, o => `${o.title || ''} ${clientOf(o)} ${o.code || ''}`), 'order', 1.1);
+    if (seeView('suppliers')) push(ent('suppliers', s => s.name, s => s.name), 'supplier', 1);
+    if (seeView('workers')) push(ent('workers', w => w.name, w => w.name), 'worker', 0.9);
+    if (seeView('equip')) push(ent('equip', e => `${e.code || ''} ${e.name}`, e => `${e.name} ${e.code || ''}`), 'equip', 0.95);
+    if (seeView('inventory')) push(ent('materials', m => `${m.code || ''} ${m.name}`, m => `${m.name} ${m.code || ''}`), 'material', 0.8);
+    return out.sort((a, b) => b.s - a.s);
+  }
+  const go = (hash, after) => { closePanel(false); location.hash = hash; if (typeof parseRoute === 'function') parseRoute(); render(true); if (after) setTimeout(after, 250); };
+  const scrollTo = sel => { const el = document.querySelector(sel); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.style.outline = '2px solid var(--accent)'; setTimeout(() => { el.style.outline = ''; }, 1800); } };
+  function routeFor(sec, c, n) {
+    if (c && c.kind === 'order') {
+      if (sec === 'purchases' && seeView('purchases')) return { label: `مشتريات ${c.label}`, run: () => { (S.ui.filter.purchases ||= {}).orderId = c.x.id; S.ui.filter.purchases.status = 'all'; go('#/purchases'); } };
+      if (sec === 'issues' || sec === 'inventory') return { label: `خامات ${c.label}`, run: () => go('#/orders/' + c.x.id, () => scrollTo('.issuecard')) };
+      return { label: c.label, run: () => go('#/orders/' + c.x.id) };
+    }
+    if (c && c.kind === 'supplier') return { label: `المورد ${c.label}`, run: () => go('#/suppliers/' + c.x.id) };
+    if (c && c.kind === 'worker') return { label: `${c.label}`, run: () => go('#/workers/' + c.x.id) };
+    if (c && c.kind === 'equip') return { label: `المعدة ${c.label}`, run: () => go('#/equip/' + c.x.id) };
+    if (c && c.kind === 'material') return { label: `الصنف ${c.label}`, run: () => { S.ui.search.inventory = c.x.code || c.x.name; go('#/inventory'); } };
+    if (sec === 'equip' && seeView('equip')) { const fl = (S.ui.filter.equip ||= {}); fl.st = /عطلان|عطل|بايظ/.test(n) ? 'broken' : /برا|بره|مواقع|موقع/.test(n) ? 'out' : /متاخر/.test(n) ? 'pm' : ''; const d = (S.settings.departments || []).find(x => !x.admin && n.includes(norm(x.name).replace(/^ال/, ''))); fl.dept = d ? d.id : ''; return { label: 'العدد والمعدات', run: () => go('#/equip') }; }
+    if (sec === 'issues') return null;
+    if (sec && seeView(sec)) { const t = (NAV.find(x => x.id === sec) || {}).label || sec; return { label: t, run: () => go('#/' + sec) }; }
+    return null;
+  }
+  function localResolve(text) {
+    const n = norm(text); const qt = toks(text);
+    const sec = (SECTIONS.find(s => s.re.test(n)) || {}).k || '';
+    const cs = candidates(qt, n);
+    const top = cs[0]; const close = cs.filter(c => top && c.s >= top.s * 0.85 && c.kind === top.kind).slice(0, 5);
+    if (top && close.length > 1 && close[1].s >= top.s * 0.98) return { choose: close.map(c => routeFor(sec, c, n)).filter(Boolean) };
+    if (top && top.s >= 0.6) { const r = routeFor(sec, top, n); if (r) return { route: r }; }
+    if (!top && sec) { const r = routeFor(sec, null, n); if (r) return { route: r }; }
+    if (top && top.s > 0) { const r = routeFor(sec, top, n); if (r) return { maybe: r }; }
+    return null;
+  }
+
+  /* ---------- AI fallback ---------- */
+  const allowedViews = () => NAV.filter(x => x.id && seeView(x.id)).map(x => `${x.id}=${x.label}`).concat(seeView('equip') ? ['equip=العدد والمعدات'] : []);
+  async function aiResolve(text) {
+    if (typeof aiAvailable !== 'function' || !aiAvailable()) return { reply: 'مش لاقي حاجة بالاسم ده. جرّب تكتب اسم المشروع أو المورد أو الصفحة بشكل أوضح.' };
+    const orders = seeView('orders') ? list('orders').slice(0, 200).map(o => `${o.id}|${o.code || ''}|${o.title || ''}|${clientOf(o)}`).join('\n') : '';
+    const sups = seeView('suppliers') ? list('suppliers').slice(0, 200).map(s => `${s.id}|${s.name}`).join('\n') : '';
+    let ctx = ''; try { ctx = typeof aiContextBase === 'function' ? JSON.stringify(aiContextBase()).slice(0, 9000) : ''; } catch (e) { ctx = ''; }
+    const prompt = `أنت مساعد داخل نظام إدارة مصنع (عربي مصري بسيط). المستخدم كتب: «${text}».
+الصفحات المسموح له بيها (id=الاسم): ${allowedViews().join('، ')}
+المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nملخص البيانات: ${ctx}
+رجّع JSON بس: {"reply":"رد قصير بالعامية","route":"#/<view>" أو "#/<view>/<id>" أو ""}. استخدم فقط صفحات من القائمة وأرقام id موجودة. متخترعش أرقام أو أسعار مش في الملخص.`;
+    try { const j = await aiJson(prompt, { maxTokens: 600 }); const route = String((j && j.route) || ''); const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route); let ok = null;
+      if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route; }
+      return { reply: String((j && j.reply) || 'تمام'), route: ok };
+    } catch (e) { return { reply: (typeof AI_ERR === 'object' && AI_ERR[e && e.code]) || 'المساعد الذكي مش متاح دلوقتي.' }; }
+  }
+
+  /* ---------- panel ---------- */
+  let listening = null;
+  const panel = () => document.getElementById('aipanel');
+  const addMsg = (who, html, acts) => { const box = panel() && panel().querySelector('.aim'); if (!box) return; const d = document.createElement('div'); d.className = 'msg ' + who; d.innerHTML = html; if (acts && acts.length) { const a = document.createElement('div'); a.className = 'acts'; acts.forEach(r => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn xs p'; b.textContent = r.label; b.onclick = () => r.run(); a.appendChild(b); }); d.appendChild(a); } box.appendChild(d); box.scrollTop = box.scrollHeight; };
+  function openPanel() {
+    if (panel()) { panel().querySelector('input').focus(); return; }
+    document.body.insertAdjacentHTML('beforeend', `<div class="aipanel" id="aipanel" role="dialog" aria-label="المساعد"><div class="aih">${SPARK}<span>المساعد</span><div class="grow"></div><button type="button" class="iconbtn" data-aiclose aria-label="إغلاق">${icon('x')}</button></div>
+      <div class="aim"><div class="msg bot">قولي عايز تروح فين — مثال: «مشروع الجازي، المشتريات بتاعته» أو «المعدات العطلانة في النجارة».<div class="hints">${['المشتريات المستنية اعتماد', 'طلبات الصيانة', 'المهام'].map(h => `<button type="button" class="btn xs" data-aihint="${esc(h)}">${esc(h)}</button>`).join('')}</div></div></div>
+      <form class="aii" id="aiform"><button type="button" class="iconbtn mic" data-aimic title="اتكلم" aria-label="اتكلم">${icon('mic')}</button><input id="aiq" class="inp" placeholder="اكتب أو اتكلم…" autocomplete="off"><button type="submit" class="btn sm p">${icon('arrow')}</button></form></div>`);
+    setTimeout(() => { const i = document.getElementById('aiq'); if (i && window.innerWidth > 900) i.focus(); }, 30);
+  }
+  function closePanel(stop = true) { if (listening) { try { listening.stop(); } catch (e) { /* ignore */ } listening = null; } const p = panel(); if (p) p.remove(); }
+  async function handle(text) {
+    text = String(text || '').trim(); if (!text) return; addMsg('me', esc(text));
+    const r = localResolve(text); const question = /^(كام|ايه|إيه|مين|امتى|إمتى|هل|ليه|فين)(\s|$)|[?؟]$/.test(text.trim());
+    if (r && r.route && !question) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); setTimeout(() => r.route.run(), 350); return; }
+    if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose); return; }
+    addMsg('bot', '<span class="muted">بفكّر…</span>'); const box = panel().querySelector('.aim'); const thinking = box.lastElementChild;
+    const a = await aiResolve(text); if (thinking) thinking.remove();
+    const acts = []; if (a.route) acts.push({ label: 'افتح', run: () => go(a.route) }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
+    addMsg('bot', mdLiteSafe(a.reply), acts);
+  }
+  const mdLiteSafe = t => (typeof mdLite === 'function' ? mdLite(t) : esc(t).replace(/\n/g, '<br>'));
+  function toggleMic(btn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { addMsg('bot', 'الجهاز ده مش بيدعم الكلام من هنا — استخدم زرار المايك اللي في الكيبورد واكتب.'); return; }
+    if (listening) { try { listening.stop(); } catch (e) { /* ignore */ } return; }
+    const rec = new SR(); rec.lang = 'ar-EG'; rec.interimResults = true; rec.continuous = false; const inp = document.getElementById('aiq'); let final = '';
+    rec.onresult = ev => { let t = ''; for (let i = 0; i < ev.results.length; i++) { t += ev.results[i][0].transcript; if (ev.results[i].isFinal) final = t; } if (inp) inp.value = t; };
+    rec.onerror = ev => { addMsg('bot', ev.error === 'not-allowed' ? 'اسمح للتطبيق يستخدم المايك من إعدادات المتصفح.' : 'ماسمعتش كويس — جرّب تاني.'); };
+    rec.onend = () => { listening = null; btn.classList.remove('on'); const t = (final || (inp && inp.value) || '').trim(); if (t) { if (inp) inp.value = ''; handle(t); } };
+    try { rec.start(); listening = rec; btn.classList.add('on'); } catch (e) { addMsg('bot', 'المايك مش متاح دلوقتي.'); }
+  }
+  document.addEventListener('click', e => {
+    const t = e.target.closest && e.target.closest('[data-aifab],[data-aiclose],[data-aimic],[data-aihint]'); if (!t) return;
+    if (t.dataset.aifab !== undefined) { panel() ? closePanel() : openPanel(); return; }
+    if (t.dataset.aiclose !== undefined) { closePanel(); return; }
+    if (t.dataset.aimic !== undefined) { toggleMic(t); return; }
+    if (t.dataset.aihint) handle(t.dataset.aihint);
+  });
+  document.addEventListener('submit', e => { if (e.target.id !== 'aiform') return; e.preventDefault(); const i = document.getElementById('aiq'); const v = i.value; i.value = ''; handle(v); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel()) closePanel(); });
+  RENDER_HOOKS.push(() => { const on = S.session && !['kiosk'].includes(role()) && !(typeof isStudioz === 'function' && isStudioz() && false); let b = document.querySelector('.aifab'); if (!on) { if (b) b.remove(); return; } if (!b) document.body.insertAdjacentHTML('beforeend', `<button class="aifab" data-aifab title="المساعد — اتكلم أو اكتب" aria-label="المساعد">${SPARK}</button>`); });
+
+  /* ---------- purchases filtered by a project ---------- */
+  if (typeof vPurchases === 'function') vPurchases = (base => function () {
+    const fl = S.ui.filter.purchases || {}; const oid = fl.orderId; if (!oid) return base.apply(this, arguments);
+    const o = byId('orders', oid); const all = S.data.purchases; let h;
+    try { S.data.purchases = new Map([...all].filter(([, p]) => p.orderId === oid)); h = base.apply(this, arguments); } finally { S.data.purchases = all; }
+    return `<div class="banner info pofilt">${icon('info')}<span>متفلتر على المشروع <b>${esc(o ? `${o.code || ''} — ${o.title || ''}` : oid)}</b> (${list('purchases').filter(p => p.orderId === oid).length} طلب)</span><div class="grow"></div><button type="button" class="btn xs" data-pofclear>إلغاء الفلتر</button></div>` + h;
+  })(vPurchases);
+  document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-pofclear]')) { if (S.ui.filter.purchases) delete S.ui.filter.purchases.orderId; render(false); } });
+  window.nfAiResolve = localResolve;
 })();
 </script>
 
