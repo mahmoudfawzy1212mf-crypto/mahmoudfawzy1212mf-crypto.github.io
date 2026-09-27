@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1852-3019ae";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1914-929ad2";</script>
 
 <script>
 'use strict';
@@ -21430,6 +21430,141 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
   const save = async (key) => { try { const { error } = await S.sb.rpc('nf_set_openai_key', { p_key: key }); if (error) { toast('تعذّر الحفظ: ' + (/bad key/.test(error.message) ? 'المفتاح مش صحيح' : error.message), 'err'); return false; } } catch (e) { toast('تعذّر الحفظ', 'err'); return false; } if (window.nfSttReset) window.nfSttReset(); return true; };
   document.addEventListener('submit', async ev => { if (ev.target.id !== 'sttform') return; ev.preventDefault(); if (!isAdmin()) return; const i = ev.target.querySelector('[name=okey]'); const k = String((i && i.value) || '').trim(); if (!/^sk-\S{17,}$/.test(k)) { toast('اكتب مفتاح صحيح يبدأ بـ sk-', 'err'); return; } if (await save(k)) { i.value = ''; toast('تم — المايك دلوقتي بيستخدم Whisper'); render(false); } });
   document.addEventListener('click', async ev => { if (!(ev.target.closest && ev.target.closest('[data-sttdel]'))) return; if (!isAdmin() || !confirm('إلغاء مفتاح Whisper والرجوع للتعرّف المدمج؟')) return; if (await save('')) { toast('أُلغي — رجع للتعرّف المدمج'); render(false); } });
+})();
+/* =====================================================================
+   v5.18 — سجل النشاط (المالك فقط) — factory + studio
+   · السيرفر: جدول nf_audit (قراءة للمالك فقط، لا تعديل ولا حذف) + trigger على docs يسجّل كل إضافة/تعديل/حذف بالـ«قبل ← بعد»
+   · من التطبيق: دخول / خروج / دخول فاشل / فتح صفحة / محاولة مرفوضة + نبضة «متصل الآن» كل 4 دقائق (RPC nf_audit_event)
+   · صفحة #/audit تظهر للمالك فقط
+   ===================================================================== */
+(() => {
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.aud-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.aud-sum .card{padding:12px}.aud-sum .n{font-size:22px;font-weight:700}
+.aud-on{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.aud-on span{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2,rgba(127,127,127,.12));font-size:12px}
+.aud-on span i{width:7px;height:7px;border-radius:9px;background:var(--good,#4a9)}
+.aud-f{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}.aud-f select,.aud-f input{min-width:130px}
+.aud-day{font-weight:700;font-size:13px;margin:14px 0 6px;color:var(--ink-2)}
+.aud-row{display:grid;grid-template-columns:52px 1fr;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:6px;background:var(--surface)}
+.aud-row .t{font-size:12px;color:var(--ink-2);direction:ltr;text-align:right}
+.aud-row .w{font-size:13px}.aud-row .w b{font-weight:700}.aud-row .m{font-size:11px;color:var(--ink-3,var(--ink-2));margin-top:3px}
+.aud-row.bad{border-color:var(--crit,#b35c5c);background:color-mix(in srgb,var(--crit,#b35c5c) 8%,var(--surface))}
+.aud-k{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;margin-inline-end:6px;background:rgba(127,127,127,.15)}
+.aud-k.create{background:rgba(74,153,119,.18)}.aud-k.update{background:rgba(90,130,200,.18)}.aud-k.delete,.aud-k.denied,.aud-k.login_fail{background:rgba(179,92,92,.2)}.aud-k.login,.aud-k.logout{background:rgba(200,160,60,.2)}
+.aud-diff{margin-top:5px;font-size:12px;display:grid;gap:2px}.aud-diff div{direction:rtl}.aud-diff code{font-size:11px;background:rgba(127,127,127,.12);padding:0 4px;border-radius:4px;word-break:break-word}
+</style>`);
+
+  const on = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sbUser && S.session && S.session.id !== 'viewer';
+  const viewingAs = () => !!(S.demoOrig || S.viewOrig);
+  const ev = (kind, o = {}) => { if (!S.sb || !S.sb.rpc) return; try { S.sb.rpc('nf_audit_event', { p_kind: kind, p_label: o.label || null, p_view: o.view || null, p_detail: o.detail || null, p_ok: o.ok !== false }).then(() => { }, () => { }); } catch (e) { /* ignore */ } };
+  window.nfAudit = ev;
+  const device = () => { const u = navigator.userAgent || ''; const d = /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'جهاز'; const app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone ? 'التطبيق' : 'المتصفح'; return `${d} · ${app}`; };
+  const pageLabel = () => { const h = document.querySelector('#topbar h1'); return (h && h.textContent.trim()) || S.route.view; };
+  const routeKey = () => `${S.route.view}${S.route.id ? '/' + S.route.id : ''}`;
+
+  /* login (once per browser session per account) + page views + heartbeat */
+  let lastKey = '', viewT = 0;
+  RENDER_HOOKS.push(() => {
+    if (!on() || viewingAs()) return;
+    const k = 'nf.aud.login.' + (S.sbUser.id || '');
+    try { if (!sessionStorage.getItem(k)) { sessionStorage.setItem(k, '1'); ev('login', { label: 'دخول', view: routeKey(), detail: device() }); } } catch (e) { /* private mode */ }
+    const rk = routeKey(); if (rk === lastKey) return; lastKey = rk;
+    clearTimeout(viewT); viewT = setTimeout(() => { if (routeKey() === rk) ev('view', { label: pageLabel(), view: rk }); }, 900);
+  });
+  setInterval(() => { if (on() && !document.hidden && !viewingAs()) ev('ping', { view: routeKey() }); }, 4 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && on() && !viewingAs()) ev('ping', { view: routeKey() }); });
+
+  /* logout — capture phase so it goes out before the session is signed out */
+  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-action="logout"]'); if (!a || !on()) return; ev('logout', { label: 'خروج', view: routeKey(), detail: device() }); try { sessionStorage.removeItem('nf.aud.login.' + (S.sbUser.id || '')); } catch (x) { /* ignore */ } }, true);
+
+  /* failed login: the form shows an error after submit */
+  let tryUser = '', tryAt = 0;
+  document.addEventListener('submit', e => { if (e.target && e.target.id === 'loginform') { const u = e.target.querySelector('#lg-user, [name=username], [name=login]'); tryUser = (u && u.value || '').trim(); tryAt = Date.now(); } }, true);
+  new MutationObserver(() => { if (!tryAt || Date.now() - tryAt > 20000) return; const er = document.getElementById('lg-err'); const msg = er && er.textContent.trim(); if (msg) { tryAt = 0; ev('login_fail', { label: tryUser, detail: `${msg} — ${device()}`, ok: false }); } }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+  /* denied: a page outside the user's permissions (router sends him home) */
+  if (typeof renderBase === 'function') renderBase = (base => function (full) {
+    try { const v = S.route && S.route.view; if (on() && !viewingAs() && v && v !== 'dashboard' && typeof canSee === 'function' && !canSee(v)) ev('denied', { label: `حاول يفتح صفحة غير مسموحة: ${v}`, view: routeKey(), ok: false }); } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(renderBase);
+  /* denied: server rejected a write (row-level security) */
+  const isDenied = e => /row-level security|42501|permission denied|not allowed|violates row/i.test(String((e && (e.message || e.code || e.details)) || e || ''));
+  ['save', 'update', 'remove'].forEach(m => { const b = Store[m].bind(Store); Store[m] = async function (col) { try { return await b.apply(Store, arguments); } catch (e) { if (on() && isDenied(e)) ev('denied', { label: `السيرفر رفض ${m === 'remove' ? 'حذف' : 'حفظ'} في «${col}»`, view: routeKey(), detail: String(e && e.message || e).slice(0, 200), ok: false }); throw e; } }; });
+
+  /* ---------------- owner page ---------------- */
+  const COLN = { orders: 'أمر تشغيل', orderfin: 'ماليات أمر', tasks: 'مهمة', workers: 'موظف', clients: 'عميل', quotations: 'عرض سعر', materials: 'خامة', purchases: 'طلب شراء', suppliers: 'مورد', leads: 'عميل محتمل', trips: 'مشوار', vehicles: 'عربية', requests: 'طلب', attendance: 'حضور', products: 'منتج', files: 'ملف', settings: 'الإعدادات', wallets: 'عهدة', money: 'حركة مالية', advances: 'سلفة', advpay: 'سداد سلفة', advbatch: 'دفعة سلف', expenses: 'مصروف', invoices: 'فاتورة', equip: 'معدة', emaint: 'صيانة معدة', etrips: 'خروج معدة', equipfin: 'ماليات معدة', itemcats: 'فئة صنف', ideas: 'فكرة', boards: 'بورد', projects: 'مشروع', penalties: 'جزاء', prodprice: 'سعر منتج', finish: 'تشطيب', staff: 'حساب', messages: 'رسالة' };
+  const KIND = { login: 'دخول', logout: 'خروج', login_fail: 'دخول فاشل', view: 'فتح صفحة', denied: 'مرفوض', create: 'إضافة', update: 'تعديل', delete: 'حذف' };
+  const GROUPS = { all: 'كل الحركات', writes: 'إضافة / تعديل / حذف', views: 'فتح الصفحات', logins: 'الدخول والخروج', bad: 'المرفوض والفاشل فقط' };
+  const GK = { writes: ['create', 'update', 'delete'], views: ['view'], logins: ['login', 'logout', 'login_fail'], bad: ['denied', 'login_fail'] };
+  const uaShort = u => { u = u || ''; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac OS/.test(u) ? 'Mac' : u ? 'جهاز' : ''; };
+  const hm = iso => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const dayOf = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const val = v => { if (v === null || v === undefined || v === '') return '—'; if (typeof v === 'object') { const s = JSON.stringify(v); return s.length > 70 ? s.slice(0, 70) + '…' : s; } const s = String(v); return s.length > 70 ? s.slice(0, 70) + '…' : s; };
+  const st = { rows: [], pres: [], people: [], loading: false, more: true, err: '' };
+  const flt = () => (S.ui.filter.audit ||= { uid: '', grp: 'all', day: '', me: true });
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from;
+
+  async function load(append) {
+    if (!hosted() || st.loading) return; st.loading = true; st.err = ''; const f = flt();
+    try {
+      let q = S.sb.from('nf_audit').select('id,at,uid,name,role,kind,col,doc_id,label,diff,view,ok,detail,ip,ua').order('at', { ascending: false }).limit(150);
+      if (f.uid) q = q.eq('uid', f.uid); else if (f.me && S.sbUser) q = q.or(`uid.is.null,uid.neq.${S.sbUser.id}`);
+      if (GK[f.grp]) q = q.in('kind', GK[f.grp]);
+      if (f.day) { const a = new Date(f.day + 'T00:00:00'), b = new Date(a.getTime() + 864e5); q = q.gte('at', a.toISOString()).lt('at', b.toISOString()); }
+      if (append && st.rows.length) q = q.lt('at', st.rows[st.rows.length - 1].at);
+      const { data, error } = await q; if (error) throw error;
+      st.rows = append ? st.rows.concat(data || []) : (data || []); st.more = (data || []).length === 150;
+      if (!append) { const p = await S.sb.from('nf_presence').select('uid,name,role,at,view,ua,out').order('at', { ascending: false }).limit(300); st.pres = (p && p.data) || []; }
+    } catch (e) { st.err = String(e && e.message || e); }
+    st.loading = false; if (S.route.view === 'audit') render(false);
+  }
+  const rowHTML = r => {
+    const who = r.name ? `<b>${esc(r.name)}</b>` : r.kind === 'login_fail' ? `<b>${esc(r.label || '؟')}</b>` : '<b>—</b>';
+    let what = '';
+    if (r.kind === 'view') what = `فتح «${esc(r.label || r.view || '')}»`;
+    else if (r.kind === 'create' || r.kind === 'update' || r.kind === 'delete') what = `${KIND[r.kind]} ${esc(COLN[r.col] || r.col || '')}${r.label ? ` «${esc(r.label)}»` : ''}`;
+    else if (r.kind === 'login_fail') what = `محاولة دخول فاشلة${r.detail ? ` — ${esc(r.detail)}` : ''}`;
+    else if (r.kind === 'denied') what = esc(r.label || 'محاولة مرفوضة');
+    else what = esc(r.label || KIND[r.kind] || r.kind);
+    const diff = r.diff && typeof r.diff === 'object' ? Object.keys(r.diff).slice(0, 8).map(k => { const [a, b] = r.diff[k] || []; return `<div><code>${esc(k)}</code> ${esc(val(a))} ← <b>${esc(val(b))}</b></div>`; }).join('') + (Object.keys(r.diff).length > 8 ? `<div class="muted">+${Object.keys(r.diff).length - 8} حقول أخرى</div>` : '') : '';
+    const meta = [r.role, uaShort(r.ua), r.ip, (r.kind === 'login' || r.kind === 'logout') && r.detail ? r.detail : ''].filter(Boolean).map(esc).join(' · ');
+    return `<div class="aud-row ${r.ok === false ? 'bad' : ''}"><div class="t">${hm(r.at)}</div><div><div class="w"><span class="aud-k ${r.kind}">${KIND[r.kind] || r.kind}</span>${who} — ${what}</div>${diff ? `<div class="aud-diff">${diff}</div>` : ''}${meta ? `<div class="m">${meta}</div>` : ''}</div></div>`;
+  };
+  function vAudit() {
+    if (!isAdmin()) return `<div class="empty">الصفحة دي للمالك بس.</div>`;
+    if (!hosted()) return `<div class="banner info">${icon('info')}<span>سجل النشاط بيشتغل في النسخة المستضافة (السيرفر) بس.</span></div>`;
+    const f = flt(); if (!st.rows.length && !st.loading && !st._first) { st._first = true; setTimeout(() => load(false), 0); }
+    const now = Date.now(); const online = st.pres.filter(p => !p.out && now - new Date(p.at).getTime() < 10 * 60 * 1000);
+    const today = dayOf(new Date().toISOString()); const tRows = st.rows.filter(r => dayOf(r.at) === today);
+    const people = [...new Map(st.pres.map(p => [p.uid, p.name])).entries()].filter(([u]) => u).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ar'));
+    let lastDay = ''; const list = st.rows.map(r => { const d = dayOf(r.at); const h = d !== lastDay ? `<div class="aud-day">${esc(typeof fmtDateLong === 'function' ? fmtDateLong(d) : d)}</div>` : ''; lastDay = d; return h + rowHTML(r); }).join('');
+    return `<div class="aud-sum">
+      <div class="card"><div class="small muted">متصلين دلوقتي</div><div class="n">${online.length}</div><div class="aud-on">${online.map(p => `<span title="${esc(p.view || '')}"><i></i>${esc(p.name || '')}</span>`).join('') || '<span class="muted small">—</span>'}</div></div>
+      <div class="card"><div class="small muted">حركات النهارده (المعروضة)</div><div class="n">${tRows.length}</div></div>
+      <div class="card"><div class="small muted">مرفوض / دخول فاشل النهارده</div><div class="n" style="color:var(--crit-ink,#c66)">${tRows.filter(r => r.ok === false).length}</div></div>
+    </div>
+    <div class="card"><div class="aud-f">
+      <select data-audf="uid"><option value="">كل الأشخاص</option>${people.map(([u, n]) => `<option value="${esc(u)}" ${f.uid === u ? 'selected' : ''}>${esc(n || u)}</option>`).join('')}</select>
+      <select data-audf="grp">${Object.keys(GROUPS).map(k => `<option value="${k}" ${f.grp === k ? 'selected' : ''}>${GROUPS[k]}</option>`).join('')}</select>
+      <input type="date" data-audf="day" value="${esc(f.day || '')}">
+      <label class="check ${f.me ? 'on' : ''}" style="margin:0"><input type="checkbox" data-audf="me" ${f.me ? 'checked' : ''}> من غير حركاتي</label>
+      <div class="grow"></div><button type="button" class="btn sm" data-audreload>تحديث</button></div>
+      ${st.err ? `<div class="banner warn">${esc(st.err)}</div>` : ''}
+      ${st.loading && !st.rows.length ? '<div class="muted small" style="padding:12px">جارٍ التحميل…</div>' : list || '<div class="empty">مفيش حركات بالفلتر ده.</div>'}
+      ${st.more && st.rows.length ? `<div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="btn sm" data-audmore ${st.loading ? 'disabled' : ''}>أقدم…</button></div>` : ''}
+    </div>
+    <p class="tiny muted" style="margin-top:8px">السجل ده بيتسجّل من السيرفر ومحدش يقدر يعدّله أو يمسحه، وبيظهر ليك إنت بس. بيتحفظ 6 شهور.</p>`;
+  }
+  VIEW_TITLES.audit = 'سجل النشاط';
+  EXTRA_VIEWS.audit = () => vAudit();
+  EXTRA_TITLES.audit = () => ({ title: 'سجل النشاط', sub: 'مين دخل، فتح إيه، وعمل إيه — للمالك فقط' });
+  const si = NAV.findIndex(n => n.id === 'settings');
+  NAV.splice(si >= 0 ? si : NAV.length, 0, { id: 'audit', label: 'سجل النشاط', icon: 'shield' });
+  /* owner only: no role list gets 'audit'; admin (null) sees all — guard canSee too, in case a role map allows everything */
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'audit') return isAdmin() && !viewingAs(); return base.apply(this, arguments); })(canSee);
+  document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-audf]'); if (!t) return; const f = flt(); const k = t.dataset.audf; f[k] = t.type === 'checkbox' ? t.checked : t.value; st.rows = []; st._first = true; load(false); render(false); });
+  document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-audreload]')) { st.rows = []; load(false); render(false); } if (e.target.closest && e.target.closest('[data-audmore]')) load(true); });
+  window.nfAuditState = st;
 })();
 </script>
 
