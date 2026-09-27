@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1440-021820";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1506-0b3a8c";</script>
 
 <script>
 'use strict';
@@ -20586,6 +20586,24 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   if (window.__NF_SUPPICK__) return; window.__NF_SUPPICK__ = 1;
   const OTHER = '__other__';
   const sups = () => sortBy(list('suppliers').filter(s => s && s.name && !s.deleted), s => s.name);
+  /* v5.10: grouped — suppliers of the item's departments first */
+  function supOptions(selId, codes) {
+    const all = sups(); const want = new Set((codes || []).filter(Boolean));
+    const of = s => (window.nfSupDepts ? window.nfSupDepts(s).codes : []);
+    const mine = want.size ? all.filter(s => of(s).some(c => want.has(c))) : []; const ids = new Set(mine.map(s => s.id)); const rest = all.filter(s => !ids.has(s.id));
+    const o = s => `<option value="${esc(s.id)}" ${selId === s.id ? 'selected' : ''}>${esc(s.name)}${s.phone ? ' — ' + esc(s.phone) : ''}</option>`;
+    const names = [...want].map(c => (window.nfDeptNameOfCode ? window.nfDeptNameOfCode(c) : c)).join(' + ');
+    return `<option value="">— اختار من الموردين المتسجلين (${all.length}) —</option>`
+      + (mine.length ? `<optgroup label="موردين ${esc(names)} (${mine.length})">${mine.map(o).join('')}</optgroup><optgroup label="موردين تانيين (${rest.length})">${rest.map(o).join('')}</optgroup>` : rest.map(o).join(''))
+      + `<option value="${OTHER}" ${selId === OTHER ? 'selected' : ''}>+ مورد مش متسجل (اكتب اسمه)</option>`;
+  }
+  window.nfSupOptions = supOptions;
+  document.addEventListener('change', e => {
+    const f = e.target.closest && e.target.closest('#mform'); if (!f) return; if (!(e.target.id === 'f-deptCode' || e.target.closest('#md-chips'))) return;
+    const sel = f.querySelector('#f-supPick'); const hid = f.querySelector('#f-deptCodesJson'); if (!sel) return;
+    let codes = []; try { codes = JSON.parse((hid && hid.value) || '[]'); } catch (x) { /* ignore */ } if (!codes.length) { const dc = f.querySelector('#f-deptCode'); if (dc) codes = [dc.value]; }
+    const v = sel.value; sel.innerHTML = supOptions(v, codes); sel.value = v;
+  });
   if (typeof materialForm === 'function') materialForm = (base => function (m) {
     let h = base.apply(this, arguments); m = m || {};
     const re = /<input id="f-supplier" name="supplier" value="([^"]*)" list="supplist"><datalist id="supplist">[\s\S]*?<\/datalist>/;
@@ -20593,11 +20611,9 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const all = sups(); const cur = String(m.supplier || '').trim();
     const hit = all.find(s => s.name.trim() === cur);
     const isOther = !!cur && !hit;
-    const sel = `<select id="f-supPick" class="sel">
-      <option value="">— اختار من الموردين المتسجلين (${all.length}) —</option>
-      ${all.map(s => `<option value="${esc(s.id)}" ${hit && hit.id === s.id ? 'selected' : ''}>${esc(s.name)}${s.phone ? ' — ' + esc(s.phone) : ''}</option>`).join('')}
-      <option value="${OTHER}" ${isOther ? 'selected' : ''}>+ مورد مش متسجل (اكتب اسمه)</option>
-    </select>
+    let itemCodes = (window.nfItemDeptCodes ? window.nfItemDeptCodes(m) : []);
+    if (!itemCodes.length) { const dcSel = /<select id="f-deptCode"[^>]*>([\s\S]*?)<\/select>/.exec(h); const pm = dcSel && /<option value="([^"]+)"[^>]*selected/.exec(dcSel[1]); if (pm) itemCodes = [pm[1]]; }
+    const sel = `<select id="f-supPick" class="sel">${supOptions(hit ? hit.id : (isOther ? OTHER : ''), itemCodes)}</select>
     <input id="f-supplier" name="supplier" value="${mm[1]}" placeholder="اسم المورد" style="margin-top:6px;${isOther ? '' : 'display:none'}">`;
     return h.replace(mm[0], sel);
   })(materialForm);
@@ -20612,6 +20628,145 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       if (empty) empty.querySelector('[name=s-id]').value = s.id; else box.insertAdjacentHTML('beforeend', suppRow({ supplierId: s.id }));
     }
   });
+})();
+/* =====================================================================
+   v5.10 — (المصنع) فئات أصناف تتزود + موردين متقسمين على الأقسام
+   (أ) فئات الصنف: زرار «+ فئة جديدة» جنب «فئة الصنف» (فورم الصنف + «صنف جديد» في أمر الشراء) وفي الإعدادات ← أكواد الأصناف.
+       الفئة = اسم + كود 3 حروف (بيتقترح، مايتكررش). بتتحفظ في collection «itemcats» (الكل يقرا؛ الكتابة: المالك + المشتريات + المخزن).
+       5 فئات جديدة ثابتة: GYP جبس ومعاجين · SIL سيليكون وعزل · STL حديد وصاج · PKG خامات تغليف · SPR قطع غيار ماكينات.
+       الفئة اللي عليها أصناف ماتتمسحش (أكوادها). تغيير الاسم مسموح.
+   (ب) المورد: «الأقسام اللي بيورّد لها» (أكتر من قسم) → deptCodes. صفحة الموردين: فلتر بالقسم + الأقسام تحت الاسم.
+       مورد من غير أقسام متسجلة → أقسامه بتتحسب من أوامر الشراء والأصناف (تظهر «من الأوامر»، ومن غير ما نكتب في بياناته).
+       فورم الصنف وأمر الشراء: موردين القسم فوق، والباقي تحت.
+   ===================================================================== */
+(function () {
+  if (window.__NF_CATSUP__) return; window.__NF_CATSUP__ = 1;
+  if (!COLS.includes('itemcats')) COLS.push('itemcats'); S.data.itemcats = S.data.itemcats || new Map();
+  const BUILTIN = ITEM_CATS.map(c => c[0]);
+  const NEW_FIXED = [['GYP', 'جبس ومعاجين'], ['SIL', 'سيليكون وعزل'], ['STL', 'حديد وصاج'], ['PKG', 'خامات تغليف'], ['SPR', 'قطع غيار ماكينات']];
+  const insertCat = (code, label) => { const i = ITEM_CATS.findIndex(c => c[0] === 'OTH'); ITEM_CATS.splice(i < 0 ? ITEM_CATS.length : i, 0, [code, label]); };
+  NEW_FIXED.forEach(([c, l]) => { if (!ITEM_CATS.some(x => x[0] === c)) { insertCat(c, l); BUILTIN.push(c); } });
+  const DEFAULT_LABEL = Object.fromEntries(ITEM_CATS.map(c => [c[0], c[1]]));
+  const catDocs = () => list('itemcats').filter(d => d && d.code && !d.deleted);
+  function syncCats() {
+    const docs = catDocs(); const byCode = Object.fromEntries(docs.map(d => [d.code, d]));
+    for (let i = ITEM_CATS.length - 1; i >= 0; i--) { const c = ITEM_CATS[i][0]; if (!BUILTIN.includes(c) && !byCode[c]) ITEM_CATS.splice(i, 1); }
+    ITEM_CATS.forEach(c => { c[1] = byCode[c[0]] && byCode[c[0]].label ? byCode[c[0]].label : (DEFAULT_LABEL[c[0]] || c[1]); });
+    docs.forEach(d => { if (!ITEM_CATS.some(c => c[0] === d.code)) insertCat(d.code, d.label || d.code); });
+  }
+  window.nfSyncCats = syncCats;
+  const canCats = () => (typeof writable !== 'function' || writable()) && (isAdmin() || ['purch', 'store'].includes(role()));
+  const TR = { 'ا': 'A', 'أ': 'A', 'إ': 'E', 'آ': 'A', 'ب': 'B', 'ت': 'T', 'ث': 'S', 'ج': 'G', 'ح': 'H', 'خ': 'K', 'د': 'D', 'ذ': 'Z', 'ر': 'R', 'ز': 'Z', 'س': 'S', 'ش': 'S', 'ص': 'S', 'ض': 'D', 'ط': 'T', 'ظ': 'Z', 'ع': 'A', 'غ': 'G', 'ف': 'F', 'ق': 'K', 'ك': 'K', 'ل': 'L', 'م': 'M', 'ن': 'N', 'ه': 'H', 'ة': 'H', 'و': 'W', 'ي': 'Y', 'ى': 'A', 'ئ': 'E', 'ؤ': 'O', 'ء': 'A' };
+  function suggestCode(name) {
+    const words = String(name || '').replace(/^ال/, '').split(/\s+/).map(w => w.replace(/^(و|ال)+/, '')).filter(Boolean);
+    const lat = s => [...s].map(ch => /[A-Za-z]/.test(ch) ? ch.toUpperCase() : (TR[ch] || '')).join('').replace(/[^A-Z]/g, '');
+    let base = words.length >= 3 ? words.slice(0, 3).map(w => lat(w)[0] || '').join('') : words.length === 2 ? (lat(words[0]).slice(0, 2) + (lat(words[1])[0] || '')) : lat(words[0] || '').replace(/[AEIOUWY]/g, (m, i) => (i ? '' : m)).slice(0, 3);
+    base = (base + lat(words.join('')) + 'XXX').slice(0, 3);
+    const taken = new Set(ITEM_CATS.map(c => c[0])); if (!taken.has(base)) return base;
+    const AZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; for (const ch of AZ) { const c = base.slice(0, 2) + ch; if (!taken.has(c)) return c; } for (const ch of AZ) { const c = base[0] + ch + base[2]; if (!taken.has(c)) return c; }
+    return 'C' + AZ[ITEM_CATS.length % 26] + AZ[(ITEM_CATS.length * 7) % 26];
+  }
+  window.nfSuggestCatCode = suggestCode;
+  async function addCat(label, code) {
+    label = String(label || '').trim(); code = String(code || '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (!label) { toast('اكتب اسم الفئة', 'err'); return null; }
+    if (code.length !== 3) { toast('الكود لازم 3 حروف إنجليزي', 'err'); return null; }
+    syncCats(); if (ITEM_CATS.some(c => c[0] === code)) { toast(`الكود ${code} مستخدم لفئة تانية`, 'err'); return null; }
+    if (ITEM_CATS.some(c => c[1].trim() === label)) { toast('فيه فئة بنفس الاسم', 'err'); return null; }
+    await Store.save('itemcats', { id: 'cat_' + code, code, label, createdAt: nowISO(), byName: (S.session && S.session.name) || '' }, { silent: true });
+    syncCats(); toast(`اتضافت الفئة «${label}» (${code})`); return code;
+  }
+  const catOpts = sel => ITEM_CATS.map(c => `<option value="${c[0]}" ${c[0] === sel ? 'selected' : ''}>${esc(c[1])} (${c[0]})</option>`).join('');
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.catnew{display:grid;grid-template-columns:2fr 90px auto auto;gap:6px;align-items:center;margin-top:6px;padding:8px;border:1px dashed var(--line);border-radius:10px}
+.catnew input{width:100%}.catnew .code{direction:ltr;text-transform:uppercase;font-family:ui-monospace,monospace}
+@media (max-width:560px){.catnew{grid-template-columns:1fr 80px}.catnew .btn{grid-column:auto}}
+.catbtn{margin-top:6px}.sdtags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.sdtags span{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted)}.sdtags span.inf{border-style:dashed}
+.cattbl td{padding:6px 4px;vertical-align:middle}.cattbl input{width:100%}
+</style>`);
+  const catBox = target => `${canCats() ? `<button type="button" class="btn xs catbtn" data-catnew="${target}">${icon('plus')}فئة جديدة</button>` : ''}<div class="catnew" data-catbox="${target}" hidden><input data-cn="name" placeholder="اسم الفئة — مثال: جبس ومعاجين"><input data-cn="code" class="code" maxlength="3" placeholder="GYP"><button type="button" class="btn xs p" data-catsave="${target}">${icon('check')}حفظ</button><button type="button" class="btn xs ghost" data-catcancel="${target}">إلغاء</button></div>`;
+  /* item form */
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    syncCats(); let h = base.apply(this, arguments);
+    const mm = /<select id="f-itemCat"[^>]*>[\s\S]*?<\/select>/.exec(h); if (!mm) return h;
+    return h.replace(mm[0], mm[0] + catBox('f-itemCat'));
+  })(materialForm);
+  /* PO quick new item */
+  if (typeof wirePoForm === 'function') wirePoForm = (base => function (f) {
+    syncCats(); const r = base.apply(this, arguments);
+    try { const cat = f && f.querySelector('#nibox #ni-cat'); if (cat && !f.querySelector('[data-catbox="ni-cat"]')) cat.insertAdjacentHTML('afterend', catBox('ni-cat')); } catch (e) { /* ignore */ }
+    try { supPoRegroup(f); } catch (e) { /* ignore */ }
+    return r;
+  })(wirePoForm);
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-catnew],[data-catsave],[data-catcancel]'); if (!t) return; e.preventDefault(); e.stopPropagation();
+    const id = t.dataset.catnew || t.dataset.catsave || t.dataset.catcancel; const root = t.closest('form') || document; const box = root.querySelector(`[data-catbox="${id}"]`); if (!box) return;
+    if (t.dataset.catnew) { box.hidden = !box.hidden; if (!box.hidden) box.querySelector('[data-cn=name]').focus(); return; }
+    if (t.dataset.catcancel) { box.hidden = true; return; }
+    const name = box.querySelector('[data-cn=name]').value; const code = box.querySelector('[data-cn=code]').value || suggestCode(name);
+    t.disabled = true; const c = await addCat(name, code).catch(err => { toast('ماتحفظتش: ' + (err && err.message || err), 'err'); return null; }); t.disabled = false; if (!c) return;
+    document.querySelectorAll('#f-itemCat, #ni-cat').forEach(sel => { const keep = sel.value; sel.innerHTML = catOpts(keep); });
+    const sel = root.querySelector('#' + id); if (sel) { sel.value = c; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    box.querySelector('[data-cn=name]').value = ''; box.querySelector('[data-cn=code]').value = ''; delete box.querySelector('[data-cn=code]').dataset.touched; box.hidden = true; if (id === 'set-cat') render(false);
+  }, true);
+  document.addEventListener('input', e => { if (!e.target.matches || !e.target.matches('.catnew [data-cn=name]')) return; const code = e.target.closest('.catnew').querySelector('[data-cn=code]'); if (!code.dataset.touched) code.value = suggestCode(e.target.value); });
+  document.addEventListener('input', e => { if (e.target.matches && e.target.matches('.catnew [data-cn=code]')) { e.target.dataset.touched = '1'; e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest && e.target.closest('.catnew')) { e.preventDefault(); const b = e.target.closest('.catnew').querySelector('[data-catsave]'); if (b) b.click(); } }, true);
+  /* settings: list / rename / delete */
+  if (EXTRA_SETTINGS.itemcodes) { const r0 = EXTRA_SETTINGS.itemcodes.render; EXTRA_SETTINGS.itemcodes.render = () => { syncCats(); const used = code => list('materials').filter(m => m.itemCat === code).length; const docs = Object.fromEntries(catDocs().map(d => [d.code, d]));
+    const h = r0().replace(/الفئات ثابتة: [^<]*/, 'الفئات تحت.');
+    return h + `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>فئات الأصناف (${ITEM_CATS.length})</h3></div>
+      <table class="cattbl" style="width:100%"><tbody>${ITEM_CATS.map(c => { const n = used(c[0]); const custom = !BUILTIN.includes(c[0]); return `<tr><td class="codeprev" style="width:60px">${c[0]}</td><td>${canCats() ? `<input value="${esc(c[1])}" data-catren="${c[0]}">` : esc(c[1])}</td><td class="tiny muted" style="width:70px">${n} صنف</td><td style="width:40px">${canCats() && custom && !n ? `<button type="button" class="iconbtn" title="مسح" data-catdel="${c[0]}">${icon('x')}</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
+      <form id="catnewform" onsubmit="return false">${catBox('set-cat')}</form><div class="hint">الفئة اللي عليها أصناف مابتتمسحش عشان أكوادها. تغيير الاسم بيتحفظ لما تخرج من الخانة.</div></div>`; }; }
+  document.addEventListener('change', async e => { const code = e.target.dataset && e.target.dataset.catren; if (!code || !canCats()) return; const label = e.target.value.trim(); if (!label) return; const old = byId('itemcats', 'cat_' + code) || { id: 'cat_' + code, code, createdAt: nowISO() }; await Store.save('itemcats', Object.assign({}, old, { label, deleted: false, renamedAt: nowISO() }), { silent: true }); syncCats(); toast('اتغير الاسم'); });
+  document.addEventListener('click', async e => { const b = e.target.closest && e.target.closest('[data-catdel]'); if (!b || !canCats()) return; const code = b.dataset.catdel; if (BUILTIN.includes(code) || list('materials').some(m => m.itemCat === code)) { toast('الفئة عليها أصناف', 'err'); return; } if (!(await confirmDlg(`مسح الفئة ${code}؟`, 'امسح'))) return; const d = byId('itemcats', 'cat_' + code); if (d) await Store.save('itemcats', Object.assign({}, d, { deleted: true }), { silent: true }); syncCats(); render(false); });
+  RENDER_HOOKS.push(() => { try { syncCats(); } catch (e) { /* ignore */ } });
+
+  /* ---------------- (ب) supplier departments ---------------- */
+  const deptCodesList = () => { const seen = new Set(); return Object.keys(DEPT_CODES).filter(k => S.settings.departments.some(d => d.id === k)).map(k => ({ c: deptCode(k), n: deptName(k) })).filter(x => { if (seen.has(x.c) || x.c === 'MX') return false; seen.add(x.c); return true; }); };
+  const nameOfCode = c => { const x = deptCodesList().find(y => y.c === c); return x ? x.n : c; };
+  window.nfDeptNameOfCode = nameOfCode;
+  function supDepts(s) {
+    if (!s) return { codes: [], inferred: false };
+    if (Array.isArray(s.deptCodes)) return { codes: [...new Set(s.deptCodes.filter(Boolean))], inferred: false };
+    const set = new Set();
+    list('purchases').forEach(p => { if (p.deptId && (p.supplierId === s.id || (typeof supplierOf === 'function' && (supplierOf(p) || {}).id === s.id))) set.add(deptCode(p.deptId)); });
+    list('materials').forEach(m => { if ((m.suppliers || []).some(x => x.supplierId === s.id) || (m.supplier && m.supplier.trim() === String(s.name || '').trim())) (window.nfItemDeptCodes ? window.nfItemDeptCodes(m) : [m.deptCode]).forEach(c => c && c !== 'MX' && set.add(c)); });
+    set.delete('MX'); return { codes: [...set], inferred: true };
+  }
+  window.nfSupDepts = supDepts;
+  if (typeof supplierForm === 'function') supplierForm = (base => function (s) {
+    let h = base.apply(this, arguments); s = s || {}; const d = supDepts(s); const have = new Set(d.codes);
+    const chips = `<div class="field full"><label>الأقسام اللي بيورّد لها (اختار أكتر من قسم)</label><div class="mdchips" id="sd-chips">${deptCodesList().map(x => `<label class="${have.has(x.c) ? 'on' : ''}" data-sd="${esc(x.c)}"><input type="checkbox" value="${esc(x.c)}" ${have.has(x.c) ? 'checked' : ''}>${esc(x.n)}</label>`).join('')}</div>${d.inferred && d.codes.length ? '<div class="hint">متعلّم من أوامر الشراء القديمة — راجعها واحفظ.</div>' : ''}<input type="hidden" id="f-supDepts" value="${esc(JSON.stringify(d.codes))}"></div>`;
+    const k = h.indexOf('<div class="field full"><label>ملاحظات</label>'); return k < 0 ? h.replace(/<\/div>\s*$/, chips + '</div>') : h.slice(0, k) + chips + h.slice(k);
+  })(supplierForm);
+  document.addEventListener('change', e => { const box = e.target.closest && e.target.closest('#sd-chips'); if (!box) return; box.querySelectorAll('label[data-sd]').forEach(l => l.classList.toggle('on', l.querySelector('input').checked)); const hid = document.getElementById('f-supDepts'); if (hid) hid.value = JSON.stringify([...box.querySelectorAll('input:checked')].map(i => i.value)); });
+  if (typeof saveSupplier === 'function') saveSupplier = (base => async function (f, s) {
+    const hid = f && f.querySelector('#f-supDepts'); let codes = null; if (hid) { try { codes = JSON.parse(hid.value || '[]'); } catch (e) { codes = null; } }
+    const doc = await base.apply(this, arguments); if (doc && doc.id && codes) await Store.update('suppliers', doc.id, { deptCodes: codes }); return doc;
+  })(saveSupplier);
+  /* suppliers page: department filter + tags */
+  if (typeof vSuppliers === 'function') vSuppliers = (base => function () {
+    const fl = (S.ui.filter.suppliers ||= { type: '' }); const want = fl.sdept || '';
+    let h; const all = S.data.suppliers;
+    if (want && all) { try { S.data.suppliers = new Map([...all].filter(([, s]) => { const c = supDepts(s).codes; return want === '__none' ? !c.length : c.includes(want); })); h = base.apply(this, arguments); } finally { S.data.suppliers = all; } } else h = base.apply(this, arguments);
+    const sel = `<select class="sel" data-sdept="1" style="max-width:190px"><option value="">كل الأقسام</option>${deptCodesList().map(x => `<option value="${esc(x.c)}" ${want === x.c ? 'selected' : ''}>${esc(x.n)}</option>`).join('')}<option value="__none" ${want === '__none' ? 'selected' : ''}>من غير قسم</option></select>`;
+    h = h.replace(/(<div class="toolbar"><div class="seg">[\s\S]*?<\/div>)/, '$1' + sel);
+    list('suppliers').forEach(s => { const d = supDepts(s); if (!d.codes.length) return; const key = `data-arg="suppliers/${s.id}"`; const i = h.indexOf(key); if (i < 0) return; const j = h.indexOf('<div class="meta">', i); if (j < 0) return; h = h.slice(0, j) + `<div class="sdtags">${d.codes.map(c => `<span class="${d.inferred ? 'inf' : ''}">${esc(nameOfCode(c))}${d.inferred ? ' · من الأوامر' : ''}</span>`).join('')}</div>` + h.slice(j); });
+    return h;
+  })(vSuppliers);
+  document.addEventListener('change', e => { if (!e.target.matches || !e.target.matches('[data-sdept]')) return; (S.ui.filter.suppliers ||= {}).sdept = e.target.value; render(false); });
+  /* PO form: suppliers of the requesting department first */
+  function supPoRegroup(f) {
+    const sel = f && f.querySelector('#f-supplierId'); if (!sel) return; const dep = f.querySelector('#f-deptId'); const code = dep && dep.value ? deptCode(dep.value) : '';
+    const v = sel.value; const all = sortBy(list('suppliers').filter(s => s && s.name), s => s.name); const lbl = s => `${esc(s.name)} — ${esc((SUPP_TYPES[s.taxType || 'tax'] || [''])[0])}`;
+    const o = s => `<option value="${esc(s.id)}" ${s.id === v ? 'selected' : ''}>${lbl(s)}</option>`;
+    const mine = code ? all.filter(s => supDepts(s).codes.includes(code)) : []; const ids = new Set(mine.map(s => s.id)); const rest = all.filter(s => !ids.has(s.id));
+    sel.innerHTML = `<option value="">— اختر من الموردين —</option>` + (mine.length ? `<optgroup label="موردين ${esc(nameOfCode(code))} (${mine.length})">${mine.map(o).join('')}</optgroup><optgroup label="موردين تانيين">${rest.map(o).join('')}</optgroup>` : rest.map(o).join(''));
+    sel.value = v;
+  }
+  window.nfSupPoRegroup = supPoRegroup;
+  document.addEventListener('change', e => { if (e.target && e.target.id === 'f-deptId') { const f = e.target.closest('form'); if (f && f.querySelector('#f-supplierId')) supPoRegroup(f); } });
 })();
 </script>
 
