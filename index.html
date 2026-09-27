@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0449-cfa9fd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0504-1eee34";</script>
 
 <script>
 'use strict';
@@ -19746,13 +19746,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      بتدخل «دفعة مفتوحة» (advbatch)؛ سعيد يبعت الدفعة للمالك (إشعار بالأسماء والمجموع) ← المالك يحوّل المجموع لبهاء (أو أحمد
      عبدالظاهر لو بهاء مش موجود — policy.advPayerAltId) ويرفع الصورة ← السيرفر يتأكد إن المستلم محفظة واحد منهم والمبلغ = المجموع
      ← الدفعة «اتموّلت» وسلفها بقت للي استلم يوزّعها (advpay.payerId). عهدة: اتموّل / اتوزّع / باقي.
-   · v4.98: نوع «كارت (إنستاباي على الكارت)» — بيتسجّل آخر ٤ أرقام + اسم صاحب الكارت بس (مش الرقم كامل)، والسيرفر يطابق
-     آخر ٤ أرقام والاسم من الصورة. المحوّلين (بهاء/أحمد) ليهم «طريقة استلام تانية» (wallet.alt) — أي واحدة منهم تتقبل في الدفعة.
+   · v4.98/b: نوع «كارت فوري» (إنستاباي ← استخدام كارت) — رقم الكارت كامل (مرتين + فحص Luhn) + اسم صاحبه، علشان المحوِّل ينسخهم
+     في إنستاباي (زرار نسخ الرقم ونسخ الاسم)؛ في القوايم بيبان مخفي •••• آخر ٤. السيرفر يطابق آخر ٤ أرقام والاسم من الصورة. المحوّلين (بهاء/أحمد) ليهم «طريقة استلام تانية» (wallet.alt) — أي واحدة منهم تتقبل في الدفعة.
    ===================================================================== */
 (function () {
   if (window.__NF_ADVWALLET__) return; window.__NF_ADVWALLET__ = 1;
   const stu = () => typeof isStuSys === 'function' && isStuSys();
-  const WT = { vf: ['فودافون كاش', '010'], et: ['اتصالات كاش', '011'], or: ['أورنج كاش', '012'], we: ['وي باي', '015'], ip: ['إنستاباي', ''], card: ['كارت (إنستاباي على الكارت)', ''] };
+  const WT = { vf: ['فودافون كاش', '010'], et: ['اتصالات كاش', '011'], or: ['أورنج كاش', '012'], we: ['وي باي', '015'], ip: ['إنستاباي', ''], card: ['كارت فوري (إنستاباي ← استخدام كارت)', ''] };
   const ACC = { id: 'owner_wallet', name: 'تحويلات محمود — محافظ/إنستاباي' };
   ['wallets', 'advpay', 'advbatch'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
   if (Store.subscribeAll) Store.subscribeAll = (base => function () {
@@ -19769,8 +19769,11 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const walletOf = wid => byId('wallets', wid);
   const wShow = w => !w ? '' : (w.number || w.ipa || (w.last4 ? `•••• ${w.last4}` : ''));
   const wLabel = w => w ? `${(WT[w.type] || [''])[0]} ${wShow(w)}${w.type === 'card' && w.holder ? ' — ' + w.holder : ''}`.trim() : '';
-  const wCopy = w => (w && (w.number || w.ipa)) || '';
-  const wSnap = w => ({ type: w.type, number: w.number || null, ipa: w.ipa || null, last4: w.last4 || null, holder: w.holder || null });
+  const wCopy = w => (w && (w.number || w.ipa || w.card)) || '';
+  const cardFmt = c => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
+  const wFull = w => !w ? '' : (w.type === 'card' && w.card ? cardFmt(w.card) : wShow(w));
+  const luhn = n => { let t = 0; for (let i = 0; i < n.length; i++) { let d = +n[n.length - 1 - i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; } return t % 10 === 0; };
+  const wSnap = w => ({ type: w.type, number: w.number || null, ipa: w.ipa || null, last4: w.last4 || null, card: w.card || null, holder: w.holder || null });
   const isPayerW = wid => !!wid && payerIds().includes(wid);
   const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9a-zA-Z@._-]/g, '');
   window.nfWalletOf = walletOf;
@@ -19789,17 +19792,17 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     return `<div class="form">${intro ? `<div class="full small">${intro}</div>` : ''}
       ${field('نوع المحفظة', `<select name="wtype" id="wl-type">${Object.keys(WT).filter(k => k !== 'card' || cardOk).map(k => `<option value="${k}" ${k === t ? 'selected' : ''}>${WT[k][0]}</option>`).join('')}</select>`)}
       <div class="field" id="wl-ipmode" style="${ip ? '' : 'display:none'}"><label>إنستاباي بـ</label><select name="ipmode"><option value="num">رقم الموبايل</option><option value="ipa">عنوان إنستاباي (name@instapay)</option></select></div>
-      <div class="field full" id="wl-holder" style="display:none"><label>اسم صاحب الكارت (زي ما بيظهر في إنستاباي)</label><input name="wholder" autocomplete="off" spellcheck="false" placeholder="مثلاً AHMED ABDELZAHER"></div>
+      <div class="field full" id="wl-holder" style="display:none"><label>اسم صاحب الكارت (اللي بتكتبه في إنستاباي)</label><input name="wholder" autocomplete="off" spellcheck="false" placeholder="مثلاً AHMED ABDELZAHER"></div>
       <div class="field full"><label id="wl-l1">الرقم</label><input name="w1" id="wl-1" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="01xxxxxxxxx" value="${esc(val)}"></div>
       <div class="field full"><label id="wl-l2">اكتب الرقم تاني (بإيدك — اللصق مقفول)</label><input name="w2" id="wl-2" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="نفس الرقم"></div>
-      <div class="full tiny muted" id="wl-note">${(opts && opts.note) || 'الرقم ده اللي هتتحول عليه السلف. بعد التسجيل مش هتقدر تغيّره غير بطلب يوافق عليه مدير الحسابات.'}</div><div class="full tiny muted" id="wl-cardnote" style="display:none">من غير رقم الكارت كامل — آخر ٤ أرقام بس والاسم، وده اللي بيظهر في صورة تحويل إنستاباي على الكارت.</div></div>`;
+      <div class="full tiny muted" id="wl-note">${(opts && opts.note) || 'الرقم ده اللي هتتحول عليه السلف. بعد التسجيل مش هتقدر تغيّره غير بطلب يوافق عليه مدير الحسابات.'}</div><div class="full tiny muted" id="wl-cardnote" style="display:none">رقم الكارت والاسم هما اللي بيتكتبوا في إنستاباي ← استخدام كارت. السيستم بيطابق آخر ٤ أرقام والاسم من صورة التحويل.</div></div>`;
   }
   function wireWalletForm(f) {
     const t = $('#wl-type', f), m = $('#wl-ipmode', f), a = $('#wl-1', f), b = $('#wl-2', f);
     const mode = () => (t.value === 'ip' && (f.querySelector('[name=ipmode]') || {}).value === 'ipa') ? 'ipa' : 'num';
-    const upd = () => { const card = t.value === 'card'; m.style.display = t.value === 'ip' ? '' : 'none'; const ipa = mode() === 'ipa'; [a, b].forEach(x => { x.inputMode = ipa ? 'email' : 'numeric'; x.placeholder = card ? '1234' : ipa ? 'name@instapay' : '01xxxxxxxxx'; x.maxLength = card ? 4 : 64; });
+    const upd = () => { const card = t.value === 'card'; m.style.display = t.value === 'ip' ? '' : 'none'; const ipa = mode() === 'ipa'; [a, b].forEach(x => { x.inputMode = ipa ? 'email' : 'numeric'; x.placeholder = card ? 'رقم الكارت 16 رقم' : ipa ? 'name@instapay' : '01xxxxxxxxx'; x.maxLength = card ? 23 : 64; });
       const h = $('#wl-holder', f), l1 = $('#wl-l1', f), l2 = $('#wl-l2', f), cn = $('#wl-cardnote', f); if (h) h.style.display = card ? '' : 'none'; if (cn) cn.style.display = card ? '' : 'none';
-      if (l1) l1.textContent = card ? 'آخر ٤ أرقام من الكارت' : 'الرقم'; if (l2) l2.textContent = card ? 'اكتب آخر ٤ أرقام تاني (بإيدك — اللصق مقفول)' : 'اكتب الرقم تاني (بإيدك — اللصق مقفول)'; };
+      if (l1) l1.textContent = card ? 'رقم كارت فوري' : 'الرقم'; if (l2) l2.textContent = card ? 'اكتب رقم الكارت تاني (بإيدك — اللصق مقفول)' : 'اكتب الرقم تاني (بإيدك — اللصق مقفول)'; };
     t.addEventListener('change', upd); f.addEventListener('change', e => { if (e.target.name === 'ipmode') upd(); });
     ['paste', 'drop', 'dragover'].forEach(ev => b.addEventListener(ev, e => { e.preventDefault(); if (ev === 'paste' || ev === 'drop') toast('اكتب الرقم بإيدك — اللصق مقفول هنا', 'err'); }));
     ['copy', 'cut'].forEach(ev => a.addEventListener(ev, e => e.preventDefault()));
@@ -19812,8 +19815,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const v1 = ipa ? String(d.w1 || '').trim().toLowerCase() : digits(d.w1), v2 = ipa ? String(d.w2 || '').trim().toLowerCase() : digits(d.w2);
     if (!v1 || !v2) { toast('اكتب الرقم في الخانتين', 'err'); return null; }
     if (v1 !== v2) { toast('الرقمين مش زي بعض — راجعهم', 'err'); return null; }
-    const none = { number: null, ipa: null, last4: null, holder: null };
-    if (type === 'card') { if (!/^\d{4}$/.test(v1)) { toast('اكتب آخر ٤ أرقام من الكارت بس', 'err'); return null; } const holder = String(d.wholder || '').trim().replace(/\s+/g, ' '); if (holder.length < 3) { toast('اكتب اسم صاحب الكارت', 'err'); return null; } return Object.assign({}, none, { type, last4: v1, holder }); }
+    const none = { number: null, ipa: null, last4: null, card: null, holder: null };
+    if (type === 'card') { if (!/^\d{16,19}$/.test(v1)) { toast('رقم الكارت لازم يبقى 16 رقم', 'err'); return null; } const holder = String(d.wholder || '').trim().replace(/\s+/g, ' '); if (holder.length < 3) { toast('اكتب اسم صاحب الكارت', 'err'); return null; }
+      if (!luhn(v1) && !(await confirmDlg(`رقم الكارت ${cardFmt(v1)} شكله مش مظبوط (فيه رقم غلط غالباً). متأكد منه؟`, 'أيوه متأكد', false))) return null;
+      return Object.assign({}, none, { type, card: v1, last4: v1.slice(-4), holder }); }
     if (ipa) { if (!/^[a-z0-9._-]+@instapay$/.test(v1)) { toast('عنوان إنستاباي لازم يبقى زي name@instapay', 'err'); return null; } return Object.assign({}, none, { type, ipa: v1 }); }
     if (!/^01[0125]\d{8}$/.test(v1)) { toast('الرقم لازم يبقى موبايل مصري 11 رقم يبدأ بـ 010 / 011 / 012 / 015', 'err'); return null; }
     const pre = (WT[type] || [])[1]; if (pre && !v1.startsWith(pre) && !(await confirmDlg(`${WT[type][0]} عادةً على أرقام ${pre} — الرقم ${v1} على شبكة تانية. متأكد إن المحفظة على الرقم ده؟ (لو نقلت رقمك من شبكة لشبكة يبقى تمام)`, 'أيوه متأكد', false))) return null;
@@ -19892,7 +19897,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (p.status === 'review' && isAdmin() && writable()) acts.push(`<button class="btn p sm" data-action="apApprove" data-arg="${esc(p.id)}">${icon('check')}اعتمد التحويل يدوي</button><button class="btn sm" data-action="apRetry" data-arg="${esc(p.id)}">يرفع صورة تانية</button>`);
     if (p.status === 'paid') { if (p.waPhone && typeof waLink === 'function') acts.push(`<a class="btn sm p" target="_blank" rel="noopener" href="${esc(waLink(p.waPhone, msgFor(p)))}">${icon('wa')}ابعت للموظف واتساب</a>`); if (navigator.share) acts.push(`<button class="btn sm" data-action="apShare" data-arg="${esc(p.id)}">مشاركة الصورة</button>`); }
     return `<div class="apcard"><div class="t"><b>${esc(p.workerName || '')}</b><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div><b>${fmtMoney(p.amount)} ${CUR()}</b></div>
-      ${p.status !== 'paid' ? (wl ? `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted small">${esc((WT[wl.type] || [''])[0])}</span><span class="wlbig">${esc(num)}</span>${wl.type === 'card' ? `<b>${esc(wl.holder || '')}</b>` : ''}${cp ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(cp)}">نسخ الرقم</button>` : ''}</div>` : '') : `<div class="small">على <b class="ltr">${esc(p.walletShown || show)}</b> · رقم العملية <b class="ltr">${esc(p.ref || '')}</b> · ${fmtDate((p.paidAt || '').slice(0, 10))}${p.manual ? ' · <span class="badge warn">اتعتمد يدوي</span>' : ''} · ${esc(p.paidByName || '')}</div>`}
+      ${p.status !== 'paid' ? (wl ? `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted small">${esc((WT[wl.type] || [''])[0])}</span><span class="wlbig">${esc(wFull(wl))}</span>${cp ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(cp)}">نسخ الرقم</button>` : ''}${wl.type === 'card' ? `<b>${esc(wl.holder || '')}</b><button class="btn xs" data-action="apCopy" data-arg="${esc(wl.holder || '')}">نسخ الاسم</button>` : ''}</div>` : '') : `<div class="small">على <b class="ltr">${esc(p.walletShown || show)}</b> · رقم العملية <b class="ltr">${esc(p.ref || '')}</b> · ${fmtDate((p.paidAt || '').slice(0, 10))}${p.manual ? ' · <span class="badge warn">اتعتمد يدوي</span>' : ''} · ${esc(p.paidByName || '')}</div>`}
       ${p.status === 'review' ? `<div class="banner warn small" style="margin:0">${(p.issues || []).map(esc).join('<br>')}</div>` : ''}
       ${p.proofPath ? `<div><img class="approof" src="${esc(p.proofUrl || '')}" alt="" data-action="apProof" data-arg="${esc(p.id)}" onerror="this.style.display='none'"></div>` : ''}
       <div class="tiny muted">اتوافق عليها ${fmtDate((p.createdAt || '').slice(0, 10))}${p.createdByName ? ' · ' + esc(p.createdByName) : ''}</div>
@@ -19916,7 +19921,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   };
   EXTRA_TITLES.advpay = () => ({ title: 'تحويل السلف', sub: 'السلف بتتحول على محفظة الموظف المسجّلة بس — مفيش سلف كاش' });
   document.addEventListener('click', e => { const b = e.target.closest('[data-aptab]'); if (!b) return; S._apTab = b.dataset.aptab; render(true); });
-  ACTIONS.apCopy = async num => { try { await navigator.clipboard.writeText(num); toast('اتنسخ الرقم'); } catch (e) { toast(num); } };
+  ACTIONS.apCopy = async num => { try { await navigator.clipboard.writeText(num); toast('اتنسخ'); } catch (e) { toast(num); } };
   ACTIONS.apProof = id => { const p = byId('advpay', id); if (p && p.proofUrl && typeof lightbox === 'function') lightbox(p.proofUrl, `${p.workerName || ''} — ${p.ref || ''}`); };
   ACTIONS.apShare = async id => { const p = byId('advpay', id); if (!p || !p.proofUrl) return; try { const r = await fetch(p.proofUrl); const blob = await r.blob(); const file = new File([blob], `tahweel-${p.ref || p.id}.jpg`, { type: blob.type || 'image/jpeg' }); const data = { files: [file], text: msgFor(p).replace(/\nصورة التحويل:.*$/m, '') }; if (navigator.canShare && !navigator.canShare(data)) delete data.files; await navigator.share(data); } catch (e) { /* cancelled */ } };
   async function callFn(body) { if (!S.sb || !S.sb.functions) throw new Error('offline'); const r = await S.sb.functions.invoke('advpay', { body }); if (r.error) { let msg = r.error.message; try { const j = await r.error.context.json(); msg = j.error || msg; } catch (e) { /* ignore */ } throw new Error(msg); } return r.data; }
@@ -19984,7 +19989,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const acts = [];
     if (b.status === 'open' && canWalletAdmin() && writable() && items.length) acts.push(`<button class="btn p sm" data-action="abSend" data-arg="${esc(b.id)}">${icon('send')}ابعت الدفعة لمحمود</button>`);
     if (['sent', 'review'].includes(b.status) && isAdmin() && writable()) acts.push(`<label class="btn p sm">${icon('camera')}ارفع صورة تحويلك<input type="file" accept="image/*" hidden data-abup="${esc(b.id)}"></label><button class="btn sm" data-action="abApprove" data-arg="${esc(b.id)}">اعتماد يدوي</button>${b.status === 'review' ? `<button class="btn sm ghost" data-action="abRetry" data-arg="${esc(b.id)}">صورة تانية</button>` : ''}`);
-    const payers = ['sent', 'review'].includes(b.status) && isAdmin() ? `<div class="small" style="display:grid;gap:4px">${payerIds().map((p, i) => { const w = walletOf(p); const mline = (m, lbl) => `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted">${lbl}</span><span class="wlbig" style="font-size:16px">${esc(wShow(m))}</span>${m.type === 'card' ? `<b>${esc(m.holder || '')}</b>` : ''}<span class="muted tiny">${esc((WT[m.type] || [''])[0])}</span>${wCopy(m) ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(wCopy(m))}">نسخ</button>` : ''}</div>`; return w ? `<div><b>${i ? 'البديل' : 'المحوِّل'}: ${esc(w.workerName || '')}</b>${mline(w, 'أساسي:')}${w.alt ? mline(w.alt, 'أو:') : ''}</div>` : `<div><span class="badge crit">${i ? 'البديل' : 'المحوِّل'} لسه ماسجلش رقمه</span></div>`; }).join('')}</div>` : '';
+    const payers = ['sent', 'review'].includes(b.status) && isAdmin() ? `<div class="small" style="display:grid;gap:4px">${payerIds().map((p, i) => { const w = walletOf(p); const mline = (m, lbl) => `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted">${lbl}</span><span class="wlbig" style="font-size:16px">${esc(wFull(m))}</span><span class="muted tiny">${esc((WT[m.type] || [''])[0])}</span>${wCopy(m) ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(wCopy(m))}">نسخ</button>` : ''}${m.type === 'card' ? `<b>${esc(m.holder || '')}</b><button class="btn xs" data-action="apCopy" data-arg="${esc(m.holder || '')}">نسخ الاسم</button>` : ''}</div>`; return w ? `<div><b>${i ? 'البديل' : 'المحوِّل'}: ${esc(w.workerName || '')}</b>${mline(w, 'أساسي:')}${w.alt ? mline(w.alt, 'أو:') : ''}</div>` : `<div><span class="badge crit">${i ? 'البديل' : 'المحوِّل'} لسه ماسجلش رقمه</span></div>`; }).join('')}</div>` : '';
     const dist = b.status === 'funded' ? (() => { const paid = Math.round(sum(items.filter(p => p.status === 'paid'), p => +p.paidAmount || +p.amount || 0) * 100) / 100; const fund = +b.fundedAmount || total; return `<div class="small">اتموّلت لـ <b>${esc(b.fundedToName || '')}</b> · رقم العملية <b class="ltr">${esc(b.ref || '')}</b> · ${fmtDate((b.fundedAt || '').slice(0, 10))}${b.manual ? ' · <span class="badge warn">يدوي</span>' : ''}<br>العهدة: اتموّل <b>${fmtMoney(fund)}</b> · اتوزّع <b>${fmtMoney(paid)}</b> · باقي معاه <b style="${fund - paid > 0.01 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(Math.round((fund - paid) * 100) / 100)}</b></div>`; })() : '';
     return `<div class="apcard"><div class="t"><b class="ltr">${esc(b.code || '')}</b><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div><b>${fmtMoney(total)} ${CUR()}</b></div>
       <div class="small">${items.map(p => `${esc(p.workerName || '')} <b>${fmtMoney(p.amount)}</b>${b.status === 'funded' ? ` <span class="muted tiny">(${p.status === 'paid' ? 'اتحوّلت' : p.status === 'review' ? 'مراجعة' : 'لسه'})</span>` : ''}`).join(' · ') || '<span class="muted">لسه مفيش سلف</span>'}</div>
