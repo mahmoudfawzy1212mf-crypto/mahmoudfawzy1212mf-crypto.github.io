@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1139-61b043";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1440-021820";</script>
 
 <script>
 'use strict';
@@ -20575,6 +20575,43 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     }
     return save0(col, doc, o);
   };
+})();
+/* =====================================================================
+   v5.09 — (المصنع) «المورد المعتاد» في فورم الصنف = لستة الموردين المتسجلين
+   · محمود: «لما أجي أختار المورد تجيب لي لستة الموردين المتسجلين — ممكن الصنف يكون عند نفس المورد».
+   · كان خانة كتابة (datalist من أسماء الأصناف/الأوامر القديمة بس) → بقت قائمة الموردين من صفحة الموردين + «مورد مش متسجل (اكتبه)».
+   · اختيار مورد متسجل بيضيفه كمان لـ «الموردون وآخر سعر لكل مورد» لو مش موجود.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUPPICK__) return; window.__NF_SUPPICK__ = 1;
+  const OTHER = '__other__';
+  const sups = () => sortBy(list('suppliers').filter(s => s && s.name && !s.deleted), s => s.name);
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    let h = base.apply(this, arguments); m = m || {};
+    const re = /<input id="f-supplier" name="supplier" value="([^"]*)" list="supplist"><datalist id="supplist">[\s\S]*?<\/datalist>/;
+    const mm = re.exec(h); if (!mm) return h;
+    const all = sups(); const cur = String(m.supplier || '').trim();
+    const hit = all.find(s => s.name.trim() === cur);
+    const isOther = !!cur && !hit;
+    const sel = `<select id="f-supPick" class="sel">
+      <option value="">— اختار من الموردين المتسجلين (${all.length}) —</option>
+      ${all.map(s => `<option value="${esc(s.id)}" ${hit && hit.id === s.id ? 'selected' : ''}>${esc(s.name)}${s.phone ? ' — ' + esc(s.phone) : ''}</option>`).join('')}
+      <option value="${OTHER}" ${isOther ? 'selected' : ''}>+ مورد مش متسجل (اكتب اسمه)</option>
+    </select>
+    <input id="f-supplier" name="supplier" value="${mm[1]}" placeholder="اسم المورد" style="margin-top:6px;${isOther ? '' : 'display:none'}">`;
+    return h.replace(mm[0], sel);
+  })(materialForm);
+  document.addEventListener('change', e => {
+    if (!e.target || e.target.id !== 'f-supPick') return; const f = e.target.closest('form') || document; const v = e.target.value; const txt = f.querySelector('#f-supplier'); if (!txt) return;
+    if (v === OTHER) { txt.style.display = ''; txt.value = ''; txt.focus(); return; }
+    txt.style.display = 'none';
+    const s = v && byId('suppliers', v); txt.value = s ? s.name : '';
+    const box = f.querySelector('#supprows');
+    if (s && box && typeof suppRow === 'function' && ![...box.querySelectorAll('[name=s-id]')].some(x => x.value === s.id)) {
+      const empty = [...box.querySelectorAll('.sr')].find(r => !r.querySelector('[name=s-id]').value);
+      if (empty) empty.querySelector('[name=s-id]').value = s.id; else box.insertAdjacentHTML('beforeend', suppRow({ supplierId: s.id }));
+    }
+  });
 })();
 </script>
 
