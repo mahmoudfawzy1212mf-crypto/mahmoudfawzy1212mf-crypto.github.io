@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1935-31660f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1944-03e160";</script>
 
 <script>
 'use strict';
@@ -21314,23 +21314,68 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
 
   /* ---------- AI fallback ---------- */
   const allowedViews = () => NAV.filter(x => x.id && seeView(x.id)).map(x => `${x.id}=${x.label}`).concat(seeView('equip') ? ['equip=العدد والمعدات'] : []);
-  async function aiResolve(text) {
+  /* v5.21: the assistant looks things up itself (tools run in the app with the asking user's own permissions) */
+  const TCOLS = { orders: ['orders', 'مشاريع/أوامر تشغيل'], orderfin: ['$fin', 'ماليات المشاريع (قيمة العقد + الدفعات)'], quotations: ['quotes', 'عروض أسعار'], clients: ['clients', 'عملاء'], suppliers: ['suppliers', 'موردين'], purchases: ['purchases', 'طلبات/أوامر شراء'], workers: ['workers', 'موظفين'], materials: ['inventory', 'خامات/أصناف المخزن'], requests: ['requests', 'طلبات (إجازات/سلف/اعتمادات)'], tasks: ['tasks', 'مهام'], equip: ['equip', 'معدات'], expenses: ['expenses', 'مصروفات'], money: ['accounts', 'حركات مالية'], advances: ['payroll', 'سلف'], invoices: ['invoices', 'فواتير'], leads: ['crm', 'عملاء محتملين'], trips: ['fleet', 'مشاوير'] };
+  const colOk = c => { const t = TCOLS[c]; if (!t || !S.data[c]) return false; if (isAdmin()) return true; if (t[0] === '$fin') return typeof seesFinance === 'function' && seesFinance(); return seeView(t[0]) || (t[0] === 'crm' && seeView('crm')); };
+  const WAGE = /salary|wage|basic|hourly|rate|allowance|bonus|deduct|net|gross/i;
+  const slim = (o, depth = 0) => { if (o == null || typeof o !== 'object') return typeof o === 'string' && o.length > 300 ? o.slice(0, 300) + '…' : o; if (Array.isArray(o)) { const a = o.slice(0, 25).map(x => slim(x, depth + 1)); if (o.length > 25) a.push(`…+${o.length - 25}`); return a; } if (depth > 3) return '{…}'; const r = {}; for (const k of Object.keys(o)) { if (/photo|image|img|avatar|b64|base64|thumb|dataUrl|svg|face|descriptor|signature/i.test(k)) continue; if (WAGE.test(k) && !(typeof seesWages === 'function' && seesWages())) continue; r[k] = slim(o[k], depth + 1); } return r; };
+  const nameOf = (c, id) => { const x = id && S.data[c] && S.data[c].get(id); return x ? (x.name || x.title || x.code || '') : ''; };
+  const brief = (c, x) => { const b = { id: x.id }; ['code', 'number', 'title', 'name', 'status', 'kind', 'type', 'date', 'orderDate', 'dueDate', 'createdAt', 'total', 'amount', 'value', 'phone', 'deptId', 'role'].forEach(k => { if (x[k] != null && x[k] !== '') b[k] = typeof x[k] === 'string' ? x[k].slice(0, 120) : x[k]; }); if (x.clientId) b.client = nameOf('clients', x.clientId); if (x.supplierId) b.supplier = nameOf('suppliers', x.supplierId); if (x.orderId) b.order = nameOf('orders', x.orderId); if (x.workerId) b.worker = nameOf('workers', x.workerId); if (c === 'orderfin') { b.order = nameOf('orders', x.id); b.payments = (x.payments || []).length; } if (!(typeof seesFinance === 'function' && seesFinance()) && !isAdmin()) { delete b.total; delete b.amount; delete b.value; } return b; };
+  const tFind = ({ col, q }) => {
+    const cols = col && col !== 'all' ? [col] : Object.keys(TCOLS); const ok = cols.filter(colOk); if (!ok.length) return 'مش مسموح أو مش موجود: ' + col;
+    const qt = toks(String(q || '')); const out = [];
+    ok.forEach(c => { const arr = list(c); arr.forEach(x => { if (!qt.length) { out.push([0, c, x]); return; } const hay = toks([x.code, x.number, x.title, x.name, x.label, x.notes, x.clientId && nameOf('clients', x.clientId), x.supplierId && nameOf('suppliers', x.supplierId), x.orderId && nameOf('orders', x.orderId), c === 'orderfin' && nameOf('orders', x.id)].filter(Boolean).join(' ')); let s = 0; qt.forEach(t => { if (hay.some(h => h === t || (t.length >= 3 && (h.startsWith(t) || t.startsWith(h))) || (t.length >= 5 && ed1(t, h)))) s++; }); if (s) out.push([s, c, x]); }); });
+    out.sort((a, b) => b[0] - a[0] || String(b[2].updatedAt || b[2].createdAt || '').localeCompare(String(a[2].updatedAt || a[2].createdAt || '')));
+    return out.length ? JSON.stringify(out.slice(0, 10).map(([, c, x]) => Object.assign({ col: c }, brief(c, x)))) : 'ملقتش نتايج.';
+  };
+  const tGet = ({ col, id }) => {
+    if (!colOk(col)) return 'مش مسموح أو مش موجود: ' + col; const x = S.data[col].get(id); if (!x) return 'ملقتش السجل ده.';
+    const r = slim(x); if (x.clientId) r._client = nameOf('clients', x.clientId); if (x.supplierId) r._supplier = nameOf('suppliers', x.supplierId); if (x.orderId) r._order = nameOf('orders', x.orderId);
+    if (col === 'orders' && colOk('orderfin')) { const f = S.data.orderfin.get(id); r._finance = f ? slim(f) : 'مفيش ماليات متسجلة للمشروع ده (لا قيمة عقد ولا دفعات)'; }
+    if (col === 'orders' && colOk('purchases')) r._purchases = list('purchases').filter(p => p.orderId === id).slice(0, 15).map(p => brief('purchases', p));
+    const s = JSON.stringify(r); return s.length > 4000 ? s.slice(0, 4000) + '…' : s;
+  };
+  async function tHistory({ col, id, who, days }) {
+    if (!isAdmin()) return 'سجل النشاط للمالك بس.';
+    const since = new Date(Date.now() - Math.min(+days || 30, 180) * 864e5).toISOString(); const lines = [];
+    list('changes').filter(c => c.at >= since && (!col || c.col === col) && (!id || c.docId === id) && (!who || String(c.byName || '').includes(who))).forEach(c => lines.push([c.at, `${c.byName || '؟'} | ${c.kind === 'save' ? 'حفظ/إضافة' : c.kind === 'update' ? 'تعديل' : c.kind} | ${c.col} «${c.label || c.docId}» | حقول: ${(c.keys || []).join(',')}`]));
+    if (typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from) { try { let q = S.sb.from('nf_audit').select('at,name,kind,col,doc_id,label,diff,view').gte('at', since).order('at', { ascending: false }).limit(60); if (col) q = q.eq('col', col); if (id) q = q.eq('doc_id', id); if (who) q = q.ilike('name', `%${who}%`); const { data } = await q; (data || []).forEach(r => lines.push([r.at, `${r.name || '؟'} | ${r.kind} | ${r.col || r.view || ''} «${r.label || r.doc_id || ''}»${r.diff ? ' | ' + Object.keys(r.diff).slice(0, 6).map(k => `${k}: ${JSON.stringify(r.diff[k][0])}→${JSON.stringify(r.diff[k][1])}`).join('؛ ').slice(0, 300) : ''}`])); } catch (e) { /* offline */ } }
+    lines.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+    return lines.length ? lines.slice(0, 40).map(([at, t]) => `${String(at).slice(0, 16).replace('T', ' ')} | ${t}`).join('\n') : 'ملقتش حركات بالشروط دي في السجل.';
+  }
+  const tAttendance = ({ date }) => { if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : todayISO(); const at = attendanceFor(d); const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const lab = { P: 'حاضر', H: 'نص يوم', A: 'غايب', L: 'إجازة' }; return `${d}:\n` + ws.map(w => { const r = at[w.id]; return `${w.name} | ${r ? (lab[r.s] || r.s) + (+r.late > 0 ? ` متأخر ${r.late}د` : '') + (r.in ? ` دخول ${r.in}` : '') : 'لسه متسجّلش'}`; }).join('\n'); };
+  const TOOLS = { find: tFind, get: tGet, history: tHistory, attendance: tAttendance };
+  async function aiResolve(text, onStep) {
     if (typeof aiAvailable !== 'function' || !aiAvailable()) return { reply: 'مش لاقي حاجة بالاسم ده. جرّب تكتب اسم المشروع أو المورد أو الصفحة بشكل أوضح.' };
     const orders = seeView('orders') ? list('orders').slice(0, 200).map(o => `${o.id}|${o.code || ''}|${o.title || ''}|${clientOf(o)}`).join('\n') : '';
     const sups = seeView('suppliers') ? list('suppliers').slice(0, 200).map(s => `${s.id}|${s.name}`).join('\n') : '';
-    const wks = seeView('workers') ? list('workers').filter(w => !w.left).slice(0, 150).map(w => `${w.id}|${w.name}`).join('\n') : '';
-    const eqs = seeView('equip') ? list('equip').slice(0, 150).map(e => `${e.id}|${e.code || ''}|${e.name}`).join('\n') : '';
-    let attLine = ''; try { if (typeof attendanceFor === 'function' && seeView('attendance')) { const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const at = attendanceFor(todayISO()); const P = ws.filter(w => ['P', 'H'].includes(at[w.id]?.s)).length, A = ws.filter(w => at[w.id]?.s === 'A').length, L = ws.filter(w => at[w.id]?.s === 'L').length, late = ws.filter(w => +at[w.id]?.late > 0).length; attLine = `حضور النهارده (${todayISO()}) — نفس أرقام لوحة المتابعة: حاضر ${P}، غايب (متسجّل غياب) ${A}، إجازة ${L}، متأخر ${late}، لسه متسجّلوش ${ws.length - P - A - L} — من إجمالي ${ws.length}. مهم: «لسه متسجّلش» مش غياب؛ الغياب هو المتسجّل غياب بس.`; } } catch (e) { attLine = ''; }
+    let attLine = ''; try { if (typeof attendanceFor === 'function' && seeView('attendance')) { const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const at = attendanceFor(todayISO()); const P = ws.filter(w => ['P', 'H'].includes(at[w.id]?.s)).length, A = ws.filter(w => at[w.id]?.s === 'A').length, L = ws.filter(w => at[w.id]?.s === 'L').length, late = ws.filter(w => +at[w.id]?.late > 0).length; attLine = `حضور النهارده (${todayISO()}): حاضر ${P}، غايب (متسجّل غياب) ${A}، إجازة ${L}، متأخر ${late}، لسه متسجّلوش ${ws.length - P - A - L} — من إجمالي ${ws.length}. «لسه متسجّلش» مش غياب.`; } } catch (e) { attLine = ''; }
     const past = hist.slice(-10).map(h => `${h.r === 'u' ? 'المستخدم' : 'المساعد'}: ${h.t}`).join('\n');
-    let ctx = ''; try { ctx = typeof aiContextBase === 'function' ? JSON.stringify(aiContextBase()).slice(0, 9000) : ''; } catch (e) { ctx = ''; }
-    const prompt = `أنت مساعد داخل نظام إدارة مصنع (عربي مصري بسيط).${past ? `\nالمحادثة لحد دلوقتي (استخدمها عشان تفهم «ده/دي/نفس المشروع/عرض السعر ده»):\n${past}` : ''}${lastOpened ? `\nآخر صفحة المستخدم فتحها من المحادثة: ${lastOpened}` : ''}\nالمستخدم كتب دلوقتي: «${text}».
-الصفحات المسموح له بيها (id=الاسم): ${allowedViews().join('، ')}
-المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nالموظفين (id|name):\n${wks}\nالمعدات (id|code|name):\n${eqs}\n${attLine ? attLine + '\\n' : ''}ملخص البيانات: ${ctx}\nملحوظة: الكلام ده ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابقه مع أقرب اسم في القوايم (مثال «الجزي» = «الجازي»). لو طلب مشتريات مشروع رجّع route «#/purchases?order=<id>».
-رجّع JSON بس: {"reply":"رد قصير بالعامية","route":"#/<view>" أو "#/<view>/<id>" أو ""}. استخدم فقط صفحات من القائمة وأرقام id موجودة. متخترعش أرقام أو أسعار مش في الملخص.`;
-    try { const j = await aiJson(prompt, { maxTokens: 600 }); const route = String((j && j.route) || ''); let route2 = route; const om = /^#\/purchases\?order=([\w-]+)$/.exec(route); if (om && byId('orders', om[1]) && seeView('purchases')) { (S.ui.filter.purchases ||= {}).orderId = om[1]; S.ui.filter.purchases.status = 'all'; route2 = '#/purchases'; } const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route2); let ok = null;
-      if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route2; }
-      return { reply: String((j && j.reply) || 'تمام'), route: ok };
+    const cols = Object.keys(TCOLS).filter(colOk).map(c => `${c}=${TCOLS[c][1]}`).join('، ');
+    const base = `أنت مساعد داخل نظام إدارة مصنع "${(S.settings && S.settings.company) || 'Ninety'}" — عربي مصري بسيط ومختصر. النهارده ${todayISO()}. المستخدم: ${(S.session && S.session.name) || ''} (${role()}${isAdmin() ? ' — المالك، عنده كل الصلاحيات' : ''}).
+${past ? `المحادثة لحد دلوقتي (استخدمها عشان تفهم «ده/دي/نفس المشروع»):\n${past}\n` : ''}${lastOpened ? `آخر صفحة فتحها من المحادثة: ${lastOpened}\n` : ''}السؤال دلوقتي: «${text}»
+الصفحات المسموحة (id=الاسم): ${allowedViews().join('، ')}
+المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\n${attLine}
+عندك أدوات تدوّر بيها في بيانات السيستم الحقيقية (بصلاحيات المستخدم ده):
+- find {"col": واحدة من [${cols}] أو "all", "q": "كلمات البحث"} ← قايمة مختصرة بالنتايج
+- get {"col": "...", "id": "..."} ← كل تفاصيل سجل (للمشروع: الماليات والدفعات وأوامر الشراء بتاعته)
+${isAdmin() ? '- history {"col": اختياري, "id": اختياري, "who": اسم اختياري, "days": عدد} ← سجل النشاط: مين أضاف/عدّل/حذف إيه وإمتى\n' : ''}- attendance {"date": "YYYY-MM-DD"} ← حضور كل موظف في اليوم ده
+القواعد: لو السؤال محتاج أرقام أو تفاصيل أو «مين عمل إيه» — دوّر الأول بأداة. أي رقم أو اسم أو تاريخ في ردك لازم يكون من نتايج الأدوات أو اللي فوق؛ لو ملقتهوش قول «ملقتش» بصراحة، وممنوع تخمّن أو تقول «هشوف». ماتقولش إنك مش شايف البيانات — إنت عندك الأدوات. الكلام ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابق مع أقرب اسم.
+رجّع JSON بس، واحد من دول:
+{"tool":"find|get|history|attendance","args":{...}}  ← لو محتاج تدوّر
+{"reply":"الرد القصير","source":"جبت المعلومة منين (مثلاً: سجل النشاط / ماليات المشروع)","route":"#/<view>" أو "#/<view>/<id>" أو "#/purchases?order=<id>" أو ""}  ← لما تبقى جاهز`;
+    const steps = [];
+    try {
+      for (let i = 0; i < 5; i++) {
+        const prompt = base + (steps.length ? `\n\nنتايج الأدوات لحد دلوقتي:\n${steps.map((s, k) => `(${k + 1}) ${s.tool} ${JSON.stringify(s.args)}:\n${s.out}`).join('\n\n')}` : '') + (i === 4 ? '\n\nدي آخر خطوة — رجّع reply دلوقتي.' : '');
+        const j = await aiJson(prompt, { maxTokens: 900 });
+        if (j && j.tool && TOOLS[j.tool] && i < 4) { if (onStep) onStep(j.tool, j.args || {}); let out; try { out = await TOOLS[j.tool](j.args || {}); } catch (e) { out = 'حصل خطأ: ' + (e && e.message || e); } steps.push({ tool: j.tool, args: j.args || {}, out: String(out).slice(0, 6000) }); continue; }
+        const route = String((j && j.route) || ''); let route2 = route; const om = /^#\/purchases\?order=([\w-]+)$/.exec(route); if (om && byId('orders', om[1]) && seeView('purchases')) { (S.ui.filter.purchases ||= {}).orderId = om[1]; S.ui.filter.purchases.status = 'all'; route2 = '#/purchases'; } const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route2); let ok = null;
+        if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases', clients: 'clients', quotes: 'quotations' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route2; }
+        return { reply: String((j && j.reply) || 'تمام'), source: String((j && j.source) || ''), route: ok, steps: steps.length };
+      }
     } catch (e) { return { reply: (typeof AI_ERR === 'object' && AI_ERR[e && e.code]) || 'المساعد الذكي مش متاح دلوقتي.' }; }
+    return { reply: 'ملقتش إجابة أكيدة.' };
   }
 
   /* ---------- panel ---------- */
@@ -21358,9 +21403,10 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     if (r && r.route && !question && (!voice || r.strong || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); hist.push({ r: 'b', t: `فتحت ${r.route.label}` }); lastOpened = r.route.label; setTimeout(() => r.route.run(), 350); return; }
     if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose.map(c => ({ label: c.label, run: () => { lastOpened = c.label; hist.push({ r: 'b', t: `فتحت ${c.label}` }); c.run(); } }))); hist.push({ r: 'b', t: 'سألته يختار: ' + r.choose.map(c => c.label).join(' / ') }); return; }
     addMsg('bot', '<span class="muted">بفكّر…</span>'); const box = panel().querySelector('.aim'); const thinking = box.lastElementChild;
-    const a = await aiResolve(text); if (thinking) thinking.remove();
+    const TL = { find: 'بدوّر في', get: 'بفتح تفاصيل', history: 'بدوّر في سجل النشاط', attendance: 'بشوف الحضور' }; const CL = c => (TCOLS[c] && TCOLS[c][1]) || c || 'السيستم';
+    const a = await aiResolve(text, (tool, args) => { if (thinking) thinking.innerHTML = `<span class="muted">${esc(TL[tool] || 'بدوّر')} ${tool === 'history' || tool === 'attendance' ? '' : esc(CL(args.col))}${args.q ? ` «${esc(String(args.q).slice(0, 40))}»` : ''}…</span>`; }); if (thinking) thinking.remove();
     hist.push({ r: 'b', t: String(a.reply || '').slice(0, 400) + (a.route ? ` [رابط: ${a.route}]` : '') }); const openIt = () => { lastOpened = a.route; go(a.route); }; const acts = []; if (a.route) acts.push({ label: 'افتح', run: openIt }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
-    addMsg('bot', mdLiteSafe(a.reply), acts);
+    addMsg('bot', mdLiteSafe(a.reply) + (a.source ? `<div class="tiny muted" style="margin-top:6px">المصدر: ${esc(a.source)}</div>` : ''), acts);
     if (voice && a.route && !question) setTimeout(openIt, 900);
   }
   const mdLiteSafe = t => (typeof mdLite === 'function' ? mdLite(t) : esc(t).replace(/\n/g, '<br>'));
