@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1506-0b3a8c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1513-e687ea";</script>
 
 <script>
 'use strict';
@@ -20767,6 +20767,32 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   window.nfSupPoRegroup = supPoRegroup;
   document.addEventListener('change', e => { if (e.target && e.target.id === 'f-deptId') { const f = e.target.closest('form'); if (f && f.querySelector('#f-supplierId')) supPoRegroup(f); } });
+})();
+/* =====================================================================
+   v5.11 — (المصنع) كود الصنف أوتوماتيك بالكامل
+   · محمود (صورة «تكويد صنف جديد»: التصنيف «دهانات ومواد تشطيب» والكود PT-OTH-0001): «عايز الكود يبقى أوتوماتيك على حسب القسم».
+   · السبب: «التصنيف» (القائمة القديمة) و«فئة الصنف» (اللي منها الكود) كانوا منفصلين → اختيار التصنيف ماكانش بيغيّر الكود.
+   · الحل: التصنيف بيختار الفئة المقابلة لوحده (والعكس) → الكود يتحدّث؛ خانة الكود بقت للقراءة بس (بتتعمل لوحدها).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CODEAUTO__) return; window.__NF_CODEAUTO__ = 1;
+  const MAP = [[/خشب|ألواح|الواح|mdf/i, 'SHT'], [/ألومنيوم|الومنيوم|قطاع/i, 'PRF'], [/حديد|معادن|صاج/i, 'STL'], [/دهان|تشطيب|ورنيش/i, 'PNT'], [/قماش|أقمشة|اقمشة|إسفنج|اسفنج/i, 'FAB'], [/مسامير|تثبيت/i, 'FIX'], [/إكسسوار|اكسسوار|مفصل|مقابض/i, 'HRD'], [/زجاج|مراي/i, 'GLS'], [/مستهلك|صنفرة/i, 'CNS'], [/غراء|لواصق/i, 'ADH'], [/كهرباء|إضاءة|اضاءة/i, 'ELC'], [/عدد|أدوات|ادوات/i, 'TOL'], [/جبس|معجون/i, 'GYP'], [/سيليكون|عزل/i, 'SIL'], [/تغليف/i, 'PKG'], [/قطع غيار/i, 'SPR']];
+  const catFor = label => { const s = String(label || ''); const exact = ITEM_CATS.find(c => c[1].trim() === s.trim()); if (exact) return exact[0]; for (const [re, c] of MAP) if (re.test(s) && ITEM_CATS.some(x => x[0] === c)) return c; return ''; };
+  const categoryFor = code => { const cats = (S.settings && S.settings.categories) || []; const hit = cats.find(n => catFor(n) === code); return hit || ''; };
+  window.nfCatForCategory = catFor;
+  const apply = (f, fromCategory) => {
+    const cat = f.querySelector('#f-itemCat'); const cg = f.querySelector('#f-category'); if (!cat || !cg) return;
+    if (fromCategory) { const c = catFor(cg.value); if (c && cat.value !== c) { cat.value = c; cat.dispatchEvent(new Event('change', { bubbles: true })); } }
+    else { const n = categoryFor(cat.value); if (n && cg.value !== n) cg.value = n; }
+  };
+  document.addEventListener('change', e => { const f = e.target.closest && e.target.closest('#mform'); if (!f || !f.querySelector('#f-itemCat')) return; if (e.target.id === 'f-category') apply(f, true); else if (e.target.id === 'f-itemCat') apply(f, false); });
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    let h = base.apply(this, arguments); m = m || {};
+    h = h.replace(/<input id="f-code" name="code" class="code ltr"/, '<input id="f-code" name="code" class="code ltr" readonly tabindex="-1" style="opacity:.85"');
+    h = h.replace('يُولَّد تلقائيًا من القسم والفئة', 'بيتعمل لوحده من القسم والفئة (والتصنيف) — كل صنف جديد رقم جديد');
+    if (!m.itemCat) setTimeout(() => { const f = document.getElementById('mform'); if (f && f.querySelector('#f-itemCat') && f.querySelector('#f-category')) apply(f, true); }, 0);
+    return h;
+  })(materialForm);
 })();
 </script>
 
