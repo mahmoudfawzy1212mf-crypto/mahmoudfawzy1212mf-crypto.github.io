@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0844-986307";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0915-993395";</script>
 
 <script>
 'use strict';
@@ -13500,7 +13500,13 @@ function i18nLoad() {
   if (I18N.exact) return Promise.resolve(true);
   if (I18N.loading) return I18N.loading;
   const inline = window.NF_I18N_EN; if (inline) { i18nCompile(inline); return Promise.resolve(true); }
-  I18N.loading = Promise.all([fetch('./en.json', { cache: 'force-cache' }).then(r => r.ok ? r.json() : null), fetch('./index.html', { cache: 'force-cache' }).then(r => r.ok ? r.text() : '').catch(() => '')])
+  /* v5.05: the pack and the page source must be the SAME build (the pack is aligned by position). 'force-cache' / the service
+     worker's cache-first could hand an older en.json with a newer index.html (or the reverse) after an update → almost nothing
+     lined up and English "didn't switch". Now both come fresh from the server (tagged with the build); offline → cached copies. */
+  const bv = encodeURIComponent(window.NF_BUILD || Date.now());
+  const getPack = () => fetch('./en.json?b=' + bv, { cache: 'no-cache' }).then(r => r.ok ? r.json() : Promise.reject(new Error('en'))).catch(() => fetch('./en.json').then(r => r.ok ? r.json() : null).catch(() => null));
+  const getSrc = () => fetch('./index.html', { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('src'))).catch(() => fetch('./index.html').then(r => r.ok ? r.text() : '').catch(() => ''));
+  I18N.loading = Promise.all([getPack(), getSrc()])
     .then(([pack, html]) => { if (!pack) return false; const dict = pack.v ? i18nBuildDict(pack, html || document.documentElement.outerHTML) : pack; i18nCompile(dict); return true; }).catch(() => false).finally(() => { I18N.loading = null; });
   return I18N.loading;
 }
@@ -13550,7 +13556,13 @@ function i18nToggleUI() {
   const chip = document.querySelector('#root .side .userchip'); if (chip && !chip.parentNode.querySelector('.langsw')) chip.insertAdjacentHTML('afterend', `<div class="langrow inside">${i18nToggleHTML()}</div>`);
   const kiosk = document.querySelector('#root .kiosk'); if (kiosk && !kiosk.querySelector('.langsw')) kiosk.insertAdjacentHTML('afterbegin', `<div class="langrow kiosk">${i18nToggleHTML()}</div>`);
 }
-if (typeof ACTIONS !== 'undefined') ACTIONS.langToggle = () => { i18nSet(I18N.lang === 'en' ? 'ar' : 'en'); };
+if (typeof ACTIONS !== 'undefined') ACTIONS.langToggle = async () => {
+  /* v5.05: the English pack takes a few seconds on a slow phone — show it's loading and ignore extra taps (a 2nd tap used to flip it back to Arabic) */
+  if (I18N._switching) return; const toEn = I18N.lang !== 'en'; I18N._switching = true;
+  document.querySelectorAll('.langsw').forEach(b => { b.style.opacity = '.55'; b.style.pointerEvents = 'none'; });
+  if (toEn && !I18N.exact && typeof toast === 'function') toast('جاري تحميل الإنجليزي… / Loading English…');
+  try { await i18nSet(toEn ? 'en' : 'ar'); } finally { I18N._switching = false; document.querySelectorAll('.langsw').forEach(b => { b.style.opacity = ''; b.style.pointerEvents = ''; }); }
+};
 /* native dialogs carry Arabic strings straight from the code */
 (function () {
   const wrap = name => { const base = window[name]; if (typeof base !== 'function') return; window[name] = function (msg, ...rest) { if (I18N.lang === 'en' && typeof msg === 'string') { const t = i18nTr(msg); if (t) msg = t; } return base.call(window, msg, ...rest); }; };
