@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0655-3e9dc6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0844-986307";</script>
 
 <script>
 'use strict';
@@ -20420,6 +20420,51 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (inv && fab.dataset.action !== 'materialNew') { fab.dataset.action = 'materialNew'; fab.dataset.arg = ''; fab.title = 'خامة جديدة'; fab.setAttribute('aria-label', 'خامة جديدة'); }
     else if (!inv && fab.dataset.action === 'materialNew') { fab.dataset.action = 'taskNew'; fab.title = 'مهمة سريعة'; fab.setAttribute('aria-label', 'مهمة جديدة'); }
   });
+})();
+/* =====================================================================
+   v5.04 — (المصنع) صنف ليه أكتر من قسم: فيه أصناف بيستخدمها كذا قسم مع بعض (مثلاً الألومنيوم والمعادن).
+   · «قسم الصنف» بقى: القسم الأساسي (منه بيتعمل الكود زي الأول) + «أقسام تانية بتستخدم الصنف» (اختيار أكتر من قسم).
+   · بيتحفظ في deptCodes (الأساسي أولهم)؛ جدول المخزن بيكتب الأقسام تحت اسم الصنف، وفلتر «كل الأقسام».
+   ===================================================================== */
+(function () {
+  if (window.__NF_MULTIDEPT__) return; window.__NF_MULTIDEPT__ = 1;
+  const depts = () => Object.keys(DEPT_CODES).filter(k => S.settings.departments.some(d => d.id === k));
+  const codes = () => { const seen = new Set(); return depts().map(k => ({ k, c: deptCode(k), n: deptName(k) })).filter(x => { if (seen.has(x.c)) return false; seen.add(x.c); return true; }); };
+  const codesOf = m => { const a = Array.isArray(m && m.deptCodes) && m.deptCodes.length ? m.deptCodes : (m && m.deptCode ? [m.deptCode] : []); return [...new Set(a.filter(Boolean))]; };
+  const nameOfCode = c => { const x = codes().find(y => y.c === c); return x ? x.n : c; };
+  window.nfItemDeptCodes = codesOf;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.mdchips{display:flex;flex-wrap:wrap;gap:6px}.mdchips label{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:13px;cursor:pointer;background:var(--surface)}
+.mdchips label.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--surface));font-weight:700}.mdchips label.dis{opacity:.45;pointer-events:none}.mdchips input{margin:0}
+.mdtags{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.mdtags span{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted)}
+</style>`);
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    let h = base.apply(this, arguments); m = m || {};
+    const dcM = /<select id="f-deptCode"[^>]*>[\s\S]*?<\/select>/.exec(h); if (!dcM) return h;
+    const selHtml = dcM[0]; const primary = ((/<option value="([^"]+)"[^>]*selected/.exec(selHtml) || [])[1]) || (codesOf(m)[0] || '');
+    const have = new Set(codesOf(m).filter(c => c !== primary));
+    const chips = `<div class="field full"><label>أقسام تانية بتستخدم الصنف (اختار أكتر من قسم)</label><div class="mdchips" id="md-chips">${codes().map(x => `<label class="${have.has(x.c) ? 'on' : ''} ${x.c === primary ? 'dis' : ''}" data-md="${esc(x.c)}"><input type="checkbox" value="${esc(x.c)}" ${have.has(x.c) ? 'checked' : ''} ${x.c === primary ? 'disabled' : ''}>${esc(x.n)} <span class="muted tiny">(${esc(x.c)})</span></label>`).join('')}</div><input type="hidden" name="deptCodesJson" id="f-deptCodesJson" value="${esc(JSON.stringify([primary].concat([...have]).filter(Boolean)))}"><div class="hint">الكود بيتعمل من القسم الأساسي بس.</div></div>`;
+    h = h.replace('>قسم الصنف</label>', '>قسم الصنف الأساسي (منه الكود)</label>');
+    const i = h.indexOf(selHtml) + selHtml.length; const close = h.indexOf('</div>', i); return close < 0 ? h + chips : h.slice(0, close + 6) + chips + h.slice(close + 6);
+  })(materialForm);
+  const sync = f => { const sel = f.querySelector('#f-deptCode'); const box = f.querySelector('#md-chips'); const hid = f.querySelector('#f-deptCodesJson'); if (!sel || !box || !hid) return; const p = sel.value;
+    box.querySelectorAll('label[data-md]').forEach(l => { const inp = l.querySelector('input'); const isP = l.dataset.md === p; if (isP) inp.checked = false; inp.disabled = isP; l.classList.toggle('dis', isP); l.classList.toggle('on', inp.checked); });
+    hid.value = JSON.stringify([p].concat([...box.querySelectorAll('input:checked')].map(x => x.value).filter(c => c !== p))); };
+  document.addEventListener('change', e => { const f = e.target.closest('#mform'); if (!f || !f.querySelector('#md-chips')) return; if (e.target.id === 'f-deptCode' || e.target.closest('#md-chips')) sync(f); });
+  const save0 = Store.save.bind(Store);
+  Store.save = (col, doc, o) => { if (col === 'materials' && doc && typeof doc === 'object' && typeof doc.deptCodesJson === 'string') { try { const arr = JSON.parse(doc.deptCodesJson || '[]'); const p = doc.deptCode || arr[0]; doc = Object.assign({}, doc, { deptCodes: [...new Set([p].concat(arr).filter(Boolean))] }); } catch (e) { /* ignore */ } delete doc.deptCodesJson; } return save0(col, doc, o); };
+  /* inventory: departments under the item name + a department filter */
+  if (typeof vInventory === 'function') vInventory = (base => function () {
+    const fl = (S.ui.filter.inventory ||= {}); const want = fl.mdept || '';
+    let h;
+    if (want && S.data.materials) { const all = S.data.materials; try { S.data.materials = new Map([...all].filter(([, m]) => codesOf(m).includes(want))); h = base.apply(this, arguments); } finally { S.data.materials = all; } } else h = base.apply(this, arguments);
+    if (h.indexOf('id="q-inventory"') < 0) return h;
+    const sel = `<select class="sel" id="fl-mdept" data-mdept="1"><option value="">كل الأقسام</option>${codes().map(x => `<option value="${esc(x.c)}" ${want === x.c ? 'selected' : ''}>${esc(x.n)}</option>`).join('')}</select>`;
+    h = h.replace(/(<select class="sel" id="fl-cat")/, sel + '$1');
+    Array.from(S.data.materials.values()).forEach(m => { const cs = codesOf(m); if (cs.length < 2 || !m.code) return; const re = new RegExp(`<td class="code[^"]*">${esc(m.code).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</td>`); const mm = re.exec(h); if (!mm) return; const j = h.indexOf('</td>', mm.index + mm[0].length); if (j < 0) return; h = h.slice(0, j) + `<div class="mdtags">${cs.map(c => `<span>${esc(nameOfCode(c))}</span>`).join('')}</div>` + h.slice(j); });
+    return h;
+  })(vInventory);
+  document.addEventListener('change', e => { if (!e.target.matches || !e.target.matches('[data-mdept]')) return; (S.ui.filter.inventory ||= {}).mdept = e.target.value; render(false); });
 })();
 </script>
 
