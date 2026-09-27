@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1513-e687ea";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1624-3da9fb";</script>
 
 <script>
 'use strict';
@@ -20793,6 +20793,201 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (!m.itemCat) setTimeout(() => { const f = document.getElementById('mform'); if (f && f.querySelector('#f-itemCat') && f.querySelector('#f-category')) apply(f, true); }, 0);
     return h;
   })(materialForm);
+})();
+/* =====================================================================
+   v5.12 — (المصنع) «طلب صنف جديد» بـ 3 عروض + «إذن صرف خامات» للمشروع
+   محمود: المكتب الفني / رئيس القسم يطلب صنف جديد بتوصيف + موردين مقترحين → المشتريات تجيب عروض 3 موردين →
+   رئيس القسم يعتمد فنيًا (كل عرض: مطابق صورة / مطابق معاينة / مرفوض) → مدير المصنع يختار ويعتمد السعر (فوق الحد: المالك) →
+   تكويد تلقائي + ربط الصنف بالمورد + أمر شراء. مورد مش متسجل: «+ مورد جديد» بفورم التسجيل الكامل ويرجع للعرض.
+   إذن صرف خامات للمشروع: كل بند — متكوّد وموجود → صرف (عهدة القسم بتأكيد رئيسه)، متكوّد ناقص → الموجود يتصرف والناقص أمر شراء
+   تلقائي بآخر مورد/سعر، خامة جديدة → «طلب صنف جديد». الحالة لكل بند في صفحة المشروع.
+   (بيبني على دورة v4.14 في 98-purchase-v414.js — نفس أنواع الطلبات rfqtech / rfqprice / custody.)
+   ===================================================================== */
+(function () {
+  if (window.__NF_NEWITEM3__) return; window.__NF_NEWITEM3__ = 1;
+  const MIN_OFFERS = 3;
+  const canIssue = () => writable() && (isAdmin() || ['head', 'manager', 'tech', 'office', 'purch'].includes(role()));
+  const offTotal = (p, of) => r2((p.rfqItems || []).reduce((a, it, i) => a + (+it.qty || 0) * (+((of.items || [])[i] || {}).price || 0), 0));
+  const sortedSups = () => sortBy(list('suppliers').filter(s => s && s.name && !s.deleted), s => s.name);
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.offtbl td,.offtbl th{vertical-align:middle}.offtbl .cheap{color:var(--good-ink,#4f8a6d);font-weight:700}.offtbl img.rfqthumb{width:44px;height:44px;border-radius:8px;object-fit:cover}
+.sugbox{display:grid;gap:6px}.isl{display:grid;grid-template-columns:2fr 90px 1.3fr 28px;gap:6px;align-items:start}.isl .nx{grid-column:1/-1;display:grid;grid-template-columns:1.2fr 2fr 90px 1fr;gap:6px}
+.isl input,.isl select{width:100%}.isl .stock{font-size:11px;color:var(--muted);padding-top:8px}
+@media(max-width:700px){.isl{grid-template-columns:1fr 80px}.isl .nx{grid-template-columns:1fr 1fr}}
+.issuecard .st{font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);white-space:nowrap}.issuecard .st.good{border-color:var(--good,#4f8a6d)}.issuecard .st.wait{border-color:var(--warn,#9a7a3a)}
+</style>`);
+
+  /* ---------- labels: «طلب عرض سعر» → «طلب صنف جديد» ---------- */
+  const relabel = h => h.replace(/طلب عرض سعر<\/button>/g, 'طلب صنف جديد</button>').replace('طلبات عروض الأسعار — خامات جديدة', 'طلبات أصناف جديدة (3 عروض أسعار)').replace('تُطلب بـ«طلب عرض سعر» من رئيس القسم: مورد + سعر + صورة', 'تُطلب بـ«طلب صنف جديد» من المكتب الفني / رئيس القسم: 3 عروض (سعر + صورة)');
+  if (typeof vPurchases === 'function') vPurchases = (base => function () { return relabel(base.apply(this, arguments)); })(vPurchases);
+
+  /* ---------- request form: suggested suppliers ---------- */
+  if (typeof rfqForm === 'function') rfqForm = (base => function (p) {
+    if (window.nfSyncCats) window.nfSyncCats(); let h = base.apply(this, arguments); p = p || {}; const sg = p.rfqSuggest || {}; const have = new Set(sg.ids || []);
+    const others = (sg.others || []).map(o => `${o.name}${o.phone ? ' — ' + o.phone : ''}`).join('\n');
+    const box = `<div class="field full"><label>موردين مقترحين (اختياري) — لو شايف مورد عنده الخامة</label><div class="sugbox"><select id="f-sugIds" multiple size="4" style="min-height:92px">${sortedSups().map(s => `<option value="${esc(s.id)}" ${have.has(s.id) ? 'selected' : ''}>${esc(s.name)}${s.phone ? ' — ' + esc(s.phone) : ''}</option>`).join('')}</select><textarea id="f-sugOthers" placeholder="مورد مش متسجل: الاسم — التليفون (كل مورد في سطر)">${esc(others)}</textarea></div><div class="hint">اضغط Ctrl (أو اضغط مطوّل على الموبايل) لاختيار أكتر من مورد.</div></div>`;
+    const k = h.indexOf('<div class="field full"><label>ملاحظات</label>'); return k < 0 ? h.replace(/<\/div>\s*$/, box + '</div>') : h.slice(0, k) + box + h.slice(k);
+  })(rfqForm);
+  const readSuggest = f => { const sel = f && f.querySelector('#f-sugIds'); const ta = f && f.querySelector('#f-sugOthers'); if (!sel && !ta) return null;
+    const ids = sel ? [...sel.selectedOptions].map(o => o.value) : []; const others = (ta ? ta.value : '').split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.split(/\s+[—\-–]\s+|[,،]\s*/); const phone = (l.match(/[+0-9٠-٩][0-9٠-٩\s-]{6,}/) || [''])[0].trim(); return { name: (m[0] || l).replace(phone, '').trim() || l, phone }; });
+    return { ids, others }; };
+  if (typeof saveRfq === 'function') saveRfq = (base => async function (f, p) {
+    const sg = readSuggest(f); const doc = await base.apply(this, arguments); if (doc && doc.id && sg) { await Store.update('purchases', doc.id, { rfqSuggest: sg }); } return doc;
+  })(saveRfq);
+  ACTIONS.rfqNew = arg => { if (!canNeed()) return; const pre = {}; if (arg && byId('orders', arg)) { pre.orderId = arg; const o = byId('orders', arg); if (o.brandId) pre.brandId = o.brandId; }
+    openModal({ title: 'طلب صنف جديد — خامة مش متكوّدة', wide: true, body: rfqForm(pre), onSubmit: f => saveRfq(f, {}) }); };
+
+  /* ---------- purchasing: up to N supplier offers ---------- */
+  const offerDialog = (p, of, preSid) => {
+    const items = p.rfqItems || []; of = of || {}; const rej = (p.rfqRejected || []).map(x => x.supplierId); const used = (p.rfqOffers || []).filter(x => x.id !== of.id).map(x => x.supplierId); const sid = preSid || of.supplierId || '';
+    const sg = p.rfqSuggest || {}; const sugIds = new Set(sg.ids || []);
+    const opt = s => `<option value="${s.id}" ${sid === s.id ? 'selected' : ''} ${rej.includes(s.id) || used.includes(s.id) ? 'disabled' : ''}>${esc(s.name)}${rej.includes(s.id) ? ' — مرفوض فنيًا' : used.includes(s.id) ? ' — عرضه متسجل' : ''}</option>`;
+    const all = sortedSups(); const sug = all.filter(s => sugIds.has(s.id)); const rest = all.filter(s => !sugIds.has(s.id));
+    const sel = `<select id="f-supplierId" name="supplierId" required><option value="">— اختر المورد —</option>${sug.length ? `<optgroup label="مقترحين من الطالب">${sug.map(opt).join('')}</optgroup><optgroup label="كل الموردين">${rest.map(opt).join('')}</optgroup>` : rest.map(opt).join('')}</select>`;
+    openModal({ title: `${of.id ? 'تعديل' : 'إضافة'} عرض مورد — ${p.number} (${(p.rfqOffers || []).length + (of.id ? 0 : 1)} من ${MIN_OFFERS})`, wide: true, submitLabel: 'حفظ العرض',
+      body: `<div class="form"><div class="field full"><label>المورد</label>${sel}<button type="button" class="btn xs" data-action="rfqNewSupplier" data-arg="${p.id}" style="margin-top:6px">${icon('plus')}مورد جديد (تسجيل كامل)</button>${(sg.others || []).length ? `<div class="hint">مقترح من الطالب ومش متسجل: ${sg.others.map(o => esc(o.name + (o.phone ? ' ' + o.phone : ''))).join('، ')} — سجّله بـ«مورد جديد».</div>` : ''}</div>
+        <div class="field full"><div class="tablewrap"><table><thead><tr><th>الخامة</th><th class="n">الكمية</th><th class="n">سعر الوحدة (${CUR()})</th><th>صورة الخامة من المورد</th></tr></thead><tbody>${items.map((it, i) => `<tr><td>${esc(it.name)}<div class="tiny muted">${esc(it.desc || '')}</div></td><td class="n">${fmtNum(it.qty)} ${esc(it.unit || '')}</td><td class="n"><input class="inp num" name="pr-${i}" type="number" step="any" min="0" style="width:110px;padding:4px 8px" value="${of.items && of.items[i] ? of.items[i].price : ''}" required></td><td><input type="file" name="ph-${i}" accept="image/*">${of.items && of.items[i] && of.items[i].thumb ? '<div class="tiny muted">فيه صورة ✓</div>' : ''}</td></tr>`).join('')}</tbody></table></div></div>
+        ${field('مدة التوريد (يوم)', inp('leadDays', of.leadDays || '', 'type="number" min="0"'))}${field('ملاحظة', `<textarea id="f-note" name="note">${esc(of.note || '')}</textarea>`, 'full')}</div>`,
+      onSubmit: async f => { const d = formData(f); const s = byId('suppliers', d.supplierId); if (!s) { toast('اختر المورد', 'err'); return false; }
+        const lines = []; for (let i = 0; i < items.length; i++) { const price = num(d['pr-' + i]); if (!(price > 0)) { toast(`اكتب سعر ${items[i].name}`, 'err'); return false; } const file = f.querySelector(`[name=ph-${i}]`)?.files?.[0]; let thumb = of.items && of.items[i] ? of.items[i].thumb || null : null, fileId = of.items && of.items[i] ? of.items[i].fileId || null : null; if (file) { const doc = await proofAttach(file, { kind: 'proof', ownerKind: 'purchase', ownerId: p.id, note: `صورة ${items[i].name} من ${s.name}` }); if (doc) { fileId = doc.id; thumb = doc.thumb || null; } if (!thumb && typeof fileToDataURL === 'function') { try { thumb = await lineImageThumb(await fileToDataURL(file)); } catch (e) { /* ignore */ } } } lines.push({ price, thumb, fileId }); }
+        if (lines.every(l => !l.thumb)) { toast('ارفق صورة الخامة من المورد لبند واحد على الأقل — رئيس القسم بيعتمد عليها', 'err'); return false; }
+        const cur = byId('purchases', p.id) || p; const me = S.session || {};
+        const offer = { id: of.id || uid(), supplierId: s.id, supplierName: s.name, items: lines, leadDays: num(d.leadDays) || null, note: d.note || '', at: nowISO(), byName: me.name || '' }; offer.total = offTotal(cur, offer);
+        const offers = (cur.rfqOffers || []).filter(x => x.id !== offer.id).concat([offer]);
+        await Store.update('purchases', p.id, { rfqOffers: offers }); toast(`اتسجل عرض ${s.name} (${offers.length} من ${MIN_OFFERS})`); return true; } });
+  };
+  ACTIONS.rfqQuote = arg => { const [id, sid] = String(arg || '').split(':'); const p = byId('purchases', id); if (!p || !canPurch() || p.status !== 'rfq' || !(p.rfqItems || []).length) return; offerDialog(p, null, sid); };
+  ACTIONS.rfqOfferEdit = arg => { const [id, oid] = String(arg).split(':'); const p = byId('purchases', id); const of = p && (p.rfqOffers || []).find(x => x.id === oid); if (!of || !canPurch() || p.status !== 'rfq') return; offerDialog(p, of); };
+  ACTIONS.rfqOfferDel = async arg => { const [id, oid] = String(arg).split(':'); const p = byId('purchases', id); if (!p || !canPurch() || p.status !== 'rfq') return; if (!(await confirmDlg('مسح العرض ده؟', 'امسح'))) return; await Store.update('purchases', id, { rfqOffers: (p.rfqOffers || []).filter(x => x.id !== oid) }); };
+  ACTIONS.rfqNewSupplier = id => { if (typeof canSuppliers === 'function' && !canSuppliers()) { toast('تسجيل الموردين للمشتريات', 'err'); return; } closeModal(); window.__nfAfterSupplier = doc => { if (doc && doc.id) ACTIONS.rfqQuote(`${id}:${doc.id}`); };
+    setTimeout(() => { ACTIONS.supplierNew(); const ov = document.getElementById('overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]') && window.__nfAfterSupplier) { window.__nfAfterSupplier = null; setTimeout(() => ACTIONS.rfqQuote(id), 50); } }); }, 80); };
+  if (typeof saveSupplier === 'function') saveSupplier = (base => async function () { const doc = await base.apply(this, arguments); const cb = window.__nfAfterSupplier; if (doc && doc.id && cb) { window.__nfAfterSupplier = null; setTimeout(() => cb(doc), 350); } return doc; })(saveSupplier);
+  /* send the offers to the head (technical approval) */
+  ACTIONS.rfqSendTech = async id => {
+    const p = byId('purchases', id); if (!p || !canPurch() || p.status !== 'rfq') return; const offers = p.rfqOffers || []; if (!offers.length) { toast('سجّل عرض مورد واحد على الأقل', 'err'); return; }
+    let why = ''; if (offers.length < MIN_OFFERS) { why = await new Promise(res => { openModal({ title: `${offers.length} عرض بس (المطلوب ${MIN_OFFERS})`, submitLabel: 'إرسال بالسبب', body: `<div class="form">${field('ليه أقل من 3 عروض؟ (بيظهر للي هيعتمد)', `<textarea id="f-why" name="why" required></textarea>`, 'full')}</div>`, onSubmit: f => { const v = (formData(f).why || '').trim(); if (!v) { toast('اكتب السبب', 'err'); return false; } res(v); return true; } }); const ov = document.getElementById('overlay'); if (ov) ov.addEventListener('click', e => { if (e.target.closest('[data-action=closemodal]')) res(''); }); }); if (!why) return; }
+    const me = S.session || {}; const cheap = offers.slice().sort((a, b) => a.total - b.total)[0];
+    const r = { id: uid(), type: 'rfqtech', purchaseId: p.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: p.deptId || null, amount: cheap.total, reason: `${p.number} — ${offers.length} عرض: ${offers.map(o => `${o.supplierName} ${fmtMoney(o.total)}`).join(' · ')}${why ? ` — أقل من 3: ${why}` : ''}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('rfqtech'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `عروض ${offers.length} موردين — الاعتماد الفني: علّم على كل عرض (مطابق من الصورة / بعد المعاينة / مرفوض)` }] };
+    await Store.save('requests', r, { silent: true }); await Store.update('purchases', p.id, { rfqTechReqId: r.id, status: 'rfq_tech', rfqQuote: cheap, rfqFewWhy: why || null, rfqVerdicts: {} });
+    const h = typeof poHead === 'function' ? poHead(p) : null; await notifyRole(typeof poHeadRole === 'function' ? poHeadRole(p) : 'head', `اعتماد فني — ${offers.length} عروض لخامة جديدة ${p.number}`, `${(p.rfqItems || []).map(it => it.name).join('، ')}\nشوف صور العروض وعلّم على كل عرض: مطابق من الصورة / بعد المعاينة / مرفوض.`, { id: `rfqt_${p.id}`, priority: 'high', fields: Object.assign({ purchaseId: p.id, deptId: p.deptId || null }, h ? { assigneeId: h.id, toRole: null } : {}) });
+    toast('اتبعت لرئيس القسم للاعتماد الفني'); render(false);
+  };
+  /* ---------- verdict / choice widgets inside the request dialogs ---------- */
+  const VERD = [['photo', 'مطابق (من الصورة)'], ['inspected', 'مطابق (بعد المعاينة)'], ['rej', 'مرفوض']];
+  const thumbs = (p, of) => (of.items || []).map((x, i) => x.thumb ? `<img class="rfqthumb" src="${x.thumb}" alt="" data-action="lightboxOffer" data-arg="${p.id}:${of.id}:${i}" style="width:44px;height:44px;cursor:zoom-in" title="${esc((p.rfqItems[i] || {}).name || '')}">` : '').join(' ');
+  ACTIONS.lightboxOffer = arg => { const [id, oid, i] = arg.split(':'); const p = byId('purchases', id); const of = p && (p.rfqOffers || []).find(x => x.id === oid); const x = of && of.items[+i]; if (x && x.thumb) lightbox(x.thumb, `${of.supplierName} — ${(p.rfqItems[+i] || {}).name || ''}`); };
+  const verdictTable = p => { const v = p.rfqVerdicts || {}; const offers = (p.rfqOffers || []).slice().sort((a, b) => a.total - b.total);
+    return `<div id="rq-offers" class="tablewrap" style="margin:8px 0"><table class="tbl offtbl"><thead><tr><th>المورد</th><th class="n">الإجمالي</th><th>الصور</th><th>الاعتماد الفني</th></tr></thead><tbody>${offers.map(o => `<tr><td>${esc(o.supplierName)}${o.leadDays ? `<div class="tiny muted">توريد ${o.leadDays} يوم</div>` : ''}</td><td class="n">${fmtMoney(o.total)}</td><td>${thumbs(p, o)}</td><td><select class="sel" data-ov="${o.id}">${VERD.map(([k, l]) => `<option value="${k}" ${(v[o.id] || 'photo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>${p.rfqFewWhy ? `<div class="banner warn">${icon('info')}<span>أقل من 3 عروض: ${esc(p.rfqFewWhy)}</span></div>` : ''}</div>`; };
+  const approvedOffers = p => { const v = p.rfqVerdicts || {}; return (p.rfqOffers || []).filter(o => v[o.id] && v[o.id] !== 'rej'); };
+  const choiceTable = p => { const offers = approvedOffers(p).sort((a, b) => a.total - b.total); if (!offers.length) return ''; const cur = p.rfqChosen || offers[0].id; const v = p.rfqVerdicts || {};
+    return `<div id="rq-choice" class="tablewrap" style="margin:8px 0"><table class="tbl offtbl"><thead><tr><th></th><th>المورد</th><th class="n">الإجمالي</th><th>فني</th><th>الصور</th></tr></thead><tbody>${offers.map((o, i) => `<tr><td><input type="radio" name="rfq-choice" value="${o.id}" ${o.id === cur ? 'checked' : ''}></td><td>${esc(o.supplierName)}${i === 0 ? ' <span class="cheap">· الأرخص</span>' : ''}</td><td class="n ${i === 0 ? 'cheap' : ''}">${fmtMoney(o.total)}</td><td class="tiny">${v[o.id] === 'inspected' ? 'بعد المعاينة' : 'من الصورة'}</td><td>${thumbs(p, o)}</td></tr>`).join('')}</tbody></table><div class="hint">اختار المورد اللي هيتكوّد عليه الصنف ويطلع له أمر الشراء. فوق ${fmtMoney(rfqOwnerAbove())} ${CUR()} بيروح للمالك كمان.</div></div>`; };
+  const injectFor = (r, host, where) => { const p = r && r.purchaseId && byId('purchases', r.purchaseId); if (!p || !(p.rfqOffers || []).length || !host) return;
+    if (r.type === 'rfqtech' && !document.getElementById('rq-offers')) host.insertAdjacentHTML(where, verdictTable(p));
+    if (r.type === 'rfqprice' && !document.getElementById('rq-choice')) host.insertAdjacentHTML(where, choiceTable(p)); };
+  ACTIONS.reqOpen = (base => id => { base(id); const r = byId('requests', id); if (!r || !['rfqtech', 'rfqprice'].includes(r.type) || !awaitingMe(r)) return; const t = document.getElementById('f-techMode') || document.getElementById('rq-msg'); if (t) injectFor(r, t, 'beforebegin'); const tm = document.getElementById('f-techMode'); const p = byId('purchases', r.purchaseId); if (tm && p && (p.rfqOffers || []).length) tm.style.display = 'none'; })(ACTIONS.reqOpen);
+  (() => { const base = ACTIONS.reqDecide; ACTIONS.reqDecide = arg => { base(arg); const [id, status] = String(arg).split(':'); const r = byId('requests', id); if (!r || status !== 'approved' || !['rfqtech', 'rfqprice'].includes(r.type)) return; const f = document.getElementById('mform'); const box = f && f.querySelector('.form'); if (box) injectFor(r, box, 'afterbegin'); const tm = document.getElementById('f-techMode'); const p = byId('purchases', r.purchaseId); if (tm && p && (p.rfqOffers || []).length) tm.closest('.field') ? tm.closest('.field').style.display = 'none' : tm.style.display = 'none'; }; })();
+  decideRequest = (base => async (id, status, note, opts = {}) => {
+    const r = byId('requests', id); const p = r && r.purchaseId ? byId('purchases', r.purchaseId) : null;
+    if (r && p && (p.rfqOffers || []).length && status === 'approved') {
+      if (r.type === 'rfqtech') { const sels = [...document.querySelectorAll('[data-ov]')]; const v = {}; if (sels.length) sels.forEach(s => { v[s.dataset.ov] = s.value; }); else (p.rfqOffers || []).forEach(o => { v[o.id] = (p.rfqVerdicts || {})[o.id] || 'photo'; });
+        if (!Object.values(v).some(x => x !== 'rej')) { toast('كل العروض مرفوضة — ارفض الطلب بدل الاعتماد', 'err'); return false; }
+        await Store.update('purchases', p.id, { rfqVerdicts: v }); }
+      if (r.type === 'rfqprice') { const ch = document.querySelector('input[name="rfq-choice"]:checked'); const offers = approvedOffers(byId('purchases', p.id)).sort((a, b) => a.total - b.total); const of = (ch && offers.find(o => o.id === ch.value)) || offers.find(o => o.id === p.rfqChosen) || offers[0];
+        if (of) { await Store.update('purchases', p.id, { rfqChosen: of.id, rfqQuote: of, supplierId: of.supplierId, supplier: of.supplierName });
+          if (of.total >= rfqOwnerAbove() && !(r.chain || []).includes('admin')) await Store.update('requests', r.id, { chain: (r.chain || []).concat(['admin']), amount: of.total });
+          else if (+r.amount !== of.total) await Store.update('requests', r.id, { amount: of.total }); } }
+    }
+    const ok = await base(id, status, note, opts);
+    if (ok !== false && r && p && (p.rfqOffers || []).length && status === 'rejected' && r.type === 'rfqtech') { const cur = byId('purchases', p.id); await Store.update('purchases', p.id, { rfqRejected: (cur.rfqRejected || []).concat((p.rfqOffers || []).filter(o => !(cur.rfqRejected || []).some(x => x.supplierId === o.supplierId)).map(o => ({ supplierId: o.supplierId, supplierName: o.supplierName, note: note || '', at: nowISO(), byName: S.session?.name || '' }))), rfqOffers: [], rfqVerdicts: {}, rfqQuote: null, status: 'rfq' }); }
+    return ok;
+  })(decideRequest);
+  applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+    const p = r && r.purchaseId ? byId('purchases', r.purchaseId) : null;
+    if (r && r.type === 'rfqtech' && p && (p.rfqOffers || []).length) {
+      const ok = approvedOffers(p).sort((a, b) => a.total - b.total); const by = S.session?.name || ''; const me = S.session || {}; if (!ok.length) return;
+      const cheap = ok[0]; const chain = ['manager'].concat(cheap.total >= rfqOwnerAbove() ? ['admin'] : []);
+      const r2q = { id: uid(), type: 'rfqprice', purchaseId: p.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: p.deptId || null, amount: cheap.total, reason: `${p.number} — مطابق فنيًا ${ok.length}: ${ok.map(o => `${o.supplierName} ${fmtMoney(o.total)}`).join(' · ')} — الأرخص ${cheap.supplierName}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain, step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `اعتماد فني: ${(p.rfqOffers || []).map(o => `${o.supplierName} ${(p.rfqVerdicts || {})[o.id] === 'rej' ? '✗' : '✓'}`).join('، ')} — مدير المصنع يختار المورد ويعتمد السعر` }] };
+      await Store.save('requests', r2q, { silent: true }); await Store.update('purchases', p.id, { rfqTech: { ok: true, mode: 'offers', byName: by, at: nowISO() }, rfqPriceReqId: r2q.id, status: 'rfq_price', rfqQuote: cheap, rfqChosen: cheap.id });
+      await notifyRole('manager', `اختيار مورد واعتماد سعر — ${p.number}`, `${r2q.reason}`, { id: `rfqp_${p.id}`, priority: 'high', fields: { purchaseId: p.id } }); return;
+    }
+    return base(r, w, patch, opts);
+  })(applyRequestEffects);
+  /* after coding: the supplier also serves the requesting department */
+  if (typeof rfqCodeAndOrder === 'function') rfqCodeAndOrder = (base => async function (p, by) {
+    const r = await base.apply(this, arguments); try { const cur = byId('purchases', p.id) || p; const s = cur.supplierId && byId('suppliers', cur.supplierId); const dc = deptCode(p.deptId || 'store'); if (s && dc) { const now = window.nfSupDepts ? window.nfSupDepts(s).codes : (s.deptCodes || []); if (!now.includes(dc) || !Array.isArray(s.deptCodes)) await Store.update('suppliers', s.id, { deptCodes: [...new Set(now.concat([dc]))] }); } } catch (e) { /* ignore */ } return r;
+  })(rfqCodeAndOrder);
+  /* ---------- the RFQ card on the purchase page: offers table ---------- */
+  const offersCard = p => { if (p.kind !== 'rfq') return ''; const offers = (p.rfqOffers || []).slice().sort((a, b) => a.total - b.total); const sg = p.rfqSuggest || {}; const v = p.rfqVerdicts || {};
+    const sug = (sg.ids || []).map(id => (byId('suppliers', id) || {}).name).filter(Boolean).concat((sg.others || []).map(o => `${o.name}${o.phone ? ' (' + o.phone + ')' : ''} — مش متسجل`));
+    return `<div class="card"><div class="cardhead"><h3>عروض الموردين (${offers.length} من ${MIN_OFFERS})</h3><div class="grow"></div>${p.status === 'rfq' && canPurch() ? `<button class="btn xs" data-action="rfqQuote" data-arg="${p.id}">${icon('plus')}عرض مورد</button>${offers.length ? `<button class="btn xs p" data-action="rfqSendTech" data-arg="${p.id}">${icon('check')}إرسال للاعتماد الفني</button>` : ''}` : ''}</div>
+      ${sug.length ? `<div class="small" style="margin-bottom:6px">موردين مقترحين من الطالب: <b>${sug.map(esc).join('، ')}</b></div>` : ''}
+      ${offers.length ? `<div class="tablewrap"><table class="tbl offtbl"><thead><tr><th>المورد</th><th class="n">الإجمالي</th><th>توريد</th><th>الصور</th><th>فني</th><th></th></tr></thead><tbody>${offers.map((o, i) => `<tr><td>${esc(o.supplierName)}${p.rfqChosen === o.id ? ' <span class="badge good">المختار</span>' : ''}</td><td class="n ${i === 0 ? 'cheap' : ''}">${fmtMoney(o.total)}${i === 0 && offers.length > 1 ? ' · الأرخص' : ''}</td><td class="tiny">${o.leadDays ? o.leadDays + ' يوم' : '—'}</td><td>${thumbs(p, o)}</td><td class="tiny">${v[o.id] ? (v[o.id] === 'rej' ? '✗ مرفوض' : v[o.id] === 'inspected' ? '✓ بعد المعاينة' : '✓ من الصورة') : '—'}</td><td>${p.status === 'rfq' && canPurch() ? `<button class="iconbtn" data-action="rfqOfferEdit" data-arg="${p.id}:${o.id}" title="تعديل">${icon('edit')}</button><button class="iconbtn" data-action="rfqOfferDel" data-arg="${p.id}:${o.id}" title="مسح">${icon('x')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<div class="muted small">${p.status === 'rfq' ? 'لسه مفيش عروض — سجّل عرض من كل مورد (سعر + صورة الخامة).' : '—'}</div>`}
+      ${p.rfqFewWhy ? `<div class="banner warn" style="margin-top:6px">${icon('info')}<span>أقل من 3 عروض: ${esc(p.rfqFewWhy)}</span></div>` : ''}</div>`; };
+  if (typeof vPurchaseDetail === 'function') vPurchaseDetail = (base => function (id) { let h = relabel(base.apply(this, arguments)); const p = byId('purchases', id); if (!p || p.kind !== 'rfq') return h;
+    h = h.replace(/<button class="btn xs p" data-action="rfqQuote" data-arg="[^"]*">[\s\S]*?<\/button>/, '').replace('طلب عرض سعر — خامة جديدة من', 'طلب صنف جديد من');
+    const c = offersCard(p); const k = h.indexOf('<div class="card tight">'); return k > 0 ? h.slice(0, k) + c + h.slice(k) : h + c; })(vPurchaseDetail);
+
+  /* ---------- 7) material issue for a project ---------- */
+  const matLabel = m => `${m.code || ''} ${m.name}${m.unit ? ' (' + m.unit + ')' : ''} — رصيد ${fmtNum(+m.qty || 0)}`;
+  const issueLine = (ln = {}) => `<div class="isl"><select name="i-mat"><option value="">— اختار صنف متكوّد —</option><option value="__new" ${ln.isNew ? 'selected' : ''}>+ خامة جديدة (مش متكوّدة)</option>${sortBy(list('materials'), m => m.name).map(m => `<option value="${m.id}" ${ln.materialId === m.id ? 'selected' : ''}>${esc(matLabel(m))}</option>`).join('')}</select><input name="i-qty" type="number" step="any" min="0" placeholder="الكمية" value="${ln.qty ?? ''}"><div class="stock" data-stock></div><button type="button" class="iconbtn" data-il="del">${icon('x')}</button>
+    <div class="nx" ${ln.isNew ? '' : 'hidden'}><input name="i-name" placeholder="اسم الخامة" value="${esc(ln.name || '')}"><input name="i-desc" placeholder="التوصيف الكامل / المواصفة" value="${esc(ln.desc || '')}"><select name="i-unit">${opts(S.settings.units, ln.unit || 'قطعة')}</select><select name="i-cat">${ITEM_CATS.map(c => `<option value="${c[0]}">${esc(c[1])}</option>`).join('')}</select></div></div>`;
+  document.addEventListener('change', e => { const sel = e.target.closest && e.target.closest('.isl select[name=i-mat]'); if (!sel) return; const row = sel.closest('.isl'); row.querySelector('.nx').hidden = sel.value !== '__new'; const m = sel.value && sel.value !== '__new' && byId('materials', sel.value); const st = row.querySelector('[data-stock]'); const q = num(row.querySelector('[name=i-qty]').value); st.textContent = m ? (+m.qty || 0) >= q && q > 0 ? 'موجود ✓ هيتصرف' : (+m.qty || 0) > 0 ? `الموجود ${fmtNum(m.qty)} — الباقي أمر شراء` : 'مش موجود — أمر شراء' : sel.value === '__new' ? 'طلب صنف جديد' : ''; });
+  document.addEventListener('input', e => { if (e.target.name === 'i-qty') { const s = e.target.closest('.isl').querySelector('select[name=i-mat]'); s.dispatchEvent(new Event('change', { bubbles: true })); } });
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-il]'); if (!b) return; const box = document.getElementById('islines'); if (!box) return; if (b.dataset.il === 'add') box.insertAdjacentHTML('beforeend', issueLine()); else if (box.querySelectorAll('.isl').length > 1) b.closest('.isl').remove(); });
+  ACTIONS.issueNew = orderId => {
+    if (!canIssue()) return; const o = byId('orders', orderId); if (!o) return; if (window.nfSyncCats) window.nfSyncCats();
+    const myDept = role() === 'head' ? (myDepts()[0] || '') : ((S.session && S.session.workerId && byId('workers', S.session.workerId) || {}).deptId || '');
+    openModal({ title: `إذن صرف خامات — ${o.code || ''} ${o.title || ''}`, wide: true, submitLabel: 'إرسال', body: `<div class="form">${field('القسم المستلم', `<select id="f-deptId" name="deptId">${opts(S.settings.departments.filter(d => !d.admin), myDept)}</select>`)}${field('مطلوب قبل', inp('expected', '', 'type="date"'))}
+      <div class="field full"><label>الخامات — اختار صنف متكوّد بالكمية، أو «خامة جديدة» واكتب توصيفها</label><div id="islines" style="display:grid;gap:8px">${issueLine()}</div><button type="button" class="btn sm" data-il="add" style="margin-top:6px">${icon('plus')}بند</button></div>
+      <div class="field full"><label>موردين مقترحين للخامات الجديدة (اختياري)</label><textarea id="f-sugOthers" placeholder="الاسم — التليفون (كل مورد في سطر)"></textarea></div>
+      ${field('ملاحظات', `<textarea name="notes"></textarea>`, 'full')}
+      <div class="banner info full" style="margin:0">${icon('info')}<span>الموجود في المخزن بيتصرف لعهدة القسم (رئيس القسم بيأكد)، الناقص بيطلع له أمر شراء على طول، والخامة الجديدة بتمشي دورة «طلب صنف جديد» (3 عروض + اعتماد).</span></div></div>`,
+      onSubmit: async f => { const d = formData(f); if (!d.deptId) { toast('اختار القسم', 'err'); return false; }
+        const rows = [...f.querySelectorAll('#islines .isl')].map(r => ({ mat: r.querySelector('[name=i-mat]').value, qty: num(r.querySelector('[name=i-qty]').value), name: (r.querySelector('[name=i-name]').value || '').trim(), desc: (r.querySelector('[name=i-desc]').value || '').trim(), unit: r.querySelector('[name=i-unit]').value, cat: r.querySelector('[name=i-cat]').value })).filter(x => x.mat && x.qty > 0);
+        if (!rows.length) { toast('أضف بند واحد على الأقل بكمية', 'err'); return false; }
+        if (rows.some(x => x.mat === '__new' && !x.name)) { toast('اكتب اسم الخامة الجديدة', 'err'); return false; }
+        const res = await submitIssue(o, d, rows, readSuggest(f)); if (!res) return false; toast(res); return true; } });
+  };
+  async function submitIssue(o, d, rows, sg) {
+    const me = S.session || {}; const iss = { id: uid(), no: `IS-${String(((o.matIssues || []).length + 1)).padStart(2, '0')}`, at: nowISO(), byId: me.id || null, byName: me.name || '', deptId: d.deptId, expected: d.expected || '', notes: d.notes || '', lines: [] };
+    const shortByMat = []; const newRows = []; let nIssue = 0; const errs = [];
+    for (const x of rows) {
+      if (x.mat === '__new') { const ln = { id: uid(), isNew: true, name: x.name, desc: x.desc, unit: x.unit, cat: x.cat, qty: x.qty }; iss.lines.push(ln); newRows.push(ln); continue; }
+      const m = byId('materials', x.mat); if (!m) continue; const avail = Math.max(0, +m.qty || 0); const give = Math.min(x.qty, avail); const short = r2(x.qty - give);
+      const ln = { id: uid(), materialId: m.id, name: m.name, code: m.code || '', unit: m.unit || '', qty: x.qty, fromStock: r2(give), short };
+      if (give > 0) { const r = { id: uid(), type: 'custody', materialId: m.id, qty: r2(give), deptId: d.deptId, orderId: o.id, issueRef: `${o.id}:${iss.id}:${ln.id}`, requesterId: me.workerId || me.id, requesterName: me.name || '', reason: `${m.code || ''} ${m.name} × ${fmtNum(give)} ${m.unit || ''} → ${deptName(d.deptId)} — ${o.code || ''} (إذن صرف ${iss.no})`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('custody'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `إذن صرف ${iss.no} للمشروع ${o.code || ''} — أمين المخزن يجهّز، ورئيس القسم يأكد الاستلام على العهدة` }] };
+        try { await Store.save('requests', r, { silent: true }); ln.custodyReqId = r.id; nIssue++; } catch (e) { errs.push(m.name); } }
+      if (short > 0) shortByMat.push({ ln, m, short });
+      iss.lines.push(ln);
+    }
+    /* shortages → one draft PO per last supplier */
+    const groups = {}; shortByMat.forEach(s => { const last = (s.m.suppliers || []).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0]; const sid = last ? last.supplierId : ''; (groups[sid] ||= []).push(Object.assign({ price: last ? +last.price || +s.m.cost || 0 : +s.m.cost || 0 }, s)); });
+    const pos = [];
+    for (const sid of Object.keys(groups)) { const s = sid && byId('suppliers', sid); const po = { id: uid(), number: nextPoNo(), kind: 'po', status: 'draft', deptId: d.deptId, orderId: o.id, brandId: o.brandId || null, supplierId: s ? s.id : null, supplier: s ? s.name : '', items: groups[sid].map(g => ({ materialId: g.m.id, name: g.m.name, unit: g.m.unit || '', qty: g.short, cost: g.price })), date: todayISO(), expected: d.expected || '', notes: `نقص خامات — إذن صرف ${iss.no} للمشروع ${o.code || ''}`, issueRef: `${o.id}:${iss.id}`, requestedBy: me.id || null, requestedByName: me.name || '', createdAt: nowISO() };
+      try { await Store.save('purchases', po, { silent: true }); groups[sid].forEach(g => { g.ln.poId = po.id; }); pos.push(po); } catch (e) { S.data.purchases && S.data.purchases.delete(po.id); groups[sid].forEach(g => { g.ln.poPending = true; }); errs.push('أمر شراء النقص'); } }
+    if (pos.length) await notifyRole('purch', `أمر شراء تلقائي — نقص خامات ${o.code || ''}`, pos.map(p => `${p.number}${p.supplier ? ' — ' + p.supplier : ''}: ${p.items.map(i => `${i.name} × ${fmtNum(i.qty)}`).join('، ')}`).join('\n') + '\nكمّل الأمر (توفر / سعر) وأرسله للاعتماد.', { id: `isspo_${iss.id}`, orderId: o.id, priority: 'high', fields: { purchaseId: pos[0].id } });
+    /* new materials → one «طلب صنف جديد» */
+    let rfq = null;
+    if (newRows.length) { rfq = { id: uid(), number: typeof nextRfqNo === 'function' ? nextRfqNo() : nextPoNo(), kind: 'rfq', status: 'rfq', deptId: d.deptId, brandId: o.brandId || null, orderId: o.id, rfqItems: newRows.map(l => ({ name: l.name, desc: l.desc, qty: l.qty, unit: l.unit, cat: l.cat })), rfqSuggest: sg || { ids: [], others: [] }, expected: d.expected || '', notes: `من إذن صرف ${iss.no} للمشروع ${o.code || ''}${d.notes ? ' — ' + d.notes : ''}`, date: todayISO(), supplier: '', items: [], issueRef: `${o.id}:${iss.id}`, requestedBy: me.id || null, requestedByName: me.name || '', createdAt: nowISO() };
+      try { await Store.save('purchases', rfq, { silent: true }); newRows.forEach(l => { l.rfqId = rfq.id; }); await notifyRole('purch', `طلب صنف جديد ${rfq.number} — من المشروع ${o.code || ''}`, `${newRows.map(x => `${x.name} (${x.desc}) × ${fmtNum(x.qty)} ${x.unit}`).join('\n')}\nهات عروض 3 موردين (سعر + صورة) من صفحة الطلب.`, { id: `rfq_${rfq.id}`, orderId: o.id, fields: { purchaseId: rfq.id } }); }
+      catch (e) { S.data.purchases && S.data.purchases.delete(rfq.id); newRows.forEach(l => { l.rfqPending = true; }); errs.push('طلب الصنف الجديد'); rfq = null; } }
+    if (errs.some(x => x === 'أمر شراء النقص' || x === 'طلب الصنف الجديد')) { const miss = iss.lines.filter(l => l.poPending || l.rfqPending); await notifyRole('purch', `إذن صرف ${iss.no} (${o.code || ''}) — محتاج تعمل الطلب`, `${miss.map(l => `${l.isNew ? 'خامة جديدة: ' + l.name + ' (' + (l.desc || '') + ')' : 'نقص: ' + l.name} × ${fmtNum(l.isNew ? l.qty : l.short)} ${l.unit || ''}`).join('\n')}\nماقدرش السيستم يعمله من حساب الطالب — اعمله من المشتريات.`, { id: `issmiss_${iss.id}`, orderId: o.id, priority: 'high' }).catch(() => {}); }
+    if (nIssue) await notifyRole('store', `إذن صرف ${iss.no} — ${o.code || ''}`, `جهّز للقسم ${deptName(d.deptId)}: ${iss.lines.filter(l => l.custodyReqId).map(l => `${l.code} ${l.name} × ${fmtNum(l.fromStock)} ${l.unit}`).join('، ')}\nرئيس القسم بيأكد الاستلام من الطلبات.`, { id: `iss_${iss.id}`, orderId: o.id, priority: 'high' }).catch(() => {});
+    await Store.update('orders', o.id, { matIssues: (byId('orders', o.id).matIssues || []).concat([iss]) });
+    const parts = []; if (nIssue) parts.push(`${nIssue} بند هيتصرف`); if (pos.length) parts.push(`${pos.length} أمر شراء للنقص`); if (rfq) parts.push('طلب صنف جديد'); if (errs.length) parts.push('وفيه بنود اتبعتت للمشتريات يعملوها');
+    return `إذن ${iss.no}: ${parts.join(' + ')}`;
+  }
+  const lineStatus = l => {
+    if (l.isNew) { const p = l.rfqId && byId('purchases', l.rfqId); if (!p) return [l.rfqPending ? 'عند المشتريات' : '—', 'wait'];
+      const map = { rfq: ['مستني عروض أسعار', 'wait'], rfq_tech: ['اعتماد فني', 'wait'], rfq_price: ['اعتماد السعر', 'wait'] }; if (map[p.status]) return [map[p.status][0] + ` · ${p.number}`, 'wait'];
+      const m = (p.items || [])[0] && byId('materials', p.items[0].materialId); return [`اتكوّد ${m ? m.code : ''} · أمر شراء ${p.number} — ${(PO_STATUS[p.status] || [p.status])[0]}`, p.status === 'received' ? 'good' : 'wait']; }
+    const out = []; let cls = 'good';
+    if (l.fromStock > 0) { const r = l.custodyReqId && byId('requests', l.custodyReqId); out.push(r ? (r.status === 'approved' ? `اتصرف ${fmtNum(l.fromStock)}` : r.status === 'rejected' ? 'الصرف اترفض' : `صرف ${fmtNum(l.fromStock)} — مستني تأكيد`) : '—'); if (!r || r.status !== 'approved') cls = 'wait'; }
+    if (l.short > 0) { const p = l.poId && byId('purchases', l.poId); out.push(p ? `نقص ${fmtNum(l.short)}: ${p.number} — ${(PO_STATUS[p.status] || [p.status === 'approval' ? 'في الاعتماد' : p.status])[0]}` : `نقص ${fmtNum(l.short)}: عند المشتريات`); if (!p || p.status !== 'received') cls = 'wait'; }
+    return [out.join(' · '), cls]; };
+  const issuesCard = o => { const iss = o.matIssues || []; const btns = `${canIssue() ? `<button class="btn xs p" data-action="issueNew" data-arg="${o.id}">${icon('plus')}إذن صرف خامات</button>` : ''}${canNeed() ? `<button class="btn xs" data-action="rfqNew" data-arg="${o.id}">${icon('plus')}طلب صنف جديد</button>` : ''}`; if (!iss.length && !btns) return '';
+    return `<div class="card issuecard"><div class="cardhead"><h3>خامات المشروع</h3><span class="badge">${iss.length}</span><div class="grow"></div>${btns}</div>${iss.length ? iss.slice().reverse().map(x => `<div style="margin-bottom:10px"><div class="small"><b class="code">${esc(x.no)}</b> · ${esc(deptName(x.deptId))} · ${fmtDate(x.at)} · ${esc(x.byName || '')}${x.expected ? ` · مطلوب قبل ${fmtDate(x.expected)}` : ''}</div><div class="tablewrap"><table class="tbl"><tbody>${x.lines.map(l => { const [t, c] = lineStatus(l); return `<tr><td>${l.code ? `<span class="code">${esc(l.code)}</span> ` : ''}${esc(l.name)}${l.isNew ? ' <span class="tiny muted">(جديدة)</span>' : ''}${l.desc ? `<div class="tiny muted">${esc(l.desc)}</div>` : ''}</td><td class="n">${fmtNum(l.qty)} ${esc(l.unit || '')}</td><td><span class="st ${c}">${esc(t)}</span></td></tr>`; }).join('')}</tbody></table></div></div>`).join('') : '<div class="muted small">لسه مفيش أذونات صرف للمشروع ده.</div>'}</div>`; };
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) { const h = base.apply(this, arguments); const o = byId('orders', id); if (!o) return h; const c = issuesCard(o); if (!c) return h; const k = h.indexOf('<div class="card"><div class="cardhead"><h3>مراحل التصنيع</h3>'); return k < 0 ? h + c : h.slice(0, k) + c + h.slice(k); })(vOrderDetail);
 })();
 </script>
 
