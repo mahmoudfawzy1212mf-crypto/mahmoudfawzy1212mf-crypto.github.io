@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1803-2a3a0a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1825-6d89f3";</script>
 
 <script>
 'use strict';
@@ -21233,7 +21233,7 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
 .aipanel .msg{padding:8px 10px;border-radius:12px;font-size:14px;line-height:1.5;max-width:92%}.aipanel .msg.me{background:color-mix(in srgb,var(--accent) 14%,var(--surface));justify-self:start}.aipanel .msg.bot{background:var(--surface-2,rgba(127,127,127,.08));justify-self:end}
 .aipanel .msg .acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .aipanel .aii{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line);align-items:center}.aipanel .aii input{flex:1;min-width:0}
-.aipanel .mic.on{background:var(--crit,#b35c5c);color:#fff;border-color:transparent}
+.aipanel .mic{width:42px;height:42px;touch-action:none;-webkit-user-select:none;user-select:none}.aipanel .mic.on{background:var(--crit,#b35c5c);color:#fff;border-color:transparent;animation:aipulse 1.1s infinite}@keyframes aipulse{0%{box-shadow:0 0 0 0 rgba(179,92,92,.55)}100%{box-shadow:0 0 0 12px rgba(179,92,92,0)}}
 .aipanel .hints{display:flex;flex-wrap:wrap;gap:6px}.aipanel .hints button{font-size:12px}
 .pofilt{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 </style>`);
@@ -21242,8 +21242,10 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
   const norm = s => String(s || '').toLowerCase().replace(/[ً-ْـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
   const STOP = new Set(['عايز', 'عاوز', 'اشوف', 'شوف', 'افتح', 'افتحلي', 'دخلني', 'دخلنى', 'ودخلني', 'على', 'علي', 'عن', 'في', 'من', 'بتاع', 'بتاعت', 'بتاعه', 'بتاعته', 'بتاعها', 'بتوع', 'شركه', 'شركة', 'مشروع', 'المشروع', 'ايه', 'اللي', 'الي', 'هات', 'ممكن', 'لو', 'سمحت', 'يا', 'و', 'ال', 'ده', 'دي', 'دا', 'الفلاني', 'كده', 'كل', 'صفحه', 'صفحة', 'لي', 'ليا', 'مع', 'عند', 'اعرض', 'وريني']);
   const strip = w => w.replace(/^(وال|بال|فال|كال|لل|ال|و)(?=\S{3,})/, '');
-  const toks = s => norm(s).split(' ').map(strip).filter(w => w.length >= 2 && !STOP.has(w));
-  const scoreName = (qt, name) => { const nt = toks(name); if (!nt.length) return 0; let hit = 0; nt.forEach(w => { if (w.length < 3 && !/\d/.test(w)) return; if (qt.some(q => q === w || (w.length >= 4 && q.length >= 4 && (q.startsWith(w) || w.startsWith(q))))) hit++; }); return hit ? hit + (hit / nt.length) * 0.5 : 0; };
+  const fold = w => w.replace(/[ذظ]/g, 'ز').replace(/ث/g, 'س').replace(/ق/g, 'ك').replace(/ض/g, 'د').replace(/^ا(?=\S{3,})/, '');
+  const toks = s => norm(s).split(' ').map(strip).filter(w => w.length >= 2 && !STOP.has(w)).map(fold);
+  const ed1 = (a, b) => { if (Math.abs(a.length - b.length) > 1) return false; let i = 0, j = 0, d = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++d > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return d + (a.length - i) + (b.length - j) <= 1; };
+  const scoreName = (qt, name) => { const nt = toks(name); if (!nt.length) return 0; let hit = 0; nt.forEach(w => { if (w.length < 3 && !/\d/.test(w)) return; if (qt.some(q => q === w || (w.length >= 4 && q.length >= 4 && (q.startsWith(w) || w.startsWith(q) || (w.length >= 5 && ed1(q, w)))))) hit++; }); return hit ? hit + (hit / nt.length) * 0.5 : 0; };
   const SECTIONS = [
     { k: 'purchases', re: /مشتري|شراء|امر شرا|اوامر شرا|\bpo\b/ },
     { k: 'issues', re: /اذن صرف|اذونات|صرف خام|خامات المشروع|خامات مشروع/ },
@@ -21297,8 +21299,8 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     const cs = candidates(qt, n);
     const top = cs[0]; const close = cs.filter(c => top && c.s >= top.s * 0.85 && c.kind === top.kind).slice(0, 5);
     if (top && close.length > 1 && close[1].s >= top.s * 0.98) return { choose: close.map(c => routeFor(sec, c, n)).filter(Boolean) };
-    if (top && top.s >= 0.6) { const r = routeFor(sec, top, n); if (r) return { route: r }; }
-    if (!top && sec) { const r = routeFor(sec, null, n); if (r) return { route: r }; }
+    if (top && top.s >= 0.6) { const r = routeFor(sec, top, n); if (r) return { route: r, strong: top.s >= 1.4 || (cs[1] ? top.s - cs[1].s >= 0.9 : top.s >= 1) }; }
+    if (!top && sec) { const r = routeFor(sec, null, n); if (r) return { route: r, strong: true }; }
     if (top && top.s > 0) { const r = routeFor(sec, top, n); if (r) return { maybe: r }; }
     return null;
   }
@@ -21309,13 +21311,15 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     if (typeof aiAvailable !== 'function' || !aiAvailable()) return { reply: 'مش لاقي حاجة بالاسم ده. جرّب تكتب اسم المشروع أو المورد أو الصفحة بشكل أوضح.' };
     const orders = seeView('orders') ? list('orders').slice(0, 200).map(o => `${o.id}|${o.code || ''}|${o.title || ''}|${clientOf(o)}`).join('\n') : '';
     const sups = seeView('suppliers') ? list('suppliers').slice(0, 200).map(s => `${s.id}|${s.name}`).join('\n') : '';
+    const wks = seeView('workers') ? list('workers').filter(w => !w.left).slice(0, 150).map(w => `${w.id}|${w.name}`).join('\n') : '';
+    const eqs = seeView('equip') ? list('equip').slice(0, 150).map(e => `${e.id}|${e.code || ''}|${e.name}`).join('\n') : '';
     let ctx = ''; try { ctx = typeof aiContextBase === 'function' ? JSON.stringify(aiContextBase()).slice(0, 9000) : ''; } catch (e) { ctx = ''; }
     const prompt = `أنت مساعد داخل نظام إدارة مصنع (عربي مصري بسيط). المستخدم كتب: «${text}».
 الصفحات المسموح له بيها (id=الاسم): ${allowedViews().join('، ')}
-المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nملخص البيانات: ${ctx}
+المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nالموظفين (id|name):\n${wks}\nالمعدات (id|code|name):\n${eqs}\nملخص البيانات: ${ctx}\nملحوظة: الكلام ده ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابقه مع أقرب اسم في القوايم (مثال «الجزي» = «الجازي»). لو طلب مشتريات مشروع رجّع route «#/purchases?order=<id>».
 رجّع JSON بس: {"reply":"رد قصير بالعامية","route":"#/<view>" أو "#/<view>/<id>" أو ""}. استخدم فقط صفحات من القائمة وأرقام id موجودة. متخترعش أرقام أو أسعار مش في الملخص.`;
-    try { const j = await aiJson(prompt, { maxTokens: 600 }); const route = String((j && j.route) || ''); const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route); let ok = null;
-      if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route; }
+    try { const j = await aiJson(prompt, { maxTokens: 600 }); const route = String((j && j.route) || ''); let route2 = route; const om = /^#\/purchases\?order=([\w-]+)$/.exec(route); if (om && byId('orders', om[1]) && seeView('purchases')) { (S.ui.filter.purchases ||= {}).orderId = om[1]; S.ui.filter.purchases.status = 'all'; route2 = '#/purchases'; } const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route2); let ok = null;
+      if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route2; }
       return { reply: String((j && j.reply) || 'تمام'), route: ok };
     } catch (e) { return { reply: (typeof AI_ERR === 'object' && AI_ERR[e && e.code]) || 'المساعد الذكي مش متاح دلوقتي.' }; }
   }
@@ -21328,36 +21332,74 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     if (panel()) { panel().querySelector('input').focus(); return; }
     document.body.insertAdjacentHTML('beforeend', `<div class="aipanel" id="aipanel" role="dialog" aria-label="المساعد"><div class="aih">${SPARK}<span>المساعد</span><div class="grow"></div><button type="button" class="iconbtn" data-aiclose aria-label="إغلاق">${icon('x')}</button></div>
       <div class="aim"><div class="msg bot">قولي عايز تروح فين — مثال: «مشروع الجازي، المشتريات بتاعته» أو «المعدات العطلانة في النجارة».<div class="hints">${['المشتريات المستنية اعتماد', 'طلبات الصيانة', 'المهام'].map(h => `<button type="button" class="btn xs" data-aihint="${esc(h)}">${esc(h)}</button>`).join('')}</div></div></div>
-      <form class="aii" id="aiform"><button type="button" class="iconbtn mic" data-aimic title="اتكلم" aria-label="اتكلم">${icon('mic')}</button><input id="aiq" class="inp" placeholder="اكتب أو اتكلم…" autocomplete="off"><button type="submit" class="btn sm p">${icon('arrow')}</button></form></div>`);
+      <form class="aii" id="aiform"><button type="button" class="iconbtn mic" data-aimic title="اتكلم" aria-label="اتكلم">${icon('mic')}</button><input id="aiq" class="inp" placeholder="اكتب — أو اضغط المايك واتكلم" autocomplete="off"><button type="submit" class="btn sm p">${icon('arrow')}</button></form><div id="aistat" class="tiny muted" style="padding:0 12px 8px" hidden></div></div>`);
     setTimeout(() => { const i = document.getElementById('aiq'); if (i && window.innerWidth > 900) i.focus(); }, 30);
   }
-  function closePanel(stop = true) { if (listening) { try { listening.stop(); } catch (e) { /* ignore */ } listening = null; } const p = panel(); if (p) p.remove(); }
-  async function handle(text) {
-    text = String(text || '').trim(); if (!text) return; addMsg('me', esc(text));
+  function closePanel(stop = true) { try { if (typeof stopRec === 'function') stopRec(); } catch (e) { /* ignore */ } const p = panel(); if (p) p.remove(); }
+  async function handle(text, voice) {
+    text = String(text || '').trim(); if (!text) return; addMsg('me', (voice ? '🎙 ' : '') + esc(text));
     const r = localResolve(text); const question = /^(كام|ايه|إيه|مين|امتى|إمتى|هل|ليه|فين)(\s|$)|[?؟]$/.test(text.trim());
-    if (r && r.route && !question) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); setTimeout(() => r.route.run(), 350); return; }
+    if (r && r.route && !question && (!voice || r.strong || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); setTimeout(() => r.route.run(), 350); return; }
     if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose); return; }
     addMsg('bot', '<span class="muted">بفكّر…</span>'); const box = panel().querySelector('.aim'); const thinking = box.lastElementChild;
     const a = await aiResolve(text); if (thinking) thinking.remove();
     const acts = []; if (a.route) acts.push({ label: 'افتح', run: () => go(a.route) }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
     addMsg('bot', mdLiteSafe(a.reply), acts);
+    if (voice && a.route && !question) setTimeout(() => go(a.route), 900);
   }
   const mdLiteSafe = t => (typeof mdLite === 'function' ? mdLite(t) : esc(t).replace(/\n/g, '<br>'));
-  function toggleMic(btn) {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { addMsg('bot', 'الجهاز ده مش بيدعم الكلام من هنا — استخدم زرار المايك اللي في الكيبورد واكتب.'); return; }
-    if (listening) { try { listening.stop(); } catch (e) { /* ignore */ } return; }
-    const rec = new SR(); rec.lang = 'ar-EG'; rec.interimResults = true; rec.continuous = false; const inp = document.getElementById('aiq'); let final = '';
-    rec.onresult = ev => { let t = ''; for (let i = 0; i < ev.results.length; i++) { t += ev.results[i][0].transcript; if (ev.results[i].isFinal) final = t; } if (inp) inp.value = t; };
-    rec.onerror = ev => { addMsg('bot', ev.error === 'not-allowed' ? 'اسمح للتطبيق يستخدم المايك من إعدادات المتصفح.' : 'ماسمعتش كويس — جرّب تاني.'); };
-    rec.onend = () => { listening = null; btn.classList.remove('on'); const t = (final || (inp && inp.value) || '').trim(); if (t) { if (inp) inp.value = ''; handle(t); } };
-    try { rec.start(); listening = rec; btn.classList.add('on'); } catch (e) { addMsg('bot', 'المايك مش متاح دلوقتي.'); }
+  /* v5.16 voice: server Whisper (if the owner set the key) → else browser recognition; hold-to-talk or tap; auto-stop after 1.5 s of silence */
+  let sttReady = null; const sttCheck = async () => { if (sttReady !== null) return sttReady; try { if (!S.sb || !S.sb.rpc || (typeof isStudioz === 'function' && isStudioz())) return (sttReady = false); const { data, error } = await S.sb.rpc('nf_stt_ready'); sttReady = !error && data === true; } catch (e) { sttReady = false; } return sttReady; };
+  window.nfSttReset = () => { sttReady = null; };
+  const hintNames = () => [].concat(list('orders').slice(0, 40).map(o => `${o.title || ''} ${clientOf(o)}`), list('suppliers').slice(0, 30).map(x => x.name), list('workers').filter(w => !w.left).slice(0, 30).map(w => w.name)).filter(Boolean).join('، ');
+  const status = t => { const st = panel() && panel().querySelector('#aistat'); if (st) { st.textContent = t || ''; st.hidden = !t; } };
+  let rec = null; // { stop(), kind }
+  const setOn = on => { const b = panel() && panel().querySelector('[data-aimic]'); if (b) b.classList.toggle('on', !!on); };
+  function stopRec() { if (rec) { try { rec.stop(); } catch (e) { /* ignore */ } } }
+  async function startServerRec() {
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }); } catch (e) { addMsg('bot', 'اسمح للتطبيق يستخدم المايك من إعدادات التليفون/المتصفح.'); return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    let mr; try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined); } catch (e) { stream.getTracks().forEach(t => t.stop()); return startBrowserRec(true); }
+    const chunks = []; mr.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    let ctx = null, raf = 0, spoke = false, lastLoud = Date.now(); const t0 = Date.now();
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream); const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an); const buf = new Uint8Array(an.fftSize);
+      const tick = () => { an.getByteTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; } const rms = Math.sqrt(sum / buf.length); const now = Date.now(); if (rms > 0.035) { spoke = true; lastLoud = now; }
+        const secs = Math.round((now - t0) / 1000); status(spoke ? `بسمعك… ${secs}ث — اسكت ثانية ونص وهبعت` : 'اتكلم…');
+        if ((spoke && now - lastLoud > 1500) || now - t0 > 20000 || (!spoke && now - t0 > 7000)) { stopRec(); return; } raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); } catch (e) { /* no analyser: hold / tap again to stop */ }
+    const done = new Promise(res => { mr.onstop = res; });
+    rec = { kind: 'server', stop: () => { if (mr.state !== 'inactive') mr.stop(); } }; setOn(true); mr.start(250);
+    await done; cancelAnimationFrame(raf); stream.getTracks().forEach(t => t.stop()); try { ctx && ctx.close(); } catch (e) { /* ignore */ } rec = null; setOn(false);
+    if (!spoke && ctx) { status(''); addMsg('bot', 'ماسمعتش صوت — قرّب التليفون وجرّب تاني.'); return; }
+    const blob = new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm') }); if (blob.size < 1500) { status(''); return; }
+    status('بكتب كلامك…');
+    try { const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = rej; fr.readAsDataURL(blob); });
+      const r = await S.sb.functions.invoke('stt', { body: { audio: b64, mime: blob.type, hint: hintNames() } }); const j = (r && r.data) || {}; status('');
+      if (j.text) { handle(j.text, true); return; }
+      if (j.error === 'no_key' || j.error === 'bad_key') { sttReady = false; addMsg('bot', j.error === 'bad_key' ? 'مفتاح OpenAI على السيرفر مش شغال — حدّثه من الإعدادات. هستخدم سماع المتصفح دلوقتي.' : 'خدمة الصوت مش متفعّلة — هستخدم سماع المتصفح.'); return; }
+      addMsg('bot', 'ماقدرتش أفهم الصوت — جرّب تاني أو اكتب.');
+    } catch (e) { status(''); addMsg('bot', 'مشكلة في الاتصال — جرّب تاني.'); }
   }
+  function startBrowserRec(quiet) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { if (!quiet) addMsg('bot', 'الجهاز ده مش بيدعم الكلام من هنا — استخدم زرار المايك اللي في الكيبورد واكتب.'); return; }
+    const r = new SR(); r.lang = 'ar-EG'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1; const inp = document.getElementById('aiq'); let final = '', last = Date.now(), timer = 0;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { try { r.stop(); } catch (e) { /* ignore */ } }, final || (inp && inp.value) ? 1500 : 7000); };
+    r.onresult = ev => { let fin = '', tmp = ''; for (let i = 0; i < ev.results.length; i++) { const t = ev.results[i][0].transcript; if (ev.results[i].isFinal) fin += t + ' '; else tmp += t; } final = fin.trim(); if (inp) inp.value = (fin + tmp).trim(); last = Date.now(); status('بسمعك… اسكت ثانية ونص وهبعت'); arm(); };
+    r.onerror = ev => { if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') addMsg('bot', 'اسمح للتطبيق يستخدم المايك من إعدادات المتصفح.'); else if (ev.error !== 'aborted' && ev.error !== 'no-speech') addMsg('bot', 'ماسمعتش كويس — جرّب تاني.'); };
+    r.onend = () => { clearTimeout(timer); rec = null; setOn(false); status(''); const t = (final || (inp && inp.value) || '').trim(); if (t) { if (inp) inp.value = ''; handle(t, true); } };
+    try { r.start(); rec = { kind: 'browser', stop: () => r.stop() }; setOn(true); status('اتكلم…'); arm(); } catch (e) { addMsg('bot', 'المايك مش متاح دلوقتي.'); }
+  }
+  async function startRec() { if (rec) return; if (await sttCheck()) return startServerRec(); return startBrowserRec(); }
+  /* hold-to-talk: press & hold = record until release; a short tap = record until silence; tap again = stop */
+  let downAt = 0, fromDown = false;
+  document.addEventListener('pointerdown', e => { const b = e.target.closest && e.target.closest('[data-aimic]'); if (!b) return; e.preventDefault(); if (rec) { stopRec(); fromDown = false; return; } downAt = Date.now(); fromDown = true; startRec(); });
+  document.addEventListener('pointerup', e => { if (!fromDown) return; fromDown = false; if (Date.now() - downAt > 600) setTimeout(stopRec, 250); });
+  document.addEventListener('contextmenu', e => { if (e.target.closest && e.target.closest('[data-aimic]')) e.preventDefault(); });
   document.addEventListener('click', e => {
     const t = e.target.closest && e.target.closest('[data-aifab],[data-aiclose],[data-aimic],[data-aihint]'); if (!t) return;
     if (t.dataset.aifab !== undefined) { panel() ? closePanel() : openPanel(); return; }
     if (t.dataset.aiclose !== undefined) { closePanel(); return; }
-    if (t.dataset.aimic !== undefined) { toggleMic(t); return; }
+    if (t.dataset.aimic !== undefined) return;
     if (t.dataset.aihint) handle(t.dataset.aihint);
   });
   document.addEventListener('submit', e => { if (e.target.id !== 'aiform') return; e.preventDefault(); const i = document.getElementById('aiq'); const v = i.value; i.value = ''; handle(v); });
@@ -21373,6 +21415,21 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
   })(vPurchases);
   document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-pofclear]')) { if (S.ui.filter.purchases) delete S.ui.filter.purchases.orderId; render(false); } });
   window.nfAiResolve = localResolve;
+})();
+
+/* ---------- v5.16: voice engine settings (owner only) — the OpenAI key goes straight to the server; never shown or stored in the browser ---------- */
+EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
+  const hosted = !!(S.sb && S.sb.rpc) && !(typeof isStudioz === 'function' && isStudioz());
+  setTimeout(async () => { const box = document.getElementById('sttstate'); if (!box || !hosted) return; if (window.nfSttReset) window.nfSttReset(); let ok = false; try { const { data } = await S.sb.rpc('nf_stt_ready'); ok = data === true; } catch (e) { /* offline */ } box.innerHTML = ok ? '<span class="badge good">شغّال: التعرّف الاحترافي (Whisper) — دقة عالية للعامية</span>' : '<span class="badge warn">بدون مفتاح — بيستخدم تعرّف الموبايل/المتصفح المدمج</span>'; }, 50);
+  return `<form class="card" id="sttform"><h3>جودة الصوت في المساعد الذكي</h3><p class="small ink2" style="margin:6px 0 12px">افتراضيًا المايك بيستخدم التعرّف المدمج في الموبايل. لدقة أعلى بكتير في العامية المصرية وأسماء المشاريع والموردين، ضيف مفتاح OpenAI (Whisper) — التكلفة تقريبًا 0.006$ للدقيقة. المفتاح بيتحفظ على السيرفر بس ومش بيظهر تاني.</p>
+    <div id="sttstate" style="margin-bottom:10px">${hosted ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">متاح في نسخة المصنع المستضافة فقط</span>'}</div>
+    ${hosted && isAdmin() ? `<div class="form">${field('مفتاح OpenAI (يبدأ بـ sk-)', inp('okey', '', 'type="password" class="ltr" autocomplete="new-password" placeholder="sk-…"'), 'full')}</div>
+    <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap"><button type="submit" class="btn p">حفظ على السيرفر</button><button type="button" class="btn" data-sttdel>إلغاء المفتاح</button></div>` : ''}</form>`;
+} };
+(() => {
+  const save = async (key) => { try { const { error } = await S.sb.rpc('nf_set_openai_key', { p_key: key }); if (error) { toast('تعذّر الحفظ: ' + (/bad key/.test(error.message) ? 'المفتاح مش صحيح' : error.message), 'err'); return false; } } catch (e) { toast('تعذّر الحفظ', 'err'); return false; } if (window.nfSttReset) window.nfSttReset(); return true; };
+  document.addEventListener('submit', async ev => { if (ev.target.id !== 'sttform') return; ev.preventDefault(); if (!isAdmin()) return; const i = ev.target.querySelector('[name=okey]'); const k = String((i && i.value) || '').trim(); if (!/^sk-\S{17,}$/.test(k)) { toast('اكتب مفتاح صحيح يبدأ بـ sk-', 'err'); return; } if (await save(k)) { i.value = ''; toast('تم — المايك دلوقتي بيستخدم Whisper'); render(false); } });
+  document.addEventListener('click', async ev => { if (!(ev.target.closest && ev.target.closest('[data-sttdel]'))) return; if (!isAdmin() || !confirm('إلغاء مفتاح Whisper والرجوع للتعرّف المدمج؟')) return; if (await save('')) { toast('أُلغي — رجع للتعرّف المدمج'); render(false); } });
 })();
 </script>
 
