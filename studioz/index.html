@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-0551-3b6f4d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-0612-d1c58c";</script>
 
 <script>
 'use strict';
@@ -10215,7 +10215,7 @@ const draftsWrite = o => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(
 const draftKey = f => { const m = f.closest('.modal, #modalroot'); const t = m && m.querySelector('h2, h3, .mtitle'); return 'd:' + ((t && t.textContent.trim()) || f.id || 'form').slice(0, 80); };
 function draftCapture(f) { const vals = {}; let any = false; $$('input,textarea,select', f).forEach(el => { if (!el.name || el.type === 'file' || el.type === 'password' || el.type === 'hidden' || el.type === 'submit') return; const v = el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? el.value || 'on' : '') : el.value; if (v) any = true; vals[el.name + (el.type === 'radio' ? ':' + el.value : '')] = v; }); return any ? vals : null; }
 let _draftTimer = null;
-document.addEventListener('input', e => { const f = e.target.closest('#mform'); if (!f) return; clearTimeout(_draftTimer); _draftTimer = setTimeout(() => { const v = draftCapture(f); const d = draftsRead(); if (v) d[draftKey(f)] = { v, at: nowISO(), path: location.hash }; else delete d[draftKey(f)]; draftsWrite(d); }, 1000); });
+document.addEventListener('input', e => { const f = e.target.closest('#mform'); if (!f) return; clearTimeout(_draftTimer); _draftTimer = setTimeout(() => { if (!document.contains(f)) return; /* v5.01: form already submitted/closed — don't resurrect its draft */ const v = draftCapture(f); const d = draftsRead(); if (v) d[draftKey(f)] = { v, at: nowISO(), path: location.hash }; else delete d[draftKey(f)]; draftsWrite(d); }, 1000); });
 document.addEventListener('submit', e => { const f = e.target.closest('#mform'); if (!f) return; const d = draftsRead(); delete d[draftKey(f)]; draftsWrite(d); }, true);
 /* restore a draft when the same form opens again (only fills empty fields) */
 const _mo = new MutationObserver(() => { const f = document.querySelector('#mform'); if (!f || f._draftChecked) return; f._draftChecked = true; const d = draftsRead(); const k = draftKey(f); const dr = d[k]; if (!dr || !dr.v) return; if (Date.now() - new Date(dr.at).getTime() > 3 * 864e5) { delete d[k]; draftsWrite(d); return; } let n = 0; Object.entries(dr.v).forEach(([name, v]) => { const [nm, rv] = name.split(':'); const els = $$(`[name="${nm}"]`, f); els.forEach(el => { if (el.type === 'checkbox') { if (!el.checked && v) { el.checked = true; n++; } } else if (el.type === 'radio') { if (el.value === rv && v && !el.checked) { el.checked = true; n++; } } else if (!el.value && v) { el.value = v; n++; } }); }); if (n) toast(`استُعيدت مسودة لم تُحفظ (${fmtDate(dr.at.slice(0, 10))} ${dr.at.slice(11, 16)}) — راجعها ثم احفظ`); });
@@ -20265,6 +20265,125 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       try { if (typeof pushSend === 'function') pushSend(['role:admin'], `دفعة آجلة مستحقة — ${p.supplier || ''}`, `${p.number} · ${fmtMoney(remaining(p))} ${CUR()}`, `/#/purchases/${p.id}`, 'podue'); } catch (e) { /* ignore */ }
     });
   });
+})();
+/* =====================================================================
+   v5.01 — شاشة «بند احترافي» في عرض السعر (بـ«ابدأ» من محمود، 27 سبتمبر)
+   · زرار «+ بند احترافي» في فورم عرض السعر ← شاشة: صورة، الاسم بالإنجليزي، الوصف، المقاسات (ط × ع × ا + الوحدة)،
+     الخامات، التشطيب — كله إنجليزي (علشان التمبلت)، الكمية والوحدة والسعر، ومعاينة حية بشكل التمبلت
+     (Priced Works Summary لـ Ninety/Elmen، وكارت المنتج لـ lōf).
+   · البند بيتحفظ بـ titleEn/descEn/spec — التمبلتات بتقراهم (lōf itemView ← titleEn/descEn، والباقي «العنوان | الوصف»).
+     البند الاحترافي خانة وصفه للقراءة بس، والدوس عليه بيفتح الشاشة للتعديل.
+   · «احفظ في الكتالوج» (للي يقدر يضيف منتجات: المالك/المكتب/الفني): منتج جديد بكود + قسم + الصورة كغلاف + البيانات
+     الإنجليزي، والبند بيتربط بيه.
+   ===================================================================== */
+(function () {
+  if (window.__NF_QLINE__) return; window.__NF_QLINE__ = 1;
+  const AR = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
+  const DU = { mm: 'mm', cm: 'cm', m: 'm' };
+  const canCatalog = () => typeof canFiles === 'function' && canFiles();
+  const dimsStr = sp => { const v = [sp.L, sp.W, sp.H].map(x => String(x == null ? '' : x).trim()).filter(Boolean); return v.length ? `${v.join(' × ')} ${DU[sp.du] || 'mm'}` : ''; };
+  const matStr = sp => [sp.materials, sp.finish ? `Finish: ${sp.finish}` : ''].map(x => String(x || '').trim()).filter(Boolean).join(', ');
+  const restOf = sp => [String(sp.desc || '').trim(), dimsStr(sp), matStr(sp)].filter(Boolean).join(' — ');
+  const compose = sp => { const t = String(sp.title || '').trim(); const parts = [String(sp.desc || '').trim() || `Supply of ${t}`, dimsStr(sp), matStr(sp)].filter(Boolean); return { titleEn: t, descEn: parts.join(' — ') }; };
+  const lineDesc = sp => { const t = String(sp.title || '').trim(); const r = restOf(sp); return r ? `${t} | ${r}` : t; };
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.qlpv{border:1px solid var(--line);border-radius:10px;background:#fff;color:#1a1a1a;font-family:Helvetica,Arial,sans-serif;direction:ltr;text-align:left;overflow:hidden}
+.qlpv table{width:100%;border-collapse:collapse;font-size:11px}.qlpv th{background:#2b2b2b;color:#fff;font-weight:700;padding:5px 6px;font-size:10px;text-align:left}
+.qlpv td{padding:6px;vertical-align:top;border-bottom:1px solid #c9c9c9}.qlpv td.n{text-align:right;white-space:nowrap}
+.qlpv .t{font-weight:700;font-size:11.5px}.qlpv .by{display:block;font-size:9px;color:#6b6b6b;letter-spacing:.3px;margin-top:1px}.qlpv .x{display:block;font-size:10.5px;color:#555;margin-top:2px;white-space:pre-wrap}
+.qlpv .lofc{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:10px;align-items:start}.qlpv .lofc .im{width:120px;height:90px;border-radius:6px;background:#f2f2f0;display:grid;place-items:center;overflow:hidden}.qlpv .lofc .im img{width:100%;height:100%;object-fit:cover}
+.qlpv .lofc .t{font-size:13px}.qlpv .lofc .d{font-size:11px;color:#333;margin-top:4px}.qlpv .lofc .d b{display:block;color:#1a1a1a}
+.qldims{display:grid;grid-template-columns:1fr auto 1fr auto 1fr 72px;gap:4px;align-items:center}.qldims span{color:var(--muted);font-size:12px;text-align:center}
+.line input[data-ql]{cursor:pointer;background:var(--surface-2,var(--surface))}
+</style>`);
+
+  /* ---- line rows: carry the spec; a spec line's text opens the screen ---- */
+  if (typeof lineRows === 'function') lineRows = (base => function (items) {
+    const arr = items || []; let h = base.apply(this, arguments); if (!arr.some(it => it && it.spec)) return h;
+    const tmp = document.createElement('div'); tmp.innerHTML = h; const rows = [...tmp.querySelectorAll('.line')]; let k = 0;
+    (arr.length ? arr : [{}]).forEach(it => { const row = rows[k++]; if (!row || !it || it.sec || !it.spec) return; const d = row.querySelector('[name=l-desc]'); if (!d) return;
+      d.setAttribute('readonly', ''); d.setAttribute('data-ql', '1'); d.title = 'بند احترافي — دوس للتعديل';
+      d.insertAdjacentHTML('afterend', `<input type="hidden" name="l-spec" value="${esc(JSON.stringify(it.spec))}"><input type="hidden" name="l-sdesc" value="${esc(it.desc || '')}">`); });
+    return tmp.innerHTML;
+  })(lineRows);
+  if (typeof readLines === 'function') readLines = (base => function (f) {
+    const out = base.apply(this, arguments); const rows = $$('#lines .line', f).filter(l => !l.dataset.sec && String((l.querySelector('[name=l-desc]') || {}).value || '').trim()); let k = 0;
+    return out.map(it => { if (!it || it.sec) return it; const row = rows[k++]; const sj = row && row.querySelector('[name=l-spec]'); if (!sj || !sj.value) return it;
+      let sp = null; try { sp = JSON.parse(sj.value); } catch (e) { sp = null; } if (!sp) return it;
+      const sd = (row.querySelector('[name=l-sdesc]') || {}).value || ''; if (sd && sd !== it.desc) return it;
+      return Object.assign({}, it, compose(sp), { spec: sp }); });
+  })(readLines);
+
+  /* ---- the screen ---- */
+  function preview(sp, brand, byTag, img, qty, unit, price) {
+    const c = compose(sp); const tot = (+qty || 0) * (+price || 0); const money = v => (typeof fmtMoney === 'function' ? fmtMoney(v) : v);
+    if (!c.titleEn) return `<div class="qlpv" style="padding:14px;color:#888;font-size:12px">Type the item name to see how it looks in the quotation…</div>`;
+    if (brand === 'lof') { const parts = c.descEn.split(' — '); return `<div class="qlpv"><div class="lofc"><div class="im">${img ? `<img src="${esc(img)}" alt="">` : '<span style="color:#aaa;font-size:11px">no photo</span>'}</div><div><div class="t">${esc(c.titleEn)}</div><div class="d">${esc(parts[0] || '')}${parts[1] ? `<b>${esc(parts[1])}</b>` : ''}${parts.slice(2).map(esc).join(' — ')}</div><div class="d" style="margin-top:6px">${money(qty || 0)} ${esc(unit || '')} × ${money(price || 0)} = <b style="display:inline">${money(tot)}</b></div></div></div></div>`; }
+    const rest = restOf(sp);
+    return `<div class="qlpv"><table><thead><tr><th style="width:26px">#</th><th>Description</th><th>Unit</th><th class="n">Qty</th><th class="n">Unit rate</th><th class="n">Total</th></tr></thead><tbody><tr><td>1.1</td><td><span class="t">${esc(c.titleEn)}</span><span class="by">BY ${esc(byTag)}</span>${rest ? `<span class="x">${esc(rest)}</span>` : ''}</td><td>${esc(unit || '')}</td><td class="n">${money(qty || 0)}</td><td class="n">${money(price || 0)}</td><td class="n"><b>${money(tot)}</b></td></tr></tbody></table></div>`;
+  }
+  function byTagOf(brand) { const B = { alu: 'NINETY FABRICATION', elm: 'ELMEN', lof: 'LOF' }; return B[brand] || String((typeof brandName === 'function' ? brandName(brand) : brand) || '').toUpperCase(); }
+  function nextCode(brand) { const pre = `${String(brand || 'NF').toUpperCase().slice(0, 3)}-Q`; const n = list('products').filter(p => String(p.code || '').startsWith(pre)).length + 1; let c = `${pre}${String(n).padStart(3, '0')}`; let i = n; while (list('products').some(p => (p.code || '').toLowerCase() === c.toLowerCase())) { i++; c = `${pre}${String(i).padStart(3, '0')}`; } return c; }
+  function openScreen(f, recalc, row) {
+    const brand = (f.querySelector('[name=brandId]') || {}).value || ''; let sp = {}; let img = ''; let qty = 1, unit = 'قطعة', price = '';
+    if (row) { try { sp = JSON.parse((row.querySelector('[name=l-spec]') || {}).value || '{}'); } catch (e) { sp = {}; } img = (row.querySelector('[name=l-img]') || {}).value || ''; qty = (row.querySelector('[name=l-qty]') || {}).value || 1; unit = (row.querySelector('[name=l-unit]') || {}).value || 'قطعة'; price = (row.querySelector('[name=l-price]') || {}).value || ''; }
+    const colls = typeof brandCollections === 'function' ? brandCollections(brand) : [];
+    const box = document.createElement('div'); box.className = 'overlay sub';
+    const en = (name, label, v, ph, ta) => `<div class="field ${ta ? 'full' : ''}"><label>${label}</label>${ta ? `<textarea name="${name}" dir="ltr" rows="2" placeholder="${esc(ph)}">${esc(v || '')}</textarea>` : `<input name="${name}" dir="ltr" value="${esc(v || '')}" placeholder="${esc(ph)}">`}</div>`;
+    box.innerHTML = `<form class="modal wide" id="qlform" style="max-width:860px"><div class="mh"><h2>${icon('edit')}${row ? 'تعديل البند' : 'بند احترافي جديد'}</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb"><div class="form">
+      <div class="full tiny muted">اكتب البيانات بالإنجليزي — دي اللي بتطلع في عرض السعر، والمعاينة تحت بتوريك شكلها بالظبط.</div>
+      <div class="field full"><label>الصورة (اختياري)</label><div class="row" style="gap:10px;align-items:center"><div id="ql-prev" style="width:72px;height:72px;border-radius:10px;border:1px dashed var(--line-2);display:grid;place-items:center;overflow:hidden">${img ? `<img src="${esc(img)}" style="width:100%;height:100%;object-fit:cover" alt="">` : icon('camera')}</div><input type="file" id="ql-file" accept="image/*" style="max-width:230px"></div></div>
+      ${en('title', 'اسم البند (Item name) *', sp.title, 'e.g. Reception Desk')}
+      ${en('desc', 'الوصف (Description)', sp.desc, 'e.g. Supply & installation of reception desk with LED strip', true)}
+      <div class="field full"><label>المقاسات: الطول × العرض × الارتفاع</label><div class="qldims"><input name="L" dir="ltr" inputmode="decimal" placeholder="L" value="${esc(sp.L || '')}"><span>×</span><input name="W" dir="ltr" inputmode="decimal" placeholder="W" value="${esc(sp.W || '')}"><span>×</span><input name="H" dir="ltr" inputmode="decimal" placeholder="H" value="${esc(sp.H || '')}"><select name="du">${Object.keys(DU).map(k => `<option value="${k}" ${(sp.du || 'mm') === k ? 'selected' : ''}>${DU[k]}</option>`).join('')}</select></div></div>
+      ${en('materials', 'الخامات (Materials)', sp.materials, 'e.g. MDF 18 mm with oak veneer, aluminium 40×20', true)}
+      ${en('finish', 'التشطيب (Finish)', sp.finish, 'e.g. Matt black powder coating')}
+      ${field('الكمية', `<input name="qty" type="number" step="any" min="0" value="${esc(qty)}" inputmode="decimal">`)}${field('الوحدة', `<input name="unit" value="${esc(unit)}" list="unitlist">`)}${field(`سعر الوحدة (${CUR()})`, `<input name="price" type="number" step="any" min="0" value="${esc(price)}" inputmode="decimal">`)}
+      ${canCatalog() && !(row && row.querySelector('[name=l-pid]') && row.querySelector('[name=l-pid]').value) ? `<div class="field full" style="border-top:1px solid var(--line);padding-top:10px"><label class="check"><input type="checkbox" name="cat" id="ql-cat"> احفظه في الكتالوج (منتج جديد بالبيانات دي)</label><div class="row" id="ql-catx" style="gap:8px;flex-wrap:wrap;margin-top:6px;display:none"><input name="code" class="code" value="${esc(nextCode(brand))}" placeholder="كود المنتج" style="max-width:160px">${colls.length ? `<select name="coll"><option value="">— بدون قسم —</option>${colls.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}</div></div>` : ''}
+      <div class="field full"><label>المعاينة (شكل البند في عرض السعر)</label><div id="ql-pv"></div></div>
+    </div></div><div class="mf"><button type="submit" class="btn p">${row ? 'حفظ التعديل' : 'إضافة البند'}</button><button type="button" class="btn ghost" data-x="1">إلغاء</button></div></form>`;
+    document.body.appendChild(box);
+    const fm = box.querySelector('#qlform'); const g = n => fm.querySelector(`[name=${n}]`);
+    const read = () => ({ title: g('title').value.trim(), desc: g('desc').value.trim(), L: g('L').value.trim(), W: g('W').value.trim(), H: g('H').value.trim(), du: g('du').value, materials: g('materials').value.trim(), finish: g('finish').value.trim() });
+    const draw = () => { box.querySelector('#ql-pv').innerHTML = preview(read(), brand, byTagOf(brand), img, num(g('qty').value), g('unit').value, num(g('price').value)); };
+    draw(); fm.addEventListener('input', draw); fm.addEventListener('change', e => { if (e.target.id === 'ql-cat') box.querySelector('#ql-catx').style.display = e.target.checked ? 'flex' : 'none'; draw(); });
+    box.querySelector('#ql-file').addEventListener('change', async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; try { const src = await fileToDataURL(fl); img = typeof lineImageThumb === 'function' ? await lineImageThumb(src) : src; box.querySelector('#ql-prev').innerHTML = `<img src="${esc(img)}" style="width:100%;height:100%;object-fit:cover" alt="">`; draw(); } catch (err) { toast('مقدرتش أقرأ الصورة', 'err'); } });
+    box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-x]')) box.remove(); });
+    fm.addEventListener('submit', async e => {
+      e.preventDefault(); const s = read();
+      if (!s.title) { toast('اكتب اسم البند', 'err'); return; }
+      const bad = ['title', 'desc', 'materials', 'finish', 'L', 'W', 'H'].filter(k => AR.test(s[k] || '')); if (bad.length) { toast('البيانات لازم تبقى إنجليزي علشان تطلع في التمبلت — فيه كلام عربي', 'err'); return; }
+      const c = compose(s); const it = { desc: lineDesc(s), titleEn: c.titleEn, descEn: c.descEn, spec: s, qty: num(g('qty').value), unit: g('unit').value.trim() || 'قطعة', price: num(g('price').value) };
+      if (img) it.img = img;
+      const pidOld = row && row.querySelector('[name=l-pid]') ? row.querySelector('[name=l-pid]').value : ''; if (pidOld) it.productId = pidOld;
+      if (g('cat') && g('cat').checked) {
+        const code = String((g('code') || {}).value || '').trim(); if (!code) { toast('اكتب كود المنتج', 'err'); return; }
+        if (list('products').some(p => (p.code || '').trim().toLowerCase() === code.toLowerCase())) { toast('كود المنتج مستخدم لمنتج تاني', 'err'); return; }
+        const pid = uid(); const doc = { id: pid, brandId: brand, code, name: c.titleEn, nameEn: c.titleEn, descEn: c.descEn, desc: s.desc, dims: dimsStr(s), finish: s.finish, materials: s.materials, unit: it.unit, status: 'active', collection: (g('coll') || {}).value || '', createdAt: nowISO(), createdByName: S.session?.name || '', src: 'quote-line' };
+        if (typeof seesFinance === 'function' && seesFinance() && it.price) doc.price = it.price;
+        try {
+          await Store.save('products', doc, { silent: true });
+          if (img) { const fid = uid(); await Store.save('files', { id: fid, name: `${code}.jpg`, kind: 'photo', mime: 'image/jpeg', size: 0, note: 'صورة من عرض السعر', productId: pid, orderId: null, ownerKind: 'product', ownerId: pid, byName: S.session?.name || '', thumb: img, pages: null, store: 'thumb', ref: null, createdAt: nowISO() }, { silent: true }); await Store.update('products', pid, { coverFileId: fid }, { silent: true }); }
+          it.productId = pid; toast(`اتحفظ في الكتالوج ${code}`);
+        } catch (err) { toast('مقدرتش أحفظه في الكتالوج: ' + (err.message || err), 'err'); }
+      }
+      if (row) { const tmp = document.createElement('div'); tmp.innerHTML = lineRows([it]); const nr = tmp.querySelector('.line'); if (nr) row.replaceWith(nr); recalc && recalc(); }
+      else appendLine(f, it, recalc);
+      box.remove();
+    });
+    setTimeout(() => { try { g('title').focus(); } catch (e) { /* ignore */ } }, 50);
+  }
+  window.nfQuoteLineScreen = openScreen;
+  if (typeof wireQuoteForm === 'function') wireQuoteForm = (base => function (f) {
+    const r = base.apply(this, arguments);
+    const add = f.querySelector('[data-line="add"]'); if (add && !f.querySelector('[data-line="pro"]')) add.insertAdjacentHTML('afterend', ` <button type="button" class="btn sm" data-line="pro">${icon('plus')}بند احترافي</button>`);
+    const recalc = () => { const ev = new Event('input', { bubbles: true }); const l = f.querySelector('#lines input:not([type=hidden])'); if (l) l.dispatchEvent(ev); };
+    f.addEventListener('click', e => {
+      const b = e.target.closest('[data-line="pro"]'); if (b) { e.preventDefault(); e.stopPropagation(); openScreen(f, recalc, null); return; }
+      const d = e.target.closest('input[data-ql]'); if (d) { e.preventDefault(); openScreen(f, recalc, d.closest('.line')); }
+    }, true);
+    return r;
+  })(wireQuoteForm);
 })();
 </script>
 
