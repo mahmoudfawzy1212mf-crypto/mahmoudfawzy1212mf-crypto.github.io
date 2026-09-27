@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1914-929ad2";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1926-569f5e";</script>
 
 <script>
 'use strict';
@@ -21226,6 +21226,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 .aifab:active{transform:scale(.96)}
 .aifab svg{width:26px;height:26px}
 @media (max-width:900px){.aifab{left:14px;bottom:calc(140px + env(safe-area-inset-bottom,0px));width:50px;height:50px}.aifab svg{width:24px;height:24px}}
+.aimini{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;align-items:center;gap:4px;padding:5px 5px 5px 6px;border-radius:999px;background:var(--surface);border:1.5px solid color-mix(in srgb,var(--accent) 50%,var(--line));box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.aimini .back{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;height:40px;padding:0 16px;border-radius:999px;border:0;background:var(--accent);color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.aimini .back svg{width:18px;height:18px}.aimini .end{width:40px;height:40px;border-radius:50%;border:0;background:transparent;color:var(--ink-2);cursor:pointer;display:grid;place-items:center}
+@media (max-width:900px){.aimini{bottom:calc(84px + env(safe-area-inset-bottom,0px))}}
+body.printing .aimini,body.nf-typing .aimini{display:none}
+.aipanel[hidden]{display:none!important}
+.aipanel .aih .newc{font-size:12px;height:30px;padding:0 10px}
 body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage .aifab,body.stuboard .aifab,body:has(.side.open) .aifab{display:none}
 .aipanel{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));width:min(420px,calc(100vw - 24px));max-height:min(70vh,560px);background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 40px -12px rgba(0,0,0,.55);z-index:70;display:flex;flex-direction:column;overflow:hidden}
 .aipanel .aih{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:700}.aipanel .aih .grow{flex:1}
@@ -21276,7 +21283,7 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     if (seeView('inventory')) push(ent('materials', m => `${m.code || ''} ${m.name}`, m => `${m.name} ${m.code || ''}`), 'material', 0.8);
     return out.sort((a, b) => b.s - a.s);
   }
-  const go = (hash, after) => { closePanel(false); location.hash = hash; if (typeof parseRoute === 'function') parseRoute(); render(true); if (after) setTimeout(after, 250); };
+  const go = (hash, after) => { minimizePanel(); location.hash = hash; if (typeof parseRoute === 'function') parseRoute(); render(true); if (after) setTimeout(after, 250); };
   const scrollTo = sel => { const el = document.querySelector(sel); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.style.outline = '2px solid var(--accent)'; setTimeout(() => { el.style.outline = ''; }, 1800); } };
   function routeFor(sec, c, n) {
     if (c && c.kind === 'order') {
@@ -21313,10 +21320,12 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     const sups = seeView('suppliers') ? list('suppliers').slice(0, 200).map(s => `${s.id}|${s.name}`).join('\n') : '';
     const wks = seeView('workers') ? list('workers').filter(w => !w.left).slice(0, 150).map(w => `${w.id}|${w.name}`).join('\n') : '';
     const eqs = seeView('equip') ? list('equip').slice(0, 150).map(e => `${e.id}|${e.code || ''}|${e.name}`).join('\n') : '';
+    let attLine = ''; try { if (typeof attendanceFor === 'function' && seeView('attendance')) { const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const at = attendanceFor(todayISO()); const P = ws.filter(w => ['P', 'H'].includes(at[w.id]?.s)).length, A = ws.filter(w => at[w.id]?.s === 'A').length, L = ws.filter(w => at[w.id]?.s === 'L').length, late = ws.filter(w => +at[w.id]?.late > 0).length; attLine = `حضور النهارده (${todayISO()}) — نفس أرقام لوحة المتابعة: حاضر ${P}، غايب (متسجّل غياب) ${A}، إجازة ${L}، متأخر ${late}، لسه متسجّلوش ${ws.length - P - A - L} — من إجمالي ${ws.length}. مهم: «لسه متسجّلش» مش غياب؛ الغياب هو المتسجّل غياب بس.`; } } catch (e) { attLine = ''; }
+    const past = hist.slice(-10).map(h => `${h.r === 'u' ? 'المستخدم' : 'المساعد'}: ${h.t}`).join('\n');
     let ctx = ''; try { ctx = typeof aiContextBase === 'function' ? JSON.stringify(aiContextBase()).slice(0, 9000) : ''; } catch (e) { ctx = ''; }
-    const prompt = `أنت مساعد داخل نظام إدارة مصنع (عربي مصري بسيط). المستخدم كتب: «${text}».
+    const prompt = `أنت مساعد داخل نظام إدارة مصنع (عربي مصري بسيط).${past ? `\nالمحادثة لحد دلوقتي (استخدمها عشان تفهم «ده/دي/نفس المشروع/عرض السعر ده»):\n${past}` : ''}${lastOpened ? `\nآخر صفحة المستخدم فتحها من المحادثة: ${lastOpened}` : ''}\nالمستخدم كتب دلوقتي: «${text}».
 الصفحات المسموح له بيها (id=الاسم): ${allowedViews().join('، ')}
-المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nالموظفين (id|name):\n${wks}\nالمعدات (id|code|name):\n${eqs}\nملخص البيانات: ${ctx}\nملحوظة: الكلام ده ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابقه مع أقرب اسم في القوايم (مثال «الجزي» = «الجازي»). لو طلب مشتريات مشروع رجّع route «#/purchases?order=<id>».
+المشاريع (id|code|title|client):\n${orders}\nالموردين (id|name):\n${sups}\nالموظفين (id|name):\n${wks}\nالمعدات (id|code|name):\n${eqs}\n${attLine ? attLine + '\\n' : ''}ملخص البيانات: ${ctx}\nملحوظة: الكلام ده ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابقه مع أقرب اسم في القوايم (مثال «الجزي» = «الجازي»). لو طلب مشتريات مشروع رجّع route «#/purchases?order=<id>».
 رجّع JSON بس: {"reply":"رد قصير بالعامية","route":"#/<view>" أو "#/<view>/<id>" أو ""}. استخدم فقط صفحات من القائمة وأرقام id موجودة. متخترعش أرقام أو أسعار مش في الملخص.`;
     try { const j = await aiJson(prompt, { maxTokens: 600 }); const route = String((j && j.route) || ''); let route2 = route; const om = /^#\/purchases\?order=([\w-]+)$/.exec(route); if (om && byId('orders', om[1]) && seeView('purchases')) { (S.ui.filter.purchases ||= {}).orderId = om[1]; S.ui.filter.purchases.status = 'all'; route2 = '#/purchases'; } const m = /^#\/([a-z]+)(?:\/([\w-]+))?$/.exec(route2); let ok = null;
       if (m && seeView(m[1])) { const colMap = { orders: 'orders', suppliers: 'suppliers', workers: 'workers', equip: 'equip', purchases: 'purchases' }; if (!m[2] || (colMap[m[1]] && byId(colMap[m[1]], m[2]))) ok = route2; }
@@ -21326,26 +21335,33 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
 
   /* ---------- panel ---------- */
   let listening = null;
+  let hist = [], lastOpened = '';
   const panel = () => document.getElementById('aipanel');
   const addMsg = (who, html, acts) => { const box = panel() && panel().querySelector('.aim'); if (!box) return; const d = document.createElement('div'); d.className = 'msg ' + who; d.innerHTML = html; if (acts && acts.length) { const a = document.createElement('div'); a.className = 'acts'; acts.forEach(r => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn xs p'; b.textContent = r.label; b.onclick = () => r.run(); a.appendChild(b); }); d.appendChild(a); } box.appendChild(d); box.scrollTop = box.scrollHeight; };
+  const mini = () => document.getElementById('aimini');
+  const hasTalk = () => hist.some(h => h.r === 'u');
+  function showMini(on) { const m = mini(); if (!on) { if (m) m.remove(); return; } if (m) return; document.body.insertAdjacentHTML('beforeend', `<div class="aimini" id="aimini"><button type="button" class="back" data-aiback>${SPARK}رجوع للمساعد</button><button type="button" class="end" data-aiend title="إنهاء المحادثة" aria-label="إنهاء المحادثة">${icon('x')}</button></div>`); }
+  function minimizePanel() { try { if (typeof stopRec === 'function') stopRec(); } catch (e) { /* ignore */ } const p = panel(); if (p) p.hidden = true; showMini(hasTalk()); }
+  function endConvo() { try { if (typeof stopRec === 'function') stopRec(); } catch (e) { /* ignore */ } const p = panel(); if (p) p.remove(); hist = []; lastOpened = ''; showMini(false); }
   function openPanel() {
-    if (panel()) { panel().querySelector('input').focus(); return; }
-    document.body.insertAdjacentHTML('beforeend', `<div class="aipanel" id="aipanel" role="dialog" aria-label="المساعد"><div class="aih">${SPARK}<span>المساعد</span><div class="grow"></div><button type="button" class="iconbtn" data-aiclose aria-label="إغلاق">${icon('x')}</button></div>
+    showMini(false);
+    if (panel()) { panel().hidden = false; const b = panel().querySelector('.aim'); if (b) b.scrollTop = b.scrollHeight; if (window.innerWidth > 900) panel().querySelector('input').focus(); return; }
+    document.body.insertAdjacentHTML('beforeend', `<div class="aipanel" id="aipanel" role="dialog" aria-label="المساعد"><div class="aih">${SPARK}<span>المساعد</span><div class="grow"></div><button type="button" class="btn xs newc" data-ainew title="ابدأ محادثة جديدة">محادثة جديدة</button><button type="button" class="iconbtn" data-aiclose aria-label="تصغير">${icon('x')}</button></div>
       <div class="aim"><div class="msg bot">قولي عايز تروح فين — مثال: «مشروع الجازي، المشتريات بتاعته» أو «المعدات العطلانة في النجارة».<div class="hints">${['المشتريات المستنية اعتماد', 'طلبات الصيانة', 'المهام'].map(h => `<button type="button" class="btn xs" data-aihint="${esc(h)}">${esc(h)}</button>`).join('')}</div></div></div>
       <form class="aii" id="aiform"><button type="button" class="iconbtn mic" data-aimic title="اتكلم" aria-label="اتكلم">${icon('mic')}</button><input id="aiq" class="inp" placeholder="اكتب — أو اضغط المايك واتكلم" autocomplete="off"><button type="submit" class="btn sm p">${icon('arrow')}</button></form><div id="aistat" class="tiny muted" style="padding:0 12px 8px" hidden></div></div>`);
     setTimeout(() => { const i = document.getElementById('aiq'); if (i && window.innerWidth > 900) i.focus(); }, 30);
   }
-  function closePanel(stop = true) { try { if (typeof stopRec === 'function') stopRec(); } catch (e) { /* ignore */ } const p = panel(); if (p) p.remove(); }
+  function closePanel() { minimizePanel(); }
   async function handle(text, voice) {
-    text = String(text || '').trim(); if (!text) return; addMsg('me', (voice ? '🎙 ' : '') + esc(text));
+    text = String(text || '').trim(); if (!text) return; addMsg('me', (voice ? '🎙 ' : '') + esc(text)); hist.push({ r: 'u', t: text.slice(0, 300) });
     const r = localResolve(text); const question = /^(كام|ايه|إيه|مين|امتى|إمتى|هل|ليه|فين)(\s|$)|[?؟]$/.test(text.trim());
-    if (r && r.route && !question && (!voice || r.strong || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); setTimeout(() => r.route.run(), 350); return; }
-    if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose); return; }
+    if (r && r.route && !question && (!voice || r.strong || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); hist.push({ r: 'b', t: `فتحت ${r.route.label}` }); lastOpened = r.route.label; setTimeout(() => r.route.run(), 350); return; }
+    if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose.map(c => ({ label: c.label, run: () => { lastOpened = c.label; hist.push({ r: 'b', t: `فتحت ${c.label}` }); c.run(); } }))); hist.push({ r: 'b', t: 'سألته يختار: ' + r.choose.map(c => c.label).join(' / ') }); return; }
     addMsg('bot', '<span class="muted">بفكّر…</span>'); const box = panel().querySelector('.aim'); const thinking = box.lastElementChild;
     const a = await aiResolve(text); if (thinking) thinking.remove();
-    const acts = []; if (a.route) acts.push({ label: 'افتح', run: () => go(a.route) }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
+    hist.push({ r: 'b', t: String(a.reply || '').slice(0, 400) + (a.route ? ` [رابط: ${a.route}]` : '') }); const openIt = () => { lastOpened = a.route; go(a.route); }; const acts = []; if (a.route) acts.push({ label: 'افتح', run: openIt }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
     addMsg('bot', mdLiteSafe(a.reply), acts);
-    if (voice && a.route && !question) setTimeout(() => go(a.route), 900);
+    if (voice && a.route && !question) setTimeout(openIt, 900);
   }
   const mdLiteSafe = t => (typeof mdLite === 'function' ? mdLite(t) : esc(t).replace(/\n/g, '<br>'));
   /* v5.16 voice: server Whisper (if the owner set the key) → else browser recognition; hold-to-talk or tap; auto-stop after 1.5 s of silence */
@@ -21396,14 +21412,17 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
   document.addEventListener('pointerup', e => { if (!fromDown) return; fromDown = false; if (Date.now() - downAt > 600) setTimeout(stopRec, 250); });
   document.addEventListener('contextmenu', e => { if (e.target.closest && e.target.closest('[data-aimic]')) e.preventDefault(); });
   document.addEventListener('click', e => {
-    const t = e.target.closest && e.target.closest('[data-aifab],[data-aiclose],[data-aimic],[data-aihint]'); if (!t) return;
-    if (t.dataset.aifab !== undefined) { panel() ? closePanel() : openPanel(); return; }
+    const t = e.target.closest && e.target.closest('[data-aifab],[data-aiclose],[data-aimic],[data-aihint],[data-ainew],[data-aiback],[data-aiend]'); if (!t) return;
+    if (t.dataset.aiback !== undefined) { openPanel(); return; }
+    if (t.dataset.aiend !== undefined) { endConvo(); return; }
+    if (t.dataset.ainew !== undefined) { endConvo(); openPanel(); return; }
+    if (t.dataset.aifab !== undefined) { panel() && !panel().hidden ? closePanel() : openPanel(); return; }
     if (t.dataset.aiclose !== undefined) { closePanel(); return; }
     if (t.dataset.aimic !== undefined) return;
     if (t.dataset.aihint) handle(t.dataset.aihint);
   });
   document.addEventListener('submit', e => { if (e.target.id !== 'aiform') return; e.preventDefault(); const i = document.getElementById('aiq'); const v = i.value; i.value = ''; handle(v); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel()) closePanel(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel() && !panel().hidden) closePanel(); });
   RENDER_HOOKS.push(() => { const on = S.session && !['kiosk'].includes(role()) && !(typeof isStudioz === 'function' && isStudioz() && false); let b = document.querySelector('.aifab'); if (!on) { if (b) b.remove(); return; } if (!b) document.body.insertAdjacentHTML('beforeend', `<button class="aifab" data-aifab title="المساعد — اتكلم أو اكتب" aria-label="المساعد">${SPARK}</button>`); });
 
   /* ---------- purchases filtered by a project ---------- */
