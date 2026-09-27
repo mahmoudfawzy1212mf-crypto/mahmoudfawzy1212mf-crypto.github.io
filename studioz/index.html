@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1004-2cde86";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-1139-61b043";</script>
 
 <script>
 'use strict';
@@ -20518,6 +20518,64 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 .wbworld > .wbsvg{z-index:3}
 .wbworld > .wbi.frame{z-index:0}
 </style>`);
+/* =====================================================================
+   v5.08 — (المصنع) صنف مشترك بين أكتر من قسم = كود MX (ميكس)
+   · محمود: «وهم بيدخلوا الخامات يبقى فيه أوبشن ده قسم النجارة وده الألومنيوم … ويبقى مكتوب ميكس».
+   · فورم الصنف: لو اتعلّم على قسم تاني جنب الأساسي → الكود يبقى MX-<الفئة>-<مسلسل> (مثال MX-FIX-0001) ويتحدّث وانت بتختار.
+   · «صنف جديد» من جوه أمر الشراء: نفس الأوبشن (أقسام تانية) ونفس الكود.
+   · الحفظ: صنف جديد له أكتر من قسم وكوده تلقائي بحروف قسم → يتصحح لـ MX (أمان لو الكود اتكتب قبل الاختيار).
+   ===================================================================== */
+(function () {
+  if (window.__NF_ITEMMIX__) return; window.__NF_ITEMMIX__ = 1;
+  const MIX = 'MX';
+  const AUTO = /^[A-Z]{2,3}-[A-Z]{3}-\d{4}$/;
+  const uniq = a => [...new Set((a || []).filter(Boolean))];
+  const prefixFor = codes => (uniq(codes).length > 1 ? MIX : (uniq(codes)[0] || 'GN'));
+  window.nfItemMixPrefix = prefixFor;
+  const deptList = () => { const seen = new Set(); return Object.keys(DEPT_CODES).filter(k => S.settings.departments.some(d => d.id === k)).map(k => ({ c: deptCode(k), n: deptName(k) })).filter(x => { if (seen.has(x.c) || x.c === MIX) return false; seen.add(x.c); return true; }); };
+
+  /* ---- main item form ---- */
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    let h = base.apply(this, arguments);
+    h = h.replace('>قسم الصنف الأساسي (منه الكود)</label>', '>قسم الصنف الأساسي</label>');
+    h = h.replace('<div class="hint">الكود بيتعمل من القسم الأساسي بس.</div>', `<div class="hint">لو الصنف بيستخدمه أكتر من قسم، الكود بيبقى <span class="codeprev">${MIX}</span> (ميكس) — مثال <span class="codeprev">${MIX}-FIX-0001</span>.</div>`);
+    return h;
+  })(materialForm);
+  const recode = f => {
+    const hid = f.querySelector('#f-deptCodesJson'); const c = f.querySelector('#f-code'); const cat = f.querySelector('#f-itemCat'); if (!hid || !c || !cat) return;
+    let arr = []; try { arr = JSON.parse(hid.value || '[]'); } catch (e) { /* ignore */ }
+    const pre = prefixFor(arr); const cur = c.value || '';
+    if (cur && !AUTO.test(cur) && !/^M-\d+$/.test(cur)) return; /* hand-typed code: leave it */
+    if (cur.startsWith(pre + '-' + cat.value + '-')) return;
+    const next = nextItemCode(pre, cat.value); c.value = next; const pv = f.querySelector('#codeprev'); if (pv) pv.textContent = next;
+  };
+  /* registered after 91 (code from primary dept) and 99zzQ (fills deptCodesJson) → runs last */
+  document.addEventListener('change', e => { const f = e.target.closest && e.target.closest('#mform'); if (!f || !f.querySelector('#md-chips')) return; if (e.target.id === 'f-deptCode' || e.target.id === 'f-itemCat' || e.target.closest('#md-chips')) recode(f); });
+
+  /* ---- quick "new item" inside a purchase order ---- */
+  const niChips = () => `<div style="grid-column:1/-1"><label>أقسام تانية بتستخدم الصنف (لو فيه ← الكود ${MIX})</label><div class="mdchips" id="ni-md">${deptList().map(x => `<label data-md="${esc(x.c)}"><input type="checkbox" value="${esc(x.c)}">${esc(x.n)}</label>`).join('')}</div></div>`;
+  if (typeof wirePoForm === 'function') wirePoForm = (base => function (f) {
+    const r = base.apply(this, arguments);
+    try { const box = f && f.querySelector('#nibox'); if (box && !box.querySelector('#ni-md')) { const cat = box.querySelector('#ni-cat'); const cell = cat && cat.closest('div'); if (cell) cell.insertAdjacentHTML('beforebegin', niChips()); } } catch (e) { /* ignore */ }
+    return r;
+  })(wirePoForm);
+  const niCodes = () => { const box = document.querySelector('#nibox:not([hidden])'); if (!box) return null; const dc = (box.querySelector('#ni-dc') || {}).value || ''; const other = [...box.querySelectorAll('#ni-md input:checked')].map(i => i.value).filter(c => c !== dc); return uniq([dc].concat(other)); };
+  const niPreview = () => { const box = document.querySelector('#nibox'); if (!box) return; const dc = (box.querySelector('#ni-dc') || {}).value || ''; box.querySelectorAll('#ni-md label[data-md]').forEach(l => { const i = l.querySelector('input'); const isP = l.dataset.md === dc; if (isP) i.checked = false; i.disabled = isP; l.classList.toggle('dis', isP); l.classList.toggle('on', i.checked); }); const codes = niCodes() || [dc]; const out = box.querySelector('#ni-code'); if (out) out.textContent = nextItemCode(prefixFor(codes), (box.querySelector('#ni-cat') || {}).value || 'OTH'); };
+  document.addEventListener('change', e => { if (!e.target.closest || !e.target.closest('#nibox')) return; if (e.target.id === 'ni-dc' || e.target.id === 'ni-cat' || e.target.closest('#ni-md')) setTimeout(niPreview, 0); });
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-ni="open"]'); if (b) setTimeout(niPreview, 0); });
+
+  /* ---- save: MX for new multi-department items ---- */
+  const save0 = Store.save.bind(Store);
+  Store.save = (col, doc, o) => {
+    if (col === 'materials' && doc && typeof doc === 'object' && !byId('materials', doc.id)) {
+      if (typeof doc.deptCodesJson === 'string') { try { const a = JSON.parse(doc.deptCodesJson || '[]'); if (a.length) doc = Object.assign({}, doc, { deptCodes: uniq([doc.deptCode || a[0]].concat(a)) }); } catch (e) { /* ignore */ } }
+      if (!(Array.isArray(doc.deptCodes) && doc.deptCodes.length > 1)) { const q = niCodes(); if (q && q.length > 1 && q[0] === doc.deptCode) doc = Object.assign({}, doc, { deptCodes: q }); }
+      const codes = uniq(Array.isArray(doc.deptCodes) ? doc.deptCodes : []);
+      if (codes.length > 1 && AUTO.test(String(doc.code || '')) && !String(doc.code).startsWith(MIX + '-')) doc = Object.assign({}, doc, { code: nextItemCode(MIX, doc.itemCat || 'OTH') });
+    }
+    return save0(col, doc, o);
+  };
+})();
 </script>
 
 </body>
