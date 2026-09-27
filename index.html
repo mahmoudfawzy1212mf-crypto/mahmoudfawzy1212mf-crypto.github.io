@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-1944-03e160";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260927-2002-45187c";</script>
 
 <script>
 'use strict';
@@ -21343,8 +21343,15 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     lines.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
     return lines.length ? lines.slice(0, 40).map(([at, t]) => `${String(at).slice(0, 16).replace('T', ' ')} | ${t}`).join('\n') : 'ملقتش حركات بالشروط دي في السجل.';
   }
-  const tAttendance = ({ date }) => { if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : todayISO(); const at = attendanceFor(d); const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const lab = { P: 'حاضر', H: 'نص يوم', A: 'غايب', L: 'إجازة' }; return `${d}:\n` + ws.map(w => { const r = at[w.id]; return `${w.name} | ${r ? (lab[r.s] || r.s) + (+r.late > 0 ? ` متأخر ${r.late}د` : '') + (r.in ? ` دخول ${r.in}` : '') : 'لسه متسجّلش'}`; }).join('\n'); };
-  const TOOLS = { find: tFind, get: tGet, history: tHistory, attendance: tAttendance };
+  const tAttendance = ({ date }) => { if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : todayISO(); const at = attendanceFor(d); const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const lab = { P: 'حاضر', H: 'نص يوم', A: 'غايب', L: 'إجازة' }; return `${d}:\n` + ws.map(w => { const r = at[w.id]; const gz = g => g && g.inside === false ? ` (خارج النطاق ${g.dist != null ? g.dist + 'م' : ''}${g.zone ? ' من ' + g.zone : ''})` : g && g.inside === true ? ' (جوه النطاق)' : ''; return `${w.name} | ${r ? (lab[r.s] || r.s) + (+r.late > 0 ? ` متأخر ${r.late}د` : '') + (r.in ? ` دخول ${r.in}${gz(r.geo)}` : '') + (r.out ? ` انصراف ${r.out}${gz(r.geoOut)}` : '') : 'لسه متسجّلش'}`; }).join('\n'); };
+  async function tOutzone({ days }) {
+    if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const n = Math.min(Math.max(+days || 1, 1), 31); const ws = list('workers').filter(w => role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId))); const out = [];
+    for (let i = 0; i < n; i++) { const d = new Date(Date.now() - i * 864e5); const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; const at = attendanceFor(iso); ws.forEach(w => { const r = at[w.id]; if (!r) return; if (r.geo && r.geo.inside === false) out.push(`${iso} | ${w.name} | بصمة حضور ${r.in || ''} خارج النطاق ${r.geo.dist != null ? r.geo.dist + 'م' : ''}`); if (r.geoOut && r.geoOut.inside === false) out.push(`${iso} | ${w.name} | بصمة انصراف ${r.out || ''} خارج النطاق ${r.geoOut.dist != null ? r.geoOut.dist + 'م' : ''}`); }); }
+    const since = new Date(Date.now() - n * 864e5).toISOString(); ws.forEach(w => (w.suspects || []).filter(x => x.at >= since).forEach(x => out.push(`${String(x.at).slice(0, 16).replace('T', ' ')} | ${w.name} | محاولة بصمة مشبوهة: ${(x.flags || []).map(f => (typeof SUSPECT_LABEL === 'object' && SUSPECT_LABEL[f]) || f).join('، ')}`)));
+    if (isAdmin() && typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from) { try { const { data } = await S.sb.from('nf_audit').select('at,name,label').eq('kind', 'denied').ilike('label', 'بصمة%').gte('at', since).limit(100); (data || []).forEach(r => out.push(`${String(r.at).slice(0, 16).replace('T', ' ')} | ${r.name || '؟'} | ${r.label}`)); } catch (e) { /* offline */ } }
+    return out.length ? `آخر ${n} يوم:\n` + out.join('\n') : `مفيش بصمات خارج النطاق ولا محاولات مشبوهة في آخر ${n} يوم.` + (isAdmin() ? '' : ' (المحاولات المرفوضة اللي ماتسجلتش بتظهر في سجل النشاط للمالك بس)');
+  }
+  const TOOLS = { find: tFind, get: tGet, history: tHistory, attendance: tAttendance, outzone: tOutzone };
   async function aiResolve(text, onStep) {
     if (typeof aiAvailable !== 'function' || !aiAvailable()) return { reply: 'مش لاقي حاجة بالاسم ده. جرّب تكتب اسم المشروع أو المورد أو الصفحة بشكل أوضح.' };
     const orders = seeView('orders') ? list('orders').slice(0, 200).map(o => `${o.id}|${o.code || ''}|${o.title || ''}|${clientOf(o)}`).join('\n') : '';
@@ -21359,10 +21366,11 @@ ${past ? `المحادثة لحد دلوقتي (استخدمها عشان تفه
 عندك أدوات تدوّر بيها في بيانات السيستم الحقيقية (بصلاحيات المستخدم ده):
 - find {"col": واحدة من [${cols}] أو "all", "q": "كلمات البحث"} ← قايمة مختصرة بالنتايج
 - get {"col": "...", "id": "..."} ← كل تفاصيل سجل (للمشروع: الماليات والدفعات وأوامر الشراء بتاعته)
-${isAdmin() ? '- history {"col": اختياري, "id": اختياري, "who": اسم اختياري, "days": عدد} ← سجل النشاط: مين أضاف/عدّل/حذف إيه وإمتى\n' : ''}- attendance {"date": "YYYY-MM-DD"} ← حضور كل موظف في اليوم ده
+${isAdmin() ? '- history {"col": اختياري, "id": اختياري, "who": اسم اختياري, "days": عدد} ← سجل النشاط: مين أضاف/عدّل/حذف إيه وإمتى\n' : ''}- attendance {"date": "YYYY-MM-DD"} ← حضور كل موظف في اليوم ده (مع البصمة جوه/خارج النطاق)
+- outzone {"days": عدد} ← كل البصمات اللي اتعملت خارج النطاق + محاولات البصمة المشبوهة أو المرفوضة في آخر كام يوم
 القواعد: لو السؤال محتاج أرقام أو تفاصيل أو «مين عمل إيه» — دوّر الأول بأداة. أي رقم أو اسم أو تاريخ في ردك لازم يكون من نتايج الأدوات أو اللي فوق؛ لو ملقتهوش قول «ملقتش» بصراحة، وممنوع تخمّن أو تقول «هشوف». ماتقولش إنك مش شايف البيانات — إنت عندك الأدوات. الكلام ممكن يكون متحوّل من صوت وفيه أخطاء كتابة — طابق مع أقرب اسم.
 رجّع JSON بس، واحد من دول:
-{"tool":"find|get|history|attendance","args":{...}}  ← لو محتاج تدوّر
+{"tool":"find|get|history|attendance|outzone","args":{...}}  ← لو محتاج تدوّر
 {"reply":"الرد القصير","source":"جبت المعلومة منين (مثلاً: سجل النشاط / ماليات المشروع)","route":"#/<view>" أو "#/<view>/<id>" أو "#/purchases?order=<id>" أو ""}  ← لما تبقى جاهز`;
     const steps = [];
     try {
@@ -21399,12 +21407,12 @@ ${isAdmin() ? '- history {"col": اختياري, "id": اختياري, "who": ا
   function closePanel() { minimizePanel(); }
   async function handle(text, voice) {
     text = String(text || '').trim(); if (!text) return; addMsg('me', (voice ? '🎙 ' : '') + esc(text)); hist.push({ r: 'u', t: text.slice(0, 300) });
-    const r = localResolve(text); const question = /^(كام|ايه|إيه|مين|امتى|إمتى|هل|ليه|فين)(\s|$)|[?؟]$/.test(text.trim());
-    if (r && r.route && !question && (!voice || r.strong || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); hist.push({ r: 'b', t: `فتحت ${r.route.label}` }); lastOpened = r.route.label; setTimeout(() => r.route.run(), 350); return; }
+    const r = localResolve(text); const nt = norm(text); const question = /(^|\s)(كام|كم|ايه|اي|مين|امتي|هل|ليه|ازاي|قولي|قول لي|تقولي|تقول لي|اعرف|فيه كام|في كام|عدد|اجمالي|مجموع|حاول|حاولوا)(\s|$)|[?؟]\s*$/.test(nt) || /[?؟]\s*$/.test(text.trim()); const navWord = /(^|\s)(دخلني|ودخلني|افتح|افتحلي|وديني|روح|روحلي|عايز اشوف|عاوز اشوف|وريني|اعرض)(\s|$)/.test(nt); const shortCmd = toks(text).length <= 4;
+    if (r && r.route && !question && (navWord || shortCmd || typeof aiAvailable !== 'function' || !aiAvailable()) && (!voice || r.strong || navWord || typeof aiAvailable !== 'function' || !aiAvailable())) { addMsg('bot', `بفتح «${esc(r.route.label)}»…`); hist.push({ r: 'b', t: `فتحت ${r.route.label}` }); lastOpened = r.route.label; setTimeout(() => r.route.run(), 350); return; }
     if (r && r.choose && r.choose.length && !question) { addMsg('bot', 'لقيت أكتر من واحد — تقصد أنهي؟', r.choose.map(c => ({ label: c.label, run: () => { lastOpened = c.label; hist.push({ r: 'b', t: `فتحت ${c.label}` }); c.run(); } }))); hist.push({ r: 'b', t: 'سألته يختار: ' + r.choose.map(c => c.label).join(' / ') }); return; }
     addMsg('bot', '<span class="muted">بفكّر…</span>'); const box = panel().querySelector('.aim'); const thinking = box.lastElementChild;
-    const TL = { find: 'بدوّر في', get: 'بفتح تفاصيل', history: 'بدوّر في سجل النشاط', attendance: 'بشوف الحضور' }; const CL = c => (TCOLS[c] && TCOLS[c][1]) || c || 'السيستم';
-    const a = await aiResolve(text, (tool, args) => { if (thinking) thinking.innerHTML = `<span class="muted">${esc(TL[tool] || 'بدوّر')} ${tool === 'history' || tool === 'attendance' ? '' : esc(CL(args.col))}${args.q ? ` «${esc(String(args.q).slice(0, 40))}»` : ''}…</span>`; }); if (thinking) thinking.remove();
+    const TL = { find: 'بدوّر في', get: 'بفتح تفاصيل', history: 'بدوّر في سجل النشاط', attendance: 'بشوف الحضور', outzone: 'بشوف البصمات خارج النطاق' }; const CL = c => (TCOLS[c] && TCOLS[c][1]) || c || 'السيستم';
+    const a = await aiResolve(text, (tool, args) => { if (thinking) thinking.innerHTML = `<span class="muted">${esc(TL[tool] || 'بدوّر')} ${['history', 'attendance', 'outzone'].includes(tool) ? '' : esc(CL(args.col))}${args.q ? ` «${esc(String(args.q).slice(0, 40))}»` : ''}…</span>`; }); if (thinking) thinking.remove();
     hist.push({ r: 'b', t: String(a.reply || '').slice(0, 400) + (a.route ? ` [رابط: ${a.route}]` : '') }); const openIt = () => { lastOpened = a.route; go(a.route); }; const acts = []; if (a.route) acts.push({ label: 'افتح', run: openIt }); if (r && (r.maybe || r.route)) acts.push(r.maybe || r.route);
     addMsg('bot', mdLiteSafe(a.reply) + (a.source ? `<div class="tiny muted" style="margin-top:6px">المصدر: ${esc(a.source)}</div>` : ''), acts);
     if (voice && a.route && !question) setTimeout(openIt, 900);
@@ -21556,6 +21564,8 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
   const isDenied = e => /row-level security|42501|permission denied|not allowed|violates row/i.test(String((e && (e.message || e.code || e.details)) || e || ''));
   ['save', 'update', 'remove'].forEach(m => { const b = Store[m].bind(Store); Store[m] = async function (col) { try { return await b.apply(Store, arguments); } catch (e) { if (on() && isDenied(e)) ev('denied', { label: `السيرفر رفض ${m === 'remove' ? 'حذف' : 'حفظ'} في «${col}»`, view: routeKey(), detail: String(e && e.message || e).slice(0, 200), ok: false }); throw e; } }; });
 
+  /* blocked fingerprint punches (outside the zone etc.) — otherwise they leave no trace */
+  if (typeof punchGeo === 'function') punchGeo = (base => async function (w, method) { const r = await base.apply(this, arguments); try { if (r && r.blocked && on()) ev('denied', { label: `بصمة مرفوضة — ${(w && w.name) || ''}: ${String(r.msg || '').slice(0, 120)}`, view: routeKey(), detail: `${method || ''} — ${device()}`, ok: false }); } catch (e) { /* ignore */ } return r; })(punchGeo);
   /* ---------------- owner page ---------------- */
   const COLN = { orders: 'أمر تشغيل', orderfin: 'ماليات أمر', tasks: 'مهمة', workers: 'موظف', clients: 'عميل', quotations: 'عرض سعر', materials: 'خامة', purchases: 'طلب شراء', suppliers: 'مورد', leads: 'عميل محتمل', trips: 'مشوار', vehicles: 'عربية', requests: 'طلب', attendance: 'حضور', products: 'منتج', files: 'ملف', settings: 'الإعدادات', wallets: 'عهدة', money: 'حركة مالية', advances: 'سلفة', advpay: 'سداد سلفة', advbatch: 'دفعة سلف', expenses: 'مصروف', invoices: 'فاتورة', equip: 'معدة', emaint: 'صيانة معدة', etrips: 'خروج معدة', equipfin: 'ماليات معدة', itemcats: 'فئة صنف', ideas: 'فكرة', boards: 'بورد', projects: 'مشروع', penalties: 'جزاء', prodprice: 'سعر منتج', finish: 'تشطيب', staff: 'حساب', messages: 'رسالة' };
   const KIND = { login: 'دخول', logout: 'خروج', login_fail: 'دخول فاشل', view: 'فتح صفحة', denied: 'مرفوض', create: 'إضافة', update: 'تعديل', delete: 'حذف' };
