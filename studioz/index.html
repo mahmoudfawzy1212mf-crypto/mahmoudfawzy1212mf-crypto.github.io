@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260927-2002-45187c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-0227-2e9fd8";</script>
 
 <script>
 'use strict';
@@ -21640,6 +21640,212 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
   document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-audf]'); if (!t) return; const f = flt(); const k = t.dataset.audf; f[k] = t.type === 'checkbox' ? t.checked : t.value; st.rows = []; st._first = true; load(false); render(false); });
   document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-audreload]')) { st.rows = []; load(false); render(false); } if (e.target.closest && e.target.closest('[data-audmore]')) load(true); });
   window.nfAuditState = st;
+})();
+/* =====================================================================
+   v5.23 — ربط ChatGPT بالمنتجات (المصنع فقط)
+   · Edge Function gpt-intake: GPT خاص بالمالك («Ninety Products») يقرا الأكواد والمشاريع (catalog) ويبعت المنتج + ملفاته (submit)
+   · كل حاجة بتوصل «مستنية مراجعة» في nf_gpt_inbox (المالك بس) — ولا حاجة بتتطبق غير لما المالك يعتمد
+   · الاعتماد: نسخة جديدة على منتج موجود أو منتج جديد بكود، الملفات تتربط بالمنتج، المشروع، ومهمة للمكتب الفني بالبنود المفتوحة
+   ===================================================================== */
+(() => {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.gpt-row{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--surface);text-decoration:none;color:inherit}
+.gpt-row .t{font-weight:600}.gpt-row .m{font-size:12px;color:var(--ink-2)}
+.gpt-sec{margin-top:12px}.gpt-sec h4{margin:0 0 6px;font-size:14px}
+.gpt-dims{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}.gpt-dims div{padding:6px 10px;border-radius:8px;background:rgba(127,127,127,.08);font-size:12.5px}.gpt-dims b{font-weight:700}
+.gpt-list{margin:0;padding-inline-start:18px;font-size:13px;display:grid;gap:3px}
+.gpt-code{direction:ltr;font-family:ui-monospace,Menlo,monospace;font-size:12px;background:rgba(127,127,127,.12);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:240px;overflow:auto}
+.gpt-key{direction:ltr;font-family:ui-monospace,Menlo,monospace;font-size:14px;padding:12px;border-radius:10px;border:1.5px dashed var(--accent);word-break:break-all;user-select:all}
+</style>`);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from;
+  const FN = () => ((window.NF_CONFIG && window.NF_CONFIG.supabaseUrl) || (S.sb && S.sb.supabaseUrl) || '').replace(/\/$/, '') + '/functions/v1/gpt-intake';
+  const st = { rows: null, loading: false, pending: null, pendAt: 0, err: '' };
+  async function loadInbox() { if (!hosted() || st.loading) return; st.loading = true; try { const { data, error } = await S.sb.from('nf_gpt_inbox').select('*').order('at', { ascending: false }).limit(100); if (error) throw error; st.rows = data || []; st.pending = st.rows.filter(r => r.status === 'pending').length; st.pendAt = Date.now(); st.err = ''; } catch (e) { st.err = String(e && e.message || e); st.rows = st.rows || []; } st.loading = false; if (['gptin', 'products'].includes(S.route.view)) render(false); }
+  const pendCount = () => { if (isAdmin() && hosted() && Date.now() - st.pendAt > 60000 && !st.loading) loadInbox(); return st.pending || 0; };
+  window.nfGptState = st; window.nfGptLoad = loadInbox;
+
+  /* ---------- helpers ---------- */
+  const normCode = c => String(c || '').toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9\-]/g, '');
+  const findProduct = d => { const c = normCode(d.code); if (c) { const p = list('products').find(x => normCode(x.code) === c); if (p) return p; } const n = String(d.name || '').trim(); return n ? list('products').find(x => x.name && x.name.trim() === n) || null : null; };
+  const familyOf = code => { const m = /^([A-Z]+-[A-Z0-9]+)(?:-\d+)?$/.exec(normCode(code)); return m ? list('products').find(p => normCode(p.code) === m[1]) || null : null; };
+  const suggestCode = d => {
+    const fam = familyOf(d.code) || null; if (fam) { const pre = normCode(fam.code) + '-'; let n = 0; list('products').forEach(p => { const c = normCode(p.code); if (c.startsWith(pre)) n = Math.max(n, parseInt(c.slice(pre.length), 10) || 0); }); return pre + String(n + 1).padStart(2, '0'); }
+    const b = (S.settings.brands || []).find(x => x.id === d.brand || String(x.code || '').toLowerCase() === d.brand) || (S.settings.brands || [])[0]; const pre = `${(b && b.code) || 'NF'}-N`; let n = 0; list('products').forEach(p => { const c = normCode(p.code); if (c.startsWith(pre)) n = Math.max(n, parseInt(c.slice(pre.length), 10) || 0); }); return pre + String(n + 1).padStart(2, '0');
+  };
+  const brandIdOf = d => { const b = (S.settings.brands || []).find(x => x.id === d.brand || String(x.code || '').toLowerCase() === String(d.brand || '').toLowerCase() || String(x.name || '').toLowerCase() === String(d.brand || '').toLowerCase()); if (b) return b.id; const c = normCode(d.code).split('-')[0]; const b2 = (S.settings.brands || []).find(x => String(x.code || '').toUpperCase() === c); return b2 ? b2.id : ((S.settings.brands || [])[0] || {}).id || null; };
+  const findOrder = name => { const n = toksG(name); if (!n.length) return null; let best = null, bs = 0; list('orders').filter(o => o.status !== 'cancelled').forEach(o => { const cl = o.clientId ? (byId('clients', o.clientId) || {}).name : ''; const h = toksG(`${o.code || ''} ${o.title || ''} ${cl || ''}`); const s = n.filter(t => h.includes(t)).length / n.length; if (s > bs) { bs = s; best = o; } }); return bs >= 0.6 ? best : null; };
+  const toksG = s => String(s || '').toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(w => w.length >= 2);
+  const kindOf = f => f.cad ? 'cad' : /pdf/.test(f.mime) ? 'drawing' : /^image\//.test(f.mime) ? 'render' : /gltf|\.glb$/i.test(f.mime + f.name) ? 'model' : /^video\//.test(f.mime) ? 'video' : /html/.test(f.mime) ? 'html' : 'other';
+  const KL = { cad: 'ملف CAD (للمكتب الفني)', drawing: 'لوحات PDF', render: 'صورة', model: 'موديل 3D', video: 'فيديو', html: 'صفحة', other: 'ملف' };
+  const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round((n || 0) / 1024)) + ' KB';
+  const dimsText = dims => (dims || []).slice(0, 8).map(d => `${d.label}: ${d.value}${d.unit ? ' ' + d.unit : ''}`).join(' · ');
+
+  /* ---------- inbox list + review ---------- */
+  function vInbox() {
+    if (!isAdmin()) return '<div class="empty">الصفحة دي للمالك بس.</div>';
+    if (!hosted()) return `<div class="banner info">${icon('info')}<span>الربط مع ChatGPT بيشتغل في النسخة المستضافة بس.</span></div>`;
+    if (st.rows === null) { setTimeout(loadInbox, 0); return '<div class="muted small" style="padding:12px">جارٍ التحميل…</div>'; }
+    const pend = st.rows.filter(r => r.status === 'pending'), done = st.rows.filter(r => r.status !== 'pending');
+    const row = r => { const d = r.data || {}; const nOk = (r.files || []).filter(f => f.ok).length; return `<a class="gpt-row" href="#/gptin/${esc(r.id)}"><div class="grow"><div class="t">${esc(d.code || '')}${d.code ? ' — ' : ''}${esc(d.name || '')}</div><div class="m">${[d.revision, d.project, `${nOk} ملف`, fmtDate(String(r.at).slice(0, 10))].filter(Boolean).map(esc).join(' · ')}</div></div>${r.status === 'pending' ? '<span class="badge warn">مستني مراجعتك</span>' : r.status === 'approved' ? '<span class="badge good">اتعمد</span>' : '<span class="badge">اترفض</span>'}</a>`; };
+    return `${st.err ? `<div class="banner warn">${esc(st.err)}</div>` : ''}
+      <div class="card"><div class="cardhead"><h3>مستني مراجعتك (${pend.length})</h3><div class="grow"></div><button class="btn sm" data-gptreload>تحديث</button><a class="btn sm ghost" href="#/settings" data-gptsettings>إعدادات الربط</a></div>${pend.map(row).join('') || '<div class="empty">مفيش حاجة جديدة من ChatGPT.</div>'}</div>
+      ${done.length ? `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>اللي اتراجع</h3></div>${done.slice(0, 30).map(row).join('')}</div>` : ''}`;
+  }
+  function vReview(id) {
+    if (!isAdmin()) return '<div class="empty">الصفحة دي للمالك بس.</div>';
+    if (st.rows === null) { setTimeout(loadInbox, 0); return '<div class="muted small" style="padding:12px">جارٍ التحميل…</div>'; }
+    const r = st.rows.find(x => x.id === id); if (!r) return '<div class="empty">مش لاقي الإرسالية دي.</div>';
+    const d = r.data || {}; const files = r.files || []; const pending = r.status === 'pending';
+    const match = findProduct(d); const ord = findOrder(d.project); const sug = suggestCode(d);
+    const prods = sortBy(list('products'), p => p.code || '');
+    const ords = sortBy(list('orders').filter(o => o.status !== 'cancelled'), o => o.code || '', true);
+    const fileRow = f => `<div class="row" style="gap:8px;padding:4px 0;font-size:13px">${f.ok ? `<span class="badge">${esc(KL[kindOf(f)])}</span><span class="grow">${esc(f.name)}</span><span class="muted tiny">${fmtSize(f.size)}</span>` : `<span class="badge crit">ماوصلش</span><span class="grow">${esc(f.name)}</span><span class="muted tiny ltr">${esc(f.err || '')}</span>`}</div>`;
+    const res = r.result || {};
+    return `<div class="card">
+      <div class="cardhead"><h3>${esc(d.code || '')}${d.code ? ' — ' : ''}${esc(d.name || '')}</h3><div class="grow"></div>${d.revision ? `<span class="badge">${esc(d.revision)}</span>` : ''}${d.stage ? `<span class="badge warn">${esc(d.stage)}</span>` : ''}</div>
+      <div class="small ink2">${[d.project && `المشروع: ${d.project}`, d.client && `العميل: ${d.client}`, d.issueDate && `إصدار: ${d.issueDate}`, `وصل ${fmtDate(String(r.at).slice(0, 10))} ${String(new Date(r.at).toTimeString()).slice(0, 5)}`].filter(Boolean).map(esc).join(' · ')}</div>
+      ${d.summary ? `<div class="gpt-sec"><h4>الوصف</h4><div class="small" style="white-space:pre-wrap">${esc(d.summary)}</div></div>` : ''}
+      ${(d.dims || []).length ? `<div class="gpt-sec"><h4>المقاسات</h4><div class="gpt-dims">${d.dims.map(x => `<div>${esc(x.label)}: <b>${esc(x.value)}</b> ${esc(x.unit || '')}</div>`).join('')}</div></div>` : ''}
+      ${(d.materials || []).length ? `<div class="gpt-sec"><h4>الخامات</h4><ul class="gpt-list">${d.materials.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${(d.manufacturing || []).length ? `<div class="gpt-sec"><h4>التصنيع والوصلات</h4><ul class="gpt-list">${d.manufacturing.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${(d.bom || []).length ? `<div class="gpt-sec"><h4>الأجزاء (BOM) — ${d.bom.length}</h4><div class="tablewrap"><table><thead><tr><th>الكود</th><th>الجزء</th><th>الخامة</th><th class="n">العدد</th><th>الملاحظات</th></tr></thead><tbody>${d.bom.map(b => `<tr><td class="ltr">${esc(b.partCode)}</td><td>${esc(b.name)}</td><td>${esc(b.material)}</td><td class="n">${esc(b.qty)} ${esc(b.unit || '')}</td><td class="small">${esc([b.process, b.notes].filter(Boolean).join(' — '))}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+      ${(d.openItems || []).length ? `<div class="gpt-sec"><h4>بنود لسه مفتوحة (${d.openItems.length})</h4><ul class="gpt-list">${d.openItems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${d.deliverables ? `<div class="gpt-sec"><h4>الملفات المذكورة</h4><div class="small">${esc(d.deliverables)}</div></div>` : ''}
+      <div class="gpt-sec"><h4>الملفات اللي وصلت (${files.filter(f => f.ok).length}/${files.length})</h4>${files.map(fileRow).join('') || '<div class="muted small">مفيش ملفات.</div>'}</div>
+    </div>
+    ${pending ? `<form class="card" id="gptapply" data-id="${esc(r.id)}" style="margin-top:12px"><h3>الاعتماد</h3>
+      <div class="form">
+        <label class="check full ${match ? 'on' : ''}"><input type="radio" name="mode" value="update" ${match ? 'checked' : ''}> نسخة جديدة على منتج موجود</label>
+        ${field('المنتج', `<select name="productId">${prods.map(p => `<option value="${esc(p.id)}" ${match && match.id === p.id ? 'selected' : ''}>${esc(p.code || '')} — ${esc(p.name || '')}</option>`).join('')}</select>`, 'full')}
+        <label class="check full ${match ? '' : 'on'}"><input type="radio" name="mode" value="new" ${match ? '' : 'checked'}> منتج جديد</label>
+        ${field('الكود', inp('newCode', normCode(d.code) && !match ? normCode(d.code) : sug, 'class="ltr"'))}${field('الاسم', inp('newName', d.name || ''))}
+        ${field('المشروع', `<select name="orderId"><option value="">— من غير ربط بأمر تشغيل —</option>${ords.map(o => `<option value="${esc(o.id)}" ${ord && ord.id === o.id ? 'selected' : ''}>${esc(o.code || '')} — ${esc(o.title || '')}</option>`).join('')}</select>`, 'full')}
+        ${field('اسم المشروع (لو مش موجود في السيستم)', inp('projectName', ord ? '' : (d.project || '')), 'full')}
+        ${(d.openItems || []).length ? `<label class="check full on"><input type="checkbox" name="task" checked> اعمل مهمة للمكتب الفني بالبنود المفتوحة (${d.openItems.length})</label>` : ''}
+      </div>
+      <p class="tiny muted" style="margin-top:8px">المنتج هيتعلّم «عينة أولى / مراجعة تصنيع» لحد ما تعتمده للإنتاج من صفحته. ملفات CAD بتفضل للمالك والمكتب الفني بس. مفيش حاجة قديمة بتتمسح — النسخة الجديدة بتتحفظ جنب القديمة.</p>
+      <div class="row" style="margin-top:12px;gap:8px"><button type="submit" class="btn p">${icon('check')}اعتماد وإضافة للمنتجات</button><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-gptreject="${esc(r.id)}">رفض</button></div></form>`
+      : `<div class="banner ${r.status === 'approved' ? 'good' : ''}" style="margin-top:12px">${icon('info')}<span>${r.status === 'approved' ? 'اتعمد' : 'اترفض'}${r.decided_by ? ` — ${esc(r.decided_by)}` : ''}${res.productId && byId('products', res.productId) ? ` · <a href="#/products/${esc(res.productId)}">افتح المنتج</a>` : ''}</span></div>`}`;
+  }
+
+  async function approve(form) {
+    const id = form.dataset.id; const r = (st.rows || []).find(x => x.id === id); if (!r || r.status !== 'pending') return; const d = r.data || {}; const fd = formData(form);
+    const btn = form.querySelector('button[type=submit]'); if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
+    try {
+      const ym = todayISO().slice(0, 7); const now = nowISO(); const rev = d.revision || `R${todayISO()}`;
+      const order = fd.orderId ? byId('orders', fd.orderId) : null; const projectName = order ? order.title : String(fd.projectName || '').trim();
+      let p = fd.mode === 'update' ? byId('products', fd.productId) : null; let pid = p ? p.id : uid();
+      if (!p) { const code = normCode(fd.newCode); if (!code) throw new Error('اكتب كود المنتج'); if (list('products').some(x => normCode(x.code) === code)) throw new Error(`الكود ${code} موجود — اختار «نسخة جديدة على منتج موجود» أو غيّر الكود`); }
+      /* files: CAD stays private (cad/…), the rest moves to the normal store so everyone who sees products can open it */
+      const fileIds = []; let cover = null;
+      for (const f of (r.files || []).filter(x => x.ok)) {
+        const kind = kindOf(f); let ref = f.ref, restricted = !!f.cad;
+        if (!f.cad) { const to = `${ym}/${uid()}`; try { const { error } = await S.sb.storage.from('files').move(f.ref, to); if (!error) ref = to; else restricted = true; } catch (e) { restricted = true; } }
+        const doc = { id: uid(), name: f.name, kind: restricted && !f.cad ? kind : kind, mime: f.mime, size: f.size, rev, note: 'من ChatGPT', productId: pid, orderId: order ? order.id : null, byName: S.session?.name || '', thumb: null, pages: null, store: 'sb', ref, enc: null, createdAt: now };
+        if (restricted) doc.restricted = true;
+        try { if (!restricted && f.size < 15 * 1048576 && ['render', 'drawing', 'model'].includes(kind)) { const { data } = await S.sb.storage.from('files').createSignedUrl(ref, 600); if (data && data.signedUrl) { if (kind === 'render') doc.thumb = await imageThumb(data.signedUrl); else { const blob = await (await fetch(data.signedUrl)).blob(); if (kind === 'drawing' && typeof pdfThumb === 'function') { const t = await pdfThumb(blob); doc.thumb = t.thumb; doc.pages = t.pages; } else if (kind === 'model' && typeof modelThumb === 'function') doc.thumb = await modelThumb({ blob }); } } } } catch (e) { /* thumbs are optional */ }
+        await Store.save('files', doc, { silent: true }); fileIds.push(doc.id); if (!cover && kind === 'render' && !restricted) cover = doc.id;
+      }
+      const spec = { revision: rev, stage: d.stage || 'عينة أولى / مراجعة تصنيع', issueDate: d.issueDate || '', dims: d.dims || [], materials: d.materials || [], manufacturing: d.manufacturing || [], bom: d.bom || [], openItems: d.openItems || [], deliverables: d.deliverables || '', summary: d.summary || '', project: projectName, orderId: order ? order.id : null, source: 'chatgpt', inboxId: r.id, at: now };
+      const revEntry = { rev, at: now, byName: S.session?.name || '', inboxId: r.id, stage: spec.stage, project: projectName, fileIds, summary: String(d.summary || '').slice(0, 400) };
+      if (p) {
+        const upd = { spec, devStage: 'review', revision: rev, revisions: (p.revisions || []).concat([revEntry]).slice(-30) };
+        if (!p.dims && (d.dims || []).length) upd.dims = dimsText(d.dims); if (!p.materials && (d.materials || []).length) upd.materials = d.materials.join('، '); if (!p.desc && d.summary) upd.desc = String(d.summary).slice(0, 600); if (!p.coverFileId && cover) upd.coverFileId = cover;
+        await Store.update('products', pid, upd);
+      } else {
+        const code = normCode(fd.newCode); const fam = familyOf(code); const doc = { id: pid, code, name: String(fd.newName || d.name || code).trim(), brandId: brandIdOf(d), unit: 'قطعة', status: 'active', source: 'chatgpt', dims: dimsText(d.dims), materials: (d.materials || []).join('، '), desc: String(d.summary || '').slice(0, 600), finish: '', spec, devStage: 'review', revision: rev, revisions: [revEntry], coverFileId: cover, createdAt: now };
+        if (fam) doc.parentId = fam.id; if (order || projectName) { doc.kind = 'project'; doc.projectOrderId = order ? order.id : null; doc.projectName = projectName; if (order && order.clientId) doc.projectClientId = order.clientId; }
+        await Store.save('products', doc); p = doc;
+      }
+      let taskId = null;
+      if (fd.task && (d.openItems || []).length) { const t = { id: uid(), title: `بنود مفتوحة — ${p.code || p.name} ${rev}`, desc: `وصلت من ChatGPT${projectName ? ` لمشروع ${projectName}` : ''}. لازم تتقفل قبل اعتماد المنتج للإنتاج:\n` + d.openItems.map((x, i) => `${i + 1}. ${x}`).join('\n') + `\n\nالمنتج: #/products/${pid}`, deptId: 'tech', assigneeId: null, orderId: order ? order.id : null, dueDate: null, priority: 'high', status: 'open', kind: 'task', source: 'chatgpt', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: now, updatedAt: now }; await Store.save('tasks', t, { silent: true }); taskId = t.id; }
+      const result = { productId: pid, orderId: order ? order.id : null, fileIds, taskId };
+      const { error } = await S.sb.rpc('nf_gpt_inbox_decide', { p_id: r.id, p_status: 'approved', p_result: result }); if (error) throw error;
+      Object.assign(r, { status: 'approved', result, decided_by: S.session?.name || '' }); st.pending = Math.max(0, (st.pending || 1) - 1);
+      toast('اتعمد — المنتج اتضاف/اتحدث'); go('products/' + pid);
+    } catch (e) { toast(String(e && e.message || e), 'err'); if (btn) { btn.disabled = false; btn.innerHTML = `${icon('check')}اعتماد وإضافة للمنتجات`; } }
+  }
+  document.addEventListener('submit', e => { if (e.target.id === 'gptapply') { e.preventDefault(); if (isAdmin()) approve(e.target); } });
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-gptreject],[data-gptreload],[data-gptsettings],[data-gptdev]'); if (!t) return;
+    if (t.dataset.gptreload !== undefined) { st.rows = null; loadInbox(); render(false); return; }
+    if (t.dataset.gptsettings !== undefined) { (S.ui.tab ||= {}).settings = 'gptlink'; return; }
+    if (t.dataset.gptreject) { if (!isAdmin() || !await confirmDlg('رفض الإرسالية دي؟ الملفات هتفضل في السجل.', 'رفض')) return; const { error } = await S.sb.rpc('nf_gpt_inbox_decide', { p_id: t.dataset.gptreject, p_status: 'rejected', p_result: null }); if (error) { toast(error.message, 'err'); return; } const r = (st.rows || []).find(x => x.id === t.dataset.gptreject); if (r) r.status = 'rejected'; st.pending = Math.max(0, (st.pending || 1) - 1); go('gptin'); return; }
+    if (t.dataset.gptdev) { if (!isAdmin()) return; if (!await confirmDlg('اعتماد المنتج للإنتاج؟ (البنود المفتوحة اتقفلت والعينة الأولى اتجربت)', 'اعتماد')) return; await Store.update('products', t.dataset.gptdev, { devStage: 'approved', devApprovedAt: nowISO(), devApprovedBy: S.session?.name || '' }); toast('اتعمد للإنتاج'); }
+  });
+  VIEW_TITLES.gptin = 'وارد من ChatGPT';
+  EXTRA_VIEWS.gptin = r => r.id ? vReview(r.id) : vInbox();
+  EXTRA_TITLES.gptin = r => r.id ? { title: 'مراجعة منتج من ChatGPT', actions: `<a class="btn ghost" href="#/gptin">${icon('back')}<span>الوارد</span></a>` } : { title: 'وارد من ChatGPT', sub: 'منتجات اتبعتت من GPT «Ninety Products» — مستنية مراجعتك' };
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'gptin') return isAdmin() && !(S.viewOrig || S.demoOrig); return base.apply(this, arguments); })(canSee);
+
+  /* products page: banner for the owner */
+  if (typeof vProducts === 'function') vProducts = (base => function () { const h = base.apply(this, arguments); if (!isAdmin() || !hosted()) return h; const n = pendCount(); return (n ? `<a class="banner warn" href="#/gptin" style="display:flex;margin-bottom:12px;text-decoration:none">${icon('info')}<span><b>وصل ${n} من ChatGPT</b> — مستني مراجعتك قبل ما يتضاف للمنتجات</span></a>` : `<div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn sm ghost" href="#/gptin">وارد ChatGPT</a></div>`) + h; })(vProducts);
+  /* product page: design spec from ChatGPT + development stage + revisions */
+  if (typeof vProductDetail === 'function') vProductDetail = (base => function (id) {
+    const h = base.apply(this, arguments); const p = byId('products', id); if (!p || !p.spec) return h; const s = p.spec;
+    const stage = p.devStage === 'approved' ? `<span class="badge good">معتمد للإنتاج${p.devApprovedBy ? ' — ' + esc(p.devApprovedBy) : ''}</span>` : `<span class="badge warn">عينة أولى / مراجعة تصنيع</span>`;
+    const card = `<div class="card" style="margin-bottom:12px"><div class="cardhead"><h3>مواصفات التصميم ${s.revision ? `<span class="badge">${esc(s.revision)}</span>` : ''}</h3><div class="grow"></div>${stage}${p.devStage !== 'approved' && isAdmin() ? `<button class="btn sm p" data-gptdev="${esc(p.id)}">اعتماد للإنتاج</button>` : ''}</div>
+      ${s.project ? `<div class="small ink2">المشروع: ${esc(s.project)}${s.issueDate ? ` · إصدار ${esc(s.issueDate)}` : ''}</div>` : ''}
+      ${(s.dims || []).length ? `<div class="gpt-sec"><div class="gpt-dims">${s.dims.map(x => `<div>${esc(x.label)}: <b>${esc(x.value)}</b> ${esc(x.unit || '')}</div>`).join('')}</div></div>` : ''}
+      ${(s.materials || []).length ? `<div class="gpt-sec"><h4>الخامات</h4><ul class="gpt-list">${s.materials.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${(s.bom || []).length ? `<details class="gpt-sec"><summary><b>الأجزاء (BOM) — ${s.bom.length}</b></summary><div class="tablewrap"><table><thead><tr><th>الكود</th><th>الجزء</th><th>الخامة</th><th class="n">العدد</th></tr></thead><tbody>${s.bom.map(b => `<tr><td class="ltr">${esc(b.partCode)}</td><td>${esc(b.name)}</td><td>${esc(b.material)}</td><td class="n">${esc(b.qty)} ${esc(b.unit || '')}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      ${(s.manufacturing || []).length ? `<details class="gpt-sec"><summary><b>التصنيع والوصلات</b></summary><ul class="gpt-list">${s.manufacturing.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+      ${(s.openItems || []).length && p.devStage !== 'approved' ? `<div class="gpt-sec"><h4>بنود لسه مفتوحة</h4><ul class="gpt-list">${s.openItems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${(p.revisions || []).length > 1 ? `<details class="gpt-sec"><summary><b>النسخ (${p.revisions.length})</b></summary><ul class="gpt-list">${p.revisions.slice().reverse().map(v => `<li>${esc(v.rev)} — ${esc(fmtDate(String(v.at).slice(0, 10)))}${v.project ? ' — ' + esc(v.project) : ''}${v.byName ? ' — ' + esc(v.byName) : ''}</li>`).join('')}</ul></details>` : ''}
+    </div>`;
+    const i = h.indexOf('<div class="card'); return i < 0 ? card + h : h.slice(0, i) + card + h.slice(i);
+  })(vProductDetail);
+
+  /* ---------- settings: connect ChatGPT (owner only) ---------- */
+  const GPT_INSTR = () => `أنت «Ninety Products» — مساعد تصميم منتجات لمصنع Ninety Fabrication (براندات: LOF أثاث خارجي، elmen أثاث داخلي، Ninety Aluminum).
+You are connected to the factory system through two actions: getCatalog and submitProduct.
+
+Rules:
+1. Before submitting, ALWAYS call getCatalog. Re-use an existing product code when the design is a revision of an existing piece (e.g. LOF-C01-05). If it is a new piece, leave "code" empty (the owner assigns it). Use the exact project title from the catalog when it matches.
+2. When the user says «ابعت المنتج للسيستم» / «send to the system», call submitProduct with every field you know: code, name, brand (lof / elm / alu), project, client, revision, issueDate, stage, summary, dims (label/value/unit), materials, manufacturing (joints & processes), bom (partCode, name, material, qty, unit, process, notes), openItems (anything not yet approved), deliverables.
+3. Attach the files: put generated/uploaded files in openaiFileIdRefs, and public https links (images, PDFs, GLB, DXF/STEP zip) in files [{name,url}].
+4. Never invent dimensions or quantities. Anything unconfirmed goes to openItems.
+5. After submitting, tell the user in Egyptian Arabic what the system replied (how many files arrived, and that it is waiting for the owner's approval in the Products page).`;
+  const OPENAPI = () => JSON.stringify({ openapi: '3.1.0', info: { title: 'Ninety Fabrication — Products intake', version: '1.0.0', description: 'Send finished product designs to the Ninety factory system. Everything waits for the owner approval.' }, servers: [{ url: FN() }], paths: {
+    '/catalog': { get: { operationId: 'getCatalog', summary: 'Existing product codes, projects and brands', responses: { 200: { description: 'Catalog', content: { 'application/json': { schema: { type: 'object' } } } } } } },
+    '/submit': { post: { operationId: 'submitProduct', summary: 'Send a product design (data + files) for owner review', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: {
+      code: { type: 'string', description: 'Existing code from getCatalog when this is a revision, else empty' }, name: { type: 'string' }, brand: { type: 'string', enum: ['lof', 'elm', 'alu'] }, project: { type: 'string' }, client: { type: 'string' }, revision: { type: 'string' }, issueDate: { type: 'string' }, stage: { type: 'string' }, summary: { type: 'string' },
+      dims: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' }, unit: { type: 'string' } } } },
+      materials: { type: 'array', items: { type: 'string' } }, manufacturing: { type: 'array', items: { type: 'string' } },
+      bom: { type: 'array', items: { type: 'object', properties: { partCode: { type: 'string' }, name: { type: 'string' }, material: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string' }, process: { type: 'string' }, notes: { type: 'string' } } } },
+      openItems: { type: 'array', items: { type: 'string' } }, deliverables: { type: 'string' },
+      files: { type: 'array', description: 'Public https links to images, PDFs, GLB, DXF/STEP/zip', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' } } } },
+      openaiFileIdRefs: { type: 'array', description: 'Files generated or uploaded in this chat', items: { type: 'string' } } } } } } }, responses: { 200: { description: 'Received — waiting for owner approval', content: { 'application/json': { schema: { type: 'object' } } } } } } } },
+    components: { schemas: {}, securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } }, security: [{ bearer: [] }] }, null, 2);
+  EXTRA_SETTINGS.gptlink = { label: 'ربط ChatGPT', render: () => {
+    if (!isAdmin()) return '<div class="empty">للمالك بس.</div>';
+    setTimeout(async () => { const box = document.getElementById('gptstate'); if (!box || !hosted()) return; try { const { data } = await S.sb.rpc('nf_gpt_key_status'); box.innerHTML = data && data.set ? `<span class="badge good">متفعّل${data.at ? ' من ' + esc(fmtDate(String(data.at).slice(0, 10))) : ''}</span>${data.pending ? ` <a class="badge warn" href="#/gptin">${data.pending} مستني مراجعتك</a>` : ''}` : '<span class="badge warn">مش متفعّل</span>'; } catch (e) { box.textContent = '—'; } }, 50);
+    return `<div class="card"><h3>ربط ChatGPT بالمنتجات</h3><p class="small ink2" style="margin:6px 0 10px">GPT خاص بيك في ChatGPT («Ninety Products») بيقرا أكواد منتجاتك وأسماء المشاريع، ولما تقوله «ابعت المنتج للسيستم» بيبعت البيانات والملفات هنا — وبتوصلك في «وارد ChatGPT» تراجعها وتعتمدها.</p>
+      <div id="gptstate" style="margin-bottom:10px">${hosted() ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">النسخة المستضافة بس</span>'}</div>
+      ${hosted() ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn p" data-gptkey>مفتاح جديد</button><button class="btn ghost" data-gptrevoke>إلغاء الربط</button><a class="btn ghost" href="#/gptin">وارد ChatGPT</a></div>` : ''}</div>
+      <div class="card" style="margin-top:12px"><h3>الخطوات (مرة واحدة — حوالي 5 دقايق)</h3><ol class="gpt-list" style="font-size:13.5px;gap:6px">
+        <li>اضغط «مفتاح جديد» فوق وانسخ المفتاح (بيظهر مرة واحدة).</li>
+        <li>افتح ChatGPT ← Explore GPTs ← <b>Create</b> ← Configure. الاسم: <b>Ninety Products</b>.</li>
+        <li>في <b>Instructions</b> الصق النص (1) تحت.</li>
+        <li>تحت خالص: <b>Create new action</b> ← Authentication ← <b>API Key</b> ← Auth Type <b>Bearer</b> ← الصق المفتاح.</li>
+        <li>في <b>Schema</b> الصق النص (2) تحت ← Save. وفي Privacy policy اكتب رابط السيستم.</li>
+        <li>احفظ الـ GPT «Only me». جرّب: «هات الكتالوج» — ولما تخلّص منتج: «ابعت المنتج للسيستم».</li></ol>
+        <div class="gpt-sec"><div class="row"><h4 class="grow">(1) Instructions</h4><button class="btn xs" data-gptcopy="instr">نسخ</button></div><div class="gpt-code" id="gpt-instr">${esc(GPT_INSTR())}</div></div>
+        <div class="gpt-sec"><div class="row"><h4 class="grow">(2) Schema</h4><button class="btn xs" data-gptcopy="schema">نسخ</button></div><div class="gpt-code" id="gpt-schema">${esc(OPENAPI())}</div></div>
+        <p class="tiny muted" style="margin-top:8px">الأمان: المفتاح بيفتح «الوارد» بس — مايقدرش يقرا فلوس ولا موظفين ولا يعدّل حاجة. أي حاجة بتوصل مستنية اعتمادك. لو المفتاح اتسرّب اضغط «مفتاح جديد» والقديم يقف فورًا.</p></div>`;
+  } };
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-gptkey],[data-gptrevoke],[data-gptcopy]'); if (!t || !isAdmin()) return;
+    if (t.dataset.gptcopy) { const txt = t.dataset.gptcopy === 'instr' ? GPT_INSTR() : OPENAPI(); try { await navigator.clipboard.writeText(txt); toast('اتنسخ'); } catch (x) { toast('انسخه يدوي من المربع', 'err'); } return; }
+    if (t.dataset.gptrevoke !== undefined) { if (!await confirmDlg('إلغاء الربط؟ ChatGPT مش هيقدر يبعت لحد ما تعمل مفتاح جديد.', 'إلغاء الربط')) return; const { error } = await S.sb.rpc('nf_gpt_key_revoke'); if (error) { toast(error.message, 'err'); return; } toast('اتلغى الربط'); render(false); return; }
+    if (t.dataset.gptkey !== undefined) {
+      const { data: stt } = await S.sb.rpc('nf_gpt_key_status'); if (stt && stt.set && !await confirmDlg('فيه مفتاح شغال — المفتاح الجديد هيوقف القديم فورًا. تكمل؟', 'مفتاح جديد')) return;
+      const { data: k, error } = await S.sb.rpc('nf_gpt_key_new'); if (error || !k) { toast((error && error.message) || 'تعذّر', 'err'); return; }
+      openModal({ title: 'مفتاح ChatGPT', body: `<p class="small">انسخه دلوقتي والصقه في ChatGPT (Action ← Authentication ← API Key ← Bearer). <b>مش هيظهر تاني</b> — ولو ضاع اعمل مفتاح جديد.</p><div class="gpt-key" id="gptkeyval">${esc(k)}</div><div class="row" style="margin-top:10px"><button type="button" class="btn p" id="gptkeycopy">نسخ المفتاح</button></div>`, footer: `<button type="button" class="btn" data-action="closemodal">تمام، نسخته</button>` }); { const b = document.getElementById('gptkeycopy'); if (b) b.onclick = async () => { try { await navigator.clipboard.writeText(k); toast('اتنسخ'); } catch (x) { toast('حدّده وانسخه يدوي', 'err'); } }; }
+      render(false);
+    }
+  });
 })();
 </script>
 
