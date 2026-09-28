@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-1540-f0ce83";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-1822-61d638";</script>
 
 <script>
 'use strict';
@@ -22209,6 +22209,33 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     state.checked = 0; await paint(); const still = document.getElementById('pushreq'); if (still) { still.outerHTML = bar(); } else toast('الإشعارات اشتغلت ✓');
   });
   window.nfPushReq = { check, state };
+})();
+/* =====================================================================
+   v5.33 — أوامر التشغيل: تمييز اللي نزل للمصنع
+   · شارة خضرا «✓ نزل للمصنع» + خط أخضر على جنب الكارت لكل أمر مفتوح اتنزّل للإنتاج
+   · فلترين جداد: «نزلت للمصنع» و«لسه ماتنزلتش» (للي بيشوف الاتنين: المالك/الحسابات/التجاري/الإدارة)
+   ===================================================================== */
+(() => {
+  const seesBoth = () => !!S.session && (isAdmin() || ['hr', 'bdd', 'manager', 'vice', 'office', 'acc'].includes(role()));
+  const released = o => (typeof orderReleased === 'function' ? orderReleased(o) : !!o.releasedAt) && !o.confidential;
+  document.head.insertAdjacentHTML('beforeend', `<style>.item.nf-rel{box-shadow:inset -4px 0 0 var(--good-ink,#1b7f4b)}[dir=ltr] .item.nf-rel{box-shadow:inset 4px 0 0 var(--good-ink,#1b7f4b)}.badge.nf-relb{background:var(--good-soft,rgba(27,127,75,.15));color:var(--good-ink,#1b7f4b);font-weight:700}</style>`);
+  let relFilter = '';
+  if (typeof orderList === 'function') orderList = (base => function (arr, opt) {
+    if (relFilter) arr = arr.filter(o => relFilter === 'rel' ? released(o) : !released(o));
+    let html = base.call(this, arr, opt); if (!seesBoth()) return html;
+    arr.forEach(o => { if (!isOpen(o) || !released(o)) return; const at = o.releasedAt ? fmtDate(String(o.releasedAt).slice(0, 10)) : '';
+      html = html.replace(new RegExp(`class="item([^"]*)"([^>]*data-arg="orders/${o.id}")`), `class="item$1 nf-rel"$2`).replace(new RegExp(`(data-arg="orders/${o.id}"[\\s\\S]*?<div class="end">)`), `$1<span class="badge nf-relb" title="${at ? 'نزل ' + esc(at) : ''}">✓ نزل للمصنع</span>`); });
+    return html;
+  })(orderList);
+  if (typeof vOrders === 'function') vOrders = (base => function () {
+    const f = S.ui.filter.orders || (S.ui.filter.orders = { status: 'open', brand: '', dept: '' });
+    const mine = ['rel', 'wait'].includes(f.status) ? f.status : ''; if (mine) { relFilter = mine; f.status = 'open'; }
+    let html; try { html = base.apply(this, arguments); } finally { if (mine) { f.status = mine; relFilter = ''; } }
+    if (!seesBoth()) return html;
+    const extra = `<button class="${mine === 'rel' ? 'on' : ''}" data-action="ofilter" data-arg="status:rel">نزلت للمصنع</button><button class="${mine === 'wait' ? 'on' : ''}" data-action="ofilter" data-arg="status:wait">لسه ماتنزلتش</button>`;
+    if (mine) html = html.replace('<button class="on" data-action="ofilter" data-arg="status:open">', '<button class="" data-action="ofilter" data-arg="status:open">');
+    return html.replace(/(<div class="seg">[\s\S]*?data-arg="status:open">المفتوحة<\/button>)/, `$1${extra}`);
+  })(vOrders);
 })();
 </script>
 
