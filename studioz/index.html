@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-0549-723eb6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-0617-3ffb88";</script>
 
 <script>
 'use strict';
@@ -21894,6 +21894,32 @@ ACTIONS.fileSave = (base => async function (id) { const f = byId('files', id); i
 if (typeof filesOf === 'function') filesOf = (base => function () { const r = base.apply(this, arguments); return canSeeSrc() ? r : r.filter(f => !isSecretLink(f)); })(filesOf);
 ACTIONS.fileOpen = (base => function (arg) { const f = byId('files', String(arg || '').split(':')[0]); if (f && isSecretLink(f) && !canSeeSrc()) { toast('اللينك ده للمالك والمكتب الفني بس', 'err'); return; } return base.apply(this, arguments); })(ACTIONS.fileOpen);
 window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
+/* =====================================================================
+   v5.28 — إشعار لمدير المصنع بكل مهمة جديدة لحد (المصنع فقط)
+   · مهمة اتعملت لموظف/رئيس قسم (أو اتحوّلت لشخص جديد) أو لقسم كامل → إشعار لمدير المصنع: «فلان عنده مهمة جديدة»
+   · ما بيتبعتش لو مدير المصنع هو اللي عملها أو هو المكلَّف، ولا للتنبيهات/التصعيد اللي السيستم بيعملها
+   ===================================================================== */
+(() => {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const sent = new Set();
+  const isMgrId = id => { if (!id) return false; const w = byId('workers', id); if (w) return w.role === 'manager'; const s = byId('staff', id); return !!(s && s.role === 'manager'); };
+  const SKIP_SRC = ['system', 'money', 'order', 'cctv', 'reminder'];
+  Store.save = (base => async function (col, doc, opts) {
+    const was = col === 'tasks' && doc && doc.id ? byId('tasks', doc.id) : null;
+    const r = await base.call(this, col, doc, opts);
+    try {
+      if (col !== 'tasks' || !doc || !S.session || role() === 'manager' || typeof pushSend !== 'function') return r;
+      if (!['open', 'doing'].includes(doc.status || 'open') || ['update', 'notice'].includes(doc.kind) || SKIP_SRC.includes(doc.source) || doc.toRole) return r;
+      const who = doc.assigneeId || null; const newWho = who ? (!was || was.assigneeId !== who) : (!was && !!doc.deptId);
+      if (!newWho || isMgrId(who)) return r;
+      const key = doc.id + ':' + (who || 'dept:' + doc.deptId); if (sent.has(key)) return r; sent.add(key);
+      const name = who ? (assigneeName(who) || 'موظف') : `قسم ${deptName(doc.deptId)}`;
+      const by = S.session.name ? ` · من ${S.session.name}` : '';
+      pushSend(['role:manager'], `${name} عنده مهمة جديدة`.slice(0, 100), `${String(doc.title || '').slice(0, 110)}${by}`, `/#/tasks/${doc.id}`, 'mgr-task-' + doc.id);
+    } catch (e) { /* push is best-effort */ }
+    return r;
+  })(Store.save);
+})();
 </script>
 
 </body>
