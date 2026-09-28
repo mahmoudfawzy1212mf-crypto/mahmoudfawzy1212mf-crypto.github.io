@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-1822-61d638";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-2003-9ee45a";</script>
 
 <script>
 'use strict';
@@ -10408,6 +10408,7 @@ wirePasswordEyes();
    · على الآيفون: خانة الكود autocomplete=one-time-code تقرأ الكود من الرسالة فوق الكيبورد
    · على أندرويد: WebOTP (السطر الأخير في الرسالة @domain #code) يملأ الكود وحده
    · نفس الشيء لكود «نسيت كلمة السر» الذي يصدر عند اعتماد الـHR لطلب إعادة الضبط
+   · v5.34: خيار «SMS احتياطي للإشعارات» (settings.sms.fallback) — السيرفر (push v4) يبعت SMS لمن لم يصله الإشعار
    ===================================================================== */
 const SMS_TPL_DEFAULT = 'كود تفعيل حسابك في سيستم {app}: {code}\nافتح الرابط وسيُملأ الكود تلقائيًا:\n{link}\n(صالح 48 ساعة)';
 const smsCfg = () => Object.assign({ auto: true, tpl: SMS_TPL_DEFAULT }, (S.settings && S.settings.sms) || {});
@@ -10511,16 +10512,16 @@ setTimeout(openFromLink, 1200);
 })();
 
 /* ---------- settings: SMS provider (hosted) + message template ---------- */
-EXTRA_SETTINGS.sms = { label: 'رسائل SMS للأكواد', render: () => {
+EXTRA_SETTINGS.sms = { label: 'رسائل SMS', render: () => {
   const c = smsCfg(); const hosted = smsAvailable();
   setTimeout(async () => { const box = document.getElementById('smsprov'); if (!box) return; const st = await smsStatus(); box.innerHTML = st.configured ? `<span class="badge good">مضبوط: ${esc(st.provider)}${st.sender ? ' — المرسل ' + esc(st.sender) : ''}</span>` : `<span class="badge warn">لم يُضبط مزوّد SMS — الأكواد تُرسل يدويًا (واتساب / من موبايلك)</span>`; }, 50);
   return `<form class="card" id="smsform"><h3>إرسال أكواد التفعيل في رسالة SMS</h3><p class="small ink2" style="margin:6px 0 12px">عند ضغط «كود تفعيل» أو اعتماد طلب «نسيت كلمة السر» يُرسل الكود تلقائيًا لرقم موبايل الموظف، والرابط في الرسالة يفتح التطبيق والكود مكتوب جاهز. الآيفون والأندرويد يقرآن الكود من الرسالة تلقائيًا.</p>
     <div id="smsprov" style="margin-bottom:10px">${hosted ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">النسخة المستضافة فقط — هنا يعمل الإرسال اليدوي (واتساب / رسالة من موبايلك)</span>'}</div>
     <div class="form"><label class="check full"><input type="checkbox" name="auto" ${c.auto !== false ? 'checked' : ''}> إرسال الرسالة تلقائيًا بمجرد إصدار الكود (لو المزوّد مضبوط)</label>
     ${field('نص الرسالة — المتغيرات: {code} الكود · {link} رابط التفعيل · {app} اسم السيستم', `<textarea id="f-tpl" name="tpl" style="min-height:110px">${esc(c.tpl || SMS_TPL_DEFAULT)}</textarea>`, 'full')}
-    ${field('رابط التطبيق (يُستخدم في الرسالة من النسخة المكتبية)', inp('appUrl', (S.settings && S.settings.appUrl) || '', 'class="ltr" placeholder="https://…"'), 'full')}${field('موبايل المالك لتنبيهات SMS (تعديلات الحضور والرواتب)', inp('ownerPhone', (S.settings && S.settings.ownerPhone) || '', 'class="ltr" inputmode="tel" placeholder="01xxxxxxxxx"'))}<label class="check"><input type="checkbox" name="ownerAlerts" ${c.ownerAlerts !== false ? 'checked' : ''}> إرسال تنبيهات SMS للمالك</label></div>
+    ${field('رابط التطبيق (يُستخدم في الرسالة من النسخة المكتبية)', inp('appUrl', (S.settings && S.settings.appUrl) || '', 'class="ltr" placeholder="https://…"'), 'full')}${field('موبايل المالك لتنبيهات SMS (تعديلات الحضور والرواتب)', inp('ownerPhone', (S.settings && S.settings.ownerPhone) || '', 'class="ltr" inputmode="tel" placeholder="01xxxxxxxxx"'))}<label class="check"><input type="checkbox" name="ownerAlerts" ${c.ownerAlerts !== false ? 'checked' : ''}> إرسال تنبيهات SMS للمالك</label><label class="check full"><input type="checkbox" name="fallback" ${c.fallback !== false ? 'checked' : ''}> SMS احتياطي للإشعارات: أي موظف الإشعار ماوصلوش على أي جهاز (الإشعارات مقفولة أو مش مفعّلة) يوصله SMS قصير فيه عنوان الإشعار ورابط السيستم — بحد أقصى رسالة كل 30 دقيقة للشخص</label></div>
     <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>
-    ${hosted && isAdmin() ? `<form class="card" id="smsprovform"><h3>مزوّد SMS (المالك فقط)</h3><p class="small ink2" style="margin:6px 0 12px">تُحفظ البيانات على السيرفر (لا تُخزَّن في المتصفح). مزوّدون مصريون: SMS Misr — أو Twilio / Vonage الدوليان — أو أي مزوّد له رابط HTTP.</p><div class="form">
+    ${hosted && isAdmin() ? `<form class="card" id="smsprovform"><h3>مزوّد SMS (المالك فقط)</h3><p class="small ink2" style="margin:6px 0 8px">تُحفظ البيانات على السيرفر (لا تُخزَّن في المتصفح). مزوّدون مصريون: SMS Misr — أو Twilio / Vonage الدوليان — أو أي مزوّد له رابط HTTP.</p><ol class="small ink2" style="margin:0 0 12px;padding-inline-start:18px;line-height:1.8"><li>اعمل حساب على smsmisr.com واشحن رصيد.</li><li>من حسابك: اطلب اسم مرسل <b class="ltr">Ninety</b> (Sender ID) — الموافقة بتاخد كام يوم.</li><li>من صفحة الـ API في حسابهم انسخ الـ Username والـ Password بتوع الـ API (مش باسورد الدخول).</li><li>اختار هنا SMS Misr، واكتب المرسل والبيانات، واحفظ، وبعدين «رسالة تجريبية لموبايلي».</li></ol><div class="form">
       ${field('المزوّد', `<select id="f-provider" name="provider"><option value="">— بدون (إرسال يدوي) —</option><option value="smsmisr">SMS Misr (مصر)</option><option value="twilio">Twilio</option><option value="vonage">Vonage</option><option value="generic">مزوّد آخر — رابط HTTP</option></select>`)}
       ${field('اسم/رقم المرسل (Sender)', inp('sender', '', 'class="ltr" placeholder="Ninety أو +1…"'))}
       <div class="full prov prov-smsmisr" hidden><div class="form">${field('Username', inp('username', '', 'class="ltr" autocomplete="off"'))}${field('Password', inp('password', '', 'type="password" class="ltr" autocomplete="new-password"'))}${field('البيئة', `<select id="f-env" name="env"><option value="1">فعلي (Live)</option><option value="2">تجريبي (Test)</option></select>`)}</div></div>
@@ -10532,7 +10533,7 @@ EXTRA_SETTINGS.sms = { label: 'رسائل SMS للأكواد', render: () => {
 } };
 document.addEventListener('change', ev => { if (ev.target && ev.target.id === 'f-provider') { const v = ev.target.value; document.querySelectorAll('#smsprovform .prov').forEach(el => { el.hidden = !el.classList.contains('prov-' + v); }); } });
 document.addEventListener('submit', async ev => {
-  if (ev.target.id === 'smsform') { ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ sms: { auto: !!d.auto, tpl: String(d.tpl || '').trim() || SMS_TPL_DEFAULT, ownerAlerts: !!d.ownerAlerts }, appUrl: String(d.appUrl || '').trim(), ownerPhone: normPhone(d.ownerPhone || '') }); toast('تم الحفظ'); return; }
+  if (ev.target.id === 'smsform') { ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings({ sms: { auto: !!d.auto, tpl: String(d.tpl || '').trim() || SMS_TPL_DEFAULT, ownerAlerts: !!d.ownerAlerts, fallback: !!d.fallback }, appUrl: String(d.appUrl || '').trim(), ownerPhone: normPhone(d.ownerPhone || '') }); toast('تم الحفظ'); return; }
   if (ev.target.id === 'smsprovform') { ev.preventDefault(); if (!isAdmin() || !smsAvailable()) return; const d = formData(ev.target); const body = { action: 'setup', provider: d.provider || '', sender: d.sender || '', username: d.username, password: d.password, env: d.env, sid: d.sid, token: d.token, key: d.key, secret: d.secret, url: d.url, method: d.method, body: d.body };
     try { const r = await S.sb.functions.invoke('sms', { body }); if (r.error || !r.data || r.data.error) { toast('تعذّر الحفظ: ' + (r.error?.message || r.data?.error || '?'), 'err'); return; } toast(r.data.configured ? 'تم ضبط مزوّد SMS' : 'أُلغي مزوّد SMS'); ev.target.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); const box = document.getElementById('smsprov'); if (box) { const st = await smsStatus(); box.innerHTML = st.configured ? `<span class="badge good">مضبوط: ${esc(st.provider)}</span>` : `<span class="badge warn">لم يُضبط مزوّد SMS</span>`; } } catch (e) { toast('تعذّر الحفظ', 'err'); } }
 });
