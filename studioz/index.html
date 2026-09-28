@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-0617-3ffb88";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-1349-d9ac3c";</script>
 
 <script>
 'use strict';
@@ -21919,6 +21919,193 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     } catch (e) { /* push is best-effort */ }
     return r;
   })(Store.save);
+})();
+/* =====================================================================
+   v5.29 — موديول «مصاريف التشغيل» (المصنع فقط) — صفحة #/opex
+   · مفتوح للمالك + مدير الحسابات (hr) + مسؤول الحسابات (acc) بس
+   · الإعدادات في مستند money/opexcfg (المالك/hr/acc بس يقروه)
+   · بنود ثابتة بتتكرر كل شهر (إيجار/كهربا/مية/غاز/سكن/…): تتعرّف مرة — المبلغ ويوم الاستحقاق
+   · حالة كل بند في الشهر: اتدفع / عند مدير الحسابات / معتمد مستني تحويل / متأخر / لسه
+   · تذكير لمسؤول الحسابات قبل الميعاد بـ3 أيام، ولمدير الحسابات لو اتأخر 3 أيام
+   · قراءات العداد (اختياري) + تنبيه لو الاستهلاك زاد فجأة
+   · بنود مخصوصة (إنترنت/نظافة/أمن…) + تقرير 12 شهر لكل بند ولكل سكن
+   · نفس المسار القديم: مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل (requests type opex)
+   ===================================================================== */
+(() => {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof OPEX_CATS === 'undefined' || typeof MONEY_CATS === 'undefined') return;
+  const oxSee = () => !!S.session && (isAdmin() || ['hr', 'acc'].includes(role()));
+  const oxRec = () => writable() && oxSee();
+  const oxEdit = () => writable() && (isAdmin() || role() === 'hr');
+  /* config lives in the «money» collection (readable by owner/hr/acc only — rent amounts never reach other roles) */
+  const oxCfg = () => { const d = typeof byId === 'function' ? byId('money', 'opexcfg') : null; return Object.assign({ items: [], cats: [] }, d || S.settings.opex || {}); };
+  const oxItems = () => (oxCfg().items || []).filter(i => i && i.id && !i.off);
+  const oxCats = () => (oxCfg().cats || []).filter(c => c && c.id && !c.off);
+  const BASE_OPEX = ['rent_factory', 'electricity', 'water', 'gas', 'tea', 'home_rent', 'home_elec', 'home_water'];
+  const syncCats = () => {
+    oxCats().forEach(c => { const m = MONEY_CATS.find(x => x[0] === c.id); if (m) m[1] = c.name; else MONEY_CATS.push([c.id, c.name]); if (!OPEX_CATS.includes(c.id)) OPEX_CATS.splice(Math.max(0, OPEX_CATS.indexOf('other')), 0, c.id); });
+    if (typeof OVERHEAD_CATS !== 'undefined') BASE_OPEX.concat(oxCats().map(c => c.id)).forEach(c => { if (!OVERHEAD_CATS.includes(c)) OVERHEAD_CATS.push(c); });
+  };
+  syncCats(); RENDER_HOOKS.push(syncCats);
+  const METER_UNITS = { electricity: 'ك.و.س', home_elec: 'ك.و.س', water: 'م³', home_water: 'م³', gas: 'م³' };
+  const dueOf = (it, ym) => `${ym}-${String(Math.min(28, Math.max(1, +it.dueDay || 1))).padStart(2, '0')}`;
+  const startYm = it => String(it.startMonth || it.createdAt || '').slice(0, 7) || '0000-00';
+  const itemLabel = it => `${it.name || catLabel(it.cat)}${it.homeId && homeName(it.homeId) ? ' · ' + homeName(it.homeId) : ''}`;
+  const liveReq = r => r && r.type === 'opex' && !['rejected', 'cancelled'].includes(r.status);
+  function stateOf(it, ym) {
+    const rs = sortBy(list('requests').filter(r => liveReq(r) && r.itemId === it.id && r.month === ym), r => r.createdAt || '', true); const r = rs[0] || null;
+    const exp = list('expenses').find(e => e.itemId === it.id && e.month === ym) || (r ? byId('expenses', 'opx_' + r.id) : null);
+    if (exp) return { k: 'paid', label: 'اتدفع', cls: 'good', amount: +exp.amount || 0, r, exp };
+    if (r && r.status === 'pending') return { k: 'pending', label: 'عند مدير الحسابات', cls: 'warn', amount: +r.amount || 0, r };
+    if (r && r.status === 'approved') return { k: 'approved', label: 'معتمد — مستني تحويل المالك', cls: 'acc', amount: +r.amount || 0, r };
+    const due = dueOf(it, ym); if (todayISO() > due) return { k: 'late', label: 'متأخر', cls: 'crit', due };
+    return { k: 'todo', label: 'لسه', cls: '', due };
+  }
+  /* meter: previous reading + consumption + spike (> 30% over the average of the last 3) */
+  function meterHist(it, beforeYm) {
+    return sortBy(list('requests').filter(r => liveReq(r) && r.itemId === it.id && r.reading != null && r.month < beforeYm), r => r.month, true);
+  }
+  function meterCalc(it, ym, reading) {
+    const h = meterHist(it, ym); const prev = h[0] ? +h[0].reading : null; if (prev == null || reading == null || isNaN(reading)) return { prev, use: null, spike: false, avg: null };
+    const use = r2(reading - prev); const uses = h.map(x => x.use).filter(x => x != null && x > 0).slice(0, 3); const avg = uses.length ? r2(uses.reduce((a, b) => a + b, 0) / uses.length) : null;
+    return { prev, use, avg, spike: avg != null && use > avg * 1.3 };
+  }
+  const lateItems = ym => oxItems().filter(it => startYm(it) <= ym && stateOf(it, ym).k === 'late');
+
+  /* ---------- page ---------- */
+  function vOpex() {
+    if (!oxSee()) return '<div class="empty">الصفحة دي للمالك والحسابات بس.</div>';
+    const f = S.ui.filter.opex ||= { ym: monthOf(todayISO()) }; const ym = f.ym; const prev = monthOf(addDays(ym + '-01', -1));
+    const items = sortBy(oxItems().filter(it => startYm(it) <= ym), it => String(+it.dueDay || 1).padStart(2, '0') + (it.name || ''));
+    const st = items.map(it => ({ it, s: stateOf(it, ym) }));
+    const opexCats = OPEX_CATS.concat(['fuel_cash', 'oil', 'car_maint']);
+    const monthExp = m => list('expenses').filter(e => e.month === m && (opexCats.includes(e.cat) || e.src === 'opex' || e.itemId));
+    const paidT = r2(sum(monthExp(ym), e => +e.amount || 0)), prevT = r2(sum(monthExp(prev), e => +e.amount || 0));
+    const waitT = r2(sum(st.filter(x => x.s.k === 'pending' || x.s.k === 'approved'), x => x.s.amount));
+    const expected = r2(sum(st.filter(x => x.s.k === 'late' || x.s.k === 'todo'), x => +x.it.amount || 0));
+    const late = st.filter(x => x.s.k === 'late').length; const diff = prevT ? Math.round((paidT - prevT) / prevT * 100) : null;
+    const kpi = (l, v, s, cls) => `<div class="kpi ${cls || ''}" style="cursor:default"><span class="stripe"></span><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s || ''}</div></div>`;
+    let h = `<div class="toolbar">${monthNavBar('opex')}<div class="grow"></div>${oxRec() ? `<button class="btn sm" data-action="opexNew">${icon('plus')}مصروف تاني</button>` : ''}${oxEdit() ? `<button class="btn sm p" data-action="oxItemEdit">${icon('plus')}بند ثابت</button>` : ''}</div><div class="stack">`;
+    h += `<div class="kpis">${kpi(`اتدفع ${fmtMonth(ym)}`, fmtMoney(paidT), diff == null || !paidT ? '' : `${diff > 0 ? '+' : ''}${diff}% عن ${fmtMonth(prev)}`, 'acc')}${kpi('في الطريق (موافقة / تحويل)', fmtMoney(waitT), `${st.filter(x => x.s.k === 'pending' || x.s.k === 'approved').length} بند`, waitT ? 'warn' : '')}${kpi('لسه ماتسجلش', fmtMoney(expected), `${st.filter(x => x.s.k === 'todo' || x.s.k === 'late').length} بند متوقع`)}${kpi('متأخر', String(late), late ? 'عدّى ميعاد استحقاقه' : 'مفيش', late ? 'crit' : 'good')}</div>`;
+    const row = ({ it, s }) => { const r = s.r; const m = r && r.reading != null ? `<div class="tiny muted">عداد ${fmtNum(r.reading)}${r.use != null ? ` · استهلاك ${fmtNum(r.use)} ${esc(it.unit || METER_UNITS[it.cat] || '')}` : ''}${r.spike ? ' <span class="badge crit" style="padding:0 6px">زيادة مفاجئة</span>' : ''}</div>` : '';
+      const act = s.k === 'todo' || s.k === 'late' ? (oxRec() ? `<button class="btn xs ${s.k === 'late' ? 'p' : ''}" data-action="oxRecord" data-arg="${esc(it.id)}:${ym}">سجّل</button>` : '') : s.k === 'approved' && isAdmin() ? `<button class="btn xs p" data-action="opexPay" data-arg="${esc(r.id)}">حوّل</button>` : s.k === 'pending' ? `<a class="btn xs ghost" href="#/requests">الطلب</a>` : '';
+      return `<tr class="ox-${s.k}"><td class="oxn"><b>${esc(itemLabel(it))}</b><div class="tiny muted">${esc(catLabel(it.cat))}${it.payee ? ' · ' + esc(it.payee) : ''}</div>${m}</td><td class="small" data-l="النوع">${it.kind === 'fixed' ? 'ثابت' : 'فاتورة'}</td><td class="small" data-l="الاستحقاق">${fmtDate(dueOf(it, ym))}</td><td class="n" data-l="المتوقع">${it.amount ? fmtMoney(it.amount) : '—'}</td><td class="n" data-l="الشهر ده"><b>${s.amount != null ? fmtMoney(s.amount) : '—'}</b></td><td class="oxs"><span class="badge ${s.cls}">${esc(s.label)}</span></td><td class="oxa" style="white-space:nowrap">${act}${oxEdit() ? ` <button class="btn xs ghost" data-action="oxItemEdit" data-arg="${esc(it.id)}" title="تعديل البند">${icon('edit')}</button>` : ''}</td></tr>`; };
+    h += `<div class="card"><div class="cardhead"><h3>البنود الثابتة — ${fmtMonth(ym)}</h3><span class="muted small">${items.length}</span></div>${items.length ? `<div class="tablewrap"><table id="oxtbl"><thead><tr><th>البند</th><th>النوع</th><th>الاستحقاق</th><th class="n">المتوقع</th><th class="n">الشهر ده</th><th>الحالة</th><th></th></tr></thead><tbody>${st.map(row).join('')}</tbody></table></div>` : `<div class="empty">مفيش بنود ثابتة لسه.${oxEdit() ? ' اضغط «بند ثابت» وعرّف الإيجار والكهربا والمية… مرة واحدة، والسيستم هيفكّركم كل شهر.' : ''}</div>`}</div>`;
+    /* one-off opex this month (not tied to a fixed item) */
+    const extraReq = sortBy(list('requests').filter(r => liveReq(r) && !r.itemId && r.month === ym), r => r.createdAt || '', true);
+    const extraExp = list('expenses').filter(e => e.month === ym && !e.itemId && (e.src === 'opex' || opexCats.includes(e.cat)) && !(e.reqId && extraReq.some(r => r.id === e.reqId)));
+    const exRows = extraReq.map(r => { const e = byId('expenses', 'opx_' + r.id); return `<tr><td>${esc(catLabel(r.cat))}${r.homeId ? ' · ' + esc(homeName(r.homeId)) : ''}<div class="tiny muted">${esc(r.payee || '')} ${esc(r.note || '')}</div></td><td class="n"><b>${fmtMoney(e ? e.amount : r.amount)}</b></td><td><span class="badge ${e ? 'good' : r.status === 'pending' ? 'warn' : 'acc'}">${e ? 'اتدفع' : r.status === 'pending' ? 'عند مدير الحسابات' : 'مستني تحويل'}</span>${!e && r.status === 'approved' && isAdmin() ? ` <button class="btn xs p" data-action="opexPay" data-arg="${esc(r.id)}">حوّل</button>` : ''}</td></tr>`; }).concat(extraExp.map(e => `<tr><td>${esc(catLabel(e.cat))}${e.homeId ? ' · ' + esc(homeName(e.homeId)) : ''}<div class="tiny muted">${esc(e.payee || '')} ${esc(e.note || '')}</div></td><td class="n"><b>${fmtMoney(e.amount)}</b></td><td><span class="badge good">اتدفع</span></td></tr>`));
+    h += `<div class="card"><div class="cardhead"><h3>مصاريف تانية — ${fmtMonth(ym)}</h3><div class="grow"></div>${oxRec() ? `<button class="btn sm" data-action="opexNew">${icon('plus')}مصروف</button>` : ''}</div>${exRows.length ? `<div class="tablewrap"><table><thead><tr><th>البند</th><th class="n">المبلغ</th><th>الحالة</th></tr></thead><tbody>${exRows.join('')}</tbody></table></div>` : '<div class="muted small">مفيش.</div>'}</div>`;
+    /* 12-month report */
+    const months = []; for (let i = 11; i >= 0; i--) months.push(monthOf(addDays(ym + '-15', -30.4 * i | 0)));
+    const uniq = Array.from(new Set(months)); const tot = uniq.map(m => ({ m, v: r2(sum(monthExp(m), e => +e.amount || 0)) })); const mx = Math.max(1, ...tot.map(x => x.v));
+    const bars = `<div class="oxbars">${tot.map(x => `<div class="oxb" title="${esc(fmtMonth(x.m))}: ${fmtMoney(x.v)}"><div class="oxv num">${x.v ? fmtMoney(Math.round(x.v)) : ''}</div><i style="height:${Math.round(x.v / mx * 100)}%"${x.m === ym ? ' class="on"' : ''}></i><span>${esc(fmtMonth(x.m).split(' ')[0])}</span></div>`).join('')}</div>`;
+    const yExp = list('expenses').filter(e => uniq.includes(e.month) && (opexCats.includes(e.cat) || e.src === 'opex' || e.itemId));
+    const byCat = {}; yExp.forEach(e => { byCat[e.cat] = (byCat[e.cat] || 0) + (+e.amount || 0); });
+    const catRows = Object.keys(byCat).map(c => ({ label: catLabel(c), value: Math.round(byCat[c]) })).sort((a, b) => b.value - a.value);
+    const hm = homes().map(hh => ({ hh, v: r2(sum(yExp.filter(e => e.homeId === hh.id), e => +e.amount || 0)), m: r2(sum(yExp.filter(e => e.homeId === hh.id && e.month === ym), e => +e.amount || 0)) }));
+    h += `<div class="grid g2"><div class="card"><div class="cardhead"><h3>آخر 12 شهر</h3><span class="muted small">${fmtMoney(r2(sum(tot, x => x.v)))} ${CUR()}</span></div>${bars}</div><div class="card"><div class="cardhead"><h3>حسب البند — آخر 12 شهر</h3></div>${hbars(catRows)}</div></div>`;
+    h += `<div class="card"><div class="cardhead"><h3>السكن</h3><div class="grow"></div>${oxEdit() ? `<button class="btn sm" data-action="homeNew">${icon('plus')}سكن</button>` : ''}</div>${hm.length ? `<div class="tablewrap"><table><thead><tr><th>السكن</th><th class="n">الإيجار الشهري</th><th class="n">${fmtMonth(ym)}</th><th class="n">آخر 12 شهر</th></tr></thead><tbody>${hm.map(x => `<tr><td><b>${esc(x.hh.name)}</b><div class="tiny muted">${esc(x.hh.address || '')}${x.hh.note ? ' · ' + esc(x.hh.note) : ''}</div></td><td class="n">${fmtMoney(x.hh.rent || 0)}</td><td class="n"><b>${fmtMoney(x.m)}</b></td><td class="n">${fmtMoney(x.v)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">مفيش سكن متسجل.</div>'}</div>`;
+    return h + '</div>';
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.oxbars{display:flex;align-items:flex-end;gap:6px;height:170px;padding-top:18px}
+.oxb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0;position:relative}
+.oxb i{display:block;width:100%;max-width:34px;background:var(--accent);opacity:.4;border-radius:6px 6px 2px 2px;min-height:2px}
+.oxb i.on{opacity:1}
+.oxb span{font-size:10.5px;color:var(--ink-2);margin-top:4px;white-space:nowrap;overflow:hidden;max-width:100%}
+.oxb .oxv{font-size:9.5px;color:var(--ink-2);white-space:nowrap;margin-bottom:2px;transform:rotate(-35deg);transform-origin:center;height:12px}
+@media (max-width:640px){.oxb .oxv{display:none}.oxb span{font-size:9px}
+#oxtbl thead{display:none}#oxtbl,#oxtbl tbody{display:block}
+#oxtbl tr{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--line)}
+#oxtbl td{display:block;border:0;padding:0}
+#oxtbl td.oxn{flex:1 1 100%}
+#oxtbl td[data-l]::before{content:attr(data-l) ": ";color:var(--ink-2);font-weight:400;font-size:11px}
+#oxtbl td.oxs{margin-inline-start:auto}#oxtbl td.oxa{flex:0 0 auto}
+#oxtbl tr.ox-late{background:rgba(220,60,60,.05)}}
+</style>`);
+
+  /* ---------- record one fixed item for a month (same approval path as «مصروف تشغيل») ---------- */
+  ACTIONS.oxRecord = arg => {
+    if (!oxRec()) return; const [iid, ym0] = String(arg || '').split(':'); const it = oxItems().find(x => x.id === iid); if (!it) return; const ym = ym0 || monthOf(todayISO());
+    const meter = !!it.meter; const unit = it.unit || METER_UNITS[it.cat] || ''; const h0 = meter ? meterHist(it, ym)[0] : null; const needPhoto = it.kind !== 'fixed';
+    openModal({ title: `${itemLabel(it)} — ${fmtMonth(ym)}`, submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">
+      ${field(`المبلغ (${CUR()})`, inp('amount', it.kind === 'fixed' && it.amount ? it.amount : '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('المستفيد', inp('payee', it.payee || ''))}
+      ${meter ? field(`قراءة العداد (${esc(unit)})`, inp('reading', '', 'type="number" step="any" min="0" inputmode="decimal"') + (h0 ? `<div class="tiny muted">القراءة اللي فاتت: ${fmtNum(h0.reading)} (${fmtMonth(h0.month)})</div>` : '')) : ''}
+      <div class="field full"><label>صورة الفاتورة / الإيصال${needPhoto ? '' : ' (اختياري)'}</label><input type="file" id="oxr-file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}
+      <div class="tiny muted full">مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (!(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; }
+        const file = (f.querySelector('#oxr-file') || {}).files?.[0]; if (needPhoto && !file) { toast('صورة الفاتورة مطلوبة', 'err'); return false; }
+        const reading = meter && d.reading !== '' && d.reading != null ? num(d.reading) : null; const mc = meter ? meterCalc(it, ym, reading) : {};
+        if (meter && reading != null && mc.prev != null && reading < mc.prev) { toast(`القراءة أقل من اللي فاتت (${fmtNum(mc.prev)})`, 'err'); return false; }
+        const me = S.session || {}; const now = nowISO(); const id = uid(); let thumb = null, fileIds = [];
+        if (file) { try { const doc = await proofAttach(file, { kind: 'invoice', ownerKind: 'request', ownerId: id, note: itemLabel(it) }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } } }
+        const reason = `${itemLabel(it)} — ${fmtMonth(ym)}`;
+        const r = { id, type: 'opex', cat: it.cat, itemId: it.id, month: ym, homeId: it.homeId || null, amount: num(d.amount), payee: d.payee || '', note: d.note || '', reason, reading, use: mc.use != null ? mc.use : null, spike: !!mc.spike, thumb, fileIds, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now,
+          thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `مصروف تشغيل ${reason}: ${fmtMoney(num(d.amount))} ${CUR()}${mc.use != null ? ` · استهلاك ${fmtNum(mc.use)} ${unit}${mc.spike ? ` (زيادة مفاجئة — المتوسط ${fmtNum(mc.avg)})` : ''}` : ''}` }] };
+        await Store.save('requests', r, { silent: true });
+        try { await notifyRole('hr', `مصروف تشغيل للموافقة — ${itemLabel(it)}${r.spike ? ' ⚠️ استهلاك زايد' : ''}`, `${reason} — المبلغ في صفحة «مصاريف التشغيل» / الطلبات`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
+        const t = byId('tasks', `oxrem_${it.id}_${ym}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }); } catch (e) { /* ignore */ } }
+        toast(r.spike ? 'اتبعت — الاستهلاك زايد عن المتوسط، اتعلّم لمدير الحسابات' : 'اتبعت لمدير الحسابات'); rerender();
+      } });
+  };
+  /* the paid expense keeps the item link (for the monthly state + reports) */
+  ACTIONS.opexPay = (base => async function (id) { const r = byId('requests', id); const out = await base.apply(this, arguments); try { const e = byId('expenses', 'opx_' + id); if (r && e && (r.itemId || r.reading != null) && !e.itemId) await Store.update('expenses', e.id, { itemId: r.itemId || null, reading: r.reading ?? null, use: r.use ?? null }, { silent: true }); } catch (x) { /* ignore */ } rerender(); return out; })(ACTIONS.opexPay);
+
+  /* ---------- fixed items editor (owner + accounts manager) ---------- */
+  const saveCfg = async patch => { const c = Object.assign({}, oxCfg(), patch, { id: 'opexcfg', type: 'opexcfg', updatedAt: nowISO(), byName: S.session?.name || '' }); await Store.save('money', c, { silent: true }); syncCats(); rerender(); };
+  ACTIONS.oxItemEdit = id => {
+    if (!oxEdit()) return; const it = (oxCfg().items || []).find(x => x.id === id) || { kind: 'fixed', dueDay: 1, cat: 'rent_factory' };
+    const cats = OPEX_CATS.filter(c => c !== 'other').concat(['other']);
+    openModal({ title: it.id ? 'تعديل بند ثابت' : 'بند ثابت جديد', extra: it.id ? `<div class="grow"></div><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-action="oxItemDel" data-arg="${esc(it.id)}">${icon('trash')}وقّف البند</button>` : '', body: `<div class="form">
+      ${field('اسم البند', inp('name', it.name || '', 'required placeholder="إيجار المصنع / كهربا المصنع / نت المكتب…"'), 'full')}
+      ${field('التصنيف', `<select name="cat" id="f-oxcat">${cats.map(c => `<option value="${c}" ${it.cat === c ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('')}</select><button type="button" class="btn xs ghost" data-action="oxCatNew" style="margin-top:6px">${icon('plus')}تصنيف جديد</button>`)}
+      ${field('السكن', `<select name="homeId" id="f-oxhome"><option value="">—</option>${homes().map(h => `<option value="${h.id}" ${it.homeId === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}</select>`)}
+      ${field('النوع', `<select name="kind"><option value="fixed" ${it.kind === 'fixed' ? 'selected' : ''}>ثابت (نفس المبلغ كل شهر — إيجار…)</option><option value="bill" ${it.kind === 'bill' ? 'selected' : ''}>فاتورة (المبلغ بيتغير — كهربا/مية/غاز…)</option></select>`)}
+      ${field(`المبلغ ${it.kind === 'bill' ? 'المتوقع' : 'الشهري'} (${CUR()})`, inp('amount', it.amount || '', 'type="number" step="any" min="0" inputmode="decimal"'))}
+      ${field('يوم الاستحقاق في الشهر (1–28)', inp('dueDay', it.dueDay || 1, 'type="number" min="1" max="28"'))}${field('المستفيد (صاحب المكان / شركة الكهربا…)', inp('payee', it.payee || ''))}
+      <label class="check full ${it.meter ? 'on' : ''}"><input type="checkbox" name="meter" ${it.meter ? 'checked' : ''}> فيه عداد — اطلب قراءة العداد كل شهر ونبّه لو الاستهلاك زاد فجأة</label>
+      ${field('وحدة العداد', inp('unit', it.unit || METER_UNITS[it.cat] || '', 'placeholder="ك.و.س / م³"'))}${field('يبدأ من شهر', inp('startMonth', it.startMonth || monthOf(todayISO()), 'type="month"'))}${field('ملاحظة', inp('note', it.note || ''), 'full')}</div>`,
+      onOpen: f => { const sync = () => { const hf = f.querySelector('#f-oxhome').closest('.field'); if (hf) hf.hidden = !(HOME_CATS.includes(f.querySelector('#f-oxcat').value) || f.querySelector('#f-oxhome').value); }; f.querySelector('#f-oxcat').addEventListener('change', sync); sync(); },
+      onSubmit: async f => {
+        const d = formData(f); if (!(d.name || '').trim()) { toast('اكتب اسم البند', 'err'); return false; } if (HOME_CATS.includes(d.cat) && !d.homeId) { toast('اختار السكن', 'err'); return false; }
+        const doc = Object.assign({}, it, { id: it.id || 'ox' + uid().slice(0, 8), name: d.name.trim(), cat: d.cat, homeId: d.homeId || null, kind: d.kind === 'bill' ? 'bill' : 'fixed', amount: num(d.amount) || 0, dueDay: Math.min(28, Math.max(1, parseInt(d.dueDay, 10) || 1)), payee: d.payee || '', meter: !!d.meter, unit: d.unit || '', startMonth: d.startMonth || monthOf(todayISO()), note: d.note || '', updatedAt: nowISO(), createdAt: it.createdAt || nowISO() });
+        const items = (oxCfg().items || []).filter(x => x.id !== doc.id).concat([doc]); await saveCfg({ items }); toast(it.id ? 'اتحفظ البند' : 'اتضاف البند');
+      } });
+  };
+  ACTIONS.oxItemDel = async id => { if (!oxEdit()) return; if (!(await confirmDlg('توقيف البند ده؟ المصاريف القديمة بتفضل زي ما هي، بس مش هيطلب تاني.', 'وقّف'))) return; const items = (oxCfg().items || []).map(x => x.id === id ? Object.assign({}, x, { off: true, offAt: nowISO() }) : x); await saveCfg({ items }); closeModal(); toast('اتوقف البند'); };
+  ACTIONS.oxCatNew = () => {
+    if (!oxEdit()) return; const name = (prompt('اسم التصنيف الجديد (مثال: إنترنت، نظافة، أمن، صيانة مباني)') || '').trim(); if (!name) return;
+    if (MONEY_CATS.some(c => c[1] === name)) { toast('التصنيف موجود', 'err'); return; }
+    const c = { id: 'ox_' + uid().slice(0, 6), name, createdAt: nowISO() }; saveCfg({ cats: (oxCfg().cats || []).concat([c]) }).then(() => { const sel = document.getElementById('f-oxcat'); if (sel) { sel.insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(name)}</option>`); sel.value = c.id; } toast('اتضاف التصنيف'); });
+  };
+
+  /* ---------- reminders: accounts officer 3 days before, accounts manager 3 days late ---------- */
+  let lastTick = 0;
+  async function oxTick() {
+    if (!oxSee() || !writable() || Date.now() - lastTick < 10 * 60000) return; lastTick = Date.now();
+    const ym = monthOf(todayISO()); const today = todayISO();
+    for (const it of oxItems()) {
+      if (startYm(it) > ym) continue; const s = stateOf(it, ym); if (!['todo', 'late'].includes(s.k)) continue; const due = dueOf(it, ym);
+      try {
+        const remId = `oxrem_${it.id}_${ym}`; if (today >= addDays(due, -3) && !byId('tasks', remId)) await notifyRole('acc', `فكّر: ${itemLabel(it)} — ${fmtMonth(ym)}`, `مستحق ${fmtDate(due)}${it.meter ? ' · خد قراءة العداد' : ''}\nسجّله من صفحة «مصاريف التشغيل».`, { id: remId, dueDate: due, fields: { link: '#/opex' } });
+        const lateId = `oxlate_${it.id}_${ym}`; if (today >= addDays(due, 3) && !byId('tasks', lateId)) await notifyRole('hr', `متأخر: ${itemLabel(it)} — ${fmtMonth(ym)}`, `كان مستحق ${fmtDate(due)} ولسه ماتسجلش.`, { id: lateId, priority: 'high', dueDate: due, fields: { link: '#/opex' } });
+      } catch (e) { /* ignore */ }
+    }
+  }
+  RENDER_HOOKS.push(() => { setTimeout(oxTick, 1500); });
+
+  /* ---------- registration: nav + route + access ---------- */
+  VIEW_TITLES.opex = 'مصاريف التشغيل';
+  EXTRA_VIEWS.opex = () => vOpex();
+  EXTRA_TITLES.opex = () => ({ title: 'مصاريف التشغيل', sub: 'إيجار · كهربا · مية · غاز · سكن — المالك والحسابات بس' });
+  (() => { const i = NAV.findIndex(n => n.id === 'money'); const entry = { id: 'opex', label: 'مصاريف التشغيل', icon: 'report', count: () => (oxSee() ? lateItems(monthOf(todayISO())).length : 0), countCls: 'crit' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  setTimeout(() => { ['hr', 'acc'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('opex')) ROLE_VIEWS[r].push('opex'); }); }, 0);
+  canSee = (base => view => (view === 'opex' ? oxSee() : base(view)))(canSee);
+  /* the money page card points here */
+  if (typeof opexSummary === 'function') opexSummary = (base => function (ym) { const h = base.apply(this, arguments); return h.replace('<div class="grow"></div>', `<div class="grow"></div><a class="btn sm ghost" href="#/opex">افتح الصفحة</a>`); })(opexSummary);
+  window.nfOpex = { stateOf, meterCalc, oxItems, lateItems };
 })();
 </script>
 
