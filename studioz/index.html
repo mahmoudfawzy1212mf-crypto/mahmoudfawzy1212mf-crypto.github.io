@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-0317-139137";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-0353-9406f6";</script>
 
 <script>
 'use strict';
@@ -21676,7 +21676,7 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
   const familyOf = code => { const m = /^([A-Z]+-[A-Z0-9]+)(?:-\d+)?$/.exec(normCode(code)); return m ? list('products').find(p => normCode(p.code) === m[1]) || null : null; };
   const suggestCode = d => {
     const fam = familyOf(d.code) || null; if (fam) { const pre = normCode(fam.code) + '-'; let n = 0; list('products').forEach(p => { const c = normCode(p.code); if (c.startsWith(pre)) n = Math.max(n, parseInt(c.slice(pre.length), 10) || 0); }); return pre + String(n + 1).padStart(2, '0'); }
-    const b = (S.settings.brands || []).find(x => x.id === d.brand || String(x.code || '').toLowerCase() === d.brand) || (S.settings.brands || [])[0]; const pre = `${(b && b.code) || 'NF'}-N`; let n = 0; list('products').forEach(p => { const c = normCode(p.code); if (c.startsWith(pre)) n = Math.max(n, parseInt(c.slice(pre.length), 10) || 0); }); return pre + String(n + 1).padStart(2, '0');
+    const b = (S.settings.brands || []).find(x => x.id === d.brand || String(x.code || '').toLowerCase() === d.brand) || (S.settings.brands || [])[0]; const pre = `${(b && b.code) || 'NF'}-${d.project || d.projectName ? 'PRJ' : 'N'}` + (d.project || d.projectName ? '-' : ''); let n = 0; list('products').forEach(p => { const c = normCode(p.code); if (c.startsWith(pre)) n = Math.max(n, parseInt(c.slice(pre.length), 10) || 0); }); return pre + String(n + 1).padStart(2, '0');
   };
   const brandIdOf = d => { const b = (S.settings.brands || []).find(x => x.id === d.brand || String(x.code || '').toLowerCase() === String(d.brand || '').toLowerCase() || String(x.name || '').toLowerCase() === String(d.brand || '').toLowerCase()); if (b) return b.id; const c = normCode(d.code).split('-')[0]; const b2 = (S.settings.brands || []).find(x => String(x.code || '').toUpperCase() === c); return b2 ? b2.id : ((S.settings.brands || [])[0] || {}).id || null; };
   const findOrder = name => { const n = toksG(name); if (!n.length) return null; let best = null, bs = 0; list('orders').filter(o => o.status !== 'cancelled').forEach(o => { const cl = o.clientId ? (byId('clients', o.clientId) || {}).name : ''; const h = toksG(`${o.code || ''} ${o.title || ''} ${cl || ''}`); const s = n.filter(t => h.includes(t)).length / n.length; if (s > bs) { bs = s; best = o; } }); return bs >= 0.6 ? best : null; };
@@ -21812,8 +21812,8 @@ Rules:
 3. Attach the files: put generated/uploaded files in openaiFileIdRefs, and public https links (images, PDFs, GLB, DXF/STEP zip) in files [{name,url}].
 4. Never invent dimensions or quantities. Anything unconfirmed goes to openItems.
 5. After submitting, tell the user in Egyptian Arabic what the system replied (how many files arrived, and that it is waiting for the owner's approval in the Products page).`;
-  const OPENAPI = () => JSON.stringify({ openapi: '3.1.0', info: { title: 'Ninety Fabrication — Products intake', version: '1.0.0', description: 'Send finished product designs to the Ninety factory system. Everything waits for the owner approval.' }, servers: [{ url: FN() }], paths: {
-    '/catalog': { get: { operationId: 'getCatalog', summary: 'Existing product codes, projects and brands', responses: { 200: { description: 'Catalog', content: { 'application/json': { schema: { type: 'object' } } } } } } },
+  const OPENAPI = () => JSON.stringify({ openapi: '3.1.0', info: { title: 'Ninety Fabrication — Products intake', version: '1.0.1', description: 'Send finished product designs to the Ninety factory system. Everything waits for the owner approval.' }, servers: [{ url: FN() }], paths: {
+    '/catalog': { get: { operationId: 'getCatalog', summary: 'Existing product codes, projects and brands', responses: { 200: { description: 'Catalog', content: { 'application/json': { schema: { type: 'object', properties: { brands: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' } } } }, products: { type: 'array', items: { type: 'object', properties: { code: { type: 'string' }, name: { type: 'string' }, brand: { type: 'string' }, family: { type: 'string' }, revision: { type: 'string' } } } }, projects: { type: 'array', items: { type: 'object', properties: { code: { type: 'string' }, title: { type: 'string' }, client: { type: 'string' }, brand: { type: 'string' }, status: { type: 'string' } } } }, codeRules: { type: 'string' } } } } } } } } },
     '/submit': { post: { operationId: 'submitProduct', summary: 'Send a product design (data + files) for owner review', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: {
       code: { type: 'string', description: 'Existing code from getCatalog when this is a revision, else empty' }, name: { type: 'string' }, brand: { type: 'string', enum: ['lof', 'elm', 'alu'] }, project: { type: 'string' }, client: { type: 'string' }, revision: { type: 'string' }, issueDate: { type: 'string' }, stage: { type: 'string' }, summary: { type: 'string' },
       dims: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' }, unit: { type: 'string' } } } },
@@ -21821,7 +21821,7 @@ Rules:
       bom: { type: 'array', items: { type: 'object', properties: { partCode: { type: 'string' }, name: { type: 'string' }, material: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string' }, process: { type: 'string' }, notes: { type: 'string' } } } },
       openItems: { type: 'array', items: { type: 'string' } }, deliverables: { type: 'string' },
       files: { type: 'array', description: 'Public https links to images, PDFs, GLB, DXF/STEP/zip', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' } } } },
-      openaiFileIdRefs: { type: 'array', description: 'Files generated or uploaded in this chat', items: { type: 'string' } } } } } } }, responses: { 200: { description: 'Received — waiting for owner approval', content: { 'application/json': { schema: { type: 'object' } } } } } } } },
+      openaiFileIdRefs: { type: 'array', description: 'Files generated or uploaded in this chat', items: { type: 'string' } } } } } } }, responses: { 200: { description: 'Received — waiting for owner approval', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' }, id: { type: 'string' }, filesReceived: { type: 'integer' }, filesFailed: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, error: { type: 'string' } } } }, message: { type: 'string' } } } } } } } } } },
     components: { schemas: {}, securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } }, security: [{ bearer: [] }] }, null, 2);
   EXTRA_SETTINGS.gptlink = { label: 'ربط ChatGPT', render: () => {
     if (!isAdmin()) return '<div class="empty">للمالك بس.</div>';
