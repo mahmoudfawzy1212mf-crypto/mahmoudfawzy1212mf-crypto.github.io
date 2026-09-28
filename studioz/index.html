@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-1349-d9ac3c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-1426-4c32f9";</script>
 
 <script>
 'use strict';
@@ -22106,6 +22106,31 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   /* the money page card points here */
   if (typeof opexSummary === 'function') opexSummary = (base => function (ym) { const h = base.apply(this, arguments); return h.replace('<div class="grow"></div>', `<div class="grow"></div><a class="btn sm ghost" href="#/opex">افتح الصفحة</a>`); })(opexSummary);
   window.nfOpex = { stateOf, meterCalc, oxItems, lateItems };
+})();
+/* =====================================================================
+   v5.30 — «شوف السيستم بعين…» يبيّن بالظبط اللي الشخص بيشوفه
+   المعاينة بتشتغل على بيانات جهاز المالك، فكانت بتبيّن حاجات السيرفر مابيبعتهاش للشخص ده.
+   دلوقتي نفس قواعد السيرفر بتتطبق في المعاينة:
+   · الأوامر السرية (nf_conf_ok) وكل اللي مربوط بيها بـ orderId → للمالك/مدير الحسابات/المدير التجاري بس
+   · ملفات عروض الأسعار والفواتير والعملاء المحتملين (nf_file_ok priced) → للمالك/hr/bdd بس
+   · لينكات ChatGPT واللينكات السرية → المالك والمكتب الفني بس
+   ===================================================================== */
+(() => {
+  const viewing = () => !!(S.viewOrig || S.demoOrig);
+  const CONF = ['admin', 'hr', 'bdd'];
+  const confIds = () => { const s = new Set(); (S.data.orders ? Array.from(S.data.orders.values()) : []).forEach(o => { if (o && o.confidential) s.add(o.id); }); return s; };
+  const priced = f => f && (f.priced === true || !!f.quotationId || ['quotation', 'invoice', 'lead'].includes(f.ownerKind));
+  const secretLink = f => typeof isSecretLink === 'function' ? isSecretLink(f) : false;
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) {
+    let a = base.apply(this, arguments); if (!viewing() || !S.session) return a; const r = role();
+    if (!CONF.includes(r)) {
+      const ids = confIds(); if (ids.size) { if (col === 'orders') a = a.filter(o => !o.confidential); else a = a.filter(d => !(d && d.orderId && ids.has(d.orderId)) && !(d && d.ownerKind === 'order' && ids.has(d.ownerId))); }
+    }
+    if (col === 'files') { if (!CONF.includes(r)) a = a.filter(f => !priced(f)); if (!(r === 'admin' || r === 'office' || r === 'tech')) a = a.filter(f => !secretLink(f)); }
+    return a;
+  })(listScope);
+  /* a confidential order opened directly by link inside the preview */
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) { const o = byId('orders', id); if (viewing() && S.session && o && o.confidential && !CONF.includes(role())) return '<div class="empty">الأمر ده مش ظاهر للشخص ده (أمر سري لسه ماتنزلش للإنتاج).</div>'; return base.apply(this, arguments); })(vOrderDetail);
 })();
 </script>
 
