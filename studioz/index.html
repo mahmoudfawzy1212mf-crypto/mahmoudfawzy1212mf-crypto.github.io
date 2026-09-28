@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-1426-4c32f9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-1458-221de4";</script>
 
 <script>
 'use strict';
@@ -22131,6 +22131,39 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   })(listScope);
   /* a confidential order opened directly by link inside the preview */
   if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) { const o = byId('orders', id); if (viewing() && S.session && o && o.confidential && !CONF.includes(role())) return '<div class="empty">الأمر ده مش ظاهر للشخص ده (أمر سري لسه ماتنزلش للإنتاج).</div>'; return base.apply(this, arguments); })(vOrderDetail);
+})();
+/* =====================================================================
+   v5.31 — «باب MCP»: رابط MCP للسيستم يشتغل من أي محادثة في ChatGPT (ومنها اللوحة الجانبية)
+   · Edge Function gpt-mcp (Streamable HTTP): get_catalog + submit_product — نفس «وارد ChatGPT» ونفس الحماية
+   · الرابط فيه مفتاح سري (nfmcp_…) — بيظهر مرة واحدة؛ «رابط جديد» يوقف القديم فورًا (RPC nf_mcp_key_* للمالك بس)
+   ===================================================================== */
+(() => {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof EXTRA_SETTINGS === 'undefined' || !EXTRA_SETTINGS.gptlink) return;
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.rpc;
+  const BASE = () => ((window.NF_CONFIG && window.NF_CONFIG.supabaseUrl) || (S.sb && S.sb.supabaseUrl) || '').replace(/\/$/, '') + '/functions/v1/gpt-mcp/';
+  const card = () => `<div class="card" id="mcpcard" style="margin-bottom:12px"><div class="cardhead"><h3>رابط MCP — الإرسال من أي محادثة في ChatGPT</h3><div class="grow"></div><span id="mcpstate">${hosted() ? '<span class="muted small">جارٍ الفحص…</span>' : '<span class="badge">النسخة المستضافة بس</span>'}</span></div>
+    <p class="small ink2" style="margin:6px 0 10px">ده الطريق الجديد: ChatGPT يقدر يبعت المنتجات من <b>أي محادثة</b> (ومنها اللوحة الجانبية اللي بتصمم فيها) — مش من GPT «Ninety Products» بس. ونفس القواعد: كله بيوصل «وارد ChatGPT» ومستني اعتمادك، الصفحة التفاعلية عرض بس للمصنع، وملفات التصنيع مقفولة لك وللمكتب الفني. (الـ GPTs هتقف 11 ديسمبر 2026 — ده البديل.)</p>
+    ${hosted() ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn p" data-mcpnew>رابط MCP جديد</button><button class="btn ghost" data-mcprevoke>إلغاء الرابط</button></div>` : ''}
+    <ol class="gpt-list" style="font-size:13.5px;gap:6px;margin-top:10px"><li>اضغط «رابط MCP جديد» وانسخ الرابط (بيظهر مرة واحدة).</li><li>في ChatGPT: <b>Settings ← MCP servers ← Add server</b> (أو Connectors) ← الاسم <b>Ninety</b> ← الصق الرابط ← Authentication: <b>No authentication</b> (الرابط نفسه هو المفتاح) ← Save.</li><li>في أي محادثة: «ابعت المنتج ده للسيستم — المشروع: … — الكود: …». لو طلب إذن اضغط Approve.</li></ol>
+    <p class="tiny muted" style="margin-top:6px">الأمان: الرابط بيفتح «الوارد» بس — مايقراش فلوس ولا موظفين ولا يعدّل حاجة. لو الرابط اتسرّب اضغط «رابط MCP جديد» والقديم يقف فورًا.</p></div>`;
+  EXTRA_SETTINGS.gptlink.render = (base => function () {
+    const h = base.apply(this, arguments); if (!isAdmin()) return h;
+    setTimeout(async () => { const box = document.getElementById('mcpstate'); if (!box || !hosted()) return; try { const { data } = await S.sb.rpc('nf_mcp_key_status'); let last = null; try { last = data && data.last ? JSON.parse(data.last) : null; } catch (e) { /* ignore */ } box.innerHTML = data && data.set ? `<span class="badge good">متفعّل${data.at ? ' من ' + esc(fmtDate(String(data.at).slice(0, 10))) : ''}</span>${last ? ` <span class="badge">آخر استخدام ${esc(fmtDate(String(last.at).slice(0, 10)))} ${esc(String(new Date(last.at).toTimeString()).slice(0, 5))}</span>` : ' <span class="badge warn">لسه ماتجربش</span>'}` : '<span class="badge warn">مش متفعّل</span>'; } catch (e) { box.textContent = '—'; } }, 60);
+    return card() + h;
+  })(EXTRA_SETTINGS.gptlink.render);
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-mcpnew],[data-mcprevoke]'); if (!t || !isAdmin() || !hosted()) return;
+    if (t.dataset.mcprevoke !== undefined) { if (!await confirmDlg('إلغاء رابط MCP؟ ChatGPT مش هيقدر يبعت منه لحد ما تعمل رابط جديد.', 'إلغاء الرابط')) return; const { error } = await S.sb.rpc('nf_mcp_key_revoke'); if (error) { toast(error.message, 'err'); return; } toast('اتلغى الرابط'); render(false); return; }
+    const { data: st } = await S.sb.rpc('nf_mcp_key_status'); if (st && st.set && !await confirmDlg('فيه رابط شغال — الرابط الجديد هيوقف القديم فورًا (وهتحتاج تحدّثه في ChatGPT). تكمل؟', 'رابط جديد')) return;
+    const { data: k, error } = await S.sb.rpc('nf_mcp_key_new'); if (error || !k) { toast((error && error.message) || 'تعذّر', 'err'); return; }
+    const url = BASE() + k;
+    openModal({ title: 'رابط MCP', body: `<p class="small">انسخه دلوقتي والصقه في ChatGPT (Settings ← MCP servers ← Add server، Authentication: No authentication). <b>مش هيظهر تاني</b> — ولو ضاع اعمل رابط جديد.</p><div class="gpt-key" id="mcpurl">${esc(url)}</div><div class="row" style="margin-top:10px"><button type="button" class="btn p" id="mcpcopy">نسخ الرابط</button></div>`, footer: `<button type="button" class="btn" data-action="closemodal">تمام، نسخته</button>` });
+    const b = document.getElementById('mcpcopy'); if (b) b.onclick = async () => { try { await navigator.clipboard.writeText(url); toast('اتنسخ'); } catch (x) { toast('حدّده وانسخه يدوي', 'err'); } };
+    render(false);
+  });
+  /* inbox: mark submissions that came through MCP */
+  if (typeof EXTRA_VIEWS !== 'undefined' && EXTRA_VIEWS.gptin) EXTRA_VIEWS.gptin = (base => function (r) { let h = base.apply(this, arguments); const st = window.nfGptState; if (st && st.rows) st.rows.forEach(x => { if (x.data && x.data.via === 'mcp') h = h.split(`href="#/gptin/${esc(x.id)}"><div class="grow"><div class="t">`).join(`href="#/gptin/${esc(x.id)}"><div class="grow"><div class="t"><span class="badge acc" style="padding:0 6px">MCP</span> `); }); return h; })(EXTRA_VIEWS.gptin);
 })();
 </script>
 
