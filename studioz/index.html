@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-1458-221de4";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-1540-f0ce83";</script>
 
 <script>
 'use strict';
@@ -22164,6 +22164,51 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   });
   /* inbox: mark submissions that came through MCP */
   if (typeof EXTRA_VIEWS !== 'undefined' && EXTRA_VIEWS.gptin) EXTRA_VIEWS.gptin = (base => function (r) { let h = base.apply(this, arguments); const st = window.nfGptState; if (st && st.rows) st.rows.forEach(x => { if (x.data && x.data.via === 'mcp') h = h.split(`href="#/gptin/${esc(x.id)}"><div class="grow"><div class="t">`).join(`href="#/gptin/${esc(x.id)}"><div class="grow"><div class="t"><span class="badge acc" style="padding:0 6px">MCP</span> `); }); return h; })(EXTRA_VIEWS.gptin);
+})();
+/* =====================================================================
+   v5.32 — الإشعارات إجبارية لكل الموظفين (طلب المالك)
+   · أي حساب ماعندوش إشعارات شغالة على الجهاز ده → شريط ثابت فوق كل الصفحات (مايتقفلش) + زرار «فعّل الإشعارات»
+   · لو المتصفح رافض الإذن (denied) → خطوات السماح من إعدادات المتصفح (أندرويد كروم / آيفون)
+   · آيفون من غير «إضافة للشاشة الرئيسية» → خطوات التثبيت (الإشعارات مابتشتغلش غير كده)
+   · بيختفي لوحده أول ما الاشتراك يتسجل
+   ===================================================================== */
+(() => {
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb;
+  let state = { checked: 0, ok: null };
+  async function check() {
+    if (!S.session || !hosted() || S.viewOrig || S.demoOrig || isAdmin()) { state.ok = true; return; }
+    if (isIOS() && !standalone()) { state.ok = false; state.why = 'ios'; return; }
+    if (!supported()) { state.ok = true; return; }   // very old browser: nothing we can do
+    if (Notification.permission === 'denied') { state.ok = false; state.why = 'denied'; return; }
+    if (Notification.permission !== 'granted') { state.ok = false; state.why = 'default'; return; }
+    try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); state.ok = !!sub; state.why = sub ? '' : 'nosub'; } catch (e) { state.ok = true; }
+  }
+  function bar() {
+    const why = state.why; const android = /Android/.test(navigator.userAgent);
+    const help = why === 'ios' ? 'على الآيفون الإشعارات مابتشتغلش غير لما التطبيق يتضاف للشاشة الرئيسية: من Safari اضغط زرار المشاركة ⬆️ ← «Add to Home Screen» ← وافتح السيستم من الأيقونة الجديدة.'
+      : why === 'denied' ? (android ? 'المتصفح قافل الإشعارات: اضغط علامة القفل 🔒 جنب العنوان فوق ← «الأذونات» / Permissions ← الإشعارات ← «سماح» ← وبعدين حدّث الصفحة.' : 'المتصفح قافل الإشعارات: من إعدادات المتصفح ← إعدادات الموقع ← الإشعارات ← «سماح» للسيستم، وبعدين حدّث الصفحة.')
+      : 'لازم تفعّل الإشعارات علشان توصلك المهام وأوامر التشغيل أول بأول.';
+    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:60;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
+  }
+  async function paint() {
+    if (Date.now() - state.checked > 30000 || state.ok === null) { state.checked = Date.now(); await check(); }
+    const v = document.getElementById('view'); const old = document.getElementById('pushreq');
+    if (state.ok || !v || document.querySelector('#loginform')) { if (old) old.remove(); return; }
+    if (!old) v.insertAdjacentHTML('afterbegin', bar());
+  }
+  RENDER_HOOKS.push(() => { setTimeout(paint, 400); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { state.checked = 0; setTimeout(paint, 800); } });
+  document.addEventListener('click', async e => {
+    if (e.target.closest && e.target.closest('[data-pushreload]')) { location.reload(); return; }
+    const t = e.target.closest && e.target.closest('[data-pushreq]'); if (!t) return;
+    t.disabled = true; t.textContent = 'جارٍ التفعيل…';
+    try { if (typeof ACTIONS.pushEnable === 'function') await ACTIONS.pushEnable(); if (typeof pushRefresh === 'function') await pushRefresh(true); } catch (x) { console.warn(x); }
+    state.checked = 0; await paint(); const still = document.getElementById('pushreq'); if (still) { still.outerHTML = bar(); } else toast('الإشعارات اشتغلت ✓');
+  });
+  window.nfPushReq = { check, state };
 })();
 </script>
 
