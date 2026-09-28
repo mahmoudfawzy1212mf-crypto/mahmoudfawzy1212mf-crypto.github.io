@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-0518-3552b4";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260928-0549-723eb6";</script>
 
 <script>
 'use strict';
@@ -10845,7 +10845,7 @@ async function filesPutRestricted(blob, mime) {
 }
 /* gallery: locked tiles for everyone else */
 function fileGalleryCad(files, ctx, o = {}) {
-  const cad = files.filter(f => f.restricted || f.kind === 'cad'); const rest = files.filter(f => !(f.restricted || f.kind === 'cad'));
+  const isL = f => typeof fileIsLink === 'function' && fileIsLink(f); const cad = files.filter(f => !isL(f) && (f.restricted || f.kind === 'cad')); const rest = files.filter(f => isL(f) || !(f.restricted || f.kind === 'cad'));
   let html = fileGalleryBase(rest, ctx, cad.length ? Object.assign({}, o, { empty: '' }) : o);
   if (cad.length) {
     const ok = canSeeCad();
@@ -10855,12 +10855,13 @@ function fileGalleryCad(files, ctx, o = {}) {
 }
 /* viewer: CAD has no in-browser viewer → download only (privileged) */
 ACTIONS.fileOpenCad = id => { const f = byId('files', id); if (!f || !canSeeCad()) return; ACTIONS.fileSave(id); };
-document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="fileOpen"]'); if (!a) return; const id = (a.dataset.arg || '').split(':')[0]; const f = byId('files', id); if (f && (f.restricted || f.kind === 'cad')) { ev.stopImmediatePropagation(); ev.preventDefault(); if (!canSeeCad()) { toast('ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط', 'err'); return; } toast('ملفات CAD تُحمَّل للفتح في برنامجها (AutoCAD / SolidWorks)'); ACTIONS.fileSave(id); } }, true);
+document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="fileOpen"]'); if (!a) return; const id = (a.dataset.arg || '').split(':')[0]; const f = byId('files', id); if (f && !(typeof fileIsLink === 'function' && fileIsLink(f)) && (f.restricted || f.kind === 'cad')) { ev.stopImmediatePropagation(); ev.preventDefault(); if (!canSeeCad()) { toast('ملف مصدر سرّي — متاح للمكتب الفني والمالك فقط', 'err'); return; } toast('ملفات CAD تُحمَّل للفتح في برنامجها (AutoCAD / SolidWorks)'); ACTIONS.fileSave(id); } }, true);
 /* manual toggle from the file card (edit modal) */
 ACTIONS.fileLockToggle = async id => {
   const f = byId('files', id); if (!f || !canSeeCad() || !canFiles()) return; const to = !f.restricted;
   if (!(await confirmDlg(to ? 'جعل هذا الملف سرّيًا؟ لن يراه إلا المالك والمكتب الفني.' : 'فتح هذا الملف لرؤساء الأقسام؟', to ? 'اجعله سرّيًا' : 'افتحه'))) return;
   try {
+    if (typeof fileIsLink === 'function' && fileIsLink(f)) { await Store.update('files', f.id, { restricted: to }); toast(to ? 'اللينك بقى سرّي — المالك والمكتب الفني بس' : 'اللينك بقى متاح'); render(false); return; }
     if (f.store === 'sb' && f.ref) { const dest = to ? (f.ref.startsWith('cad/') ? f.ref : 'cad/' + f.ref) : f.ref.replace(/^cad\//, ''); if (dest !== f.ref) { const { error } = await S.sb.storage.from('files').move(f.ref, dest); if (error) throw error; await Store.update('files', f.id, { ref: dest, restricted: to, kind: to ? 'cad' : (isCadName(f.name) ? 'other' : f.kind) }); } else await Store.update('files', f.id, { restricted: to }); }
     else await Store.update('files', f.id, { restricted: to, kind: to ? 'cad' : (isCadName(f.name) ? 'other' : f.kind) });
     toast(to ? 'أصبح الملف سرّيًا' : 'أصبح الملف متاحًا'); render(false);
@@ -21810,10 +21811,13 @@ You are connected to the factory system through two actions: getCatalog and subm
 Rules:
 1. Before submitting, ALWAYS call getCatalog. Re-use an existing product code when the design is a revision of an existing piece (e.g. LOF-C01-05). If it is a new piece, leave "code" empty (the owner assigns it). Use the exact project title from the catalog when it matches.
 2. When the user says «ابعت المنتج للسيستم» / «send to the system», call submitProduct with every field you know: code, name, brand (lof / elm / alu), project, client, revision, issueDate, stage, summary, dims (label/value/unit), materials, manufacturing (joints & processes), bom (partCode, name, material, qty, unit, process, notes), openItems (anything not yet approved), deliverables.
-3. Attach the files: put generated/uploaded files in openaiFileIdRefs, and public https links (images, PDFs, GLB, DXF/STEP zip) in files [{name,url}].
+3. Attach the files in two parts (put generated/uploaded files in openaiFileIdRefs, public https links in files [{name,url}]):
+   a) THE INTERACTIVE PAGE — ONE self-contained .html file (model viewer, dimensions, drawings, BOM). Inline every CSS/JS/image/model (data: URIs; JS libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com). It must NOT contain download buttons/links for CAD or source files and must NOT link to chatgpt.site or any other page. The factory sees this page inside the system only.
+   b) SOURCE FILES — DWG / DXF / STEP / SLDPRT / STL / zip as separate files. The system locks them automatically to the owner and the technical office.
+   Never send a chatgpt.site page link as a file.
 4. Never invent dimensions or quantities. Anything unconfirmed goes to openItems.
 5. After submitting, tell the user in Egyptian Arabic what the system replied (how many files arrived, and that it is waiting for the owner's approval in the Products page).`;
-  const OPENAPI = () => JSON.stringify({ openapi: '3.1.0', info: { title: 'Ninety Fabrication — Products intake', version: '1.0.1', description: 'Send finished product designs to the Ninety factory system. Everything waits for the owner approval.' }, servers: [{ url: FN() }], paths: {
+  const OPENAPI = () => JSON.stringify({ openapi: '3.1.0', info: { title: 'Ninety Fabrication — Products intake', version: '1.1.0', description: 'Send finished product designs to the Ninety factory system. Everything waits for the owner approval.' }, servers: [{ url: FN() }], paths: {
     '/catalog': { get: { operationId: 'getCatalog', summary: 'Existing product codes, projects and brands', responses: { 200: { description: 'Catalog', content: { 'application/json': { schema: { type: 'object', properties: { brands: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' } } } }, products: { type: 'array', items: { type: 'object', properties: { code: { type: 'string' }, name: { type: 'string' }, brand: { type: 'string' }, family: { type: 'string' }, revision: { type: 'string' } } } }, projects: { type: 'array', items: { type: 'object', properties: { code: { type: 'string' }, title: { type: 'string' }, client: { type: 'string' }, brand: { type: 'string' }, status: { type: 'string' } } } }, codeRules: { type: 'string' } } } } } } } } },
     '/submit': { post: { operationId: 'submitProduct', summary: 'Send a product design (data + files) for owner review', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: {
       code: { type: 'string', description: 'Existing code from getCatalog when this is a revision, else empty' }, name: { type: 'string' }, brand: { type: 'string', enum: ['lof', 'elm', 'alu'] }, project: { type: 'string' }, client: { type: 'string' }, revision: { type: 'string' }, issueDate: { type: 'string' }, stage: { type: 'string' }, summary: { type: 'string' },
@@ -21821,7 +21825,7 @@ Rules:
       materials: { type: 'array', items: { type: 'string' } }, manufacturing: { type: 'array', items: { type: 'string' } },
       bom: { type: 'array', items: { type: 'object', properties: { partCode: { type: 'string' }, name: { type: 'string' }, material: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string' }, process: { type: 'string' }, notes: { type: 'string' } } } },
       openItems: { type: 'array', items: { type: 'string' } }, deliverables: { type: 'string' },
-      files: { type: 'array', description: 'Public https links to images, PDFs, GLB, DXF/STEP/zip', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' } } } },
+      files: { type: 'array', description: 'Public https links: the interactive page as ONE self-contained .html file, plus source files (DWG/DXF/STEP/SLDPRT/zip) separately', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' } } } },
       openaiFileIdRefs: { type: 'array', description: 'Files generated or uploaded in this chat', items: { type: 'string' } } } } } } }, responses: { 200: { description: 'Received — waiting for owner approval', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' }, id: { type: 'string' }, filesReceived: { type: 'integer' }, filesFailed: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, error: { type: 'string' } } } }, message: { type: 'string' } } } } } } } } } },
     components: { schemas: {}, securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } }, security: [{ bearer: [] }] }, null, 2);
   EXTRA_SETTINGS.gptlink = { label: 'ربط ChatGPT', render: () => {
@@ -21853,6 +21857,43 @@ Rules:
     }
   });
 })();
+/* =====================================================================
+   v5.27 — حماية صفحات المنتجات وملفات المصدر
+   · لينكات ChatGPT (chatgpt.site …) وأي لينك متعلّم «سرّي»: المالك والمكتب الفني بس — السيرفر نفسه مابيبعتهاش لحد تاني (nf_file_ok)
+   · الصفحة التفاعلية (HTML) بتتفتح جوه التطبيق بس: من غير زرار تنزيل لغير المالك/المكتب الفني،
+     وأي لينك تحميل لملف CAD أو لينك لبرّه جوه الصفحة بيتقفل
+   ===================================================================== */
+const SRC_EXT_RE = /\.(dwg|dxf|dwt|sldprt|sldasm|slddrw|step|stp|iges|igs|x_t|x_b|sat|ipt|iam|idw|prt|asm|catpart|catproduct|3dm|skp|f3d|rvt|rfa|nc|gcode|stl|zip|rar|7z)(\?|#|$)/i;
+const SECRET_URL_RE = /(chatgpt\.(site|com)|oaiusercontent\.com|openai\.com)/i;
+const canSeeSrc = () => (typeof canSeeCad === 'function' ? canSeeCad() : isAdmin());
+const isSecretLink = f => !!f && (f.kind === 'link' || f.store === 'link') && (!!f.restricted || SECRET_URL_RE.test(String(f.url || '')));
+/* strip source-file downloads + outside links from an interactive page (factory view) */
+function nfStripSrc(html) {
+  let t = String(html || '');
+  t = t.replace(/<a\b([^>]*?)\bhref\s*=\s*(["'])(.*?)\2([^>]*)>/gis, (m, a, q, href, b) => {
+    const bad = SRC_EXT_RE.test(href) || /^\s*(https?:)?\/\//i.test(href) || /^\s*(blob:|data:(?!image\/))/i.test(href);
+    return bad ? `<a${a}href="#" data-nf-blocked="1"${b}>` : m;
+  });
+  t = t.replace(/(<a\b[^>]*?)\sdownload(\s*=\s*(["']).*?\3)?/gis, '$1');
+  t = t.replace(/<(iframe|embed|object)\b[^>]*\b(src|data)\s*=\s*(["'])\s*(https?:)?\/\/[^"']*\3[^>]*>(\s*<\/\1>)?/gis, '');
+  return t;
+}
+const NF_SRC_LOCK = `<script>(function(){var R=${SRC_EXT_RE.toString()};function bad(h){h=String(h||'');return R.test(h)||/^\\s*(https?:)?\\/\\//i.test(h)||/^\\s*(blob:|data:(?!image\\/))/i.test(h);}
+document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a');if(!a)return;var h=a.getAttribute('href')||'';if(a.hasAttribute('download')||bad(h)||a.dataset.nfBlocked){e.preventDefault();e.stopPropagation();}},true);
+try{window.open=function(){return null;};}catch(_){}})();<\/script>`;
+if (typeof htmlWithCapture === 'function') htmlWithCapture = (base => function (text) {
+  if (canSeeSrc()) return base.apply(this, arguments);
+  const t = nfStripSrc(text); const out = base.call(this, t); const i = out.search(/<head[^>]*>/i);
+  if (i >= 0) { const j = out.indexOf('>', i) + 1; return out.slice(0, j) + NF_SRC_LOCK + out.slice(j); } return NF_SRC_LOCK + out;
+})(htmlWithCapture);
+/* no download button / no save for interactive pages outside the owner + technical office */
+const pageLocked = f => !!f && !canSeeSrc() && (typeof fileIsHtml === 'function' ? fileIsHtml(f) : /html/.test(f.mime || '') || f.kind === 'html');
+if (typeof fileActs === 'function') fileActs = (base => function (f, o) { if (pageLocked(f)) return ''; return base.apply(this, arguments); })(fileActs);
+ACTIONS.fileSave = (base => async function (id) { const f = byId('files', id); if (pageLocked(f) || (f && (f.restricted || isSecretLink(f)) && !canSeeSrc())) { toast('الصفحة دي بتتفتح جوه السيستم بس', 'err'); return; } return base.apply(this, arguments); })(ACTIONS.fileSave);
+/* secret links never show for anyone else (the server already withholds them — this covers cached/demo data) */
+if (typeof filesOf === 'function') filesOf = (base => function () { const r = base.apply(this, arguments); return canSeeSrc() ? r : r.filter(f => !isSecretLink(f)); })(filesOf);
+ACTIONS.fileOpen = (base => function (arg) { const f = byId('files', String(arg || '').split(':')[0]); if (f && isSecretLink(f) && !canSeeSrc()) { toast('اللينك ده للمالك والمكتب الفني بس', 'err'); return; } return base.apply(this, arguments); })(ACTIONS.fileOpen);
+window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
 </script>
 
 </body>
