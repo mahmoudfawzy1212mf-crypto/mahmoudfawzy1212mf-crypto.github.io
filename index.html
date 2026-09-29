@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0916-de648d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0942-12842f";</script>
 
 <script>
 'use strict';
@@ -19414,6 +19414,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      المهام/الإشعارات مفيهاش أي مبلغ.
    · v4.92 (المالك): الاتفاق مصنعية بس — الصنايعية بيشتغلوا جوّه المصنع على مكنّا وبخاماتنا (الخامات بتتصرف من المخزن على المشروع زي أي قسم).
      الصرف (مقدم + دفعات) قبل ما كل القطع تتسلّم مايعدّيش 75% من قيمة المصنعية — الـ25% الباقية بعد التسليم الكامل (العميل + السيرفر).
+   · v5.43 (المالك): «مراحل الدفع» — رئيس القسم/المالك بيكتب المراحل ونسبها (اسم + % + «عند البدء» أو «بعد إنجازها»)،
+     مجموع اللي قبل «التسليم النهائي» ≤ 75% والتسليم النهائي ≥ 25% والكل = 100%. المرحلة: رئيس القسم يعلّم «خلصت» ← مدير المصنع يأكد ←
+     الحسابات تصرف مبلغها بالظبط. مراحل «عند البدء» بتبقى مستحقة أول ما الاتفاق يتعتمد. التسليم النهائي بيتعلّم لوحده لما كل القطع تتسلم
+     ومدير المصنع يعتمده (= اعتماد التسليم النهائي). نفس القواعد على السيرفر (nf_v543_pj_stages). الاتفاقات القديمة زي ما هي.
    ===================================================================== */
 (function () {
   if (window.__NF_PIECE__) return; window.__NF_PIECE__ = 1;
@@ -19438,6 +19442,24 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const CAP = 0.75; const capOf = j => R2(jTotal(j) * CAP);
   const payRoom = j => R2(Math.max(0, (allDelivered(j) || j.status === 'delivered' ? jTotal(j) : capOf(j)) - jPaid(j)));
   const allDelivered = j => (j.items || []).length > 0 && (j.items || []).every(it => (+it.done || 0) >= (+it.qty || 0));
+  /* v5.43 stages */
+  const hasStages = j => Array.isArray(j.stages) && j.stages.length > 0;
+  const stAmt = (j, s) => R2(jTotal(j) * (+s.pct || 0) / 100);
+  const stPaid = (j, s) => R2(sum((j.payments || []).filter(p => p.stageId === s.id), p => +p.amount || 0));
+  const STG = { waiting: ['لسه', ''], done: ['خلصت — مستنية تأكيد المدير', 'warn'], confirmed: ['مستحقة للصرف', 'warn'], paid: ['اتصرفت', 'ok'] };
+  const FINAL_NAME = 'التسليم النهائي';
+  const TPL = () => [{ name: 'مقدم قبل البدء', pct: 25, when: 'start' }, { name: 'بعد الهيكل والإسفنج', pct: 25, when: 'work' }, { name: 'بعد التنجيد', pct: 25, when: 'work' }];
+  function stagesCheck(st) {
+    const pre = st.filter(s => !s.final), fin = st.find(s => s.final); const preSum = R2(sum(pre, s => +s.pct || 0)), finP = fin ? R2(+fin.pct || 0) : 0;
+    if (pre.some(s => !s.name || !(+s.pct > 0))) return 'كل مرحلة لازم يبقى لها اسم ونسبة';
+    if (!fin) return 'مرحلة التسليم النهائي ناقصة';
+    if (preSum > 75.001) return `مجموع المراحل قبل التسليم النهائي ${fmtNum(preSum)}% — لازم مايعدّيش 75%`;
+    if (finP < 24.999) return 'التسليم النهائي لازم يبقى 25% على الأقل';
+    if (Math.abs(preSum + finP - 100) > 0.01) return `مجموع النسب ${fmtNum(R2(preSum + finP))}% — لازم يبقى 100%`;
+    return '';
+  }
+  const dueStages = j => hasStages(j) ? j.stages.filter(s => s.status === 'confirmed' && stPaid(j, s) < stAmt(j, s) - 0.001) : [];
+  const mgrStages = j => hasStages(j) && ['approved', 'delivered'].includes(j.status) && (isAdmin() || role() === 'manager') ? j.stages.filter(s => s.status === 'done') : [];
   const myTurn = j => { if (!S.session || !writable()) return false; if (['draft', 'returned'].includes(j.status)) return isUpHead() || isAdmin(); if (j.status !== 'pending') return false; const c = CHAIN[j.step]; return !!c && (isAdmin() || role() === c.role); };
   const itemsTxt = j => (j.items || []).map(it => `${it.name} ×${fmtNum(it.qty)}`).join('، ');
   const crName = id => (byId('crafters', id) || {}).name || '';
@@ -19449,8 +19471,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   /* ------------ nav + access ------------ */
   VIEW_TITLES.piecejobs = 'قسم التنجيد — اتفاقات القطعة';
   /* v4.93 (المالك): مش في القايمة الجانبية — جوّه قسم التنجيد نفسه (لوحات الأقسام)، وللحسابات كارت في الرئيسية + زرار في المهمة */
-  const waitingMe = () => list('piecejobs').filter(myTurn).length;
-  const toPay = () => canPay() ? list('piecejobs').filter(j => ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0 && (j.status === 'delivered' || (+j.advance > 0 && !(j.payments || []).some(p => p.kind === 'advance')))).length : 0;
+  const waitingMe = () => list('piecejobs').filter(j => myTurn(j) || mgrStages(j).length).length;
+  const toPay = () => canPay() ? list('piecejobs').filter(j => ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0 && (hasStages(j) ? dueStages(j).length > 0 : (j.status === 'delivered' || (+j.advance > 0 && !(j.payments || []).some(p => p.kind === 'advance'))))).length : 0;
   const deptBox = () => { const w = waitingMe(), act = list('piecejobs').filter(j => j.status === 'approved').length; return `<a class="pjdept" href="#/piecejobs">${icon('layers')}<span>اتفاقات القطعة — الصنايعية</span>${w ? `<span class="badge warn">${w} مستني</span>` : ''}${act ? `<span class="muted tiny">${act} شغال</span>` : ''}</a>`; };
   if (typeof vBoards === 'function') vBoards = (base => function () {
     const h = base.apply(this, arguments); if (!canPJ()) return h; const nm = esc(deptName(DEP));
@@ -19481,6 +19503,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 .pjlog div{padding:4px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
 .pjdept{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 4px 8px;padding:8px 10px;border:1px dashed var(--line);border-radius:12px;font-size:12.5px;color:inherit;text-decoration:none;background:var(--surface)}.pjdept svg{width:16px;height:16px}
 @media (max-width:600px){.pjitems .pjr{grid-template-columns:minmax(0,1fr) 58px 86px 30px}}
+.pjstform .pjs{display:grid;grid-template-columns:minmax(0,2fr) 70px 120px 34px;gap:6px;align-items:center;margin-bottom:6px}.pjstform .pjs input,.pjstform .pjs select{min-width:0}.pjstform .pjs.fin{opacity:.95}.pjstform .pjs.fin input[name=s-name]{background:var(--surface-2)}
+.pjstsum{font-size:12.5px;margin-top:4px}.pjstsum.bad{color:var(--crit-ink);font-weight:600}.pjstsum.ok{color:#2f8f5b}
+.pjstages{display:grid;gap:6px}.pjst{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;padding:8px 10px}.pjst .n{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);font-weight:700;font-size:12px}.pjst.confirmed{border-color:#c79a3a}.pjst.paid{border-color:#7aa37a;background:color-mix(in srgb,#7aa37a 8%,var(--surface))}.pjst.done{border-style:dashed;border-color:#c79a3a}
+@media (max-width:600px){.pjstform .pjs{grid-template-columns:72px minmax(0,1fr) 30px;padding-bottom:6px;border-bottom:1px dashed var(--line)}.pjstform .pjs [name=s-name]{grid-column:1/-1}}
 </style>`);
   /* ------------ notifications (no amounts in tasks — tasks are readable by more people) ------------ */
   async function closeTurn(j) { const t = j.turnTask && byId('tasks', j.turnTask); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } }
@@ -19495,7 +19521,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const TABS = [['mine', 'مستني موافقتي'], ['pending', 'في الاعتماد'], ['work', 'شغال'], ['delivered', 'اتسلّم'], ['paid', 'اتصرف'], ['all', 'الكل'], ['crafters', 'الصنايعية']];
   function tabRows(tab) {
     const all = sortBy(list('piecejobs'), j => j.createdAt || '').reverse();
-    if (tab === 'mine') return all.filter(myTurn);
+    if (tab === 'mine') return all.filter(j => myTurn(j) || mgrStages(j).length);
     if (tab === 'pending') return all.filter(j => ['pending', 'returned', 'draft'].includes(j.status));
     if (tab === 'work') return all.filter(j => j.status === 'approved');
     if (tab === 'delivered') return all.filter(j => j.status === 'delivered');
@@ -19537,7 +19563,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (myTurn(j) && ['draft', 'returned'].includes(j.status)) { acts.push(`<button class="btn" data-action="pjEdit" data-arg="${esc(j.id)}">${icon('edit')}تعديل</button>`, `<button class="btn p" data-action="pjSubmit" data-arg="${esc(j.id)}">${icon('send')}إرسال للاعتماد</button>`, `<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjDelete" data-arg="${esc(j.id)}">${icon('trash')}حذف</button>`); }
     if (myTurn(j) && j.status === 'pending') acts.push(`<button class="btn p" data-action="pjAct" data-arg="${esc(j.id)}:approve">${icon('check')}موافقة</button>`, `<button class="btn" data-action="pjAct" data-arg="${esc(j.id)}:return">${icon('back')}رجّعه بملاحظة</button>`, `<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjAct" data-arg="${esc(j.id)}:reject">${icon('x')}رفض</button>`);
     if (writable() && canDeliver() && j.status === 'approved') acts.push(`<button class="btn p" data-action="pjDeliver" data-arg="${esc(j.id)}">${icon('check')}تسجيل استلام قطع</button>`);
-    if (writable() && canPay() && ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0) acts.push(`<button class="btn p" data-action="pjPay" data-arg="${esc(j.id)}">${icon('money')}صرف للصنايعي</button>`);
+    if (writable() && canPay() && ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0 && (!hasStages(j) || dueStages(j).length)) acts.push(`<button class="btn p" data-action="pjPay" data-arg="${esc(j.id)}">${icon('money')}صرف للصنايعي</button>`);
     if (writable() && isAdmin() && !['paid', 'cancelled', 'rejected'].includes(j.status)) acts.push(`<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjCancel" data-arg="${esc(j.id)}">إلغاء الاتفاق</button>`);
     const c = byId('crafters', j.crafterId) || {};
     const lastNote = [...(j.log || [])].reverse().find(l => ['return', 'reject'].includes(l.action));
@@ -19557,18 +19583,55 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         <div class="card"><div class="cardhead"><h3>الفلوس</h3></div><div class="small" style="display:grid;gap:6px">
           <div>إجمالي الاتفاق: <b>${fmtMoney(tot)}</b></div>
           ${+j.advance ? `<div>المقدم المتفق عليه: <b>${fmtMoney(j.advance)}</b></div>` : ''}
-          ${!allDelivered(j) && !['delivered', 'paid'].includes(j.status) ? `<div class="muted">أقصى صرف قبل التسليم الكامل (75%): <b>${fmtMoney(capOf(j))}</b> — الـ25% الباقية بعد تسليم كل القطع</div>` : ''}
+          ${!hasStages(j) && !allDelivered(j) && !['delivered', 'paid'].includes(j.status) ? `<div class="muted">أقصى صرف قبل التسليم الكامل (75%): <b>${fmtMoney(capOf(j))}</b> — الـ25% الباقية بعد تسليم كل القطع</div>` : ''}
           <div class="muted tiny">مصنعية بس — الخامات والمكن على المصنع</div>
           <div>قيمة اللي اتسلّم: <b>${fmtMoney(earned)}</b></div>
           <div>اتصرف: <b>${fmtMoney(paid)}</b></div>
           <div>فاضل للصنايعي: <b style="${tot - paid > 0 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(R2(tot - paid))}</b>${earned - paid > 0 ? ` <span class="muted">(منهم ${fmtMoney(R2(earned - paid))} على قطع اتسلمت)</span>` : ''}</div>
-          ${(j.payments || []).length ? `<div class="pjlog">${j.payments.map(p => `<div>${fmtDate(p.date || (p.at || '').slice(0, 10))} — ${p.kind === 'advance' ? 'مقدم' : 'دفعة'} <b>${fmtMoney(p.amount)}</b> · ${esc(p.byName || '')}</div>`).join('')}</div>` : ''}
+          ${(j.payments || []).length ? `<div class="pjlog">${j.payments.map(p => `<div>${fmtDate(p.date || (p.at || '').slice(0, 10))} — ${p.kind === 'stage' ? 'مرحلة «' + esc(p.stageName || '') + '»' : p.kind === 'advance' ? 'مقدم' : 'دفعة'} <b>${fmtMoney(p.amount)}</b> · ${esc(p.byName || '')}</div>`).join('')}</div>` : ''}
         </div></div>
       </div>
+      ${hasStages(j) ? stagesCardHTML(j) : ''}
       <div class="card" style="margin-top:12px"><div class="tablewrap"><table><thead><tr><th>القطعة</th><th class="n">العدد</th><th class="n">سعر القطعة</th><th class="n">الإجمالي</th><th class="n">اتسلّم</th></tr></thead><tbody>${(j.items || []).map(it => `<tr><td><b>${esc(it.name)}</b></td><td class="n">${fmtNum(it.qty)}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney(R2((+it.qty || 0) * (+it.price || 0)))}</td><td class="n">${fmtNum(+it.done || 0)} / ${fmtNum(it.qty)}</td></tr>`).join('')}<tr><td colspan="3"><b>الإجمالي</b></td><td class="n"><b>${fmtMoney(tot)}</b></td><td></td></tr></tbody></table></div></div>
       ${(j.log || []).length ? `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>السجل</h3></div><div class="pjlog">${[...j.log].reverse().map(l => `<div>${fmtDate((l.at || '').slice(0, 10))} ${(l.at || '').slice(11, 16)} — <b>${esc(l.byName || '')}</b>: ${esc(LOGTXT[l.action] || l.action)}${l.note ? ` — ${esc(l.note)}` : ''}</div>`).join('')}</div></div>` : ''}`;
   }
-  const LOGTXT = { create: 'فتح الاتفاق', edit: 'عدّل الاتفاق', submit: 'بعته للاعتماد', approve: 'وافق', return: 'رجّعه', reject: 'رفضه', deliver: 'سجّل استلام', pay: 'صرف', cancel: 'ألغى الاتفاق', final: 'اتعتمد نهائي — الشغل يبدأ' };
+  function stagesCardHTML(j) {
+    const pre = R2(sum(j.stages.filter(s => !s.final), s => +s.pct || 0));
+    const rowAct = s => {
+      if (!writable() || !['approved', 'delivered'].includes(j.status)) return '';
+      if (s.status === 'waiting' && !s.final && s.when !== 'start' && (isUpHead() || isAdmin() || role() === 'manager')) return `<button class="btn sm" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:done">${icon('check')}خلصت</button>`;
+      if (s.status === 'done' && (isAdmin() || role() === 'manager')) return `<button class="btn sm p" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:confirm">${icon('check')}${s.final ? 'اعتماد التسليم النهائي' : 'تأكيد'}</button><button class="btn sm ghost" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:back">رجّعها</button>`;
+      if (s.status === 'confirmed' && canPay() && stPaid(j, s) < stAmt(j, s) - 0.001) return `<button class="btn sm p" data-action="pjPay" data-arg="${esc(j.id)}:${esc(s.id)}">${icon('money')}صرف</button>`;
+      return '';
+    };
+    const who = s => s.status === 'waiting' ? (s.final ? 'بيتعلّم لوحده لما كل القطع تتسلم' : s.when === 'start' ? 'مستحقة أول ما الاتفاق يتعتمد' : 'بعد ما تخلص') : [s.doneByName && `خلّصها ${esc(s.doneByName)}`, s.confirmedByName && `أكّدها ${esc(s.confirmedByName)}`, s.status === 'paid' && 'اتصرفت'].filter(Boolean).join(' · ');
+    return `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>مراحل الدفع</h3><div class="grow"></div><span class="muted small">قبل التسليم النهائي ${fmtNum(pre)}% · التسليم النهائي ${fmtNum(R2(100 - pre))}%</span></div>
+      <div class="pjstages">${j.stages.map((s, i) => `<div class="pjst ${s.status}"><div class="n">${i + 1}</div><div class="grow"><b>${esc(s.name)}</b> <span class="muted">${fmtNum(+s.pct)}%</span> · <b>${fmtMoney(stAmt(j, s))}</b>${s.final ? ' <span class="badge">آخر 25%+</span>' : ''}<div class="tiny muted">${who(s)}${s.note ? ' — ' + esc(s.note) : ''}</div>${s.photo ? `<img src="${esc(s.photo)}" alt="" style="height:44px;border-radius:8px;margin-top:4px;cursor:zoom-in" data-action="pjStagePhoto" data-arg="${esc(j.id)}:${esc(s.id)}">` : ''}</div><span class="badge ${(STG[s.status] || STG.waiting)[1]}">${(STG[s.status] || STG.waiting)[0]}</span>${rowAct(s)}</div>`).join('')}</div></div>`;
+  }
+  ACTIONS.pjStagePhoto = arg => { const [id, sid] = String(arg).split(':'); const j = byId('piecejobs', id); const s = j && (j.stages || []).find(x => x.id === sid); if (s && s.photo && typeof lightbox === 'function') lightbox(s.photo, s.name); };
+  ACTIONS.pjStage = arg => {
+    const [id, sid, kind] = String(arg).split(':'); const j = byId('piecejobs', id); if (!j || !hasStages(j) || !['approved', 'delivered'].includes(j.status)) return; const s = j.stages.find(x => x.id === sid); if (!s) return;
+    const save = async (patch, logNote, after) => { const cur = Object.assign({}, byId('piecejobs', id)); cur.stages = (cur.stages || []).map(x => x.id === sid ? Object.assign({}, x, patch) : x); cur.log = (cur.log || []).concat([logEntry('stage', { note: logNote })]); cur.updatedAt = nowISO(); if (after) await after(cur); await Store.save('piecejobs', cur); };
+    if (kind === 'done') {
+      if (!(isUpHead() || isAdmin() || role() === 'manager') || s.status !== 'waiting') return;
+      openModal({ title: `المرحلة خلصت — ${s.name}`, submitLabel: 'بلّغ مدير المصنع', body: `<div class="form"><div class="full small muted">${esc(j.code)} · ${esc(itemsTxt(j))}</div>${field('ملاحظة (اختياري)', inp('note', ''), 'full')}<div class="field full"><label>صورة الشغل (اختياري)</label><input type="file" name="ph" accept="image/*"></div></div>`,
+        onSubmit: async f => { const note = (formData(f).note || '').trim(); let photo = ''; const fi = f.querySelector('[name=ph]'); if (fi && fi.files && fi.files[0]) { try { photo = await shrink(fi.files[0]); } catch (e) { /* ignore */ } }
+          await save({ status: 'done', doneAt: nowISO(), doneBy: S.session?.id || null, doneByName: S.session?.name || '', note, photo }, `مرحلة «${s.name}» خلصت`, async cur => { await openTurn(cur, { toRole: 'manager' }, `اتفاق قطعة ${cur.code}: مرحلة «${s.name}» خلصت — أكّدها`, `الصنايعي: ${cur.crafterName || ''}${cur.orderCode ? `\nالمشروع: ${cur.orderCode}` : ''}`); }); toast('اتبلّغ مدير المصنع'); } });
+      return;
+    }
+    if (kind === 'confirm') {
+      if (!(isAdmin() || role() === 'manager') || s.status !== 'done') return;
+      if (s.final && !allDelivered(j)) { toast('لسه في قطع ماتسلمتش', 'err'); return; }
+      confirmDlg(s.final ? `اعتماد التسليم النهائي لـ ${j.code}؟ بعدها الحسابات تقدر تصرف آخر ${fmtNum(+s.pct)}%.` : `تأكيد إن مرحلة «${s.name}» خلصت؟ بعدها الحسابات تقدر تصرف ${fmtNum(+s.pct)}%.`, s.final ? 'اعتماد' : 'تأكيد').then(async ok => { if (!ok) return;
+        await save({ status: 'confirmed', confirmedAt: nowISO(), confirmedBy: S.session?.id || null, confirmedByName: S.session?.name || '' }, s.final ? 'اعتماد التسليم النهائي' : `تأكيد مرحلة «${s.name}»`, async cur => { await openTurn(cur, { toRole: 'acc' }, `اتفاق قطعة ${cur.code}: مرحلة «${s.name}» مستحقة للصرف`, `الصنايعي: ${cur.crafterName || ''}`); }); toast('اتأكدت — اتبلّغت الحسابات'); });
+      return;
+    }
+    if (kind === 'back') {
+      if (!(isAdmin() || role() === 'manager') || s.status !== 'done' || s.final) return;
+      openModal({ title: `رجوع المرحلة — ${s.name}`, submitLabel: 'رجّعها', body: `<div class="form">${field('السبب', `<textarea name="note" required></textarea>`, 'full')}</div>`, onSubmit: async f => { const note = (formData(f).note || '').trim(); if (!note) return false; await save({ status: 'waiting', note: 'رجعت: ' + note, doneAt: null, doneByName: '' }, `رجّع مرحلة «${s.name}»: ${note}`, async cur => { await openTurn(cur, headTarget(cur), `مرحلة «${s.name}» في ${cur.code} رجعت`, note); }); toast('رجعت لرئيس القسم'); } });
+    }
+  };
+  const LOGTXT = { stage: 'مراحل الدفع', create: 'فتح الاتفاق', edit: 'عدّل الاتفاق', submit: 'بعته للاعتماد', approve: 'وافق', return: 'رجّعه', reject: 'رفضه', deliver: 'سجّل استلام', pay: 'صرف', cancel: 'ألغى الاتفاق', final: 'اتعتمد نهائي — الشغل يبدأ' };
   EXTRA_VIEWS.piecejobs = r => { if (!canPJ()) return `<div class="empty"><b>مش متاحة</b></div>`; return r.id ? vPieceDetail(r.id) : vPieceList(); };
   EXTRA_TITLES.piecejobs = (r, addBtn) => {
     const acts = []; if (!r.id && writable()) { if (isUpHead() || isAdmin()) acts.push(addBtn('اتفاق قطعة', 'pjNew')); if (S._pjTab === 'crafters' || isUpHead() || ['manager', 'acc', 'hr'].includes(role()) || isAdmin()) acts.push(`<button class="btn" data-action="crafterNew" data-arg="">${icon('plus')}<span>صنايعي</span></button>`); }
@@ -19589,23 +19652,40 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       ${field('الصنايعي', `<div class="row" style="gap:6px"><select name="crafterId" id="pj-crafter" style="flex:1"><option value="">— اختار —</option>${crs.map(c => `<option value="${esc(c.id)}" ${c.id === j.crafterId ? 'selected' : ''}>${esc(c.name)}${c.trade ? ' — ' + esc(c.trade) : ''}</option>`).join('')}</select><button type="button" class="btn sm" id="pj-newcr">${icon('plus')}جديد</button></div>`, 'full')}
       <div class="field full"><label>القطع والسعر المتفق عليه</label><div class="pjitems" id="pjitems"><div class="pjr pjh"><span>القطعة</span><span>العدد</span><span>سعر القطعة</span><span></span></div>${(j.items && j.items.length ? j.items : [{}]).map(itemRow).join('')}</div><button type="button" class="btn sm" data-pji="add">${icon('plus')}قطعة</button><div class="pjtot" id="pjtot"></div></div>
       <div class="full small muted" style="margin:-2px 0 4px">الاتفاق ده مصنعية بس — الشغل جوّه المصنع على مكنّا، والخامات كلها علينا (بتتصرف من المخزن على المشروع). الصرف قبل التسليم الكامل مايعدّيش 75% من المصنعية.</div>
-      ${field(`مقدم قبل البدء (${CUR()}) — اختياري، لحد 75%`, inp('advance', j.advance || '', 'type="number" min="0" step="any" inputmode="decimal" placeholder="0 = الفلوس بعد الشغل"'))}
+      ${stagesFormHTML(j)}
+      <div class="field" id="pj-advf" ${useStagesOf(j) ? 'hidden' : ''}><label>مقدم قبل البدء (${CUR()}) — اختياري، لحد 75%</label>${inp('advance', j.advance || '', 'type="number" min="0" step="any" inputmode="decimal" placeholder="0 = الفلوس بعد الشغل"')}</div>
       ${field('ميعاد التسليم', inp('dueDate', j.dueDate || '', 'type="date"'))}
       ${field('ملاحظات', `<textarea name="notes" placeholder="الخامة، القماش، أي تفاصيل متفق عليها">${esc(j.notes || '')}</textarea>`, 'full')}
       <div class="field full"><label>صورة / رسمة (اختياري)</label><div class="row" style="gap:8px;align-items:center"><input type="file" id="pj-photo-file" accept="image/*" hidden><button type="button" class="btn sm" id="pj-photo-pick">${icon('camera')}<span>${j.photo ? 'تغيير الصورة' : 'اختر صورة'}</span></button><span id="pj-photo-prev">${j.photo ? `<img src="${esc(j.photo)}" style="height:48px;border-radius:8px">` : ''}</span><input type="hidden" name="photo" id="pj-photo" value="${esc(j.photo || '')}"></div></div>
     </div>`;
   }
+  const useStagesOf = j => j.useStages !== false && (hasStages(j) || !(j.id && +j.advance > 0));
+  const stRow = s => `<div class="pjs ${s.final ? 'fin' : ''}" data-sid="${esc(s.id || '')}"><input name="s-name" placeholder="اسم المرحلة — مثال: بعد الهيكل" value="${esc(s.final ? FINAL_NAME : (s.name || ''))}" ${s.final ? 'readonly' : ''}><input name="s-pct" type="number" min="0" max="100" step="any" inputmode="decimal" placeholder="%" value="${s.pct ?? ''}">${s.final ? `<span class="tiny muted">بعد تسليم كل القطع واعتماد المدير</span>` : `<select name="s-when"><option value="work" ${s.when !== 'start' ? 'selected' : ''}>بعد ما تخلص</option><option value="start" ${s.when === 'start' ? 'selected' : ''}>عند بدء الشغل</option></select>`}${s.final ? '<span></span>' : `<button type="button" class="iconbtn" data-pjs="del" title="شيل">${icon('x')}</button>`}</div>`;
+  function stagesFormHTML(j) {
+    const on = useStagesOf(j); const st = hasStages(j) ? j.stages : TPL().concat([{ name: FINAL_NAME, pct: 25, final: true }]);
+    const pre = st.filter(s => !s.final), fin = st.find(s => s.final) || { name: FINAL_NAME, pct: 25, final: true };
+    return `<div class="field full pjstform"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="useStages" id="pj-usest" ${on ? 'checked' : ''} style="width:auto"> مراحل الدفع بالنسب</label>
+      <div id="pjstbox" ${on ? '' : 'hidden'}><div class="tiny muted" style="margin:2px 0 6px">اكتب المراحل ونسبها — مجموع اللي قبل «التسليم النهائي» مايعدّيش 75%، والتسليم النهائي 25% على الأقل، والكل 100%.</div>
+      <div id="pjstrows">${pre.map(stRow).join('')}</div>${stRow(fin)}
+      <div class="row" style="gap:6px;margin-top:4px"><button type="button" class="btn sm" data-pjs="add">${icon('plus')}مرحلة</button><button type="button" class="btn sm ghost" data-pjs="tpl">النموذج الجاهز</button></div><div class="pjstsum" id="pjstsum"></div></div></div>`;
+  }
+  const readStages = (f, prev) => { const old = new Map(((prev && prev.stages) || []).map(s => [s.id, s])); const rows = $$('.pjstform .pjs', f); return rows.map(r => { const final = r.classList.contains('fin'); const id = r.dataset.sid || uid(); const o = old.get(id) || {}; return { id, name: final ? FINAL_NAME : (r.querySelector('[name=s-name]').value || '').trim(), pct: R2(num(r.querySelector('[name=s-pct]').value)), when: final ? 'final' : (r.querySelector('[name=s-when]') || {}).value || 'work', final, status: o.status || 'waiting' }; }).filter(s => s.final || s.name || s.pct); };
   const readItems = f => $$('#pjitems .pjr:not(.pjh)', f).map(r => ({ name: (r.querySelector('[name=i-name]').value || '').trim(), qty: num(r.querySelector('[name=i-qty]').value), price: num(r.querySelector('[name=i-price]').value) })).filter(it => it.name);
   function wireForm(f) {
     const upd = () => { const its = readItems(f); const t = R2(sum(its, it => it.qty * it.price)); const el = $('#pjtot', f); if (el) el.textContent = its.length ? `الإجمالي: ${fmtMoney(t)} — ${its.length} بند` : ''; };
     f.addEventListener('input', e => { if (e.target.closest('#pjitems')) upd(); });
     f.addEventListener('click', e => { const b = e.target.closest('[data-pji]'); if (!b) return; e.preventDefault(); if (b.dataset.pji === 'add') $('#pjitems', f).insertAdjacentHTML('beforeend', itemRow({})); else { const rows = $$('#pjitems .pjr:not(.pjh)', f); if (rows.length > 1) b.closest('.pjr').remove(); } upd(); });
+    const stSum = () => { const box = $('#pjstsum', f); if (!box) return; const on = ($('#pj-usest', f) || {}).checked; if (!on) { box.textContent = ''; return; } const st = readStages(f); const t = R2(sum(readItems(f), it => it.qty * it.price)); const pre = R2(sum(st.filter(s => !s.final), s => +s.pct || 0)); const fin = st.find(s => s.final); const err = stagesCheck(st); box.className = 'pjstsum ' + (err ? 'bad' : 'ok'); box.innerHTML = `قبل التسليم النهائي: <b>${fmtNum(pre)}%</b>${t ? ` (${fmtMoney(R2(t * pre / 100))})` : ''} · التسليم النهائي: <b>${fmtNum(fin ? +fin.pct || 0 : 0)}%</b>${t && fin ? ` (${fmtMoney(R2(t * (+fin.pct || 0) / 100))})` : ''}${err ? ` — ${esc(err)}` : ' ✓'}`; };
+    f.addEventListener('input', e => { if (e.target.closest('.pjstform') || e.target.closest('#pjitems')) stSum(); });
+    f.addEventListener('change', e => { if (e.target.id === 'pj-usest') { const on = e.target.checked; const bx = $('#pjstbox', f); if (bx) bx.hidden = !on; const af = $('#pj-advf', f); if (af) { af.hidden = on; if (on) { const a = af.querySelector('[name=advance]'); if (a) a.value = ''; } } stSum(); } });
+    f.addEventListener('click', e => { const b = e.target.closest('[data-pjs]'); if (!b) return; e.preventDefault(); const rows = $('#pjstrows', f); if (b.dataset.pjs === 'add') rows.insertAdjacentHTML('beforeend', stRow({ when: 'work' })); else if (b.dataset.pjs === 'tpl') { rows.innerHTML = TPL().map(stRow).join(''); const fp = f.querySelector('.pjs.fin [name=s-pct]'); if (fp) fp.value = 25; } else b.closest('.pjs').remove(); stSum(); });
+    stSum();
     const pick = $('#pj-photo-pick', f), file = $('#pj-photo-file', f);
     if (pick && file) { pick.addEventListener('click', () => file.click()); file.addEventListener('change', async () => { if (!file.files[0]) return; try { const url = await shrink(file.files[0]); $('#pj-photo', f).value = url; $('#pj-photo-prev', f).innerHTML = `<img src="${url}" style="height:48px;border-radius:8px">`; } catch (e) { toast('تعذّر قراءة الصورة', 'err'); } finally { file.value = ''; } }); }
     const nc = $('#pj-newcr', f); if (nc) nc.addEventListener('click', () => { S._pjDraftForm = formSnapshot(f); ACTIONS.crafterNew('', null, c => { S._pjNewCrafter = c.id; ACTIONS.pjNew(S._pjReopen || '', null, true); }); });
     upd();
   }
-  function formSnapshot(f) { return { orderId: (f.querySelector('[name=orderId]') || {}).value || '', items: readItems(f), advance: (f.querySelector('[name=advance]') || {}).value || '', dueDate: (f.querySelector('[name=dueDate]') || {}).value || '', notes: (f.querySelector('[name=notes]') || {}).value || '', photo: (f.querySelector('[name=photo]') || {}).value || '' }; }
+  function formSnapshot(f) { return { useStages: !!(f.querySelector('#pj-usest') || {}).checked, stages: readStages(f), orderId: (f.querySelector('[name=orderId]') || {}).value || '', items: readItems(f), advance: (f.querySelector('[name=advance]') || {}).value || '', dueDate: (f.querySelector('[name=dueDate]') || {}).value || '', notes: (f.querySelector('[name=notes]') || {}).value || '', photo: (f.querySelector('[name=photo]') || {}).value || '' }; }
   async function shrink(fileObj) { const src = await fileToDataURL(fileObj); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1000 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.72)); }; im.onerror = rej; im.src = src; }); }
   function logEntry(action, extra) { return Object.assign({ at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '', role: role(), action }, extra || {}); }
   function openJobForm(j, isNew) {
@@ -19619,9 +19699,11 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         if (!draft && items.some(it => !(it.qty > 0) || !(it.price > 0))) { toast('كل قطعة لازم يبقى لها عدد وسعر', 'err'); return false; }
         if (!draft && !d.crafterId) { toast('اختار الصنايعي', 'err'); return false; }
         const o = d.orderId ? byId('orders', d.orderId) : null; const total = R2(sum(items, it => it.qty * it.price)); const adv = num(d.advance);
-        if (adv > R2(total * CAP) + 0.001) { toast(`المقدم مايعدّيش 75% من المصنعية (${fmtMoney(R2(total * CAP))})`, 'err'); return false; }
+        const useSt = !!(f.querySelector('#pj-usest') || {}).checked; const stages = useSt ? readStages(f, j).map(s => Object.assign(s, { status: 'waiting' })) : [];
+        if (useSt && !draft) { const er = stagesCheck(stages); if (er) { toast(er, 'err'); return false; } }
+        if (!useSt && adv > R2(total * CAP) + 0.001) { toast(`المقدم مايعدّيش 75% من المصنعية (${fmtMoney(R2(total * CAP))})`, 'err'); return false; }
         const base = isNew ? { id: uid(), code: nextCode(), deptId: DEP, headWid: S.session?.workerId || null, headName: S.session?.name || '', createdAt: nowISO(), createdBy: S.session?.id || null, log: [logEntry('create')], payments: [], round: 0 } : Object.assign({}, j, { log: (j.log || []).concat([logEntry('edit')]) });
-        const doc = Object.assign(base, { orderId: o ? o.id : null, orderCode: o ? o.code || '' : '', orderTitle: o ? o.title || '' : '', crafterId: d.crafterId || null, crafterName: crName(d.crafterId), items: items.map(it => Object.assign(it, { done: 0 })), total, advance: adv, dueDate: d.dueDate || null, notes: d.notes || '', photo: d.photo || '', updatedAt: nowISO() });
+        const doc = Object.assign(base, { orderId: o ? o.id : null, orderCode: o ? o.code || '' : '', orderTitle: o ? o.title || '' : '', crafterId: d.crafterId || null, crafterName: crName(d.crafterId), items: items.map(it => Object.assign(it, { done: 0 })), total, advance: useSt ? 0 : adv, stages, useStages: useSt, dueDate: d.dueDate || null, notes: d.notes || '', photo: d.photo || '', updatedAt: nowISO() });
         if (draft) { doc.status = j && j.status === 'returned' ? 'returned' : 'draft'; doc.step = 0; await Store.save('piecejobs', doc); toast('اتحفظت مسودة'); go('piecejobs/' + doc.id); return; }
         await submitJob(doc); go('piecejobs/' + doc.id);
       } });
@@ -19639,7 +19721,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     openJobForm(j, true);
   };
   ACTIONS.pjEdit = id => { const j = byId('piecejobs', id); if (!j || !myTurn(j) || !['draft', 'returned'].includes(j.status)) return; openJobForm(j, false); };
-  ACTIONS.pjSubmit = async id => { const j = byId('piecejobs', id); if (!j || !myTurn(j)) return; if (!j.crafterId || !(j.items || []).length || (j.items || []).some(it => !(+it.qty > 0) || !(+it.price > 0))) { toast('كمّل البيانات الأول (الصنايعي وعدد وسعر كل قطعة)', 'err'); return ACTIONS.pjEdit(id); } await submitJob(Object.assign({}, j)); };
+  ACTIONS.pjSubmit = async id => { const j = byId('piecejobs', id); if (!j || !myTurn(j)) return; if (hasStages(j) && stagesCheck(j.stages)) { toast(stagesCheck(j.stages), 'err'); return ACTIONS.pjEdit(id); } if (!j.crafterId || !(j.items || []).length || (j.items || []).some(it => !(+it.qty > 0) || !(+it.price > 0))) { toast('كمّل البيانات الأول (الصنايعي وعدد وسعر كل قطعة)', 'err'); return ACTIONS.pjEdit(id); } await submitJob(Object.assign({}, j)); };
   ACTIONS.pjDelete = async id => { const j = byId('piecejobs', id); if (!j || !['draft', 'returned'].includes(j.status)) return; if (!(await confirmDlg(`حذف الاتفاق ${j.code}؟`, 'حذف'))) return; await closeTurn(j); await Store.remove('piecejobs', id); go('piecejobs'); toast('اتحذف'); };
   ACTIONS.pjAct = (arg) => {
     const [id, kind] = String(arg).split(':'); const j = byId('piecejobs', id); if (!j || !myTurn(j) || j.status !== 'pending') return;
@@ -19654,7 +19736,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
           cur.status = 'approved'; cur.step = 4; cur.approvedAt = nowISO(); cur.log.push(logEntry('final'));
           cur.turnTask = await openTurn(cur, headTarget(cur), `اتفاق ${cur.code} اتعتمد — الشغل يبدأ`, `${itemsTxt(cur)}\nالصنايعي: ${cur.crafterName || ''}\nسجّل الاستلام من صفحة الاتفاق لما القطع تخلص.`);
           const wid = `pj_${cur.id}_work`; try { await Store.save('tasks', { id: wid, title: `تنجيد بالقطعة ${cur.code}: ${itemsTxt(cur)}`.slice(0, 140), desc: `الصنايعي: ${cur.crafterName || ''}${cur.orderCode ? `\nالمشروع: ${cur.orderCode}` : ''}`, deptId: DEP, assigneeId: cur.headWid || null, orderId: cur.orderId || null, dueDate: cur.dueDate || null, priority: 'normal', status: 'open', kind: 'task', source: 'piecejob', pieceJobId: cur.id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); cur.workTask = wid; } catch (e) { /* ignore */ }
-          if (+cur.advance > 0) await openTurn(cur, { toRole: 'acc' }, `صرف مقدم اتفاق قطعة ${cur.code}`, `الصنايعي: ${cur.crafterName || ''} — المقدم متسجل في الاتفاق`);
+          if (hasStages(cur)) { const st = cur.stages.filter(s => s.when === 'start' && s.status === 'waiting'); if (st.length) { cur.stages = cur.stages.map(s => s.when === 'start' && s.status === 'waiting' ? Object.assign({}, s, { status: 'confirmed', confirmedAt: nowISO(), confirmedByName: 'مع اعتماد الاتفاق' }) : s); await openTurn(cur, { toRole: 'acc' }, `اتفاق قطعة ${cur.code}: ${st.map(s => '«' + s.name + '»').join(' و')} مستحقة للصرف`, `الصنايعي: ${cur.crafterName || ''}`); } }
+          else if (+cur.advance > 0) await openTurn(cur, { toRole: 'acc' }, `صرف مقدم اتفاق قطعة ${cur.code}`, `الصنايعي: ${cur.crafterName || ''} — المقدم متسجل في الاتفاق`);
           await Store.save('piecejobs', cur); toast('اتعتمد نهائي — اتبلّغ رئيس القسم'); return;
         }
         cur.status = kind === 'return' ? 'returned' : 'rejected'; cur.step = 0;
@@ -19672,12 +19755,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         const txt = cur.items.map((it, i) => it.done !== before[i] ? `${it.name} ${fmtNum(it.done)}/${fmtNum(it.qty)}` : '').filter(Boolean).join('، ');
         if (!txt) { toast('مفيش تغيير'); return; }
         cur.log = (cur.log || []).concat([logEntry('deliver', { note: txt })]); cur.updatedAt = nowISO();
-        if (allDelivered(cur)) { cur.status = jPaid(cur) >= jTotal(cur) ? 'paid' : 'delivered'; cur.deliveredAt = nowISO(); await closeTurn(cur); if (cur.workTask && byId('tasks', cur.workTask)) { try { await Store.update('tasks', cur.workTask, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } if (cur.status === 'delivered') cur.turnTask = await openTurn(cur, { toRole: 'acc' }, `اتفاق قطعة ${cur.code} اتسلّم — صرف للصنايعي`, `الصنايعي: ${cur.crafterName || ''}\n${itemsTxt(cur)}`); }
-        await Store.save('piecejobs', cur); toast(cur.status === 'approved' ? 'اتسجل الاستلام' : 'كل القطع اتسلمت — اتبلّغت الحسابات');
+        if (allDelivered(cur)) { cur.status = jPaid(cur) >= jTotal(cur) ? 'paid' : 'delivered'; cur.deliveredAt = nowISO(); await closeTurn(cur); if (cur.workTask && byId('tasks', cur.workTask)) { try { await Store.update('tasks', cur.workTask, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } if (hasStages(cur)) { cur.stages = cur.stages.map(s => s.final && s.status === 'waiting' ? Object.assign({}, s, { status: 'done', doneAt: nowISO(), doneBy: S.session?.id || null, doneByName: S.session?.name || '', note: 'كل القطع اتسلمت' }) : s); if (cur.status !== 'paid') cur.turnTask = await openTurn(cur, { toRole: 'manager' }, `اتفاق قطعة ${cur.code}: كل القطع اتسلمت — اعتماد التسليم النهائي`, `الصنايعي: ${cur.crafterName || ''}\n${itemsTxt(cur)}`); } else if (cur.status === 'delivered') cur.turnTask = await openTurn(cur, { toRole: 'acc' }, `اتفاق قطعة ${cur.code} اتسلّم — صرف للصنايعي`, `الصنايعي: ${cur.crafterName || ''}\n${itemsTxt(cur)}`); }
+        await Store.save('piecejobs', cur); toast(cur.status === 'approved' ? 'اتسجل الاستلام' : hasStages(cur) ? 'كل القطع اتسلمت — اتبلّغ مدير المصنع يعتمد التسليم النهائي' : 'كل القطع اتسلمت — اتبلّغت الحسابات');
       } });
   };
-  ACTIONS.pjPay = id => {
-    const j = byId('piecejobs', id); if (!j || !canPay() || !['approved', 'delivered'].includes(j.status)) return;
+  ACTIONS.pjPay = arg => {
+    const [id, sid0] = String(arg).split(':'); const j = byId('piecejobs', id); if (!j || !canPay() || !['approved', 'delivered'].includes(j.status)) return;
+    if (hasStages(j)) return payStage(j, sid0);
     const tot = jTotal(j), paid = jPaid(j), earned = jEarned(j); const advLeft = R2(Math.max(0, (+j.advance || 0) - sum((j.payments || []).filter(p => p.kind === 'advance'), p => +p.amount || 0)));
     const room = payRoom(j); const sugg = R2(Math.min(room, j.status === 'approved' && earned <= paid && advLeft > 0 ? advLeft : Math.max(0, (earned || tot) - paid)));
     if (!(room > 0)) { toast(j.status === 'approved' ? `اتصرف 75% من المصنعية — الباقي بعد تسليم كل القطع` : 'مفيش فلوس فاضلة', 'err'); return; }
@@ -19700,8 +19784,32 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         await Store.save('piecejobs', cur); toast('اتسجل الصرف واتقيد على المشروع');
       } });
   };
+  function payStage(j, sid0) {
+    const due = dueStages(j); if (!due.length) { toast('مفيش مرحلة مستحقة — المرحلة لازم تخلص ويأكدها مدير المصنع الأول', 'err'); return; }
+    const first = due.find(s => s.id === sid0) || due[0]; const accts = (typeof acctCfg === 'function' ? acctCfg().accounts : [{ id: 'cash', name: 'الخزينة' }]);
+    const left = s => R2(stAmt(j, s) - stPaid(j, s));
+    openModal({ title: `صرف مرحلة — ${j.code}`, submitLabel: 'تسجيل الصرف', body: `<div class="form"><div class="full small">الاتفاق ${fmtMoney(jTotal(j))} · اتصرف ${fmtMoney(jPaid(j))} · الصنايعي: ${esc(j.crafterName || '')}</div>
+      ${field('المرحلة', `<select name="sid" id="pj-sid">${due.map(s => `<option value="${esc(s.id)}" data-amt="${left(s)}" ${s.id === first.id ? 'selected' : ''}>${esc(s.name)} — ${fmtNum(+s.pct)}% = ${fmtMoney(left(s))}</option>`).join('')}</select>`, 'full')}
+      ${field(`المبلغ (${CUR()})`, inp('amount', left(first), 'type="number" readonly'))}
+      ${field('من حساب', `<select name="account">${opts(accts, accts[0] && accts[0].id)}</select>`)}
+      ${field('التاريخ', inp('date', todayISO(), 'type="date"'))}
+      ${field('ملاحظة', inp('note', ''), 'full')}</div>`,
+      onOpen: f => { const sel = $('#pj-sid', f); if (sel) sel.addEventListener('change', () => { const o = sel.selectedOptions[0]; f.querySelector('[name=amount]').value = o ? o.dataset.amt : ''; }); },
+      onSubmit: async f => {
+        const d = formData(f); const cur = Object.assign({}, byId('piecejobs', j.id)); const s = (cur.stages || []).find(x => x.id === d.sid); if (!s || s.status !== 'confirmed') { toast('المرحلة مش مستحقة', 'err'); return false; }
+        const amt = R2(stAmt(cur, s) - stPaid(cur, s)); if (!(amt > 0)) { toast('المرحلة اتصرفت', 'err'); return false; }
+        const pid = uid(); const date = d.date || todayISO();
+        const exp = { id: `pjx_${cur.id}_${pid}`, date, month: monthOf(date), amount: amt, cat: CAT.id, account: d.account || 'cash', orderId: cur.orderId || null, payee: cur.crafterName || crName(cur.crafterId), ref: cur.code, note: `أجور تنجيد بالقطعة ${cur.code} — مرحلة «${s.name}» ${fmtNum(+s.pct)}%${d.note ? ' — ' + d.note : ''}`, src: 'piecejob', pieceJobId: cur.id, byName: S.session?.name || '', createdAt: nowISO() };
+        await Store.save('expenses', exp);
+        cur.payments = (cur.payments || []).concat([{ id: pid, date, at: nowISO(), amount: amt, kind: 'stage', stageId: s.id, stageName: s.name, account: exp.account, expenseId: exp.id, by: S.session?.id || null, byName: S.session?.name || '', note: d.note || '' }]);
+        cur.stages = cur.stages.map(x => x.id === s.id ? Object.assign({}, x, { status: 'paid', paidAt: nowISO() }) : x);
+        cur.log = (cur.log || []).concat([logEntry('pay', { note: `مرحلة «${s.name}» ${fmtMoney(amt)}` })]); cur.updatedAt = nowISO();
+        if (allDelivered(cur) && jPaid(cur) >= jTotal(cur) - 0.001) { cur.status = 'paid'; cur.paidAt = nowISO(); await closeTurn(cur); }
+        await Store.save('piecejobs', cur); toast('اتسجل الصرف واتقيد على المشروع');
+      } });
+  }
   ACTIONS.pjCancel = async id => { const j = byId('piecejobs', id); if (!j || !isAdmin()) return; if (!(await confirmDlg(`إلغاء الاتفاق ${j.code}؟ الصرف اللي اتسجل بيفضل في المصروفات.`, 'إلغاء الاتفاق'))) return; await closeTurn(j); await Store.save('piecejobs', Object.assign({}, j, { status: 'cancelled', cancelledAt: nowISO(), log: (j.log || []).concat([logEntry('cancel')]) })); toast('اتلغى'); };
-  window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats, payRoom, CAP };
+  window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats, payRoom, CAP, stagesCheck, dueStages, stAmt };
 })();
 /* =====================================================================
    v4.94 — (المصنع) الإجازات والغياب حسب كلام المالك (بالرقم السري — 26 سبتمبر)
@@ -20936,7 +21044,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const issueLine = (ln = {}) => `<div class="isl"><select name="i-mat"><option value="">— اختار صنف متكوّد —</option><option value="__new" ${ln.isNew ? 'selected' : ''}>+ خامة جديدة (مش متكوّدة)</option>${sortBy(list('materials'), m => m.name).map(m => `<option value="${m.id}" ${ln.materialId === m.id ? 'selected' : ''}>${esc(matLabel(m))}</option>`).join('')}</select><input name="i-qty" type="number" step="any" min="0" placeholder="الكمية" value="${ln.qty ?? ''}"><div class="stock" data-stock></div><button type="button" class="iconbtn" data-il="del">${icon('x')}</button>
     <div class="nx" ${ln.isNew ? '' : 'hidden'}><input name="i-name" placeholder="اسم الخامة" value="${esc(ln.name || '')}"><input name="i-desc" placeholder="التوصيف الكامل / المواصفة" value="${esc(ln.desc || '')}"><select name="i-unit">${opts(S.settings.units, ln.unit || 'قطعة')}</select><select name="i-cat">${ITEM_CATS.map(c => `<option value="${c[0]}">${esc(c[1])}</option>`).join('')}</select></div></div>`;
   document.addEventListener('change', e => { const sel = e.target.closest && e.target.closest('.isl select[name=i-mat]'); if (!sel) return; const row = sel.closest('.isl'); row.querySelector('.nx').hidden = sel.value !== '__new'; const m = sel.value && sel.value !== '__new' && byId('materials', sel.value); const st = row.querySelector('[data-stock]'); const q = num(row.querySelector('[name=i-qty]').value); st.textContent = m ? (+m.qty || 0) >= q && q > 0 ? 'موجود ✓ هيتصرف' : (+m.qty || 0) > 0 ? `الموجود ${fmtNum(m.qty)} — الباقي أمر شراء` : 'مش موجود — أمر شراء' : sel.value === '__new' ? 'طلب صنف جديد' : ''; });
-  document.addEventListener('input', e => { if (e.target.name === 'i-qty') { const s = e.target.closest('.isl').querySelector('select[name=i-mat]'); s.dispatchEvent(new Event('change', { bubbles: true })); } });
+  document.addEventListener('input', e => { if (e.target.name === 'i-qty' && e.target.closest('.isl')) { const s = e.target.closest('.isl').querySelector('select[name=i-mat]'); if (s) s.dispatchEvent(new Event('change', { bubbles: true })); } });
   document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-il]'); if (!b) return; const box = document.getElementById('islines'); if (!box) return; if (b.dataset.il === 'add') box.insertAdjacentHTML('beforeend', issueLine()); else if (box.querySelectorAll('.isl').length > 1) b.closest('.isl').remove(); });
   ACTIONS.issueNew = orderId => {
     if (!canIssue()) return; const o = byId('orders', orderId); if (!o) return; if (window.nfSyncCats) window.nfSyncCats();
