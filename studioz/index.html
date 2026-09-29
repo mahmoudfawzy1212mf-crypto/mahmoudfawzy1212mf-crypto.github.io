@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1312-9006ef";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1337-9ea3d6";</script>
 
 <script>
 'use strict';
@@ -23011,6 +23011,115 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
     const onR = () => fit(body); addEventListener('resize', onR);
     return () => { removeEventListener('resize', onR); if (typeof dispose === 'function') dispose(); };
   })(mountHtmlViewer);
+})();
+/* =====================================================================
+   v5.51 — (المصنع) مسؤول المشتريات بيصلّح تكويد الأصناف بنفسه (بالرقم السري — 29 سبتمبر)
+   طلب بهاء (المشتريات): «كوّدت صنف غلط وعايز أعدّل» + «عايز أضيف بند كهرباء».
+   محمود: «عايزه يضيف ويغيّر الكود لوحده من غير ما يرجعلي».
+   · التصنيف: قايمة «التصنيف» بقت فيها كمان كل «فئات الصنف» (زي كهرباء وإضاءة / عدد وأدوات / فئات المشتريات الجديدة)،
+     وزرار «+ تصنيف جديد» تحتها (بيفتح نفس خانة «فئة جديدة» — collection itemcats اللي المشتريات بتكتب فيها أصلًا).
+   · تصحيح الكود (المالك + المشتريات): في تعديل الصنف زرار «تصحيح الكود» → تغيّر القسم/الفئة/التصنيف والكود الجديد بيتعمل لوحده
+     (نفس القسم والفئة = نفس الكود). من غير موافقة؛ الحركات والأرصدة مربوطة بالصنف مش بالكود. الكود القديم بيتسجّل في codeLog،
+     وإشعار للمالك للعلم بس. من غير الزرار، تعديل الصنف مابيغيّرش الكود (قبل كده تغيير الفئة في التعديل كان بيدي رقم جديد بالغلط).
+   · المسح: المشتريات تمسح صنف ما عليهوش حركات (رصيد صفر، مفيش حركة مخزن، ومش في أمر شراء اتطلب/اتستلم). غير كده المالك بس.
+   ===================================================================== */
+(function () {
+  if (window.__NF_RECODE__) return; window.__NF_RECODE__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const canRecode = () => !!S.session && !stu() && (typeof writable !== 'function' || writable()) && (isAdmin() || role() === 'purch');
+  const canCatsX = () => !!S.session && !stu() && (typeof writable !== 'function' || writable()) && (isAdmin() || ['purch', 'store'].includes(role()));
+  const catFor = l => (typeof window.nfCatForCategory === 'function' ? window.nfCatForCategory(l) : '');
+  const PRE_ORDER = ['draft', 'rfq', 'rfq_tech', 'need_ok', 'rejected', 'cancelled'];
+  const movesOf = m => {
+    const why = [];
+    if (Math.abs(+m.qty || 0) > 0) why.push('عليه رصيد');
+    if (list('movements').some(x => x.materialId === m.id)) why.push('عليه حركات مخزن');
+    if (list('purchases').some(p => !PRE_ORDER.includes(p.status) && (p.items || []).some(it => it.materialId === m.id))) why.push('داخل في أمر شراء اتطلب');
+    return why;
+  };
+  window.nfItemMoves = movesOf;
+  const codeTaken = (code, selfId) => list('materials').some(x => x.id !== selfId && x.code === code);
+  function recodeFor(m, dc, cat) {
+    const pre = `${dc}-${cat}-`;
+    if (m && m.code && String(m.code).startsWith(pre)) return m.code;
+    let c = nextItemCode(dc, cat); let n = parseInt(c.slice(pre.length), 10) || 1;
+    while (codeTaken(c, m && m.id)) { n++; c = pre + String(n).padStart(4, '0'); }
+    return c;
+  }
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.recodebar{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.recodebar .old{font-family:ui-monospace,monospace;direction:ltr;text-decoration:line-through;color:var(--muted)}
+#mform.recoding #f-code{outline:2px solid var(--acc,#3b82f6);opacity:1!important}
+</style>`);
+
+  /* ---- form: التصنيف list + «تصنيف جديد» + «تصحيح الكود» ---- */
+  if (typeof materialForm === 'function') materialForm = (base => function (m) {
+    m = m || {}; let h = base.apply(this, arguments);
+    try {
+      const have = new Set(S.settings.categories || []); const covered = new Set([...have].map(catFor).filter(Boolean));
+      const extra = ITEM_CATS.filter(c => !covered.has(c[0]) && !have.has(c[1])).map(c => c[1]);
+      if (m.category && !have.has(m.category) && !extra.includes(m.category)) extra.push(m.category);
+      if (extra.length) h = h.replace(/(<select id="f-category" name="category">[\s\S]*?)(<\/select>)/, (all, a, b) => a + extra.map(l => `<option ${l === m.category ? 'selected' : ''}>${esc(l)}</option>`).join('') + b);
+      if (canCatsX()) h = h.replace(/(<select id="f-category" name="category">[\s\S]*?<\/select>)/, `$1<button type="button" class="btn xs catbtn" data-cattrig="1">${icon('plus')}تصنيف جديد</button>`);
+      if (m.id) h = h.replace('<input id="f-code"', `<input type="hidden" id="f-matid" value="${esc(m.id)}"><input id="f-code"`);
+      if (m.id && m.code && canRecode()) h = h.replace(/(<input id="f-code"[^>]*>)/, `$1<div class="recodebar" id="recodebar"><button type="button" class="btn xs" data-recode="1">${icon('edit')}تصحيح الكود</button><span class="tiny muted">لو الصنف اتكوّد غلط: دوس هنا وغيّر القسم أو الفئة أو التصنيف — الكود يتعمل لوحده</span></div>`);
+    } catch (e) { console.warn('recode form', e); }
+    return h;
+  })(materialForm);
+
+  /* capture: mark edit forms so the old auto-renumber (91) leaves an existing code alone unless «تصحيح الكود» is on */
+  document.addEventListener('change', e => { const f = e.target.closest && e.target.closest('#mform'); if (!f) return; const mid = f.querySelector('#f-matid'); if (mid && !f.dataset.matId) f.dataset.matId = mid.value; }, true);
+  document.addEventListener('change', e => {
+    const f = e.target.closest && e.target.closest('#mform'); if (!f || !f.querySelector('#f-itemCat')) return;
+    const id = e.target.id;
+    /* a فئة with no matching تصنيف → add it to the list and pick it */
+    if (id === 'f-itemCat') { const cg = f.querySelector('#f-category'); const code = e.target.value; if (cg && catFor(cg.value) !== code) { let o = [...cg.options].find(x => catFor(x.value) === code); if (!o) { const c = ITEM_CATS.find(x => x[0] === code); if (c) { o = document.createElement('option'); o.textContent = c[1]; o.value = c[1]; cg.appendChild(o); } } if (o) cg.value = o.value; } }
+    if (!['f-itemCat', 'f-deptCode', 'f-category'].includes(id)) return;
+    const mid = f.querySelector('#f-matid'); if (!mid) return; const m = byId('materials', mid.value); const c = f.querySelector('#f-code'); if (!m || !c) return;
+    const dc = (f.querySelector('#f-deptCode') || {}).value, cat = (f.querySelector('#f-itemCat') || {}).value; if (!dc || !cat) return;
+    c.value = f.dataset.rcOn === '1' ? recodeFor(m, dc, cat) : (m.code || c.value);
+    const p = f.querySelector('#codeprev'); if (p) p.textContent = c.value;
+    const bar = f.querySelector('#recodebar .tiny'); if (bar && f.dataset.rcOn === '1') bar.innerHTML = c.value !== m.code ? `<span class="old">${esc(m.code)}</span> ← <b class="ltr">${esc(c.value)}</b> — هيتحفظ لما تدوس «حفظ»` : 'نفس القسم والفئة = نفس الكود';
+  });
+  document.addEventListener('click', e => {
+    const t = e.target.closest && e.target.closest('button[data-recode],button[data-cattrig]'); if (!t) return; e.preventDefault();
+    const f = t.closest('#mform') || document;
+    if (t.dataset.cattrig) { const b = f.querySelector('[data-catnew="f-itemCat"]'); if (b) { b.click(); const box = f.querySelector('[data-catbox="f-itemCat"]'); if (box && !box.hidden) box.scrollIntoView({ block: 'center', behavior: 'smooth' }); } return; }
+    if (!canRecode()) return;
+    const on = f.dataset.rcOn !== '1'; f.dataset.rcOn = on ? '1' : ''; f.classList.toggle('recoding', on);
+    t.innerHTML = on ? `${icon('x')}إلغاء التصحيح` : `${icon('edit')}تصحيح الكود`;
+    const mid = f.querySelector('#f-matid'); const m = mid && byId('materials', mid.value); const c = f.querySelector('#f-code'); const bar = f.querySelector('#recodebar .tiny');
+    if (!on && m && c) { c.value = m.code; const p = f.querySelector('#codeprev'); if (p) p.textContent = m.code; }
+    if (bar) bar.textContent = on ? 'غيّر القسم أو الفئة أو التصنيف تحت — الكود الجديد هيظهر هنا' : 'لو الصنف اتكوّد غلط: دوس هنا وغيّر القسم أو الفئة أو التصنيف — الكود يتعمل لوحده';
+    if (on) { const s = f.querySelector('#f-itemCat'); if (s) s.focus(); }
+  });
+
+  /* ---- save: log the old code + tell the owner (for info only) ---- */
+  Store.save = (base => async function (col, doc, opts) {
+    let note = null;
+    if (col === 'materials' && doc && typeof doc === 'object' && doc.id) {
+      const old = byId('materials', doc.id);
+      if (old && old.code && doc.code && old.code !== doc.code) {
+        if (codeTaken(doc.code, doc.id)) { toast(`الكود ${doc.code} مستخدم لصنف تاني`, 'err'); doc.code = old.code; }
+        else { const by = (S.session && S.session.name) || ''; doc.codeLog = (old.codeLog || []).concat([{ from: old.code, to: doc.code, at: nowISO(), by }]); note = { from: old.code, to: doc.code, name: doc.name || old.name || '', by }; }
+      }
+    }
+    const r = await base.apply(this, arguments);
+    if (note) { toast(`الكود اتغيّر: ${note.from} ← ${note.to}`); if (!isAdmin() && typeof notifyOwner === 'function') notifyOwner(`تصحيح كود صنف — ${note.to}`, `${note.by} غيّر كود «${note.name}» من ${note.from} إلى ${note.to} (للعلم — الحركات والأرصدة زي ما هي).`, { priority: 'normal', id: `recode_${doc.id}_${Date.now()}` }).catch(() => { }); }
+    return r;
+  })(Store.save);
+
+  /* ---- delete: purchasing may delete an item that has no movements ---- */
+  let editingId = null;
+  if (ACTIONS.materialEdit) ACTIONS.materialEdit = (base => function (id) { editingId = id; try { return base.apply(this, arguments); } finally { editingId = null; } })(ACTIONS.materialEdit);
+  openModal = (base => function (o) {
+    if (editingId && o && !o.extra && role() === 'purch' && canRecode() && /^تعديل /.test(o.title || '')) { const m = byId('materials', editingId); if (m && !movesOf(m).length) o = Object.assign({}, o, { extra: `<div class="grow"></div><button type="button" class="btn ghost" style="color:var(--crit-ink)" data-action="materialDelete" data-arg="${esc(m.id)}">${icon('trash')}حذف</button>` }); }
+    return base.call(this, o);
+  })(openModal);
+  if (ACTIONS.materialDelete) ACTIONS.materialDelete = (base => async function (id) {
+    const m = byId('materials', id);
+    if (m && role() === 'purch') { const why = movesOf(m); if (why.length) { toast(`الصنف ده ${why.join(' و')} — المسح عند المالك بس`, 'err'); return; } }
+    const r = await base.apply(this, arguments); if (m && !byId('materials', id)) closeModal(); return r;
+  })(ACTIONS.materialDelete);
 })();
 </script>
 
