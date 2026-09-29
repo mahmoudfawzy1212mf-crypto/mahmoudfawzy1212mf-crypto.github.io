@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1021-bc2c4f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1031-d2b6dd";</script>
 
 <script>
 'use strict';
@@ -22478,6 +22478,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     end: '<path d="M12 9c-2.6 0-5.1.5-7.4 1.4-.6.2-1 .8-1 1.5v2.6c0 .6.5 1 1.1 1l3-.5c.5-.1.9-.5.9-1v-1.8a13 13 0 0 1 6.8 0V14c0 .5.4.9.9 1l3 .5c.6.1 1.1-.4 1.1-1V12c0-.7-.4-1.3-1-1.5A19.6 19.6 0 0 0 12 9z" fill="currentColor"/>',
     x: '<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
     cam: '<path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+    spk: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round"/>',
     chev: '<path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   };
   const svg = (k, s = 24) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${IC[k]}</svg>`;
@@ -22537,7 +22538,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const vid = c.video && c.state !== 'incoming';
     const bar = c.state === 'incoming'
       ? `${cbtn('decline', 'end', 'رفض', 'red')}${cbtn('accept', c.video ? 'video' : 'phone', 'رد', 'grn')}`
-      : `${cbtn('mute', c.muted ? 'micoff' : 'mic', c.muted ? 'مكتوم' : 'كتم', c.muted ? 'off' : '')}${c.video ? `${cbtn('cam', c.camOff ? 'camoff' : 'video', 'الكاميرا', c.camOff ? 'off' : '')}${cbtn('flip', 'flip', 'قلب', '')}` : ''}${cbtn('hang', 'end', 'إنهاء', 'red')}`;
+      : `${cbtn('mute', c.muted ? 'micoff' : 'mic', c.muted ? 'مكتوم' : 'كتم', c.muted ? 'off' : '')}${c.video ? `${cbtn('cam', c.camOff ? 'camoff' : 'video', 'الكاميرا', c.camOff ? 'off' : '')}${cbtn('flip', 'flip', 'قلب', '')}` : ''}${cbtn('spk', 'spk', 'سبيكر', c.spk ? 'off' : '')}${cbtn('hang', 'end', 'إنهاء', 'red')}`;
     let el = document.getElementById('nfcall');
     if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '')) {
       el = screen(`${vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div></div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%"><div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>`);
@@ -22550,6 +22551,23 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const rv = el.querySelector('.rv') || el.querySelector('.ra'); const lv = el.querySelector('.lv');
     if (rv && c.remote && rv.srcObject !== c.remote) { rv.srcObject = c.remote; rv.muted = false; rv.volume = 1; const pp = rv.play && rv.play(); if (pp && pp.catch) pp.catch(() => needTap()); }
     if (lv && c.local && lv.srcObject !== c.local) lv.srcObject = c.local;
+  }
+  /* v5.47 — speaker button: switch the output when the phone lists its outputs (setSinkId), otherwise make the other side louder (WebAudio ×3) */
+  async function setSpeaker(c, on) {
+    c.spk = on; const el = document.getElementById('nfcall'); const m = el && (el.querySelector('video.rv') || el.querySelector('audio.ra'));
+    if (c.boost) { try { c.boost.src.disconnect(); c.boost.g.disconnect(); } catch (e) { /* ignore */ } c.boost = null; if (m) m.muted = false; }
+    try {
+      if (m && typeof m.setSinkId === 'function' && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput' && d.deviceId);
+        const spk = outs.find(d => /speaker|loud|مكبر|سماعة خارجية/i.test(d.label)); const ear = outs.find(d => /earpiece|receiver|handset|سماعة الأذن/i.test(d.label)) || outs.find(d => d.deviceId === 'default');
+        const target = on ? spk : ear; if (target) { await m.setSinkId(target.deviceId); paint(); return; }
+      }
+    } catch (e) { /* fall back */ }
+    if (on && c.remote && c.remote.getAudioTracks().length) {
+      try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') await AC.resume(); const src = AC.createMediaStreamSource(c.remote), g = AC.createGain(); g.gain.value = 3; src.connect(g); g.connect(AC.destination); c.boost = { src, g }; if (m) m.muted = true; }
+      catch (e) { toast('مش قادر يعلّي الصوت على الموبايل ده — علّي صوت الموبايل من زراير الجنب', 'err'); c.spk = false; }
+    }
+    paint();
   }
   /* v5.46 — the phone blocked sound until a tap → big «تشغيل الصوت» button */
   function needTap() { const el = document.getElementById('nfcall'); if (!el || el.querySelector('.tapaudio')) return; el.insertAdjacentHTML('beforeend', '<button class="tapaudio" style="position:absolute;z-index:5;left:50%;top:45%;transform:translate(-50%,-50%);padding:14px 22px;border-radius:30px;border:0;background:#34c759;color:#fff;font:inherit;font-size:17px;font-weight:600">🔊 اضغط لتشغيل الصوت</button>'); el.querySelector('.tapaudio').addEventListener('click', ev => { ev.stopPropagation(); el.querySelectorAll('video.rv,audio.ra').forEach(m => { m.muted = false; m.play().catch(() => { }); }); ev.target.remove(); }); }
@@ -22618,7 +22636,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     return pc;
   }
   const gathered = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 4000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
-  function cleanup(c) { if (!c) return; stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearInterval(c.mon); clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
+  function cleanup(c) { if (!c) return; stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearInterval(c.mon); if (c.boost) { try { c.boost.src.disconnect(); c.boost.g.disconnect(); } catch (e) { /* ignore */ } c.boost = null; } clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
   async function finish(status, note) {
     const c = C.cur; if (!c) return; C.cur = null; cleanup(c);
     if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
@@ -22701,6 +22719,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       const a = b.dataset.nfc; const c = C.cur;
       if (a === 'accept') return accept(true); if (a === 'accept-a') return accept(false);
       if (a === 'decline') return finish('declined'); if (a === 'hang') return finish(c && c.state === 'calling' ? 'missed' : 'ended'); if (a === 'close') return closeScreen();
+      if (a === 'spk' && c) { setSpeaker(c, !c.spk); return; }
       if (a === 'mute' && c && c.local) { c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); return paint(); }
       if (a === 'cam' && c && c.local) { c.camOff = !c.camOff; c.local.getVideoTracks().forEach(t => { t.enabled = !c.camOff; }); return paint(); }
       if (a === 'flip' && c && c.local && c.pc) { (async () => { try { c.facing = c.facing === 'environment' ? 'user' : 'environment'; const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: c.facing } }); const nt = s.getVideoTracks()[0]; const snd = c.pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (snd) await snd.replaceTrack(nt); c.local.getVideoTracks().forEach(t => { c.local.removeTrack(t); t.stop(); }); c.local.addTrack(nt); const lv = document.querySelector('#nfcall .lv'); if (lv) { lv.srcObject = c.local; lv.style.transform = c.facing === 'environment' ? 'none' : 'scaleX(-1)'; } } catch (x) { toast('مش قادر يقلب الكاميرا', 'err'); } })(); return; }
