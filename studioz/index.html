@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1221-e46fe0";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1312-9006ef";</script>
 
 <script>
 'use strict';
@@ -11327,8 +11327,8 @@ async function pushSubscribe(silent) {
   try {
     const perm = await Notification.requestPermission(); if (perm !== 'granted') { if (!silent) toast('لم يُسمح بالإشعارات', 'err'); return false; }
     const reg = await navigator.serviceWorker.ready; const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); const key = v.data && v.data.publicKey; if (!key) throw new Error('no vapid');
-    let sub = await reg.pushManager.getSubscription(); if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
-    const r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error;
+    let sub = await reg.pushManager.getSubscription(), vk0 = ''; try { const ok0 = sub && sub.options && sub.options.applicationServerKey; if (ok0) { const b = new Uint8Array(ok0); let t = ''; for (let i = 0; i < b.length; i++) t += String.fromCharCode(b[i]); if (btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') !== key) { await sub.unsubscribe(); sub = null; } else vk0 = key; } } catch (e) { /* ignore */ } if (!sub) { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) }); vk0 = key; }
+    let r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: vk0 || undefined, personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error; if (r.data && r.data.stale) { try { await sub.unsubscribe(); } catch (e) { /* ignore */ } sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(r.data.publicKey || key) }); r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: r.data.publicKey || key, personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error; }
     try { localStorage.setItem('nf.push.' + (S.session?.id || ''), '1'); } catch (e) { /* ignore */ }
     if (!silent) toast('تم تفعيل الإشعارات على هذا الجهاز ✓'); return true;
   } catch (e) { console.warn('push', e); if (!silent) toast('تعذّر تفعيل الإشعارات: ' + (e.message || e), 'err'); return false; }
@@ -16471,18 +16471,38 @@ Object.assign(window, { instRecalc, instAll });
    ===================================================================== */
 const PUSH_REFRESH_MS = 6 * 3600e3;
 let _pushRefreshing = false;
+/* v5.50: السيرفر كان ممكن يغيّر مفاتيح الإشعارات (VAPID) → اشتراك الجهاز القديم بيموت بصمت.
+   دلوقتي: كل مرة بنقارن مفتاح اشتراك الجهاز بمفتاح السيرفر؛ لو مختلف (أو السيرفر قال stale) بنلغي القديم ونشترك من جديد.
+   لو الموبايل رفض الاشتراك من غير لمسة (آيفون أحيانًا) بيظهر شريط «فعّل الإشعارات تاني» بلمسة واحدة. */
+const u8ToB64u = buf => { if (!buf) return ''; const b = new Uint8Array(buf); let s = ''; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+let _vapidKey = '';
+async function vapidKey() { if (_vapidKey) return _vapidKey; const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); _vapidKey = (v.data && v.data.publicKey) || ''; return _vapidKey; }
+const subKey = sub => { try { return u8ToB64u(sub && sub.options && sub.options.applicationServerKey); } catch (e) { return ''; } };
+async function pushResub(reg, old, key) { const oldEp = old ? old.endpoint : ''; if (old) { try { await old.unsubscribe(); } catch (e) { /* ignore */ } } try { const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) }); pushNeedTap(false); return { sub, oldEp }; } catch (e) { console.warn('resub', e); pushNeedTap(true); return null; } }
+function pushNeedTap(on) {
+  S._pushNeedTap = !!on; const el = document.getElementById('nf-pushfix');
+  if (!on) { if (el) el.remove(); return; }
+  if (el || !document.body) return;
+  document.body.insertAdjacentHTML('beforeend', `<div id="nf-pushfix" data-action="pushFix" style="position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9000;background:#b45309;color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.35);cursor:pointer">${icon('bell')}<b style="flex:1;font-size:14px">الإشعارات والمكالمات وقفت على الجهاز ده — دوس هنا لتفعيلها تاني</b></div>`);
+}
+ACTIONS.pushFix = async () => { const ok = await pushSubscribe(false); if (ok) { pushNeedTap(false); pushRefresh(true); } };
 async function pushRefresh(force) {
   if (_pushRefreshing || !S.session || typeof pushAvailable !== 'function' || !pushAvailable() || Notification.permission !== 'granted') return;
   _pushRefreshing = true;
   try {
     const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
-    const k = 'nf.pushep.' + (S.session.id || ''); let prevEp = '', prevAt = 0;
+    const k = 'nf.pushep2.' + (S.session.id || ''); let prevEp = '', prevAt = 0;
     try { const o = JSON.parse(localStorage.getItem(k) || '{}'); prevEp = o.ep || ''; prevAt = +o.at || 0; } catch (e) { /* ignore */ }
-    if (!sub) { const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); const key = v.data && v.data.publicKey; if (!key) return; sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) }); }
+    const key = await vapidKey(); if (!key) return;
+    let replace = '';
+    const have = subKey(sub);
+    if (!sub || (have && have !== key)) { const r = await pushResub(reg, sub, key); if (!r) return; sub = r.sub; replace = r.oldEp; force = true; }
     const ep = sub.endpoint; if (!force && ep === prevEp && Date.now() - prevAt < PUSH_REFRESH_MS) return;
-    const r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), personId: S.session.id || '', ua: navigator.userAgent, replace: prevEp && prevEp !== ep ? prevEp : undefined } });
-    if (r.error) return;
-    try { localStorage.setItem(k, JSON.stringify({ ep, at: Date.now() })); localStorage.setItem('nf.push.' + (S.session.id || ''), '1'); } catch (e) { /* ignore */ }
+    const body = () => ({ action: 'subscribe', sub: sub.toJSON(), vk: subKey(sub) || undefined, personId: S.session.id || '', ua: navigator.userAgent, replace: replace || (prevEp && prevEp !== ep ? prevEp : undefined) });
+    let r = await S.sb.functions.invoke('push', { body: body() });
+    if (!r.error && r.data && r.data.stale) { if (r.data.publicKey) _vapidKey = r.data.publicKey; const x = await pushResub(reg, sub, _vapidKey); if (!x) return; sub = x.sub; replace = x.oldEp; r = await S.sb.functions.invoke('push', { body: body() }); }
+    if (r.error || !(r.data && r.data.ok)) return;
+    try { localStorage.setItem(k, JSON.stringify({ ep: sub.endpoint, at: Date.now() })); localStorage.setItem('nf.push.' + (S.session.id || ''), '1'); } catch (e) { /* ignore */ }
   } catch (e) { console.warn('pushRefresh', e); } finally { _pushRefreshing = false; }
 }
 document.addEventListener('nf:ready', () => setTimeout(() => pushRefresh(false), 2000));
@@ -19489,7 +19509,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const h = base.apply(this, arguments); if (!canPJ() || isUpHead()) return h; const w = waitingMe(), pay = toPay(); if (!w && !pay && !['acc', 'hr'].includes(role())) return h;
     return pjCard() + h;
   })(vDashboard);
-  const pjCard = () => { const w = waitingMe(), pay = toPay(); return `<div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">${icon('layers')}<b>قسم التنجيد — اتفاقات القطعة</b>${w ? `<span class="badge warn">${w} مستني موافقتك</span>` : ''}${pay ? `<span class="badge warn">${pay} مستني صرف</span>` : ''}${!w && !pay ? '<span class="muted small">مفيش حاجة مستنياك</span>' : ''}<div class="grow"></div><a class="btn sm" href="#/piecejobs">افتح</a></div></div>`; };
+  const pjCard = () => { const w = waitingMe(), pay = toPay(); return `<div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">${icon('layers').replace('<svg ', '<svg width="22" height="22" style="flex:0 0 22px" ')}<b>قسم التنجيد — اتفاقات القطعة</b>${w ? `<span class="badge warn">${w} مستني موافقتك</span>` : ''}${pay ? `<span class="badge warn">${pay} مستني صرف</span>` : ''}${!w && !pay ? '<span class="muted small">مفيش حاجة مستنياك</span>' : ''}<div class="grow"></div><a class="btn sm" href="#/piecejobs">افتح</a></div></div>`; };
   /* the tasks page is the landing page for accounts: show the card there too (not in a task's detail) */
   if (typeof vTasks === 'function') vTasks = (base => function () { const h = base.apply(this, arguments); if (S.route.id || !canPJ() || isUpHead()) return h; if (!waitingMe() && !toPay() && !['acc', 'hr'].includes(role())) return h; return pjCard() + h; })(vTasks);
   if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
@@ -19570,7 +19590,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (myTurn(j) && j.status === 'pending') acts.push(`<button class="btn p" data-action="pjAct" data-arg="${esc(j.id)}:approve">${icon('check')}موافقة</button>`, `<button class="btn" data-action="pjAct" data-arg="${esc(j.id)}:return">${icon('back')}رجّعه بملاحظة</button>`, `<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjAct" data-arg="${esc(j.id)}:reject">${icon('x')}رفض</button>`);
     if (writable() && canDeliver() && j.status === 'approved') acts.push(`<button class="btn p" data-action="pjDeliver" data-arg="${esc(j.id)}">${icon('check')}تسجيل استلام قطع</button>`);
     if (writable() && canPay() && ['approved', 'delivered'].includes(j.status) && payRoom(j) > 0 && (!hasStages(j) || dueStages(j).length)) acts.push(`<button class="btn p" data-action="pjPay" data-arg="${esc(j.id)}">${icon('money')}صرف للصنايعي</button>`);
-    if (writable() && isAdmin() && !['paid', 'cancelled', 'rejected'].includes(j.status)) acts.push(`<button class="btn ghost" style="color:var(--crit-ink)" data-action="pjCancel" data-arg="${esc(j.id)}">إلغاء الاتفاق</button>`);
+    if (writable() && isAdmin() && !['paid', 'cancelled', 'rejected'].includes(j.status)) acts.push(`<button class="btn ghost" style="color:var(--crit-ink)" data-action="pieceCancel" data-arg="${esc(j.id)}">إلغاء الاتفاق</button>`);
     const c = byId('crafters', j.crafterId) || {};
     const lastNote = [...(j.log || [])].reverse().find(l => ['return', 'reject'].includes(l.action));
     return `<div class="row" style="gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><a class="btn sm ghost" href="#/piecejobs">${icon('back')}كل الاتفاقات</a><span class="code ltr" style="font-weight:700;font-size:16px">${esc(j.code || '')}</span>${badge(j)}</div>
@@ -19605,8 +19625,8 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const pre = R2(sum(j.stages.filter(s => !s.final), s => +s.pct || 0));
     const rowAct = s => {
       if (!writable() || !['approved', 'delivered'].includes(j.status)) return '';
-      if (s.status === 'waiting' && !s.final && s.when !== 'start' && (isUpHead() || isAdmin() || role() === 'manager')) return `<button class="btn sm" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:done">${icon('check')}خلصت</button>`;
-      if (s.status === 'done' && (isAdmin() || role() === 'manager')) return `<button class="btn sm p" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:confirm">${icon('check')}${s.final ? 'اعتماد التسليم النهائي' : 'تأكيد'}</button><button class="btn sm ghost" data-action="pjStage" data-arg="${esc(j.id)}:${esc(s.id)}:back">رجّعها</button>`;
+      if (s.status === 'waiting' && !s.final && s.when !== 'start' && (isUpHead() || isAdmin() || role() === 'manager')) return `<button class="btn sm" data-action="pjPayStage" data-arg="${esc(j.id)}:${esc(s.id)}:done">${icon('check')}خلصت</button>`;
+      if (s.status === 'done' && (isAdmin() || role() === 'manager')) return `<button class="btn sm p" data-action="pjPayStage" data-arg="${esc(j.id)}:${esc(s.id)}:confirm">${icon('check')}${s.final ? 'اعتماد التسليم النهائي' : 'تأكيد'}</button><button class="btn sm ghost" data-action="pjPayStage" data-arg="${esc(j.id)}:${esc(s.id)}:back">رجّعها</button>`;
       if (s.status === 'confirmed' && canPay() && stPaid(j, s) < stAmt(j, s) - 0.001) return `<button class="btn sm p" data-action="pjPay" data-arg="${esc(j.id)}:${esc(s.id)}">${icon('money')}صرف</button>`;
       return '';
     };
@@ -19615,7 +19635,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       <div class="pjstages">${j.stages.map((s, i) => `<div class="pjst ${s.status}"><div class="n">${i + 1}</div><div class="grow"><b>${esc(s.name)}</b> <span class="muted">${fmtNum(+s.pct)}%</span> · <b>${fmtMoney(stAmt(j, s))}</b>${s.final ? ' <span class="badge">آخر 25%+</span>' : ''}<div class="tiny muted">${who(s)}${s.note ? ' — ' + esc(s.note) : ''}</div>${s.photo ? `<img src="${esc(s.photo)}" alt="" style="height:44px;border-radius:8px;margin-top:4px;cursor:zoom-in" data-action="pjStagePhoto" data-arg="${esc(j.id)}:${esc(s.id)}">` : ''}</div><span class="badge ${(STG[s.status] || STG.waiting)[1]}">${(STG[s.status] || STG.waiting)[0]}</span>${rowAct(s)}</div>`).join('')}</div></div>`;
   }
   ACTIONS.pjStagePhoto = arg => { const [id, sid] = String(arg).split(':'); const j = byId('piecejobs', id); const s = j && (j.stages || []).find(x => x.id === sid); if (s && s.photo && typeof lightbox === 'function') lightbox(s.photo, s.name); };
-  ACTIONS.pjStage = arg => {
+  ACTIONS.pjPayStage = arg => {
     const [id, sid, kind] = String(arg).split(':'); const j = byId('piecejobs', id); if (!j || !hasStages(j) || !['approved', 'delivered'].includes(j.status)) return; const s = j.stages.find(x => x.id === sid); if (!s) return;
     const save = async (patch, logNote, after) => { const cur = Object.assign({}, byId('piecejobs', id)); cur.stages = (cur.stages || []).map(x => x.id === sid ? Object.assign({}, x, patch) : x); cur.log = (cur.log || []).concat([logEntry('stage', { note: logNote })]); cur.updatedAt = nowISO(); if (after) await after(cur); await Store.save('piecejobs', cur); };
     if (kind === 'done') {
@@ -19814,7 +19834,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         await Store.save('piecejobs', cur); toast('اتسجل الصرف واتقيد على المشروع');
       } });
   }
-  ACTIONS.pjCancel = async id => { const j = byId('piecejobs', id); if (!j || !isAdmin()) return; if (!(await confirmDlg(`إلغاء الاتفاق ${j.code}؟ الصرف اللي اتسجل بيفضل في المصروفات.`, 'إلغاء الاتفاق'))) return; await closeTurn(j); await Store.save('piecejobs', Object.assign({}, j, { status: 'cancelled', cancelledAt: nowISO(), log: (j.log || []).concat([logEntry('cancel')]) })); toast('اتلغى'); };
+  ACTIONS.pieceCancel = async id => { const j = byId('piecejobs', id); if (!j || !isAdmin()) return; if (!(await confirmDlg(`إلغاء الاتفاق ${j.code}؟ الصرف اللي اتسجل بيفضل في المصروفات.`, 'إلغاء الاتفاق'))) return; await closeTurn(j); await Store.save('piecejobs', Object.assign({}, j, { status: 'cancelled', cancelledAt: nowISO(), log: (j.log || []).concat([logEntry('cancel')]) })); toast('اتلغى'); };
   window.nfPiece = { jTotal, jEarned, jPaid, myTurn, CHAIN, DEP, crafterStats, payRoom, CAP, stagesCheck, dueStages, stAmt };
 })();
 /* =====================================================================
