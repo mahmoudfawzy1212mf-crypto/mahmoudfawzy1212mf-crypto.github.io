@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0657-d16c4b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0823-b06403";</script>
 
 <script>
 'use strict';
@@ -5793,7 +5793,7 @@ function readOrderItems(f) { return $$('#oitems .oitem', f).map(el => ({ product
 
 /* ---------------- order detail: drawings & 3D card ---------------- */
 function orderDrawingsCardBase(o) {
-  const ps = orderProducts(o); const own = filesOf('order', o.id); const all = orderFiles(o); const hint = Files.uploadHint();
+  const ps = orderProducts(o); const own = filesOf('order', o.id).filter(f => !f.productId || !ps.some(p => p.id === f.productId)); const all = orderFiles(o); const hint = Files.uploadHint();
   if (!ps.length && !own.length && !canFiles()) return '';
   return `<div class="card" id="drawings"><div class="cardhead"><h3>الرسومات والمعاينة 3D</h3>${all.length ? `<span class="muted small">${all.length} ملف</span>` : ''}<div class="grow"></div>${all.length ? `<button class="btn sm p" data-action="fileOpen" data-arg="${all[0].id}:order-${o.id}">${icon('play')}فتح العارض</button>` : ''}${canFiles() ? `<button class="btn sm ghost" data-action="fileUpload" data-arg="order:${o.id}">${icon('plus')}رسومات خاصة بالأمر</button>` : ''}</div>
     ${ps.map(p => { const fs = filesOf('product', p.id); const it = orderItems(o).find(x => x.productId === p.id); return `<div class="prow"><div class="row" style="gap:8px;margin-bottom:4px"><a href="#/products/${p.id}" class="bold">${esc(p.name)}</a><span class="code">${esc(p.code || '')}</span>${p.rev ? `<span class="tiny muted">${esc(p.rev)}</span>` : ''}<span class="num small">× ${fmtNum(it?.qty || 1)}</span>${it && it.color ? `<span class="badge">${esc(it.color)}</span>` : ''}${p.dims ? `<span class="tiny muted">${esc(p.dims)}</span>` : ''}<div class="grow"></div>${typeof productModReqBtn === 'function' ? productModReqBtn(p, o) : ''}</div>${p.notes ? `<div class="small" style="white-space:pre-wrap;color:var(--ink-2);margin-bottom:6px">${esc(p.notes)}</div>` : ''}${fileGallery(fs, 'order-' + o.id, { empty: 'لا توجد ملفات لهذا المنتج بعد' })}</div>`; }).join('')}
@@ -22544,6 +22544,33 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
     const n = missedCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
   });
   window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount };
+})();
+/* =====================================================================
+   v5.38 — صور المنتجات اللي وصلت من غير thumbnail (زي اللي بتتضاف تلقائي من ChatGPT على السيرفر)
+   · أي ملف «صورة» مخزّن على السيرفر وماعندوش thumb ويظهر في الصفحة → بيتعمله thumb من الصورة نفسها ويتحفظ (مرة واحدة)
+   · غلاف المنتج: لو مفيش coverFileId بيتاخد أول صورة للمنتج
+   ===================================================================== */
+(() => {
+  const busy = new Set(); const failed = new Set();
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.storage;
+  async function fix(f) {
+    if (busy.has(f.id) || failed.has(f.id)) return; busy.add(f.id);
+    try {
+      const { data } = await S.sb.storage.from('files').createSignedUrl(f.ref, 600); if (!data || !data.signedUrl) throw new Error('url');
+      const t = await imageThumb(data.signedUrl); if (!t) throw new Error('thumb');
+      const cur = byId('files', f.id); if (!cur) return;
+      if (typeof canFiles === 'function' && canFiles()) await Store.update('files', f.id, { thumb: t }, { silent: true }); else { cur.thumb = t; }
+      const p = f.productId ? byId('products', f.productId) : null;
+      if (p && !p.coverFileId && typeof canFiles === 'function' && canFiles()) await Store.update('products', p.id, { coverFileId: f.id }, { silent: true });
+      if (typeof rerender === 'function') rerender(); else render(false);
+    } catch (e) { failed.add(f.id); } finally { busy.delete(f.id); }
+  }
+  RENDER_HOOKS.push(() => {
+    if (!hosted() || !S.session || typeof imageThumb !== 'function') return;
+    const view = document.getElementById('view'); if (!view) return;
+    const todo = list('files').filter(f => f && f.kind === 'render' && !f.thumb && f.store === 'sb' && f.ref && !f.restricted && !f.deleted && !busy.has(f.id) && !failed.has(f.id) && view.innerHTML.includes(f.id)).slice(0, 4);
+    todo.forEach(f => setTimeout(() => fix(f), 50));
+  });
 })();
 </script>
 
