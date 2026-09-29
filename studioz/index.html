@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1049-1689cb";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1221-e46fe0";</script>
 
 <script>
 'use strict';
@@ -22859,6 +22859,25 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
     if (!b) { document.body.insertAdjacentHTML('beforeend', `<a class="callfab" href="#/calls" title="المكالمات" aria-label="المكالمات">${svg('phone', 24)}</a>`); b = document.querySelector('.callfab'); }
     const n = missedCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
   });
+  /* v5.49 — settings (owner): Cloudflare TURN key (saved on the server only, never shown back) */
+  if (typeof EXTRA_SETTINGS !== 'undefined') EXTRA_SETTINGS.calls = { label: 'المكالمات', render: () => {
+    if (!isAdmin() || !hosted()) return '<div class="card"><p class="muted">الإعداد ده للمالك في النسخة المستضافة.</p></div>';
+    setTimeout(async () => { const box = document.getElementById('turnst'); if (!box) return; try { const r = await S.sb.functions.invoke('rtc', { body: { action: 'status' } }); const d = r && r.data || {}; box.innerHTML = d.configured ? (d.ok ? `<span class="badge good">✓ سيرفر TURN شغال (${esc(d.keyId || '')})</span>` : '<span class="badge crit">المفتاح متسجل بس Cloudflare رافضه — سجّله تاني</span>') : '<span class="badge warn">مش متضبط — المكالمات بين الشبكات المختلفة ممكن تقع</span>'; } catch (e) { box.textContent = 'تعذّر الفحص'; } }, 50);
+    return `<form class="card" id="turnform"><h3>سيرفر TURN للمكالمات (Cloudflare)</h3><p class="small ink2" style="margin:6px 0 10px">بيوصّل المكالمة لما الموبايلين على شبكات مختلفة (4G / واي فاي). المكالمة بتفضل مشفّرة من جهاز لجهاز. أول 1000 جيجا في الشهر مجاناً.</p>
+      <div id="turnst" style="margin-bottom:10px"><span class="muted small">جارٍ الفحص…</span></div>
+      <ol class="small ink2" style="margin:0 0 12px;padding-inline-start:20px;line-height:1.9"><li>ادخل <b class="ltr">dash.cloudflare.com</b> واعمل حساب مجاني</li><li>من القايمة: <b>Realtime</b> ← <b>TURN Server</b> ← <b>Create</b></li><li>اكتب أي اسم (مثلاً Ninety) واضغط Create</li><li>انسخ الـ <b>Turn Token ID</b> والـ <b>API Token</b> والصقهم هنا — الـ Token بيظهر مرة واحدة بس</li></ol>
+      <div class="form">${field('Turn Token ID (Key ID)', inp('keyId', '', 'class="ltr" autocomplete="off" placeholder="مثال: 0b5d…"'), 'full')}${field('API Token', inp('token', '', 'type="password" class="ltr" autocomplete="new-password"'), 'full')}</div>
+      <div class="tiny muted" style="margin-top:6px">بيتحفظ على السيرفر بس، ومش بيرجع يظهر لحد — ولا في المتصفح.</div>
+      <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap"><button type="submit" class="btn p">حفظ وتجربة</button><button type="button" class="btn ghost" data-action="turnClear">شيل المفتاح</button></div></form>`;
+  } };
+  document.addEventListener('submit', async ev => {
+    if (!ev.target || ev.target.id !== 'turnform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target);
+    if (!d.keyId || !d.token) { toast('الصق الـ Key ID والـ API Token', 'err'); return; } toast('جارٍ التجربة مع Cloudflare…');
+    try { const r = await S.sb.functions.invoke('rtc', { body: { action: 'setup', keyId: String(d.keyId).trim(), token: String(d.token).trim() } }); const res = (r && r.data) || {}; let msg = res.error || (r.error && r.error.message) || ''; if (!res.ok) { try { const ctx = r.error && r.error.context; if (ctx && ctx.json) { const j = await ctx.json(); msg = j.error || msg; } } catch (x) { /* ignore */ } toast('ماتحفظش: ' + (msg || '?'), 'err'); return; }
+      C.ice = null; toast('✓ سيرفر TURN اتضبط وشغال'); ev.target.reset(); render(false);
+    } catch (e) { toast('تعذّر الحفظ', 'err'); }
+  });
+  ACTIONS.turnClear = async () => { if (!isAdmin() || !(await confirmDlg('شيل مفتاح TURN؟ المكالمات هترجع تشتغل من غير السيرفر.', 'شيل'))) return; await S.sb.functions.invoke('rtc', { body: { action: 'setup', clear: true } }); C.ice = null; toast('اتشال'); render(false); };
   window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount, addPerson };
 })();
 /* =====================================================================
