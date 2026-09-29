@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260928-2003-9ee45a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0511-a7ea09";</script>
 
 <script>
 'use strict';
@@ -22237,6 +22237,75 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (mine) html = html.replace('<button class="on" data-action="ofilter" data-arg="status:open">', '<button class="" data-action="ofilter" data-arg="status:open">');
     return html.replace(/(<div class="seg">[\s\S]*?data-arg="status:open">المفتوحة<\/button>)/, `$1${extra}`);
   })(vOrders);
+})();
+/* =====================================================================
+   v5.35 — أوامر التشغيل من غير فلوس (طلب المالك + PIN)
+   «لما أفتح أمر التشغيل مع حد جنبي مايشوفش قيمة المشروع ولا المقايسة»
+   · صفحة الأمر وقايمة الأوامر: القيمة/المحصّل/المتبقي/عرض السعر، كروت «الدفعات» و«حسابات الأمر» و«المقايسة»،
+     زراير الفاتورة/الدفعة/التحويل، أعمدة التكلفة والمبالغ في الجداول، وأي «… ج.م» → مخفية عند الكل (والمالك كمان)
+   · ملفات المقايسة/عروض الأسعار/الفواتير المرفوعة على الأمر مابتظهرش في صفحة الأمر
+   · 👁 «إظهار المبالغ» للمصرّح لهم بس (المالك + أدوار الفلوس) — مؤقت: دقيقة واحدة أو لحد ما تسيب الصفحة
+   · بيشتغل على الـ DOM بعد الرسم (قبل ما الشاشة تترسم) علشان يلحق كل الإضافات اللي بتتحط بعدين
+   ===================================================================== */
+(() => {
+  const MP = { until: 0, timer: 0, obs: null, busy: false };
+  const onOrders = () => !!(S.session && S.route && S.route.view === 'orders');
+  const canReveal = () => !!S.session && (isAdmin() || (typeof seesFinance === 'function' && seesFinance()));
+  const revealed = () => Date.now() < MP.until;
+  const active = () => onOrders() && !revealed();
+  const MONEY_RE = /[\d٠-٩][\d٠-٩,.٬]*\s*(?:ج\.م|جنيه|EGP|L\.E)/g;
+  const HEAD_KILL = ['الدفعات', 'حسابات الأمر', 'المقايسة'];
+  const LABEL_KILL = ['قيمة الأمر', 'المحصّل', 'المحصل', 'المتبقي', 'عرض السعر'];
+  const BTN_KILL = /فاتورة|تسجيل دفعة|تسجيل تحويل|عرض السعر|إعداد المقايسة/;
+  const COL_KILL = /^(التكلفة|تكلفة|المبلغ|السعر|سعر|الإجمالي|القيمة|قيمة)/;
+  const PRICED_NAME = /مقايس|عرض[ _-]?سعر|فاتور|BOQ|quotation|invoice/i;
+  const pricedFile = f => !!f && (f.priced === true || !!f.quotationId || ['quotation', 'invoice', 'lead'].includes(f.ownerKind) || PRICED_NAME.test(String(f.name || f.title || '')));
+
+  /* files: priced ones never reach the order page while hidden */
+  if (typeof filesOf === 'function') filesOf = (base => function () { const r = base.apply(this, arguments); return active() && Array.isArray(r) ? r.filter(f => !pricedFile(f)) : r; })(filesOf);
+
+  function maskText(root) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const hits = [];
+    while (w.nextNode()) { const n = w.currentNode; if (MONEY_RE.test(n.nodeValue)) hits.push(n); MONEY_RE.lastIndex = 0; }
+    hits.forEach(n => { n.nodeValue = n.nodeValue.replace(MONEY_RE, '••••'); });
+  }
+  function dropCols(root) {
+    root.querySelectorAll('table').forEach(t => {
+      const head = t.querySelector('thead tr'); if (!head) return; const ths = Array.from(head.children);
+      const kill = ths.map((th, i) => COL_KILL.test(th.textContent.trim()) ? i : -1).filter(i => i >= 0); if (!kill.length) return;
+      t.querySelectorAll('tr').forEach(tr => { const cells = Array.from(tr.children); if (cells.length !== ths.length) return; kill.slice().reverse().forEach(i => cells[i] && cells[i].remove()); });
+      t.querySelectorAll('tfoot').forEach(f => f.remove());
+    });
+  }
+  function apply() {
+    const v = document.getElementById('view'); if (!v || !active()) return;
+    MP.busy = true;
+    try {
+      v.querySelectorAll('.card').forEach(c => { const h = c.querySelector('.cardhead h3, .cardhead h2, :scope > h3'); if (h && HEAD_KILL.some(k => h.textContent.trim().startsWith(k))) c.remove(); });
+      v.querySelectorAll('.tiny.muted').forEach(l => { const p = l.parentElement; if (p && LABEL_KILL.includes(l.textContent.trim()) && p.children.length <= 3 && p.id !== 'view') p.remove(); });
+      v.querySelectorAll('a,button').forEach(b => { if (!b.hasAttribute('data-mpshow') && BTN_KILL.test(b.textContent)) b.remove(); });
+      dropCols(v); maskText(v);
+      if (S.route.id && canReveal() && !v.querySelector('[data-mpshow]')) { const row = v.querySelector('.card .row.no-print'); if (row) row.insertAdjacentHTML('beforeend', `<button type="button" class="btn sm ghost" data-mpshow="1" title="المبالغ مخفية — بتظهر دقيقة واحدة">👁 إظهار المبالغ</button>`); }
+      v.dataset.mp = '1';
+    } finally { MP.busy = false; }
+  }
+  function hideBtn() {
+    const v = document.getElementById('view'); if (!v || !onOrders() || !revealed() || !S.route.id || v.querySelector('[data-mphide]')) return;
+    const row = v.querySelector('.card .row.no-print'); if (row) row.insertAdjacentHTML('beforeend', `<button type="button" class="btn sm ghost" data-mphide="1">🙈 إخفاء المبالغ</button>`);
+  }
+  RENDER_HOOKS.push(() => { apply(); hideBtn(); });
+  /* late additions (hooks with setTimeout, async cards) */
+  const watch = () => { const v = document.getElementById('view'); if (!v || (MP.obs && MP.el === v)) return; if (MP.obs) MP.obs.disconnect(); MP.el = v; MP.obs = new MutationObserver(() => { if (!MP.busy && active()) { MP.obs.disconnect(); apply(); MP.obs.observe(v, { childList: true, subtree: true }); } }); MP.obs.observe(v, { childList: true, subtree: true }); };
+  document.addEventListener('nf:ready', watch); setTimeout(watch, 1500); RENDER_HOOKS.push(watch);
+  const hideNow = () => { MP.until = 0; clearTimeout(MP.timer); };
+  window.addEventListener('hashchange', () => { if (revealed()) { hideNow(); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && revealed()) { hideNow(); render(false); } });
+  document.addEventListener('click', e => {
+    const s = e.target.closest && e.target.closest('[data-mpshow]'); const h = e.target.closest && e.target.closest('[data-mphide]');
+    if (s) { if (!canReveal()) return; MP.until = Date.now() + 60000; clearTimeout(MP.timer); MP.timer = setTimeout(() => { MP.until = 0; if (onOrders()) render(false); }, 60000); render(false); return; }
+    if (h) { hideNow(); render(false); }
+  });
+  window.nfMoneyPriv = { MP, apply, active, pricedFile };
 })();
 </script>
 
