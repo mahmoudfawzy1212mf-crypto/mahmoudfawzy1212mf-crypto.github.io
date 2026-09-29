@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0942-12842f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0954-d07290";</script>
 
 <script>
 'use strict';
@@ -22594,10 +22594,12 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     return pc;
   }
   const gathered = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 4000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
-  function cleanup(c) { if (!c) return; stopTone(); clearInterval(c.tick); clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
+  function cleanup(c) { if (!c) return; stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
   async function finish(status, note) {
     const c = C.cur; if (!c) return; C.cur = null; cleanup(c);
     if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
+    if (c.id && c.dir === 'in' && c.state === 'incoming' && status === 'declined') S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { });
+    if (c.id && c.dir === 'out' && ['calling', 'connecting'].includes(c.state)) { const miss = status === 'missed' || !status; S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + c.callee], title: miss ? `📞 مكالمة فايتة من ${c.myName || ''}` : 'Ninety', body: miss ? 'اضغط علشان ترجع تتصل' : '', url: '/#/calls', tag: 'call-' + c.id, call: (miss ? 'end:' : 'stop:') + c.id, sms: false } }).catch(() => { }); }
     if (note) { const o = c.dir === 'out' ? c.callee : c.caller; screen(`${bgOf(o)}<div class="top">${avHtml(dirOf(o), 120, 'av')}<div class="nm">${esc(nameOf(o))}</div><div class="st">${esc(note)}</div></div><div class="bar">${cbtn('close', 'x', 'إغلاق', '')}</div>`); setTimeout(() => { if (!C.cur) closeScreen(); }, 3500); }
     else closeScreen();
     C.logAt = 0; if (S.route && S.route.view === 'calls') render(false);
@@ -22615,7 +22617,8 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       const { data, error } = await S.sb.from('nf_calls').insert({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }).select('id').single();
       if (error) throw error; c.id = data.id; paint();
       const myName = (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
-      S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.video ? 'مكالمة فيديو — اضغط للرد' : 'مكالمة صوت — اضغط للرد', url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, sms: false } }).catch(() => { });
+      const ring = () => S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.video ? 'مكالمة فيديو — اضغط «رد» أو افتح' : 'مكالمة صوت — اضغط «رد» أو افتح', url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, sms: false } }).catch(() => { });
+      ring(); c.myName = myName; c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(); else clearInterval(c.reRing); }, 7000);
       c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
     } catch (e) { console.warn(e); const msg = /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون' + (video ? ' والكاميرا' : '') + ' للسيستم' : 'تعذّر بدء المكالمة'; C.cur = c; finish(c.id ? 'failed' : null, msg); }
   }
@@ -22635,6 +22638,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       c.pc = await makePc(c); await c.pc.setRemoteDescription(c.offer); const ans = await c.pc.createAnswer(); await c.pc.setLocalDescription(ans); await gathered(c.pc);
       const { error } = await S.sb.from('nf_calls').update({ answer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp }, status: 'active' }).eq('id', c.id).eq('status', 'ringing');
       if (error) throw error;
+      S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { });
     } catch (e) { console.warn(e); finish('failed', /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون للسيستم' : 'تعذّر الرد'); }
   }
   async function onRow(row) {
@@ -22661,10 +22665,10 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   }
   /* opened from the push notification */
   async function fromHash() {
-    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})/); if (!m || !hosted()) return;
+    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted()) return;
     subscribe();
     const { data } = await S.sb.from('nf_calls').select('*').eq('id', m[1]).maybeSingle();
-    if (data && data.status === 'ringing' && data.callee === me()) incoming(data);
+    if (data && data.status === 'ringing' && data.callee === me()) { await incoming(data); if (m[2] && C.cur && C.cur.id === data.id) { try { history.replaceState(null, '', '#/calls'); } catch (e) { /* ignore */ } if (m[2] === 'accept') accept(true); else finish('declined'); } }
     else if (data && data.callee === me() && data.status === 'missed') toast(`مكالمة فايتة من ${nameOf(data.caller)}`);
   }
   document.addEventListener('click', e => {
@@ -22842,7 +22846,7 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
 }
 .nfv-html.desk{overflow:hidden}.nfv-html.desk iframe{position:absolute;top:0;left:0;width:1280px;transform-origin:0 0}
 </style>`);
-  const MFIX = `<meta name="viewport" content="width=device-width,initial-scale=1"><style id="nf-mfix">@media (max-width:1100px){html,body{max-width:100%!important;overflow-x:hidden!important}body *:not(canvas){max-width:100%}body *:not(pre):not(code):not(textarea){white-space:normal!important;overflow-wrap:anywhere}img,video{max-width:100%!important;height:auto}table{display:block;overflow-x:auto}pre{white-space:pre-wrap}}</style>`;
+  const MFIX = `<meta name="viewport" content="width=device-width,initial-scale=1"><style id="nf-mfix">@media (max-width:1100px){html,body{max-width:100%!important;overflow-x:hidden!important}body *:not(canvas){max-width:100%}body *:not(pre):not(code):not(textarea){white-space:normal!important;overflow-wrap:anywhere}img,video{max-width:100%!important;height:auto}table{display:block;overflow-x:auto}pre{white-space:pre-wrap}[class*=nav],[class*=controls],[class*=tabs],[class*=toolbar],[role=tablist]{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;max-height:none!important;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:6px!important}[class*=nav]>*,[class*=controls]>*,[class*=tabs]>*,[class*=toolbar]>*,[role=tablist]>*{flex:0 0 auto!important;width:auto!important;max-width:none!important;margin-inline-start:0!important}[class*=nav] button,[class*=controls] button,[class*=tabs] button,[class*=toolbar] button,[role=tablist] button,[class*=nav] a{white-space:nowrap!important}button,.btn,select{min-height:36px!important;padding:6px 12px!important}select{max-width:100%!important;min-width:0!important;text-overflow:ellipsis}main{padding-inline:10px!important}header img,header svg,[class*=logo]{max-width:110px!important;margin:8px!important}h1{font-size:20px!important}h2{font-size:18px!important}}</style>`;
   const small = () => Math.min(innerWidth, screen.width || innerWidth) <= 1100;
   const deskOn = () => { try { return localStorage.getItem('nf.htmlDesk') === '1'; } catch (e) { return false; } };
   if (typeof htmlWithCapture === 'function') htmlWithCapture = (base => function (text) {
