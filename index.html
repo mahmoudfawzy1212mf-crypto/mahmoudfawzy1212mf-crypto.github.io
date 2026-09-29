@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1408-c965a6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1453-c6e158";</script>
 
 <script>
 'use strict';
@@ -15432,7 +15432,7 @@ const OWNER_ACCTS_DEF = [{ id: 'personal', name: 'حساب محمود الشخص
 const ownerAccts = () => { const a = S.settings.money && S.settings.money.accounts; return Array.isArray(a) && a.length ? a : OWNER_ACCTS_DEF; };
 const wallets = () => { const w = S.settings.money && S.settings.money.wallets; return Array.isArray(w) ? w.filter(x => x && x.id && !x.off) : []; };
 const walletOf = id => wallets().find(w => w.id === id) || null;
-const homes = () => { const h = S.settings.money && S.settings.money.homes; return Array.isArray(h) ? h.filter(x => x && x.id && !x.off) : []; };
+const homes = () => { const h = S.settings.money && S.settings.money.homes; const c = (typeof byId === 'function' && S.data && S.data.money && byId('money', 'opexcfg')) || {}; const all = (Array.isArray(h) ? h : []).concat(Array.isArray(c.homes) ? c.homes : []); return all.filter(x => x && x.id && !x.off); };   // v5.54: السكن ممكن يتسجل من مسؤول الحسابات (بيتحفظ في money/opexcfg)
 const homeName = id => (homes().find(h => h.id === id) || {}).name || '';
 const acctLabel = id => { const o = ownerAccts().find(a => a.id === id); if (o) return o.name; const w = walletOf(id); if (w) return `عهدة ${w.name}`; return typeof acctName === 'function' ? acctName(id) : id; };
 const myWalletIds = () => { const me = S.session && S.session.workerId; return me ? wallets().filter(w => w.holder === me).map(w => w.id) : []; };
@@ -15445,7 +15445,7 @@ if (!COLS.includes('money')) COLS.push('money'); S.data.money = S.data.money || 
 Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('money').onSnapshot(snap => { S.data.money = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.money = true; rerender(); }, e => console.warn('snapshot money', e))); })(Store.subscribeAll);
 
 /* ---------- expense categories for operations / wallets ---------- */
-const MONEY_CATS = [['rent_factory', 'إيجار المصنع'], ['electricity', 'كهرباء المصنع'], ['water', 'مياه المصنع'], ['gas', 'أنابيب غاز'], ['tea', 'شاي وسكر'], ['home_rent', 'إيجار سكن'], ['home_elec', 'كهرباء سكن'], ['home_water', 'مياه سكن'], ['fuel_cash', 'بنزين كاش (Octane واقف)'], ['oil', 'تغيير زيت'], ['car_maint', 'صيانة عربيات'], ['office_salaries', 'مرتبات المكتب (الاستوديو)'], ['office_rent', 'إيجار المكتب (الاستوديو)']];
+const MONEY_CATS = [['rent_factory', 'إيجار المصنع'], ['electricity', 'كهرباء المصنع'], ['water', 'مياه المصنع'], ['gas', 'أنابيب غاز'], ['tea', 'شاي وسكر'], ['home_rent', 'إيجار سكن'], ['home_elec', 'كهرباء سكن'], ['home_water', 'مياه سكن'], ['fuel_cash', 'بنزين كاش (Octane واقف)'], ['oil', 'تغيير زيت'], ['car_maint', 'صيانة عربيات'], ['office_salaries', 'مرتبات المكتب (الاستوديو)'], ['office_rent', 'إيجار المكتب (الاستوديو)'], ['tips', 'إكراميات']];
 const OPEX_CATS = ['rent_factory', 'electricity', 'water', 'gas', 'tea', 'home_rent', 'home_elec', 'home_water', 'other'];
 const HOME_CATS = ['home_rent', 'home_elec', 'home_water'];
 const CAR_CATS = ['fuel_cash', 'oil', 'car_maint'];
@@ -15637,7 +15637,7 @@ ACTIONS.opexPay = async id => {
   const t = byId('tasks', `opex_${r.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' });
   toast('تم تسجيل التحويل');
 };
-ACTIONS.homeNew = () => { if (!(isAdmin() || role() === 'hr')) return; openModal({ title: 'سكن جديد', body: `<div class="form">${field('الاسم', inp('name', '', 'required placeholder="سكن 1 — العبور"'))}${field('العنوان', inp('address', ''))}${field(`الإيجار الشهري (${CUR()})`, inp('rent', '', 'type="number" step="any" min="0"'))}${field('ملاحظة (مين ساكن…)', inp('note', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!(d.name || '').trim()) return false; const m = Object.assign({}, S.settings.money || {}); m.homes = (m.homes || []).concat([{ id: 'h' + uid().slice(0, 6), name: d.name.trim(), address: d.address || '', rent: num(d.rent) || 0, note: d.note || '' }]); await Store.saveSettings(Object.assign({}, S.settings, { money: m })); toast('تم إضافة السكن'); } }); };
+ACTIONS.homeNew = () => { if (!(isAdmin() || ['hr', 'acc'].includes(role()))) return; openModal({ title: 'سكن جديد', body: `<div class="form">${field('الاسم', inp('name', '', 'required placeholder="سكن 1 — العبور"'))}${field('العنوان', inp('address', ''))}${field(`الإيجار الشهري (${CUR()})`, inp('rent', '', 'type="number" step="any" min="0"'))}${field('ملاحظة (مين ساكن…)', inp('note', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!(d.name || '').trim()) return false; const home = { id: 'h' + uid().slice(0, 6), name: d.name.trim(), address: d.address || '', rent: num(d.rent) || 0, note: d.note || '' }; if (isAdmin() || role() === 'hr') { const m = Object.assign({}, S.settings.money || {}); m.homes = (m.homes || []).concat([home]); await Store.saveSettings(Object.assign({}, S.settings, { money: m })); } else { const c = Object.assign({ id: 'opexcfg', type: 'opexcfg', items: [], cats: [] }, byId('money', 'opexcfg') || {}); c.homes = (c.homes || []).concat([home]); await Store.save('money', c, { silent: true }); } toast('تم إضافة السكن'); } }); };
 ACTIONS.walletNew = () => { if (!isAdmin()) return; const ws = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.role && w.role !== 'none' && w.role !== 'employee'), w => w.name); openModal({ title: 'عهدة جديدة', body: `<div class="form">${field('اسم العهدة', inp('name', '', 'required'))}${field('صاحبها', `<select name="holder">${ws.map(w => `<option value="${w.id}">${esc(w.name)} — ${esc(ROLES[w.role] || '')}</option>`).join('')}</select>`)}${field('الغرض', inp('note', ''), 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!(d.name || '').trim() || !d.holder) return false; const m = Object.assign({}, S.settings.money || {}); m.wallets = (m.wallets || []).concat([{ id: 'w_' + uid().slice(0, 8), name: d.name.trim(), holder: d.holder, note: d.note || '' }]); await Store.saveSettings(Object.assign({}, S.settings, { money: m })); toast('تم إضافة العهدة'); } }); };
 
 /* ---------- 9) monthly tea & sugar quota ---------- */
@@ -15695,7 +15695,7 @@ function vMoney(r) {
   }
   if (!seesMoneyOps()) return h + '</div>';
   h += opexSummary(ym) + quotaCard(ym);
-  const sups = sortBy(list('suppliers').map(s => ({ s, x: supplierWallet(s) })).filter(o => o.x.paid || o.x.pending), o => -(o.x.paid + o.x.pending));
+  const sups = sortBy(list('suppliers').map(s => ({ s, x: supplierWallet(s) })).filter(o => o.x.paid || o.x.pending || o.x.opening), o => -(o.x.paid + o.x.pending));
   h += `<div class="card"><div class="cardhead"><h3>محافظ الموردين</h3><span class="muted small">${sups.length}</span></div>${sups.length ? `<div class="tablewrap"><table><thead><tr><th>المورد</th><th class="n">اتحوّل له</th><th class="n">قيمة المستلم</th><th class="n">الفرق</th><th class="n">مجمّد</th></tr></thead><tbody>${sups.map(({ s, x }) => `<tr class="click" data-action="go" data-arg="suppliers/${s.id}"><td>${esc(s.name)}</td><td class="n">${fmtMoney(x.paid)}</td><td class="n">${fmtMoney(x.received)}</td><td class="n"><b>${fmtMoney(x.balance)}</b></td><td class="n">${x.hold ? fmtMoney(x.hold) : ''}</td></tr>`).join('')}</tbody></table></div><div class="tiny muted" style="margin-top:6px">الفرق موجب = المورد معاه فلوس لينا (اتحوّل له أكتر من اللي استلمناه).</div>` : '<div class="muted small">لسه مفيش تحويلات لموردين</div>'}</div>`;
   return h + '</div>';
 }
@@ -22090,7 +22090,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   if (typeof OPEX_CATS === 'undefined' || typeof MONEY_CATS === 'undefined') return;
   const oxSee = () => !!S.session && (isAdmin() || ['hr', 'acc'].includes(role()));
   const oxRec = () => writable() && oxSee();
-  const oxEdit = () => writable() && (isAdmin() || role() === 'hr');
+  const oxEdit = () => writable() && (isAdmin() || ['hr', 'acc'].includes(role()));   // v5.54 (بالرقم السري): مسؤول الحسابات كمان بيعرّف البنود الثابتة
   /* config lives in the «money» collection (readable by owner/hr/acc only — rent amounts never reach other roles) */
   const oxCfg = () => { const d = typeof byId === 'function' ? byId('money', 'opexcfg') : null; return Object.assign({ items: [], cats: [] }, d || S.settings.opex || {}); };
   const oxItems = () => (oxCfg().items || []).filter(i => i && i.id && !i.off);
@@ -22106,14 +22106,27 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const startYm = it => String(it.startMonth || it.createdAt || '').slice(0, 7) || '0000-00';
   const itemLabel = it => `${it.name || catLabel(it.cat)}${it.homeId && homeName(it.homeId) ? ' · ' + homeName(it.homeId) : ''}`;
   const liveReq = r => r && r.type === 'opex' && !['rejected', 'cancelled'].includes(r.status);
-  function stateOf(it, ym) {
-    const rs = sortBy(list('requests').filter(r => liveReq(r) && r.itemId === it.id && r.month === ym), r => r.createdAt || '', true); const r = rs[0] || null;
-    const exp = list('expenses').find(e => e.itemId === it.id && e.month === ym) || (r ? byId('expenses', 'opx_' + r.id) : null);
+  /* v5.54: weekly items (freq 'weekly' + weekday 0=الأحد … 6=السبت) — one period per week, keyed by that day's date */
+  const isWk = it => it && it.freq === 'weekly';
+  const WDAYS = ['الأحد', 'الاتنين', 'التلات', 'الأربع', 'الخميس', 'الجمعة', 'السبت'];
+  const wdOf = d => new Date(d + 'T12:00:00').getDay();
+  function periodsOf(it, ym) {
+    if (!isWk(it)) return [ym];
+    const wd = it.weekday == null ? 6 : +it.weekday; const out = []; const st = it.startDate || (startYm(it) + '-01');
+    for (let d = ym + '-01'; d.slice(0, 7) === ym; d = addDays(d, 1)) if (wdOf(d) === wd && d >= st) out.push(d);
+    return out;
+  }
+  const perOf = (it, ym, per) => (isWk(it) ? (per || periodsOf(it, ym).filter(d => d <= todayISO()).pop() || periodsOf(it, ym)[0]) : ym);
+  const perLabel = (it, ym, per) => (isWk(it) ? `أسبوع ${fmtDate(per)}` : fmtMonth(ym));
+  function stateOf(it, ym, per) {
+    per = perOf(it, ym, per); const wk = isWk(it);
+    const rs = sortBy(list('requests').filter(r => liveReq(r) && r.itemId === it.id && (wk ? r.period === per : (r.month === ym && !r.period))), r => r.createdAt || '', true); const r = rs[0] || null;
+    const exp = list('expenses').find(e => e.itemId === it.id && (wk ? e.period === per : (e.month === ym && !e.period))) || (r ? byId('expenses', 'opx_' + r.id) : null);
     if (exp) return { k: 'paid', label: 'اتدفع', cls: 'good', amount: +exp.amount || 0, r, exp };
     if (r && r.status === 'pending') return { k: 'pending', label: 'عند مدير الحسابات', cls: 'warn', amount: +r.amount || 0, r };
     if (r && r.status === 'approved') return { k: 'approved', label: 'معتمد — مستني تحويل المالك', cls: 'acc', amount: +r.amount || 0, r };
-    const due = dueOf(it, ym); if (todayISO() > due) return { k: 'late', label: 'متأخر', cls: 'crit', due };
-    return { k: 'todo', label: 'لسه', cls: '', due };
+    const due = wk ? per : dueOf(it, ym); if (todayISO() > due) return { k: 'late', label: 'متأخر', cls: 'crit', due, per };
+    return { k: 'todo', label: 'لسه', cls: '', due, per };
   }
   /* meter: previous reading + consumption + spike (> 30% over the average of the last 3) */
   function meterHist(it, beforeYm) {
@@ -22124,14 +22137,14 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const use = r2(reading - prev); const uses = h.map(x => x.use).filter(x => x != null && x > 0).slice(0, 3); const avg = uses.length ? r2(uses.reduce((a, b) => a + b, 0) / uses.length) : null;
     return { prev, use, avg, spike: avg != null && use > avg * 1.3 };
   }
-  const lateItems = ym => oxItems().filter(it => startYm(it) <= ym && stateOf(it, ym).k === 'late');
+  const lateItems = ym => oxItems().filter(it => startYm(it) <= ym && periodsOf(it, ym).some(p => stateOf(it, ym, p).k === 'late'));
 
   /* ---------- page ---------- */
   function vOpex() {
     if (!oxSee()) return '<div class="empty">الصفحة دي للمالك والحسابات بس.</div>';
     const f = S.ui.filter.opex ||= { ym: monthOf(todayISO()) }; const ym = f.ym; const prev = monthOf(addDays(ym + '-01', -1));
     const items = sortBy(oxItems().filter(it => startYm(it) <= ym), it => String(+it.dueDay || 1).padStart(2, '0') + (it.name || ''));
-    const st = items.map(it => ({ it, s: stateOf(it, ym) }));
+    const st = items.flatMap(it => periodsOf(it, ym).map(per => ({ it, per, s: stateOf(it, ym, per) })));
     const opexCats = OPEX_CATS.concat(['fuel_cash', 'oil', 'car_maint']);
     const monthExp = m => list('expenses').filter(e => e.month === m && (opexCats.includes(e.cat) || e.src === 'opex' || e.itemId));
     const paidT = r2(sum(monthExp(ym), e => +e.amount || 0)), prevT = r2(sum(monthExp(prev), e => +e.amount || 0));
@@ -22141,9 +22154,9 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const kpi = (l, v, s, cls) => `<div class="kpi ${cls || ''}" style="cursor:default"><span class="stripe"></span><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s || ''}</div></div>`;
     let h = `<div class="toolbar">${monthNavBar('opex')}<div class="grow"></div>${oxRec() ? `<button class="btn sm" data-action="opexNew">${icon('plus')}مصروف تاني</button>` : ''}${oxEdit() ? `<button class="btn sm p" data-action="oxItemEdit">${icon('plus')}بند ثابت</button>` : ''}</div><div class="stack">`;
     h += `<div class="kpis">${kpi(`اتدفع ${fmtMonth(ym)}`, fmtMoney(paidT), diff == null || !paidT ? '' : `${diff > 0 ? '+' : ''}${diff}% عن ${fmtMonth(prev)}`, 'acc')}${kpi('في الطريق (موافقة / تحويل)', fmtMoney(waitT), `${st.filter(x => x.s.k === 'pending' || x.s.k === 'approved').length} بند`, waitT ? 'warn' : '')}${kpi('لسه ماتسجلش', fmtMoney(expected), `${st.filter(x => x.s.k === 'todo' || x.s.k === 'late').length} بند متوقع`)}${kpi('متأخر', String(late), late ? 'عدّى ميعاد استحقاقه' : 'مفيش', late ? 'crit' : 'good')}</div>`;
-    const row = ({ it, s }) => { const r = s.r; const m = r && r.reading != null ? `<div class="tiny muted">عداد ${fmtNum(r.reading)}${r.use != null ? ` · استهلاك ${fmtNum(r.use)} ${esc(it.unit || METER_UNITS[it.cat] || '')}` : ''}${r.spike ? ' <span class="badge crit" style="padding:0 6px">زيادة مفاجئة</span>' : ''}</div>` : '';
-      const act = s.k === 'todo' || s.k === 'late' ? (oxRec() ? `<button class="btn xs ${s.k === 'late' ? 'p' : ''}" data-action="oxRecord" data-arg="${esc(it.id)}:${ym}">سجّل</button>` : '') : s.k === 'approved' && isAdmin() ? `<button class="btn xs p" data-action="opexPay" data-arg="${esc(r.id)}">حوّل</button>` : s.k === 'pending' ? `<a class="btn xs ghost" href="#/requests">الطلب</a>` : '';
-      return `<tr class="ox-${s.k}"><td class="oxn"><b>${esc(itemLabel(it))}</b><div class="tiny muted">${esc(catLabel(it.cat))}${it.payee ? ' · ' + esc(it.payee) : ''}</div>${m}</td><td class="small" data-l="النوع">${it.kind === 'fixed' ? 'ثابت' : 'فاتورة'}</td><td class="small" data-l="الاستحقاق">${fmtDate(dueOf(it, ym))}</td><td class="n" data-l="المتوقع">${it.amount ? fmtMoney(it.amount) : '—'}</td><td class="n" data-l="الشهر ده"><b>${s.amount != null ? fmtMoney(s.amount) : '—'}</b></td><td class="oxs"><span class="badge ${s.cls}">${esc(s.label)}</span></td><td class="oxa" style="white-space:nowrap">${act}${oxEdit() ? ` <button class="btn xs ghost" data-action="oxItemEdit" data-arg="${esc(it.id)}" title="تعديل البند">${icon('edit')}</button>` : ''}</td></tr>`; };
+    const row = ({ it, s, per }) => { const r = s.r; const m = r && r.reading != null ? `<div class="tiny muted">عداد ${fmtNum(r.reading)}${r.use != null ? ` · استهلاك ${fmtNum(r.use)} ${esc(it.unit || METER_UNITS[it.cat] || '')}` : ''}${r.spike ? ' <span class="badge crit" style="padding:0 6px">زيادة مفاجئة</span>' : ''}</div>` : '';
+      const act = s.k === 'todo' || s.k === 'late' ? (oxRec() ? `<button class="btn xs ${s.k === 'late' ? 'p' : ''}" data-action="oxRecord" data-arg="${esc(it.id)}:${ym}:${isWk(it) ? per : ''}">سجّل</button>` : '') : s.k === 'approved' && isAdmin() ? `<button class="btn xs p" data-action="opexPay" data-arg="${esc(r.id)}">حوّل</button>` : s.k === 'pending' ? `<a class="btn xs ghost" href="#/requests">الطلب</a>` : '';
+      return `<tr class="ox-${s.k}"><td class="oxn"><b>${esc(itemLabel(it))}</b><div class="tiny muted">${esc(catLabel(it.cat))}${it.payee ? ' · ' + esc(it.payee) : ''}</div>${m}</td><td class="small" data-l="النوع">${it.kind === 'fixed' ? 'ثابت' : 'فاتورة'}${isWk(it) ? ` · أسبوعي (${WDAYS[it.weekday == null ? 6 : +it.weekday]})` : ''}${it.kind === 'fixed' && it.auto !== false ? ' · <span class="badge acc" style="padding:0 6px">تلقائي</span>' : ''}</td><td class="small" data-l="الاستحقاق">${fmtDate(isWk(it) ? per : dueOf(it, ym))}</td><td class="n" data-l="المتوقع">${it.amount ? fmtMoney(it.amount) : '—'}</td><td class="n" data-l="الشهر ده"><b>${s.amount != null ? fmtMoney(s.amount) : '—'}</b></td><td class="oxs"><span class="badge ${s.cls}">${esc(s.label)}</span></td><td class="oxa" style="white-space:nowrap">${act}${oxEdit() ? ` <button class="btn xs ghost" data-action="oxItemEdit" data-arg="${esc(it.id)}" title="تعديل البند">${icon('edit')}</button>` : ''}</td></tr>`; };
     h += `<div class="card"><div class="cardhead"><h3>البنود الثابتة — ${fmtMonth(ym)}</h3><span class="muted small">${items.length}</span></div>${items.length ? `<div class="tablewrap"><table id="oxtbl"><thead><tr><th>البند</th><th>النوع</th><th>الاستحقاق</th><th class="n">المتوقع</th><th class="n">الشهر ده</th><th>الحالة</th><th></th></tr></thead><tbody>${st.map(row).join('')}</tbody></table></div>` : `<div class="empty">مفيش بنود ثابتة لسه.${oxEdit() ? ' اضغط «بند ثابت» وعرّف الإيجار والكهربا والمية… مرة واحدة، والسيستم هيفكّركم كل شهر.' : ''}</div>`}</div>`;
     /* one-off opex this month (not tied to a fixed item) */
     const extraReq = sortBy(list('requests').filter(r => liveReq(r) && !r.itemId && r.month === ym), r => r.createdAt || '', true);
@@ -22181,9 +22194,9 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
 
   /* ---------- record one fixed item for a month (same approval path as «مصروف تشغيل») ---------- */
   ACTIONS.oxRecord = arg => {
-    if (!oxRec()) return; const [iid, ym0] = String(arg || '').split(':'); const it = oxItems().find(x => x.id === iid); if (!it) return; const ym = ym0 || monthOf(todayISO());
+    if (!oxRec()) return; const [iid, ym0, per0] = String(arg || '').split(':'); const it = oxItems().find(x => x.id === iid); if (!it) return; const ym = ym0 || monthOf(todayISO()); const per = isWk(it) ? perOf(it, ym, per0) : null;
     const meter = !!it.meter; const unit = it.unit || METER_UNITS[it.cat] || ''; const h0 = meter ? meterHist(it, ym)[0] : null; const needPhoto = it.kind !== 'fixed';
-    openModal({ title: `${itemLabel(it)} — ${fmtMonth(ym)}`, submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">
+    openModal({ title: `${itemLabel(it)} — ${perLabel(it, ym, per)}`, submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">
       ${field(`المبلغ (${CUR()})`, inp('amount', it.kind === 'fixed' && it.amount ? it.amount : '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('المستفيد', inp('payee', it.payee || ''))}
       ${meter ? field(`قراءة العداد (${esc(unit)})`, inp('reading', '', 'type="number" step="any" min="0" inputmode="decimal"') + (h0 ? `<div class="tiny muted">القراءة اللي فاتت: ${fmtNum(h0.reading)} (${fmtMonth(h0.month)})</div>` : '')) : ''}
       <div class="field full"><label>صورة الفاتورة / الإيصال${needPhoto ? '' : ' (اختياري)'}</label><input type="file" id="oxr-file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}
@@ -22195,17 +22208,17 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
         if (meter && reading != null && mc.prev != null && reading < mc.prev) { toast(`القراءة أقل من اللي فاتت (${fmtNum(mc.prev)})`, 'err'); return false; }
         const me = S.session || {}; const now = nowISO(); const id = uid(); let thumb = null, fileIds = [];
         if (file) { try { const doc = await proofAttach(file, { kind: 'invoice', ownerKind: 'request', ownerId: id, note: itemLabel(it) }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } } }
-        const reason = `${itemLabel(it)} — ${fmtMonth(ym)}`;
-        const r = { id, type: 'opex', cat: it.cat, itemId: it.id, month: ym, homeId: it.homeId || null, amount: num(d.amount), payee: d.payee || '', note: d.note || '', reason, reading, use: mc.use != null ? mc.use : null, spike: !!mc.spike, thumb, fileIds, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now,
+        const reason = `${itemLabel(it)} — ${perLabel(it, ym, per)}`;
+        const r = { id, type: 'opex', cat: it.cat, itemId: it.id, month: ym, period: per || null, homeId: it.homeId || null, amount: num(d.amount), payee: d.payee || '', note: d.note || '', reason, reading, use: mc.use != null ? mc.use : null, spike: !!mc.spike, thumb, fileIds, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now,
           thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `مصروف تشغيل ${reason}: ${fmtMoney(num(d.amount))} ${CUR()}${mc.use != null ? ` · استهلاك ${fmtNum(mc.use)} ${unit}${mc.spike ? ` (زيادة مفاجئة — المتوسط ${fmtNum(mc.avg)})` : ''}` : ''}` }] };
         await Store.save('requests', r, { silent: true });
         try { await notifyRole('hr', `مصروف تشغيل للموافقة — ${itemLabel(it)}${r.spike ? ' ⚠️ استهلاك زايد' : ''}`, `${reason} — المبلغ في صفحة «مصاريف التشغيل» / الطلبات`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
-        const t = byId('tasks', `oxrem_${it.id}_${ym}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }); } catch (e) { /* ignore */ } }
+        const t = byId('tasks', `oxrem_${it.id}_${per || ym}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }); } catch (e) { /* ignore */ } }
         toast(r.spike ? 'اتبعت — الاستهلاك زايد عن المتوسط، اتعلّم لمدير الحسابات' : 'اتبعت لمدير الحسابات'); rerender();
       } });
   };
   /* the paid expense keeps the item link (for the monthly state + reports) */
-  ACTIONS.opexPay = (base => async function (id) { const r = byId('requests', id); const out = await base.apply(this, arguments); try { const e = byId('expenses', 'opx_' + id); if (r && e && (r.itemId || r.reading != null) && !e.itemId) await Store.update('expenses', e.id, { itemId: r.itemId || null, reading: r.reading ?? null, use: r.use ?? null }, { silent: true }); } catch (x) { /* ignore */ } rerender(); return out; })(ACTIONS.opexPay);
+  ACTIONS.opexPay = (base => async function (id) { const r = byId('requests', id); const out = await base.apply(this, arguments); try { const e = byId('expenses', 'opx_' + id); if (r && e && (r.itemId || r.reading != null) && !e.itemId) await Store.update('expenses', e.id, { itemId: r.itemId || null, period: r.period || null, reading: r.reading ?? null, use: r.use ?? null }, { silent: true }); } catch (x) { /* ignore */ } rerender(); return out; })(ACTIONS.opexPay);
 
   /* ---------- fixed items editor (owner + accounts manager) ---------- */
   const saveCfg = async patch => { const c = Object.assign({}, oxCfg(), patch, { id: 'opexcfg', type: 'opexcfg', updatedAt: nowISO(), byName: S.session?.name || '' }); await Store.save('money', c, { silent: true }); syncCats(); rerender(); };
@@ -22218,13 +22231,17 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       ${field('السكن', `<select name="homeId" id="f-oxhome"><option value="">—</option>${homes().map(h => `<option value="${h.id}" ${it.homeId === h.id ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}</select>`)}
       ${field('النوع', `<select name="kind"><option value="fixed" ${it.kind === 'fixed' ? 'selected' : ''}>ثابت (نفس المبلغ كل شهر — إيجار…)</option><option value="bill" ${it.kind === 'bill' ? 'selected' : ''}>فاتورة (المبلغ بيتغير — كهربا/مية/غاز…)</option></select>`)}
       ${field(`المبلغ ${it.kind === 'bill' ? 'المتوقع' : 'الشهري'} (${CUR()})`, inp('amount', it.amount || '', 'type="number" step="any" min="0" inputmode="decimal"'))}
-      ${field('يوم الاستحقاق في الشهر (1–28)', inp('dueDay', it.dueDay || 1, 'type="number" min="1" max="28"'))}${field('المستفيد (صاحب المكان / شركة الكهربا…)', inp('payee', it.payee || ''))}
+      ${field('بيتكرر', `<select name="freq" id="f-oxfreq"><option value="monthly" ${!isWk(it) ? 'selected' : ''}>كل شهر</option><option value="weekly" ${isWk(it) ? 'selected' : ''}>كل أسبوع</option></select>`)}
+      ${field('يوم الأسبوع', `<select name="weekday" id="f-oxwd">${WDAYS.map((w, i) => `<option value="${i}" ${(it.weekday == null ? 6 : +it.weekday) === i ? 'selected' : ''}>${w}</option>`).join('')}</select>`)}
+      ${field('يوم الاستحقاق في الشهر (1–28)', inp('dueDay', it.dueDay || 1, 'type="number" min="1" max="28"'))}
+      <label class="check full ${it.auto !== false ? 'on' : ''}" id="f-oxautow"><input type="checkbox" name="auto" ${it.auto !== false ? 'checked' : ''}> تلقائي — لو المبلغ ثابت: السيستم يفتح طلب الصرف لوحده في ميعاده ويبعته لمدير الحسابات (الفاتورة المتغيرة: تذكير لمسؤول الحسابات يسجل المبلغ والصورة)</label>${field('المستفيد (صاحب المكان / شركة الكهربا…)', inp('payee', it.payee || ''))}
       <label class="check full ${it.meter ? 'on' : ''}"><input type="checkbox" name="meter" ${it.meter ? 'checked' : ''}> فيه عداد — اطلب قراءة العداد كل شهر ونبّه لو الاستهلاك زاد فجأة</label>
       ${field('وحدة العداد', inp('unit', it.unit || METER_UNITS[it.cat] || '', 'placeholder="ك.و.س / م³"'))}${field('يبدأ من شهر', inp('startMonth', it.startMonth || monthOf(todayISO()), 'type="month"'))}${field('ملاحظة', inp('note', it.note || ''), 'full')}</div>`,
-      onOpen: f => { const sync = () => { const hf = f.querySelector('#f-oxhome').closest('.field'); if (hf) hf.hidden = !(HOME_CATS.includes(f.querySelector('#f-oxcat').value) || f.querySelector('#f-oxhome').value); }; f.querySelector('#f-oxcat').addEventListener('change', sync); sync(); },
+      onOpen: f => { const sync = () => { const hf = f.querySelector('#f-oxhome').closest('.field'); if (hf) hf.hidden = !(HOME_CATS.includes(f.querySelector('#f-oxcat').value) || f.querySelector('#f-oxhome').value); const wk = f.querySelector('#f-oxfreq').value === 'weekly'; f.querySelector('#f-oxwd').closest('.field').hidden = !wk; f.querySelector('[name=dueDay]').closest('.field').hidden = wk; }; f.querySelector('#f-oxcat').addEventListener('change', sync); f.querySelector('#f-oxfreq').addEventListener('change', sync); sync(); },
       onSubmit: async f => {
         const d = formData(f); if (!(d.name || '').trim()) { toast('اكتب اسم البند', 'err'); return false; } if (HOME_CATS.includes(d.cat) && !d.homeId) { toast('اختار السكن', 'err'); return false; }
-        const doc = Object.assign({}, it, { id: it.id || 'ox' + uid().slice(0, 8), name: d.name.trim(), cat: d.cat, homeId: d.homeId || null, kind: d.kind === 'bill' ? 'bill' : 'fixed', amount: num(d.amount) || 0, dueDay: Math.min(28, Math.max(1, parseInt(d.dueDay, 10) || 1)), payee: d.payee || '', meter: !!d.meter, unit: d.unit || '', startMonth: d.startMonth || monthOf(todayISO()), note: d.note || '', updatedAt: nowISO(), createdAt: it.createdAt || nowISO() });
+        if (d.kind !== 'bill' && d.auto && !(num(d.amount) > 0)) { toast('البند الثابت التلقائي محتاج مبلغ', 'err'); return false; }
+        const doc = Object.assign({}, it, { id: it.id || 'ox' + uid().slice(0, 8), name: d.name.trim(), cat: d.cat, homeId: d.homeId || null, kind: d.kind === 'bill' ? 'bill' : 'fixed', amount: num(d.amount) || 0, dueDay: Math.min(28, Math.max(1, parseInt(d.dueDay, 10) || 1)), payee: d.payee || '', meter: !!d.meter, unit: d.unit || '', startMonth: d.startMonth || monthOf(todayISO()), note: d.note || '', freq: d.freq === 'weekly' ? 'weekly' : 'monthly', weekday: d.freq === 'weekly' ? (parseInt(d.weekday, 10) || 0) : null, startDate: d.freq === 'weekly' ? (it.startDate && it.freq === 'weekly' ? it.startDate : todayISO()) : null, auto: !!d.auto, updatedAt: nowISO(), createdAt: it.createdAt || nowISO() });
         const items = (oxCfg().items || []).filter(x => x.id !== doc.id).concat([doc]); await saveCfg({ items }); toast(it.id ? 'اتحفظ البند' : 'اتضاف البند');
       } });
   };
@@ -22241,12 +22258,26 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (!oxSee() || !writable() || Date.now() - lastTick < 10 * 60000) return; lastTick = Date.now();
     const ym = monthOf(todayISO()); const today = todayISO();
     for (const it of oxItems()) {
-      if (startYm(it) > ym) continue; const s = stateOf(it, ym); if (!['todo', 'late'].includes(s.k)) continue; const due = dueOf(it, ym);
-      try {
-        const remId = `oxrem_${it.id}_${ym}`; if (today >= addDays(due, -3) && !byId('tasks', remId)) await notifyRole('acc', `فكّر: ${itemLabel(it)} — ${fmtMonth(ym)}`, `مستحق ${fmtDate(due)}${it.meter ? ' · خد قراءة العداد' : ''}\nسجّله من صفحة «مصاريف التشغيل».`, { id: remId, dueDate: due, fields: { link: '#/opex' } });
-        const lateId = `oxlate_${it.id}_${ym}`; if (today >= addDays(due, 3) && !byId('tasks', lateId)) await notifyRole('hr', `متأخر: ${itemLabel(it)} — ${fmtMonth(ym)}`, `كان مستحق ${fmtDate(due)} ولسه ماتسجلش.`, { id: lateId, priority: 'high', dueDate: due, fields: { link: '#/opex' } });
-      } catch (e) { /* ignore */ }
+      if (startYm(it) > ym) continue;
+      for (const per of periodsOf(it, ym)) {
+        const s = stateOf(it, ym, per); if (!['todo', 'late'].includes(s.k)) continue; const wk = isWk(it); const due = wk ? per : dueOf(it, ym); const key = wk ? per : ym; const lbl = perLabel(it, ym, per);
+        if (wk && due > today) continue;
+        try {
+          /* v5.54: fixed amount + تلقائي → the request opens itself on its day (same path: مدير الحسابات ← المالك) */
+          if (it.kind === 'fixed' && it.auto !== false && +it.amount > 0 && today >= due) { await oxAutoReq(it, ym, wk ? per : null); continue; }
+          const remId = `oxrem_${it.id}_${key}`; if (today >= addDays(due, wk ? 0 : -3) && !byId('tasks', remId)) await notifyRole('acc', `فكّر: ${itemLabel(it)} — ${lbl}`, `مستحق ${fmtDate(due)}${it.meter ? ' · خد قراءة العداد' : ''}\nسجّل المبلغ وصورة الفاتورة من صفحة «مصاريف التشغيل».`, { id: remId, dueDate: due, fields: { link: '#/opex' } });
+          const lateId = `oxlate_${it.id}_${key}`; if (today >= addDays(due, wk ? 2 : 3) && !byId('tasks', lateId)) await notifyRole('hr', `متأخر: ${itemLabel(it)} — ${lbl}`, `كان مستحق ${fmtDate(due)} ولسه ماتسجلش.`, { id: lateId, priority: 'high', dueDate: due, fields: { link: '#/opex' } });
+        } catch (e) { /* ignore */ }
+      }
     }
+  }
+  async function oxAutoReq(it, ym, per) {
+    const id = `oxa_${it.id}_${per || ym}`; if (byId('requests', id)) return;
+    const now = nowISO(); const reason = `${itemLabel(it)} — ${perLabel(it, ym, per)}`;
+    const r = { id, type: 'opex', cat: it.cat, itemId: it.id, month: per ? monthOf(per) : ym, period: per || null, homeId: it.homeId || null, amount: +it.amount, payee: it.payee || '', note: it.note || '', reason, reading: null, use: null, spike: false, thumb: null, fileIds: [], auto: true, requesterId: null, requesterName: 'تلقائي (السيستم)', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: null, createdByName: 'تلقائي (السيستم)', createdAt: now,
+      thread: [{ id: uid(), at: now, by: null, byName: 'السيستم', role: 'system', kind: 'system', text: `مصروف ثابت اتفتح تلقائي: ${reason} — ${fmtMoney(+it.amount)} ${CUR()}` }] };
+    await Store.save('requests', r, { silent: true });
+    try { await notifyRole('hr', `مصروف ثابت للموافقة — ${itemLabel(it)}`, `${reason} — اتفتح تلقائي في ميعاده (صفحة «مصاريف التشغيل» / الطلبات)`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
   }
   RENDER_HOOKS.push(() => { setTimeout(oxTick, 1500); });
 
@@ -22259,7 +22290,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   canSee = (base => view => (view === 'opex' ? oxSee() : base(view)))(canSee);
   /* the money page card points here */
   if (typeof opexSummary === 'function') opexSummary = (base => function (ym) { const h = base.apply(this, arguments); return h.replace('<div class="grow"></div>', `<div class="grow"></div><a class="btn sm ghost" href="#/opex">افتح الصفحة</a>`); })(opexSummary);
-  window.nfOpex = { stateOf, meterCalc, oxItems, lateItems };
+  window.nfOpex = { stateOf, meterCalc, oxItems, lateItems, periodsOf, oxTick: () => { lastTick = 0; return oxTick(); } };
 })();
 /* =====================================================================
    v5.30 — «شوف السيستم بعين…» يبيّن بالظبط اللي الشخص بيشوفه
@@ -23142,6 +23173,133 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
     if (m && role() === 'purch') { const why = movesOf(m); if (why.length) { toast(`الصنف ده ${why.join(' و')} — المسح عند المالك بس`, 'err'); return; } }
     const r = await base.apply(this, arguments); if (m && !byId('materials', id)) closeModal(); return r;
   })(ACTIONS.materialDelete);
+})();
+/* =====================================================================
+   v5.54 — (المصنع) شغل مسؤول الحسابات (أحمد عبدالظاهر) — بالرقم السري، 29 سبتمبر
+   محمود: «import لحسابات الموردين القدام زي نيو جراندي» + «الإكراميات» (من غير سقف).
+   (1) أرصدة الموردين القديمة: زرار «استيراد حسابات قديمة» في صفحة الموردين (المالك + مدير الحسابات + مسؤول الحسابات)
+       → ملف Excel جاهز (شيت «الأرصدة» + شيت «كشف» اختياري) → معاينة (موجود / جديد / غلط) → حفظ.
+       الرصيد بيتحفظ في money/sopen_<المورد> (مش على المورد نفسه عشان الفلوس ماتظهرش لباقي الأدوار)
+       ومحفظة المورد بتحسبه «رصيد افتتاحي». المورد اللي مش موجود بيتعمل.
+       + في محفظة المورد: زرار «الرصيد الافتتاحي» لتعديل مورد واحد باليد.
+   (2) الإكراميات: زرار «إكرامية» جنب «مصروف من العهدة» — لمين + ليه + (أمر شراء / مشوار) — الصورة اختيارية، من غير سقف.
+       expense cat 'tips' src 'wallet'. تقرير الشهر في صفحة الفلوس (المالك + الحسابات)؛ صاحب العهدة بيشوف بتاعته في عهدته.
+   (المصاريف الثابتة الأوتوماتيك — شهري/أسبوعي — في 99zzZf-opex.js)
+   ===================================================================== */
+(function () {
+  if (window.__NF_ACCX__) return; window.__NF_ACCX__ = 1;
+  if ((typeof isStudioz === 'function' && isStudioz()) || typeof supplierWallet !== 'function' || typeof moneyDialog !== 'function') return;
+  const canImp = () => !!S.session && (typeof writable !== 'function' || writable()) && (isAdmin() || ['hr', 'acc'].includes(role()));
+  const openDoc = sid => (S.data && S.data.money ? byId('money', 'sopen_' + sid) : null);
+  const DIAC = new RegExp('[' + String.fromCharCode(0x64B) + '-' + String.fromCharCode(0x652) + String.fromCharCode(0x640) + ']', 'g');
+  const norm = s => String(s || '').trim().replace(DIAC, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/^ال/, '').replace(/\s+ال/g, ' ').replace(/[^\p{L}\p{N}]+/gu, '');
+  const findSup = name => { const n = norm(name); if (!n) return null; return list('suppliers').find(s => norm(s.name) === n) || null; };
+  const isoOf = v => { if (!v) return ''; if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(s); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/.exec(s); if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; } if (/^\d{5}$/.test(s)) { const d = new Date(Date.UTC(1899, 11, 30) + (+s) * 864e5); return d.toISOString().slice(0, 10); } return ''; };
+  const numOf = v => { if (v == null || v === '') return null; const s = String(v).replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(/[,\s٬]/g, '').replace('٫', '.'); const n = parseFloat(s); return isNaN(n) ? null : n; };
+
+  /* ---- supplier wallet: + opening balance ---- */
+  supplierWallet = (base => function (s) { const x = base.apply(this, arguments); const o = s && openDoc(s.id); if (o && +o.amount) { x.opening = r2(+o.amount); x.openingDoc = o; x.balance = r2(x.balance + x.opening); } else x.opening = 0; return x; })(supplierWallet);
+  supplierWalletCard = (base => function (s) {
+    let h = base.apply(this, arguments); const x = supplierWallet(s); const o = x.openingDoc;
+    const line = `<div class="sopen" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--line);border-radius:10px;margin-bottom:10px">${o ? `<span class="tiny muted">رصيد افتتاحي${o.asOf ? ' لحد ' + fmtDate(o.asOf) : ''}</span><b class="num">${fmtMoney(Math.abs(o.amount))}</b><span class="badge ${o.amount < 0 ? 'crit' : 'warn'}">${o.amount < 0 ? 'علينا له' : 'معاه لينا'}</span>${o.note ? `<span class="tiny muted">${esc(o.note)}</span>` : ''}${(o.lines || []).length ? `<button type="button" class="btn xs ghost" data-sopenlines="${esc(s.id)}">كشف قديم (${o.lines.length})</button>` : ''}` : '<span class="tiny muted">مفيش رصيد افتتاحي (حساب قديم) متسجل</span>'}<div class="grow"></div>${canImp() ? `<button type="button" class="btn xs" data-action="sopenEdit" data-arg="${esc(s.id)}">${icon('edit')}الرصيد الافتتاحي</button>` : ''}</div>`;
+    const i = h.indexOf('<div class="grid g4"'); return i < 0 ? h : h.slice(0, i) + line + h.slice(i);
+  })(supplierWalletCard);
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-sopenlines]'); if (!b) return; const o = openDoc(b.dataset.sopenlines); if (!o) return; const s = byId('suppliers', o.supplierId);
+    openModal({ title: `الكشف القديم — ${s ? s.name : o.supplierName || ''}`, wide: true, footer: '<button type="button" class="btn" data-action="closemodal">قفل</button>', body: `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البيان</th><th class="n">فاتورة (علينا)</th><th class="n">دفعة</th></tr></thead><tbody>${(o.lines || []).map(l => `<tr><td>${l.date ? fmtDate(l.date) : '—'}</td><td>${esc(l.desc || '')}</td><td class="n">${l.inv ? fmtMoney(l.inv) : ''}</td><td class="n">${l.pay ? fmtMoney(l.pay) : ''}</td></tr>`).join('')}</tbody></table></div>` }); });
+  async function saveOpen(s, amount, asOf, note, lines) {
+    const d = { id: 'sopen_' + s.id, type: 'sopen', supplierId: s.id, supplierName: s.name, amount: r2(amount), asOf: asOf || '', note: note || '', lines: lines || [], at: nowISO(), byName: (S.session && S.session.name) || '' };
+    await Store.save('money', d, { silent: true }); return d;
+  }
+  ACTIONS.sopenEdit = id => {
+    const s = byId('suppliers', id); if (!s || !canImp()) return; const o = openDoc(id) || {};
+    openModal({ title: `الرصيد الافتتاحي — ${s.name}`, body: `<div class="form">${field(`المبلغ (${CUR()})`, inp('amount', o.amount ? Math.abs(o.amount) : '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field('الاتجاه', `<select name="dir"><option value="owe" ${!(o.amount > 0) ? 'selected' : ''}>علينا له (لسه ماندفعلوش)</option><option value="ours" ${o.amount > 0 ? 'selected' : ''}>معاه لينا (دافعين زيادة / مقدم)</option></select>`)}${field('لحد تاريخ', inp('asOf', o.asOf || todayISO(), 'type="date"'))}${field('ملاحظة', inp('note', o.note || ''), 'full')}<div class="tiny muted full">صفر = مفيش رصيد قديم. التعديل بيستبدل الرقم القديم.</div></div>`,
+      onSubmit: async f => { const d = formData(f); const a = num(d.amount) || 0; await saveOpen(s, d.dir === 'ours' ? a : -a, d.asOf, d.note, o.lines); toast('اتحفظ الرصيد الافتتاحي'); rerender(); } });
+  };
+
+  /* ---- import ---- */
+  viewTitleBase = (base => function () {
+    const t = base.apply(this, arguments);
+    if (S.route.view === 'suppliers' && !S.route.id && canImp() && !/sopenImport/.test(t.actions || '')) t.actions = (t.actions || '') + `<button class="btn" data-action="sopenImport">${icon('upload') || icon('plus')}<span>استيراد حسابات قديمة</span></button>`;
+    return t;
+  })(viewTitleBase);
+  ACTIONS.sopenTemplate = async () => {
+    const ok = typeof loadXLSX === 'function' ? await loadXLSX() : false; if (!ok || !window.XLSX) { toast('تعذّر تحميل Excel — جرّب تاني', 'err'); return; }
+    const wb = XLSX.utils.book_new();
+    const a = [['المورد', 'التليفون', 'المبلغ', 'الاتجاه (علينا له / معاه لينا)', 'لحد تاريخ', 'ملاحظات'], ['نيو جراندي', '', 0, 'علينا له', todayISO(), 'مثال — امسح السطر ده'], ...list('suppliers').filter(s => !openDoc(s.id)).map(s => [s.name, s.phone || '', '', 'علينا له', todayISO(), ''])];
+    const b = [['المورد', 'التاريخ', 'البيان', 'فاتورة (علينا)', 'دفعة (دفعناها)'], ['نيو جراندي', todayISO(), 'فاتورة 123 — مثال', 0, 0]];
+    const w1 = XLSX.utils.aoa_to_sheet(a); w1['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 34 }]; w1['!views'] = [{ RTL: true }];
+    const w2 = XLSX.utils.aoa_to_sheet(b); w2['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 40 }, { wch: 16 }, { wch: 16 }]; w2['!views'] = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(wb, w1, 'الأرصدة'); XLSX.utils.book_append_sheet(wb, w2, 'كشف');
+    XLSX.writeFile(wb, `ارصدة-الموردين-القديمة-${todayISO()}.xlsx`); toast('اتنزل الملف — املاه وارفعه هنا');
+  };
+  const col = (hdr, keys) => hdr.findIndex(h => keys.some(k => String(h || '').includes(k)));
+  function parseBook(wb) {
+    const sheets = wb.SheetNames.map(n => ({ n, rows: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }) })).filter(x => x.rows.length);
+    const isKashf = x => /كشف/.test(x.n) || (x.rows[0] || []).some(h => /فاتور|بيان/.test(String(h)));
+    const balS = sheets.find(x => !isKashf(x)); const kS = sheets.find(x => isKashf(x) && x !== balS);
+    const map = new Map(); const errs = []; const key = n => norm(n);
+    const ent = name => { const k = key(name); if (!map.has(k)) map.set(k, { name: String(name).trim(), phone: '', amount: null, asOf: '', note: '', lines: [], rows: [] }); return map.get(k); };
+    if (balS) { const h = balS.rows[0]; const ci = { n: col(h, ['المورد', 'اسم']), p: col(h, ['تليفون', 'هاتف', 'موبايل']), a: col(h, ['المبلغ', 'الرصيد']), d: col(h, ['الاتجاه']), t: col(h, ['تاريخ']), x: col(h, ['ملاحظ']) };
+      if (ci.n < 0) errs.push('شيت الأرصدة: مفيش عمود «المورد»');
+      balS.rows.slice(1).forEach((r, i) => { const name = String(r[ci.n] ?? '').trim(); if (!name) return; if (/امسح السطر ده/.test(String(r[ci.x] ?? ''))) return; const e = ent(name); const a = numOf(r[ci.a]); if (ci.p >= 0 && r[ci.p]) e.phone = String(r[ci.p]).trim(); if (a != null) { const ours = /معاه|لينا|له علينا|مقدم/.test(String(r[ci.d] ?? '')) && !/علينا له/.test(String(r[ci.d] ?? '')); e.amount = ours ? Math.abs(a) : -Math.abs(a); if (a < 0 && ci.d < 0) e.amount = Math.abs(a); } e.asOf = isoOf(r[ci.t]) || e.asOf; e.note = String(r[ci.x] ?? '').trim() || e.note; e.rows.push(i + 2); }); }
+    if (kS) { const h = kS.rows[0]; const ci = { n: col(h, ['المورد', 'اسم']), t: col(h, ['تاريخ']), b: col(h, ['البيان', 'بيان']), i: col(h, ['فاتور', 'علينا']), p: col(h, ['دفع']) };
+      kS.rows.slice(1).forEach(r => { const name = String(r[ci.n] ?? '').trim(); if (!name) return; const inv = numOf(r[ci.i]) || 0, pay = numOf(r[ci.p]) || 0; if (!inv && !pay) return; ent(name).lines.push({ date: isoOf(r[ci.t]), desc: String(r[ci.b] ?? '').trim(), inv, pay }); }); }
+    const out = [...map.values()].map(e => { if (e.amount == null && e.lines.length) { e.amount = -r2(sum(e.lines, l => +l.inv || 0) - sum(e.lines, l => +l.pay || 0)); if (!e.asOf) e.asOf = e.lines.map(l => l.date).filter(Boolean).sort().pop() || ''; } const s = findSup(e.name); return Object.assign(e, { sup: s, had: s ? openDoc(s.id) : null, err: e.amount == null ? 'مفيش مبلغ' : '' }); });
+    return { out, errs };
+  }
+  ACTIONS.sopenImport = () => {
+    if (!canImp()) return;
+    openModal({ title: 'استيراد حسابات الموردين القديمة', wide: true, submitLabel: 'حفظ الأرصدة', body: `<div class="form"><div class="banner info full" style="margin:0">${icon('info')}<span>١) نزّل الملف الجاهز (فيه كل الموردين المتسجلين) ٢) اكتب لكل مورد رصيده القديم — «علينا له» ولا «معاه لينا» — ولحد تاريخ إيه ٣) ارفعه هنا وراجع المعاينة. شيت «كشف» اختياري لو عايز تحط الفواتير والدفعات القديمة سطر سطر.</span></div>
+      <div class="field full"><button type="button" class="btn" data-action="sopenTemplate">${icon('download') || ''}نزّل ملف Excel الجاهز</button></div>
+      <div class="field full"><label>ارفع الملف (Excel أو CSV)</label><input type="file" id="so-file" accept=".xlsx,.xls,.csv"></div><div class="full" id="so-prev"></div></div>`,
+      onOpen: f => { f.querySelector('#so-file').addEventListener('change', async ev => { const file = ev.target.files && ev.target.files[0]; const box = f.querySelector('#so-prev'); if (!file) return; box.innerHTML = '<div class="muted small">بيقرا الملف…</div>';
+        try { const ok = await loadXLSX(); if (!ok) throw new Error('Excel'); const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); const r = parseBook(wb); f._so = r.out;
+          const good = r.out.filter(x => !x.err); box.innerHTML = `${r.errs.map(e => `<div class="banner crit">${esc(e)}</div>`).join('')}<div class="small" style="margin:6px 0"><b>${good.length}</b> مورد هيتحفظ · <b>${good.filter(x => !x.sup).length}</b> منهم جديد هيتعمل · <b>${r.out.filter(x => x.err).length}</b> فيهم غلط (مش هيتحفظوا)</div>
+            <div class="tablewrap"><table id="so-tbl"><thead><tr><th>المورد</th><th class="n">المبلغ</th><th>الاتجاه</th><th>لحد</th><th>الحالة</th></tr></thead><tbody>${r.out.map(x => `<tr class="${x.err ? 'so-bad' : ''}"><td><b>${esc(x.name)}</b>${x.lines.length ? `<div class="tiny muted">${x.lines.length} سطر كشف</div>` : ''}</td><td class="n num">${x.amount != null ? fmtMoney(Math.abs(x.amount)) : '—'}</td><td>${x.amount == null ? '' : x.amount < 0 ? '<span class="badge crit">علينا له</span>' : x.amount > 0 ? '<span class="badge warn">معاه لينا</span>' : 'متسوّي'}</td><td class="small">${x.asOf ? fmtDate(x.asOf) : '—'}</td><td class="small">${x.err ? `<span style="color:var(--crit-ink)">${esc(x.err)}</span>` : x.sup ? (x.had ? 'موجود — هيستبدل الرصيد القديم' : 'موجود ✓') : 'جديد — هيتعمل مورد'}</td></tr>`).join('')}</tbody></table></div>`;
+        } catch (e) { box.innerHTML = `<div class="banner crit">مقدرتش أقرا الملف — اتأكد إنه Excel أو CSV (${esc(e.message || e)})</div>`; } }); },
+      onSubmit: async f => {
+        const rows = (f._so || []).filter(x => !x.err); if (!rows.length) { toast('ارفع الملف الأول', 'err'); return false; }
+        let made = 0;
+        for (const x of rows) {
+          let s = x.sup || findSup(x.name);
+          if (!s) { s = { id: uid(), name: x.name, phone: x.phone || '', contact: '', location: 'مستورد من الحسابات القديمة', taxType: 'tax', category: '', terms: '', notes: 'اتعمل من استيراد الأرصدة القديمة', importedOld: true, createdAt: nowISO() }; await Store.save('suppliers', s, { silent: true }); made++; }
+          await saveOpen(s, x.amount, x.asOf, x.note, x.lines);
+        }
+        toast(`اتحفظ ${rows.length} رصيد${made ? ` · اتعمل ${made} مورد جديد` : ''}`); rerender();
+      } });
+  };
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>#so-tbl tr.so-bad td{background:rgba(220,60,60,.06)}</style>`);
+
+  /* ---- tips (إكراميات) ---- */
+  const tipIds = () => (isAdmin() || role() === 'hr') ? wallets().map(w => w.id) : myWalletIds();
+  ACTIONS.tipNew = async wid => {
+    const ids = tipIds(); if (!ids.length) { toast('مفيش عهدة باسمك', 'err'); return; } const w0 = walletOf(wid) || walletOf(ids[0]);
+    const pos = sortBy(list('purchases').filter(p => p.number && !['cancelled', 'rejected'].includes(p.status)), p => p.createdAt || p.date || '', true).slice(0, 40);
+    const trips = sortBy(list('trips'), t => t.date || t.createdAt || '', true).slice(0, 30);
+    const fields = `${ids.length > 1 ? field('من عهدة', `<select name="walletId">${ids.map(id => `<option value="${id}" ${id === w0.id ? 'selected' : ''}>${esc(walletOf(id).name)} — ${fmtMoney(walletBalance(id).balance)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field('التاريخ', inp('date', todayISO(), 'type="date"'))}
+      ${field('لمين', inp('payee', '', 'required placeholder="سواق المورد / عامل التحميل / الونش…"'))}${field('ليه', inp('why', '', 'required placeholder="تنزيل خامات / توصيل مستعجل…"'))}
+      ${field('على أمر شراء (اختياري)', `<select name="poId"><option value="">—</option>${pos.map(p => `<option value="${p.id}">${esc(p.number)} — ${esc(p.supplier || '')}</option>`).join('')}</select>`)}${trips.length ? field('على مشوار (اختياري)', `<select name="tripId"><option value="">—</option>${trips.map(t => `<option value="${t.id}">${esc(t.code || t.title || t.purpose || '')} ${t.date ? '— ' + esc(fmtDate(t.date)) : ''}</option>`).join('')}</select>`) : ''}`;
+    const res = await moneyDialog({ title: 'إكرامية من العهدة', intro: 'من غير سقف — بس اكتب لمين وليه. الصورة اختيارية.', amount: '', fields, fileRequired: false, submitLabel: 'تسجيل الإكرامية', ownerKind: 'expense' });
+    if (!res) return; const w = walletOf(res.walletId); if (!w) return; const bal = walletBalance(w.id).balance;
+    if (!(res.payee || '').trim() || !(res.why || '').trim()) { toast('اكتب لمين وليه', 'err'); return; }
+    if (res.amount > bal + 0.5) { toast(`رصيد العهدة ${fmtMoney(bal)} ${CUR()} — اطلب مبلغ الأول`, 'err'); return; }
+    await Store.save('expenses', { id: uid(), date: res.date || todayISO(), month: monthOf(res.date || todayISO()), amount: res.amount, cat: 'tips', account: w.id, holderId: w.holder, orderId: null, payee: res.payee.trim(), tipWhy: res.why.trim(), tipPoId: res.poId || null, tipTripId: res.tripId || null, ref: '', note: [res.why.trim(), res.note || ''].filter(Boolean).join(' — '), src: 'wallet', fileIds: res.fileIds, thumb: res.thumb, byName: S.session?.name || '', createdAt: nowISO() });
+    toast('اتسجلت الإكرامية');
+  };
+  RENDER_HOOKS.push(() => { try {
+    if (!tipIds().length) return;
+    document.querySelectorAll('[data-action="walletSpend"]').forEach(b => { if (b.nextElementSibling && b.nextElementSibling.dataset && b.nextElementSibling.dataset.action === 'tipNew') return; b.insertAdjacentHTML('afterend', `<button class="${b.className.replace(/\bp\b/, '')}" data-action="tipNew" data-arg="${esc(b.dataset.arg || '')}">${icon('money')}إكرامية</button>`); });
+  } catch (e) { /* ignore */ } });
+  /* monthly report on the money page (owner + accounts) */
+  RENDER_HOOKS.push(() => { try {
+    if (S.route.view !== 'money' || S.route.id || !seesMoneyOps()) return; const v = document.getElementById('view'); if (!v || v.querySelector('#tipscard')) return;
+    const ym = (S.ui.filter.money || {}).ym || monthOf(todayISO()); const rows = sortBy(list('expenses').filter(e => e.cat === 'tips' && e.month === ym), e => e.date || '', true);
+    const byH = {}; rows.forEach(e => { const w = walletOf(e.account); const k = w ? w.name : (e.byName || '—'); byH[k] = (byH[k] || 0) + (+e.amount || 0); });
+    const tot = r2(sum(rows, e => +e.amount || 0));
+    const html = `<div class="card" id="tipscard"><div class="cardhead"><h3>الإكراميات — ${fmtMonth(ym)}</h3><div class="grow"></div><b class="num">${fmtMoney(tot)} ${CUR()}</b></div>${rows.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${Object.keys(byH).map(k => `<span class="badge">${esc(k)}: ${fmtMoney(r2(byH[k]))}</span>`).join('')}</div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>من عهدة</th><th>لمين</th><th>ليه</th><th>على</th><th class="n">المبلغ</th></tr></thead><tbody>${rows.map(e => { const w = walletOf(e.account); const p = e.tipPoId && byId('purchases', e.tipPoId); const t = e.tipTripId && byId('trips', e.tipTripId); return `<tr><td>${fmtDate(e.date)}</td><td class="small">${esc(w ? w.name : e.byName || '')}</td><td>${esc(e.payee || '')}</td><td class="small">${esc(e.tipWhy || e.note || '')}</td><td class="small">${p ? `<a href="#/purchases/${p.id}"><span class="code">${esc(p.number)}</span></a>` : t ? esc(t.code || t.title || 'مشوار') : '—'}</td><td class="n"><b>${fmtMoney(e.amount)}</b></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted small">مفيش إكراميات الشهر ده.</div>'}</div>`;
+    const st = v.querySelector('.stack') || v; st.insertAdjacentHTML('beforeend', html);
+  } catch (e) { /* ignore */ } });
+  window.nfAccX = { parseBook, findSup, norm };
 })();
 </script>
 
