@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1337-9ea3d6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1350-82a640";</script>
 
 <script>
 'use strict';
@@ -7260,7 +7260,7 @@ function supplierFormBase(s) {
     <div class="banner info full" style="margin:0">${icon('info')}<span>الضريبي: لا يُستلم أي توريد بدون الفاتورة الضريبية. غير الضريبي: تلزم صورة بطاقته أو موافقة مدير المصنع على كل طلب.</span></div></div>`;
 }
 async function saveSupplierBase(f, s) {
-  const d = formData(f); if (!d.name || !d.phone || !d.location) { toast('اسم المورد وهاتفه وموقعه إجبارية', 'err'); return false; }
+  const d = formData(f); const tech = typeof window.nfTechOnsite === 'function' && window.nfTechOnsite(f); if (tech && !d.location) d.location = 'فني — بيجي يصلح في المصنع'; if (!d.name || !d.phone || !d.location) { toast(tech ? 'اسم الفني وتليفونه إجباريين' : 'اسم المورد وهاتفه وموقعه إجبارية', 'err'); return false; }
   const doc = Object.assign({}, s, { id: s.id || uid(), name: d.name, taxType: d.taxType, taxId: d.taxId, phone: d.phone, contact: d.contact, location: d.location, category: d.category, terms: d.terms, notes: d.notes, createdAt: s.createdAt || nowISO() });
   await Store.save('suppliers', doc); const file = $('#f-idcard', f)?.files?.[0]; if (file) await proofAttach(file, { kind: 'idcard', ownerKind: 'supplier', ownerId: doc.id });
   toast('تم الحفظ'); return doc;
@@ -8058,9 +8058,10 @@ function supplierForm(s) {
   return html.replace(/(<div class="field full"><label>الموقع \/ العنوان \(إجباري\)<\/label>[\s\S]*?<\/div>)/, '$1' + geo);
 }
 async function saveSupplier(f, s) {
-  const d = formData(f); if (d.lat === '' || d.lng === '') { toast('حدد لوكيشن المورد على الخريطة (أو موقعي الآن / رابط جوجل)', 'err'); return false; }
+  const d = formData(f); const noGeo = d.lat === '' || d.lng === ''; const tech = typeof window.nfTechOnsite === 'function' && window.nfTechOnsite(f);
+  if (noGeo && !tech) { toast('حدد لوكيشن المورد على الخريطة (أو موقعي الآن / رابط جوجل)', 'err'); return false; }
   const doc = await saveSupplierBase(f, s); if (doc === false || !doc) return doc;
-  await Store.update('suppliers', doc.id, { lat: num(d.lat), lng: num(d.lng) }); return doc;
+  if (!noGeo) await Store.update('suppliers', doc.id, { lat: num(d.lat), lng: num(d.lng) }); return doc;
 }
 ['supplierNew', 'supplierEdit'].forEach(k => { const f0 = ACTIONS[k]; ACTIONS[k] = arg => { f0(arg); const f = $('#mform'); if (f) wireSiteForm(f); }; });
 /* the supplier page shows the map + navigation link */
@@ -21339,8 +21340,22 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 
   /* ---------- suppliers: «مورد صيانة» ---------- */
   if (typeof supplierForm === 'function') supplierForm = (base => function (s) { let h = base.apply(this, arguments); s = s || {};
-    const box = `<div class="field full"><label><input type="checkbox" id="f-smaint" ${s.maint ? 'checked' : ''}> مورد صيانة معدات</label><select id="f-smode" style="margin-top:6px"><option value="both" ${(s.maintMode || 'both') === 'both' ? 'selected' : ''}>عنده وبيجي المصنع</option><option value="shop" ${s.maintMode === 'shop' ? 'selected' : ''}>الصيانة عنده (المعدة بتروح له)</option><option value="onsite" ${s.maintMode === 'onsite' ? 'selected' : ''}>بيجي يصلح في المصنع</option></select></div>`;
+    const on = !!s.maint, md = s.maintMode || 'onsite';
+    const box = `<div class="field full maintbox ${on ? 'on' : ''}"><label class="mchk"><input type="checkbox" id="f-smaint" ${on ? 'checked' : ''}><span><b>فني / مورد صيانة معدات</b><span class="tiny muted"> — علّم هنا لو ده فني بيصلّح المعدات مش مورد خامات</span></span></label><select id="f-smode"><option value="onsite" ${md === 'onsite' ? 'selected' : ''}>بيجي يصلح في المصنع</option><option value="shop" ${md === 'shop' ? 'selected' : ''}>الصيانة عنده (المعدة بتروح له)</option><option value="both" ${md === 'both' ? 'selected' : ''}>الاتنين — عنده وبيجي المصنع</option></select><div class="hint mhint">فني بيجي المصنع: العنوان والخريطة مش إجباري — الاسم والتليفون كفاية.</div></div>`;
+    const nm = h.indexOf('<label>اسم المورد</label>'); const ne = nm < 0 ? -1 : h.indexOf('</div>', nm); if (ne > 0) return h.slice(0, ne + 6) + box + h.slice(ne + 6);
     const k = h.indexOf('<div class="field full"><label>ملاحظات</label>'); return k < 0 ? h.replace(/<\/div>\s*$/, box + '</div>') : h.slice(0, k) + box + h.slice(k); })(supplierForm);
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.maintbox{border:1px dashed var(--line);border-radius:12px;padding:10px 12px}.maintbox.on{border-style:solid;border-color:var(--acc,#3b82f6)}
+.maintbox .mchk{display:flex!important;gap:10px;align-items:center;cursor:pointer;margin:0}
+.maintbox .mchk input{width:22px!important;height:22px;min-height:0!important;flex:0 0 22px;margin:0;padding:0;accent-color:var(--acc,#3b82f6)}
+.maintbox select,.maintbox .mhint{display:none;margin-top:8px}.maintbox.on select,.maintbox.on .mhint{display:block}
+</style>`);
+  const techOnsite = f => { const cb = f && f.querySelector('#f-smaint'); const md = f && f.querySelector('#f-smode'); return !!(cb && cb.checked && md && md.value === 'onsite'); };
+  window.nfTechOnsite = techOnsite;
+  const techSync = f => { const box = f.querySelector('.maintbox'); if (!box) return; const cb = f.querySelector('#f-smaint'); box.classList.toggle('on', cb.checked); const t = techOnsite(f);
+    const loc = f.querySelector('[name=location]'); if (loc) { if (t) loc.removeAttribute('required'); else loc.setAttribute('required', ''); const lb = loc.closest('.field') && loc.closest('.field').querySelector('label'); if (lb) lb.textContent = t ? 'الموقع / العنوان (اختياري للفني)' : 'الموقع / العنوان (إجباري)'; } };
+  document.addEventListener('change', e => { if (!e.target || !['f-smaint', 'f-smode'].includes(e.target.id)) return; const f = e.target.closest('#mform'); if (f) techSync(f); });
+  new MutationObserver(() => { const f = document.getElementById('mform'); if (f && f.querySelector('.maintbox') && !f.dataset.techSynced) { f.dataset.techSynced = '1'; techSync(f); } }).observe(document.body, { childList: true, subtree: true });
   if (typeof saveSupplier === 'function') saveSupplier = (base => async function (f, s) { const cb = f && f.querySelector('#f-smaint'); const mode = f && f.querySelector('#f-smode'); const hid = f && f.querySelector('#f-supDepts'); let codes = null; if (hid) { try { codes = JSON.parse(hid.value || '[]'); } catch (x) { codes = null; } }
     const doc = await base.apply(this, arguments); if (doc && doc.id && cb) { const patch = { maint: cb.checked, maintMode: cb.checked ? (mode ? mode.value : 'both') : null }; if (codes) patch.deptCodes = codes; await Store.update('suppliers', doc.id, patch); } return doc; })(saveSupplier);
   if (typeof vSuppliers === 'function') vSuppliers = (base => function () { let h = base.apply(this, arguments); list('suppliers').filter(s => s.maint).forEach(s => { const key = `data-arg="suppliers/${s.id}"`; const i = h.indexOf(key); if (i < 0) return; const j = h.indexOf('</div>', h.indexOf('<div class="title">', i)); if (j < 0) return; h = h.slice(0, j) + ` <span class="badge acc">صيانة${s.maintMode === 'onsite' ? ' — بيجي المصنع' : s.maintMode === 'shop' ? ' — عنده' : ''}</span>` + h.slice(j); }); return h; })(vSuppliers);
