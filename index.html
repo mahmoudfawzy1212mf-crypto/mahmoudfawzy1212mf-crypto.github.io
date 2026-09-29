@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0511-a7ea09";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0644-27067d";</script>
 
 <script>
 'use strict';
@@ -22306,6 +22306,231 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (h) { hideNow(); render(false); }
   });
   window.nfMoneyPriv = { MP, apply, active, pricedFile };
+})();
+/* =====================================================================
+   v5.36 — مكالمات صوت وفيديو جوه السيستم (واي فاي / باقة) — طلب المالك: «الكل يكلّم الكل، صوت وفيديو»
+   · WebRTC من جهاز لجهاز (مشفّر DTLS-SRTP) — السيرفر بيشيل بس «مين بيتصل بمين» (جدول nf_calls بـ RLS: الطرفين بس)
+   · الرنّة: إشعار push «📞 فلان بيتصل بيك» + لو التطبيق مفتوح شاشة مكالمة واردة برنّة
+   · ICE: Edge Function «rtc» (STUN — ولو اتضبط TURN في admin_config.turn_cfg بيتدّي تلقائي)
+   · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة
+   ===================================================================== */
+(() => {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from && S.sbUser;
+  const me = () => (S.sbUser && S.sbUser.id) || '';
+  const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
+  const RING_MS = 45000;
+  const roleName = r => (typeof ROLES !== 'undefined' && ROLES[r]) ? ROLES[r].split(' — ')[0] : (r || '');
+  const nameOf = uid => { const d = (C.dir || []).find(x => x.uid === uid); return d ? d.name : 'مستخدم'; };
+  async function loadDir(force) {
+    if (!hosted()) return [];
+    if (!force && C.dir && Date.now() - C.dirAt < 600000) return C.dir;
+    const { data, error } = await S.sb.rpc('nf_call_directory'); if (!error && Array.isArray(data)) { C.dir = data.filter(x => x.uid).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')); C.dirAt = Date.now(); }
+    return C.dir || [];
+  }
+  async function loadLog() {
+    if (!hosted()) return [];
+    try { await S.sb.rpc('nf_calls_sweep'); } catch (e) { /* ignore */ }
+    const { data } = await S.sb.from('nf_calls').select('id,caller,callee,video,status,created_at,answered_at,ended_at').order('created_at', { ascending: false }).limit(60);
+    C.log = data || []; C.logAt = Date.now(); return C.log;
+  }
+  const missedCount = () => { const seen = +(localStorage.getItem('nf.calls.seen') || 0); return (C.log || []).filter(c => c.callee === me() && c.status === 'missed' && Date.parse(c.created_at) > seen).length; };
+  async function iceServers() {
+    if (C.ice && Date.now() - C.ice.at < 3 * 3600e3) return C.ice.servers;
+    try { const r = await S.sb.functions.invoke('rtc', { body: {} }); if (r && r.data && Array.isArray(r.data.iceServers)) { C.ice = { at: Date.now(), servers: r.data.iceServers, turn: !!r.data.turn }; return C.ice.servers; } } catch (e) { /* ignore */ }
+    return [{ urls: ['stun:stun.l.google.com:19302'] }];
+  }
+  /* ---------- tones (WebAudio — no files) ---------- */
+  let AC = null;
+  function tone(kind) {
+    stopTone(); try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) { return; }
+    const beep = (f1, f2, dur) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = f1; g.gain.value = 0.0001; o.connect(g); g.connect(AC.destination); const t = AC.currentTime; g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); if (f2) o.frequency.setValueAtTime(f2, t + dur / 2); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.start(t); o.stop(t + dur + 0.05); };
+    const loop = () => { if (kind === 'in') { beep(880, 660, 0.45); setTimeout(() => beep(880, 660, 0.45), 550); if (navigator.vibrate) navigator.vibrate([400, 200, 400]); } else beep(425, 0, 1.0); };
+    loop(); C.ring = setInterval(loop, kind === 'in' ? 2000 : 3000);
+  }
+  function stopTone() { if (C.ring) { clearInterval(C.ring); C.ring = null; } if (navigator.vibrate) try { navigator.vibrate(0); } catch (e) { /* ignore */ } }
+  /* ---------- call screen ---------- */
+  function css() {
+    if (document.getElementById('nfcall-css')) return;
+    document.head.insertAdjacentHTML('beforeend', `<style id="nfcall-css">
+      #nfcall{position:fixed;inset:0;z-index:9999;background:#0b0f17;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:max(24px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}
+      #nfcall video{background:#000}#nfcall .rv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}#nfcall .lv{position:absolute;top:max(16px,env(safe-area-inset-top));inset-inline-end:16px;width:28vw;max-width:150px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:2px solid rgba(255,255,255,.4);z-index:2;transform:scaleX(-1)}
+      #nfcall .top{position:relative;z-index:2;text-align:center;margin-top:8vh;text-shadow:0 1px 6px rgba(0,0,0,.6)}#nfcall .av{width:96px;height:96px;border-radius:50%;background:#1f2937;display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px}
+      #nfcall .nm{font-size:24px;font-weight:700}#nfcall .st{opacity:.8;margin-top:6px;font-size:15px}
+      #nfcall .bar{position:relative;z-index:2;display:flex;gap:18px;flex-wrap:wrap;justify-content:center}#nfcall .cb{width:64px;height:64px;border-radius:50%;border:0;font-size:26px;background:rgba(255,255,255,.16);color:#fff;cursor:pointer}#nfcall .cb.off{background:#fff;color:#111}#nfcall .cb.red{background:#e5484d}#nfcall .cb.grn{background:#2fa36b}
+      #nfcall .lbl{display:block;font-size:11px;opacity:.8;margin-top:4px;text-align:center}#nfcall.vid .av{display:none}
+      .nfc-row{display:flex!important;flex-direction:row!important;flex-wrap:nowrap;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line,rgba(127,127,127,.18))}.nfc-row .grow{flex:1;min-width:0}.nfc-row .t{font-weight:600}.nfc-row .s{font-size:12px;opacity:.7}
+      .nfc-av{flex:0 0 38px;width:38px;height:38px;border-radius:50%;background:var(--acc-soft,rgba(46,125,255,.12));display:flex;align-items:center;justify-content:center}.nfc-row>span,.nfc-btn{flex:0 0 auto}.nfc-btn{border:0;border-radius:999px;width:40px;height:40px;font-size:18px;cursor:pointer;background:var(--acc-soft,rgba(46,125,255,.12))}
+    </style>`);
+  }
+  function screen(html) { css(); let el = document.getElementById('nfcall'); if (!el) { el = document.createElement('div'); el.id = 'nfcall'; document.body.appendChild(el); } el.innerHTML = html; return el; }
+  function closeScreen() { const el = document.getElementById('nfcall'); if (el) el.remove(); }
+  const fmtT = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  function paint() {
+    const c = C.cur; if (!c) return closeScreen();
+    const other = c.dir === 'out' ? c.callee : c.caller; const nm = esc(nameOf(other));
+    const st = c.state === 'incoming' ? (c.video ? '🎥 مكالمة فيديو واردة' : '📞 مكالمة صوت واردة') : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) : c.note || '';
+    const vid = c.video && c.state !== 'incoming';
+    const bar = c.state === 'incoming'
+      ? `<div><button class="cb red" data-nfc="decline">✕</button><span class="lbl">رفض</span></div>${c.video ? `<div><button class="cb grn" data-nfc="accept-a">📞</button><span class="lbl">صوت بس</span></div>` : ''}<div><button class="cb grn" data-nfc="accept">${c.video ? '🎥' : '📞'}</button><span class="lbl">رد</span></div>`
+      : `<div><button class="cb ${c.muted ? 'off' : ''}" data-nfc="mute">${c.muted ? '🔇' : '🎙️'}</button><span class="lbl">${c.muted ? 'مكتوم' : 'الميك'}</span></div>${c.video ? `<div><button class="cb ${c.camOff ? 'off' : ''}" data-nfc="cam">${c.camOff ? '🚫' : '📷'}</button><span class="lbl">الكاميرا</span></div><div><button class="cb" data-nfc="flip">🔄</button><span class="lbl">قلب</span></div>` : ''}<div><button class="cb red" data-nfc="hang">✆</button><span class="lbl">إنهاء</span></div>`;
+    let el = document.getElementById('nfcall');
+    if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '')) {
+      el = screen(`${vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : '<audio class="ra" autoplay></audio>'}<div class="top"><div class="av">👤</div><div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div></div><div class="bar">${bar}</div>`);
+      el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.classList.toggle('vid', !!vid);
+      attach();
+    } else { const s = document.getElementById('nfc-st'); if (s) s.textContent = st; const b = el.querySelector('.bar'); if (b) b.innerHTML = bar; }
+  }
+  function attach() {
+    const c = C.cur; const el = document.getElementById('nfcall'); if (!c || !el) return;
+    const rv = el.querySelector('.rv') || el.querySelector('.ra'); const lv = el.querySelector('.lv');
+    if (rv && c.remote && rv.srcObject !== c.remote) { rv.srcObject = c.remote; rv.play && rv.play().catch(() => { }); }
+    if (lv && c.local && lv.srcObject !== c.local) lv.srcObject = c.local;
+  }
+  /* ---------- WebRTC ---------- */
+  async function media(video) {
+    try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false }); }
+    catch (e) { if (video) { toast('الكاميرا مش متاحة — المكالمة هتبقى صوت بس', 'err'); return navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } throw e; }
+  }
+  async function makePc(c) {
+    const pc = new RTCPeerConnection({ iceServers: await iceServers() });
+    c.remote = new MediaStream();
+    pc.ontrack = ev => { ev.streams[0] ? ev.streams[0].getTracks().forEach(t => { if (!c.remote.getTracks().includes(t)) c.remote.addTrack(t); }) : c.remote.addTrack(ev.track); attach(); };
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState;
+      if (s === 'connected' && c.state !== 'active') { c.state = 'active'; stopTone(); c.t0 = Date.now(); c.tick = setInterval(() => { c.secs = Math.round((Date.now() - c.t0) / 1000); paint(); }, 1000); paint(); }
+      if (s === 'failed') { finish('failed', 'الاتصال ماوصلش — الشبكة قافلة المكالمات (جرّب واي فاي)'); }
+      if (s === 'disconnected') { setTimeout(() => { if (C.cur === c && pc.connectionState === 'disconnected') finish('ended', 'انقطع الاتصال'); }, 8000); }
+    };
+    c.local.getTracks().forEach(t => pc.addTrack(t, c.local));
+    return pc;
+  }
+  const gathered = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 4000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
+  function cleanup(c) { if (!c) return; stopTone(); clearInterval(c.tick); clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
+  async function finish(status, note) {
+    const c = C.cur; if (!c) return; C.cur = null; cleanup(c);
+    if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
+    if (note) { screen(`<div class="top"><div class="av">👤</div><div class="nm">${esc(nameOf(c.dir === 'out' ? c.callee : c.caller))}</div><div class="st">${esc(note)}</div></div><div class="bar"><div><button class="cb" data-nfc="close">✓</button><span class="lbl">تمام</span></div></div>`); setTimeout(() => { if (!C.cur) closeScreen(); }, 3500); }
+    else closeScreen();
+    C.logAt = 0; if (S.route && S.route.view === 'calls') render(false);
+  }
+  async function startCall(uid, video) {
+    if (!hosted()) { toast('المكالمات بتشتغل في النسخة المستضافة بس', 'err'); return; }
+    if (C.cur) { toast('إنت في مكالمة دلوقتي', 'err'); return; }
+    if (!uid || uid === me()) return;
+    await loadDir();
+    const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'calling' }; paint(); tone('out');
+    try {
+      c.local = await media(video); c.video = c.local.getVideoTracks().length > 0; paint(); attach();
+      c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
+      if (C.cur !== c) return cleanup(c);
+      const { data, error } = await S.sb.from('nf_calls').insert({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }).select('id').single();
+      if (error) throw error; c.id = data.id; paint();
+      const myName = (S.session && S.session.name) || nameOf(me());
+      S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.video ? 'مكالمة فيديو — اضغط للرد' : 'مكالمة صوت — اضغط للرد', url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, sms: false } }).catch(() => { });
+      c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
+    } catch (e) { console.warn(e); const msg = /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون' + (video ? ' والكاميرا' : '') + ' للسيستم' : 'تعذّر بدء المكالمة'; C.cur = c; finish(c.id ? 'failed' : null, msg); }
+  }
+  async function incoming(row) {
+    if (!row || row.callee !== me() || row.status !== 'ringing') return;
+    if (Date.now() - Date.parse(row.created_at) > RING_MS + 15000) return;
+    if (C.cur) { if (C.cur.id !== row.id) await S.sb.from('nf_calls').update({ status: 'busy' }).eq('id', row.id); return; }
+    await loadDir();
+    C.cur = { id: row.id, dir: 'in', caller: row.caller, callee: row.callee, video: !!row.video, state: 'incoming', offer: row.offer }; paint(); tone('in');
+    C.cur.timeout = setTimeout(() => { if (C.cur && C.cur.id === row.id && C.cur.state === 'incoming') { const c = C.cur; C.cur = null; cleanup(c); closeScreen(); } }, RING_MS);
+  }
+  async function accept(withVideo) {
+    const c = C.cur; if (!c || c.state !== 'incoming') return; stopTone(); clearTimeout(c.timeout);
+    c.state = 'connecting'; c.video = !!(c.video && withVideo); paint();
+    try {
+      c.local = await media(c.video); c.video = c.local.getVideoTracks().length > 0 || !!(c.video); paint(); attach();
+      c.pc = await makePc(c); await c.pc.setRemoteDescription(c.offer); const ans = await c.pc.createAnswer(); await c.pc.setLocalDescription(ans); await gathered(c.pc);
+      const { error } = await S.sb.from('nf_calls').update({ answer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp }, status: 'active' }).eq('id', c.id).eq('status', 'ringing');
+      if (error) throw error;
+    } catch (e) { console.warn(e); finish('failed', /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون للسيستم' : 'تعذّر الرد'); }
+  }
+  async function onRow(row) {
+    if (!row) return;
+    const c = C.cur;
+    if (row.callee === me() && row.status === 'ringing' && (!c || c.id !== row.id)) return incoming(row);
+    if (!c || c.id !== row.id) { C.logAt = 0; return; }
+    if (c.dir === 'out' && row.status === 'active' && row.answer && c.pc && !c.pc.currentRemoteDescription) { c.state = 'connecting'; stopTone(); clearTimeout(c.timeout); paint(); try { await c.pc.setRemoteDescription(row.answer); } catch (e) { finish('failed', 'تعذّر الاتصال'); } return; }
+    if (['ended', 'declined', 'missed', 'busy', 'failed'].includes(row.status)) {
+      const note = row.status === 'declined' ? 'رفض المكالمة' : row.status === 'busy' ? 'في مكالمة تانية' : row.status === 'missed' ? (c.dir === 'in' ? 'مكالمة فايتة' : 'مردّش') : row.status === 'failed' ? 'الاتصال ماكملش' : 'المكالمة خلصت';
+      C.cur = null; cleanup(c); C.cur = null; if (c.state === 'incoming') closeScreen(); else { C.cur = c; finish(null, note); }
+    }
+  }
+  function subscribe() {
+    if (!hosted() || !S.sb.channel) return; const uid = me(); if (!uid || C.chUid === uid) return;
+    if (C.ch) try { S.sb.removeChannel(C.ch); } catch (e) { /* ignore */ }
+    C.chUid = uid;
+    C.ch = S.sb.channel('nfcalls-' + uid)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'nf_calls', filter: 'callee=eq.' + uid }, p => onRow(p.new))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'nf_calls', filter: 'caller=eq.' + uid }, p => onRow(p.new))
+      .subscribe();
+    /* a call that rang while the app was closed */
+    setTimeout(async () => { try { const { data } = await S.sb.from('nf_calls').select('*').eq('callee', uid).eq('status', 'ringing').gte('created_at', new Date(Date.now() - RING_MS).toISOString()).order('created_at', { ascending: false }).limit(1); if (data && data[0]) incoming(data[0]); } catch (e) { /* ignore */ } }, 800);
+  }
+  /* opened from the push notification */
+  async function fromHash() {
+    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})/); if (!m || !hosted()) return;
+    subscribe();
+    const { data } = await S.sb.from('nf_calls').select('*').eq('id', m[1]).maybeSingle();
+    if (data && data.status === 'ringing' && data.callee === me()) incoming(data);
+    else if (data && data.callee === me() && data.status === 'missed') toast(`مكالمة فايتة من ${nameOf(data.caller)}`);
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-nfc]'); if (b) {
+      const a = b.dataset.nfc; const c = C.cur;
+      if (a === 'accept') return accept(true); if (a === 'accept-a') return accept(false);
+      if (a === 'decline') return finish('declined'); if (a === 'hang') return finish(c && c.state === 'calling' ? 'missed' : 'ended'); if (a === 'close') return closeScreen();
+      if (a === 'mute' && c && c.local) { c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); return paint(); }
+      if (a === 'cam' && c && c.local) { c.camOff = !c.camOff; c.local.getVideoTracks().forEach(t => { t.enabled = !c.camOff; }); return paint(); }
+      if (a === 'flip' && c && c.local && c.pc) { (async () => { try { c.facing = c.facing === 'environment' ? 'user' : 'environment'; const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: c.facing } }); const nt = s.getVideoTracks()[0]; const snd = c.pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (snd) await snd.replaceTrack(nt); c.local.getVideoTracks().forEach(t => { c.local.removeTrack(t); t.stop(); }); c.local.addTrack(nt); const lv = document.querySelector('#nfcall .lv'); if (lv) { lv.srcObject = c.local; lv.style.transform = c.facing === 'environment' ? 'none' : 'scaleX(-1)'; } } catch (x) { toast('مش قادر يقلب الكاميرا', 'err'); } })(); return; }
+      return;
+    }
+    const k = e.target.closest && e.target.closest('[data-nfcall]'); if (k) { e.preventDefault(); startCall(k.dataset.nfcall, k.dataset.v === '1'); }
+  });
+  window.addEventListener('beforeunload', () => { if (C.cur && C.cur.id) { try { S.sb.from('nf_calls').update({ status: C.cur.state === 'incoming' ? 'missed' : 'ended' }).eq('id', C.cur.id); } catch (e) { /* ignore */ } } });
+
+  /* ---------- page: المكالمات ---------- */
+  const callBtns = uid => `<button class="nfc-btn" data-nfcall="${esc(uid)}" title="اتصال صوت">📞</button><button class="nfc-btn" data-nfcall="${esc(uid)}" data-v="1" title="اتصال فيديو">🎥</button>`;
+  const stIcon = c => { const out = c.caller === me(); if (c.status === 'missed' || c.status === 'busy') return out ? '↗️ مردّش' : '❗ فايتة'; if (c.status === 'declined') return out ? '↗️ رفض' : '↙️ رفضتها'; if (c.status === 'failed') return '⚠️ ماوصلتش'; return out ? '↗️ صادرة' : '↙️ واردة'; };
+  const dur = c => c.answered_at && c.ended_at ? fmtT(Math.max(0, Math.round((Date.parse(c.ended_at) - Date.parse(c.answered_at)) / 1000))) : '';
+  function vCalls() {
+    css();
+    if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>';
+    if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog()]).then(() => { if (S.route.view === 'calls') render(false); }); }
+    try { localStorage.setItem('nf.calls.seen', String(Date.now())); } catch (e) { /* ignore */ }
+    const q = String((S.ui && S.ui.callQ) || '').trim(); const dir = (C.dir || []).filter(x => x.uid !== me() && (!q || String(x.name).includes(q) || roleName(x.role).includes(q)));
+    const log = (C.log || []).slice(0, 30);
+    return `<div class="grid gmain"><div class="stack">
+      <div class="card"><div class="cardhead"><h3>اتصل بحد</h3><div class="grow"></div><span class="muted small">${(C.dir || []).length ? (C.dir.length - 1) + ' شخص' : 'جارٍ التحميل…'}</span></div>
+        <input type="search" id="nfc-q" placeholder="ابحث بالاسم أو الوظيفة…" value="${esc(q)}" style="width:100%;margin:4px 0 8px">
+        <div>${dir.map(x => `<div class="nfc-row"><div class="nfc-av">👤</div><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${esc(roleName(x.role))}${x.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(x.dept_id)) : ''}</div></div>${callBtns(x.uid)}</div>`).join('') || '<div class="empty small">مفيش نتايج</div>'}</div></div>
+    </div><div class="stack">
+      <div class="card"><div class="cardhead"><h3>آخر المكالمات</h3></div>${log.length ? log.map(c => { const other = c.caller === me() ? c.callee : c.caller; return `<div class="nfc-row"><div class="grow"><div class="t" style="${c.status === 'missed' && c.callee === me() ? 'color:var(--crit-ink,#c0392b)' : ''}">${esc(nameOf(other))}</div><div class="s">${stIcon(c)} · ${c.video ? 'فيديو' : 'صوت'}${dur(c) ? ' · ' + dur(c) : ''} · ${esc(fmtDate(String(c.created_at).slice(0, 10)))} ${esc(new Date(c.created_at).toTimeString().slice(0, 5))}</div></div>${callBtns(other)}</div>`; }).join('') : '<div class="empty small">لسه مفيش مكالمات</div>'}</div>
+      <div class="card"><p class="small ink2" style="margin:0">المكالمة بتعدّي على النت (واي فاي أو باقة) من غير رصيد، ومشفّرة من جهاز لجهاز — السيستم مابيسجّلش الصوت ولا الصورة. علشان توصلك المكالمة والتطبيق مقفول لازم الإشعارات تبقى شغالة (وعلى الآيفون: السيستم مضاف للشاشة الرئيسية).</p></div>
+    </div></div>`;
+  }
+  document.addEventListener('input', e => { if (e.target && e.target.id === 'nfc-q') { S.ui = S.ui || {}; S.ui.callQ = e.target.value; const pos = e.target.selectionStart; render(false); const n = document.getElementById('nfc-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } } } });
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.calls = 'المكالمات';
+  if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.calls = () => vCalls();
+  if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'calls')) NAV.push({ id: 'calls', label: 'المكالمات', icon: 'bell', count: () => missedCount(), countCls: 'crit' });
+  setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk') ROLE_VIEWS[r].push('calls'); }); }, 0);
+  if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' : base(view)))(canSee);
+  /* call buttons on a person's page (workers / staff) */
+  RENDER_HOOKS.push(() => {
+    subscribe();
+    const r = S.route || {}; if (!hosted() || !r.id || !['workers', 'staff'].includes(r.view)) return;
+    const pid = r.view === 'workers' ? 'w:' + r.id : r.id; const d = (C.dir || []).find(x => x.person_id === pid);
+    if (!C.dir) { loadDir().then(() => { if (S.route.id === r.id) render(false); }); return; }
+    if (!d || d.uid === me()) return; css(); const head = document.querySelector('#view .cardhead'); if (!head || head.querySelector('[data-nfcall]')) return;
+    head.insertAdjacentHTML('beforeend', `<span style="display:inline-flex;gap:6px;margin-inline-start:8px">${callBtns(d.uid)}</span>`);
+  });
+  window.addEventListener('hashchange', fromHash); document.addEventListener('nf:ready', () => setTimeout(fromHash, 600)); setTimeout(fromHash, 2000);
+  setInterval(() => { if (hosted() && document.visibilityState === 'visible' && (!C.logAt || Date.now() - C.logAt > 120000)) loadLog().then(() => { if (typeof rerender === 'function') rerender(); }).catch(() => { }); }, 60000);
+  window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount };
 })();
 </script>
 
