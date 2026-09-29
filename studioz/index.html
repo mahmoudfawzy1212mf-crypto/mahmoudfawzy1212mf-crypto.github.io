@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0847-3c36f7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0916-de648d";</script>
 
 <script>
 'use strict';
@@ -9062,7 +9062,8 @@ async function punchGeo(w, method) {
 async function flagSuspect(w0, flags, geo) {
   const w = byId('workers', w0.id) || w0; const cfg = secCfg(); const hist = (w.suspects || []).filter(s => s.at > new Date(Date.now() - 30 * 864e5).toISOString()); const rec = { at: nowISO(), flags, lat: geo && geo.lat, lng: geo && geo.lng, ip: geo && geo.ip || null, dev: devId() };
   const next = hist.concat([rec]).slice(-20); const upd = { suspects: next };
-  const lock = next.length >= (+cfg.lockAfter || 3); if (lock) { upd.locked = true; upd.lockedAt = nowISO(); upd.lockReason = 'محاولات بصمة مشبوهة متكررة'; }
+  const SOFT = ['gesture']; /* v5.42: face matched but the liveness move timed out → recorded + sent to HR, never counts toward the lock */
+  const lock = next.filter(s => (s.flags || []).some(f => !SOFT.includes(f))).length >= (+cfg.lockAfter || 3); if (lock) { upd.locked = true; upd.lockedAt = nowISO(); upd.lockReason = 'محاولات بصمة مشبوهة متكررة'; }
   try { await Store.update('workers', w.id, upd, { silent: true }); } catch (e) { /* ro */ }
   const desc = `${w.name} — ${flags.map(f => SUSPECT_LABEL[f]).join(' · ')}\nالموقع: ${geo && geo.lat != null ? `${geo.lat}, ${geo.lng} (دقة ${geo.acc || '?'} م)` : 'غير متاح'}${geo && geo.ip ? `\nIP: ${geo.ip}` : ''}\nالمحاولات المشبوهة خلال 30 يومًا: ${next.length}${lock ? '\n⛔ تم قفل الحساب مؤقتًا — يفكّه HR بعد المراجعة' : ''}`;
   const hr = typeof headActorRole === 'function' ? headActorRole(w) : 'head';
@@ -21816,7 +21817,7 @@ Rules:
 1. Before submitting, ALWAYS call getCatalog. Re-use an existing product code when the design is a revision of an existing piece (e.g. LOF-C01-05). If it is a new piece, leave "code" empty (the owner assigns it). Use the exact project title from the catalog when it matches.
 2. When the user says «ابعت المنتج للسيستم» / «send to the system», call submitProduct with every field you know: code, name, brand (lof / elm / alu), project, client, revision, issueDate, stage, summary, dims (label/value/unit), materials, manufacturing (joints & processes), bom (partCode, name, material, qty, unit, process, notes), openItems (anything not yet approved), deliverables.
 3. Attach the files in two parts (put generated/uploaded files in openaiFileIdRefs, public https links in files [{name,url}]):
-   a) THE INTERACTIVE PAGE — ONE self-contained .html file (model viewer, dimensions, drawings, BOM). Inline every CSS/JS/image/model (data: URIs; JS libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com). It must NOT contain download buttons/links for CAD or source files and must NOT link to chatgpt.site or any other page. The factory sees this page inside the system only.
+   a) THE INTERACTIVE PAGE — ONE self-contained .html file (model viewer, dimensions, drawings, BOM). Inline every CSS/JS/image/model (data: URIs; JS libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com). It must NOT contain download buttons/links for CAD or source files and must NOT link to chatgpt.site or any other page. The factory sees this page inside the system only. It MUST work on phones and tablets (360–1100 px): viewport meta, fluid layout, no fixed widths wider than the screen, long titles wrap, tabs in one horizontally-scrolling row.
    b) SOURCE FILES — DWG / DXF / STEP / SLDPRT / STL / zip as separate files. The system locks them automatically to the owner and the technical office.
    Never send a chatgpt.site page link as a file.
 4. Never invent dimensions or quantities. Anything unconfirmed goes to openItems.
@@ -22328,7 +22329,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   async function loadDir(force) {
     if (!hosted()) return [];
     if (!force && C.dir && Date.now() - C.dirAt < 600000) return C.dir;
-    const { data, error } = await S.sb.rpc('nf_call_directory'); if (!error && Array.isArray(data)) { C.dir = data.filter(x => x.uid).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')); C.dirAt = Date.now(); }
+    let { data, error } = await S.sb.rpc('nf_call_directory2'); if (error || !Array.isArray(data)) ({ data, error } = await S.sb.rpc('nf_call_directory')); if (!error && Array.isArray(data)) { C.dir = data.filter(x => x.uid).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')); C.dirAt = Date.now(); setTimeout(syncAvatars, 300); }
     return C.dir || [];
   }
   async function loadLog() {
@@ -22352,18 +22353,64 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     loop(); C.ring = setInterval(loop, kind === 'in' ? 2000 : 3000);
   }
   function stopTone() { if (C.ring) { clearInterval(C.ring); C.ring = null; } if (navigator.vibrate) try { navigator.vibrate(0); } catch (e) { /* ignore */ } }
+  /* ---------- v5.42 look (iPhone / FaceTime) — icons, avatars ---------- */
+  const IC = {
+    phone: '<path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z" fill="currentColor"/>',
+    video: '<rect x="2.5" y="6" width="13" height="12" rx="3" fill="currentColor"/><path d="M16.5 10.2 21.5 7v10l-5-3.2z" fill="currentColor"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>',
+    micoff: '<rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>',
+    camoff: '<rect x="2.5" y="6" width="13" height="12" rx="3" fill="currentColor"/><path d="M16.5 10.2 21.5 7v10l-5-3.2z" fill="currentColor"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    flip: '<path d="M4 9a8 8 0 0 1 14-3.5L20 8M20 4v4h-4M20 15a8 8 0 0 1-14 3.5L4 16M4 20v-4h4" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    end: '<path d="M12 9c-2.6 0-5.1.5-7.4 1.4-.6.2-1 .8-1 1.5v2.6c0 .6.5 1 1.1 1l3-.5c.5-.1.9-.5.9-1v-1.8a13 13 0 0 1 6.8 0V14c0 .5.4.9.9 1l3 .5c.6.1 1.1-.4 1.1-1V12c0-.7-.4-1.3-1-1.5A19.6 19.6 0 0 0 12 9z" fill="currentColor"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+    cam: '<path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+    chev: '<path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+  };
+  const svg = (k, s = 24) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${IC[k]}</svg>`;
+  const dirOf = uid => (C.dir || []).find(x => x.uid === uid) || { uid, name: nameOf(uid) };
+  const initials = n => { const w = String(n || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).map(x => x.length > 3 ? x.replace(/^ال/, '') : x); return ((w[0] || '')[0] || '') + ((w[1] || '')[0] || ''); };
+  const hue = s => { let h = 0; for (const ch of String(s || '')) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; };
+  function avHtml(d, size, cls = '') {
+    const n = (d && d.name) || ''; const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px`;
+    if (d && d.photo) return `<div class="nfc-avt ${cls}" style="${st}"><img src="${esc(d.photo)}" alt=""></div>`;
+    const h = hue(n); return `<div class="nfc-avt ${cls}" style="${st};background:linear-gradient(180deg,hsl(${h} 30% 62%),hsl(${h} 32% 44%))">${esc(initials(n)) || svg('phone', Math.round(size * 0.4))}</div>`;
+  }
+  function bgOf(uid) { const d = dirOf(uid); return d.photo ? `<div class="bg" style="background-image:url('${esc(d.photo)}')"></div><div class="shade"></div>` : `<div class="bg" style="background:linear-gradient(160deg,hsl(${hue(d.name)} 25% 30%),#0b0f17 70%)"></div><div class="shade"></div>`; }
+  const cbtn = (act, ic, lbl, cls) => `<div class="cbw"><button class="cb ${cls || ''}" data-nfc="${act}" aria-label="${esc(lbl)}">${svg(ic, 30)}</button><span class="lbl">${esc(lbl)}</span></div>`;
   /* ---------- call screen ---------- */
   function css() {
     if (document.getElementById('nfcall-css')) return;
     document.head.insertAdjacentHTML('beforeend', `<style id="nfcall-css">
-      #nfcall{position:fixed;inset:0;z-index:9999;background:#0b0f17;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:max(24px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}
-      #nfcall video{background:#000}#nfcall .rv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}#nfcall .lv{position:absolute;top:max(16px,env(safe-area-inset-top));inset-inline-end:16px;width:28vw;max-width:150px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:2px solid rgba(255,255,255,.4);z-index:2;transform:scaleX(-1)}
-      #nfcall .top{position:relative;z-index:2;text-align:center;margin-top:8vh;text-shadow:0 1px 6px rgba(0,0,0,.6)}#nfcall .av{width:96px;height:96px;border-radius:50%;background:#1f2937;display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px}
-      #nfcall .nm{font-size:24px;font-weight:700}#nfcall .st{opacity:.8;margin-top:6px;font-size:15px}
-      #nfcall .bar{position:relative;z-index:2;display:flex;gap:18px;flex-wrap:wrap;justify-content:center}#nfcall .cb{width:64px;height:64px;border-radius:50%;border:0;font-size:26px;background:rgba(255,255,255,.16);color:#fff;cursor:pointer}#nfcall .cb.off{background:#fff;color:#111}#nfcall .cb.red{background:#e5484d}#nfcall .cb.grn{background:#2fa36b}
-      #nfcall .lbl{display:block;font-size:11px;opacity:.8;margin-top:4px;text-align:center}#nfcall.vid .av{display:none}
-      .nfc-row{display:flex!important;flex-direction:row!important;flex-wrap:nowrap;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line,rgba(127,127,127,.18))}.nfc-row .grow{flex:1;min-width:0}.nfc-row .t{font-weight:600}.nfc-row .s{font-size:12px;opacity:.7}
-      .nfc-av{flex:0 0 38px;width:38px;height:38px;border-radius:50%;background:var(--acc-soft,rgba(46,125,255,.12));display:flex;align-items:center;justify-content:center}.nfc-row>span,.nfc-btn{flex:0 0 auto}.nfc-btn{border:0;border-radius:999px;width:40px;height:40px;font-size:18px;cursor:pointer;background:var(--acc-soft,rgba(46,125,255,.12))}
+      #nfcall{position:fixed;inset:0;z-index:9999;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:max(28px,env(safe-area-inset-top)) 20px max(34px,env(safe-area-inset-bottom));font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",inherit;overflow:hidden;-webkit-user-select:none;user-select:none}
+      #nfcall .bg{position:absolute;inset:-40px;background-size:cover;background-position:center;filter:blur(38px) saturate(1.3);transform:scale(1.15)}#nfcall .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.25),rgba(0,0,0,.55) 70%,rgba(0,0,0,.75))}
+      #nfcall video{background:#000}#nfcall .rv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+      #nfcall .lv{position:absolute;top:max(18px,env(safe-area-inset-top));left:16px;width:30vw;max-width:130px;aspect-ratio:3/4;object-fit:cover;border-radius:16px;z-index:3;transform:scaleX(-1);box-shadow:0 6px 22px rgba(0,0,0,.5);touch-action:none;transition:left .25s,top .25s,right .25s,bottom .25s}
+      #nfcall .top{position:relative;z-index:2;text-align:center;margin-top:9vh;display:flex;flex-direction:column;align-items:center}
+      #nfcall .nfc-avt.av{margin-bottom:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+      #nfcall .nm{font-size:32px;font-weight:600;letter-spacing:-.3px}#nfcall .st{opacity:.72;margin-top:6px;font-size:17px}
+      #nfcall .bar{position:relative;z-index:2;display:flex;gap:26px;justify-content:center;align-items:flex-start;flex-wrap:wrap;transition:opacity .25s,transform .25s}
+      #nfcall .bar.inc{width:100%;max-width:360px;justify-content:space-between}
+      #nfcall .cbw{display:flex;flex-direction:column;align-items:center}
+      #nfcall .cb{width:72px;height:72px;border-radius:50%;border:0;background:rgba(255,255,255,.18);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0}
+      #nfcall .cb:active{filter:brightness(1.3)}#nfcall .cb.off{background:#fff;color:#111}#nfcall .cb.red{background:#ff3b30}#nfcall .cb.grn{background:#34c759}
+      #nfcall .lbl{display:block;font-size:13px;opacity:.9;margin-top:8px;text-align:center}
+      #nfcall.vid{justify-content:flex-end}#nfcall.vid .top{position:absolute;top:max(22px,env(safe-area-inset-top));left:16px;right:16px;margin:0;align-items:flex-start;text-align:start;transition:opacity .25s}#nfcall.vid .top .av{display:none}#nfcall.vid .nm{font-size:22px;text-shadow:0 1px 8px rgba(0,0,0,.6)}#nfcall.vid .st{font-size:14px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+      #nfcall.vid .bar{gap:14px;padding:12px 16px;border-radius:36px;background:rgba(40,40,40,.55);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}#nfcall.vid .cb{width:56px;height:56px;background:rgba(255,255,255,.14)}#nfcall.vid .cb.red{background:#ff3b30}#nfcall.vid .cb.off{background:#fff;color:#111}#nfcall.vid .lbl{display:none}
+      #nfcall.hideui .bar{opacity:0;transform:translateY(30px);pointer-events:none}#nfcall.hideui .top{opacity:0}
+      #nfcall .alt{position:relative;z-index:2;margin-top:18px;background:none;border:0;color:#fff;opacity:.85;font-size:15px;display:flex;gap:6px;align-items:center;cursor:pointer}
+      .nfc-avt{flex:0 0 auto;border-radius:50%;overflow:hidden;display:grid;place-items:center;color:#fff;font-weight:600;letter-spacing:.5px}.nfc-avt img{width:100%;height:100%;object-fit:cover;display:block}
+      body.nf-callspage .fab,body.nf-callspage .aifab,body.nf-callspage .callfab{display:none!important}
+      .nfc-seg{display:flex;background:var(--surface-2,rgba(127,127,127,.14));border-radius:10px;padding:2px;margin:0 0 12px}.nfc-seg button{flex:1;border:0;background:none;color:inherit;font:inherit;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer}.nfc-seg button.on{background:var(--surface,#2a2f3a);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+      .nfc-list{border-radius:14px;overflow:hidden;background:var(--surface,transparent);border:1px solid var(--line,rgba(127,127,127,.18))}
+      .nfc-row{display:flex!important;flex-direction:row!important;flex-wrap:nowrap;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;position:relative}.nfc-row+.nfc-row::before{content:'';position:absolute;top:0;inset-inline-start:70px;inset-inline-end:0;border-top:1px solid var(--line,rgba(127,127,127,.18))}
+      .nfc-row:active{background:rgba(127,127,127,.12)}.nfc-row .grow{flex:1;min-width:0}.nfc-row .t{font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nfc-row .s{font-size:13px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nfc-row .t.miss{color:#ff453a}
+      .nfc-btn{flex:0 0 auto;border:0;border-radius:50%;width:36px;height:36px;display:grid;place-items:center;cursor:pointer;padding:0;background:rgba(52,199,89,.14);color:#34c759}.nfc-btn.v{background:rgba(10,132,255,.14);color:#0a84ff}
+      .nfc-idx{font-size:13px;font-weight:600;opacity:.55;margin:14px 6px 6px}
+      #nfc-sheet{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}#nfc-sheet .sh{width:100%;max-width:440px;background:var(--bg,#12151c);color:var(--ink,#fff);border-radius:22px 22px 0 0;padding:14px 20px max(26px,env(safe-area-inset-bottom));text-align:center;animation:nfcup .22s ease-out}
+      @keyframes nfcup{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}#nfc-sheet .grab{width:38px;height:5px;border-radius:3px;background:rgba(127,127,127,.4);margin:0 auto 14px}
+      #nfc-sheet .nfc-avt{margin:6px auto 12px}#nfc-sheet .n{font-size:26px;font-weight:600}#nfc-sheet .r{opacity:.6;margin-top:2px}
+      #nfc-sheet .acts{display:flex;gap:10px;margin-top:20px}#nfc-sheet .acts button{flex:1;border:0;border-radius:14px;padding:12px 0 10px;background:var(--surface-2,rgba(127,127,127,.14));color:#0a84ff;font:inherit;font-size:13px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}#nfc-sheet .acts button.g{color:#34c759}
+      .nfc-me{display:flex;align-items:center;gap:12px;margin-bottom:12px}.nfc-me .grow{flex:1}.nfc-me label{cursor:pointer}
     </style>`);
   }
   function screen(html) { css(); let el = document.getElementById('nfcall'); if (!el) { el = document.createElement('div'); el.id = 'nfcall'; document.body.appendChild(el); } el.innerHTML = html; return el; }
@@ -22371,17 +22418,17 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const fmtT = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   function paint() {
     const c = C.cur; if (!c) return closeScreen();
-    const other = c.dir === 'out' ? c.callee : c.caller; const nm = esc(nameOf(other));
-    const st = c.state === 'incoming' ? (c.video ? '🎥 مكالمة فيديو واردة' : '📞 مكالمة صوت واردة') : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) : c.note || '';
+    const other = c.dir === 'out' ? c.callee : c.caller; const d = dirOf(other); const nm = esc(d.name || nameOf(other));
+    const st = c.state === 'incoming' ? (c.video ? 'مكالمة فيديو…' : 'مكالمة صوت…') : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) : c.note || '';
     const vid = c.video && c.state !== 'incoming';
     const bar = c.state === 'incoming'
-      ? `<div><button class="cb red" data-nfc="decline">✕</button><span class="lbl">رفض</span></div>${c.video ? `<div><button class="cb grn" data-nfc="accept-a">📞</button><span class="lbl">صوت بس</span></div>` : ''}<div><button class="cb grn" data-nfc="accept">${c.video ? '🎥' : '📞'}</button><span class="lbl">رد</span></div>`
-      : `<div><button class="cb ${c.muted ? 'off' : ''}" data-nfc="mute">${c.muted ? '🔇' : '🎙️'}</button><span class="lbl">${c.muted ? 'مكتوم' : 'الميك'}</span></div>${c.video ? `<div><button class="cb ${c.camOff ? 'off' : ''}" data-nfc="cam">${c.camOff ? '🚫' : '📷'}</button><span class="lbl">الكاميرا</span></div><div><button class="cb" data-nfc="flip">🔄</button><span class="lbl">قلب</span></div>` : ''}<div><button class="cb red" data-nfc="hang">✆</button><span class="lbl">إنهاء</span></div>`;
+      ? `${cbtn('decline', 'end', 'رفض', 'red')}${cbtn('accept', c.video ? 'video' : 'phone', 'رد', 'grn')}`
+      : `${cbtn('mute', c.muted ? 'micoff' : 'mic', c.muted ? 'مكتوم' : 'كتم', c.muted ? 'off' : '')}${c.video ? `${cbtn('cam', c.camOff ? 'camoff' : 'video', 'الكاميرا', c.camOff ? 'off' : '')}${cbtn('flip', 'flip', 'قلب', '')}` : ''}${cbtn('hang', 'end', 'إنهاء', 'red')}`;
     let el = document.getElementById('nfcall');
     if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '')) {
-      el = screen(`${vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : '<audio class="ra" autoplay></audio>'}<div class="top"><div class="av">👤</div><div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div></div><div class="bar">${bar}</div>`);
-      el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.classList.toggle('vid', !!vid);
-      attach();
+      el = screen(`${vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div></div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%"><div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>`);
+      el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.classList.toggle('vid', !!vid); el.classList.remove('hideui');
+      attach(); if (vid) pipDrag(el);
     } else { const s = document.getElementById('nfc-st'); if (s) s.textContent = st; const b = el.querySelector('.bar'); if (b) b.innerHTML = bar; }
   }
   function attach() {
@@ -22389,6 +22436,36 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const rv = el.querySelector('.rv') || el.querySelector('.ra'); const lv = el.querySelector('.lv');
     if (rv && c.remote && rv.srcObject !== c.remote) { rv.srcObject = c.remote; rv.play && rv.play().catch(() => { }); }
     if (lv && c.local && lv.srcObject !== c.local) lv.srcObject = c.local;
+  }
+  /* FaceTime: drag your own picture to any corner · tap the screen to hide / show the controls */
+  function pipDrag(el) {
+    const lv = el.querySelector('.lv'); if (!lv) return; let sx = 0, sy = 0, ox = 0, oy = 0, drag = false, moved = false;
+    lv.addEventListener('pointerdown', e => { drag = true; moved = false; const r = lv.getBoundingClientRect(); sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top; lv.style.transition = 'none'; lv.setPointerCapture(e.pointerId); e.stopPropagation(); });
+    lv.addEventListener('pointermove', e => { if (!drag) return; const dx = e.clientX - sx, dy = e.clientY - sy; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; lv.style.left = (ox + dx) + 'px'; lv.style.top = (oy + dy) + 'px'; lv.style.right = 'auto'; lv.style.bottom = 'auto'; });
+    lv.addEventListener('pointerup', e => { if (!drag) return; drag = false; lv.style.transition = ''; const r = lv.getBoundingClientRect(); const W = innerWidth, H = innerHeight, m = 16; const left = r.left + r.width / 2 < W / 2; const top = r.top + r.height / 2 < H / 2; lv.style.left = left ? m + 'px' : (W - r.width - m) + 'px'; lv.style.top = top ? Math.max(m, 18) + 'px' : (H - r.height - 120) + 'px'; e.stopPropagation(); });
+    el.addEventListener('click', e => { if (!el.classList.contains('vid') || e.target.closest('.bar') || e.target.closest('.lv')) return; el.classList.toggle('hideui'); });
+  }
+  /* ---------- employee photos for calls (small copies made by the owner / HR from the employee file) ---------- */
+  let avBusy = false;
+  const shrink = (src, max = 112) => new Promise(res => { const img = new Image(); img.onload = () => { try { const s = Math.min(img.width, img.height); const cv = document.createElement('canvas'); cv.width = cv.height = max; const x = cv.getContext('2d'); x.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, max, max); res(cv.toDataURL('image/jpeg', 0.72)); } catch (e) { res(null); } }; img.onerror = () => res(null); img.src = src; });
+  async function syncAvatars() {
+    if (avBusy || !hosted() || !(typeof isAdmin === 'function' && (isAdmin() || role() === 'hr'))) return; avBusy = true; let n = 0;
+    try {
+      for (const d of (C.dir || [])) {
+        if (!d.person_id || !d.photo_src || (d.photo && d.photo_src === d.photo_srcSeen)) continue;
+        const rec = String(d.person_id).startsWith('w:') ? byId('workers', d.person_id.slice(2)) : byId('staff', d.person_id); if (!rec || !rec.photo) continue;
+        const { data: cur } = await S.sb.from('nf_avatars').select('src').eq('uid', d.uid).maybeSingle(); if (cur && cur.src === d.photo_src) { d.photo_srcSeen = d.photo_src; continue; }
+        const img = await shrink(rec.photo); if (!img) continue;
+        const { error } = await S.sb.from('nf_avatars').upsert({ uid: d.uid, img, src: d.photo_src, updated_at: new Date().toISOString() }); if (!error) { d.photo = img; d.photo_srcSeen = d.photo_src; n++; }
+      }
+    } catch (e) { console.warn('avatars', e); } finally { avBusy = false; }
+    if (n && S.route && S.route.view === 'calls') render(false);
+  }
+  async function setMyPhoto(file) {
+    if (!file || !hosted()) return; const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(null); fr.readAsDataURL(file); }); if (!url) return;
+    const img = await shrink(url, 160); if (!img) { toast('الصورة مش مدعومة', 'err'); return; }
+    const { error } = await S.sb.from('nf_avatars').upsert({ uid: me(), img, src: 'self', updated_at: new Date().toISOString() }); if (error) { toast(error.message, 'err'); return; }
+    const d = (C.dir || []).find(x => x.uid === me()); if (d) d.photo = img; toast('اتحطت صورتك'); render(false);
   }
   /* ---------- WebRTC ---------- */
   async function media(video) {
@@ -22413,7 +22490,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   async function finish(status, note) {
     const c = C.cur; if (!c) return; C.cur = null; cleanup(c);
     if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
-    if (note) { screen(`<div class="top"><div class="av">👤</div><div class="nm">${esc(nameOf(c.dir === 'out' ? c.callee : c.caller))}</div><div class="st">${esc(note)}</div></div><div class="bar"><div><button class="cb" data-nfc="close">✓</button><span class="lbl">تمام</span></div></div>`); setTimeout(() => { if (!C.cur) closeScreen(); }, 3500); }
+    if (note) { const o = c.dir === 'out' ? c.callee : c.caller; screen(`${bgOf(o)}<div class="top">${avHtml(dirOf(o), 120, 'av')}<div class="nm">${esc(nameOf(o))}</div><div class="st">${esc(note)}</div></div><div class="bar">${cbtn('close', 'x', 'إغلاق', '')}</div>`); setTimeout(() => { if (!C.cur) closeScreen(); }, 3500); }
     else closeScreen();
     C.logAt = 0; if (S.route && S.route.view === 'calls') render(false);
   }
@@ -22429,7 +22506,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       if (C.cur !== c) return cleanup(c);
       const { data, error } = await S.sb.from('nf_calls').insert({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }).select('id').single();
       if (error) throw error; c.id = data.id; paint();
-      const myName = (S.session && S.session.name) || nameOf(me());
+      const myName = (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
       S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.video ? 'مكالمة فيديو — اضغط للرد' : 'مكالمة صوت — اضغط للرد', url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, sms: false } }).catch(() => { });
       c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
     } catch (e) { console.warn(e); const msg = /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون' + (video ? ' والكاميرا' : '') + ' للسيستم' : 'تعذّر بدء المكالمة'; C.cur = c; finish(c.id ? 'failed' : null, msg); }
@@ -22496,26 +22573,44 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   });
   window.addEventListener('beforeunload', () => { if (C.cur && C.cur.id) { try { S.sb.from('nf_calls').update({ status: C.cur.state === 'incoming' ? 'missed' : 'ended' }).eq('id', C.cur.id); } catch (e) { /* ignore */ } } });
 
-  /* ---------- page: المكالمات ---------- */
-  const callBtns = uid => `<button class="nfc-btn" data-nfcall="${esc(uid)}" title="اتصال صوت">📞</button><button class="nfc-btn" data-nfcall="${esc(uid)}" data-v="1" title="اتصال فيديو">🎥</button>`;
-  const stIcon = c => { const out = c.caller === me(); if (c.status === 'missed' || c.status === 'busy') return out ? '↗️ مردّش' : '❗ فايتة'; if (c.status === 'declined') return out ? '↗️ رفض' : '↙️ رفضتها'; if (c.status === 'failed') return '⚠️ ماوصلتش'; return out ? '↗️ صادرة' : '↙️ واردة'; };
+  /* ---------- page: المكالمات (iPhone «Contacts / Recents» look) ---------- */
+  const callBtns = uid => `<button class="nfc-btn" data-nfcall="${esc(uid)}" title="اتصال صوت" aria-label="اتصال صوت">${svg('phone', 18)}</button><button class="nfc-btn v" data-nfcall="${esc(uid)}" data-v="1" title="اتصال فيديو" aria-label="اتصال فيديو">${svg('video', 18)}</button>`;
+  const stTxt = c => { const out = c.caller === me(); if (c.status === 'missed' || c.status === 'busy') return out ? 'مردّش' : 'فايتة'; if (c.status === 'declined') return out ? 'رفض' : 'رفضتها'; if (c.status === 'failed') return 'ماوصلتش'; return out ? 'صادرة' : 'واردة'; };
   const dur = c => c.answered_at && c.ended_at ? fmtT(Math.max(0, Math.round((Date.parse(c.ended_at) - Date.parse(c.answered_at)) / 1000))) : '';
+  const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : fmtDate(String(iso).slice(0, 10)); };
   function vCalls() {
     css();
     if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>';
     if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog()]).then(() => { if (S.route.view === 'calls') render(false); }); }
     try { localStorage.setItem('nf.calls.seen', String(Date.now())); } catch (e) { /* ignore */ }
-    const q = String((S.ui && S.ui.callQ) || '').trim(); const dir = (C.dir || []).filter(x => x.uid !== me() && (!q || String(x.name).includes(q) || roleName(x.role).includes(q)));
-    const log = (C.log || []).slice(0, 30);
-    return `<div class="grid gmain"><div class="stack">
-      <div class="card"><div class="cardhead"><h3>اتصل بحد</h3><div class="grow"></div><span class="muted small">${(C.dir || []).length ? (C.dir.length - 1) + ' شخص' : 'جارٍ التحميل…'}</span></div>
-        <input type="search" id="nfc-q" placeholder="ابحث بالاسم أو الوظيفة…" value="${esc(q)}" style="width:100%;margin:4px 0 8px">
-        <div>${dir.map(x => `<div class="nfc-row"><div class="nfc-av">👤</div><div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${esc(roleName(x.role))}${x.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(x.dept_id)) : ''}</div></div>${callBtns(x.uid)}</div>`).join('') || '<div class="empty small">مفيش نتايج</div>'}</div></div>
-    </div><div class="stack">
-      <div class="card"><div class="cardhead"><h3>آخر المكالمات</h3></div>${log.length ? log.map(c => { const other = c.caller === me() ? c.callee : c.caller; return `<div class="nfc-row"><div class="grow"><div class="t" style="${c.status === 'missed' && c.callee === me() ? 'color:var(--crit-ink,#c0392b)' : ''}">${esc(nameOf(other))}</div><div class="s">${stIcon(c)} · ${c.video ? 'فيديو' : 'صوت'}${dur(c) ? ' · ' + dur(c) : ''} · ${esc(fmtDate(String(c.created_at).slice(0, 10)))} ${esc(new Date(c.created_at).toTimeString().slice(0, 5))}</div></div>${callBtns(other)}</div>`; }).join('') : '<div class="empty small">لسه مفيش مكالمات</div>'}</div>
-      <div class="card"><p class="small ink2" style="margin:0">المكالمة بتعدّي على النت (واي فاي أو باقة) من غير رصيد، ومشفّرة من جهاز لجهاز — السيستم مابيسجّلش الصوت ولا الصورة. علشان توصلك المكالمة والتطبيق مقفول لازم الإشعارات تبقى شغالة (وعلى الآيفون: السيستم مضاف للشاشة الرئيسية).</p></div>
-    </div></div>`;
+    S.ui = S.ui || {}; const tab = S.ui.callTab || 'contacts';
+    const q = String(S.ui.callQ || '').trim(); const dir = (C.dir || []).filter(x => x.uid !== me() && (!q || String(x.name).includes(q) || roleName(x.role).includes(q)));
+    const log = (C.log || []).slice(0, 40); const mine = (C.dir || []).find(x => x.uid === me());
+    const sub = x => `${esc(roleName(x.role))}${x.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(x.dept_id)) : ''}`;
+    let body = '';
+    if (tab === 'contacts') {
+      let last = ''; const rows = dir.map(x => { const L = String(x.name || '').trim()[0] || ''; const idx = L !== last ? (last = L, `</div><div class="nfc-idx">${esc(L)}</div><div class="nfc-list">`) : ''; return `${idx}<div class="nfc-row" data-nfcsheet="${esc(x.uid)}">${avHtml(x, 44)}<div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${sub(x)}</div></div>${callBtns(x.uid)}</div>`; }).join('');
+      body = `<input type="search" id="nfc-q" placeholder="ابحث بالاسم أو الوظيفة…" value="${esc(q)}" style="width:100%;margin:0 0 4px;border-radius:12px">${dir.length ? `<div class="nfc-list" style="display:none">${rows}</div>` : '<div class="empty small">مفيش نتايج</div>'}`;
+    } else {
+      body = log.length ? `<div class="nfc-list">${log.map(c => { const other = c.caller === me() ? c.callee : c.caller; const d = dirOf(other); const miss = (c.status === 'missed' || c.status === 'busy') && c.callee === me(); return `<div class="nfc-row" data-nfcsheet="${esc(other)}">${avHtml(d, 40)}<div class="grow"><div class="t ${miss ? 'miss' : ''}">${esc(d.name || nameOf(other))}</div><div class="s">${svg(c.video ? 'video' : 'phone', 12)} ${stTxt(c)}${dur(c) ? ' · ' + dur(c) : ''}</div></div><span class="s" style="opacity:.55;font-size:13px">${esc(whenTxt(c.created_at))}</span>${callBtns(other)}</div>`; }).join('')}</div>` : '<div class="empty small">لسه مفيش مكالمات</div>';
+    }
+    return `<div style="max-width:640px;margin:0 auto">
+      <div class="nfc-me">${avHtml(mine || { name: (S.session && S.session.name) || '' }, 52)}<div class="grow"><div style="font-weight:700;font-size:17px">${esc((mine && mine.name) || (S.session && S.session.name) || '')}</div><div class="muted small">${(C.dir || []).length ? (C.dir.length - 1) + ' شخص على السيستم' : 'جارٍ التحميل…'}</div></div><label class="btn sm ghost">${svg('cam', 16)}<span>صورتي</span><input type="file" accept="image/*" id="nfc-myphoto" hidden></label></div>
+      <div class="nfc-seg"><button class="${tab === 'contacts' ? 'on' : ''}" data-nfctab="contacts">جهات الاتصال</button><button class="${tab === 'recent' ? 'on' : ''}" data-nfctab="recent">الأخيرة${missedCount() ? ` <span style="color:#ff453a">(${missedCount()})</span>` : ''}</button></div>
+      ${body}
+      <p class="small ink2" style="margin:14px 4px 0;opacity:.7">المكالمة على النت (واي فاي أو باقة) من غير رصيد، ومشفّرة من جهاز لجهاز — السيستم مابيسجّلش الصوت ولا الصورة. علشان توصلك المكالمة والتطبيق مقفول لازم الإشعارات تبقى شغالة.</p>
+    </div>`;
   }
+  function openSheet(uid) {
+    const d = dirOf(uid); if (!d || uid === me()) return; css(); document.getElementById('nfc-sheet')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `<div id="nfc-sheet"><div class="sh"><div class="grab"></div>${avHtml(d, 112)}<div class="n">${esc(d.name)}</div><div class="r">${esc(roleName(d.role))}${d.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(d.dept_id)) : ''}</div><div class="acts"><button class="g" data-nfcall="${esc(uid)}">${svg('phone', 24)}<span>صوت</span></button><button data-nfcall="${esc(uid)}" data-v="1">${svg('video', 24)}<span>فيديو</span></button></div></div></div>`);
+  }
+  document.addEventListener('click', e => {
+    const sh = document.getElementById('nfc-sheet'); if (sh && (e.target === sh || e.target.closest('#nfc-sheet [data-nfcall]'))) setTimeout(() => sh.remove(), 0);
+    const t = e.target.closest && e.target.closest('[data-nfctab]'); if (t) { S.ui = S.ui || {}; S.ui.callTab = t.dataset.nfctab; render(false); return; }
+    const r = e.target.closest && e.target.closest('[data-nfcsheet]'); if (r && !e.target.closest('[data-nfcall]')) openSheet(r.dataset.nfcsheet);
+  });
+  document.addEventListener('change', e => { if (e.target && e.target.id === 'nfc-myphoto' && e.target.files && e.target.files[0]) setMyPhoto(e.target.files[0]); });
   document.addEventListener('input', e => { if (e.target && e.target.id === 'nfc-q') { S.ui = S.ui || {}; S.ui.callQ = e.target.value; const pos = e.target.selectionStart; render(false); const n = document.getElementById('nfc-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } } } });
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.calls = 'المكالمات';
   if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.calls = () => vCalls();
@@ -22524,7 +22619,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' : base(view)))(canSee);
   /* call buttons on a person's page (workers / staff) */
   RENDER_HOOKS.push(() => {
-    subscribe();
+    subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
     const r = S.route || {}; if (!hosted() || !r.id || !['workers', 'staff'].includes(r.view)) return;
     const pid = r.view === 'workers' ? 'w:' + r.id : r.id; const d = (C.dir || []).find(x => x.person_id === pid);
     if (!C.dir) { loadDir().then(() => { if (S.route.id === r.id) render(false); }); return; }
@@ -22543,7 +22638,7 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
   RENDER_HOOKS.push(() => {
     const on = hosted() && S.session && role() !== 'kiosk' && !(S.route && S.route.view === 'calls'); let b = document.querySelector('.callfab');
     if (!on) { if (b) b.remove(); return; }
-    if (!b) { document.body.insertAdjacentHTML('beforeend', '<a class="callfab" href="#/calls" title="المكالمات" aria-label="المكالمات">📞</a>'); b = document.querySelector('.callfab'); }
+    if (!b) { document.body.insertAdjacentHTML('beforeend', `<a class="callfab" href="#/calls" title="المكالمات" aria-label="المكالمات">${svg('phone', 24)}</a>`); b = document.querySelector('.callfab'); }
     const n = missedCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
   });
   window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount };
@@ -22613,6 +22708,52 @@ function orderPresTile(p, pres, fs, ctx) {
     todo.forEach(f => setTimeout(() => fix(f), 50));
     clearTimeout(pcT); pcT = setTimeout(presCover, 1500);
   });
+})();
+/* =====================================================================
+   v5.42 — عارض الملفات على الموبايل والتابلت (طلب المالك: «اليوكس يو آي بتاع صفحة المنتجات يتظبط على الموبايل والتابلت»)
+   · شريط الملفات فوق: شرايح صغيرة في سطر واحد بتتسحب
+   · الأزرار العايمة (📞 / AI / +) بتستخبى طول ما العارض مفتوح
+   · صفحات HTML (برزنتيشن ChatGPT): تصليح تلقائي للموبايل (العناوين الطويلة بتلف، مفيش سكرول بالعرض)
+     + زرار «عرض الكمبيوتر» يعرض الصفحة زي الديسكتوب متصغّرة على قد الشاشة
+   ===================================================================== */
+(() => {
+  document.head.insertAdjacentHTML('beforeend', `<style id="nf-mview">
+body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!important}
+@media (max-width:1100px){
+  .nfv-top{padding:6px 10px;gap:6px;min-height:46px}
+  .nfv-top .nfv-title{min-width:0;flex:1 1 160px}.nfv-top .nfv-title b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}.nfv-top .nfv-title .tiny{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nfv-top .grow{display:none}.nfv-top .btn.sm{padding:5px 9px}
+}
+@media (max-width:640px){
+  .nfv-top{flex-wrap:nowrap}.nfv-top .nfv-title{flex:1 1 auto}.nfv-top .nfv-acts{display:flex;gap:4px}
+  .nfv-top .btn.sm:not(.a) span{display:none}.nfv-top .btn.sm{padding:6px 8px}
+  .nfv-tabs{padding:6px 10px;gap:6px;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch}
+  .nfv-tabs button{flex-direction:row!important;max-width:170px;padding:3px 8px 3px 4px;border-radius:999px;min-height:0}
+  .nfv-tabs button img{width:26px;height:26px;border-radius:50%;flex:0 0 26px}
+  .nfv-tabs button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+}
+.nfv-html.desk{overflow:hidden}.nfv-html.desk iframe{position:absolute;top:0;left:0;width:1280px;transform-origin:0 0}
+</style>`);
+  const MFIX = `<meta name="viewport" content="width=device-width,initial-scale=1"><style id="nf-mfix">@media (max-width:1100px){html,body{max-width:100%!important;overflow-x:hidden!important}body *:not(canvas){max-width:100%}body *:not(pre):not(code):not(textarea){white-space:normal!important;overflow-wrap:anywhere}img,video{max-width:100%!important;height:auto}table{display:block;overflow-x:auto}pre{white-space:pre-wrap}}</style>`;
+  const small = () => Math.min(innerWidth, screen.width || innerWidth) <= 1100;
+  const deskOn = () => { try { return localStorage.getItem('nf.htmlDesk') === '1'; } catch (e) { return false; } };
+  if (typeof htmlWithCapture === 'function') htmlWithCapture = (base => function (text) {
+    let t = base.apply(this, arguments); if (!small() || deskOn()) return t;
+    if (/<meta[^>]+name=["']?viewport/i.test(t)) t = t.replace(/<meta[^>]+name=["']?viewport[^>]*>/i, '');
+    const i = t.search(/<head[^>]*>/i); if (i >= 0) { const j = t.indexOf('>', i) + 1; return t.slice(0, j) + MFIX + t.slice(j); } return MFIX + t;
+  })(htmlWithCapture);
+  function fit(body) { const w = body.querySelector('.nfv-html'); const ifr = w && w.querySelector('iframe'); if (!ifr) return; const on = small() && deskOn(); w.classList.toggle('desk', on); if (on) { const k = w.clientWidth / 1280; ifr.style.transform = `scale(${k})`; ifr.style.height = (w.clientHeight / k) + 'px'; } else { ifr.style.transform = ''; ifr.style.height = ''; } }
+  if (typeof mountHtmlViewer === 'function') mountHtmlViewer = (base => async function (body, acts, f) {
+    const dispose = await base.apply(this, arguments);
+    if (small()) {
+      const b = document.createElement('button'); b.className = 'btn sm ghost'; b.id = 'nfv-desk';
+      const lab = () => { b.innerHTML = deskOn() ? `${icon('inventory')}<span>عرض الموبايل</span>` : `${icon('print')}<span>عرض الكمبيوتر</span>`; }; lab();
+      b.onclick = () => { try { localStorage.setItem('nf.htmlDesk', deskOn() ? '0' : '1'); } catch (e) { /* ignore */ } if (_viewer) viewerShow(_viewer.idx); };
+      acts.appendChild(b); fit(body);
+    }
+    const onR = () => fit(body); addEventListener('resize', onR);
+    return () => { removeEventListener('resize', onR); if (typeof dispose === 'function') dispose(); };
+  })(mountHtmlViewer);
 })();
 </script>
 
