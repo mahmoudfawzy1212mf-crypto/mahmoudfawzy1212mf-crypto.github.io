@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0954-d07290";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1003-c19ea2";</script>
 
 <script>
 'use strict';
@@ -3852,14 +3852,20 @@ ACTIONS.pinSet = wid => { const w = byId('workers', wid); if (!w) return; openMo
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64u = s => Uint8Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
 const deviceBioAvailable = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
-async function deviceRegister(w) {
-  const cred = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: S.settings.company || 'Ninety Fabrication' }, user: { id: new TextEncoder().encode(w.id), name: w.username || w.code || w.id, displayName: w.name }, pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' }, timeout: 60000, attestation: 'none' } });
+async function deviceRegister(w, rk) {
+  const cred = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: S.settings.company || 'Ninety Fabrication' }, user: { id: new TextEncoder().encode(w.id), name: w.username || w.code || w.id, displayName: w.name }, pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: rk || 'preferred', requireResidentKey: false }, timeout: 60000, attestation: 'none' } });
   return { id: b64u(cred.rawId), at: nowISO(), ua: navigator.userAgent.slice(0, 90) };
 }
 async function deviceVerify(w) { const c = w.deviceCred; if (!c) return false; const a = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: fromB64u(c.id) }], userVerification: 'required', timeout: 60000 } }); return !!a && b64u(a.rawId) === c.id; }
 ACTIONS.deviceEnroll = async wid => {
   const w = byId('workers', wid); if (!w) return; if (!deviceBioAvailable()) { toast('بصمة الجهاز تحتاج فتح التطبيق من رابط https على موبايل أو جهاز فيه بصمة/تعرّف وجه', 'err'); return; }
-  try { const cred = await deviceRegister(w); await Store.update('workers', w.id, { deviceCred: cred }); toast('تم تفعيل بصمة الجهاز — ستُطلب عند كل بصمة من هذا الموبايل'); } catch (e) { console.warn(e); toast('لم يكتمل التفعيل — تأكد من وجود بصمة/قفل مفعّل على الجهاز', 'err'); }
+  /* v5.45: retry once with a device-only key (some Androids refuse a synced passkey) + say WHY it failed, and keep «saved» apart from «the phone refused» */
+  let cred = null, err = null;
+  try { cred = await deviceRegister(w); } catch (e) { err = e; if (!/NotAllowed|Abort/.test(String(e && e.name))) { try { cred = await deviceRegister(w, 'discouraged'); err = null; } catch (e2) { err = e2; } } }
+  if (!cred) { const n = String((err && err.name) || ''); console.warn(err);
+    const why = /NotAllowed/.test(n) ? 'اتلغى أو الوقت خلص — اضغط «فعّل» تاني وحط صباعك على الحساس لما يطلب' : /InvalidState/.test(n) ? 'البصمة متسجلة قبل كده على الموبايل ده — اطلب من HR يلغي بصمة الجهاز القديمة وجرّب تاني' : /NotSupported|Security/.test(n) ? 'الموبايل أو المتصفح مش بيدعم بصمة الجهاز — افتح التطبيق من Chrome وتأكد إن Google Play Services شغالة' : 'الموبايل رفض — تأكد إن فيه بصمة صباع أو قفل شاشة متسجل في إعدادات الموبايل وإن حساب Google شغال';
+    toast(`لم يكتمل التفعيل: ${why}${n ? ` (${n})` : ''}`, 'err'); return; }
+  try { await Store.update('workers', w.id, { deviceCred: cred }); toast('تم تفعيل بصمة الجهاز — ستُطلب عند كل بصمة من هذا الموبايل'); } catch (e) { console.warn(e); toast('البصمة اتعملت على الموبايل بس ماتحفظتش على السيستم — تأكد من النت وجرّب تاني', 'err'); }
 };
 ACTIONS.deviceRemove = async wid => { if (!(await confirmDlg('إلغاء بصمة الجهاز لهذا الموظف؟ سيحتاج لتفعيلها من جديد على موبايله.'))) return; await Store.update('workers', wid, { deviceCred: null }); };
 
