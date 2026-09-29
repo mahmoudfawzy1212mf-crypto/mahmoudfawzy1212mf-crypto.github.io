@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-1453-c6e158";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-1631-c83549";</script>
 
 <script>
 'use strict';
@@ -23300,6 +23300,228 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
     const st = v.querySelector('.stack') || v; st.insertAdjacentHTML('beforeend', html);
   } catch (e) { /* ignore */ } });
   window.nfAccX = { parseBook, findSup, norm };
+})();
+/* =====================================================================
+   v5.55 — «الممو» بتاع المالك (للمالك بس) — مربوط بالمساعد الذكي والسيستم
+   محمود: «أسجّل ڤويس نوت بكل اللي عايز أعمله في المشاريع… عايز أشوف الخامة جت ولا لأ، أكلم حد في المصنع
+   أشوف التاسك خلصت، حد طالب عرض سعر… ويعمل عليها ريمايندر، ولو ياخد أكشن ياخد».
+   · زرار فوق زرار الاتصال (المالك بس) → صفحة #/memo: تكتب أو تتكلم (stt) → المساعد (aiJson) يقسّم الكلام لبنود
+     ويربط كل بند بالمشروع / أمر الشراء / المهمة / الموظف / العميل (من قايمة بيانات السيستم نفسها).
+   · قبل الحفظ معاينة: «جه ولا لأ؟» و«خلصت ولا لأ؟» بيترد عليها على طول من السيستم؛ الأكشنز (مهمة/رسالة لموظف،
+     عميل محتمل في CRM البراند، تذكير) مابتتنفذش غير لما تعلّم عليها وتدوس «احفظ ونفّذ». مفيش أي حاجة فيها فلوس أو موافقات.
+   · التخزين: collection «memos» — السيرفر (migration nf_v555_memos) قافلها على المالك بس (قراءة وكتابة).
+   · التذكير: Edge Function «memo-tick» كل 5 دقايق (pg_cron nf-memo-5m): قبل ما يفكّرك بيبص في السيستم —
+     لو أمر الشراء اتسلّم / المهمة خلصت يقفل البند ويبعت «✓ خلصت»، غير كده «⏰ …» باللي حاصل. بيوصل والأبليكيشن مقفول.
+   ===================================================================== */
+(function () {
+  if (window.__NF_MEMO__) return; window.__NF_MEMO__ = 1;
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const own = () => !!S.session && isAdmin() && !(typeof isStuSys === 'function' && isStuSys());
+  if (!COLS.includes('memos')) COLS.push('memos'); S.data.memos = S.data.memos || new Map();
+  const memos = () => list('memos').filter(m => m && m.id && !m.deleted);
+  const NOTE = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>';
+  const MIC = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.memofab{position:fixed;left:18px;bottom:calc(222px + env(safe-area-inset-bottom,0px));width:54px;height:54px;border-radius:50%;border:1.5px solid color-mix(in srgb,#d08a1e 50%,var(--line));background:var(--surface);color:#d08a1e;box-shadow:0 8px 20px -8px rgba(0,0,0,.45);z-index:60;display:grid;place-items:center;cursor:pointer;text-decoration:none}
+.memofab .n{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#e5484d;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center}
+@media (max-width:900px){.memofab{left:14px;bottom:calc(268px + env(safe-area-inset-bottom,0px));width:50px;height:50px}}
+body.printing .memofab,body.fab-hide .memofab,body.nf-typing .memofab,body.nf-chatpage .memofab,body.stuboard .memofab,body:has(.side.open) .memofab,body:has(.aipanel:not([hidden])) .memofab,body:has(#nfcall) .memofab,body.nf-callspage .memofab,body.nfv-open .memofab{display:none}
+.memobox textarea{width:100%;min-height:92px;resize:vertical;font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.memobox .row{gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.memomic.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}
+.memotabs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}.memotabs button{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}.memotabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.memoit{display:flex;gap:10px;align-items:flex-start;padding:10px 4px;border-bottom:1px solid var(--line)}.memoit:last-child{border-bottom:0}
+.memoit .dot{flex:0 0 10px;height:10px;border-radius:50%;margin-top:6px;background:var(--line)}.memoit.late .dot{background:#e5484d}.memoit.wait .dot{background:#d08a1e}.memoit.done .dot{background:#2fa36b}
+.memoit .b{flex:1;min-width:0}.memoit .t{font-weight:600}.memoit.done .t{text-decoration:line-through;color:var(--ink-2)}
+.memoit .chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.memoit .chips a,.memoit .chips span{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--ink-2);text-decoration:none}
+.memoit .acts{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.memoprev .mp{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px}.memoprev .mp.off{opacity:.55}
+.memoprev .mp .hd{display:flex;gap:8px;align-items:center}.memoprev .mp .hd input[type=text]{flex:1;font-weight:600}
+.memoprev .ans{margin-top:6px;padding:6px 10px;border-radius:8px;background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:13px}
+.memoprev .act{margin-top:6px;font-size:13px}.memoprev .act b{color:var(--accent)}
+.memoprev .g{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}@media (max-width:560px){.memoprev .g{grid-template-columns:1fr}}
+</style>`);
+
+  /* ---------- FAB ---------- */
+  const lateCount = () => { const now = new Date().toISOString(); return memos().filter(m => m.status !== 'done' && m.due && m.due <= now).length; };
+  RENDER_HOOKS.push(() => {
+    let b = document.querySelector('.memofab'); const on = own() && !(S.route && S.route.view === 'memo');
+    if (!on) { if (b) b.remove(); return; }
+    if (!b) { document.body.insertAdjacentHTML('beforeend', `<a class="memofab" href="#/memo" title="الممو" aria-label="الممو">${NOTE}</a>`); b = document.querySelector('.memofab'); }
+    const n = lateCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
+  });
+
+  /* ---------- helpers ---------- */
+  const pad = n => String(n).padStart(2, '0');
+  const localIn = iso => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const toIso = v => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d.toISOString(); };
+  const tomorrow9 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); };
+  const fmtWhen = iso => { if (!iso) return 'من غير ميعاد'; const d = new Date(iso); const t = `${pad(d.getHours())}:${pad(d.getMinutes())}`; const day = localIn(iso).slice(0, 10); const today = todayISO(); return (day === today ? 'النهارده' : day === addDays(today, 1) ? 'بكرة' : day === addDays(today, -1) ? 'امبارح' : fmtDate(day)) + ' ' + t; };
+  const wName = id => { const w = id && byId('workers', id); return w ? w.name : ''; };
+  const poLabel = p => (typeof PO_STATUS !== 'undefined' && PO_STATUS[p.status] ? PO_STATUS[p.status][0] : p.status);
+  const taskLabel = t => (typeof TASK_STATUS !== 'undefined' && TASK_STATUS[t.status] ? TASK_STATUS[t.status][0] : t.status);
+  const PO_DONE = ['received', 'partial', 'arrived', 'closed'];
+  const brandName = id => ((S.settings.brands || []).find(b => b.id === id) || {}).name || id || '';
+  function answerOf(it) {
+    if (it.kind === 'check_po') { const p = it.purchaseId && byId('purchases', it.purchaseId); if (!p) return { txt: 'مالقيتش أمر الشراء — اختاره تحت أو هيتحط تذكير بس', done: false }; const done = PO_DONE.includes(p.status); return { done, txt: `${done ? '✓ ' : 'لسه — '}أمر الشراء ${p.number || ''} (${p.supplier || ''}): ${poLabel(p)}${p.receivedAt ? ' — اتسلّم ' + fmtDate(String(p.receivedAt).slice(0, 10)) : p.expected ? ' — المتوقع ' + fmtDate(p.expected) : ''}` }; }
+    if (it.kind === 'check_task') { const t = it.taskId && byId('tasks', it.taskId); if (!t) return { txt: 'مالقيتش المهمة — لو عايز تبعت للمسؤول غيّر النوع لـ«رسالة لموظف»', done: false }; const done = t.status === 'done'; return { done, txt: `${done ? '✓ ' : 'لسه — '}«${t.title || ''}»: ${taskLabel(t)}${t.assigneeId ? ' — ' + wName(t.assigneeId) : ''}${t.doneAt ? ' — خلصت ' + fmtDate(String(t.doneAt).slice(0, 10)) : ''}` }; }
+    if (it.kind === 'summary') { const o = it.orderId && byId('orders', it.orderId); if (!o) return { txt: 'مالقيتش المشروع', done: false }; const st = orderStages(o); const dn = st.filter(s => ['done', 'skipped'].includes(s.status)).length; const late = list('tasks').filter(t => t.orderId === o.id && !['done', 'cancelled'].includes(t.status) && t.dueDate && t.dueDate < todayISO()).length; const pos = list('purchases').filter(p => p.orderId === o.id && !PO_DONE.includes(p.status) && p.status !== 'cancelled'); return { txt: `${o.code} — ${o.title || ''}: المراحل ${dn}/${st.length}${o.dueDate ? ' · التسليم ' + fmtDate(o.dueDate) : ''} · مهام متأخرة ${late} · مشتريات لسه ماوصلتش ${pos.length}${pos.length ? ' (' + pos.slice(0, 3).map(p => p.number).join('، ') + ')' : ''}`, done: false }; }
+    return null;
+  }
+  const KINDS = { remind: 'تذكير', check_po: 'أشوف الخامة/أمر الشراء جه ولا لأ', check_task: 'أشوف المهمة خلصت ولا لأ', message: 'رسالة / مهمة لموظف', lead: 'عرض سعر محتمل (CRM)', summary: 'أشوف موقف المشروع', note: 'ملاحظة' };
+
+  /* ---------- AI: split + link ---------- */
+  function ctx() {
+    const orders = list('orders').filter(o => isOpen(o)).slice(0, 60).map(o => `${o.id}|${o.code}|${(o.title || '').slice(0, 50)}|${clientName(o.clientId)}`);
+    const workers = list('workers').filter(w => !w.left && w.status !== 'inactive').slice(0, 80).map(w => `${w.id}|${w.name}|${(typeof deptName === 'function' ? deptName(w.deptId) : w.deptId) || ''}`);
+    const pos = list('purchases').filter(p => !['cancelled'].includes(p.status) && !PO_DONE.includes(p.status)).slice(0, 60).map(p => `${p.id}|${p.number || ''}|${p.supplier || ''}|${p.orderId || ''}|${(p.items || []).map(i => i.name).filter(Boolean).slice(0, 4).join('، ')}|${p.status}`);
+    const tasks = list('tasks').filter(t => ['open', 'doing'].includes(t.status || 'open') && t.assigneeId).slice(0, 80).map(t => `${t.id}|${(t.title || '').slice(0, 50)}|${wName(t.assigneeId)}|${t.orderId || ''}`);
+    const clients = list('clients').slice(0, 80).map(c => `${c.id}|${c.name}`);
+    return { orders, workers, pos, tasks, clients };
+  }
+  async function aiSplit(text) {
+    const c = ctx(); const now = new Date();
+    const prompt = `إنت مساعد مالك مصنع (Ninety Fabrication). المالك قال الكلام ده في «الممو» بتاعه (عامية مصري):
+«${text}»
+قسّمه لبنود منفصلة (كل حاجة عايز يعملها أو يفتكرها بند). الوقت دلوقتي ${localIn(now.toISOString())} (توقيت القاهرة، اليوم ${['الأحد', 'الاتنين', 'التلات', 'الأربع', 'الخميس', 'الجمعة', 'السبت'][now.getDay()]}).
+أنواع البند (kind):
+- check_po: عايز يعرف خامة/أمر شراء وصل ولا لأ → purchaseId من قايمة المشتريات
+- check_task: عايز يعرف مهمة عند حد خلصت ولا لأ → taskId من قايمة المهام
+- message: عايز يكلم/يبلّغ/يطلب من حد في المصنع حاجة → workerId + message (نص قصير مهذب هيتبعت للموظف)
+- lead: حد (عميل) عايز عرض سعر جديد لسه ماتعملش → clientName (+ clientId لو موجود) + brandId (lof = أثاث خارجي/مواقع، elm = أثاث داخلي/خشب/مطابخ، alu = ألومنيوم شبابيك وأبواب)
+- summary: عايز يشوف موقف/سلمنت/حالة مشروع → orderId
+- remind: تذكير عام يعمل حاجة (زي «أعمل أوفر» أو «أتصل بفلان»)
+- note: ملاحظة من غير أكشن
+الميعاد due بصيغة YYYY-MM-DDTHH:mm لو قال ميعاد (بكرة = الساعة 9 الصبح لو ماقالش ساعة؛ «بعد الضهر» = 14:00)، وإلا null.
+اربط orderId من المشاريع لو ذكر مشروع/عميل/كود. استخدم الـ id اللي في القوايم بالظبط، ولو مش متأكد سيبه null.
+المشاريع (id|كود|اسم|عميل):
+${c.orders.join('\n') || '—'}
+الموظفين (id|اسم|قسم):
+${c.workers.join('\n') || '—'}
+المشتريات المفتوحة (id|رقم|مورد|orderId|أصناف|حالة):
+${c.pos.join('\n') || '—'}
+المهام المفتوحة (id|عنوان|مع مين|orderId):
+${c.tasks.join('\n') || '—'}
+العملاء (id|اسم):
+${c.clients.join('\n') || '—'}
+رد JSON بس: {"items":[{"title":"عنوان قصير بالعامية","kind":"...","due":null,"orderId":null,"purchaseId":null,"taskId":null,"workerId":null,"message":null,"clientId":null,"clientName":null,"brandId":null,"detail":null}]}`;
+    const j = await aiJson(prompt);
+    const items = (j && Array.isArray(j.items) ? j.items : []).filter(x => x && x.title).slice(0, 12);
+    return items.map(x => ({ title: String(x.title).slice(0, 140), kind: KINDS[x.kind] ? x.kind : 'remind', due: x.due ? toIso(x.due) : null, orderId: x.orderId && byId('orders', x.orderId) ? x.orderId : null, purchaseId: x.purchaseId && byId('purchases', x.purchaseId) ? x.purchaseId : null, taskId: x.taskId && byId('tasks', x.taskId) ? x.taskId : null, workerId: x.workerId && byId('workers', x.workerId) ? x.workerId : null, message: x.message || '', clientId: x.clientId && byId('clients', x.clientId) ? x.clientId : null, clientName: x.clientName || '', brandId: ['lof', 'elm', 'alu'].includes(x.brandId) ? x.brandId : 'lof', detail: x.detail || '', on: true }));
+  }
+
+  /* ---------- preview → confirm → save + act ---------- */
+  const optList = (arr, sel, lab) => `<option value="">—</option>${arr.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? 'selected' : ''}>${esc(lab(x))}</option>`).join('')}`;
+  function prevCard(it, i) {
+    const a = answerOf(it);
+    const act = it.kind === 'message' ? `هتتبعت مهمة لـ<b>${esc(wName(it.workerId) || '— اختار الموظف')}</b>: «${esc(it.message || it.title)}» — ولما يخلّصها البند يتقفل` : it.kind === 'lead' ? `هيتعمل عميل محتمل «<b>${esc(it.clientName || (it.clientId ? clientName(it.clientId) : '—'))}</b>» في CRM ${esc(brandName(it.brandId))} + تذكير تعمل العرض` : it.kind === 'check_po' || it.kind === 'check_task' ? (a && a.done ? 'خلصت فعلًا — هيتسجل كمنتهي' : 'تذكير في الميعاد — وقتها السيستم هيبص تاني ولو خلصت يقفله لوحده') : it.kind === 'summary' ? 'هيتحفظ تذكير لو حطيت ميعاد' : it.kind === 'note' ? 'ملاحظة' : 'تذكير في الميعاد';
+    return `<div class="mp ${it.on ? '' : 'off'}" data-mi="${i}"><div class="hd"><input type="checkbox" data-mf="on" ${it.on ? 'checked' : ''} title="نفّذ/احفظ"><input type="text" data-mf="title" value="${esc(it.title)}"></div>
+      <div class="g"><select data-mf="kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${it.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select><input type="datetime-local" data-mf="due" value="${localIn(it.due)}"></div>
+      <div class="g"><select data-mf="orderId">${optList(list('orders').filter(o => isOpen(o)), it.orderId, o => `${o.code} — ${o.title || ''}`)}</select>
+      ${it.kind === 'check_po' ? `<select data-mf="purchaseId">${optList(list('purchases').filter(p => p.status !== 'cancelled' && (!it.orderId || p.orderId === it.orderId)), it.purchaseId, p => `${p.number || ''} — ${p.supplier || ''} (${poLabel(p)})`)}</select>` : it.kind === 'check_task' ? `<select data-mf="taskId">${optList(list('tasks').filter(t => ['open', 'doing'].includes(t.status || 'open') && (!it.orderId || t.orderId === it.orderId)), it.taskId, t => `${t.title || ''} — ${wName(t.assigneeId)}`)}</select>` : it.kind === 'message' ? `<select data-mf="workerId">${optList(list('workers').filter(w => !w.left && w.status !== 'inactive'), it.workerId, w => w.name)}</select>` : it.kind === 'lead' ? `<select data-mf="brandId">${['lof', 'elm', 'alu'].map(b => `<option value="${b}" ${it.brandId === b ? 'selected' : ''}>${esc(brandName(b))}</option>`).join('')}</select>` : '<span></span>'}</div>
+      ${it.kind === 'message' ? `<input type="text" data-mf="message" value="${esc(it.message || it.title)}" placeholder="الرسالة للموظف" style="width:100%;margin-top:6px">` : ''}${it.kind === 'lead' ? `<input type="text" data-mf="clientName" value="${esc(it.clientName || (it.clientId ? clientName(it.clientId) : ''))}" placeholder="اسم العميل" style="width:100%;margin-top:6px">` : ''}
+      ${a ? `<div class="ans">${esc(a.txt)}</div>` : ''}<div class="act">← ${act}</div></div>`;
+  }
+  function openPreview(items, src) {
+    const draw = () => { const box = document.getElementById('memoprev'); if (box) box.innerHTML = items.map(prevCard).join('') || '<div class="muted">مافيش بنود.</div>'; };
+    openModal({ title: 'رتّبت كلامك كده', wide: true, submitLabel: 'احفظ ونفّذ المعلّم عليه', body: `<div class="memoprev" id="memoprev">${items.map(prevCard).join('')}</div><div class="tiny muted">مفيش حاجة هتتبعت لحد غير البنود المعلّم عليها. مفيش أي حاجة فيها فلوس أو موافقات.</div>`,
+      onOpen: f => { f.addEventListener('change', e => { const card = e.target.closest('[data-mi]'); if (!card) return; const it = items[+card.dataset.mi]; const k = e.target.dataset.mf; if (!k) return; if (k === 'on') it.on = e.target.checked; else if (k === 'due') it.due = toIso(e.target.value); else it[k] = e.target.value || null; if (['kind', 'orderId', 'purchaseId', 'taskId', 'workerId', 'on'].includes(k)) draw(); }); f.addEventListener('input', e => { const card = e.target.closest('[data-mi]'); const k = e.target.dataset.mf; if (card && ['title', 'message', 'clientName'].includes(k)) items[+card.dataset.mi][k] = e.target.value; }); },
+      onSubmit: async () => { const n = await saveItems(items.filter(x => x.on), src); toast(n ? `اتحفظ ${n} بند` : 'مااتحفظش حاجة'); location.hash = '#/memo'; rerender(); } });
+  }
+  async function saveItems(items, src) {
+    let n = 0; const now = nowISO();
+    for (const it of items) {
+      const id = 'mm' + uid().slice(0, 10); const o = it.orderId && byId('orders', it.orderId);
+      const m = { id, title: (it.title || '').trim() || KINDS[it.kind], kind: it.kind, status: 'open', due: it.due || null, orderId: it.orderId || null, orderCode: o ? o.code : null, purchaseId: null, taskId: null, workerId: null, workerName: null, leadId: null, check: null, src: src || '', createdAt: now };
+      const a = answerOf(it);
+      if (it.kind === 'check_po' && it.purchaseId) { m.purchaseId = it.purchaseId; m.check = { kind: 'po', id: it.purchaseId }; }
+      if (it.kind === 'check_task' && it.taskId) { const t = byId('tasks', it.taskId); m.taskId = it.taskId; m.check = { kind: 'task', id: it.taskId }; if (t && t.assigneeId) { m.workerId = t.assigneeId; m.workerName = wName(t.assigneeId); } }
+      if ((it.kind === 'check_po' || it.kind === 'check_task') && a) { if (a.done) { m.status = 'done'; m.doneAt = now; m.doneBy = 'السيستم (اتأكد وقت التسجيل)'; m.autoNote = a.txt; } else { m.lastState = a.txt; if (!m.due) m.due = tomorrow9(); } }
+      if (it.kind === 'summary' && a) m.autoNote = a.txt;
+      if (it.kind === 'message' && it.workerId) {
+        const tid = 'mt_' + id; const msg = (it.message || it.title || '').trim();
+        await Store.save('tasks', { id: tid, title: msg.slice(0, 140), desc: `من المالك${o ? ` — ${o.code} ${o.title || ''}` : ''}`, deptId: (byId('workers', it.workerId) || {}).deptId || null, assigneeId: it.workerId, orderId: it.orderId || null, dueDate: it.due ? localIn(it.due).slice(0, 10) : todayISO(), priority: 'high', status: 'open', kind: 'task', source: 'memo', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: now, updatedAt: now });
+        m.taskId = tid; m.workerId = it.workerId; m.workerName = wName(it.workerId); m.check = { kind: 'task', id: tid }; m.status = 'waiting'; if (!m.due) m.due = tomorrow9();
+      }
+      if (it.kind === 'lead') {
+        const name = (it.clientName || (it.clientId ? clientName(it.clientId) : '') || it.title).trim(); const lid = uid();
+        await Store.save('leads', { id: lid, brandId: it.brandId || 'lof', name, contact: '', phone: (it.clientId && (byId('clients', it.clientId) || {}).phone) || '', email: '', source: 'ممو المالك', stage: 'new', value: 0, owner: null, nextAt: it.due ? localIn(it.due).slice(0, 10) : null, need: it.detail || it.title, notes: `من ممو المالك: ${src || it.title}`.slice(0, 500), clientId: it.clientId || null, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: now, updatedAt: now, activities: [] });
+        m.leadId = lid; if (!m.due) m.due = tomorrow9();
+      }
+      if (it.kind === 'remind' && !m.due) m.due = tomorrow9();
+      if (it.kind === 'summary' && !it.due) { m.status = 'done'; m.doneAt = now; m.doneBy = 'عرض فوري'; }
+      await Store.save('memos', m, { silent: true }); n++;
+    }
+    return n;
+  }
+
+  /* ---------- voice ---------- */
+  let rec = null;
+  async function micToggle(btn) {
+    if (rec) { rec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('التسجيل مش مدعوم هنا — استخدم مايك الكيبورد', 'err'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } }); } catch (e) { toast('اسمح للأبليكيشن يستخدم المايك', 'err'); return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'].find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 64000 } : undefined); const chunks = []; mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const t0 = Date.now(); const lab = btn.querySelector('span'); const iv = setInterval(() => { if (lab) lab.textContent = `بسمعك… ${Math.round((Date.now() - t0) / 1000)}ث — دوس تاني لما تخلص`; if (Date.now() - t0 > 180000) mr.stop(); }, 500);
+    const done = new Promise(r => { mr.onstop = r; }); rec = { stop: () => { if (mr.state !== 'inactive') mr.stop(); } }; btn.classList.add('on'); mr.start(250);
+    await done; clearInterval(iv); stream.getTracks().forEach(t => t.stop()); rec = null; btn.classList.remove('on'); if (lab) lab.textContent = 'اتكلم';
+    const blob = new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }); if (blob.size < 1500) return;
+    if (lab) lab.textContent = 'بكتب كلامك…';
+    try { const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = rej; fr.readAsDataURL(blob); });
+      const hint = [].concat(list('orders').filter(o => isOpen(o)).slice(0, 40).map(o => `${o.code} ${o.title || ''} ${clientName(o.clientId)}`), list('workers').slice(0, 40).map(w => w.name), list('suppliers').slice(0, 30).map(x => x.name)).join('، ');
+      const r = await S.sb.functions.invoke('stt', { body: { audio: b64, mime: blob.type, hint } }); const j = (r && r.data) || {};
+      if (j.text) { const ta = document.getElementById('memotxt'); if (ta) { ta.value = (ta.value ? ta.value.trim() + '\n' : '') + j.text; ta.focus(); } }
+      else toast('ماقدرتش أفهم الصوت — جرّب تاني أو اكتب', 'err');
+    } catch (e) { toast('مشكلة في الاتصال — جرّب تاني', 'err'); } finally { if (lab) lab.textContent = 'اتكلم'; }
+  }
+
+  /* ---------- page ---------- */
+  const tabOf = m => { const now = new Date(); const eod = new Date(); eod.setHours(23, 59, 59, 999); if (m.status === 'done') return 'done'; if (m.status === 'waiting' && !(m.due && m.due <= now.toISOString())) return 'wait'; if (m.due && m.due <= eod.toISOString()) return 'now'; return 'next'; };
+  function row(m) {
+    const now = new Date().toISOString(); const late = m.status !== 'done' && m.due && m.due <= now; const cls = m.status === 'done' ? 'done' : late ? 'late' : m.status === 'waiting' ? 'wait' : '';
+    const o = m.orderId && byId('orders', m.orderId); const p = m.purchaseId && byId('purchases', m.purchaseId); const l = m.leadId && byId('leads', m.leadId);
+    const chips = [o ? `<a href="#/orders/${o.id}">${esc(o.code)}</a>` : '', p ? `<a href="#/purchases/${p.id}">${esc(p.number || 'أمر شراء')} · ${esc(poLabel(p))}</a>` : '', m.taskId ? `<a href="#/tasks/${esc(m.taskId)}">مهمة${m.workerName ? ' — ' + esc(m.workerName) : ''}</a>` : '', l ? `<a href="#/crm">عميل محتمل: ${esc(l.name)}</a>` : '', `<span>${esc(KINDS[m.kind] || '')}</span>`].filter(Boolean).join('');
+    const note = m.autoNote || m.lastState; const acts = m.status === 'done' ? `<button class="btn xs ghost" data-memo="reopen:${m.id}">رجّعه</button>` : `<button class="btn xs p" data-memo="done:${m.id}">${icon('check')}خلصت</button><button class="btn xs" data-memo="h1:${m.id}">+ساعة</button><button class="btn xs" data-memo="tm:${m.id}">بكرة</button>`;
+    return `<div class="memoit ${cls}"><span class="dot"></span><div class="b"><div class="t">${esc(m.title)}</div><div class="tiny muted">${m.status === 'done' ? 'خلصت ' + fmtWhen(m.doneAt) + (m.doneBy ? ' · ' + esc(m.doneBy) : '') : fmtWhen(m.due)}${m.status === 'waiting' ? ' · مستني رد' : ''}</div>${note ? `<div class="small" style="margin-top:3px">${esc(note)}</div>` : ''}<div class="chips">${chips}</div></div><div class="acts">${acts}<button class="iconbtn" data-memo="del:${m.id}" title="مسح">${icon('x')}</button></div></div>`;
+  }
+  function vMemo() {
+    if (!own()) return '<div class="empty">الصفحة دي للمالك بس.</div>';
+    const f = S.ui.filter.memo ||= { tab: 'now' }; const all = sortBy(memos(), m => m.due || '9999', false);
+    const by = { now: [], wait: [], next: [], done: [] }; all.forEach(m => by[tabOf(m)].push(m)); by.done = sortBy(by.done, m => m.doneAt || '', true).slice(0, 60);
+    const T = [['now', 'النهارده والمتأخر'], ['wait', 'مستني رد حد'], ['next', 'الجاي'], ['done', 'خلصت']];
+    return `<div class="stack"><div class="card memobox"><div class="cardhead"><h3>${NOTE} قول أو اكتب اللي في دماغك</h3></div>
+      <textarea id="memotxt" placeholder="مثال: مشروع الجازي عايز أشوف السلمنت، والألومنيوم المفروض ييجي النهارده شوفه جه ولا لأ، وكلّم أحمد السيد يخلّص تاسك التقطيع، وعماد عايز عرض سعر لكافيه جديد — فكّرني الخميس 10"></textarea>
+      <div class="row"><button type="button" class="btn memomic" data-memo="mic">${MIC}<span>اتكلم</span></button><div class="grow"></div><button type="button" class="btn p" data-memo="go">رتّب وربط بالسيستم</button></div></div>
+      <div class="card"><div class="memotabs">${T.map(([k, l]) => `<button type="button" data-memotab="${k}" class="${f.tab === k ? 'on' : ''}">${l} (${by[k].length})</button>`).join('')}</div>
+      ${by[f.tab].length ? by[f.tab].map(row).join('') : '<div class="muted small" style="padding:10px">مفيش.</div>'}</div></div>`;
+  }
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-memotab],[data-memo]'); if (!t || !own()) return;
+    if (t.dataset.memotab) { (S.ui.filter.memo ||= {}).tab = t.dataset.memotab; render(false); return; }
+    const [a, id] = String(t.dataset.memo).split(':');
+    if (a === 'mic') { micToggle(t); return; }
+    if (a === 'go') { const ta = document.getElementById('memotxt'); const txt = (ta && ta.value || '').trim(); if (!txt) { toast('اكتب أو اتكلم الأول', 'err'); return; } t.disabled = true; const old = t.textContent; t.textContent = 'بفكّر…';
+      let items = []; try { items = await aiSplit(txt); } catch (err) { console.warn('memo ai', err); }
+      t.disabled = false; t.textContent = old;
+      if (!items.length) items = [{ title: txt.slice(0, 140), kind: 'remind', due: tomorrow9(), on: true, brandId: 'lof' }];
+      openPreview(items, txt); if (ta) ta.value = ''; return; }
+    const m = byId('memos', id); if (!m) return; const now = nowISO();
+    if (a === 'done') await Store.save('memos', Object.assign({}, m, { status: 'done', doneAt: now, doneBy: 'المالك' }), { silent: true });
+    else if (a === 'reopen') await Store.save('memos', Object.assign({}, m, { status: m.check && m.kind === 'message' ? 'waiting' : 'open', doneAt: null, due: tomorrow9(), notifiedAt: null }), { silent: true });
+    else if (a === 'h1') { const d = new Date(Math.max(Date.now(), m.due ? Date.parse(m.due) : 0) + 3600e3); await Store.save('memos', Object.assign({}, m, { due: d.toISOString(), notifiedAt: null }), { silent: true }); toast('اتأجّل ساعة'); }
+    else if (a === 'tm') { await Store.save('memos', Object.assign({}, m, { due: tomorrow9(), notifiedAt: null }), { silent: true }); toast('اتأجّل لبكرة 9 الصبح'); }
+    else if (a === 'del') { if (!(await confirmDlg('مسح البند ده؟', 'امسح'))) return; await Store.remove('memos', id); }
+    rerender();
+  });
+  /* the assistant panel gets a «الممو» shortcut for the owner */
+  RENDER_HOOKS.push(() => { try { if (!own()) return; const p = document.querySelector('.aipanel .aih'); if (!p || p.querySelector('[data-memolink]')) return; p.insertAdjacentHTML('beforeend', `<a class="btn xs" data-memolink="1" href="#/memo" style="margin-inline-start:6px">${NOTE.replace('width="24" height="24"', 'width="16" height="16"')}الممو</a>`); } catch (e) { /* ignore */ } });
+
+  VIEW_TITLES.memo = 'الممو';
+  EXTRA_VIEWS.memo = () => vMemo();
+  EXTRA_TITLES.memo = () => ({ title: 'الممو', sub: 'بتاعك إنت بس — اتكلم، والمساعد يرتّب ويربط ويفكّرك' });
+  canSee = (base => view => (view === 'memo' ? own() : base(view)))(canSee);
+  window.nfMemo = { aiSplit, saveItems, answerOf, tabOf };
 })();
 </script>
 
