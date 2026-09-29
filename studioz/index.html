@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260929-0823-b06403";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260929-0837-ab6530";</script>
 
 <script>
 'use strict';
@@ -5796,7 +5796,7 @@ function orderDrawingsCardBase(o) {
   const ps = orderProducts(o); const own = filesOf('order', o.id).filter(f => !f.productId || !ps.some(p => p.id === f.productId)); const all = orderFiles(o); const hint = Files.uploadHint();
   if (!ps.length && !own.length && !canFiles()) return '';
   return `<div class="card" id="drawings"><div class="cardhead"><h3>الرسومات والمعاينة 3D</h3>${all.length ? `<span class="muted small">${all.length} ملف</span>` : ''}<div class="grow"></div>${all.length ? `<button class="btn sm p" data-action="fileOpen" data-arg="${all[0].id}:order-${o.id}">${icon('play')}فتح العارض</button>` : ''}${canFiles() ? `<button class="btn sm ghost" data-action="fileUpload" data-arg="order:${o.id}">${icon('plus')}رسومات خاصة بالأمر</button>` : ''}</div>
-    ${ps.map(p => { const fs = filesOf('product', p.id); const it = orderItems(o).find(x => x.productId === p.id); return `<div class="prow"><div class="row" style="gap:8px;margin-bottom:4px"><a href="#/products/${p.id}" class="bold">${esc(p.name)}</a><span class="code">${esc(p.code || '')}</span>${p.rev ? `<span class="tiny muted">${esc(p.rev)}</span>` : ''}<span class="num small">× ${fmtNum(it?.qty || 1)}</span>${it && it.color ? `<span class="badge">${esc(it.color)}</span>` : ''}${p.dims ? `<span class="tiny muted">${esc(p.dims)}</span>` : ''}<div class="grow"></div>${typeof productModReqBtn === 'function' ? productModReqBtn(p, o) : ''}</div>${p.notes ? `<div class="small" style="white-space:pre-wrap;color:var(--ink-2);margin-bottom:6px">${esc(p.notes)}</div>` : ''}${fileGallery(fs, 'order-' + o.id, { empty: 'لا توجد ملفات لهذا المنتج بعد' })}</div>`; }).join('')}
+    ${ps.map(p => { const fsAll = filesOf('product', p.id); const pres = typeof orderPresFile === 'function' ? orderPresFile(fsAll) : null; const fs = pres ? fsAll.filter(f => f !== pres && !fileIsHtml(f) && f.kind !== 'render') : fsAll; const it = orderItems(o).find(x => x.productId === p.id); return `<div class="prow"><div class="row" style="gap:8px;margin-bottom:4px"><a href="#/products/${p.id}" class="bold">${esc(p.name)}</a><span class="code">${esc(p.code || '')}</span>${p.rev ? `<span class="tiny muted">${esc(p.rev)}</span>` : ''}<span class="num small">× ${fmtNum(it?.qty || 1)}</span>${it && it.color ? `<span class="badge">${esc(it.color)}</span>` : ''}${p.dims && String(p.dims).length <= 40 ? `<span class="tiny muted">${esc(p.dims)}</span>` : ''}<div class="grow"></div>${typeof productModReqBtn === 'function' ? productModReqBtn(p, o) : ''}</div>${p.notes ? `<div class="small" style="white-space:pre-wrap;color:var(--ink-2);margin-bottom:6px">${esc(p.notes)}</div>` : ''}${pres ? orderPresTile(p, pres, fsAll, 'order-' + o.id) : ''}${fs.length || !pres ? fileGallery(fs, 'order-' + o.id, { empty: 'لا توجد ملفات لهذا المنتج بعد' }) : ''}</div>`; }).join('')}
     ${own.length ? `<div class="prow"><div class="bold small" style="margin-bottom:4px">رسومات خاصة بهذا الأمر</div>${fileGallery(own, 'order-' + o.id)}</div>` : ''}
     ${!ps.length && !own.length ? `<div class="muted small">اختر منتج الأمر من الكتالوج (تعديل الأمر ← منتجات الأمر) أو ارفع رسومات خاصة بهذا الأمر.${hint ? ' ' + esc(hint) : ''}</div>` : ''}
     ${role() === 'head' && all.length ? `<div class="tiny muted" style="margin-top:8px">افتح أي ملف بالشاشة الكاملة: تكبير بالإصبعين، وفي الموديل 3D تدوير وتفكيك وقطاع. لو تفصيلة مش واضحة اضغط «استفسار» داخل العارض ويوصل السؤال للمكتب الفني كمهمة.</div>` : ''}
@@ -22546,30 +22546,68 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
   window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount };
 })();
 /* =====================================================================
-   v5.38 — صور المنتجات اللي وصلت من غير thumbnail (زي اللي بتتضاف تلقائي من ChatGPT على السيرفر)
-   · أي ملف «صورة» مخزّن على السيرفر وماعندوش thumb ويظهر في الصفحة → بيتعمله thumb من الصورة نفسها ويتحفظ (مرة واحدة)
+   v5.38/v5.39 — صورة المنتج من بره + البرزنتيشن
+   · صور «render» على السيرفر من غير thumb → بتتنزل كـ blob (مش signed URL عشان الـ canvas مايتقفلش) ويتعملها thumb ويتحفظ
    · غلاف المنتج: لو مفيش coverFileId بيتاخد أول صورة للمنتج
+   · كارت أمر التشغيل: لو المنتج ليه برزنتيشن → اسم المنتج × العدد + كارت البرزنتيشن بصورة المنتج (من غير الصور/النسخ القديمة)
+   · ملف البرزنتيشن نفسه بياخد صورة المنتج كـ thumb بدل الشاشة السودا
    ===================================================================== */
+function orderPresFile(fs) {
+  const hs = (fs || []).filter(f => f && fileIsHtml(f) && !f.restricted && f.kind !== 'cad' && !(typeof fileIsLink === 'function' && fileIsLink(f)));
+  return hs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+}
+function productCoverFile(p, fs) {
+  const rs = (fs || filesOf('product', p.id)).filter(f => f && f.kind === 'render' && !f.restricted);
+  const c = p.coverFileId ? rs.find(f => f.id === p.coverFileId) : null;
+  return c || rs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+}
+function orderPresTile(p, pres, fs, ctx) {
+  const c = productCoverFile(p, fs); const img = (c && c.thumb) || (pres.thumbCover ? pres.thumb : '');
+  return `<div class="prestile" data-action="fileOpen" data-arg="${esc(pres.id)}${ctx ? ':' + esc(ctx) : ''}" title="${esc(pres.name)}"${c && !c.thumb ? ` data-needthumb="${esc(c.id)}"` : ''}><div class="pimg">${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<div class="fico">${icon('star')}<span>جاري تحميل الصورة…</span></div>`}</div><div class="pbar">${icon('play')}<span>افتح البرزنتيشن — كل التفاصيل جوه</span>${pres.rev ? `<span class="tiny muted">${esc(pres.rev)}</span>` : ''}</div></div>`;
+}
 (() => {
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.prestile{display:block;width:min(100%,440px);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:var(--surface);margin:6px 0 4px}
+.prestile:hover{border-color:var(--accent,#4c8dff)}
+.prestile .pimg{aspect-ratio:4/3;background:#fff;display:grid;place-items:center}
+.prestile .pimg img{width:100%;height:100%;object-fit:contain;display:block}
+.prestile .pimg .fico{color:#667;display:grid;place-items:center;gap:6px}
+.prestile .pbar{display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:700}
+.prestile .pbar .tiny{margin-inline-start:auto;font-weight:400}
+</style>`);
   const busy = new Set(); const failed = new Set();
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.storage;
+  const may = () => typeof canFiles === 'function' && canFiles();
   async function fix(f) {
     if (busy.has(f.id) || failed.has(f.id)) return; busy.add(f.id);
+    let url = '';
     try {
-      const { data } = await S.sb.storage.from('files').createSignedUrl(f.ref, 600); if (!data || !data.signedUrl) throw new Error('url');
-      const t = await imageThumb(data.signedUrl); if (!t) throw new Error('thumb');
+      const blob = await Files.blob(f); if (!blob) throw new Error('blob');
+      url = URL.createObjectURL(blob);
+      const t = await Promise.race([imageThumb(url, 640), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000))]); if (!t) throw new Error('thumb');
       const cur = byId('files', f.id); if (!cur) return;
-      if (typeof canFiles === 'function' && canFiles()) await Store.update('files', f.id, { thumb: t }, { silent: true }); else { cur.thumb = t; }
+      if (may()) await Store.update('files', f.id, { thumb: t }, { silent: true }); else cur.thumb = t;
       const p = f.productId ? byId('products', f.productId) : null;
-      if (p && !p.coverFileId && typeof canFiles === 'function' && canFiles()) await Store.update('products', p.id, { coverFileId: f.id }, { silent: true });
+      if (p && !p.coverFileId && may()) await Store.update('products', p.id, { coverFileId: f.id }, { silent: true });
       if (typeof rerender === 'function') rerender(); else render(false);
-    } catch (e) { failed.add(f.id); } finally { busy.delete(f.id); }
+    } catch (e) { console.warn('thumb-fix', e); failed.add(f.id); } finally { if (url) URL.revokeObjectURL(url); busy.delete(f.id); }
   }
+  /* the presentation takes the product image as its own thumb (instead of a black screenshot) */
+  async function presCover() {
+    if (!may()) return;
+    for (const h of list('files').filter(f => f && fileIsHtml(f) && f.productId && !f.deleted && !f.restricted)) {
+      const p = byId('products', h.productId); if (!p) continue; const c = productCoverFile(p); if (!c || !c.thumb) continue;
+      if (h.thumbCover === c.id && h.thumb === c.thumb) continue;
+      try { await Store.update('files', h.id, { thumb: c.thumb, thumbCover: c.id }, { silent: true }); } catch (e) { /* ignore */ }
+    }
+  }
+  let pcT = 0;
   RENDER_HOOKS.push(() => {
     if (!hosted() || !S.session || typeof imageThumb !== 'function') return;
-    const view = document.getElementById('view'); if (!view) return;
-    const todo = list('files').filter(f => f && f.kind === 'render' && !f.thumb && f.store === 'sb' && f.ref && !f.restricted && !f.deleted && !busy.has(f.id) && !failed.has(f.id) && view.innerHTML.includes(f.id)).slice(0, 4);
+    const view = document.getElementById('view'); if (!view) return; const html = view.innerHTML;
+    const todo = list('files').filter(f => f && f.kind === 'render' && !f.thumb && f.store === 'sb' && f.ref && !f.restricted && !f.deleted && !busy.has(f.id) && !failed.has(f.id) && html.includes(f.id)).slice(0, 4);
     todo.forEach(f => setTimeout(() => fix(f), 50));
+    clearTimeout(pcT); pcT = setTimeout(presCover, 1500);
   });
 })();
 </script>
