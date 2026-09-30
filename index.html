@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260930-1237-821a13";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260930-1250-a138ac";</script>
 
 <script>
 'use strict';
@@ -23522,6 +23522,130 @@ ${c.clients.join('\n') || '—'}
   EXTRA_TITLES.memo = () => ({ title: 'الممو', sub: 'بتاعك إنت بس — اتكلم، والمساعد يرتّب ويربط ويفكّرك' });
   canSee = (base => view => (view === 'memo' ? own() : base(view)))(canSee);
   window.nfMemo = { aiSplit, saveItems, answerOf, tabOf };
+})();
+/* =====================================================================
+   v5.57 — (المصنع) «إرسال للمورد» على جروب واتساب المورد («ابدأ» من محمود — 30 سبتمبر)
+   محمود: «لما مسؤول الحسابات يدوس إرسال للمورد يفتح الواتس ويبعت على الجروب بتاع المورد» + «خانة الجروب مش هيبقى فيها عبد الرحمن».
+   · ملف المورد: خانة «جروب واتساب» (اسم الجروب + لينك الدعوة اختياري) — يكتبها ويشوفها المالك والحسابات والمشتريات بس
+     (أمين المخزن لأ). حفظ المورد من غير الخانة بيسيب القيمة القديمة زي ما هي.
+   · أمر الشراء بعد صورة التحويل: زرار «إرسال للمورد» (المالك + الحسابات) — الموبايل: قايمة المشاركة بصورة التحويل + الرسالة
+     واسم الجروب مكتوب قدامه (يختار واتساب ← الجروب). الكمبيوتر: الرسالة بتتنسخ + الصورة بتنزل + لينك الجروب بيفتح.
+     بيتسجّل «اتبعت للمورد» بالتاريخ والاسم. من غير جروب: نفس الرسالة على رقم المورد (الزرار القديم).
+   · تذكير: لو عدّى يوم على التحويل ومااتبعتش → مهمة للحسابات «ابعت تحويل … للمورد» وبتتقفل لوحدها أول ما يتبعت.
+   ===================================================================== */
+(function () {
+  if (window.__NF_WAGROUP__) return; window.__NF_WAGROUP__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const canGrp = () => !!S.session && !stu() && (isAdmin() || ['acc', 'purch'].includes(role()));
+  const canSend = () => !!S.session && !stu() && (isAdmin() || role() === 'acc');
+  const START = '2026-09-30';
+  const grpOf = s => (s && s.waGroup && String(s.waGroup).trim()) ? { name: String(s.waGroup).trim(), link: (s.waGroupLink || '').trim() } : null;
+  window.nfSupGroup = grpOf;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.wagrp{border:1px dashed var(--line);border-radius:12px;padding:10px 12px}.wagrp .row{gap:8px;flex-wrap:wrap}.wagrp input{flex:1;min-width:180px}
+.wagrpline{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12.5px}.wagrpline .g{background:var(--good-soft);color:var(--good-ink);border-radius:999px;padding:3px 10px;font-weight:700}
+.wasend{display:grid;gap:10px}.wasend .msg{white-space:pre-wrap;background:var(--surface-2,var(--surface));border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px}.wasend .gname{font-size:17px;font-weight:800}
+.wasend img{max-width:100%;max-height:260px;border-radius:10px;border:1px solid var(--line)}
+</style>`);
+
+  /* ---------- supplier form: «جروب واتساب» ---------- */
+  if (typeof supplierForm === 'function') supplierForm = (base => function (s) {
+    let h = base.apply(this, arguments); s = s || {}; if (!canGrp()) return h;
+    const box = `<div class="field full wagrp"><label>${icon('wa')} جروب واتساب المورد <span class="tiny muted">(اختياري — تحويلاته بتتبعت عليه)</span></label><div class="row"><input id="f-waGroup" name="waGroup" placeholder="اسم الجروب زي ما هو في واتساب" value="${esc(s.waGroup || '')}"><input id="f-waGroupLink" name="waGroupLink" class="ltr" placeholder="https://chat.whatsapp.com/…  (لينك الدعوة — اختياري)" value="${esc(s.waGroupLink || '')}"></div></div>`;
+    const k = h.indexOf('<div class="field full"><label>ملاحظات</label>'); return k < 0 ? h.replace(/<\/div>\s*$/, box + '</div>') : h.slice(0, k) + box + h.slice(k);
+  })(supplierForm);
+  if (typeof saveSupplier === 'function') saveSupplier = (base => async function (f, s) {
+    const g = f && f.querySelector('#f-waGroup'), l = f && f.querySelector('#f-waGroupLink');
+    const gv = g ? g.value.trim() : null, lv = l ? l.value.trim() : null;
+    if (lv && !/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]+/.test(lv)) { toast('لينك الجروب لازم يبدأ بـ https://chat.whatsapp.com/', 'err'); return false; }
+    const doc = await base.apply(this, arguments);
+    if (doc && doc.id && g && canGrp()) { const cur = byId('suppliers', doc.id) || {}; if ((cur.waGroup || '') !== gv || (cur.waGroupLink || '') !== (lv || '')) await Store.update('suppliers', doc.id, { waGroup: gv, waGroupLink: lv || '' }); }
+    return doc;
+  })(saveSupplier);
+
+  /* ---------- the transfer being sent ---------- */
+  const payX = (p, pid) => pid === 'main' ? (p.transfer ? Object.assign({ id: 'main' }, p.transfer) : null) : ((p.deferred && p.deferred.payments) || []).find(x => x.id === pid) || null;
+  function msgOf(p, x) {
+    return `السلام عليكم ${p.supplier || ''}،\nتم تحويل ${fmtMoney(x.amount)} ${CUR()} — أمر الشراء ${p.number}\n${x.ref ? `رقم العملية: ${x.ref}\n` : ''}التاريخ: ${fmtDate((x.at || '').slice(0, 10))}${x.methodLabel ? `\nعلى: ${x.methodLabel}` : ''}\nصورة التحويل مرفقة.\n— Ninety Fabrication`;
+  }
+  function thumbOf(x) { if (x.thumb) return x.thumb; const f = (x.fileIds || []).map(id => byId('files', id)).find(f => f && f.thumb); return f ? f.thumb : null; }
+  async function imageFile(p, x) {
+    const name = `tahweel-${p.number}${x.id && x.id !== 'main' ? '-' + x.id.slice(-4) : ''}.jpg`;
+    const tryUrl = async u => { const r = await fetch(u); if (!r.ok) throw new Error(r.status); const b = await r.blob(); if (!/^image\//.test(b.type || '')) throw new Error('type'); return new File([b], name, { type: b.type }); };
+    if (x.proofUrl) { try { return await tryUrl(x.proofUrl); } catch (e) { /* expired → thumb */ } }
+    const t = thumbOf(x); if (t) { try { return await tryUrl(t); } catch (e) { /* ignore */ } }
+    return null;
+  }
+  async function mark(p, pid, how, grp) {
+    const m = { waAt: nowISO(), waBy: S.session?.name || '', waTo: how, waGroup: grp ? grp.name : null };
+    const p1 = byId('purchases', p.id) || p;
+    if (pid === 'main') await Store.update('purchases', p.id, { transfer: Object.assign({}, p1.transfer, m) });
+    else await Store.update('purchases', p.id, { deferred: Object.assign({}, p1.deferred, { payments: (p1.deferred.payments || []).map(y => y.id === pid ? Object.assign({}, y, m) : y) }) });
+    const t = byId('tasks', `powa_${p.id}_${pid}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' }, { silent: true }); } catch (e) { /* ignore */ } }
+  }
+  const mobileShare = f => !!(navigator.share && f && (!navigator.canShare || navigator.canShare({ files: [f] })));
+  ACTIONS.poSendSup = async arg => {
+    const [id, pid] = String(arg).split(':'); const p = byId('purchases', id); const x = p && payX(p, pid); if (!x || !canSend()) return;
+    const s = supplierOf(p); const grp = grpOf(s); const text = msgOf(p, x); const th = thumbOf(x);
+    if (!grp) { if (!s || !s.phone) { toast('المورد مالوش جروب ولا رقم — ضيف جروب الواتساب من ملف المورد', 'err'); return; } try { window.open(waLink(s.phone, text.replace('صورة التحويل مرفقة.', x.proofUrl ? `صورة التحويل: ${x.proofUrl}` : '').replace(/\n\n/g, '\n')), '_blank', 'noopener'); } catch (e) { /* ignore */ } await mark(p, pid, 'phone', null); return; }
+    const file = await imageFile(p, x); const share = mobileShare(file);
+    const go = await new Promise(res => { let done = false; const fin = v => { if (!done) { done = true; res(v); } };
+      openModal({ title: `إرسال للمورد — ${p.supplier || ''}`, submitLabel: share ? 'افتح المشاركة' : 'انسخ الرسالة ونزّل الصورة', body: `<div class="wasend"><div class="banner info" style="margin:0">${icon('wa')}<span>اختار واتساب، وبعدها الجروب:<br><span class="gname">${esc(grp.name)}</span></span></div>${th ? `<img src="${esc(th)}" alt="صورة التحويل">` : '<div class="banner warn" style="margin:0">مفيش صورة تحويل على الأمر — الرسالة بس هتتبعت</div>'}<div class="msg">${esc(text)}</div>${share ? '<div class="tiny muted">الرسالة كمان بتتنسخ — لو واتساب بعت الصورة من غير الكلام، الصقه تحتها.</div>' : ''}${!share ? `<div class="tiny muted">على الكمبيوتر: الرسالة هتتنسخ والصورة هتنزل${grp.link ? ' وجروب المورد هيفتح' : ''} — الصق الرسالة وارفق الصورة في الجروب.</div>` : ''}</div>`, onSubmit: () => { fin(true); return true; } });
+      const iv = setInterval(() => { if (!document.getElementById('mform')) { clearInterval(iv); fin(false); } }, 300); });
+    if (!go) return;
+    if (share) {
+      try { navigator.clipboard && navigator.clipboard.writeText(text).catch(() => { }); } catch (e) { /* ignore */ }
+      try { await navigator.share({ files: [file], text }); } catch (e) { if (e && e.name === 'AbortError') { toast('ماتبعتش'); return; } try { await navigator.share({ text }); } catch (e2) { return; } }
+    } else {
+      try { await navigator.clipboard.writeText(text); } catch (e) { /* ignore */ }
+      if (file) { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
+      try { window.open(grp.link || 'https://web.whatsapp.com/', '_blank', 'noopener'); } catch (e) { /* ignore */ }
+    }
+    await mark(p, pid, 'group', grp); toast(`اتسجّل: اتبعت لجروب «${grp.name}»`);
+  };
+  ACTIONS.supGroupEdit = id => {
+    const s0 = byId('suppliers', id); if (!s0 || !canGrp() || !writable()) return; closeModal();
+    openModal({ title: `جروب واتساب — ${s0.name || ''}`, submitLabel: 'حفظ', body: `<div class="form"><div class="field full wagrp"><label>${icon('wa')} اسم الجروب زي ما هو في واتساب</label><input id="f-waGroup" name="waGroup" value="${esc(s0.waGroup || '')}" placeholder="مثلاً: ${esc(s0.name || 'المورد')} × Ninety"></div>${field('لينك الدعوة (اختياري)', `<input id="f-waGroupLink" name="waGroupLink" class="ltr" value="${esc(s0.waGroupLink || '')}" placeholder="https://chat.whatsapp.com/…">`, 'full')}<div class="hint full">تحويلات المورد بتتبعت على الجروب ده من زرار «إرسال للمورد». امسح الاسم عشان تشيل الجروب.</div></div>`,
+      onSubmit: async f => { const g = f.querySelector('#f-waGroup').value.trim(), l = f.querySelector('#f-waGroupLink').value.trim(); if (l && !/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]+/.test(l)) { toast('لينك الجروب لازم يبدأ بـ https://chat.whatsapp.com/', 'err'); return false; } await Store.update('suppliers', id, { waGroup: g, waGroupLink: g ? l : '' }); toast(g ? `اتحفظ جروب «${g}»` : 'اتشال الجروب'); return true; } });
+  };
+
+  /* ---------- buttons on the PO transfer card ---------- */
+  const sentLine = x => x.waAt ? `<span class="tiny muted">اتبعت للمورد ${fmtDate(x.waAt.slice(0, 10))} · ${esc(x.waBy || '')}${x.waGroup ? ` · جروب «${esc(x.waGroup)}»` : ''}</span>` : '<span class="badge warn">لسه مااتبعتش للمورد</span>';
+  function sendRow(p, pid, x) {
+    const s = supplierOf(p); const grp = grpOf(s);
+    return `<div class="wagrpline" data-wagrp="${esc(p.id)}:${pid}"><button class="btn sm p" data-action="poSendSup" data-arg="${esc(p.id)}:${pid}">${icon('wa')}إرسال للمورد</button>${grp ? `<span class="g">جروب: ${esc(grp.name)}</span>` : `<span class="tiny muted">مالوش جروب — هيتبعت على رقمه</span>${s && writable() ? ` <button class="btn xs" data-action="supGroupEdit" data-arg="${esc(s.id)}">+ جروب واتساب</button>` : ''}`}${sentLine(x)}</div>`;
+  }
+  if (typeof transferCard === 'function') transferCard = (base => p => {
+    let h = base(p); if (stu() || !p || !canSend()) return h;
+    /* the old «ابعت التحويل للمورد واتساب / مشاركة الصورة» row → one «إرسال للمورد» row */
+    const rows = []; if (p.transfer) rows.push(['main', payX(p, 'main')]); ((p.deferred && p.deferred.payments) || []).forEach(x => rows.push([x.id, x]));
+    rows.forEach(([pid, x]) => {
+      const re = new RegExp(`<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn sm p" data-action="poWa" data-arg="${p.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:${pid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}">[\\s\\S]*?</div>`);
+      if (re.test(h)) h = h.replace(re, sendRow(p, pid, x));
+    });
+    return h;
+  })(transferCard);
+
+  /* ---------- supplier page: show the group ---------- */
+  if (typeof vSupplierDetailWithStats === 'function') vSupplierDetailWithStats = (base => function (id) {
+    const h = base.apply(this, arguments); const s = byId('suppliers', id); if (!s || !canGrp()) return h;
+    const g = grpOf(s); const line = `<div class="card"><div class="wagrpline" style="margin:0">${icon('wa')}${g ? `<span class="g">جروب واتساب: ${esc(g.name)}</span>${g.link ? ` <a class="tiny ltr" href="${esc(g.link)}" target="_blank" rel="noopener">${esc(g.link)}</a>` : ''}` : '<span class="muted small">مفيش جروب واتساب للمورد</span>'}${writable() ? ` <button class="btn xs" data-action="supGroupEdit" data-arg="${esc(s.id)}">${g ? 'تعديل' : '+ ضيف الجروب'}</button>` : ''}</div></div>`;
+    const i = h.indexOf('<div class="card'); return i < 0 ? h + line : h.slice(0, i) + line + h.slice(i);
+  })(vSupplierDetailWithStats);
+
+  /* ---------- reminder: a day after the transfer and still not sent → task for accounts ---------- */
+  RENDER_HOOKS.push(() => {
+    if (stu() || S._poWaChecked || !S.session || !(isAdmin() || role() === 'acc') || !writable() || !S.loaded || !S.loaded.purchases || !S.loaded.tasks) return;
+    S._poWaChecked = true; const cut = new Date(Date.now() - 24 * 3600e3).toISOString();
+    list('purchases').filter(p => p.status !== 'cancelled').forEach(p => {
+      const rows = []; if (p.transfer) rows.push(['main', payX(p, 'main')]); ((p.deferred && p.deferred.payments) || []).forEach(x => rows.push([x.id, x]));
+      rows.forEach(([pid, x]) => {
+        if (!x || x.waAt || !x.at || x.at < (window.NF_POWA_START || START) || x.at > cut) return; const tid = `powa_${p.id}_${pid}`; if (byId('tasks', tid)) return;
+        const g = grpOf(supplierOf(p));
+        Store.save('tasks', { id: tid, title: `ابعت تحويل ${p.number} للمورد ${p.supplier || ''}`, desc: `اتحوّل من يوم ولسه مااتبعتش للمورد. افتح أمر الشراء ← «إرسال للمورد»${g ? ` (جروب «${g.name}»)` : ''}.`, toRole: 'acc', assigneeId: null, deptId: null, priority: 'high', status: 'open', kind: 'update', source: 'powa', purchaseId: p.id, link: `/#/purchases/${p.id}`, createdBy: null, createdByName: 'السيستم', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }).catch(() => { });
+      });
+    });
+  });
 })();
 </script>
 
