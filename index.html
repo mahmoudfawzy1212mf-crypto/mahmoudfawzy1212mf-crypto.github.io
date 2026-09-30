@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260930-2215-ff5396";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260930-2245-64e724";</script>
 
 <script>
 'use strict';
@@ -23940,6 +23940,36 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return inject(base.apply(this, arguments)); })(vOrderDetail);
   /* الضغط على الصورة ما يفتحش صفحة المنتج (اللينك) — بيفتح الصورة كبيرة */
   document.addEventListener('click', ev => { const t = ev.target.closest('.pthumb[data-action="pthumbOpen"]'); if (!t) return; ev.preventDefault(); ev.stopPropagation(); ACTIONS.pthumbOpen(t.dataset.arg); }, true);
+})();
+/* =====================================================================
+   v5.62 — ترتيب كارت المنتج في عرض السعر / المشروع (ملاحظة محمود على الصورة — 30 سبتمبر):
+   الكلام كان بيتزنق في عمود ضيق جنب شارة الحالة والسهم. دلوقتي: الصورة يمين (72×72) ← الكود + الشارة في سطر ←
+   اسم المنتج في سطر كامل ← المقاسات سطر رمادي ← حالة التصنيع تحتهم. من غير خطوط تحت الكلام.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PTHUMB2__) return; window.__NF_PTHUMB2__ = 1;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style id="nf-pthumb2">
+.item.pitem{align-items:flex-start;gap:12px;padding:12px 14px;text-decoration:none!important}
+.item.pitem *{text-decoration:none!important}
+.item.pitem>.pthumb{width:72px;height:72px;margin-top:2px}
+.item.pitem>.main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px}
+.item.pitem .phead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.item.pitem .phead .code{font-size:13px;font-weight:600;letter-spacing:.3px}
+.item.pitem .pname{font-size:15.5px;font-weight:600;line-height:1.35;color:var(--ink)}
+.item.pitem .pdims{font-size:12.5px;color:var(--muted);line-height:1.45}
+.item.pitem .pstage{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.item.pitem .pstage .badge{font-size:11.5px}
+.item.pitem::after{align-self:center}
+</style>`);
+  const RE = /<a class="item" href="#\/products\/([^"]+)">(<div class="pthumb[^>]*>[\s\S]*?<\/div>)<div class="main"><div class="title">([\s\S]*?)<\/div><div class="meta">([\s\S]*?)<\/div><\/div>([\s\S]*?)<\/a>/g;
+  const fix = html => typeof html === 'string' && html.indexOf('class="pthumb') >= 0 ? html.replace(RE, (m, id, thumb, title, meta, rest) => {
+    const p = byId('products', id); if (!p) return m;
+    const kind = typeof pKindBadge === 'function' ? pKindBadge(p) : ''; const qty = (title.match(/<span class="muted">×[^<]*<\/span>/) || [''])[0];
+    const stage = (rest || '').trim();
+    return `<a class="item pitem" href="#/products/${id}">${thumb}<div class="main"><div class="phead"><span class="code">${esc(p.code || '')}</span>${kind}${qty}</div><div class="pname">${esc(p.name || '')}</div>${p.dims ? `<div class="pdims">${esc(p.dims)}</div>` : ''}${stage ? `<div class="pstage">${stage}</div>` : ''}</div></a>`;
+  }) : html;
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return fix(base.apply(this, arguments)); })(vQuoteDetailBase);
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return fix(base.apply(this, arguments)); })(vOrderDetail);
 })();
 </script>
 
