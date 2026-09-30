@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260930-1359-d9a962";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20260930-2040-a77fa3";</script>
 
 <script>
 'use strict';
@@ -22496,12 +22496,12 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · WebRTC من جهاز لجهاز (مشفّر DTLS-SRTP) — السيرفر بيشيل بس «مين بيتصل بمين» (جدول nf_calls بـ RLS: الطرفين بس)
    · الرنّة: إشعار push «📞 فلان بيتصل بيك» + لو التطبيق مفتوح شاشة مكالمة واردة برنّة
    · ICE: Edge Function «rtc» (STUN — ولو اتضبط TURN في admin_config.turn_cfg بيتدّي تلقائي)
-   · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة
+   · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة · v5.62 (30 سبتمبر — طلب محمود): المدير التجاري (bdd) ومهندس المكتب الفني (tech) مالهمش مكالمات خالص — لا صفحة ولا زرار ولا يظهروا لحد (السيرفر كمان: nf_calls_allowed / nf_call_visible)
    ===================================================================== */
 (() => {
   if (typeof isStudioz === 'function' && isStudioz()) return;
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from && S.sbUser;
-  const me = () => (S.sbUser && S.sbUser.id) || '';
+  const me = () => (S.sbUser && S.sbUser.id) || ''; const noCalls = () => typeof role === 'function' && ['bdd', 'tech'].includes(role()); /* v5.62: المدير التجاري ومهندس المكتب الفني — من غير مكالمات خالص */
   const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
   const RING_MS = 45000;
   const roleName = r => (typeof ROLES !== 'undefined' && ROLES[r]) ? ROLES[r].split(' — ')[0] : (r || '');
@@ -22835,7 +22835,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   }
   /* opened from the push notification */
   async function fromHash() {
-    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted()) return;
+    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted() || noCalls()) return;
     subscribe();
     const { data } = await S.sb.from('nf_calls').select('*').eq('id', m[1]).maybeSingle();
     if (data && data.status === 'ringing' && data.callee === me()) { await incoming(data); if (m[2] && C.cur && C.cur.id === data.id) { try { history.replaceState(null, '', '#/calls'); } catch (e) { /* ignore */ } if (m[2] === 'accept') accept(true); else finish('declined'); } }
@@ -22864,7 +22864,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : fmtDate(String(iso).slice(0, 10)); };
   function vCalls() {
     css();
-    if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>';
+    if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>'; if (noCalls()) return '<div class="empty">المكالمات مش متاحة لهذا الحساب.</div>';
     if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog()]).then(() => { if (S.route.view === 'calls') render(false); }); }
     try { localStorage.setItem('nf.calls.seen', String(Date.now())); } catch (e) { /* ignore */ }
     S.ui = S.ui || {}; const tab = S.ui.callTab || 'contacts';
@@ -22899,11 +22899,11 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.calls = 'المكالمات';
   if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.calls = () => vCalls();
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'calls')) NAV.push({ id: 'calls', label: 'المكالمات', icon: 'bell', count: () => missedCount(), countCls: 'crit' });
-  setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk') ROLE_VIEWS[r].push('calls'); }); }, 0);
-  if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' : base(view)))(canSee);
+  setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk' && r !== 'bdd' && r !== 'tech') ROLE_VIEWS[r].push('calls'); }); }, 0);
+  if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' && !noCalls() : base(view)))(canSee);
   /* call buttons on a person's page (workers / staff) */
   RENDER_HOOKS.push(() => {
-    subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
+    if (noCalls()) return; subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
     const r = S.route || {}; if (!hosted() || !r.id || !['workers', 'staff'].includes(r.view)) return;
     const pid = r.view === 'workers' ? 'w:' + r.id : r.id; const d = (C.dir || []).find(x => x.person_id === pid);
     if (!C.dir) { loadDir().then(() => { if (S.route.id === r.id) render(false); }); return; }
@@ -22920,7 +22920,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
 body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-chatpage .callfab,body.stuboard .callfab,body:has(.side.open) .callfab,body:has(.aipanel:not([hidden])) .callfab,body:has(#nfcall) .callfab{display:none}
 </style>`);
   RENDER_HOOKS.push(() => {
-    const on = hosted() && S.session && role() !== 'kiosk' && !(S.route && S.route.view === 'calls'); let b = document.querySelector('.callfab');
+    const on = hosted() && S.session && role() !== 'kiosk' && !noCalls() && !(S.route && S.route.view === 'calls'); let b = document.querySelector('.callfab');
     if (!on) { if (b) b.remove(); return; }
     if (!b) { document.body.insertAdjacentHTML('beforeend', `<a class="callfab" href="#/calls" title="المكالمات" aria-label="المكالمات">${svg('phone', 24)}</a>`); b = document.querySelector('.callfab'); }
     const n = missedCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
