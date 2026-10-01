@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1403-db0329";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1526-519b33";</script>
 
 <script>
 'use strict';
@@ -25422,6 +25422,31 @@ form:not(.lofqf) [data-line="lcat"],form:not(.lofqf) [data-line="lprj"]{display:
     f.addEventListener('click', e => { const b = e.target.closest('[data-line="lcat"],[data-line="lprj"]'); if (!b) return; e.preventDefault(); e.stopPropagation(); if (b.dataset.line === 'lcat') pickCatalog(f, recalc); else pickProjects(f, recalc); }, true);
     return r;
   })(wireQuoteForm);
+})();
+/* =====================================================================
+   v5.78 — محادثات/مهام التعاقدات والدفعات (finConf): المالك + الحسابات (hr) + آلاء (bdd) بس
+   · السيرفر (nf_conf_ok): مهمة عليها finConf=true مابتوصلش لأي دور تاني — حتى لو كتب فيها قبل كده.
+   · هنا: أي مهمة جديدة رايحة للمالك/الحسابات/آلاء بس وكلامها عن شيك/دفعة/تحويل/حوالة/عقد/PO بتتعلّم finConf تلقائيًا.
+   · التصعيد («مهمة مهمة لم تُشاهد») لمهمة finConf بيروح للمالك بس — مش لمدير المصنع ولا رؤساء الأقسام — ونسخة التصعيد بتاخد finConf.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FINCONF__) return; window.__NF_FINCONF__ = 1;
+  const FIN_ROLES = ['admin', 'hr', 'bdd'];
+  const RE = /(شيك|الدفعة المقدمة|دفعة مقدمة|تحويل العميل|حوالة|مستند التعاقد|أمر التوريد|أمر توريد|\bPO\b|عقد|التعاقد)/;
+  const roleOfPerson = id => { if (!id) return ''; const w = byId('workers', id); if (w) return w.role || ''; const s = byId('staff', id); return s ? (s.role || '') : ''; };
+  const finOnly = t => { const tr = t.toRole || ''; if (tr && !FIN_ROLES.includes(tr)) return false; if (t.assigneeId && !FIN_ROLES.includes(roleOfPerson(t.assigneeId))) return false; return !!(tr || t.assigneeId); };
+  const finTaskOf = id => { if (!/^esc\d_/.test(String(id || ''))) return null; return list('tasks').find(x => x.finConf && String(id).includes('_' + x.id + '_')) || null; };
+  window.nfFinOnlyTask = finOnly;
+  Store.save = (base => function (col, doc, opts) {
+    if (col === 'tasks' && doc && typeof doc === 'object' && !doc.finConf) {
+      if (finTaskOf(doc.id)) doc = Object.assign({}, doc, { finConf: true });
+      else if (finOnly(doc) && RE.test(`${doc.title || ''} ${doc.desc || ''}`)) doc = Object.assign({}, doc, { finConf: true });
+    }
+    return base.call(this, col, doc, opts);
+  })(Store.save);
+  /* نسخة قديمة محفوظة على الجهاز: متبانش برضه لغير المصرّح لهم */
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) { const out = base.apply(this, arguments); if (col === 'tasks' && Array.isArray(out) && S.session && !FIN_ROLES.includes(role())) return out.filter(t => !(t && t.finConf)); return out; })(listScope);
+  if (typeof escalationTargets === 'function') escalationTargets = (base => function (t, level) { if (t && t.finConf) return { ids: ['role:admin'], label: 'المالك' }; return base.apply(this, arguments); })(escalationTargets);
 })();
 </script>
 
