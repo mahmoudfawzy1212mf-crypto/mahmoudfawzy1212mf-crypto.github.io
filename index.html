@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-0446-47bc49";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1003-37108f";</script>
 
 <script>
 'use strict';
@@ -24084,6 +24084,148 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     else toast(r && r.error === 'vpn' ? 'إنت فاتح VPN — اقفله وجرّب تاني' : 'مقدرتش أسجّل النت — جرّب تاني', 'err');
   };
   ACTIONS.fgDelIp = async ip => { if (!isAdmin() || !(await confirmDlg(`تشيل ${ip} من نت المصنع؟`, 'شيل', true))) return; const r = await callGate({ action: 'delip', ip }); if (r && r.ok) { ipsState = r; render(false); } };
+})();
+/* =====================================================================
+   v5.64 — قراءة الشيكات وإيصالات الإيداع (المالك ومدير الحسابات بس)
+   · صورة شيك العميل / شيك صحة التوقيع → Edge `chqread` يقرا الرقم والبنك والمبلغ والتاريخ ويملأ الخانات.
+   · إيصال الإيداع → يقرا رقم الشيك والمبلغ والتاريخ والحساب ويقارنهم بالشيك المتسجّل؛ أي اختلاف = تحذير أحمر
+     قبل الحفظ + يتسجّل على الشيك + إشعار للمالك.
+   · القراءة على السيرفر؛ الأرقام اللي اتقرت بتتحفظ جوه الدفعة (نفس صلاحيات الشيكات — admin/hr).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CHQOCR__) return; window.__NF_CHQOCR__ = 1;
+  const ok = () => typeof isAdmin === 'function' && (isAdmin() || role() === 'hr') && typeof sbOn === 'function' && sbOn() && S.sb;
+  const digits = v => String(v == null ? '' : v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+  const sameNo = (a, b) => { const x = digits(a).replace(/^0+/, ''), y = digits(b).replace(/^0+/, ''); return !!x && !!y && (x === y || (x.length >= 5 && y.length >= 5 && (x.endsWith(y) || y.endsWith(x)))); };
+  const isoOk = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  const dayDiff = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
+  const ctx = { mode: null, orderId: null, pid: null, res: { front: null, slip: null, img: null } };
+  window.__nfChqCtx = ctx;
+
+  async function toB64(file) {
+    const mime = (file.type || '').toLowerCase();
+    if (mime === 'application/pdf') { if (file.size > 4.5e6) throw new Error('big'); const buf = await file.arrayBuffer(); let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return { image: btoa(s), mime }; }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const M = 1800; const sc = Math.min(1, M / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      return { image: c.toDataURL('image/jpeg', 0.86).split(',')[1], mime: 'image/jpeg' };
+    } finally { URL.revokeObjectURL(url); }
+  }
+  async function readImage(file, kind) {
+    const p = await toB64(file);
+    const r = await S.sb.functions.invoke('chqread', { body: Object.assign({ kind }, p) });
+    if (r.error || !r.data || !r.data.ok) throw new Error('read');
+    return r.data.data || {};
+  }
+  window.chqReadFile = readImage;
+
+  const box = (input) => { let b = input.parentElement.querySelector('.chqocr'); if (!b) { b = document.createElement('div'); b.className = 'chqocr small'; b.style.cssText = 'margin-top:6px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2,rgba(127,127,127,.06))'; input.parentElement.appendChild(b); } return b; };
+  const setVal = (form, name, v) => { const el = form.querySelector('[name="' + name + '"]'); if (!el || v == null || v === '') return false; el.value = v; el.style.outline = '2px solid var(--accent,#2a7)'; el.dispatchEvent(new Event('input', { bubbles: true })); return true; };
+  const fmtA = n => (typeof fmtMoney === 'function' ? fmtMoney(n) : String(n)) + ' ' + (typeof CUR === 'function' ? CUR() : '');
+
+  /* ---------- مقارنة الإيصال بالشيك المتسجّل ---------- */
+  function slipIssues(p, s, enteredDate) {
+    const iss = [];
+    if (!s || s.isSlip === false) { iss.push('الصورة مش واضح إنها إيصال إيداع بنك'); return iss; }
+    const nos = (s.chequeNos || []).map(digits).filter(Boolean);
+    if (!nos.length) iss.push('رقم الشيك مش ظاهر في الإيصال');
+    else if (p.chequeNo && !nos.some(n => sameNo(n, p.chequeNo))) iss.push(`رقم الشيك في الإيصال (${nos.join('، ')}) مختلف عن الشيك المتسجّل (${digits(p.chequeNo)})`);
+    const amt = num(s.amount); const want = +p.chequeAmount || 0;
+    if (!(amt > 0)) iss.push('المبلغ مش ظاهر في الإيصال');
+    else if (want > 0 && Math.abs(amt - want) > 1) iss.push(`المبلغ في الإيصال ${fmtA(amt)} مختلف عن مبلغ الشيك ${fmtA(want)}`);
+    if (isoOk(s.depositDate) && isoOk(enteredDate) && dayDiff(s.depositDate, enteredDate) > 3) iss.push(`تاريخ الإيداع في الإيصال ${fmtDate(s.depositDate)} مختلف عن التاريخ المكتوب ${fmtDate(enteredDate)}`);
+    return iss;
+  }
+  function chequeIssues(c, entered) {
+    const iss = [];
+    if (!c || c.isCheque === false) { iss.push('الصورة مش واضح إنها شيك'); return iss; }
+    const a = num(c.amount), w = num(c.amountWordsValue);
+    if (a > 0 && w > 0 && Math.abs(a - w) > 1) iss.push(`المبلغ بالأرقام ${fmtA(a)} مختلف عن المبلغ بالحروف ${fmtA(w)}`);
+    if (entered) {
+      if (a > 0 && num(entered.amount) > 0 && Math.abs(a - num(entered.amount)) > 1) iss.push(`المبلغ المكتوب ${fmtA(num(entered.amount))} مختلف عن اللي على الشيك ${fmtA(a)}`);
+      if (c.chequeNo && entered.chequeNo && !sameNo(c.chequeNo, entered.chequeNo)) iss.push(`رقم الشيك المكتوب (${digits(entered.chequeNo)}) مختلف عن اللي على الشيك (${digits(c.chequeNo)})`);
+    }
+    if (c.signed === false) iss.push('الشيك شكله مش متوقّع');
+    return iss;
+  }
+  /* نص الإشعار من غير أي مبالغ (قاعدة: مفيش فلوس في نصوص المهام) */
+  const shortIss = t => /المبلغ في الإيصال/.test(t) ? 'المبلغ في الإيصال مختلف عن مبلغ الشيك' : /المبلغ المكتوب/.test(t) ? 'المبلغ المكتوب مختلف عن اللي على الشيك' : /بالحروف/.test(t) ? 'المبلغ بالأرقام مختلف عن المبلغ بالحروف' : t;
+  window.chqShortIss = shortIss;
+  window.chqSlipIssues = slipIssues; window.chqChequeIssues = chequeIssues;
+  const issuesHtml = iss => iss.length ? `<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(220,38,38,.12);border:1px solid #dc2626;color:#dc2626"><b>⚠ في اختلاف — راجع قبل الحفظ:</b><ul style="margin:4px 0 0;padding-inline-start:18px">${iss.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : `<div style="margin-top:6px;color:var(--good-ink,#16a34a)"><b>✓ مطابق للشيك المتسجّل</b></div>`;
+
+  /* ---------- سياق النوافذ ---------- */
+  ['inChequeNew', 'outChequeNew'].forEach(k => { const base = ACTIONS[k]; if (typeof base !== 'function') return; ACTIONS[k] = function (id) { ctx.mode = k; ctx.orderId = id; ctx.pid = null; ctx.res = { front: null, slip: null, img: null }; return base.apply(this, arguments); }; });
+  if (typeof ACTIONS.inChequeDeposit === 'function') { const base = ACTIONS.inChequeDeposit; ACTIONS.inChequeDeposit = function (arg) { const [id, pid] = String(arg || '').split(':'); ctx.mode = 'inChequeDeposit'; ctx.orderId = id; ctx.pid = pid; ctx.res = { front: null, slip: null, img: null }; return base.apply(this, arguments); }; }
+
+  /* ---------- لما الصورة تترفع ---------- */
+  document.addEventListener('change', async ev => {
+    const input = ev.target; if (!input || input.type !== 'file' || !['front', 'slip', 'img'].includes(input.name)) return;
+    const form = input.closest('form') || document.getElementById('mform'); if (!form || !ok()) return;
+    const okMode = (input.name === 'front' && ctx.mode === 'inChequeNew') || (input.name === 'img' && ctx.mode === 'outChequeNew') || (input.name === 'slip' && ctx.mode === 'inChequeDeposit'); if (!okMode) return;
+    const file = input.files && input.files[0]; const b = box(input); if (!file) { b.remove(); return; }
+    const kind = input.name === 'slip' ? 'slip' : 'cheque'; const tok = Date.now(); input.dataset.ocrTok = tok;
+    b.innerHTML = `<span class="muted">⏳ السيستم بيقرا ${kind === 'slip' ? 'الإيصال' : 'الشيك'}…</span>`;
+    let d; try { d = await readImage(file, kind); } catch (e) { if (input.dataset.ocrTok == tok) b.innerHTML = '<span class="muted">مقدرتش أقرا الصورة — اكتب البيانات بإيدك</span>'; ctx.res[input.name] = null; return; }
+    if (input.dataset.ocrTok != tok) return;
+    ctx.res[input.name] = Object.assign({ at: nowISO() }, d);
+    if (kind === 'cheque') {
+      const filled = [];
+      if (setVal(form, 'chequeNo', digits(d.chequeNo))) filled.push('رقم الشيك');
+      if (setVal(form, 'bank', d.bank)) filled.push('البنك');
+      if (input.name === 'front') { if (num(d.amount) > 0 && setVal(form, 'amount', num(d.amount))) filled.push('المبلغ'); if (isoOk(d.date) && setVal(form, 'dueDate', d.date)) filled.push('تاريخ الاستحقاق'); }
+      else if (isoOk(d.date) && setVal(form, 'date', d.date)) filled.push('التاريخ');
+      const iss = chequeIssues(d, null);
+      b.innerHTML = `<div>${filled.length ? `✓ اتقرا من الصورة: <b>${filled.join('، ')}</b> — راجعهم` : 'مقدرتش أطلع بيانات واضحة — اكتبها بإيدك'}${d.drawer ? ` · الساحب: ${esc(d.drawer)}` : ''}${d.payee ? ` · لأمر: ${esc(d.payee)}` : ''}${d.confidence === 'low' ? ' · <span style="color:#d97706">الصورة مش واضحة</span>' : ''}</div>${iss.length ? issuesHtml(iss) : ''}`;
+    } else {
+      const o = byId('orders', ctx.orderId); const p = o && (o.payments || []).find(x => x && x.id === ctx.pid); if (!p) { b.innerHTML = '<span class="muted">اتقرا الإيصال</span>'; return; }
+      if (isoOk(d.depositDate)) setVal(form, 'date', d.depositDate);
+      const iss = slipIssues(p, d, (form.querySelector('[name="date"]') || {}).value);
+      b.innerHTML = `<div class="muted">الإيصال: ${(d.chequeNos || []).length ? `شيك ${esc((d.chequeNos || []).map(digits).join('، '))}` : 'رقم الشيك مش ظاهر'} · ${num(d.amount) > 0 ? fmtA(num(d.amount)) : 'المبلغ مش ظاهر'}${d.depositDate ? ` · ${fmtDate(d.depositDate)}` : ''}${d.accountNo ? ` · حساب ${esc(digits(d.accountNo))}` : ''}</div>${issuesHtml(iss)}`;
+    }
+  }, true);
+
+  /* ---------- حفظ القراءة على الشيك + إشعار المالك ---------- */
+  const alerts = [];
+  Store.update = (base => function (col, id, patch) {
+    try {
+      if (col === 'orders' && patch && ctx.orderId === id && ok()) {
+        const R = ctx.res;
+        if (Array.isArray(patch.payments) && R.front && ctx.mode === 'inChequeNew') {
+          patch.payments = patch.payments.map(x => { if (!x || x.kind !== 'cheque' || x.ocr || !x.imageFileId || x.stage !== 'received') return x; const ent = { amount: x.chequeAmount, chequeNo: x.chequeNo }; const iss = chequeIssues(R.front, ent); if (iss.length) alerts.push({ id, p: x, iss, what: 'شيك العميل' }); return Object.assign({}, x, { ocr: R.front, ocrIssues: iss }); });
+          ctx.res.front = null;
+        }
+        if (Array.isArray(patch.payments) && R.slip && ctx.mode === 'inChequeDeposit') {
+          patch.payments = patch.payments.map(x => { if (!x || x.id !== ctx.pid || x.stage !== 'deposited' || !x.depositSlipFileId) return x; const iss = slipIssues(x, R.slip, (x.depositedAt || '').slice(0, 10)); if (iss.length) alerts.push({ id, p: x, iss, what: 'إيصال الإيداع' }); return Object.assign({}, x, { slipOcr: R.slip, slipIssues: iss }); });
+          ctx.res.slip = null;
+        }
+        if (patch.outCheque && R.img && ctx.mode === 'outChequeNew') {
+          const oc = patch.outCheque; const iss = chequeIssues(R.img, { chequeNo: oc.chequeNo }); if (iss.length) alerts.push({ id, p: oc, iss, what: 'شيك صحة التوقيع' });
+          patch.outCheque = Object.assign({}, oc, { ocr: R.img, ocrIssues: iss }); ctx.res.img = null;
+        }
+      }
+    } catch (e) { console.warn('chqocr', e); }
+    const out = base.apply(this, arguments);
+    if (alerts.length) { const list = alerts.splice(0); Promise.resolve(out).then(() => list.forEach(a => { const o = byId('orders', a.id); if (!o || typeof notifyRole !== 'function') return; notifyRole('admin', `⚠ اختلاف في ${a.what} — ${o.code} رقم ${digits(a.p.chequeNo) || '؟'}`, a.iss.map(shortIss).join(' · ') + ` · سجّله ${(S.session || {}).name || ''}`, { orderId: o.id, id: `own_chqocr_${a.p.id || o.id}_${Date.now().toString(36)}`, priority: 'high' }); })).catch(() => { }); }
+    return out;
+  })(Store.update);
+
+  /* ---------- علامة على الشيك في صفحة الأمر ---------- */
+  function mark(html) {
+    try {
+      const id = (location.hash.match(/#\/orders\/([^/?]+)/) || [])[1]; const o = id && byId('orders', id); if (!o || !(isAdmin() || role() === 'hr')) return html;
+      (o.payments || []).filter(p => p && p.kind === 'cheque' && p.chequeNo).forEach(p => {
+        const iss = [].concat(p.ocrIssues || [], p.slipIssues || []); const read = p.ocr || p.slipOcr; if (!read && !iss.length) return;
+        const tag = iss.length ? ` <span class="badge bad" title="${esc(iss.join(' · '))}">⚠ ${esc(iss[0])}${iss.length > 1 ? ` (+${iss.length - 1})` : ''}</span>` : ` <span class="badge good">✓ مطابق للصورة</span>`;
+        const needle = `<span>رقم <span class="ltr">${esc(p.chequeNo)}</span></span>`; const i = html.indexOf(needle); if (i >= 0) html = html.slice(0, i + needle.length) + tag + html.slice(i + needle.length);
+      });
+      const oc = o.outCheque; if (oc && oc.chequeNo && (oc.ocrIssues || []).length) { const needle = ` رقم <span class="ltr">${esc(oc.chequeNo)}</span>`; const i = html.indexOf(needle); if (i >= 0) html = html.slice(0, i + needle.length) + ` <span class="badge bad" title="${esc(oc.ocrIssues.join(' · '))}">⚠ ${esc(oc.ocrIssues[0])}</span>` + html.slice(i + needle.length); }
+    } catch (e) { /* ignore */ }
+    return html;
+  }
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return mark(base.apply(this, arguments)); })(vOrderDetail);
 })();
 </script>
 
