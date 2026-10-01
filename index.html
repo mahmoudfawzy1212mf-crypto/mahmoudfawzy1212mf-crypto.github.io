@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1526-519b33";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1556-3389c6";</script>
 
 <script>
 'use strict';
@@ -25447,6 +25447,54 @@ form:not(.lofqf) [data-line="lcat"],form:not(.lofqf) [data-line="lprj"]{display:
   /* نسخة قديمة محفوظة على الجهاز: متبانش برضه لغير المصرّح لهم */
   if (typeof listScope === 'function') listScope = (base => function (col, arr) { const out = base.apply(this, arguments); if (col === 'tasks' && Array.isArray(out) && S.session && !FIN_ROLES.includes(role())) return out.filter(t => !(t && t.finConf)); return out; })(listScope);
   if (typeof escalationTargets === 'function') escalationTargets = (base => function (t, level) { if (t && t.finConf) return { ids: ['role:admin'], label: 'المالك' }; return base.apply(this, arguments); })(escalationTargets);
+})();
+/* =====================================================================
+   v5.79 — شيل / ضيف طرف في أي محادثة (بـ«ابدأ» من محمود)
+   · ✕ على اسم الطرف (للمالك + اللي فتح المحادثة) → task.excluded += [id] + رسالة نظام.
+   · المتشال: المحادثة بتختفي عنده (السيرفر nf_conf_ok: excluded ? person/worker id → false، حتى لو مدير/رئيس قسم/مدير مصنع)،
+     ومش بيوصله إشعارات (taskParties بيستبعده). المالك والمكلَّف بالمهمة ما يتشالوش.
+   · «+ طرف» لشخص كان متشال → بيرجع (بيتشال من excluded).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CHATPARTIES__) return; window.__NF_CHATPARTIES__ = 1;
+  const norm = id => String(id || '').replace(/^w:/, '');
+  const exSet = t => new Set((Array.isArray(t && t.excluded) ? t.excluded : []).map(norm));
+  const isEx = (t, id) => !!id && exSet(t).has(norm(id));
+  const meEx = t => !isAdmin() && myIds().some(id => isEx(t, id));
+  const canRemove = t => writable() && (isAdmin() || myIds().some(id => norm(id) === norm(t.createdBy)));
+  const protectedId = (t, id) => norm(id) === norm(t.assigneeId) || (byId('staff', id) || {}).role === 'admin';
+  window.nfTaskExcluded = isEx;
+
+  if (typeof taskParties === 'function') taskParties = (base => function (t) { const out = base.apply(this, arguments); if (!t || !Array.isArray(t.excluded) || !t.excluded.length) return out; return out.filter(p => !isEx(t, p.id)); })(taskParties);
+  if (typeof taskVisible === 'function') taskVisible = (base => function (t) { if (t && meEx(t)) return false; return base.apply(this, arguments); })(taskVisible);
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) { const out = base.apply(this, arguments); if (col === 'tasks' && Array.isArray(out) && S.session && !isAdmin()) return out.filter(t => !(t && Array.isArray(t.excluded) && t.excluded.length && meEx(t))); return out; })(listScope);
+
+  /* «+ طرف» لحد كان متشال → يرجع */
+  Store.update = (base => function (col, id, patch, opts) {
+    if (col === 'tasks' && patch && Array.isArray(patch.participants)) { const t = byId('tasks', id); if (t && Array.isArray(t.excluded) && t.excluded.length) { const back = new Set(patch.participants.map(p => norm(p.id))); const ex = t.excluded.filter(x => !back.has(norm(x))); if (ex.length !== t.excluded.length) patch = Object.assign({}, patch, { excluded: ex }); } }
+    return base.call(this, col, id, patch, opts);
+  })(Store.update);
+
+  /* ✕ على أسماء الأطراف في صفحة المحادثة */
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    if (t && meEx(t)) return '<div class="card muted">ليست لك صلاحية على هذه المهمة</div>';
+    let html = base.apply(this, arguments); if (!t || !canRemove(t)) return html;
+    const parties = taskParties(t); const i = html.indexOf('<div class="tparties'); if (i < 0) return html; const j = html.indexOf('</div>', i); if (j < 0) return html;
+    const chips = parties.map(p => { const lock = protectedId(t, p.id) || myIds().some(m => norm(m) === norm(p.id)); return `<span class="badge" title="${esc(p.why)}">${esc(String(p.name || '').split(' — ')[0])}${lock ? '' : `<button type="button" class="tpx" data-action="taskRemoveParty" data-arg="${esc(t.id)}|${esc(p.id)}" title="شيل من المحادثة" aria-label="شيل">×</button>`}</span>`; }).join('');
+    const open = html.slice(i, html.indexOf('>', i) + 1);
+    return html.slice(0, i) + open + chips + html.slice(j);
+  })(vTaskDetail);
+  document.head.insertAdjacentHTML('beforeend', '<style>.tparties .tpx{border:0;background:none;color:inherit;opacity:.55;margin-inline-start:6px;padding:0 2px;font-size:14px;line-height:1;cursor:pointer}.tparties .tpx:hover{opacity:1;color:#c0392b}</style>');
+  ACTIONS.taskRemoveParty = async arg => {
+    const [tid, pid] = String(arg || '').split('|'); const t = byId('tasks', tid); if (!t || !pid || !canRemove(t) || protectedId(t, pid)) return;
+    const p = taskParties(t).find(x => x.id === pid) || { name: (typeof assigneeName === 'function' ? assigneeName(norm(pid)) : '') || pid };
+    const name = String(p.name || '').split(' — ')[0];
+    if (!await confirmDlg(`تشيل ${name} من المحادثة؟ مش هيشوفها تاني ومش هيوصله منها إشعارات.`, 'شيل')) return;
+    const ex = Array.from(new Set((t.excluded || []).concat([norm(pid), 'w:' + norm(pid), pid])));
+    const participants = (t.participants || []).filter(x => norm(x.id) !== norm(pid));
+    const th = (Array.isArray(t.thread) ? t.thread : []).concat([{ id: uid(), at: nowISO(), by: null, byName: 'السيستم', sys: true, text: `${S.session.name || ''} شال ${name} من المحادثة` }]);
+    await Store.update('tasks', tid, { excluded: ex, participants, thread: th }); toast(`اتشال ${name}`);
+  };
 })();
 </script>
 
