@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1327-b5f432";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1345-f59c97";</script>
 
 <script>
 'use strict';
@@ -25340,6 +25340,82 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     }
     S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'acc' }); toast(`اتسلّم ✓ — ${o.code}`); render(false);
   };
+})();
+/* =====================================================================
+   v5.76 — فورم عرض سعر LOF (بـ«ابدأ» من محمود)
+   · «عرض سعر جديد» لـ LOF بيفتح الفورم على طول (من غير شاشة From Catalogue / Project خاص).
+   · بنود عرض LOF: 3 زراير بس — New Item (البند الاحترافي) · From Catalogue (منتجات الكتالوج بس، بالأقسام)
+     · From Projects (منتجات المشاريع: المنطقة ← المشروع ← منتجاته). باقي الزراير بتستخبى في عروض LOF بس.
+   ===================================================================== */
+(function () {
+  if (window.__NF_LOFQFORM__) return; window.__NF_LOFQFORM__ = 1;
+  const LB = 'lof';
+  document.head.insertAdjacentHTML('beforeend', `<style>
+form.lofqf [data-line="add"],form.lofqf [data-line="sec"],form.lofqf [data-line="custom"],form.lofqf [data-line="pick"]{display:none!important}
+form:not(.lofqf) [data-line="lcat"],form:not(.lofqf) [data-line="lprj"]{display:none!important}
+.prjpick{display:grid;grid-template-columns:240px 1fr;gap:12px;min-height:380px}.prjpick .side{border-inline-end:1px solid var(--line);padding-inline-end:10px;max-height:60vh;overflow:auto}
+.prjpick .ar{font-size:11.5px;color:var(--muted);font-weight:700;margin:10px 0 4px}.prjpick .pj{display:flex;justify-content:space-between;gap:6px;width:100%;text-align:start;padding:7px 9px;border-radius:9px;border:0;background:none;font-size:13px;color:inherit;cursor:pointer}
+.prjpick .pj:hover{background:var(--surface-2)}.prjpick .pj.on{background:color-mix(in srgb,var(--acc,#3b6ea5) 14%,transparent);font-weight:700}.prjpick .pj .n{color:var(--muted);font-size:11.5px}
+.prjpick .main{max-height:60vh;overflow:auto}@media(max-width:700px){.prjpick{grid-template-columns:1fr}.prjpick .side{border:0;max-height:none}}
+</style>`);
+
+  /* ---------- 1) عرض سعر جديد = الفورم على طول ---------- */
+  const brandSel = f => f && f.querySelector('[name=brandId]');
+  const setLof = f => { const br = brandSel(f); if (br && br.value !== LB && [...br.options].some(o => o.value === LB)) { br.value = LB; br.dispatchEvent(new Event('change', { bubbles: true })); } };
+  ACTIONS.lofQuoteNew = cid => { S.ui.crmBrand = LB; ACTIONS.quoteNew(cid || undefined); setTimeout(() => setLof(document.getElementById('mform')), 60); };
+
+  /* ---------- 2) زراير البنود ---------- */
+  const isLofForm = f => ((brandSel(f) || {}).value || '') === LB;
+  const kindOf = p => (typeof pKind === 'function' ? pKind(p) : (p.kind || ''));
+  const prods = () => list('products').filter(p => p.brandId === LB && p.status !== 'archived');
+  const lineOf = p => ({ productId: p.id, img: (typeof productCover === 'function' ? productCover(p) : '') || '', desc: `${p.name}${p.dims ? ' — ' + p.dims : ''}${p.finish ? ' — ' + p.finish : ''}`, qty: 1, unit: p.unit || 'قطعة', price: (typeof seesFinance === 'function' && seesFinance()) ? (p.price || '') : '' });
+  const card = p => { const cover = typeof productCover === 'function' ? productCover(p) : ''; return `<button type="button" class="pc" data-pid="${esc(p.id)}"><div class="im">${cover ? `<img src="${esc(cover)}" alt="">` : `<span class="muted">${icon('inventory')}</span>`}</div><div class="bd"><span class="code">${esc(p.code || '')}</span><div class="bold">${esc(p.name || '')}</div>${p.dims ? `<div class="tiny muted">${esc(p.dims)}</div>` : ''}${typeof seesFinance === 'function' && seesFinance() && p.price ? `<div class="pr">${fmtMoney(p.price)} ${CUR()}</div>` : ''}</div></button>`; };
+  function overlay(title, drawBody, onPick) {
+    const box = document.createElement('div'); box.className = 'overlay sub'; document.body.appendChild(box); const st = { q: '' };
+    const draw = () => { box.innerHTML = `<div class="modal wide" style="max-width:980px"><div class="mh"><h2>${title}</h2><button type="button" class="iconbtn" data-x="1">${icon('x')}</button></div><div class="mb"><div class="search" style="margin-bottom:10px">${icon('search')}<input placeholder="بحث بالكود أو الاسم" value="${esc(st.q)}" data-q="1"></div>${drawBody(st)}</div></div>`; const qi = box.querySelector('[data-q]'); if (qi && st.q) { qi.focus(); qi.setSelectionRange(st.q.length, st.q.length); } };
+    draw();
+    box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-x]')) { box.remove(); return; } const s = e.target.closest('[data-st]'); if (s) { const [k, v] = s.dataset.st.split('='); st[k] = v; draw(); return; } const it = e.target.closest('[data-pid]'); if (!it) return; const p = byId('products', it.dataset.pid); if (p) { onPick(p); box.remove(); toast(`اتضاف ${p.code || p.name}`); } });
+    box.addEventListener('input', e => { if (!e.target.dataset.q) return; st.q = e.target.value; clearTimeout(box._t); box._t = setTimeout(draw, 200); });
+    return box;
+  }
+  const match = (p, q) => !q || `${p.code || ''} ${p.name || ''} ${p.dims || ''}`.toLowerCase().includes(q.toLowerCase());
+  /* From Catalogue = نفس شاشة الكتالوج (بعلامات الصورة/الإنجليزي) بس من غير منتجات المشاريع */
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) {
+    const out = base.apply(this, arguments);
+    if (col === 'products' && S._catOnly && Array.isArray(out)) { if (S._catOnlyBox && !document.body.contains(S._catOnlyBox)) { S._catOnly = false; S._catOnlyBox = null; return out; } return out.filter(p => kindOf(p) !== 'project'); }
+    return out;
+  })(listScope);
+  function pickCatalog(f, recalc) {
+    S._catOnly = true; S._catOnlyBox = null;
+    try { pickCatalogLine(f, recalc, LB); } catch (e) { S._catOnly = false; throw e; }
+    S._catOnlyBox = [...document.querySelectorAll('.overlay.sub')].pop() || null; if (!S._catOnlyBox) S._catOnly = false;
+  }
+  function pickProjects(f, recalc) {
+    const arr0 = prods().filter(p => kindOf(p) === 'project');
+    const gOf = p => (typeof window.pgOf === 'function' ? window.pgOf(p) : null);
+    const groups = new Map(); arr0.forEach(p => { const g = gOf(p); const id = g ? g.id : '_none'; if (!groups.has(id)) groups.set(id, { id, name: g ? (g.name || '—') : 'بدون مشروع', area: g ? (g.area || 'بدون منطقة') : 'بدون منطقة', items: [] }); groups.get(id).items.push(p); });
+    const gs = sortBy([...groups.values()], g => (g.area === 'بدون منطقة' ? 'ي' : g.area) + ' ' + g.name);
+    overlay(`${icon('orders')}From Projects — منتجات المشاريع`, st => {
+      if (st.pj === undefined) st.pj = gs.length ? gs[0].id : '';
+      const areas = []; gs.forEach(g => { if (!areas.includes(g.area)) areas.push(g.area); });
+      const side = areas.map(a => `<div class="ar">${esc(a)}</div>${gs.filter(g => g.area === a).map(g => `<button type="button" class="pj ${st.pj === g.id && !st.q ? 'on' : ''}" data-st="pj=${esc(g.id)}"><span>${esc(g.name)}</span><span class="n">${g.items.length}</span></button>`).join('')}`).join('');
+      let list_ = st.q ? arr0.filter(p => match(p, st.q)) : ((gs.find(g => g.id === st.pj) || { items: [] }).items);
+      list_ = sortBy(list_, p => p.code || p.name);
+      const cur = gs.find(g => g.id === st.pj);
+      const head = st.q ? `<div class="small muted" style="margin-bottom:8px">نتايج البحث في كل المشاريع (${list_.length})</div>` : (cur ? `<div style="margin-bottom:8px"><b>${esc(cur.name)}</b> <span class="muted small">· ${esc(cur.area)} · ${cur.items.length} منتج</span></div>` : '');
+      return gs.length ? `<div class="prjpick"><div class="side">${side}</div><div class="main">${head}${list_.length ? `<div class="pickgrid">${list_.map(p => { const g = st.q ? gOf(p) : null; return card(p).replace('</div></button>', `${g ? `<div class="tiny muted">${esc(g.name)}</div>` : ''}</div></button>`); }).join('')}</div>` : '<div class="empty"><b>مفيش منتجات</b></div>'}</div></div>` : '<div class="empty"><b>لسه مفيش منتجات مشاريع</b></div>';
+    }, p => appendLine(f, lineOf(p), recalc));
+  }
+  if (typeof wireQuoteForm === 'function') wireQuoteForm = (base => function (f) {
+    const r = base.apply(this, arguments);
+    const pro = f.querySelector('[data-line="pro"]');
+    if (pro && !f.querySelector('[data-line="lcat"]')) pro.insertAdjacentHTML('afterend', ` <button type="button" class="btn sm ghost" data-line="lcat">${icon('inventory')}From Catalogue</button> <button type="button" class="btn sm ghost" data-line="lprj">${icon('orders')}From Projects</button>`);
+    const toggle = () => { const on = isLofForm(f); f.classList.toggle('lofqf', on); const b = f.querySelector('[data-line="pro"]'); if (b) b.innerHTML = `${icon('plus')}${on ? 'New Item' : 'بند احترافي'}`; };
+    toggle(); const br = brandSel(f); if (br) br.addEventListener('change', toggle);
+    const recalc = () => { const l = f.querySelector('#lines input:not([type=hidden])'); if (l) l.dispatchEvent(new Event('input', { bubbles: true })); };
+    f.addEventListener('click', e => { const b = e.target.closest('[data-line="lcat"],[data-line="lprj"]'); if (!b) return; e.preventDefault(); e.stopPropagation(); if (b.dataset.line === 'lcat') pickCatalog(f, recalc); else pickProjects(f, recalc); }, true);
+    return r;
+  })(wireQuoteForm);
 })();
 </script>
 
