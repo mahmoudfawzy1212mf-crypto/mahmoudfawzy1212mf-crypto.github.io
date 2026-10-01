@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1207-77d571";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1224-1aab99";</script>
 
 <script>
 'use strict';
@@ -24578,27 +24578,41 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return html;
   })(vCrmBrand);
 
-  /* ---------- 4) القائمة الجانبية: مجموعات فوق بالترتيب (navGroups) أو مجموعة واحدة (navTop) ---------- */
+  /* ---------- 4) القائمة الجانبية: مجموعات فوق بالترتيب (navGroups) أو مجموعة واحدة (navTop)
+     v5.72: عنصر { fromGrp: 'المخازن' } بياخد كل اللي باقي من مجموعة أصلية، وعنصر 'saleskit/catalogues' = صفحة فرعية.
+     ده ترتيب بس — مفيش حاجة بتستخبى أو تظهر غير اللي canSee بيسمح بيه. ---------- */
   if (typeof navHTML === 'function') navHTML = (base => function () {
-    let html = base.apply(this, arguments); const p = prefs(); if (!p) return html;
+    const html = base.apply(this, arguments); const p = prefs(); if (!p) return html;
     const groups = Array.isArray(p.navGroups) && p.navGroups.length ? p.navGroups : (Array.isArray(p.navTop) && p.navTop.length ? [{ label: p.navTopLabel || 'المبيعات', items: p.navTop.map(id => ({ id })) }] : null);
     if (!groups) return html;
-    const v = S.route.view; let top = '';
+    const v = S.route.view, rid = S.route.id || '';
+    /* تفكيك القائمة الأصلية لعناصر بمجموعاتها */
+    const toks = []; let cur = ''; const rest = html.replace(/<div class="grp">([^<]*)<\/div>|<a href="#\/([^"]*)"[\s\S]*?<\/a>/g, (m, g, id) => { if (g !== undefined) { cur = g.replace(/&amp;/g, '&'); toks.push({ grp: cur }); } else toks.push({ id, a: m, grp: cur }); return ''; });
+    const used = new Set(); const take = t => { used.add(t); return t.a; };
+    const relabel = (a, l) => l ? a.replace(/<span>[^<]*<\/span>/, `<span>${esc(l)}</span>`) : a;
+    let top = '';
     groups.forEach(g => {
       const parts = [];
       (g.items || []).forEach(it => {
-        const id = it.id; const re = new RegExp('<a href="#/' + id.replace(/[-/]/g, '\\$&') + '"[^>]*>[\\s\\S]*?</a>'); const m = html.match(re);
-        let a = m ? m[0] : '';
-        if (m) html = html.replace(m[0], '');
-        else if (typeof canSee === 'function' && canSee(id)) { const n = (typeof NAV !== 'undefined' ? NAV : []).find(x => x.id === id) || {}; a = `<a href="#/${id}" class="${v === id ? 'on' : ''}" data-action="navgo">${icon(it.icon || n.icon || 'layers')}<span>${esc(it.label || n.label || id)}</span></a>`; }
-        if (a && it.label) a = a.replace(/<span>[^<]*<\/span>/, `<span>${esc(it.label)}</span>`);
-        if (a) parts.push(a);
+        if (it.fromGrp) { toks.filter(t => t.a && !used.has(t) && t.grp === it.fromGrp).forEach(t => parts.push(take(t))); return; }
+        const id = String(it.id || ''); if (!id) return; const [bid, sub] = id.split('/');
+        if (sub) {
+          if (typeof canSee !== 'function' || !canSee(bid)) return;
+          toks.filter(t => t.a && t.id === bid).forEach(t => used.add(t));
+          const n = (typeof NAV !== 'undefined' ? NAV : []).find(x => x.id === bid) || {};
+          parts.push(`<a href="#/${esc(id)}" class="${v === bid && rid === sub ? 'on' : ''}" data-action="navgo">${icon(it.icon || n.icon || 'layers')}<span>${esc(it.label || sub)}</span></a>`); return;
+        }
+        const t = toks.find(x => x.a && !used.has(x) && x.id === id);
+        if (t) { parts.push(relabel(take(t), it.label)); return; }
+        if (typeof canSee === 'function' && canSee(id)) { const n = (typeof NAV !== 'undefined' ? NAV : []).find(x => x.id === id) || {}; parts.push(`<a href="#/${esc(id)}" class="${v === id ? 'on' : ''}" data-action="navgo">${icon(it.icon || n.icon || 'layers')}<span>${esc(it.label || (typeof n.label === 'function' ? n.label() : n.label) || id)}</span></a>`); }
       });
       if (parts.length) top += `<div class="grp">${esc(g.label || '')}</div>` + parts.join('');
     });
     if (!top) return html;
-    html = html.replace(/<div class="grp">[^<]*<\/div>(?=<div class="grp">|$)/g, '');
-    return top + html;
+    /* الباقي تحت بمجموعاته الأصلية */
+    let below = ''; let pend = null;
+    toks.forEach(t => { if (!t.a) { pend = t.grp; return; } if (used.has(t)) return; if (pend !== null) { below += `<div class="grp">${esc(pend)}</div>`; pend = null; } below += t.a; });
+    return top + below + rest;
   })(navHTML);
 })();
 /* =====================================================================
@@ -24615,9 +24629,14 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   const myW = () => me().workerId ? byId('workers', me().workerId) : null;
   const skSee = () => !!S.session && !(typeof isStuSys === 'function' && isStuSys()) && (isAdmin() || !!(myW() && myW().uiPrefs && myW().uiPrefs.salesKit));
   window.skSee = skSee;
-  const CATS = 'Catalogues', PROFILE = 'Company Profile';
+  const CATS = 'Catalogues', PROFILE = 'Company Profile', SAMPLES = 'Samples Board', PROJECTS = 'Projects';
+  /* v5.72: صفحات فرعية من القائمة: #/saleskit/catalogues · /samples · /projects */
+  const SUBS = { catalogues: { sec: CATS, title: 'B2B & B2C Catalogues', segs: true }, samples: { sec: SAMPLES, title: 'Samples Board — All Materials' }, projects: { sec: PROJECTS, title: 'All B2B & B2C Projects', segs: true } };
+  const SEG_SECS = [CATS, PROJECTS];
+  const fSeg = f => (f.seg === 'b2b' || f.seg === 'b2c') ? f.seg : 'both';
+  const SEG_L = { b2b: 'B2B', b2c: 'B2C', both: 'B2B & B2C' };
   const skFiles = () => list('files').filter(f => (f.kind === 'saleskit' || f.ownerKind === 'saleskit') && !f.deleted && !f.archived);
-  const sectionsOf = fs => { const base = [CATS, PROFILE]; fs.forEach(f => { const s = f.section || 'Other'; if (!base.includes(s)) base.push(s); }); return base; };
+  const sectionsOf = fs => { const base = [CATS, PROFILE, SAMPLES, PROJECTS]; fs.forEach(f => { const s = f.section || 'Other'; if (!base.includes(s)) base.push(s); }); return base; };
   const fmtSize = n => typeof fmtBytes === 'function' ? fmtBytes(n || 0) : ((n || 0) / 1048576).toFixed(1) + ' MB';
   document.head.insertAdjacentHTML('beforeend', `<style>
 .skhead{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;background:color-mix(in srgb,var(--surface-2) 70%,transparent);border:1px solid var(--line);margin-bottom:14px}
@@ -24627,6 +24646,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
 .skfile .th{width:56px;height:56px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;overflow:hidden;flex:none}.skfile .th img{width:100%;height:100%;object-fit:cover}
 .skfile .th svg{width:22px;height:22px;color:var(--muted)}.skfile .mn{flex:1;min-width:0}.skfile .mn b{display:block;font-size:13.5px}.skfile .mn small{color:var(--muted);font-size:11.5px}
 .skfile .acts{display:flex;gap:6px;flex-wrap:wrap}.skfile.old{opacity:.65}
+.sksub{padding:8px 12px 4px;font-size:12px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center}.sksub .n{font-weight:400}
 </style>`);
 
   function fileRow(f, old, ro) {
@@ -24638,27 +24658,31 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     if (!skSee()) return `<div class="empty"><b>الصفحة دي مش متاحة</b></div>`;
     const fs = skFiles(); const cats = typeof catalogsOf === 'function' ? catalogsOf(BRAND) : [];
     const k = typeof brandKit === 'function' ? brandKit(BRAND) : { name: 'lōf' };
-    const head = `<div class="skhead">${typeof BRAND_SVG !== 'undefined' && BRAND_SVG.lof ? BRAND_SVG.lof : ''}<div class="t"><b>Sales Kit — ${esc(k.name || 'lōf')}</b><span>الكتالوجات والبروفايل وكل اللي محتاجه وانت بتبيع — ابعته للعميل بضغطة</span></div><div class="grow"></div><button class="btn p" data-action="skUpload" data-arg="">${icon('plus')}رفع ملف</button></div>`;
-    const secs = sectionsOf(fs).map(s => {
+    const head = `<div class="skhead">${typeof BRAND_SVG !== 'undefined' && BRAND_SVG.lof ? BRAND_SVG.lof : ''}<div class="t"><b>Sales Kit — ${esc(k.name || 'lōf')}</b><span>الكتالوجات والبروفايل وكل اللي محتاجه وانت بتبيع — ابعته للعميل بضغطة</span></div><div class="grow"></div><button class="btn p" data-action="skUpload" data-arg="${SUBS[S.route.id] ? esc(SUBS[S.route.id].sec) : ''}">${icon('plus')}رفع ملف</button></div>`;
+    const subK = SUBS[S.route.id] ? S.route.id : ''; const only = subK ? SUBS[subK].sec : '';
+    const rowsHTML = rows => { const seen = new Set(); return rows.map(f => { const key = String(f.title || f.name || '').trim().toLowerCase(); const old = seen.has(key); seen.add(key); return fileRow(f, old, f._ro); }).join(''); };
+    const secs = sectionsOf(fs).filter(s => !only || s === only).map(s => {
       let rows = fs.filter(f => (f.section || 'Other') === s).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      /* أحدث نسخة من كل عنوان فوق، والأقدم تحتها باهت */
-      const seen = new Set(); let html = rows.map(f => { const key = String(f.title || f.name || '').trim().toLowerCase(); const old = seen.has(key); seen.add(key); return fileRow(f, old); }).join('');
-      if (s === CATS) html += cats.map(f => fileRow(Object.assign({}, f, { title: f.name }), false, true)).join('');
-      const n = rows.length + (s === CATS ? cats.length : 0);
-      return `<div class="card sksec"><div class="cardhead"><h3>${icon(s === CATS ? 'print' : s === PROFILE ? 'user' : 'layers')}${esc(s)}</h3><span class="muted small">${n}</span><div class="grow"></div><button class="btn sm ghost" data-action="skUpload" data-arg="${esc(s)}">${icon('plus')}رفع</button></div>${html || '<div class="muted small" style="padding:10px 12px">لسه مفيش ملفات هنا</div>'}</div>`;
+      if (s === CATS) rows = rows.concat(cats.map(f => Object.assign({}, f, { title: f.name, _ro: true })));
+      let html;
+      /* الكتالوجات والمشاريع: B2B لوحدها، B2C لوحدها، واللي للاتنين */
+      if (SEG_SECS.includes(s)) html = ['b2b', 'b2c', 'both'].map(k => { const rr = rows.filter(f => fSeg(f) === k); if (!rr.length && k === 'both') return ''; return `<div class="sksub">${SEG_L[k]}<span class="n">(${rr.length})</span><div class="grow"></div><button class="btn xs ghost" data-action="skUpload" data-arg="${esc(s)}|${k}">${icon('plus')}رفع</button></div>` + (rr.length ? rowsHTML(rr) : '<div class="muted small" style="padding:8px 12px">لسه مفيش</div>'); }).join('');
+      else html = rowsHTML(rows);
+      const ttl = only && subK ? SUBS[subK].title : s;
+      return `<div class="card sksec"><div class="cardhead"><h3>${icon(s === CATS ? 'print' : s === PROFILE ? 'user' : s === PROJECTS ? 'orders' : 'layers')}${esc(ttl)}</h3><span class="muted small">${rows.length}</span><div class="grow"></div><button class="btn sm ghost" data-action="skUpload" data-arg="${esc(s)}">${icon('plus')}رفع</button></div>${html || '<div class="muted small" style="padding:10px 12px">لسه مفيش ملفات هنا</div>'}</div>`;
     }).join('');
     return head + secs + `<div class="muted tiny" style="margin-top:6px">الصفحة دي ليك وللناس اللي المالك مضيفهم بس — محدش تاني يقدر يفتح الملفات.</div>`;
   }
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.saleskit = 'Sales Kit';
   EXTRA_VIEWS.saleskit = () => vSalesKit();
-  EXTRA_TITLES.saleskit = () => ({ title: 'Sales Kit', sub: 'كتالوجات · Company Profile · ملفات البيع' });
+  EXTRA_TITLES.saleskit = () => (SUBS[S.route.id] ? { title: SUBS[S.route.id].title, sub: 'Sales Kit' } : { title: 'Sales Kit', sub: 'كتالوجات · Company Profile · Samples · Projects' });
   canSee = (base => view => (view === 'saleskit' ? skSee() : base(view)))(canSee);
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'saleskit')) { const i = NAV.findIndex(n => n.id === 'invoices'); const items = [{ grp: 'Sales Kit' }, { id: 'saleskit', label: 'Sales Kit', icon: 'layers' }]; if (i >= 0) NAV.splice(i + 1, 0, ...items); else NAV.push(...items); }
 
   /* ---------- رفع ---------- */
-  ACTIONS.skUpload = sec => {
-    if (!skSee()) return; const secs = sectionsOf(skFiles());
-    openModal({ title: 'رفع ملف على Sales Kit', body: `<div class="form">${field('القسم', inp('section', sec || PROFILE, `list="sk-secs" required`) + `<datalist id="sk-secs">${secs.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`)}${field('اسم الملف', inp('title', '', 'required placeholder="مثال: LOF Company Profile 2026"'))}<div class="field full"><label>الملف (PDF / صورة / فيديو — لحد 20 ميجا)</label><input type="file" id="f-skfile" name="skfile" accept="application/pdf,image/*,video/*" required></div><div class="full tiny muted">لو رفعت ملف بنفس الاسم، القديم بيفضل محفوظ تحته كنسخة أقدم.</div><div class="full" id="skprog"></div></div>`, submitLabel: 'رفع',
+  ACTIONS.skUpload = arg => {
+    if (!skSee()) return; const secs = sectionsOf(skFiles()); let [sec, sg] = String(arg || '').split('|'); sg = ['b2b', 'b2c', 'both'].includes(sg) ? sg : 'both';
+    openModal({ title: 'رفع ملف على Sales Kit', body: `<div class="form">${field('القسم', inp('section', sec || PROFILE, `list="sk-secs" required`) + `<datalist id="sk-secs">${secs.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`)}${field('لمين؟', `<select name="seg"><option value="both" ${sg === 'both' ? 'selected' : ''}>B2B & B2C — الاتنين</option><option value="b2b" ${sg === 'b2b' ? 'selected' : ''}>B2B — شركات / مقاولين / مكاتب</option><option value="b2c" ${sg === 'b2c' ? 'selected' : ''}>B2C — أفراد / فلل</option></select>`)}${field('اسم الملف', inp('title', '', 'required placeholder="مثال: LOF Company Profile 2026"'))}<div class="field full"><label>الملف (PDF / صورة / فيديو — لحد 20 ميجا)</label><input type="file" id="f-skfile" name="skfile" accept="application/pdf,image/*,video/*" required></div><div class="full tiny muted">لو رفعت ملف بنفس الاسم، القديم بيفضل محفوظ تحته كنسخة أقدم.</div><div class="full" id="skprog"></div></div>`, submitLabel: 'رفع',
       onSubmit: async f => {
         const d = formData(f); const file = (f.querySelector('#f-skfile') || {}).files?.[0]; if (!file) { toast('اختار الملف', 'err'); return false; }
         if (file.size > 20 * 1048576) { toast('الملف أكبر من 20 ميجا', 'err'); return false; }
@@ -24667,7 +24691,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         const id = uid(); const ref = `saleskit/${todayISO().slice(0, 7)}/${id}${ext}`;
         try { const r = await S.sb.storage.from('files').upload(ref, file, { contentType: mime, upsert: false }); if (r.error) throw r.error; } catch (e) { if (prog) prog.innerHTML = ''; toast('الرفع فشل — ' + String(e.message || e), 'err'); return false; }
         let thumb = null, pages = null; try { if (/^image\//.test(mime)) thumb = await imageThumb(URL.createObjectURL(file)); else if (mime === 'application/pdf') { const t = await pdfThumb(file); thumb = t.thumb; pages = t.pages; } } catch (e) { /* ignore */ }
-        await Store.save('files', { id, name: file.name, title: (d.title || file.name).trim(), kind: 'saleskit', ownerKind: 'saleskit', ownerId: BRAND, brandId: BRAND, section: (d.section || PROFILE).trim(), store: 'sb', ref, mime, size: file.size, thumb, pages, productId: null, orderId: null, byId: me().id || null, byName: me().name || '', createdAt: nowISO() });
+        await Store.save('files', { id, name: file.name, title: (d.title || file.name).trim(), kind: 'saleskit', ownerKind: 'saleskit', ownerId: BRAND, brandId: BRAND, section: (d.section || PROFILE).trim(), seg: ['b2b', 'b2c'].includes(d.seg) ? d.seg : 'both', store: 'sb', ref, mime, size: file.size, thumb, pages, productId: null, orderId: null, byId: me().id || null, byName: me().name || '', createdAt: nowISO() });
         toast('اترفع ✓');
       } });
   };
