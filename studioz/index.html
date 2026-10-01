@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1033-96ed92";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1057-a2f28a";</script>
 
 <script>
 'use strict';
@@ -24393,6 +24393,124 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     document.querySelectorAll('.nfsysbtn').forEach(b => { if (b.dataset.action !== 'nfHubHome') { b.dataset.action = 'nfHubHome'; b.removeAttribute('data-arg'); b.textContent = '⇄ Ninety'; b.title = 'شاشة Ninety — الشركتين'; } });
     document.querySelectorAll('.nfsysside').forEach(d => { if (!d.dataset.hub) { d.dataset.hub = '1'; d.innerHTML = '<button type="button" data-action="nfHubHome">⇄ الرجوع لـ Ninety</button>'; } });
   });
+})();
+/* =====================================================================
+   v5.66 — تصنيف منتجات المشاريع: المنطقة ← المشروع
+   · settings.pgroups = [{ id, name, area, brandId, clientId, orderIds[], note }] — المالك/الموارد يعدّلها.
+   · مشروع المنتج: products.pgId، وإلا من أمر التشغيل (projectOrderId / orderId) لو الأمر متسجّل في مشروع،
+     وإلا من المنتج الأب، وإلا مشروع تلقائي باسم أمر التشغيل، وإلا «بدون مشروع».
+   · صفحة المنتجات ← «منتجات المشاريع»: فلتر بالمنطقة والمشروع + أقسام لكل منطقة ومشروع (العميل، الأوامر، العدد).
+   · فورم المنتج: خانة «المشروع (التصنيف)». مفيش تغيير صلاحيات — بيرتب نفس المنتجات اللي الشخص شايفها.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PGROUPS__) return; window.__NF_PGROUPS__ = 1;
+  const groups = () => Array.isArray(S.settings.pgroups) ? S.settings.pgroups.filter(g => g && g.id) : [];
+  const gById = id => groups().find(g => g.id === id) || null;
+  const canEditPg = () => isAdmin() || role() === 'hr';
+  function pgOf(p, depth) {
+    if (!p) return null; if (p.pgId) { const g = gById(p.pgId); if (g) return g; }
+    const oid = p.projectOrderId || p.orderId; if (oid) { const g = groups().find(x => (x.orderIds || []).includes(oid)); if (g) return g; }
+    if (p.parentId && (depth || 0) < 3) { const g = pgOf(byId('products', p.parentId), (depth || 0) + 1); if (g && !g.auto) return g; }
+    if (oid) { const o = byId('orders', oid); if (o) return { id: 'o:' + o.id, auto: true, name: o.title || o.code, area: '', brandId: o.brandId, clientId: o.clientId, orderIds: [o.id] }; }
+    return null;
+  }
+  window.pgOf = pgOf;
+  const NOAREA = 'مناطق تانية'; const NONE = { id: '', name: 'بدون مشروع', area: '' };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.pgbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-2px 0 12px}
+.pgbar .lbl{font-size:12px;color:var(--muted)}
+.pgarea{margin:6px 0 14px}.pgarea>h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}.pgarea>h4 svg{width:16px;height:16px;flex:none}.pgsec .pgh svg{width:14px;height:14px}.pgarea>h4 .n{font-size:12px;color:var(--muted);font-weight:400}
+.pgsec{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;background:color-mix(in srgb,var(--surface-2) 40%,transparent)}
+.pgsec .pgh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}.pgsec .pgh b{font-size:14px}.pgsec .pgh .meta{font-size:12px;color:var(--muted)}
+.pgsec .pgh .meta a{color:inherit;text-decoration:underline}.pgsec .pgh .sp{flex:1}
+</style>`);
+
+  /* ---------- صفحة المنتجات ---------- */
+  function cardsIn(html, start) {
+    const out = []; let i = start; const re = /\s*<a class="pcard" href="#\/products\/([^"]+)">[\s\S]*?<\/a>/y;
+    for (;;) { re.lastIndex = i; const m = re.exec(html); if (!m) break; out.push({ id: m[1], html: m[0].trim() }); i = re.lastIndex; }
+    return { cards: out, end: i };
+  }
+  function sectionHTML(g, cards, f) {
+    const cl = g.clientId ? byId('clients', g.clientId) : null; const ords = (g.orderIds || []).map(id => byId('orders', id)).filter(Boolean);
+    return `<div class="pgsec"><div class="pgh"><b>${esc(g.name)}</b><span class="meta">${[cl ? esc(cl.name) : '', ords.map(o => `<a href="#/orders/${o.id}">${esc(o.code)}</a>`).join(' · ')].filter(Boolean).join(' — ')}</span><span class="sp"></span><span class="badge">${cards.length} منتج</span>${g.id && !g.auto && f.pg !== g.id ? `<button class="btn xs ghost" data-action="prFilter" data-arg="pg:${esc(g.id)}">افتح المشروع</button>` : ''}${g.id && !g.auto && canEditPg() ? `<button class="btn xs ghost" data-action="pgEdit" data-arg="${esc(g.id)}">${icon('edit')}</button>` : ''}</div><div class="pgrid">${cards.map(c => c.html).join('')}</div></div>`;
+  }
+  function grouped(cards, f) {
+    const byG = new Map();
+    cards.forEach(c => { const p = byId('products', c.id); const g = pgOf(p) || NONE; const k = g.id; if (!byG.has(k)) byG.set(k, { g, cards: [] }); byG.get(k).cards.push(c); });
+    let arr = [...byG.values()];
+    if (f.pg) arr = arr.filter(x => x.g.id === f.pg);
+    if (f.area) arr = arr.filter(x => (x.g.area || NOAREA) === f.area);
+    if (!arr.length) return `<div class="empty"><b>مفيش منتجات في الاختيار ده</b></div>`;
+    const areas = new Map(); arr.forEach(x => { const a = x.g.id ? (x.g.area || NOAREA) : ''; if (!areas.has(a)) areas.set(a, []); areas.get(a).push(x); });
+    const order = [...areas.keys()].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || (a === NOAREA ? 1 : 0) - (b === NOAREA ? 1 : 0) || a.localeCompare(b, 'ar'));
+    return order.map(a => { const xs = areas.get(a).sort((x, y) => String(x.g.name).localeCompare(String(y.g.name), 'ar')); const n = xs.reduce((s, x) => s + x.cards.length, 0);
+      return `<div class="pgarea"><h4>${icon('map')}${esc(a || 'بدون مشروع')}<span class="n">${xs.length > 1 || a ? `${xs.length} مشروع · ` : ''}${n} منتج</span></h4>${xs.map(x => sectionHTML(x.g, x.cards, f)).join('')}</div>`; }).join('');
+  }
+  function barHTML(f, brandId) {
+    const ps = list('products').filter(p => p.status !== 'archived' && (!brandId || p.brandId === brandId) && typeof pKind === 'function' && pKind(p) === 'project');
+    const cnt = new Map(); ps.forEach(p => { const g = pgOf(p); if (g && !g.auto) cnt.set(g.id, (cnt.get(g.id) || 0) + 1); });
+    const gs = groups().filter(g => (!brandId || !g.brandId || g.brandId === brandId) && cnt.get(g.id));
+    const areas = [...new Set(gs.map(g => g.area || NOAREA))].sort((a, b) => a.localeCompare(b, 'ar'));
+    const aN = a => gs.filter(g => (g.area || NOAREA) === a).reduce((s, g) => s + cnt.get(g.id), 0);
+    let h = `<div class="pgbar"><span class="lbl">المنطقة:</span><button class="btn sm ${!f.area && !f.pg ? 'p' : 'ghost'}" data-action="pgPick" data-arg="area:">كل المناطق</button>${areas.map(a => `<button class="btn sm ${f.area === a ? 'p' : 'ghost'}" data-action="pgPick" data-arg="area:${esc(a)}">${esc(a)} (${aN(a)})</button>`).join('')}${canEditPg() ? `<button class="btn sm ghost" data-action="pgEdit" data-arg="">${icon('plus')}مشروع</button>` : ''}</div>`;
+    const inArea = gs.filter(g => !f.area || (g.area || NOAREA) === f.area);
+    if (f.area || f.pg) h += `<div class="pgbar"><span class="lbl">المشروع:</span>${inArea.map(g => `<button class="btn sm ${f.pg === g.id ? 'p' : 'ghost'}" data-action="pgPick" data-arg="pg:${esc(g.id)}">${esc(g.name)} (${cnt.get(g.id)})</button>`).join('')}</div>`;
+    return h;
+  }
+  if (typeof vProducts === 'function') vProducts = (base => function () {
+    let html = base.apply(this, arguments); const f = (S.ui.filter.products ||= {}); if (f.kind !== 'project') return html;
+    let i = 0; let first = true;
+    for (;;) {
+      const s = html.indexOf('<div class="pgrid">', i); if (s < 0) break;
+      const { cards, end } = cardsIn(html, s + '<div class="pgrid">'.length);
+      const close = html.indexOf('</div>', end); if (close < 0) break;
+      const body = (first ? barHTML(f, f.brand || '') : '') + grouped(cards, f); first = false;
+      html = html.slice(0, s) + body + html.slice(close + 6); i = s + body.length;
+    }
+    return html;
+  })(vProducts);
+  ACTIONS.pgPick = arg => { const [k, v] = String(arg || '').split(/:(.*)/s); const f = (S.ui.filter.products ||= {}); if (k === 'area') { f.area = v || ''; f.pg = ''; } else { f.pg = v || ''; const g = gById(v); if (g) f.area = g.area || NOAREA; } render(false); };
+  /* فلتر النوع: لو اتغيّر نرجّع المنطقة/المشروع للكل */
+  if (ACTIONS.prFilter) ACTIONS.prFilter = (base => function (arg) { const [k, v] = String(arg || '').split(':'); const f = (S.ui.filter.products ||= {}); if (k === 'kind' || k === 'brand') { f.area = ''; f.pg = ''; } if (k === 'pg') { f.pg = v; const g = gById(v); f.area = g ? (g.area || NOAREA) : ''; render(false); return; } return base.apply(this, arguments); })(ACTIONS.prFilter);
+
+  /* ---------- إضافة / تعديل مشروع ---------- */
+  ACTIONS.pgEdit = id => {
+    if (!canEditPg()) return; const g = (id && gById(id)) || { id: '', name: '', area: '', brandId: (S.ui.filter.products || {}).brand || 'lof', clientId: '', orderIds: [] };
+    const areas = [...new Set(groups().map(x => x.area).filter(Boolean))];
+    const ords = sortBy(list('orders').filter(o => o.status !== 'cancelled' && (!g.brandId || o.brandId === g.brandId)), o => o.code || '', true);
+    const taken = new Map(); groups().forEach(x => { if (x.id !== g.id) (x.orderIds || []).forEach(o => taken.set(o, x.name)); });
+    openModal({ title: id ? `تعديل المشروع — ${g.name}` : 'مشروع جديد', wide: true, body: `<div class="form">${field('اسم المشروع', inp('name', g.name || '', 'required placeholder="مثال: أورنج بارك — إيفرجرين"'))}${field('المنطقة', inp('area', g.area || '', 'list="pg-areas" required placeholder="مثال: المستقبل سيتي / الجيزة / الساحل"') + `<datalist id="pg-areas">${areas.map(a => `<option value="${esc(a)}">`).join('')}</datalist>`)}${field('البراند', `<select name="brandId">${opts(S.settings.brands, g.brandId || '')}</select>`)}${field('العميل / المقاول', `<select name="clientId"><option value="">—</option>${opts(sortBy(list('clients'), c => c.name || ''), g.clientId || '')}</select>`)}
+      <div class="field full"><label>أوامر التشغيل بتاعة المشروع <span class="muted tiny">— منتجات الأمر بتدخل المشروع لوحدها</span></label><div class="stack" style="gap:4px;max-height:220px;overflow:auto">${ords.map(o => `<label class="check"><input type="checkbox" name="o_${esc(o.id)}" ${(g.orderIds || []).includes(o.id) ? 'checked' : ''}> <span class="code">${esc(o.code)}</span> ${esc(o.title || '')}${taken.has(o.id) ? ` <span class="muted tiny">(في «${esc(taken.get(o.id))}»)</span>` : ''}</label>`).join('') || '<span class="muted">مفيش أوامر</span>'}</div></div>${field('ملاحظة', inp('note', g.note || ''), 'full')}</div>`,
+      submitLabel: 'حفظ', onSubmit: async f => {
+        const d = formData(f); if (!String(d.name || '').trim() || !String(d.area || '').trim()) { toast('اكتب اسم المشروع والمنطقة', 'err'); return false; }
+        const orderIds = ords.filter(o => (f.querySelector(`[name="o_${CSS.escape(o.id)}"]`) || {}).checked).map(o => o.id);
+        const ng = Object.assign({}, g, { id: g.id || 'pg_' + uid(), name: d.name.trim(), area: d.area.trim(), brandId: d.brandId || '', clientId: d.clientId || '', orderIds, note: d.note || '', updatedAt: nowISO(), updatedBy: (S.session || {}).name || '' });
+        const all = groups().filter(x => x.id !== ng.id).map(x => Object.assign({}, x, { orderIds: (x.orderIds || []).filter(o => !orderIds.includes(o)) })).concat([ng]);
+        await Store.saveSettings(Object.assign({}, S.settings, { pgroups: all })); toast('اتحفظ المشروع');
+      } });
+  };
+
+  /* ---------- فورم المنتج ---------- */
+  if (typeof productForm === 'function') productForm = (base => function (p) {
+    const h = base.apply(this, arguments); p = p || {}; const gs = groups().filter(g => !p.brandId || !g.brandId || g.brandId === p.brandId); if (!gs.length) return h;
+    const auto = p.id ? pgOf(Object.assign({}, p, { pgId: null })) : null;
+    const box = field('المشروع (التصنيف)', `<select name="pgId" id="f-pgId"><option value="">${auto && !auto.auto ? `تلقائي من أمر التشغيل — ${esc(auto.name)}` : '— حسب أمر التشغيل / بدون —'}</option>${[...new Set(gs.map(g => g.area || NOAREA))].map(a => `<optgroup label="${esc(a)}">${gs.filter(g => (g.area || NOAREA) === a).map(g => `<option value="${esc(g.id)}" ${p.pgId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</optgroup>`).join('')}</select>`);
+    const i = h.lastIndexOf('</div>'); return i < 0 ? h + box : h.slice(0, i) + box + h.slice(i);
+  })(productForm);
+  if (typeof saveProduct === 'function') saveProduct = (base => async function (f, p) {
+    const el = f && f.querySelector('[name="pgId"]'); const v = el ? el.value : undefined; const code = (f.querySelector('[name="code"]') || {}).value;
+    const r = await base.apply(this, arguments); if (r === false || v === undefined) return r;
+    try { const doc = p && p.id ? byId('products', p.id) : list('products').find(x => (x.code || '').trim().toLowerCase() === String(code || '').trim().toLowerCase()); if (doc && (doc.pgId || '') !== v) await Store.update('products', doc.id, { pgId: v || null }, { silent: true }); } catch (e) { console.warn(e); }
+    return r;
+  })(saveProduct);
+  /* صفحة المنتج: سطر المشروع */
+  if (typeof vProductDetail === 'function') vProductDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const p = byId('products', id); const g = pgOf(p); if (!g || g.auto) return html;
+    return `<div class="banner info" style="margin-bottom:12px">${icon('map')}<span>المشروع: <b>${esc(g.name)}</b>${g.area ? ` · ${esc(g.area)}` : ''} — <a href="#/products" data-action="pgOpenFromProduct" data-arg="${esc(g.id)}">كل منتجات المشروع</a></span></div>` + html;
+  })(vProductDetail);
+  ACTIONS.pgOpenFromProduct = id => { const g = gById(id); const f = (S.ui.filter.products ||= {}); f.kind = 'project'; f.pg = id; f.area = g ? (g.area || NOAREA) : ''; if (g && g.brandId) f.brand = g.brandId; location.hash = '#/products'; S.route = { view: 'products', id: null, sub: null }; render(true); };
 })();
 </script>
 
