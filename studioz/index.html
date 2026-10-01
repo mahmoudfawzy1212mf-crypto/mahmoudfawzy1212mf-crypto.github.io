@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1254-480914";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1327-b5f432";</script>
 
 <script>
 'use strict';
@@ -25111,6 +25111,235 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     const web = linkKind(q.link) === 'web';
     return `<div class="pstline">${icon('link')}<span>الأوفر الأصلي${q.imported ? ' (من شيت Excel)' : ''}:</span>${web ? `<a class="btn sm" href="${esc(q.link)}" target="_blank" rel="noopener">فتح الأوفر ↗</a>` : `<span class="ltr small muted">${esc(q.link)}</span><span class="badge warn">ملف على جهاز</span>`}</div>` + html;
   })(vQuoteDetail);
+})();
+/* =====================================================================
+   v5.75 — مسار عرض السعر (LOF): شريط مراحل تفاعلي فوق صفحة العرض
+   1 المشروع والعميل · 2 المنتجات والتسعير V1 · 3 اتبعت للعميل · 4 التفاوض (V2, V3…) · 5 موافقة العميل
+   6 استلام الـPO (داتا إلزامية: رقم/تاريخ/ملف، مدير المشروع، لوكيشن المشروع، مقر الشركة، الكونتاكت) · 7 تسليم للحسابات
+   · النسخة اللي اتبعتت بتتقفل (q.sentRev) — التعديل = «نسخة جديدة» (snapshot في q.versions) مع طلب العميل.
+   · الخصم على المشروع ده بس (بنود العرض) — البرايس ليست مش بتتلمس.
+   · خصم أكبر من 10% من إجمالي V1 (لغير المالك) = لازم موافقة المالك قبل الإرسال/الموافقة (q.discReq / q.discOk).
+   · تسليم للحسابات: أمر تشغيل من النسخة المعتمدة + الـPO في «التعاقد والدفعات» (contract kind:po) + بيانات المشروع
+     + إشعار للحسابات (hr) «اطلب شيك الدفعة المقدمة» — من غير مبالغ.
+   ===================================================================== */
+(function () {
+  if (window.__NF_QPIPE__) return; window.__NF_QPIPE__ = 1;
+  const BRAND = 'lof'; const DISC_MAX = 10;
+  const me = () => S.session || {};
+  const isLof = q => !!q && q.brandId === BRAND;
+  const rev = q => +q.rev || 1;
+  const totalOf = v => typeof quoteTotal === 'function' ? quoteTotal(v) : 0;
+  const snap = q => ({ v: rev(q), items: JSON.parse(JSON.stringify(q.items || [])), discount: +q.discount || 0, vat: !!q.vat, subject: q.subject || '', total: totalOf(q), date: q.date || '', sentAt: q.sentRev === rev(q) ? (q.sentAt || null) : null, sentVia: q.sentRev === rev(q) ? (q.sentVia || '') : '', note: q.revNote || '', at: q.revAt || q.createdAt || null, by: q.revBy || '' });
+  const versionsAll = q => (q.versions || []).concat([Object.assign(snap(q), { current: true })]);
+  const v1Total = q => { const a = versionsAll(q); return a[0] ? a[0].total : totalOf(q); };
+  const discPct = q => { if (rev(q) <= 1) return 0; const b = v1Total(q); return b > 0 ? Math.round((1 - totalOf(q) / b) * 1000) / 10 : 0; };
+  const discOkNow = q => !!(q.discOk && q.discOk.v === rev(q) && Math.abs((+q.discOk.total || 0) - totalOf(q)) < 0.01);
+  const needsDiscOk = q => isLof(q) && rev(q) > 1 && discPct(q) > DISC_MAX && !isAdmin() && !discOkNow(q);
+  const locked = q => ['approved', 'converted'].includes(q.status) || q.sentRev === rev(q);
+  const poDone = p => !!(p && p.no && p.date && p.fileId && p.pmName && p.pmPhone && p.site && p.hq);
+  const money = n => `${fmtMoney(n)} ${CUR()}`;
+  const wOf = id => String(id || '').startsWith('w:') ? String(id).slice(2) : null;
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.qp{margin-bottom:14px}.qp-steps{display:flex;gap:0;overflow-x:auto;padding:14px 8px 10px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.qp-st{flex:1;min-width:104px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;cursor:pointer;border:0;background:none;padding:0 4px;color:inherit}
+.qp-st:not(:last-child)::after{content:'';position:absolute;top:15px;inset-inline-start:calc(50% + 18px);inset-inline-end:calc(-50% + 18px);height:2px;background:var(--line)}
+.qp-st.done:not(:last-child)::after{background:#2e7d4f}
+.qp-st .c{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;border:2px solid var(--line);background:var(--surface);color:var(--muted);z-index:1}
+.qp-st.done .c{background:#2e7d4f;border-color:#2e7d4f;color:#fff}.qp-st.cur .c{border-color:#3b6ea5;color:#3b6ea5;box-shadow:0 0 0 4px color-mix(in srgb,#3b6ea5 18%,transparent)}
+.qp-st.lost .c{background:#c0392b;border-color:#c0392b;color:#fff}
+.qp-st .l{font-size:11.5px;text-align:center;line-height:1.3;color:var(--muted)}.qp-st.cur .l,.qp-st.sel .l{color:var(--ink);font-weight:700}.qp-st .s{font-size:10.5px;color:var(--muted);text-align:center}
+.qp-st.sel .c{outline:2px solid var(--ink);outline-offset:2px}
+.qp-pan{border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;padding:14px 16px;margin-top:-8px;background:var(--surface);padding-top:20px}
+.qp-pan h4{margin:0 0 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.qp-kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 16px;font-size:13px}.qp-kv .k{font-size:11.5px;color:var(--muted)}
+.qp-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.qp-tbl th,.qp-tbl td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:start}.qp-tbl th{color:var(--muted);font-weight:600}
+.qp-tbl tr.cur td{background:color-mix(in srgb,#3b6ea5 7%,transparent)}.qp-up{color:#c0392b}.qp-dn{color:#2e7d4f}
+.qp-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+</style>`);
+
+  /* ---------- المراحل ---------- */
+  function steps(q) {
+    const vs = versionsAll(q); const sent = vs.some(v => v.sentAt) || !!q.sentAt; const appr = ['approved', 'converted'].includes(q.status); const lost = q.status === 'rejected';
+    const o = q.orderId ? byId('orders', q.orderId) : null;
+    return [
+      { k: 'proj', l: 'المشروع والعميل', done: !!(q.clientId && q.subject) },
+      { k: 'v1', l: 'المنتجات والتسعير V1', done: (vs[0].items || []).length > 0 },
+      { k: 'sent', l: 'اتبعت للعميل', done: sent, s: sent ? fmtDate(String((vs.find(v => v.sentAt) || {}).sentAt || q.sentAt || '').slice(0, 10)) : '' },
+      { k: 'neg', l: 'التفاوض', done: appr || q.orderId, s: rev(q) > 1 ? `V${rev(q)}${discPct(q) ? ` · ${discPct(q) > 0 ? '−' : '+'}${Math.abs(discPct(q))}%` : ''}` : (appr ? 'من غير تفاوض' : '') },
+      { k: 'appr', l: lost ? 'اترفض' : 'موافقة العميل', done: appr, lost, s: appr ? `V${q.approvedRev || rev(q)}` : '' },
+      { k: 'po', l: 'استلام الـPO', done: poDone(q.po), s: q.po && q.po.no ? q.po.no : '' },
+      { k: 'acc', l: 'تسليم للحسابات', done: !!o, s: o ? (o.code || '') : '' },
+    ];
+  }
+  const curStep = st => { const i = st.findIndex(s => !s.done && !s.lost); return i < 0 ? st.length - 1 : i; };
+
+  function panel(q, k) {
+    const c = byId('clients', q.clientId) || {}; const canEdit = typeof canDo === 'function' && (canDo('sales') || isAdmin());
+    const vs = versionsAll(q);
+    if (k === 'proj') {
+      const seg = typeof window.nfSegOf === 'function' ? window.nfSegOf('quotations', q) : '';
+      return `<h4>${icon('clients')}المشروع والعميل</h4><div class="qp-kv"><div><div class="k">العميل</div><b>${esc(c.name || '—')}</b>${c.id ? ` · <a href="#/clients/${esc(c.id)}">ملف العميل</a>` : ''}</div><div><div class="k">المشروع / موضوع العرض</div><b>${esc(q.subject || '—')}</b></div><div><div class="k">النوع</div>${seg ? seg.toUpperCase() : '—'}</div><div><div class="k">التليفون / الإيميل</div><span class="ltr">${esc(c.phone || '—')}</span> · ${esc(c.email || '—')}</div></div>${canEdit && !locked(q) ? `<div class="qp-acts"><button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}تعديل</button></div>` : ''}`;
+    }
+    if (k === 'v1') {
+      const v = vs[0];
+      return `<h4>${icon('quote')}المنتجات والتسعير — V1 <span class="muted small">${(v.items || []).length} بند · ${money(v.total)}</span></h4>${itemsTable(v.items)}${canEdit && rev(q) === 1 && !locked(q) ? `<div class="qp-acts"><button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}تعديل البنود والأسعار</button></div>` : `<div class="tiny muted" style="margin-top:8px">${rev(q) > 1 ? 'V1 مقفولة — التعديلات في النسخ اللي بعدها.' : 'اتبعتت للعميل — أي تعديل يبقى «نسخة جديدة».'}</div>`}`;
+    }
+    if (k === 'sent') {
+      const rows = vs.filter(v => v.sentAt);
+      return `<h4>${icon('send')}الإرسال للعميل</h4>${rows.length ? `<table class="qp-tbl"><thead><tr><th>النسخة</th><th>اتبعتت</th><th>عن طريق</th><th>الإجمالي</th></tr></thead><tbody>${rows.map(v => `<tr><td>V${v.v}</td><td>${esc(fmtDate(String(v.sentAt).slice(0, 10)))}</td><td>${esc(v.sentVia || '—')}</td><td>${money(v.total)}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">لسه ما اتبعتش — استخدم واتساب / إيميل تحت، أو علّم إنه اتبعت.</div>'}${canEdit && q.sentRev !== rev(q) && !['approved', 'converted', 'rejected'].includes(q.status) ? `<div class="qp-acts"><button class="btn sm" data-action="qpMarkSent" data-arg="${esc(q.id)}">${icon('check')}علّم V${rev(q)} إنها اتبعتت</button></div>` : ''}`;
+    }
+    if (k === 'neg') {
+      const pct = discPct(q); const req = q.discReq && q.discReq.v === rev(q) ? q.discReq : null;
+      let ban = '';
+      if (rev(q) > 1 && pct > DISC_MAX) {
+        if (discOkNow(q)) ban = `<div class="banner good" style="margin-bottom:10px">${icon('check')}<span>المالك وافق على خصم V${rev(q)} (${pct}% عن V1) — ${esc(q.discOk.byName || '')}</span></div>`;
+        else if (req && req.status === 'pending' && Math.abs((+req.total || 0) - totalOf(q)) < 0.01) ban = `<div class="banner warn" style="margin-bottom:10px">${icon('alert')}<span>خصم V${rev(q)} = ${pct}% عن V1 — أكبر من ${DISC_MAX}%. ${isAdmin() ? `طلب من ${esc(req.byName || '')}${req.note ? ' — ' + esc(req.note) : ''}` : 'مستني موافقة المالك قبل الإرسال.'}</span><div class="grow"></div>${isAdmin() ? `<button class="btn sm p" data-action="qpDiscOk" data-arg="${esc(q.id)}">وافق</button><button class="btn sm ghost" data-action="qpDiscNo" data-arg="${esc(q.id)}">ارفض</button>` : ''}</div>`;
+        else if (req && req.status === 'rejected' && Math.abs((+req.total || 0) - totalOf(q)) < 0.01) ban = `<div class="banner crit" style="margin-bottom:10px">${icon('x')}<span>المالك رفض خصم V${rev(q)}${req.reason ? ' — ' + esc(req.reason) : ''}. عدّل الأسعار أو اعمل نسخة تانية.</span></div>`;
+        else if (!isAdmin()) ban = `<div class="banner warn" style="margin-bottom:10px">${icon('alert')}<span>خصم V${rev(q)} = ${pct}% عن V1 — أكبر من ${DISC_MAX}%، لازم موافقة المالك قبل الإرسال.</span><div class="grow"></div><button class="btn sm p" data-action="qpDiscAsk" data-arg="${esc(q.id)}">اطلب موافقة المالك</button></div>`;
+      }
+      const tbl = `<table class="qp-tbl"><thead><tr><th>النسخة</th><th>التاريخ</th><th>طلب العميل / السبب</th><th>الإجمالي</th><th>عن V1</th><th>الحالة</th><th></th></tr></thead><tbody>${vs.map((v, i) => { const d = i ? Math.round((1 - v.total / (vs[0].total || 1)) * 1000) / 10 : 0; return `<tr class="${v.current ? 'cur' : ''}"><td><b>V${v.v}</b></td><td>${esc(fmtDate(String(v.at || v.date || '').slice(0, 10)))}</td><td>${esc(v.note || (i ? '' : 'العرض الأول'))}</td><td>${money(v.total)}</td><td>${i ? `<span class="${d > 0 ? 'qp-dn' : 'qp-up'}">${d > 0 ? '−' : '+'}${Math.abs(d)}%</span>` : '—'}</td><td>${v.current ? (['approved', 'converted'].includes(q.status) ? '<span class="badge good">معتمدة</span>' : v.sentAt ? '<span class="badge acc">اتبعتت</span>' : '<span class="badge">قيد التعديل</span>') : (v.sentAt ? '<span class="muted tiny">اتبعتت</span>' : '<span class="muted tiny">—</span>')}</td><td>${i ? `<button class="btn xs ghost" data-action="qpCompare" data-arg="${esc(q.id)}:${vs[i - 1].v}:${v.v}">قارن بـ V${vs[i - 1].v}</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`;
+      const canNew = canEdit && !['approved', 'converted', 'rejected'].includes(q.status);
+      return `<h4>${icon('chat')}التفاوض والنسخ <span class="muted small">الخصم على المشروع ده بس — البرايس ليست زي ما هي</span></h4>${ban}${tbl}<div class="qp-acts">${canNew ? `<button class="btn sm p" data-action="qpNewVer" data-arg="${esc(q.id)}">${icon('plus')}نسخة جديدة V${rev(q) + 1} (العميل طلب تعديل)</button>` : ''}${canNew && !locked(q) && rev(q) > 1 ? `<button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}عدّل V${rev(q)}</button>` : ''}</div>`;
+    }
+    if (k === 'appr') {
+      if (q.status === 'rejected') return `<h4>${icon('x')}العميل رفض العرض</h4><div class="small">${esc(q.lostReason || '')}</div>${canEdit ? `<div class="qp-acts"><button class="btn sm" data-action="qpReopen" data-arg="${esc(q.id)}">رجّع العرض للتفاوض</button></div>` : ''}`;
+      if (['approved', 'converted'].includes(q.status)) return `<h4>${icon('check')}العميل وافق على V${q.approvedRev || rev(q)}</h4><div class="small">${esc(fmtDate(String(q.approvedAt || '').slice(0, 10)))} ${q.approvedBy ? '· ' + esc(q.approvedBy) : ''} — الإجمالي المعتمد ${money(totalOf(q))}. الخطوة الجاية: استلام الـPO.</div>`;
+      return `<h4>${icon('check')}موافقة العميل</h4><div class="small muted">النسخة الحالية V${rev(q)} — ${money(totalOf(q))}${needsDiscOk(q) ? ' · <b style="color:#c0392b">محتاجة موافقة المالك على الخصم الأول</b>' : ''}</div>${canEdit ? `<div class="qp-acts"><button class="btn sm a" data-action="qpApprove" data-arg="${esc(q.id)}">${icon('check')}العميل وافق على V${rev(q)}</button><button class="btn sm ghost" data-action="qpLost" data-arg="${esc(q.id)}">العميل رفض</button></div>` : ''}`;
+    }
+    if (k === 'po') {
+      const p = q.po || {}; const appr = ['approved', 'converted'].includes(q.status);
+      if (!appr) return `<h4>${icon('request')}استلام الـPO</h4><div class="muted small">بيتفتح بعد موافقة العميل.</div>`;
+      const kv = (l, v) => `<div><div class="k">${l}</div>${v ? esc(v) : '<span class="muted">—</span>'}</div>`;
+      return `<h4>${icon('request')}استلام الـPO ${poDone(p) ? '<span class="badge good">مكتمل</span>' : '<span class="badge warn">ناقص</span>'}</h4>${p.no || p.fileId ? `<div class="qp-kv">${kv('رقم الـPO', p.no)}${kv('تاريخ الـPO', p.date ? fmtDate(p.date) : '')}<div><div class="k">ملف الـPO</div>${p.fileId ? `<button class="btn xs" data-action="fileOpen" data-arg="${esc(p.fileId)}">فتح</button>` : '<span class="muted">—</span>'}</div>${kv('مدير المشروع', [p.pmName, p.pmPhone, p.pmEmail].filter(Boolean).join(' · '))}<div><div class="k">لوكيشن المشروع</div>${esc(p.site || '—')}${p.siteMap ? ` · <a href="${esc(p.siteMap)}" target="_blank" rel="noopener">الخريطة ↗</a>` : ''}</div>${kv('مقر الشركة', p.hq)}${kv('Contact person', [p.cName, p.cPhone].filter(Boolean).join(' · '))}</div>` : '<div class="muted small">ارفع الـPO وكمّل بيانات المشروع.</div>'}${canEdit && !q.orderId ? `<div class="qp-acts"><button class="btn sm p" data-action="qpPo" data-arg="${esc(q.id)}">${icon('up')}${p.no ? 'تعديل الـPO والبيانات' : 'ارفع الـPO'}</button></div>` : ''}`;
+    }
+    if (k === 'acc') {
+      const o = q.orderId ? byId('orders', q.orderId) : null;
+      if (!o) return `<h4>${icon('money')}تسليم للحسابات</h4><div class="small muted">${poDone(q.po) ? 'كل حاجة جاهزة — التسليم بيعمل أمر التشغيل من النسخة المعتمدة، والـPO بيتحط في «التعاقد والدفعات»، والحسابات بيوصلها تطلب شيك الدفعة المقدمة.' : 'لازم الـPO وبياناته الأول.'}</div>${canEdit && poDone(q.po) && ['approved'].includes(q.status) ? `<div class="qp-acts"><button class="btn sm p" data-action="qpHand" data-arg="${esc(q.id)}">${icon('send')}تسليم للحسابات</button></div>` : ''}`;
+      const chq = (o.payments || []).filter(p => p && p.kind === 'cheque' && !p._ph && (p.ptype || 'down') === 'down');
+      const ST = { received: 'شيك الدفعة المقدمة اتسلّم — لسه ما اتودعش', deposited: 'الشيك اتودع — مستني التحصيل', cleared: 'الدفعة المقدمة اتحصّلت ✓', bounced: 'الشيك رجع ✗' };
+      const dep = chq.length ? ST[chq[chq.length - 1].stage] || 'شيك مسجّل' : 'الحسابات بتطلب شيك الدفعة المقدمة';
+      const rel = typeof orderReleased === 'function' ? orderReleased(o) : !!o.releasedAt;
+      const ph = typeof window.nfOrderPhase === 'function' ? window.nfOrderPhase(o).t : ''; const sc = typeof window.nfOrderSched === 'function' ? window.nfOrderSched(o) : null;
+      return `<h4>${icon('money')}اتسلّم للحسابات ${canSee('orders') ? `<a class="badge acc" href="#/orders/${esc(o.id)}">${esc(o.code || '')}</a>` : `<span class="badge acc">${esc(o.code || '')}</span>`}</h4><div class="qp-kv"><div><div class="k">التسليم</div>${esc(fmtDate(String(q.handedAt || o.createdAt || '').slice(0, 10)))} ${q.handedBy ? '· ' + esc(q.handedBy) : ''}</div><div><div class="k">الدفعة المقدمة</div>${esc(dep)}</div><div><div class="k">اعتماد التشغيل</div>${rel ? '<span style="color:#2e7d4f">✓ اتعتمد</span>' : 'لسه'}</div><div><div class="k">في المصنع</div>${esc(ph)} ${sc ? `<span class="schd ${sc.c}">${esc(sc.t)}</span>` : ''}</div></div>`;
+    }
+    return '';
+  }
+  function itemsTable(items) {
+    return `<table class="qp-tbl"><thead><tr><th>البند</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${(items || []).map(it => `<tr><td>${esc(String(it.desc || '').split('\n')[0].split('|')[0])}</td><td>${fmtNum(+it.qty || 0)} ${esc(it.unit || '')}</td><td>${fmtMoney(+it.price || 0)}</td><td>${fmtMoney((+it.qty || 0) * (+it.price || 0))}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">مفيش بنود</td></tr>'}</tbody></table>`;
+  }
+  function bar(q) {
+    const st = steps(q); const cur = curStep(st); const selK = (S.ui.qpSel && S.ui.qpSel[q.id]) || st[cur].k;
+    return `<div class="qp no-print"><div class="qp-steps">${st.map((s, i) => `<button class="qp-st ${s.done ? 'done' : ''} ${s.lost ? 'lost' : ''} ${i === cur && !s.done ? 'cur' : ''} ${s.k === selK ? 'sel' : ''}" data-action="qpSel" data-arg="${esc(q.id)}:${s.k}"><span class="c">${s.done ? '✓' : s.lost ? '✗' : i + 1}</span><span class="l">${esc(s.l)}</span>${s.s ? `<span class="s">${esc(s.s)}</span>` : ''}</button>`).join('')}</div><div class="qp-pan">${panel(q, selK)}</div></div>`;
+  }
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function (id) {
+    let html = base.apply(this, arguments); const q = byId('quotations', id); if (!isLof(q)) return html;
+    if (!isAdmin()) html = html.replace(/<button class="btn sm p" data-action="quoteConvert"[^>]*>[\s\S]*?<\/button>/, '');
+    if (rev(q) > 1) html = html.replace(/(<div class="row no-print">)/, `$1<span class="badge acc">V${rev(q)}</span>`);
+    return bar(q) + html;
+  })(vQuoteDetailBase);
+  ACTIONS.qpSel = arg => { const [id, k] = String(arg || '').split(':'); S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: k }); render(false); };
+
+  /* ---------- قفل النسخة اللي اتبعتت + تسجيل نسخة الإرسال ---------- */
+  Store.update = (base => function (col, id, patch, opts) {
+    if (col === 'quotations' && patch && (patch.status === 'sent' || patch.sentAt)) { const cur = byId('quotations', id); if (cur && isLof(cur)) patch = Object.assign({}, patch, { sentRev: rev(cur), sendLog: (cur.sendLog || []).concat([{ v: rev(cur), at: patch.sentAt || nowISO(), via: patch.sentVia || 'يدوي', by: me().name || '' }]) }); }
+    return base.call(this, col, id, patch, opts);
+  })(Store.update);
+  if (ACTIONS.quoteEdit) ACTIONS.quoteEdit = (base => function (id) {
+    const q = byId('quotations', id); if (!isLof(q) || !locked(q)) return base.apply(this, arguments);
+    if (['approved', 'converted'].includes(q.status) && !isAdmin()) { toast(`V${rev(q)} معتمدة ومقفولة`, 'err'); return; }
+    if (isAdmin()) { confirmDlg(`V${rev(q)} ${['approved', 'converted'].includes(q.status) ? 'معتمدة' : 'اتبعتت للعميل'}. تعدّل فيها نفسها؟ (الأفضل «نسخة جديدة» عشان التاريخ يفضل واضح)`, 'تعديل', false).then(ok => { if (ok) base(id); }); return; }
+    openModal({ title: `V${rev(q)} اتبعتت للعميل`, body: `<p class="small">النسخة اللي اتبعتت بتتقفل زي ما هي. لو العميل طلب تعديل، اعمل نسخة جديدة V${rev(q) + 1} وعدّل فيها.</p>`, submitLabel: `نسخة جديدة V${rev(q) + 1}`, onSubmit: () => { setTimeout(() => ACTIONS.qpNewVer(id), 50); } });
+  })(ACTIONS.quoteEdit);
+
+  ACTIONS.qpNewVer = id => {
+    const q = byId('quotations', id); if (!isLof(q) || ['approved', 'converted', 'rejected'].includes(q.status)) return;
+    openModal({ title: `نسخة جديدة V${rev(q) + 1} — ${q.number}`, body: `<div class="form">${field('العميل طلب إيه؟ / سبب التعديل', `<textarea name="note" required placeholder="مثال: عايز خصم على المقاعد، أو تقليل الكمية"></textarea>`, 'full')}<div class="full tiny muted">V${rev(q)} هتتحفظ زي ما هي، والنسخة الجديدة بتبدأ منها وتعدّل فيها الأسعار أو تعمل خصم. البرايس ليست مش بتتغير.</div></div>`, submitLabel: 'اعمل النسخة',
+      onSubmit: async f => { const d = formData(f); if (!String(d.note || '').trim()) { toast('اكتب طلب العميل', 'err'); return false; }
+        const cur = byId('quotations', id); const vs = (cur.versions || []).concat([snap(cur)]);
+        await Store.update('quotations', id, { versions: vs, rev: rev(cur) + 1, status: 'draft', revNote: d.note.trim(), revAt: nowISO(), revBy: me().name || '', discReq: null, discOk: null });
+        S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'neg' }); toast(`V${rev(cur) + 1} جاهزة — عدّل الأسعار`); setTimeout(() => { const qq = byId('quotations', id); if (qq && typeof ACTIONS.quoteEdit === 'function') ACTIONS.quoteEdit(id); }, 80); } });
+  };
+  ACTIONS.qpCompare = arg => {
+    const [id, a, b] = String(arg || '').split(':'); const q = byId('quotations', id); if (!q) return; const vs = versionsAll(q); const A = vs.find(v => String(v.v) === a), B = vs.find(v => String(v.v) === b); if (!A || !B) return;
+    const key = it => String(it.desc || '').split('\n')[0].split('|')[0].trim().toLowerCase(); const names = []; [...A.items, ...B.items].forEach(it => { const k = key(it); if (!names.includes(k)) names.push(k); });
+    const line = (v, k) => (v.items || []).find(it => key(it) === k);
+    const rows = names.map(k => { const x = line(A, k), y = line(B, k); const px = x ? +x.price || 0 : null, py = y ? +y.price || 0 : null; const qx = x ? +x.qty || 0 : null, qy = y ? +y.qty || 0 : null; const ch = px !== py || qx !== qy; return `<tr style="${ch ? 'font-weight:600' : ''}"><td>${esc(String((y || x).desc || '').split('\n')[0].split('|')[0])}</td><td>${qx == null ? '—' : fmtNum(qx)} → ${qy == null ? '<span class="qp-up">اتشال</span>' : fmtNum(qy)}</td><td>${px == null ? '<span class="qp-dn">جديد</span>' : fmtMoney(px)} → ${py == null ? '—' : fmtMoney(py)}${px && py && px !== py ? ` <span class="${py < px ? 'qp-dn' : 'qp-up'}">(${py < px ? '−' : '+'}${Math.abs(Math.round((1 - py / px) * 1000) / 10)}%)</span>` : ''}</td></tr>`; }).join('');
+    openModal({ title: `مقارنة V${A.v} ← V${B.v} — ${q.number}`, wide: true, body: `<table class="qp-tbl"><thead><tr><th>البند</th><th>الكمية</th><th>سعر الوحدة</th></tr></thead><tbody>${rows}</tbody></table><div class="qp-kv" style="margin-top:12px"><div><div class="k">خصم إضافي</div>${fmtMoney(A.discount)} → ${fmtMoney(B.discount)}</div><div><div class="k">الإجمالي</div><b>${money(A.total)} → ${money(B.total)}</b></div><div><div class="k">طلب العميل في V${B.v}</div>${esc(B.note || '—')}</div></div>`, submitLabel: 'تمام', onSubmit: () => { } });
+  };
+  /* ---------- موافقة المالك على الخصم ---------- */
+  function discGuard(q) {
+    if (!needsDiscOk(q)) return true;
+    const req = q.discReq && q.discReq.v === rev(q) && Math.abs((+q.discReq.total || 0) - totalOf(q)) < 0.01 ? q.discReq : null;
+    if (req && req.status === 'pending') { toast('مستني موافقة المالك على الخصم', 'err'); return false; }
+    openModal({ title: 'الخصم محتاج موافقة المالك', body: `<p class="small">V${rev(q)} أقل من V1 بـ <b>${discPct(q)}%</b> — أكبر من ${DISC_MAX}%. لازم المالك يوافق قبل ما تتبعت أو تتعتمد.</p>${field('ملاحظة للمالك (اختياري)', inp('note', ''), 'full')}`, submitLabel: 'اطلب موافقة المالك', onSubmit: f => askDisc(q.id, formData(f).note) });
+    return false;
+  }
+  async function askDisc(id, note) {
+    const q = byId('quotations', id); if (!q) return; const pct = discPct(q);
+    await Store.update('quotations', id, { discReq: { v: rev(q), pct, total: totalOf(q), status: 'pending', note: note || '', by: me().id || null, byName: me().name || '', workerId: me().workerId || null, at: nowISO() } });
+    if (typeof notifyOwner === 'function') { const tid = `qdisc_${id}_v${rev(q)}`; await notifyOwner(`موافقة على خصم — ${q.number} V${rev(q)}`, `${me().name || ''} طالبة خصم ${pct}% عن V1 على عرض ${q.number}${q.subject ? ' (' + q.subject + ')' : ''}. افتح العرض ← «التفاوض» ووافق أو ارفض.`, { id: tid }); try { await Store.update('tasks', tid, { link: '/#/quotes/' + id }); } catch (e) { /* ignore */ } }
+    toast('الطلب اتبعت للمالك');
+  }
+  ACTIONS.qpDiscAsk = id => { const q = byId('quotations', id); if (q) discGuard(q); };
+  const tellReq = async (q, title, desc) => { const w = q.discReq && (q.discReq.workerId || wOf(q.discReq.by)); if (!w) return; await Store.save('tasks', { id: `qdisc_r_${q.id}_${Date.now().toString(36)}`, title, desc, assigneeId: w, dueDate: todayISO(), priority: 'normal', status: 'open', kind: 'notice', source: 'system', link: '/#/quotes/' + q.id, createdBy: me().id || null, createdByName: me().name || '', createdAt: nowISO() }, { silent: true }); };
+  ACTIONS.qpDiscOk = async id => { const q = byId('quotations', id); if (!q || !isAdmin()) return; await Store.update('quotations', id, { discOk: { v: rev(q), total: totalOf(q), by: me().id || null, byName: me().name || '', at: nowISO() }, discReq: Object.assign({}, q.discReq, { status: 'ok' }) }); await tellReq(q, `المالك وافق على خصم ${q.number} V${rev(q)} ✓`, 'تقدر تبعت النسخة للعميل دلوقتي.'); const t = byId('tasks', `qdisc_${id}_v${rev(q)}`); if (t) await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); toast('اتوافق ✓'); };
+  ACTIONS.qpDiscNo = id => { const q = byId('quotations', id); if (!q || !isAdmin()) return; openModal({ title: `رفض خصم ${q.number} V${rev(q)}`, body: field('السبب', inp('reason', ''), 'full'), submitLabel: 'رفض', onSubmit: async f => { const r = formData(f).reason || ''; await Store.update('quotations', id, { discReq: Object.assign({}, q.discReq, { status: 'rejected', reason: r }) }); await tellReq(q, `المالك رفض خصم ${q.number} V${rev(q)}`, r || 'عدّل الأسعار أو اعمل نسخة تانية.'); const t = byId('tasks', `qdisc_${id}_v${rev(q)}`); if (t) await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); toast('اترفض'); } }); };
+  ['quoteSendWa', 'quoteSendMail'].forEach(a => { if (ACTIONS[a]) ACTIONS[a] = (base => function (id) { const q = byId('quotations', id); if (q && !discGuard(q)) return; return base.apply(this, arguments); })(ACTIONS[a]); });
+  if (ACTIONS.quoteStatus) ACTIONS.quoteStatus = (base => async function (arg) {
+    const [id, st] = String(arg || '').split(':'); const q = byId('quotations', id);
+    if (isLof(q) && ['sent', 'approved'].includes(st) && !discGuard(q)) return;
+    const r = await base.apply(this, arguments);
+    if (isLof(q) && st === 'approved') await Store.update('quotations', id, { approvedRev: rev(q), approvedAt: nowISO(), approvedBy: me().name || '' });
+    return r;
+  })(ACTIONS.quoteStatus);
+  ACTIONS.qpMarkSent = id => ACTIONS.quoteStatus(`${id}:sent`);
+  ACTIONS.qpApprove = async id => { const q = byId('quotations', id); if (!q) return; if (!discGuard(q)) return; if (!await confirmDlg(`العميل وافق على ${q.number} V${rev(q)} بإجمالي ${money(totalOf(q))}؟ النسخة دي هتتقفل.`, 'وافق', false)) return; await ACTIONS.quoteStatus(`${id}:approved`); S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'po' }); render(false); };
+  ACTIONS.qpLost = id => { const q = byId('quotations', id); if (!q) return; openModal({ title: `العميل رفض ${q.number}`, body: field('السبب', inp('reason', '', 'required placeholder="مثال: السعر عالي / اختار مورد تاني / المشروع اتأجل"'), 'full'), submitLabel: 'تسجيل', onSubmit: async f => { const r = (formData(f).reason || '').trim(); if (!r) { toast('اكتب السبب', 'err'); return false; } await Store.update('quotations', id, { status: 'rejected', lostReason: r, lostAt: nowISO(), lostRev: rev(q) }); toast('اتسجل'); } }); };
+  ACTIONS.qpReopen = async id => { const q = byId('quotations', id); if (!q || q.status !== 'rejected') return; await Store.update('quotations', id, { status: q.sentRev === rev(q) ? 'sent' : 'draft', lostReason: '', reopenedAt: nowISO() }); toast('رجع للتفاوض'); };
+
+  /* ---------- الـPO ---------- */
+  ACTIONS.qpPo = id => {
+    const q = byId('quotations', id); if (!q || q.orderId || !['approved', 'converted'].includes(q.status)) return; const p = q.po || {}; const c = byId('clients', q.clientId) || {};
+    openModal({ title: `استلام الـPO — ${q.number}`, wide: true, body: `<div class="form">
+      ${field('رقم الـPO *', inp('no', p.no || '', 'required'))}${field('تاريخ الـPO *', inp('date', p.date || todayISO(), 'type="date" required'))}
+      ${attachInput('pofile', p.fileId ? 'ملف الـPO (اتركه فاضي للإبقاء على الحالي)' : 'ملف الـPO * (صورة / PDF)', false)}
+      <div class="full" style="font-weight:700;margin-top:6px">مدير المشروع</div>
+      ${field('الاسم *', inp('pmName', p.pmName || '', 'required'))}${field('الموبايل *', inp('pmPhone', p.pmPhone || '', 'required inputmode="tel" class="ltr"'))}${field('الإيميل', inp('pmEmail', p.pmEmail || '', 'type="email" class="ltr"'))}
+      <div class="full" style="font-weight:700;margin-top:6px">الأماكن</div>
+      ${field('لوكيشن المشروع (العنوان) *', inp('site', p.site || '', 'required'), 'full')}${field('لينك الخريطة (جوجل ماب)', inp('siteMap', p.siteMap || '', 'class="ltr" placeholder="https://maps.google.com/..."'), 'full')}
+      ${field('عنوان مقر الشركة *', inp('hq', p.hq || c.address || '', 'required'), 'full')}
+      <div class="full" style="font-weight:700;margin-top:6px">Contact person (لو مختلف عن مدير المشروع)</div>
+      ${field('الاسم', inp('cName', p.cName || c.contact || ''))}${field('الموبايل', inp('cPhone', p.cPhone || '', 'inputmode="tel" class="ltr"'))}
+    </div>`, submitLabel: 'حفظ',
+      onSubmit: async f => {
+        const d = formData(f); const file = typeof pickFile === 'function' ? pickFile(f, 'pofile') : ((f.querySelector('#f-pofile') || {}).files || [])[0];
+        if (!file && !p.fileId) { toast('ارفع ملف الـPO', 'err'); return false; }
+        for (const [k, l] of [['no', 'رقم الـPO'], ['date', 'تاريخ الـPO'], ['pmName', 'اسم مدير المشروع'], ['pmPhone', 'موبايل مدير المشروع'], ['site', 'لوكيشن المشروع'], ['hq', 'مقر الشركة']]) if (!String(d[k] || '').trim()) { toast(`ناقص: ${l}`, 'err'); return false; }
+        let fileId = p.fileId || null;
+        if (file) { try { S._pricedUp = true; const att = await attachFile(file, { kind: 'contract', ownerKind: 'quotation', ownerId: id, note: `${q.number} — PO ${d.no}` }); fileId = att.id; } catch (e) { toast(String(e.message || e), 'err'); return false; } finally { S._pricedUp = false; } }
+        const po = { no: d.no.trim(), date: d.date, fileId, pmName: d.pmName.trim(), pmPhone: d.pmPhone.trim(), pmEmail: (d.pmEmail || '').trim(), site: d.site.trim(), siteMap: (d.siteMap || '').trim(), hq: d.hq.trim(), cName: (d.cName || '').trim(), cPhone: (d.cPhone || '').trim(), at: nowISO(), by: me().name || '' };
+        await Store.update('quotations', id, { po }); S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'acc' }); toast('الـPO اتحفظ ✓');
+      } });
+  };
+  /* ---------- تسليم للحسابات ---------- */
+  ACTIONS.qpHand = async id => {
+    const q = byId('quotations', id); if (!q || q.orderId || q.status !== 'approved' || !poDone(q.po)) return;
+    if (!await confirmDlg(`تسليم ${q.number} V${q.approvedRev || rev(q)} للحسابات؟ هيطلع أمر تشغيل بالنسخة المعتمدة، والـPO يتحط في «التعاقد والدفعات»، والحسابات يوصلها تطلب شيك الدفعة المقدمة.`, 'تسليم', false)) return;
+    const p = q.po; const b = brand(q.brandId); const items = q.items || []; const qty = sum(items, it => it.qty); const units = new Set(items.map(it => it.unit)); const now = nowISO();
+    const o = { id: uid(), code: nextCode(q.brandId), brandId: q.brandId, clientId: q.clientId, title: q.subject, qty: units.size === 1 ? qty : 1, unit: units.size === 1 && items[0] ? items[0].unit : 'طقم', value: totalOf(q), orderDate: todayISO(), dueDate: '', priority: 'normal', route: (b && b.route) || [], stages: {}, payments: [], status: 'new', quotationId: q.id, seg: typeof window.nfSegOf === 'function' ? window.nfSegOf('quotations', q) : undefined, createdAt: now, gateRequired: true,
+      notes: 'بنود العرض:\n' + items.map(it => `• ${String(it.desc || '').split('\n')[0]} — ${fmtNum(it.qty)} ${it.unit || ''}`).join('\n'),
+      project: { pmName: p.pmName, pmPhone: p.pmPhone, pmEmail: p.pmEmail, site: p.site, siteMap: p.siteMap, hq: p.hq, contactName: p.cName, contactPhone: p.cPhone },
+      contract: { kind: 'po', no: p.no, date: p.date, note: `من عرض ${q.number} V${q.approvedRev || rev(q)}`, fileId: p.fileId, at: now, by: me().id || null, byName: me().name || '', log: [{ at: now, by: me().name || '', from: null, to: 'po' }] } };
+    await Store.save('orders', o, { silent: true });
+    await Store.update('quotations', id, { status: 'converted', orderId: o.id, handedAt: now, handedBy: me().name || '' });
+    const cl = byId('clients', q.clientId) || {};
+    if (typeof notifyRole === 'function') {
+      await notifyRole('hr', `مشروع جديد ${o.code} نزل له PO — اطلب شيك الدفعة المقدمة`, `${q.subject || ''} · ${cl.name || ''} — PO ${p.no}. مدير المشروع: ${p.pmName} ${p.pmPhone}. افتح صفحة الأمر ← «التعاقد والدفعات».`, { orderId: o.id, id: `hr_newpo_${o.id}`, priority: 'high' });
+      await notifyRole('admin', `${me().name || ''} سلّم مشروع ${o.code} للحسابات`, `${q.subject || ''} · ${cl.name || ''} — PO ${p.no} (عرض ${q.number} V${q.approvedRev || rev(q)}).`, { orderId: o.id, id: `own_newpo_${o.id}` });
+    }
+    S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'acc' }); toast(`اتسلّم ✓ — ${o.code}`); render(false);
+  };
 })();
 </script>
 
