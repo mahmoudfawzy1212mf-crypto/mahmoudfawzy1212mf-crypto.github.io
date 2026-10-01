@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1821-2d3186";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1833-28e703";</script>
 
 <script>
 'use strict';
@@ -25495,6 +25495,117 @@ form:not(.lofqf) [data-line="lcat"],form:not(.lofqf) [data-line="lprj"]{display:
     const th = (Array.isArray(t.thread) ? t.thread : []).concat([{ id: uid(), at: nowISO(), by: null, byName: 'السيستم', sys: true, text: `${S.session.name || ''} شال ${name} من المحادثة` }]);
     await Store.update('tasks', tid, { excluded: ex, participants, thread: th }); toast(`اتشال ${name}`);
   };
+})();
+/* =====================================================================
+   v5.81 — From Catalogue: السيتات زي الكتالوج (بـ«ابدأ» من محمود)
+   · أي قسم فيه «سيتات» (منتج أم له قطع parentId) — زي Garden Furniture — بيظهر كروت سيتات بدل الشبكة المفرودة.
+   · تدوس على السيت → قطعه (كنبة/كرسي/ترابيزة…) بالكود والاسم والسعر (للمصرّح له) والكمية.
+     تضيف قطعة لوحدها (الفورم يفضل مفتوح) · تعلّم كذا قطعة «أضف المختار» · «أضف السيت كله» (عنوان قسم باسم السيت + قطعه).
+   · المنتجات اللي مش تبع سيت في نفس القسم → كارت «قطع منفصلة».
+   · البحث بيدوّر في كل قطع القسم ومكتوب تحت كل نتيجة السيت بتاعها.
+   · القطعة من غير صورة → بتاخد صورة السيت.
+   ===================================================================== */
+(function () {
+  if (window.__NF_GSETS__) return; window.__NF_GSETS__ = 1;
+  if (typeof pickCatalogLine !== 'function') return;
+  const LOOSE = '_loose';
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.gsets{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;max-height:58vh;overflow:auto;padding:2px}
+.gsets .gs{display:flex;flex-direction:column;text-align:start;border:1px solid var(--line);border-radius:12px;background:var(--surface,#fff);padding:0;overflow:hidden;cursor:pointer;color:inherit}
+.gsets .gs:hover{border-color:var(--acc,#3b6ea5);box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.gsets .gs .im{aspect-ratio:4/3;background:var(--surface-2);display:flex;align-items:center;justify-content:center;overflow:hidden}.gsets .gs .im img{width:100%;height:100%;object-fit:cover}
+.gsets .gs .bd{padding:8px 10px}.gsets .gs .n{font-size:11.5px;color:var(--muted)}
+.gsdet .gsh{display:flex;gap:12px;align-items:center;margin-bottom:10px}.gsdet .gsh img{width:84px;height:64px;object-fit:cover;border-radius:9px}
+.gsrows{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.gsr{display:grid;grid-template-columns:26px 48px minmax(0,1fr) auto 70px auto;gap:8px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line)}.gsr:last-child{border-bottom:0}
+.gsr img,.gsr .ph{width:48px;height:40px;object-fit:cover;border-radius:7px;background:var(--surface-2);display:flex;align-items:center;justify-content:center}
+.gsr .pr{font-size:12px;white-space:nowrap}.gsr input[type=number]{width:70px;padding:4px 6px}.gsr.done{background:color-mix(in srgb,var(--good-ink,#2e7d32) 8%,transparent)}
+.gsbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+@media(max-width:600px){.gsr{grid-template-columns:22px 40px minmax(0,1fr) 56px auto}.gsr .pr{display:none}.gsr input[type=number]{width:56px}}
+</style>`);
+
+  const parentOf = p => (p && p.parentId ? byId('products', p.parentId) : null);
+  const eff = p => { const c = productCollection(p); if (c) return c; const par = parentOf(p); return par ? productCollection(par) : ''; };
+  const kids = id => (typeof familyItems === 'function' ? familyItems(id) : sortBy(list('products').filter(x => x.parentId === id && x.status !== 'archived'), x => x.code || x.name)).filter(x => !(S._catOnly && typeof pKind === 'function' && pKind(x) === 'project'));
+  const cover = p => (typeof productCover === 'function' ? productCover(p) : '') || '';
+  const setName = s => (s && s.nameEn && !/[ا-ي]/.test(s.nameEn) ? s.nameEn : (s && s.name)) || '';
+  const money = p => (typeof seesFinance === 'function' && seesFinance() && p.price ? `${fmtMoney(p.price)} ${CUR()}` : '');
+
+  function model(b, coll) {
+    const all = list('products').filter(p => p.brandId === b && p.status !== 'archived' && !p.parentId && eff(p) === coll);
+    const sets = sortBy(all.filter(p => kids(p.id).length), p => p.code || p.name);
+    const loose = sortBy(all.filter(p => !kids(p.id).length), p => p.code || p.name);
+    return { sets, loose };
+  }
+
+  const row = (p, set, done, showSet) => {
+    const img = cover(p) || (set ? cover(set) : '');
+    const en = p.nameEn && p.nameEn !== p.name ? `<span class="tiny muted"> · ${esc(p.nameEn)}</span>` : '';
+    return `<div class="gsr ${done ? 'done' : ''}" data-gp="${esc(p.id)}"><input type="checkbox" data-gchk="${esc(p.id)}" aria-label="اختار">${img ? `<img src="${esc(img)}" alt="">` : `<span class="ph muted">${icon('inventory')}</span>`}<div style="min-width:0"><span class="code">${esc(p.code || '')}</span> <b>${esc(p.name || '')}</b>${en}${p.dims ? `<div class="tiny muted">${esc(p.dims)}</div>` : ''}${showSet && set ? `<div class="tiny muted">من سيت ${esc(setName(set))} <span class="code">${esc(set.code || '')}</span></div>` : ''}</div><span class="pr">${money(p)}</span><input type="number" min="1" step="1" value="1" data-gqty="${esc(p.id)}" aria-label="الكمية"><button type="button" class="btn sm ${done ? 'ghost' : 'p'}" data-gadd="${esc(p.id)}">${done ? '✓ تاني' : `${icon('plus')}أضف`}</button></div>`;
+  };
+
+  function render(box, b) {
+    const mb = box.querySelector('.mb'); if (!mb) return;
+    const on = box.querySelector('.seg [data-coll].on'); const coll = on ? on.dataset.coll : '';
+    const qi = box.querySelector('[data-q]'); const q = qi ? qi.value.trim().toLowerCase() : '';
+    if (!coll) return; // «الكل» = زي ما هي
+    const m = model(b, coll); if (!m.sets.length) return; // قسم مفيهوش سيتات = الشبكة العادية
+    if (box._gcoll !== coll) { box._gcoll = coll; box._gset = null; }
+    const done = box._gdone || (box._gdone = new Set());
+    const old = mb.querySelector('.pickgrid') || mb.querySelector('.empty') || mb.querySelector('.gsview');
+    let html = '';
+    if (q) {
+      const hits = [];
+      m.sets.forEach(s => { const sm = `${s.code || ''} ${s.name || ''} ${s.nameEn || ''}`.toLowerCase().includes(q); kids(s.id).forEach(k => { if (sm || `${k.code || ''} ${k.name || ''} ${k.nameEn || ''} ${k.dims || ''}`.toLowerCase().includes(q)) hits.push([k, s]); }); });
+      m.loose.forEach(p => { if (`${p.code || ''} ${p.name || ''} ${p.nameEn || ''} ${p.dims || ''}`.toLowerCase().includes(q)) hits.push([p, null]); });
+      html = `<div class="gsview gsdet"><div class="small muted" style="margin-bottom:8px">نتايج البحث في كل قطع القسم (${hits.length})</div>${hits.length ? `<div class="gsrows">${hits.map(([p, s]) => row(p, s, done.has(p.id), true)).join('')}</div><div class="gsbar"><button type="button" class="btn sm p" data-gsel="1" disabled>أضف المختار</button></div>` : '<div class="empty"><b>مفيش نتايج</b></div>'}</div>`;
+    } else if (box._gset) {
+      const isLoose = box._gset === LOOSE; const s = isLoose ? null : byId('products', box._gset);
+      const items = isLoose ? m.loose : (s ? kids(s.id) : []);
+      const sc = s ? cover(s) : '';
+      html = `<div class="gsview gsdet"><div class="gsh"><button type="button" class="btn sm ghost" data-gback="1">${icon('back')}السيتات</button>${sc ? `<img src="${esc(sc)}" alt="">` : ''}<div><b>${esc(isLoose ? 'قطع منفصلة' : setName(s))}</b> ${s ? `<span class="code">${esc(s.code || '')}</span>` : ''}<div class="tiny muted">${items.length} قطعة</div></div></div>
+        ${items.length ? `<div class="gsrows">${items.map(p => row(p, s, done.has(p.id), false)).join('')}</div>` : '<div class="empty"><b>مفيش قطع</b></div>'}
+        <div class="gsbar"><button type="button" class="btn sm" data-gsel="1" disabled>أضف المختار</button>${!isLoose && items.length ? `<button type="button" class="btn sm p" data-gall="${esc(s.id)}">${icon('plus')}أضف السيت كله (${items.length} قطع)</button>` : ''}<span class="tiny muted">الكمية بتتكتب جنب كل قطعة</span></div></div>`;
+    } else {
+      const card = (id, name, code, img, n) => `<button type="button" class="gs" data-gset="${esc(id)}"><div class="im">${img ? `<img src="${esc(img)}" alt="">` : `<span class="muted">${icon('inventory')}</span>`}</div><div class="bd">${code ? `<span class="code">${esc(code)}</span>` : ''}<div class="bold">${esc(name)}</div><div class="n">${n} قطعة</div></div></button>`;
+      html = `<div class="gsview"><div class="gsets">${m.sets.map(s => card(s.id, setName(s), s.code, cover(s), kids(s.id).length)).join('')}${m.loose.length ? card(LOOSE, 'قطع منفصلة', '', '', m.loose.length) : ''}</div></div>`;
+    }
+    if (old) old.outerHTML = html; else mb.insertAdjacentHTML('beforeend', html);
+  }
+
+  /* إضافة كذا قطعة مرة واحدة: رسايل «ناقصه إنجليزي/صورة» تبقى رسالة واحدة بدل رسالة لكل قطعة */
+  let bulk = 0, missed = 0;
+  if (typeof toast === 'function') toast = (base => function (msg, kind) { if (bulk && kind === 'err' && /ناقصه/.test(String(msg || ''))) { missed++; return; } return base.apply(this, arguments); })(toast);
+  function addPieces(box, f, recalc, ids, opts) {
+    const ps = ids.map(id => byId('products', id)).filter(Boolean); if (!ps.length) return;
+    if (ps.length > 1) { bulk++; missed = 0; setTimeout(() => { bulk--; if (missed) toast(`${missed} قطعة ناقصها إنجليزي أو صورة — كمّلها من صفحة المنتج علشان العرض يطلع كامل`, 'err'); missed = 0; }, 900); }
+    const lines = f.querySelector('#lines');
+    if (opts.section) appendLine(f, { sec: true, desc: opts.section, qty: 0, price: 0, unit: '' }, recalc);
+    ps.forEach(p => {
+      const set = parentOf(p); const qEl = box.querySelector(`[data-gqty="${p.id}"]`); const qty = Math.max(1, num(qEl ? qEl.value : 1) || 1);
+      appendLine(f, { productId: p.id, img: cover(p) || (set ? cover(set) : ''), desc: `${p.name}${p.dims ? ' — ' + p.dims : ''}`, qty, unit: p.unit || 'قطعة', price: (typeof seesFinance === 'function' && seesFinance()) ? (p.price || '') : '' }, recalc);
+      if (set && !opts.section && lines) { const d = [...lines.querySelectorAll('.line:not(.lsec) [name=l-desc]')].pop(); const sn = setName(set); if (d && sn && !d.value.toLowerCase().includes(sn.toLowerCase())) d.value = `${sn} — ${d.value}`; }
+      (box._gdone || (box._gdone = new Set())).add(p.id);
+    });
+    recalc && recalc();
+  }
+
+  pickCatalogLine = (base => function (f, recalc, b) {
+    const r = base.apply(this, arguments);
+    const box = [...document.querySelectorAll('.overlay.sub')].pop(); if (!box || box._gsets) return r; box._gsets = 1;
+    render(box, b);
+    if (window.MutationObserver) new MutationObserver(() => render(box, b)).observe(box, { childList: true });
+    box.addEventListener('click', e => {
+      const t = e.target; if (!(t instanceof Element)) return;
+      const st = t.closest('[data-gset]'); if (st) { box._gset = st.dataset.gset; render(box, b); return; }
+      if (t.closest('[data-gback]')) { box._gset = null; render(box, b); return; }
+      const ad = t.closest('[data-gadd]'); if (ad) { const p = byId('products', ad.dataset.gadd); addPieces(box, f, recalc, [ad.dataset.gadd], {}); render(box, b); toast(`اتضاف ${p ? (p.code || p.name) : ''}`); return; }
+      const all = t.closest('[data-gall]'); if (all) { const s = byId('products', all.dataset.gall); const ids = kids(all.dataset.gall).map(x => x.id); addPieces(box, f, recalc, ids, { section: setName(s) }); box.remove(); toast(`اتضاف سيت ${setName(s)} (${ids.length} قطع)`); return; }
+      if (t.closest('[data-gsel]')) { const ids = [...box.querySelectorAll('[data-gchk]:checked')].map(x => x.dataset.gchk); if (!ids.length) return; const sets = new Set(ids.map(id => (byId('products', id) || {}).parentId || '')); const one = sets.size === 1 && [...sets][0] ? byId('products', [...sets][0]) : null; addPieces(box, f, recalc, ids, ids.length > 1 && one ? { section: setName(one) } : {}); box.remove(); toast(`اتضاف ${ids.length} قطع`); return; }
+    });
+    box.addEventListener('change', e => { if (!e.target.dataset || !e.target.dataset.gchk) return; const n = box.querySelectorAll('[data-gchk]:checked').length; const bt = box.querySelector('[data-gsel]'); if (bt) { bt.disabled = !n; bt.textContent = n ? `أضف المختار (${n})` : 'أضف المختار'; bt.classList.toggle('p', !!n); } });
+    return r;
+  })(pickCatalogLine);
 })();
 </script>
 
