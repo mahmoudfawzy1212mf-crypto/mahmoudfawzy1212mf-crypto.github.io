@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1116-b50dff";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1126-6d5684";</script>
 
 <script>
 'use strict';
@@ -20048,11 +20048,12 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   RENDER_HOOKS.push(() => {
     if (stu() || !S.session || !S.session.workerId || S._walletLater || S._walletAsking || !S.loaded.wallets || !writable()) return;
     if (walletOf(S.session.workerId) || document.querySelector('#mform')) return;
-    const w = byId('workers', S.session.workerId); if (w && typeof regAckOf === 'function' && !regAckOf(w)) return;
+    const w = byId('workers', S.session.workerId); if (w && w.noWallet) return; /* v5.68: موظف مالوش سلف/تحويلات */ if (w && typeof regAckOf === 'function' && !regAckOf(w)) return;
     S._walletAsking = true; setTimeout(() => { S._walletAsking = false; if (!walletOf(S.session.workerId) && !document.querySelector('#mform')) ACTIONS.walletSet(S.session.workerId); }, 400);
   });
   /* no advance request without a registered number */
   if (typeof advanceValidate === 'function') advanceValidate = (base => async function (r, d, w, forKiosk) {
+    if (!stu() && w && w.noWallet) { toast('مالكش سلف على السيستم — راجع مدير الحسابات', 'err'); return false; }
     if (!stu() && w && !forKiosk && S.session && S.session.workerId === w.id && !walletOf(w.id)) { toast('سجّل رقم التحويلات الأول — السلف بتتحول على محفظتك', 'err'); setTimeout(() => ACTIONS.walletSet(w.id), 300); return false; }
     return base.apply(this, arguments);
   })(advanceValidate);
@@ -20197,6 +20198,20 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   if (typeof vWorkerDetail === 'function') vWorkerDetail = (base => function (id) { const h = base.apply(this, arguments); if (stu() || !(canWalletAdmin() || role() === 'acc')) return h; return walletCard(id, false) + h; })(vWorkerDetail);
   if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); if (stu() || !S.session || !S.session.workerId) return h; return walletCard(S.session.workerId, true) + h; })(vMe);
+})();
+/* v5.68 — خانة «مالوش سلف ولا تحويلات» في ملف الموظف (المالك / مدير الحسابات) */
+(function () {
+  if (window.__NF_NOWALLET__) return; window.__NF_NOWALLET__ = 1;
+  const can = () => !!S.session && (isAdmin() || role() === 'hr') && !(typeof isStuSys === 'function' && isStuSys());
+  if (typeof workerForm === 'function') workerForm = (base => function (w) {
+    const html = base.apply(this, arguments); if (!can()) return html; w = w || {};
+    const box = `<div class="field full"><label class="check"><input type="checkbox" name="noWallet" ${w.noWallet ? 'checked' : ''}> مالوش سلف ولا تحويلات <span class="muted tiny">— مش هيتطلب منه رقم محفظة، ومش هيقدر يطلب سلفة</span></label></div>`;
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + box : html.slice(0, i) + box + html.slice(i);
+  })(workerForm);
+  if (typeof workerFromFormBase === 'function') workerFromFormBase = (base => async function (f) {
+    const doc = await base.apply(this, arguments); const el = f && f.querySelector('[name="noWallet"]'); if (!doc || !el || !can()) return doc;
+    doc.noWallet = !!el.checked || null; return doc;
+  })(workerFromFormBase);
 })();
 /* =====================================================================
    v5.00 — (المصنع) تحويلات الموردين (بـ«ابدأ» من محمود، 27 سبتمبر):
