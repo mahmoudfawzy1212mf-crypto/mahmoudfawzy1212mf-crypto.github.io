@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1224-1aab99";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1237-646045";</script>
 
 <script>
 'use strict';
@@ -24556,8 +24556,8 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!S._uiHomeDone && S.session && S.loaded && S.loaded.workers) setTimeout(goHome, 0); });
 
   /* ---------- 3) ترتيب CRM ---------- */
-  const TABS = [['board', 'المبيعات'], ['clist', 'العملاء'], ['quotes', 'عروض الأسعار'], ['invoices', 'الفواتير'], ['follow', 'المتابعات'], ['clients', 'التعاقدات وأوامر التشغيل'], ['after', 'ما بعد البيع'], ['report', 'التقارير']];
-  const OWN = ['clist', 'quotes', 'invoices'];
+  const TABS = [['board', 'المبيعات'], ['clist', 'العملاء'], ['quotes', 'عروض الأسعار'], ['invoices', 'الفواتير'], ['follow', 'المتابعات'], ['clients', 'التعاقدات وأوامر التشغيل'], ['status', 'حالة المشاريع'], ['after', 'ما بعد البيع'], ['report', 'التقارير']];
+  const OWN = ['clist', 'quotes', 'invoices', 'status'];
   const tabsHTML = f => `<div class="tabs" style="margin:10px 0">${TABS.map(([k, l]) => `<button class="${f.tab === k ? 'on' : ''}" data-action="crmTab" data-arg="${k}">${l}</button>`).join('')}</div>`;
   function quotesBody(b) {
     const qs = sortBy(list('quotations').filter(q => q.brandId === b), q => q.date || '', true);
@@ -24572,7 +24572,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   if (typeof vCrmBrand === 'function') vCrmBrand = (base => function (b) {
     const p = prefs(); if (!p || !p.crmTabs || S.route.id) return base.apply(this, arguments);
     const f = S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' };
-    if (OWN.includes(f.tab)) { S.ui.crmBrand = b; const body = f.tab === 'quotes' ? quotesBody(b) : f.tab === 'invoices' ? (typeof crmInvoicesCard === 'function' ? crmInvoicesCard(b).replace('style="margin-top:14px"', '') : '') : clientsBody(b); return `<div class="crmb" style="${brandVars(b)}">${crmHeader(b)}${tabsHTML(f)}${body}</div>`; }
+    if (OWN.includes(f.tab)) { S.ui.crmBrand = b; const body = f.tab === 'status' ? (typeof window.nfProjStatusBody === 'function' ? window.nfProjStatusBody(b) : '') : f.tab === 'quotes' ? quotesBody(b) : f.tab === 'invoices' ? (typeof crmInvoicesCard === 'function' ? crmInvoicesCard(b).replace('style="margin-top:14px"', '') : '') : clientsBody(b); return `<div class="crmb" style="${brandVars(b)}">${crmHeader(b)}${tabsHTML(f)}${body}</div>`; }
     let html = base.apply(this, arguments);
     html = html.replace(/<div class="tabs" style="margin:10px 0">[\s\S]*?<\/div>/, tabsHTML(f));
     return html;
@@ -24799,6 +24799,97 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   ACTIONS.clientSegSet = async arg => { const [id, s] = String(arg || '').split(':'); if (!byId('clients', id) || !['b2b', 'b2c'].includes(s)) return; await Store.update('clients', id, { seg: s }); toast(`بقى ${s.toUpperCase()}`); };
 
   /* ---------- تابات آلاء الخاصة (العملاء/العروض/الفواتير جوه CRM) بتمشي على نفس الفلتر تلقائيًا لأنها جوه vCrmBrand ---------- */
+})();
+/* =====================================================================
+   v5.73 — «حالة المشاريع» جوه CRM البراند (تابة لآلاء — crmTabs)
+   · كل أمر تشغيل للبراند (غير الملغي): المرحلة الحالية في المصنع بكلام بسيط
+     (مشتريات خامات / في الإنتاج — القسم / تغليف / تركيب / جاهز / اتسلّم / متوقف)،
+     شريط تقدم، مراحل الأمر، ميعاد التسليم + On schedule / قرّب / متأخر.
+   · عرض بس — مفيش فلوس، مفيش أسماء عمال، مفيش تعديل.
+   · سطر الحالة كمان في صفحة العميل وصفحة عرض السعر.
+   · uiPrefs.hide = ['orders', 'products'] → الصفحات دي تتقفل في الواجهة للشخص ده (البيانات بتتحط بعد الـPIN).
+   ===================================================================== */
+(function () {
+  if (window.__NF_PSTATUS__) return; window.__NF_PSTATUS__ = 1;
+  const raw = col => (S.data && S.data[col]) ? Array.from(S.data[col].values()) : [];
+  const prefs = () => (typeof window.nfUiPrefs === 'function' ? window.nfUiPrefs() : null);
+  const segOf = o => (typeof window.nfSegOf === 'function' ? window.nfSegOf('orders', o) : 'b2b');
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.pst-sum{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.pst-sum .k{flex:1;min-width:120px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+.pst-sum .k b{font-size:22px;display:block}.pst-sum .k span{font-size:12px;color:var(--muted)}
+.pst-sum .k.g b{color:#2e7d4f}.pst-sum .k.y b{color:#b7791f}.pst-sum .k.r b{color:#c0392b}.pst-sum .k.h b{color:#6b7280}
+.pst{padding:14px 16px;border-bottom:1px solid var(--line)}.pst:last-child{border-bottom:0}
+.pst .top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pst .top b{font-size:14.5px}.pst .top .code{font-size:11.5px;color:var(--muted);direction:ltr}
+.pst .ph{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}.pst .ph .now{font-weight:700}
+.pst .bar{height:7px;border-radius:5px;background:var(--surface-2);overflow:hidden;margin-top:8px}.pst .bar i{display:block;height:100%;background:var(--acc,#3b6ea5);border-radius:5px}
+.pst .stg{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}.pst .stg span{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+.pst .stg span.done{background:color-mix(in srgb,#2e7d4f 14%,transparent);color:#2e7d4f;border-color:transparent}.pst .stg span.active{background:color-mix(in srgb,#3b6ea5 16%,transparent);color:#3b6ea5;border-color:transparent;font-weight:700}.pst .stg span.skipped{text-decoration:line-through;opacity:.6}
+.schd{font-size:11.5px;padding:2px 9px;border-radius:20px;font-weight:700;white-space:nowrap}.schd.g{background:color-mix(in srgb,#2e7d4f 15%,transparent);color:#2e7d4f}.schd.y{background:color-mix(in srgb,#b7791f 16%,transparent);color:#b7791f}.schd.r{background:color-mix(in srgb,#c0392b 15%,transparent);color:#c0392b}.schd.h{background:var(--surface-2);color:var(--muted)}
+.pstline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;font-size:13px}
+</style>`);
+
+  const OPEN_PO = ['draft', 'need', 'need_ok', 'approved', 'ordered', 'arrived', 'partial', 'pending'];
+  const openPOs = o => raw('purchases').filter(p => p.orderId === o.id && OPEN_PO.includes(p.status || 'draft') && !p.deleted);
+  function phase(o) {
+    if (o.status === 'delivered') return { t: 'اتسلّم', k: 'done' };
+    if (o.status === 'hold') return { t: 'متوقف' + (o.holdReason ? ' — ' + o.holdReason : ''), k: 'hold' };
+    if (o.status === 'ready') return { t: 'جاهز للتسليم', k: 'ready' };
+    const cs = typeof currentStage === 'function' ? currentStage(o) : null; const active = cs && cs.status === 'active';
+    const pos = openPOs(o).length;
+    if (active) {
+      const d = String(cs.deptId || ''); const nm = typeof deptName === 'function' ? deptName(d) : d;
+      if (/pack|تغليف/i.test(d + ' ' + nm)) return { t: 'تغليف', k: 'pack', po: pos };
+      if (/^inst|تركيب/i.test(d + ' ' + nm)) return { t: 'تركيب في الموقع', k: 'inst', po: pos };
+      return { t: 'في الإنتاج — ' + nm, k: 'prod', po: pos };
+    }
+    if (pos) return { t: 'مشتريات خامات', k: 'purch' };
+    const st = typeof orderStages === 'function' ? orderStages(o) : [];
+    if (st.length && st.every(s => ['done', 'skipped'].includes(s.status))) return { t: 'خلص الإنتاج — في انتظار التسليم', k: 'ready' };
+    return { t: 'لسه ما بدأش الإنتاج (تحضير)', k: 'new' };
+  }
+  function sched(o) {
+    if (o.status === 'delivered') return { c: 'g', t: 'اتسلّم' };
+    if (o.status === 'hold') return { c: 'h', t: '⏸ متوقف' };
+    if (!o.dueDate) return { c: 'h', t: 'مفيش ميعاد تسليم' };
+    const d = daysBetween(todayISO(), o.dueDate);
+    if (d < 0) return { c: 'r', t: `متأخر ${-d} يوم` };
+    if (d <= 3) return { c: 'y', t: d === 0 ? 'التسليم النهارده' : `قرّب — فاضل ${d} أيام` };
+    return { c: 'g', t: 'On schedule — في الميعاد' };
+  }
+  window.nfOrderPhase = phase; window.nfOrderSched = sched;
+  const clientName = o => { const c = o.clientId ? byId('clients', o.clientId) : null; return c ? c.name : (o.clientName || ''); };
+  const segBadge = s => `<span class="badge segb ${s === 'b2c' ? 'c' : ''}">${s === 'b2c' ? 'B2C' : 'B2B'}</span>`;
+  function card(o) {
+    const ph = phase(o), sc = sched(o), pr = typeof orderProgress === 'function' ? orderProgress(o) : 0;
+    const st = (typeof orderStages === 'function' ? orderStages(o) : []).map(s => `<span class="${esc(s.status || 'pending')}">${s.status === 'done' ? '✓ ' : ''}${esc(typeof deptName === 'function' ? deptName(s.deptId) : s.deptId)}</span>`).join('');
+    return `<div class="pst"><div class="top"><b>${esc(o.title || o.code || 'مشروع')}</b>${segBadge(segOf(o))}<span class="code">${esc(o.code || '')}</span><div class="grow"></div><span class="schd ${sc.c}">${esc(sc.t)}</span></div>
+      <div class="ph"><span class="muted">${esc(clientName(o))}</span><span class="muted">·</span><span>المرحلة دلوقتي:</span><span class="now">${esc(ph.t)}</span>${ph.po ? `<span class="badge warn">في خامات لسه جاية</span>` : ''}<div class="grow"></div>${o.dueDate ? `<span class="muted small">التسليم: ${esc(fmtDate(o.dueDate))}</span>` : ''}</div>
+      <div class="bar"><i style="width:${pr}%"></i></div><div class="row" style="justify-content:space-between;margin-top:4px"><div class="stg">${st}</div><span class="small muted">${pr}%</span></div></div>`;
+  }
+  function body(b) {
+    const sc = S._segScope; let os = (typeof listScope === 'function' ? listScope('orders', raw('orders')) : raw('orders')).filter(o => o.brandId === b && o.status !== 'cancelled' && !o.deleted);
+    if (sc === 'b2b' || sc === 'b2c') os = os.filter(o => segOf(o) === sc);
+    const rank = o => o.status === 'delivered' ? 9 : ({ r: 0, y: 1, h: 2, g: 3 })[sched(o).c];
+    os = os.slice().sort((x, y) => rank(x) - rank(y) || String(x.dueDate || '9').localeCompare(String(y.dueDate || '9')));
+    const open = os.filter(o => o.status !== 'delivered'); const n = c => open.filter(o => sched(o).c === c).length;
+    const sum = `<div class="pst-sum"><div class="k g"><b>${n('g')}</b><span>في الميعاد</span></div><div class="k y"><b>${n('y')}</b><span>قرّب ميعادها</span></div><div class="k r"><b>${n('r')}</b><span>متأخرة</span></div><div class="k h"><b>${n('h')}</b><span>متوقفة / من غير ميعاد</span></div></div>`;
+    return sum + `<div class="card"><div class="cardhead"><h3>${icon('orders')}حالة المشاريع في المصنع</h3><span class="muted small">${os.length}</span></div>${os.length ? os.map(card).join('') : '<div class="muted small" style="padding:12px">لسه مفيش مشاريع داخلة تشغيل</div>'}</div><div class="muted tiny" style="margin-top:6px">الحالة بتتحدث لوحدها من المصنع — للعرض بس.</div>`;
+  }
+  window.nfProjStatusBody = b => { const sc = typeof crmSeg === 'function' ? crmSeg() : ''; const prev = S._segScope; S._segScope = sc; try { return body(b); } finally { S._segScope = prev; } };
+  const line = o => { const ph = phase(o), sc = sched(o); return `<div class="pstline">${icon('orders')}<b>${esc(o.code || '')}</b><span>المرحلة دلوقتي: <b>${esc(ph.t)}</b></span><div class="grow"></div><span class="schd ${sc.c}">${esc(sc.t)}</span></div>`; };
+  const showLines = () => !!(prefs() && prefs().crmTabs);
+  if (typeof vClientDetail === 'function') vClientDetail = (base => function (id) {
+    const html = base.apply(this, arguments); if (!showLines()) return html;
+    const os = raw('orders').filter(o => o.clientId === id && o.status !== 'cancelled' && !o.deleted); return os.length ? os.map(line).join('') + html : html;
+  })(vClientDetail);
+  if (typeof vQuoteDetail === 'function') vQuoteDetail = (base => function (id) {
+    const html = base.apply(this, arguments); if (!showLines()) return html;
+    const os = raw('orders').filter(o => o.quotationId === id && o.status !== 'cancelled' && !o.deleted); return os.length ? os.map(line).join('') + html : html;
+  })(vQuoteDetail);
+
+  /* uiPrefs.hide: صفحات مقفولة في الواجهة للشخص ده */
+  const hidden = v => { const p = prefs(); return !!(p && Array.isArray(p.hide) && p.hide.includes(v)); };
+  if (typeof canSee === 'function') canSee = (base => function (view) { if (!isAdmin() && hidden(view)) return false; return base.apply(this, arguments); })(canSee);
 })();
 </script>
 
