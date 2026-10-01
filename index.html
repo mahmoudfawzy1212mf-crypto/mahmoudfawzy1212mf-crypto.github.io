@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1237-646045";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1254-480914";</script>
 
 <script>
 'use strict';
@@ -24890,6 +24890,227 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   /* uiPrefs.hide: صفحات مقفولة في الواجهة للشخص ده */
   const hidden = v => { const p = prefs(); return !!(p && Array.isArray(p.hide) && p.hide.includes(v)); };
   if (typeof canSee === 'function') canSee = (base => function (view) { if (!isAdmin() && hidden(view)) return false; return base.apply(this, arguments); })(canSee);
+})();
+/* =====================================================================
+   v5.74 — «استيراد عملاء Excel» (مؤقت — للمالك + uiPrefs.cimport)
+   · رفع شيت → ربط الأعمدة (تلقائي + يدوي، بيتحفظ) → قراءة الهايبر لينك (لينك الأوفر) لكل صف.
+   · معاينة: عملاء جداد / هيتحدّثوا (تطابق بالتليفون وإلا بالاسم) / عروض جديدة / هتتحدّث / صفوف فيها مشكلة.
+   · دمج (Overwrite): بيكتب فوق الموجود ويضيف الجديد — مفيش مسح.
+   · استبدال كامل: من حساب الموظف = طلب للمالك (إشعار بالأعداد بس)؛ المالك يوافق → عملاء وعروض LOF الحالية
+     تروح سلة المحذوفات (ترجع خلال 30 يوم) ما عدا اللي عليه أوامر تشغيل/فواتير أو عروض محوّلة، وبعدين الشيت يدخل.
+   · الطلب المعلّق محفوظ كـ files doc (kind:cimport, ownerKind:lead, priced) → يقراه المالك + bdd البراند بس.
+   ===================================================================== */
+(function () {
+  if (window.__NF_CIMPORT__) return; window.__NF_CIMPORT__ = 1;
+  const BRAND = 'lof';
+  const raw = col => (S.data && S.data[col]) ? Array.from(S.data[col].values()) : [];
+  const vis = col => (typeof listScope === 'function' ? listScope(col, raw(col)) : raw(col));
+  const prefs = () => (typeof window.nfUiPrefs === 'function' ? window.nfUiPrefs() : null);
+  const ciSee = () => !!S.session && !(typeof isStuSys === 'function' && isStuSys()) && (isAdmin() || !!(prefs() && prefs().cimport && role() === 'bdd'));
+  window.ciSee = ciSee;
+  const FIELDS = [
+    ['name', 'اسم العميل / الشركة', /^(client|customer|company|name|account)|عميل|العميل|الاسم|اسم|شركة|الشركة/i],
+    ['contact', 'الشخص المسؤول', /contact|person|المسؤول|مسئول|المندوب/i],
+    ['phone', 'التليفون', /phone|mobile|tel|whats|هاتف|تليفون|موبايل|محمول|رقم ال|واتس/i],
+    ['email', 'الإيميل', /mail|ايميل|إيميل|البريد/i],
+    ['address', 'العنوان / المنطقة', /address|location|area|city|العنوان|المنطقة|المدينة|الموقع/i],
+    ['seg', 'نوع العميل (B2B/B2C)', /b2b|b2c|segment|type|category|النوع|نوع|الفئة|التصنيف/i],
+    ['qno', 'رقم العرض', /(quot|offer|proposal|ref).*(no|num|#|code)|رقم العرض|رقم الاوفر|رقم الأوفر|المرجع|ref/i],
+    ['qtitle', 'وصف العرض / المشروع', /project|subject|title|description|scope|المشروع|الموضوع|الوصف|البند/i],
+    ['qdate', 'تاريخ العرض', /date|تاريخ/i],
+    ['qvalue', 'قيمة العرض', /value|amount|total|price|القيمة|المبلغ|الاجمالي|الإجمالي|السعر/i],
+    ['qstatus', 'حالة العرض (اتوافق / لأ)', /status|state|approv|accept|result|الحالة|موافق|الموافقة|النتيجة|القرار/i],
+    ['qlink', 'لينك الأوفر', /link|url|file|offer|quotation|اللينك|الرابط|الملف|الاوفر|الأوفر|العرض/i],
+  ];
+  const FL = Object.fromEntries(FIELDS.map(f => [f[0], f[1]]));
+  const MAPKEY = 'nf.cimport.map';
+  const lsGet = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+  const lsPut = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.ci-map{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}.ci-map label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px}
+.ci-k{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.ci-k div{flex:1;min-width:120px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.ci-k b{font-size:20px;display:block}.ci-k span{font-size:12px;color:var(--muted)}
+.ci-tbl{width:100%;border-collapse:collapse;font-size:12.5px}.ci-tbl th,.ci-tbl td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:start;vertical-align:top}.ci-tbl th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--surface)}
+.ci-tbl tr.err td{background:color-mix(in srgb,#c0392b 9%,transparent)}.ci-wrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.ci-mode{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ci-mode button{padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);text-align:start}.ci-mode button b{display:block;margin-bottom:4px}.ci-mode button span{font-size:12px;color:var(--muted)}.ci-mode button.danger b{color:#c0392b}
+@media(max-width:640px){.ci-mode{grid-template-columns:1fr}}
+</style>`);
+
+  /* ---------- قراءة الشيت ---------- */
+  const cellText = c => { if (!c) return ''; if (c.v instanceof Date) return c.v; if (c.w != null && c.t !== 'n') return String(c.w).trim(); return c.v == null ? '' : (typeof c.v === 'string' ? c.v.trim() : c.v); };
+  const cellLink = c => { if (!c) return ''; if (c.l && c.l.Target) return String(c.l.Target).trim(); const m = c.f && String(c.f).match(/HYPERLINK\(\s*"([^"]+)"/i); return m ? m[1].trim() : ''; };
+  async function readBook(file) {
+    const ok = typeof loadXLSX === 'function' ? await loadXLSX() : false; if (!ok || !window.XLSX) throw new Error('تعذّر تحميل قارئ Excel');
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: true, cellHTML: false });
+    const sheets = wb.SheetNames.map(n => { const ws = wb.Sheets[n]; if (!ws || !ws['!ref']) return { name: n, rows: [] }; const R = XLSX.utils.decode_range(ws['!ref']); const rows = [];
+      for (let r = R.s.r; r <= R.e.r; r++) { const vals = [], links = []; let any = false; for (let c = R.s.c; c <= R.e.c; c++) { const cell = ws[XLSX.utils.encode_cell({ r, c })]; const v = cellText(cell); const l = cellLink(cell); vals.push(v); links.push(l); if ((v !== '' && v != null) || l) any = true; } if (any) rows.push({ vals, links, r: r + 1 }); }
+      return { name: n, rows }; });
+    return sheets.filter(s => s.rows.length > 1);
+  }
+  function autoMap(headers) {
+    const saved = lsGet(MAPKEY); const m = {}; const used = new Set();
+    if (saved && saved.sig === headers.join('|')) return saved.map;
+    FIELDS.forEach(([k, , re]) => { const i = headers.findIndex((h, j) => !used.has(j) && re.test(String(h || ''))); if (i >= 0) { m[k] = i; used.add(i); } });
+    return m;
+  }
+  const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+  const phoneKey = p => { const d = digits(p); return d.length >= 8 ? d.slice(-10) : ''; };
+  const nameKey = n => String(n || '').toLowerCase().replace(/[\u064B-\u0652]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\b(co|company|ltd|llc|شركة|شركه)\b/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+  const toISO = v => { if (!v) return ''; if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10); const s = String(v).trim(); let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/); if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; } return ''; };
+  const numOf = v => { if (typeof v === 'number') return v; const s = String(v || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d.,-]/g, ''); if (!s) return 0; const n = parseFloat(s.replace(/,(?=\d{3}(\D|$))/g, '').replace(',', '.')); return isFinite(n) ? n : 0; };
+  const statusOf = v => { const s = String(v || '').trim(); if (!s) return ''; if (/approv|accept|won|confirm|signed|contract|^yes$|^y$|موافق|اتوافق|وافق|تم التعاقد|متعاقد|تعاقد|مقبول|^نعم$|^تم$/i.test(s)) return 'approved'; if (/reject|lost|declin|cancel|^no$|مرفوض|رفض|ملغي|لم يتم|^لا$/i.test(s)) return 'rejected'; return 'sent'; };
+  const segOfTxt = v => { const s = String(v || ''); if (/b2c|فرد|افراد|أفراد|فيلا|individual|villa|home/i.test(s)) return 'b2c'; if (/b2b|شركة|شركه|مقاول|مكتب|company|corporate|developer|contractor/i.test(s)) return 'b2b'; return ''; };
+  const linkKind = u => !u ? '' : /^https?:\/\//i.test(u) ? 'web' : /^mailto:/i.test(u) ? '' : 'local';
+
+  function buildRecords(sheet, hdrIdx, map) {
+    const out = []; const at = (row, k) => map[k] != null && map[k] !== '' ? row.vals[+map[k]] : '';
+    sheet.rows.slice(hdrIdx + 1).forEach(row => {
+      const name = String(at(row, 'name') || '').trim(); const phone = String(at(row, 'phone') || '').trim();
+      let link = map.qlink != null && map.qlink !== '' ? (row.links[+map.qlink] || (/^https?:|^[a-z]:\\|^\\\\/i.test(String(at(row, 'qlink'))) ? String(at(row, 'qlink')).trim() : '')) : '';
+      if (!link) link = ['qno', 'qtitle', 'name'].map(k => map[k] != null && map[k] !== '' ? row.links[+map[k]] : '').find(Boolean) || row.links.find(l => l && !/^mailto:/i.test(l)) || '';
+      const q = { number: String(at(row, 'qno') || '').trim(), title: String(at(row, 'qtitle') || '').trim(), date: toISO(at(row, 'qdate')), value: numOf(at(row, 'qvalue')), status: statusOf(at(row, 'qstatus')), link };
+      const hasQ = !!(q.number || q.link || q.value || q.title);
+      const rec = { r: row.r, name, contact: String(at(row, 'contact') || '').trim(), phone, email: String(at(row, 'email') || '').trim(), address: String(at(row, 'address') || '').trim(), seg: segOfTxt(at(row, 'seg')), q: hasQ ? q : null, err: '' };
+      if (!name && !phone) { if (!hasQ) return; rec.err = 'من غير اسم ولا تليفون'; }
+      else if (phone && digits(phone).length > 0 && digits(phone).length < 8) rec.err = 'التليفون ناقص';
+      out.push(rec);
+    });
+    return out;
+  }
+  /* تخطيط: إيه اللي هيتعمل (ضد الداتا الحالية أو ضد اللي هيفضل بعد الاستبدال) */
+  function lofClients() { const qs = raw('quotations'), os = raw('orders'), ls = raw('leads'); return vis('clients').filter(c => c.brandId === BRAND || qs.some(q => q.clientId === c.id && q.brandId === BRAND) || os.some(o => o.clientId === c.id && o.brandId === BRAND) || ls.some(l => l.clientId === c.id && (l.brandId || BRAND) === BRAND)); }
+  function removable() {
+    const os = raw('orders'), inv = raw('invoices'), qs = raw('quotations');
+    const keepC = c => os.some(o => o.clientId === c.id) || inv.some(i => i.clientId === c.id) || qs.some(q => q.clientId === c.id && q.brandId && q.brandId !== BRAND);
+    const keepQ = q => q.status === 'converted' || os.some(o => o.quotationId === q.id) || inv.some(i => i.quotationId === q.id);
+    const quotes = vis('quotations').filter(q => q.brandId === BRAND); const cl = lofClients();
+    return { clients: cl.filter(c => !keepC(c)), quotes: quotes.filter(q => !keepQ(q)), keptC: cl.filter(keepC), keptQ: quotes.filter(keepQ) };
+  }
+  function plan(recs, mode) {
+    const rm = mode === 'replace' ? removable() : { clients: [], quotes: [] }; const gone = new Set([...rm.clients, ...rm.quotes].map(d => d.id));
+    const cl = lofClients().filter(c => !gone.has(c.id)); const byP = new Map(), byN = new Map();
+    cl.forEach(c => { const p = phoneKey(c.phone); if (p) byP.set(p, c); const n = nameKey(c.name); if (n) byN.set(n, c); });
+    const qs = vis('quotations').filter(q => q.brandId === BRAND && !gone.has(q.id));
+    const groups = new Map(); const steps = [];
+    recs.forEach(rec => {
+      if (rec.err) { steps.push({ rec, act: 'err' }); return; }
+      const key = phoneKey(rec.phone) || 'n:' + nameKey(rec.name); let g = groups.get(key);
+      if (!g) { const ex = (phoneKey(rec.phone) && byP.get(phoneKey(rec.phone))) || (nameKey(rec.name) && byN.get(nameKey(rec.name))) || null; g = { key, ex, rec, recs: [] }; groups.set(key, g); }
+      g.recs.push(rec);
+      let qa = ''; if (rec.q) { const ex = qs.find(q => (rec.q.number && q.number === rec.q.number) || (rec.q.link && q.link === rec.q.link)); qa = ex ? 'upd' : 'new'; rec._qex = ex ? ex.id : null; }
+      steps.push({ rec, act: g.recs.length > 1 ? 'same' : (g.ex ? 'upd' : 'new'), qa });
+    });
+    const gs = [...groups.values()];
+    return { steps, groups: gs, nNewC: gs.filter(g => !g.ex).length, nUpdC: gs.filter(g => g.ex).length, nNewQ: steps.filter(s => s.qa === 'new').length, nUpdQ: steps.filter(s => s.qa === 'upd').length, nErr: steps.filter(s => s.act === 'err').length, nLocal: steps.filter(s => s.rec.q && linkKind(s.rec.q.link) === 'local').length, rm };
+  }
+
+  /* ---------- التنفيذ ---------- */
+  async function applyMerge(recs, progress) {
+    const p = plan(recs, 'merge'); let i = 0; const total = p.groups.length; const now = nowISO(); const res = { c: 0, q: 0 };
+    let seq = vis('quotations').filter(q => /^LOF-IMP-/.test(q.number || '')).reduce((m, q) => Math.max(m, parseInt(String(q.number).split('-').pop(), 10) || 0), 0);
+    for (const g of p.groups) {
+      i++; if (progress && i % 5 === 0) progress(`جاري الحفظ… ${i} / ${total}`);
+      const r0 = g.recs.reduce((a, r) => { ['name', 'contact', 'phone', 'email', 'address', 'seg'].forEach(k => { if (r[k] && !a[k]) a[k] = r[k]; }); return a; }, {});
+      const base = g.ex ? Object.assign({}, g.ex) : { id: uid(), type: r0.seg === 'b2c' ? 'فرد' : 'شركة', createdAt: now };
+      ['name', 'contact', 'phone', 'email', 'address'].forEach(k => { if (r0[k]) base[k] = r0[k]; }); if (r0.seg) base.seg = r0.seg;
+      if (!base.brandId) base.brandId = BRAND; base.importedAt = now; base.importedBy = S.session.name || '';
+      const c = await Store.save('clients', base, { silent: true }); res.c++;
+      for (const r of g.recs) {
+        if (!r.q) continue; const q = r.q; const ex = r._qex ? byId('quotations', r._qex) : null;
+        const doc = ex ? Object.assign({}, ex) : { id: uid(), number: q.number || `LOF-IMP-${String(++seq).padStart(3, '0')}`, brandId: BRAND, clientId: c.id, status: 'sent', items: [], vat: false, discount: 0, createdAt: now, imported: true };
+        doc.clientId = c.id; if (q.number) doc.number = q.number; if (q.title) doc.subject = q.title; if (q.date) doc.date = q.date; else if (!doc.date) doc.date = todayISO();
+        if (q.status) doc.status = ex && ex.status === 'converted' ? 'converted' : q.status; if (q.link) doc.link = q.link; if (c.seg) doc.seg = c.seg;
+        if (q.value && (!ex || !(ex.items || []).length || ex.imported)) { doc.items = [{ desc: q.title || 'عرض سعر', qty: 1, unit: 'مقطوعية', price: q.value }]; doc.vat = false; doc.discount = 0; }
+        doc.importedAt = now; await Store.save('quotations', doc, { silent: true }); res.q++;
+      }
+    }
+    return res;
+  }
+  async function applyReplace(recs, progress) {
+    const rm = removable(); let i = 0; const n = rm.clients.length + rm.quotes.length;
+    for (const q of rm.quotes) { await Store.remove('quotations', q.id); if (progress && ++i % 5 === 0) progress(`بنشيل القديم… ${i} / ${n}`); }
+    for (const c of rm.clients) { await Store.remove('clients', c.id); if (progress && ++i % 5 === 0) progress(`بنشيل القديم… ${i} / ${n}`); }
+    const res = await applyMerge(recs, progress); return Object.assign(res, { rc: rm.clients.length, rq: rm.quotes.length });
+  }
+
+  /* ---------- الصفحة ---------- */
+  const st = () => (S._ci ||= { step: 1 });
+  const pending = () => sortBy(raw('files').filter(f => f.kind === 'cimport' && f.status === 'pending' && !f.deleted), f => f.createdAt || '', true);
+  function vImport() {
+    if (!ciSee()) return `<div class="empty"><b>الصفحة دي مش متاحة</b></div>`;
+    const s = st(); let html = '';
+    const pend = pending();
+    if (pend.length) html += pend.map(f => `<div class="banner ${isAdmin() ? 'warn' : 'info'}" style="margin-bottom:10px">${icon('alert')}<span><b>طلب استبدال كامل</b> من ${esc(f.byName || '')} — ${esc(fmtDate((f.createdAt || '').slice(0, 10)))}: هيتشال ${f.counts.rc} عميل و${f.counts.rq} عرض (للسلة)، ويدخل ${f.counts.nc} عميل و${f.counts.nq} عرض من «${esc(f.title || '')}».${isAdmin() ? '' : ' مستني موافقة المالك.'}</span><div class="grow"></div>${isAdmin() ? `<button class="btn sm p" data-action="ciApprove" data-arg="${esc(f.id)}">وافق ونفّذ</button><button class="btn sm ghost" data-action="ciReject" data-arg="${esc(f.id)}">ارفض</button>` : (f.byId === S.session.id ? `<button class="btn sm ghost" data-action="ciReject" data-arg="${esc(f.id)}">إلغاء الطلب</button>` : '')}</div>`).join('');
+    html += `<div class="card"><div class="cardhead"><h3>${icon('up')}1) ارفع شيت العملاء</h3><div class="grow"></div>${s.file ? `<span class="muted small">${esc(s.file)}</span>` : ''}</div><div style="padding:12px 14px"><div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input type="file" id="ci-file" accept=".xlsx,.xls,.xlsm,.csv"><button class="btn p" data-action="ciRead">قراءة الشيت</button>${s.sheets && s.sheets.length > 1 ? `<select id="ci-sheet">${s.sheets.map((x, i) => `<option value="${i}" ${i === s.si ? 'selected' : ''}>${esc(x.name)} (${x.rows.length - 1} صف)</option>`).join('')}</select>` : ''}</div><div class="tiny muted" style="margin-top:6px">الصف الأول فيه أسماء الأعمدة. لو في هايبر لينك على أي خانة في الصف (لينك الأوفر)، السيستم بيقراه.</div></div></div>`;
+    if (s.sheets && s.sheets[s.si]) {
+      const sh = s.sheets[s.si]; const headers = sh.rows[s.hi || 0].vals.map(v => String(v || ''));
+      html += `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>${icon('link')}2) ربط الأعمدة</h3><div class="grow"></div><span class="muted small">صف العناوين:</span><select id="ci-hdr">${sh.rows.slice(0, 8).map((r, i) => `<option value="${i}" ${i === (s.hi || 0) ? 'selected' : ''}>صف ${r.r}</option>`).join('')}</select></div><div class="ci-map" style="padding:12px 14px">${FIELDS.map(([k, l]) => `<div><label>${esc(l)}</label><select data-ci-f="${k}"><option value="">—</option>${headers.map((h, i) => `<option value="${i}" ${String(s.map[k]) === String(i) ? 'selected' : ''}>${esc(h || ('عمود ' + (i + 1)))}</option>`).join('')}</select></div>`).join('')}</div></div>`;
+      const recs = buildRecords(sh, s.hi || 0, s.map); s.recs = recs; const p = plan(recs, 'merge');
+      html += `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>${icon('view')}3) معاينة — مفيش حاجة اتحفظت لسه</h3></div><div style="padding:0 14px"><div class="ci-k"><div><b>${p.nNewC}</b><span>عميل جديد</span></div><div><b>${p.nUpdC}</b><span>عميل موجود هيتحدّث</span></div><div><b>${p.nNewQ}</b><span>عرض جديد</span></div><div><b>${p.nUpdQ}</b><span>عرض هيتحدّث</span></div><div style="${p.nErr ? 'border-color:#c0392b' : ''}"><b style="${p.nErr ? 'color:#c0392b' : ''}">${p.nErr}</b><span>صف فيه مشكلة (هيتساب)</span></div></div>
+        ${p.nLocal ? `<div class="banner warn" style="margin-bottom:10px">${icon('alert')}<span>${p.nLocal} لينك رايح لملف على جهاز (مش لينك أونلاين) — هيتحفظ بس مش هيفتح من السيستم. الأحسن ترفع الملفات دي على OneDrive/Drive وتحط اللينك.</span></div>` : ''}
+        <div class="ci-wrap"><table class="ci-tbl"><thead><tr><th>صف</th><th>العميل</th><th>تليفون</th><th>النوع</th><th>العميل في السيستم</th><th>العرض</th><th>الحالة</th><th>لينك</th></tr></thead><tbody>${p.steps.slice(0, 400).map(x => { const r = x.rec; return `<tr class="${x.act === 'err' ? 'err' : ''}"><td>${r.r}</td><td>${esc(r.name || '—')}${r.contact ? `<div class="tiny muted">${esc(r.contact)}</div>` : ''}</td><td class="ltr">${esc(r.phone || '')}</td><td>${r.seg ? r.seg.toUpperCase() : ''}</td><td>${x.act === 'err' ? `<b style="color:#c0392b">${esc(r.err)}</b>` : x.act === 'new' ? '<span class="badge good">جديد</span>' : x.act === 'upd' ? '<span class="badge acc">هيتحدّث</span>' : '<span class="muted tiny">نفس العميل</span>'}</td><td>${r.q ? `${esc(r.q.number || '')}${r.q.title ? ' — ' + esc(r.q.title) : ''}${r.q.date ? `<div class="tiny muted">${esc(fmtDate(r.q.date))}</div>` : ''}${x.qa ? ` <span class="badge ${x.qa === 'new' ? 'good' : 'acc'}">${x.qa === 'new' ? 'جديد' : 'هيتحدّث'}</span>` : ''}` : '<span class="muted">—</span>'}</td><td>${r.q && r.q.status ? (QUOTE_STATUS[r.q.status] || [''])[0] : ''}</td><td>${r.q && r.q.link ? (linkKind(r.q.link) === 'web' ? `<a href="${esc(r.q.link)}" target="_blank" rel="noopener">فتح ↗</a>` : '<span class="badge warn">على جهاز</span>') : ''}</td></tr>`; }).join('')}</tbody></table></div>${p.steps.length > 400 ? `<div class="tiny muted">بيعرض أول 400 صف من ${p.steps.length}</div>` : ''}</div>
+        <div style="padding:14px"><h4 style="margin:0 0 8px">4) اختار طريقة الإدخال</h4><div class="ci-mode"><button data-action="ciGo" data-arg="merge"><b>دمج (Overwrite)</b><span>الشيت يكتب فوق بيانات العملاء والعروض الموجودة ويضيف الجديد. مفيش حاجة بتتمسح.</span></button><button class="danger" data-action="ciGo" data-arg="replace"><b>استبدال كامل</b><span>عملاء وعروض LOF الحالية تتشال (للسلة — ترجع خلال 30 يوم) والشيت يبقى هو الداتا. ${isAdmin() ? 'هتأكد قبل التنفيذ.' : 'بيروح طلب للمالك يوافق الأول.'} اللي عليه أوامر تشغيل أو فواتير مش بيتشال.</span></button></div><div id="ci-prog" style="margin-top:10px"></div></div></div>`;
+    }
+    return html + `<div class="muted tiny" style="margin-top:8px">صفحة مؤقتة لنقل الداتا القديمة — بتتشال بعد ما النقل يخلص. أوامر التشغيل والفواتير والمدفوعات والبراندات التانية مش بتتلمس.</div>`;
+  }
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.cimport = 'استيراد عملاء Excel';
+  EXTRA_VIEWS.cimport = () => vImport();
+  EXTRA_TITLES.cimport = () => ({ title: 'استيراد عملاء من Excel', sub: 'عملاء LOF وعروضهم — مع لينك كل أوفر' });
+  canSee = (base => view => (view === 'cimport' ? ciSee() : base(view)))(canSee);
+  if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'cimport')) { const i = NAV.findIndex(n => n.id === 'invoices'); const it = { id: 'cimport', label: 'استيراد عملاء Excel', icon: 'up', count: () => pending().length, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, it); else NAV.push(it); }
+
+  const prog = t => { const el = document.getElementById('ci-prog'); if (el) el.innerHTML = t ? `<div class="banner info">${icon('info')}<span>${esc(t)}</span></div>` : ''; };
+  ACTIONS.ciRead = async () => {
+    const f = (document.getElementById('ci-file') || {}).files?.[0]; if (!f) { toast('اختار ملف الإكسل', 'err'); return; }
+    prog('جاري قراءة الشيت…'); let sheets; try { sheets = await readBook(f); } catch (e) { prog(''); toast(String(e.message || e), 'err'); return; }
+    if (!sheets.length) { prog(''); toast('الشيت فاضي', 'err'); return; }
+    const si = sheets.reduce((b, s, i) => s.rows.length > sheets[b].rows.length ? i : b, 0);
+    S._ci = { step: 2, file: f.name, sheets, si, hi: 0, map: autoMap(sheets[si].rows[0].vals.map(v => String(v || ''))) }; render(false);
+  };
+  ACTIONS.ciSheet = () => { const s = st(); const el = document.getElementById('ci-sheet'); s.si = +(el ? el.value : 0); s.hi = 0; s.map = autoMap(s.sheets[s.si].rows[0].vals.map(v => String(v || ''))); render(false); };
+  ACTIONS.ciHdr = () => { const s = st(); const el = document.getElementById('ci-hdr'); s.hi = +(el ? el.value : 0); s.map = autoMap(s.sheets[s.si].rows[s.hi].vals.map(v => String(v || ''))); render(false); };
+  document.addEventListener('change', e => { const el = e.target; if (!el) return; if (el.id === 'ci-sheet') return ACTIONS.ciSheet(); if (el.id === 'ci-hdr') return ACTIONS.ciHdr(); if (!el.dataset || !el.dataset.ciF) return; const s = st(); s.map = Object.assign({}, s.map, { [el.dataset.ciF]: el.value === '' ? '' : +el.value }); const sh = s.sheets[s.si]; lsPut(MAPKEY, { sig: sh.rows[s.hi || 0].vals.map(v => String(v || '')).join('|'), map: s.map }); render(false); }, true);
+  ACTIONS.ciGo = async mode => {
+    const s = st(); if (!ciSee() || !s.recs) return; const p = plan(s.recs, mode); const good = s.recs.filter(r => !r.err);
+    if (!good.length) { toast('مفيش صفوف سليمة', 'err'); return; }
+    if (mode === 'merge') {
+      if (!await confirmDlg(`هيدخل ${p.nNewC} عميل جديد ويتحدّث ${p.nUpdC}، و${p.nNewQ} عرض جديد ويتحدّث ${p.nUpdQ}. نكمّل؟`, 'دمج', false)) return;
+      prog('جاري الحفظ…'); const r = await applyMerge(good, prog); prog(''); S._ci = { step: 1 }; toast(`خلص ✓ — ${r.c} عميل و${r.q} عرض`); render(true); return;
+    }
+    const pr = plan(good, 'replace'); const counts = { rc: pr.rm.clients.length, rq: pr.rm.quotes.length, kc: pr.rm.keptC.length, kq: pr.rm.keptQ.length, nc: pr.groups.length, nq: good.filter(r => r.q).length };
+    if (!isAdmin()) {
+      if (!await confirmDlg(`هيتبعت طلب للمالك: يتشال ${counts.rc} عميل و${counts.rq} عرض ويدخل ${counts.nc} عميل و${counts.nq} عرض من الشيت. مفيش حاجة هتتمسح غير لما يوافق.`, 'ابعت الطلب', false)) return;
+      const id = 'cimp_' + uid(); const slim = good.map(r => ({ r: r.r, name: r.name, contact: r.contact, phone: r.phone, email: r.email, address: r.address, seg: r.seg, q: r.q, err: '' }));
+      await Store.save('files', { id, kind: 'cimport', ownerKind: 'lead', ownerId: 'cimport', priced: true, brandId: BRAND, title: s.file || 'Excel', name: s.file || 'Excel', store: 'none', rows: slim, counts, status: 'pending', byId: S.session.id || null, byName: S.session.name || '', workerId: S.session.workerId || null, createdAt: nowISO() });
+      if (typeof notifyOwner === 'function') { const tid = 'cimp_t_' + id.slice(5); await notifyOwner(`${S.session.name || 'موظف'} طالب استبدال كامل لعملاء LOF من Excel`, `هيتشال ${counts.rc} عميل و${counts.rq} عرض (للسلة)، ويدخل ${counts.nc} عميل و${counts.nq} عرض من الشيت. افتح «استيراد عملاء Excel» ووافق أو ارفض.`, { id: tid }); try { await Store.update('tasks', tid, { link: '/#/cimport' }); } catch (e) { /* ignore */ } }
+      S._ci = { step: 1 }; toast('الطلب اتبعت للمالك'); render(true); return;
+    }
+    if (!await confirmDlg(`استبدال كامل: هيتشال ${counts.rc} عميل و${counts.rq} عرض LOF (للسلة 30 يوم)${counts.kc || counts.kq ? `، وهيفضل ${counts.kc} عميل و${counts.kq} عرض عليهم أوامر/فواتير` : ''}، ويدخل ${counts.nc} عميل و${counts.nq} عرض من الشيت. متأكد؟`, 'استبدال')) return;
+    prog('جاري التنفيذ…'); const r = await applyReplace(good, prog); prog(''); S._ci = { step: 1 }; toast(`خلص ✓ — اتشال ${r.rc} عميل و${r.rq} عرض، ودخل ${r.c} عميل و${r.q} عرض`); render(true);
+  };
+  ACTIONS.ciApprove = async id => {
+    const f = byId('files', id); if (!f || !isAdmin() || f.status !== 'pending') return; const rm = removable();
+    if (!await confirmDlg(`موافقة على طلب ${f.byName || ''}: هيتشال ${rm.clients.length} عميل و${rm.quotes.length} عرض LOF دلوقتي (للسلة 30 يوم)${rm.keptC.length || rm.keptQ.length ? `، وهيفضل ${rm.keptC.length} عميل و${rm.keptQ.length} عرض عليهم أوامر/فواتير` : ''}، ويدخل ${f.counts.nc} عميل و${f.counts.nq} عرض من الشيت. نفّذ؟`, 'وافق ونفّذ')) return;
+    S._ci = { step: 1 }; render(false); prog('جاري التنفيذ…');
+    const r = await applyReplace((f.rows || []).map(x => Object.assign({}, x)), prog); prog('');
+    await Store.update('files', id, { status: 'done', doneAt: nowISO(), doneBy: S.session.name || '', result: { rc: r.rc, rq: r.rq, c: r.c, q: r.q }, rows: [] });
+    const wid = f.workerId || (String(f.byId || '').startsWith('w:') ? String(f.byId).slice(2) : null);
+    if (wid) await Store.save('tasks', { id: 'cimp_ok_' + id.slice(5), title: 'المالك وافق على استبدال داتا عملاء LOF ✓', desc: `اتشال ${r.rc} عميل و${r.rq} عرض، ودخل ${r.c} عميل و${r.q} عرض من «${f.title || ''}».`, assigneeId: wid, dueDate: todayISO(), priority: 'normal', status: 'open', kind: 'notice', source: 'system', link: '/#/clients', createdBy: S.session.id || null, createdByName: S.session.name || '', createdAt: nowISO() }, { silent: true });
+    toast('اتنفّذ ✓'); render(true);
+  };
+  ACTIONS.ciReject = async id => {
+    const f = byId('files', id); if (!f || f.status !== 'pending' || !(isAdmin() || f.byId === S.session.id)) return; if (!await confirmDlg(isAdmin() ? 'ترفض الطلب؟ مفيش حاجة هتتغير.' : 'تلغي الطلب؟', isAdmin() ? 'رفض' : 'إلغاء الطلب')) return;
+    await Store.update('files', id, { status: isAdmin() ? 'rejected' : 'cancelled', doneAt: nowISO(), doneBy: S.session.name || '', rows: [] });
+    const wid = f.workerId || (String(f.byId || '').startsWith('w:') ? String(f.byId).slice(2) : null);
+    if (isAdmin() && wid) await Store.save('tasks', { id: 'cimp_no_' + id.slice(5), title: 'المالك رفض طلب استبدال داتا العملاء', desc: 'الداتا زي ما هي — ممكن تستخدم «دمج» بدل الاستبدال.', assigneeId: wid, dueDate: todayISO(), priority: 'normal', status: 'open', kind: 'notice', source: 'system', createdBy: S.session.id || null, createdByName: S.session.name || '', createdAt: nowISO() }, { silent: true });
+    toast('تم'); render(true);
+  };
+
+  /* لينك الأوفر الأصلي في صفحة العرض */
+  if (typeof vQuoteDetail === 'function') vQuoteDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const q = byId('quotations', id); if (!q || !q.link) return html;
+    const web = linkKind(q.link) === 'web';
+    return `<div class="pstline">${icon('link')}<span>الأوفر الأصلي${q.imported ? ' (من شيت Excel)' : ''}:</span>${web ? `<a class="btn sm" href="${esc(q.link)}" target="_blank" rel="noopener">فتح الأوفر ↗</a>` : `<span class="ltr small muted">${esc(q.link)}</span><span class="badge warn">ملف على جهاز</span>`}</div>` + html;
+  })(vQuoteDetail);
 })();
 </script>
 
