@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1126-6d5684";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1139-02c6d0";</script>
 
 <script>
 'use strict';
@@ -24526,6 +24526,67 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return `<div class="banner info" style="margin-bottom:12px">${icon('map')}<span>المشروع: <b>${esc(g.name)}</b>${g.area ? ` · ${esc(g.area)}` : ''} — <a href="#/products" data-action="pgOpenFromProduct" data-arg="${esc(g.id)}">كل منتجات المشروع</a></span></div>` + html;
   })(vProductDetail);
   ACTIONS.pgOpenFromProduct = id => { const g = gById(id); const f = (S.ui.filter.products ||= {}); f.kind = 'project'; f.pg = id; f.area = g ? (g.area || NOAREA) : ''; if (g && g.brandId) f.brand = g.brandId; location.hash = '#/products'; S.route = { view: 'products', id: null, sub: null }; render(true); };
+})();
+/* =====================================================================
+   v5.69 — واجهة مخصّصة لموظف بعينه (workers.uiPrefs) — مفيش تغيير صلاحيات
+   uiPrefs = { logo: 'lof', home: 'crm-lof', crmTabs: true }
+   · logo: لوجو البراند مكان «NINETY FACTORY MANAGEMENT» في القائمة الجانبية.
+   · home: أول صفحة بتفتح بعد الدخول.
+   · crmTabs: ترتيب CRM البراند: المبيعات ← العملاء ← عروض الأسعار ← الفواتير ← الباقي.
+   ===================================================================== */
+(function () {
+  if (window.__NF_ULAYOUT__) return; window.__NF_ULAYOUT__ = 1;
+  const prefs = () => { const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; return (w && w.uiPrefs && typeof w.uiPrefs === 'object') ? w.uiPrefs : null; };
+  window.nfUiPrefs = prefs;
+  document.head.insertAdjacentHTML('beforeend', '<style>.side .brand.ubrand{display:flex;justify-content:center;padding:10px 6px 14px;color:#fff}.side .brand.ubrand svg{height:58px;width:auto;display:block}</style>');
+
+  /* ---------- 1) اللوجو ---------- */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    const p = prefs(); const el = document.querySelector('.side .brand'); if (!el) return;
+    const want = p && p.logo && typeof BRAND_SVG !== 'undefined' && BRAND_SVG[p.logo] ? p.logo : '';
+    if ((el.dataset.ub || '') === want) return;
+    if (!el.dataset.orig) el.dataset.orig = el.innerHTML;
+    if (want) { el.innerHTML = BRAND_SVG[want]; el.classList.add('ubrand'); } else { el.innerHTML = el.dataset.orig; el.classList.remove('ubrand'); }
+    el.dataset.ub = want;
+  });
+
+  /* ---------- 2) أول صفحة ---------- */
+  const goHome = () => { const p = prefs(); if (!p || !p.home || S._uiHomeDone) return; const h = (location.hash || '').replace(/^#\/?/, ''); S._uiHomeDone = true; if (h && !['dashboard', 'me', 'ninety', ''].includes(h.split('/')[0])) return; const v = String(p.home).replace(/^#\/?/, ''); S.route = { view: v, id: null, sub: null }; location.hash = '#/' + v; render(true); };
+  document.addEventListener('nf:login', () => { S._uiHomeDone = false; setTimeout(goHome, 0); });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!S._uiHomeDone && S.session && S.loaded && S.loaded.workers) setTimeout(goHome, 0); });
+
+  /* ---------- 3) ترتيب CRM ---------- */
+  const TABS = [['board', 'المبيعات'], ['clist', 'العملاء'], ['quotes', 'عروض الأسعار'], ['invoices', 'الفواتير'], ['follow', 'المتابعات'], ['clients', 'التعاقدات وأوامر التشغيل'], ['after', 'ما بعد البيع'], ['report', 'التقارير']];
+  const OWN = ['clist', 'quotes', 'invoices'];
+  const tabsHTML = f => `<div class="tabs" style="margin:10px 0">${TABS.map(([k, l]) => `<button class="${f.tab === k ? 'on' : ''}" data-action="crmTab" data-arg="${k}">${l}</button>`).join('')}</div>`;
+  function quotesBody(b) {
+    const qs = sortBy(list('quotations').filter(q => q.brandId === b), q => q.date || '', true);
+    return `<div class="card"><div class="cardhead"><h3>عروض أسعار ${esc(brandKit(b).name)}</h3><span class="muted small">${qs.length}</span><div class="grow"></div>${typeof canCrm === 'function' && canCrm() ? `<button class="btn sm" data-action="quoteNew">${icon('plus')}عرض</button>` : ''}</div><div class="list">${qs.map(q => `<a class="item" href="#/quotes/${q.id}"><div class="main"><div class="title"><span class="code">${esc(q.number || '')}</span> ${esc(clientName(q.clientId))}</div><div class="meta"><span>${fmtDate(q.date)}</span>${seesFinance() ? `<span>${fmtMoney(q.total || 0)}</span>` : ''}</div></div><div class="end">${badge(QUOTE_STATUS, q.status)}</div></a>`).join('') || '<div class="muted small">مفيش عروض لسه</div>'}</div></div>`;
+  }
+  function clientsBody(b) {
+    const qs = list('quotations').filter(q => q.brandId === b), os = list('orders').filter(o => o.brandId === b), ls = typeof leadsAll === 'function' ? leadsAll() : [];
+    const ids = new Set([...qs.map(q => q.clientId), ...os.map(o => o.clientId), ...ls.map(l => l.clientId)].filter(Boolean));
+    const cs = sortBy(list('clients').filter(c => ids.has(c.id) || c.brandId === b), c => c.name || '');
+    return `<div class="card"><div class="cardhead"><h3>عملاء ${esc(brandKit(b).name)}</h3><span class="muted small">${cs.length}</span><div class="grow"></div>${typeof ACTIONS.clientNew === 'function' ? `<button class="btn sm" data-action="clientNew">${icon('plus')}عميل</button>` : ''}</div><div class="list">${cs.map(c => { const nq = qs.filter(q => q.clientId === c.id).length, no = os.filter(o => o.clientId === c.id).length; return `<a class="item" href="#/clients/${c.id}"><div class="main"><div class="title">${esc(c.name || '')}</div><div class="meta">${c.contact ? `<span>${esc(c.contact)}</span>` : ''}${c.phone ? `<span class="ltr">${esc(c.phone)}</span>` : ''}<span>${nq} عرض</span><span>${no} أمر تشغيل</span></div></div></a>`; }).join('') || '<div class="muted small">مفيش عملاء لسه</div>'}</div></div>`;
+  }
+  if (typeof vCrmBrand === 'function') vCrmBrand = (base => function (b) {
+    const p = prefs(); if (!p || !p.crmTabs || S.route.id) return base.apply(this, arguments);
+    const f = S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' };
+    if (OWN.includes(f.tab)) { S.ui.crmBrand = b; const body = f.tab === 'quotes' ? quotesBody(b) : f.tab === 'invoices' ? (typeof crmInvoicesCard === 'function' ? crmInvoicesCard(b).replace('style="margin-top:14px"', '') : '') : clientsBody(b); return `<div class="crmb" style="${brandVars(b)}">${crmHeader(b)}${tabsHTML(f)}${body}</div>`; }
+    let html = base.apply(this, arguments);
+    html = html.replace(/<div class="tabs" style="margin:10px 0">[\s\S]*?<\/div>/, tabsHTML(f));
+    return html;
+  })(vCrmBrand);
+
+  /* ---------- 4) القائمة الجانبية: مجموعة المبيعات فوق بالترتيب ---------- */
+  if (typeof navHTML === 'function') navHTML = (base => function () {
+    let html = base.apply(this, arguments); const p = prefs(); if (!p || !Array.isArray(p.navTop) || !p.navTop.length) return html;
+    const picked = [];
+    p.navTop.forEach(id => { const re = new RegExp('<a href="#/' + id.replace(/[-/]/g, '\\$&') + '"[^>]*>[\\s\\S]*?</a>'); const m = html.match(re); if (m) { picked.push(m[0]); html = html.replace(m[0], ''); } });
+    if (!picked.length) return html;
+    html = html.replace(/<div class="grp">[^<]*<\/div>(?=<div class="grp">|$)/g, '');
+    return `<div class="grp">${esc(p.navTopLabel || 'المبيعات')}</div>` + picked.join('') + html;
+  })(navHTML);
 })();
 </script>
 
