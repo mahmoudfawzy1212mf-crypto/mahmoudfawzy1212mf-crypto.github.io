@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1003-37108f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1033-96ed92";</script>
 
 <script>
 'use strict';
@@ -24226,6 +24226,173 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return html;
   }
   if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return mark(base.apply(this, arguments)); })(vOrderDetail);
+})();
+/* =====================================================================
+   v5.65 — شاشة Ninety من برّه: مهام الشركتين في مكان واحد + بوابة للموظف المشترك
+   · المالك: شاشة Ninety فيها «المهام» عمودين — Ninety Fabrication / Ninety Studioz (المتأخر فوق بالأحمر)،
+     والضغط على المهمة يفتحها جوه السيستم بتاعها.
+   · موظف على أكتر من سيستم (workers.systems): بيفتح على شاشة Ninety خاصة بيه — «بوابتي» (البصمة واللائحة
+     والطلبات من شركته الأساسية) + مهامه في الشركتين + كارت لكل شركة بعدد مهامه.
+   · الشركة الأساسية للبصمة واللائحة: workers.attHome (factory / studio). في السيستم التاني: مفيش بصمة،
+     ومش داخل في كشوف الحضور/الرواتب/الجزاءات (hrWorkers)، والكشك يرفضه.
+   · مهام الشركة التانية بتتقري بجلسة الشخص نفسه هناك (SSO) — RLS السيستم التاني هي اللي بتحدد المسموح.
+   ===================================================================== */
+(function () {
+  if (window.__NF_HUB__) return; window.__NF_HUB__ = 1;
+  const SELF = typeof nfSelfCo === 'function' ? nfSelfCo() : 'factory';
+  const OTHER = SELF === 'studio' ? 'factory' : 'studio';
+  const CO = { factory: { name: 'Ninety Fabrication', short: 'Fabrication', ar: 'المصنع', color: 'var(--nf-fab)' }, studio: { name: 'Ninety Studioz', short: 'Studioz', ar: 'الاستوديو', color: 'var(--nf-stu)' } };
+  const hashv = () => (location.hash || '').replace(/^#\/?/, '').split('?')[0];
+  const coOfPeer = p => /stud/i.test(p.name || '') ? 'studio' : /fact/i.test(p.name || '') ? 'factory' : String(p.name || '');
+  const peerOf = co => (typeof NF_PEERS === 'function' ? NF_PEERS() : []).find(p => coOfPeer(p) === co) || null;
+  const coUrl = co => (NINETY_COS[co] && NINETY_COS[co].url) || (co === 'studio' ? 'studioz/index.html' : '../index.html');
+
+  /* ---------- الشركة الأساسية (البصمة واللائحة) ---------- */
+  const attHomeOf = w => (w && ['factory', 'studio'].includes(w.attHome)) ? w.attHome : null;
+  const awayHome = w => { const h = attHomeOf(w); return !!h && h !== SELF; };
+  window.nfAttHomeOf = attHomeOf; window.nfAttAway = awayHome;
+  if (typeof hrWorkers === 'function') hrWorkers = (base => function () { return base.apply(this, arguments).filter(w => !awayHome(w)); })(hrWorkers);
+  /* لائحته في شركته الأساسية — مش مطلوب يوافق على لائحة السيستم ده */
+  if (typeof needsAck === 'function') needsAck = (base => function () { const m = typeof myRecord === 'function' ? myRecord() : null; if (m && m.rec && awayHome(m.rec)) return false; return base.apply(this, arguments); })(needsAck);
+  if (typeof kioskPunch === 'function') kioskPunch = (base => async function (w) { if (awayHome(w)) { toast(`حضور ${w.name || ''} على ${CO[attHomeOf(w)].name} — البصمة من هناك`, 'err'); return null; } return base.apply(this, arguments); })(kioskPunch);
+  if (typeof vMeBase === 'function') vMeBase = (base => function () {
+    const html = base.apply(this, arguments); const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; if (!awayHome(w)) return html;
+    const h = attHomeOf(w); const btn = `<button class="btn p" style="font-size:16px;padding:12px 26px;margin-top:12px;border-radius:14px" data-action="nfHubOpen" data-arg="${h}|#/me">${icon('play')}البصمة على ${CO[h].name}</button><div class="tiny muted" style="margin-top:8px">حضورك ولائحتك على ${CO[h].name} — مش هنا</div>`;
+    return html.replace(/<button class="btn p"[^>]*data-action="selfPunch"[^>]*>[\s\S]*?<\/button>/, btn).replace(/<div id="geo-live"[^>]*>[\s\S]*?<\/div>/, '').replace(/لم تسجّل حضورك بعد/, CO[h].short);
+  })(vMeBase);
+  if (typeof workerForm === 'function') workerForm = (base => function (w) {
+    let html = base.apply(this, arguments); w = w || {}; if (!(isAdmin() || (typeof canEditHr === 'function' && canEditHr()))) return html;
+    const cur = attHomeOf(w) || '';
+    const box = `<div class="field"><label>الشركة الأساسية (البصمة واللائحة) <span class="muted tiny">— لموظف على أكتر من سيستم</span></label><select name="attHome" id="f-attHome"><option value="">هنا (${CO[SELF].ar})</option>${['factory', 'studio'].map(c => `<option value="${c}" ${cur === c && c !== SELF ? 'selected' : ''} ${c === SELF ? 'hidden' : ''}>${CO[c].name}</option>`).join('')}</select></div>`;
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + box : html.slice(0, i) + box + html.slice(i);
+  })(workerForm);
+  if (typeof workerFromFormBase === 'function') workerFromFormBase = (base => async function (f) {
+    const doc = await base.apply(this, arguments); const el = f && f.querySelector('[name="attHome"]'); if (!doc || !el) return doc;
+    doc.attHome = el.value && el.value !== SELF ? el.value : null; return doc;
+  })(workerFromFormBase);
+
+  /* ---------- مهام السيستم التاني (بجلسة الشخص هناك) ---------- */
+  const PC = {};
+  const peerClient = p => PC[p.ref] || (PC[p.ref] = window.supabase.createClient(p.url, p.anon, { auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false } }));
+  async function peerSession(co) {
+    const p = peerOf(co); if (!p || !window.supabase || !S.sb) return null; const c = peerClient(p);
+    let s = null; try { const r = await c.auth.getSession(); s = r.data && r.data.session; } catch (e) { s = null; }
+    if (s && s.expires_at && s.expires_at * 1000 < Date.now() + 30000) { try { const r = await c.auth.refreshSession(); s = r.data && r.data.session; } catch (e) { s = null; } }
+    if (!s) {
+      try {
+        const r1 = await S.sb.functions.invoke('sso', { body: { action: 'ticket' } }); const code = r1 && r1.data && r1.data.code; if (!code) return null;
+        const r2 = await fetch(p.url + '/functions/v1/sso', { method: 'POST', headers: { 'content-type': 'application/json', apikey: p.anon }, body: JSON.stringify({ action: 'login', code, from: nfConfig().supabaseUrl }) });
+        const j2 = await r2.json().catch(() => ({})); if (!j2.token_hash) return null;
+        const v = await c.auth.verifyOtp({ token_hash: j2.token_hash, type: 'magiclink' }); s = v.data && v.data.session;
+      } catch (e) { return null; }
+    }
+    return s ? { c, s } : null;
+  }
+  const OPEN = ['open', 'doing'];
+  function mineFilter(ids, rl, owner) { return t => { if (!t || !OPEN.includes(t.status) || t.kind === 'update') return false; if (owner) return true; if (t.assigneeId && ids.includes(t.assigneeId)) return true; if (!t.assigneeId && t.toRole && t.toRole === rl) return true; return (t.participants || []).some(x => x && ids.includes(x.id)); }; }
+  async function peerTasks(co, owner) {
+    const ps = await peerSession(co); if (!ps) return { err: 'nosession', tasks: [] };
+    const { c, s } = ps;
+    let prof = null; try { const r = await c.from('profiles').select('role, person_id').eq('uid', s.user.id).maybeSingle(); prof = r.data; } catch (e) { prof = null; }
+    const rl = (prof && prof.role) || ((s.user.app_metadata || {}).nf_role) || ''; const pid = (prof && prof.person_id) || '';
+    const ids = [pid, pid.replace(/^[a-z]:/, '')].filter(Boolean);
+    let rows = []; try { const r = await c.from('docs').select('id, data').eq('col', 'tasks').in('data->>status', OPEN).order('updated_at', { ascending: false }).limit(400); if (r.error) return { err: 'read', tasks: [] }; rows = r.data || []; } catch (e) { return { err: 'read', tasks: [] }; }
+    const tasks = rows.map(r => Object.assign({ id: r.id }, r.data || {})).filter(mineFilter(ids, rl, owner || rl === 'admin'));
+    return { tasks, role: rl };
+  }
+  function localTasks(owner) {
+    const ids = typeof myIds === 'function' ? myIds() : []; const f = mineFilter(ids, role(), owner);
+    return list('tasks').filter(t => f(t) || (!owner && typeof taskMine === 'function' && OPEN.includes(t.status) && t.kind !== 'update' && taskMine(t)));
+  }
+  const H = S._nfHub = { at: 0, busy: false, data: {} };
+  function refresh(force) {
+    const owner = isNinetyOwner(); H.data[SELF] = { tasks: localTasks(owner) };
+    if (H.busy || (!force && H.data[OTHER] && Date.now() - H.at < (H.data[OTHER].err ? 15000 : 60000))) return;
+    H.busy = true; H.at = Date.now();
+    peerTasks(OTHER, owner).then(r => { H.data[OTHER] = r; }).catch(() => { H.data[OTHER] = { err: 'read', tasks: [] }; }).finally(() => { H.busy = false; if (document.querySelector('#nhome')) render(true); });
+  }
+  window.nfHubRefresh = refresh;
+
+  /* ---------- الواجهة ---------- */
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.nhtasks{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.nhtasks .col{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;border-top:4px solid var(--c)}
+.nhtasks .col .ch{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--c) 6%,var(--surface))}
+.nhtasks .col .ch b{font-size:14.5px}.nhtasks .col .ch .n{margin-inline-start:auto;font-size:12px;color:var(--muted)}.nhtasks .col .ch .n .bad{color:#b35c5c;font-weight:700}
+.nhtasks ul{list-style:none;margin:0;padding:6px;display:flex;flex-direction:column;gap:4px;max-height:420px;overflow:auto}
+.nhtasks li{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;line-height:1.35}
+.nhtasks li:hover{background:var(--surface-2)}.nhtasks li i{width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px;background:var(--c)}
+.nhtasks li.late i{background:#b35c5c}.nhtasks li small{display:block;color:var(--muted);font-size:11.5px}.nhtasks li.late small{color:#b35c5c}
+.nhtasks .emp{padding:16px 14px;color:var(--muted);font-size:12.5px}
+.nhub .portal{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.nhub .portal .row1{display:flex;align-items:center;gap:12px}.nhub .portal .st{font-size:18px;font-weight:700}
+.nhub .portal .acts{display:flex;gap:8px;flex-wrap:wrap}
+.nhub .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.nhub .ccard{background:var(--surface);border:1px solid var(--line);border-inline-start:5px solid var(--c);border-radius:14px;padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:10px}
+.nhub .ccard:hover{box-shadow:0 0 0 2px var(--c)}.nhub .ccard b{font-size:15px}.nhub .ccard small{display:block;color:var(--muted);font-size:12px}.nhub .ccard .go{margin-inline-start:auto;font-size:12.5px;font-weight:600}
+.nhub .hbar{display:flex;align-items:center;justify-content:space-between;background:var(--nf-side);color:var(--nf-side-ink);border-radius:14px;padding:12px 16px}.nhub .hbar img{height:22px;filter:invert(1)!important}
+@media(max-width:820px){.nhtasks,.nhub .cards{grid-template-columns:1fr}}
+</style>`);
+  const dueTxt = t => { const d = t.dueDate || t.due || ''; if (!d) return ''; return (d < todayISO() ? 'متأخرة — ' : 'ميعادها ') + fmtDate(String(d).slice(0, 10)); };
+  const sortT = arr => arr.slice().sort((a, b) => { const la = (a.dueDate || '9') < todayISO() ? 0 : 1, lb = (b.dueDate || '9') < todayISO() ? 0 : 1; if (la !== lb) return la - lb; const pa = ['urgent', 'high'].includes(a.priority) ? 0 : 1, pb = ['urgent', 'high'].includes(b.priority) ? 0 : 1; if (pa !== pb) return pa - pb; return String(a.dueDate || '9').localeCompare(String(b.dueDate || '9')); });
+  function colHTML(co) {
+    const d = H.data[co]; const c = CO[co];
+    const head = n => `<div class="ch"><b>${c.name}</b><span class="n">${n}</span></div>`;
+    if (!d) return `<div class="col" style="--c:${c.color}">${head('…')}<div class="emp">⏳ جاري تحميل مهام ${c.ar}…</div></div>`;
+    if (d.err) return `<div class="col" style="--c:${c.color}">${head('')}<div class="emp">مقدرتش أجيب مهام ${c.ar} دلوقتي — <a href="#" data-action="nfHubOpen" data-arg="${co}|#/tasks">افتح ${c.short}</a></div></div>`;
+    const ts = sortT(d.tasks); const late = ts.filter(t => (t.dueDate || '9') < todayISO()).length; const own = co === SELF;
+    const who = t => own && t.assigneeId && typeof assigneeName === 'function' ? assigneeName(t.assigneeId) : (t.assigneeName || (t.toRole && typeof ROLES !== 'undefined' && ROLES[t.toRole]) || '');
+    return `<div class="col" style="--c:${c.color}">${head(`${ts.length} مفتوحة${late ? ` · <span class="bad">${late} متأخرة</span>` : ''}`)}${ts.length ? `<ul>${ts.slice(0, 40).map(t => { const lt = (t.dueDate || '9') < todayISO(); const w = who(t); const dt = dueTxt(t); return `<li class="${lt ? 'late' : ''}" data-action="nfHubOpen" data-arg="${co}|#/tasks/${esc(t.id)}"><i></i><span>${esc(t.title || 'مهمة')}${w || dt ? `<small>${esc([w, dt].filter(Boolean).join(' · '))}</small>` : ''}</span></li>`; }).join('')}${ts.length > 40 ? `<li data-action="nfHubOpen" data-arg="${co}|#/tasks"><span class="muted">+ ${ts.length - 40} كمان — افتح ${c.short}</span></li>` : ''}</ul>` : '<div class="emp">مفيش مهام مفتوحة ✓</div>'}</div>`;
+  }
+  const tasksBlock = () => `<div class="hhead"><div><h1 style="font-size:16px">المهام</h1><p>${isNinetyOwner() ? 'كل المهام المفتوحة في الشركتين' : 'المطلوب منك في الشركتين'}</p></div></div><div class="nhtasks">${colHTML('factory')}${colHTML('studio')}</div>`;
+
+  /* المالك: نضيف المهام لشاشة Ninety */
+  if (typeof ninetyHomeHTML === 'function') ninetyHomeHTML = (base => function () {
+    const html = base.apply(this, arguments); refresh(false);
+    const i = html.indexOf('<div class="blk"'); return i < 0 ? html : html.slice(0, i) + tasksBlock() + html.slice(i);
+  })(ninetyHomeHTML);
+
+  /* الموظف المشترك: شاشة Ninety خاصة بيه */
+  const isHubUser = () => !!S.session && S.mode !== 'boot' && !isNinetyOwner() && role() !== 'kiosk' && typeof mySystems === 'function' && mySystems().length > 0;
+  const hubDue = () => isHubUser() && !ninetyCo() && ['', 'dashboard', 'ninety'].includes(hashv());
+  function portalHTML(w) {
+    const home = attHomeOf(w) || SELF; const c = CO[home];
+    let st = ''; if (home === SELF) { const r = (attendanceFor(todayISO()) || {})[w.id] || {}; st = r.out ? `انصرفت ${esc(r.out)}` : r.in ? `حضرت ${esc(r.in)}` : r.s === 'L' ? 'إجازة' : 'لم تسجّل حضورك بعد'; } else st = 'البصمة على ' + c.name;
+    return `<div class="portal" style="--c:${c.color}"><div class="row1">${typeof avatarHTML === 'function' ? avatarHTML(w, 46) : ''}<div><div class="tiny muted">بوابتي · ${c.name}</div><div class="st">${st}</div><div class="tiny muted">${fmtDateLong ? fmtDateLong(todayISO()) : todayISO()}</div></div></div>
+      <div class="acts"><button class="btn p" data-action="nfHubOpen" data-arg="${home}|#/me">${icon('play')}تسجيل الحضور / الانصراف</button><button class="btn" data-action="nfHubOpen" data-arg="${home}|#/regulation">${icon('file')}اللائحة</button><button class="btn" data-action="nfHubOpen" data-arg="${home}|#/requests">${icon('plus')}طلب إجازة / إذن / سلفة</button></div></div>`;
+  }
+  function cardHTML(co) { const d = H.data[co]; const n = d && !d.err ? d.tasks.length : null; const late = d && !d.err ? d.tasks.filter(t => (t.dueDate || '9') < todayISO()).length : 0; const c = CO[co];
+    return `<div class="ccard" style="--c:${c.color}" data-action="nfHubOpen" data-arg="${co}|"><div><b>${c.name}</b><small>${n == null ? c.ar : `${n} مهمة مفتوحة${late ? ` · ${late} متأخرة` : ''}`}</small></div><span class="go">ادخل ←</span></div>`; }
+  function hubHTML() {
+    refresh(false); const w = S.session.workerId ? byId('workers', S.session.workerId) : null; const first = ((S.session && S.session.name) || '').trim().split(/\s+/)[0] || '';
+    const g = new Date().getHours() < 12 ? 'صباح الخير' : 'مساء الخير';
+    return `<div class="nhome nhub" id="nhome" style="grid-template-columns:1fr"><main class="nmain" style="max-width:980px;margin:0 auto;width:100%;box-sizing:border-box">
+      <div class="hbar">${typeof logoImg === 'function' ? logoImg(22) : '<b>Ninety</b>'}<span class="tiny" style="opacity:.8">Ninety</span></div>
+      <div class="hhead"><div><h1>${g} يا ${esc(first)}</h1><p>${fmtDate(todayISO())}</p></div></div>
+      ${w ? portalHTML(w) : ''}
+      ${tasksBlock()}
+      <div class="cards">${cardHTML('factory')}${cardHTML('studio')}</div>
+    </main></div>`;
+  }
+  render = (base => function (full) {
+    if (hubDue()) { const root = $('#root'); if (root) { if (hashv() !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = hubHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
+    return base.apply(this, arguments);
+  })(render);
+
+  /* ---------- التنقل ---------- */
+  ACTIONS.nfHubOpen = arg => {
+    const [co, href] = String(arg || '').split('|'); ninetySet('factory');
+    if (co === SELF || !co) { const h = href || '#/dashboard'; const v = h.replace(/^#\/?/, '').split('/'); S.route = { view: v[0] || 'dashboard', id: v[1] || null, sub: v[2] || null }; location.hash = h; render(true); return; }
+    location.href = coUrl(co) + (href || '');
+  };
+  ACTIONS.nfHubHome = () => { ninetySet(''); closeModal(); refresh(true); location.hash = '#/ninety'; render(true); };
+  window.addEventListener('hashchange', () => { if (hashv() === 'ninety' && isHubUser()) { ninetySet(''); render(true); } });
+  /* زرار «⇄» بتاع الموظف المشترك بقى يرجّعه لشاشة Ninety */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!isHubUser()) return;
+    document.querySelectorAll('.nfsysbtn').forEach(b => { if (b.dataset.action !== 'nfHubHome') { b.dataset.action = 'nfHubHome'; b.removeAttribute('data-arg'); b.textContent = '⇄ Ninety'; b.title = 'شاشة Ninety — الشركتين'; } });
+    document.querySelectorAll('.nfsysside').forEach(d => { if (!d.dataset.hub) { d.dataset.hub = '1'; d.innerHTML = '<button type="button" data-action="nfHubHome">⇄ الرجوع لـ Ninety</button>'; } });
+  });
 })();
 </script>
 
