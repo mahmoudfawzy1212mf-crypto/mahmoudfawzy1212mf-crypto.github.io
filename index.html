@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1158-6b7061";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1207-77d571";</script>
 
 <script>
 'use strict';
@@ -24688,6 +24688,93 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     if (how === 'wa') window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
     else location.href = 'mailto:?subject=' + encodeURIComponent(`${t} — ${k}`) + '&body=' + encodeURIComponent(msg);
   };
+})();
+/* =====================================================================
+   v5.71 — B2B / B2C في كل CRM: العملاء والعروض والفواتير وأوامر التشغيل
+   · نوع العميل: clients.seg، وإلا من فرصة مربوطة بيه (leads.clientId)، وإلا «فرد» = B2C، وإلا B2B.
+   · العرض/الفاتورة/الأمر: seg بتاعه لو موجود، وإلا من الفرصة أو العرض، وإلا من العميل.
+   · زرار B2B / B2C فوق CRM البراند بيفلتر الشاشة كلها (الأرقام، اللوحة، العملاء، العروض، الفواتير،
+     المتابعات، التقارير) عن طريق listScope وقت الرسم بس. صفحات العملاء/العروض/الفواتير: B2B / B2C / الكل.
+   · مفيش تغيير صلاحيات.
+   ===================================================================== */
+(function () {
+  if (window.__NF_CRMSEG__) return; window.__NF_CRMSEG__ = 1;
+  const raw = col => (S.data && S.data[col]) ? Array.from(S.data[col].values()) : [];
+  const rawBy = (col, id) => (id && S.data && S.data[col]) ? S.data[col].get(id) || null : null;
+  const lSeg = l => (typeof leadSeg === 'function' ? leadSeg(l) : (l.seg || 'b2b'));
+  function segClient(c) {
+    if (!c) return 'b2b'; if (c.seg === 'b2b' || c.seg === 'b2c') return c.seg;
+    const l = raw('leads').find(x => x && x.clientId === c.id); if (l) return lSeg(l);
+    return c.type === 'فرد' ? 'b2c' : 'b2b';
+  }
+  function segQuote(q) { if (!q) return 'b2b'; if (q.seg === 'b2b' || q.seg === 'b2c') return q.seg; const l = rawBy('leads', q.leadId); if (l) return lSeg(l); return segClient(rawBy('clients', q.clientId)); }
+  function segDoc(col, d) {
+    if (!d) return 'b2b'; if (d.seg === 'b2b' || d.seg === 'b2c') return d.seg;
+    if (col === 'clients') return segClient(d);
+    if (col === 'quotations') return segQuote(d);
+    if (d.quotationId) { const q = rawBy('quotations', d.quotationId); if (q) return segQuote(q); }
+    if (d.leadId) { const l = rawBy('leads', d.leadId); if (l) return lSeg(l); }
+    return segClient(rawBy('clients', d.clientId));
+  }
+  window.nfSegOf = segDoc;
+  const SEG_COLS = ['clients', 'quotations', 'invoices', 'orders'];
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) {
+    const out = base.apply(this, arguments); const sc = S._segScope;
+    if ((sc === 'b2b' || sc === 'b2c') && SEG_COLS.includes(col) && Array.isArray(out)) return out.filter(d => segDoc(col, d) === sc);
+    return out;
+  })(listScope);
+  const withScope = (sc, fn) => { const prev = S._segScope; S._segScope = sc; try { return fn(); } finally { S._segScope = prev; } };
+  document.head.insertAdjacentHTML('beforeend', '<style>.badge.segb{font-size:10px;padding:0 6px;margin-inline-start:6px;vertical-align:1px}.badge.segb.c{background:color-mix(in srgb,#b05a32 18%,transparent);color:#b05a32}.segtoggle button .n{opacity:.7;font-weight:400;margin-inline-start:4px}</style>');
+  const segBadge = s => `<span class="badge segb ${s === 'b2c' ? 'c' : ''}">${s === 'b2c' ? 'B2C' : 'B2B'}</span>`;
+
+  /* ---------- CRM البراند: الشاشة كلها بالنوع المختار ---------- */
+  if (typeof vCrmBrand === 'function') vCrmBrand = (base => function (b) {
+    if (S.route.id) return base.apply(this, arguments);
+    const sc = typeof crmSeg === 'function' ? crmSeg() : 'b2b';
+    let html = withScope(sc, () => base.apply(this, arguments));
+    /* عدد العملاء على كل زرار */
+    const inBrand = c => c.brandId === b || raw('quotations').some(q => q.clientId === c.id && q.brandId === b) || raw('orders').some(o => o.clientId === c.id && o.brandId === b) || raw('leads').some(l => l.clientId === c.id && (l.brandId || b) === b);
+    const cs = (typeof listScope === 'function' ? listScope('clients', raw('clients')) : raw('clients')).filter(inBrand);
+    const n = s => cs.filter(c => segClient(c) === s).length;
+    html = html.replace(/(data-action="crmSeg" data-arg="b2b">)B2B(<\/button>)/, `$1B2B<span class="n">(${n('b2b')})</span>$2`).replace(/(data-action="crmSeg" data-arg="b2c">)B2C(<\/button>)/, `$1B2C<span class="n">(${n('b2c')})</span>$2`);
+    return html;
+  })(vCrmBrand);
+
+  /* ---------- صفحات العملاء / العروض / الفواتير ---------- */
+  const pageSeg = () => (S.ui.filter.segAll || '');
+  ACTIONS.segAll = v => { S.ui.filter.segAll = v || ''; render(false); };
+  function segBar(col) {
+    const all = typeof listScope === 'function' ? listScope(col, raw(col)) : raw(col); const s = pageSeg();
+    const n = k => all.filter(d => segDoc(col, d) === k).length;
+    return `<div class="seg" style="margin-inline-end:8px">${[['', 'الكل', all.length], ['b2b', 'B2B', n('b2b')], ['b2c', 'B2C', n('b2c')]].map(([k, l, c]) => `<button class="${s === k ? 'on' : ''}" data-action="segAll" data-arg="${k}">${l} <span class="muted">(${c})</span></button>`).join('')}</div>`;
+  }
+  function decorate(html, col, labelOf) {
+    const arr = typeof listScope === 'function' ? listScope(col, raw(col)) : raw(col);
+    arr.forEach(d => { const lbl = labelOf(d); if (!lbl) return; const e = esc(lbl); const needles = col === 'clients' ? [`<b>${e}</b>`] : [`>${e}</span>`, `>${e}</b>`]; for (const nd of needles) { const i = html.indexOf(nd); if (i >= 0) { html = html.slice(0, i + nd.length) + segBadge(segDoc(col, d)) + html.slice(i + nd.length); break; } } });
+    return html;
+  }
+  const addBar = (html, col) => { const i = html.indexOf('<div class="toolbar">'); return i < 0 ? segBar(col) + html : html.slice(0, i + 21) + segBar(col) + html.slice(i + 21); };
+  if (typeof vClients === 'function') vClients = (base => function () { const s = pageSeg(); let h = withScope(s, () => base.apply(this, arguments)); h = withScope(s, () => decorate(h, 'clients', c => c.name)); return addBar(h, 'clients'); })(vClients);
+  if (typeof vQuotes === 'function') vQuotes = (base => function () { const s = pageSeg(); let h = withScope(s, () => base.apply(this, arguments)); h = withScope(s, () => decorate(h, 'quotations', q => q.number)); return addBar(h, 'quotations'); })(vQuotes);
+  if (typeof vInvoices === 'function') vInvoices = (base => function () { if (S.route.id) return base.apply(this, arguments); const s = pageSeg(); let h = withScope(s, () => base.apply(this, arguments)); h = withScope(s, () => decorate(h, 'invoices', x => x.number)); return addBar(h, 'invoices'); })(vInvoices);
+  if (EXTRA_VIEWS.invoices) EXTRA_VIEWS.invoices = () => vInvoices();
+
+  /* ---------- فورم العميل: النوع ---------- */
+  if (typeof clientForm === 'function') clientForm = (base => function (c) {
+    const html = base.apply(this, arguments); c = c || {};
+    const cur = c.id ? segClient(c) : (String(S.route.view || '').startsWith('crm-') && typeof crmSeg === 'function' ? crmSeg() : (pageSeg() || 'b2b'));
+    const box = field('نوع العميل', `<select name="seg" id="f-cseg"><option value="b2b" ${cur === 'b2b' ? 'selected' : ''}>B2B — شركة / مقاول / مكتب</option><option value="b2c" ${cur === 'b2c' ? 'selected' : ''}>B2C — فرد / فيلا / بيت</option></select>`);
+    const i = html.indexOf('<div class="form">'); return i < 0 ? box + html : html.slice(0, i + 18) + box + html.slice(i + 18);
+  })(clientForm);
+  /* صفحة العميل: علامة النوع + تغيير بضغطة */
+  if (typeof vClientDetail === 'function') vClientDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const c = byId('clients', id); if (!c) return html; const s = segClient(c);
+    const can = typeof canDo === 'function' && (canDo('sales') || isAdmin() || ['bdd', 'hr'].includes(role()));
+    return `<div class="row" style="gap:8px;margin-bottom:10px;align-items:center">${segBadge(s)}<span class="small muted">${s === 'b2c' ? 'عميل فرد' : 'شركة / مقاول / مكتب'}</span>${can ? `<button class="btn xs ghost" data-action="clientSegSet" data-arg="${esc(id)}:${s === 'b2c' ? 'b2b' : 'b2c'}">خلّيه ${s === 'b2c' ? 'B2B' : 'B2C'}</button>` : ''}</div>` + html;
+  })(vClientDetail);
+  ACTIONS.clientSegSet = async arg => { const [id, s] = String(arg || '').split(':'); if (!byId('clients', id) || !['b2b', 'b2c'].includes(s)) return; await Store.update('clients', id, { seg: s }); toast(`بقى ${s.toUpperCase()}`); };
+
+  /* ---------- تابات آلاء الخاصة (العملاء/العروض/الفواتير جوه CRM) بتمشي على نفس الفلتر تلقائيًا لأنها جوه vCrmBrand ---------- */
 })();
 </script>
 
