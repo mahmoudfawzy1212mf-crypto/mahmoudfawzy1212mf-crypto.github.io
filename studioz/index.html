@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260930-1359-d9a962";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-0446-47bc49";</script>
 
 <script>
 'use strict';
@@ -22496,12 +22496,12 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · WebRTC من جهاز لجهاز (مشفّر DTLS-SRTP) — السيرفر بيشيل بس «مين بيتصل بمين» (جدول nf_calls بـ RLS: الطرفين بس)
    · الرنّة: إشعار push «📞 فلان بيتصل بيك» + لو التطبيق مفتوح شاشة مكالمة واردة برنّة
    · ICE: Edge Function «rtc» (STUN — ولو اتضبط TURN في admin_config.turn_cfg بيتدّي تلقائي)
-   · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة
+   · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة · v5.62 (30 سبتمبر — طلب محمود): المدير التجاري (bdd) ومهندس المكتب الفني (tech) مالهمش مكالمات خالص — لا صفحة ولا زرار ولا يظهروا لحد (السيرفر كمان: nf_calls_allowed / nf_call_visible)
    ===================================================================== */
 (() => {
   if (typeof isStudioz === 'function' && isStudioz()) return;
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from && S.sbUser;
-  const me = () => (S.sbUser && S.sbUser.id) || '';
+  const me = () => (S.sbUser && S.sbUser.id) || ''; const noCalls = () => typeof role === 'function' && ['bdd', 'tech'].includes(role()); /* v5.62: المدير التجاري ومهندس المكتب الفني — من غير مكالمات خالص */
   const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
   const RING_MS = 45000;
   const roleName = r => (typeof ROLES !== 'undefined' && ROLES[r]) ? ROLES[r].split(' — ')[0] : (r || '');
@@ -22835,7 +22835,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   }
   /* opened from the push notification */
   async function fromHash() {
-    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted()) return;
+    const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted() || noCalls()) return;
     subscribe();
     const { data } = await S.sb.from('nf_calls').select('*').eq('id', m[1]).maybeSingle();
     if (data && data.status === 'ringing' && data.callee === me()) { await incoming(data); if (m[2] && C.cur && C.cur.id === data.id) { try { history.replaceState(null, '', '#/calls'); } catch (e) { /* ignore */ } if (m[2] === 'accept') accept(true); else finish('declined'); } }
@@ -22864,7 +22864,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : fmtDate(String(iso).slice(0, 10)); };
   function vCalls() {
     css();
-    if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>';
+    if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>'; if (noCalls()) return '<div class="empty">المكالمات مش متاحة لهذا الحساب.</div>';
     if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog()]).then(() => { if (S.route.view === 'calls') render(false); }); }
     try { localStorage.setItem('nf.calls.seen', String(Date.now())); } catch (e) { /* ignore */ }
     S.ui = S.ui || {}; const tab = S.ui.callTab || 'contacts';
@@ -22899,11 +22899,11 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.calls = 'المكالمات';
   if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.calls = () => vCalls();
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'calls')) NAV.push({ id: 'calls', label: 'المكالمات', icon: 'bell', count: () => missedCount(), countCls: 'crit' });
-  setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk') ROLE_VIEWS[r].push('calls'); }); }, 0);
-  if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' : base(view)))(canSee);
+  setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk' && r !== 'bdd' && r !== 'tech') ROLE_VIEWS[r].push('calls'); }); }, 0);
+  if (typeof canSee === 'function') canSee = (base => view => (view === 'calls' ? !!S.session && role() !== 'kiosk' && !noCalls() : base(view)))(canSee);
   /* call buttons on a person's page (workers / staff) */
   RENDER_HOOKS.push(() => {
-    subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
+    if (noCalls()) return; subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
     const r = S.route || {}; if (!hosted() || !r.id || !['workers', 'staff'].includes(r.view)) return;
     const pid = r.view === 'workers' ? 'w:' + r.id : r.id; const d = (C.dir || []).find(x => x.person_id === pid);
     if (!C.dir) { loadDir().then(() => { if (S.route.id === r.id) render(false); }); return; }
@@ -22920,7 +22920,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
 body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-chatpage .callfab,body.stuboard .callfab,body:has(.side.open) .callfab,body:has(.aipanel:not([hidden])) .callfab,body:has(#nfcall) .callfab{display:none}
 </style>`);
   RENDER_HOOKS.push(() => {
-    const on = hosted() && S.session && role() !== 'kiosk' && !(S.route && S.route.view === 'calls'); let b = document.querySelector('.callfab');
+    const on = hosted() && S.session && role() !== 'kiosk' && !noCalls() && !(S.route && S.route.view === 'calls'); let b = document.querySelector('.callfab');
     if (!on) { if (b) b.remove(); return; }
     if (!b) { document.body.insertAdjacentHTML('beforeend', `<a class="callfab" href="#/calls" title="المكالمات" aria-label="المكالمات">${svg('phone', 24)}</a>`); b = document.querySelector('.callfab'); }
     const n = missedCount(); const old = b.querySelector('.n'); if (n && !old) b.insertAdjacentHTML('beforeend', `<span class="n">${n}</span>`); else if (old) { if (n) old.textContent = n; else old.remove(); }
@@ -23683,6 +23683,407 @@ html .wa .bb a,html[data-theme] .wa .bb a{color:#027eb5}
 html .wa .bb .rp,html[data-theme] .wa .bb .rp{color:#111b21;background:rgba(0,0,0,.08)}
 html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.12)}
 </style>`);
+})();
+/* =====================================================================
+   v5.60 — التعاقد والدفعات والشيكات جوه حساب الشغلانة (طلب محمود — 30 سبتمبر)
+   · أول ما الأوفر يتقبل ويطلع أمر تشغيل: كارت «التعاقد والدفعات» بيتفتح جوه صفحة الأمر (نفس مكان «اعتماد التشغيل»)
+     وبيوصل إشعار لمدير الحسابات (سعيد) «ارفع العقد / أمر التوريد».
+   · مرفق التعاقد (عقد / أمر توريد / خطاب ترسية) إلزامي: الأمر ما ينزلش إنتاج قبله (للأوامر الجديدة بعد البيلد ده بس —
+     الأوامر الجارية زي ما هي). المالك يقدر يعلّم «تعاقد شفهي» لو مفيش مستند.
+   · شيك صحة التوقيع (شيك المصنع): صورة الشيك بعد اعتماد البنك ← اتسلّم للعميل (إقرار استلام ممضي) ← مسترد.
+   · شيك الداون بيمنت (شيك العميل): مستلَم (صورة الشيك + رقمه + البنك + الاستحقاق) ← تم الإيداع (إيصال الإيداع)
+     ← تحصّل (يتحسب محصَّل ساعتها بس) / مرتجع. كل خطوة بتتسجل باسم اللي عملها وتاريخها.
+     الشيك بيتخزن جوه orders.payments (المسار المالي المقفول من السيرفر — v4.80) بمبلغ 0 لغاية ما يتحصّل.
+   · استلام شيك العميل (بالصورة) بيقوم مقام «تحويل العميل» في بوابة اعتماد التشغيل.
+   · لوحة الحسابات: كارت متابعة (شيكات عندنا لم تُسلَّم · مستلَمة لم تُودَع · مودَعة لم تُحصَّل · أوامر بلا مرفق تعاقد).
+     التنبيه بعد policy.chequeDays يوم (افتراضي 3).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CONTRACT__) return; window.__NF_CONTRACT__ = 1;
+  const SINCE = '2026-09-30T19:00:00.000Z';
+  const CONTRACT_KINDS = { contract: 'عقد', po: 'أمر توريد (PO)', award: 'خطاب ترسية', verbal: 'تعاقد شفهي — بدون مستند' };
+  const OUT_ST = { ready: ['جاهز للتسليم', 'warn'], delivered: ['اتسلّم للعميل ✓', 'good'], returned: ['مسترد ✓', ''] };
+  const IN_ST = { received: ['مستلَم — لم يُودَع', 'warn'], deposited: ['تم الإيداع — بانتظار التحصيل', 'acc'], cleared: ['تحصّل ✓', 'good'], bounced: ['مرتجع ✗', 'crit'] };
+  const chequeDays = () => { const n = +((S.settings.policy || {}).chequeDays); return n > 0 ? n : 3; };
+  const contractGate = () => (S.settings.policy || {}).contractGate !== false;
+  const me = () => S.session || {};
+  const stamp = () => ({ at: nowISO(), by: me().id || null, byName: me().name || '' });
+  const daysAgo = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : 0;
+  const fin = () => typeof seesFinance === 'function' && seesFinance();
+  const canContract = () => writable() && (isAdmin() || ['hr', 'office'].includes(role()) || canDo('sales'));
+  const canCheque = () => writable() && (isAdmin() || role() === 'hr'); /* الفلوس (payments) السيرفر بيقبلها من المالك/مدير الحسابات بس (v4.80) */
+  const canOutCheque = () => writable() && (isAdmin() || role() === 'hr');
+  const needsContract = o => contractGate() && !!o.createdAt && o.createdAt >= SINCE;
+  const contractOk = o => !!(o.contract && (o.contract.fileId || o.contract.kind === 'verbal'));
+  const inCheques = o => (o.payments || []).filter(p => p && p.kind === 'cheque' && !p._ph);
+  const fileOf = id => (id && byId('files', id)) || null;
+  const thumbs = ids => { const fs = ids.map(fileOf).filter(Boolean); return fs.length ? `<div style="margin-top:6px">${attachGallery(fs)}</div>` : ''; };
+  /* الملفات دي فيها فلوس → تتعلّم priced علشان السيرفر يقفلها على المالك/مدير الحسابات (v4.81) */
+  async function attachPriced(file, meta) { S._pricedUp = true; try { return await attachFile(file, meta); } finally { S._pricedUp = false; } }
+  const pickFile = (f, name) => ($('#f-' + name, f) || {}).files?.[0] || null;
+  const logLine = (from, to, note) => Object.assign({ from, to, note: note || '' }, stamp());
+
+  /* ---------- بوابة التشغيل: مرفق التعاقد شرط تالت ---------- */
+  if (typeof orderReleased === 'function') orderReleased = (base => function (o) {
+    if (!o) return false; if (!gateRequired() || o.releasedAt) return true;
+    if (!o.approval && !o.gateRequired && o.status !== 'new') return true;
+    return orderApproved(o) && orderDeposits(o).length > 0 && (!needsContract(o) || contractOk(o));
+  })(orderReleased);
+  if (typeof releaseCheck === 'function') releaseCheck = (base => async function (o) {
+    o = byId('orders', o.id) || o; if (needsContract(o) && !contractOk(o) && !o.releasedAt) return false;
+    return base.apply(this, arguments);
+  })(releaseCheck);
+
+  /* ---------- الكارت الجديد في صفحة الأمر ---------- */
+  const row = (label, body) => `<div style="padding:8px 0;border-top:1px solid var(--line)"><div class="tiny muted" style="margin-bottom:3px">${label}</div>${body}</div>`;
+  const who = (x, pre) => x && x.at ? `<span class="tiny muted"> · ${pre || ''}${esc(x.byName || '')} ${fmtDate(x.at.slice(0, 10))}</span>` : '';
+  function contractCard(o) {
+    if (o.status === 'cancelled') return '';
+    const c = o.contract || null; const oc = o.outCheque || null; const ins = sortBy(inCheques(o), p => p.receivedAt || '', true);
+    const open = isOpen(o); const money = fin();
+    const cRow = c ? `<div><b>${esc(CONTRACT_KINDS[c.kind] || c.kind || 'مستند')}</b>${c.no ? ` · رقم <span class="ltr">${esc(c.no)}</span>` : ''}${c.date ? ` · ${fmtDate(c.date)}` : ''}${who(c, 'رفعه ')}</div>${c.fileId && money ? thumbs([c.fileId]) : ''}` : `<span class="muted"${needsContract(o) ? ' style="color:var(--crit-ink)"' : ''}>${needsContract(o) ? 'مطلوب قبل التشغيل — لم يُرفع بعد' : 'لم يُرفع بعد'}</span>`;
+    const cBtn = canContract() && open ? ` <button class="btn xs ${c ? 'ghost' : 'p'}" data-action="contractSet" data-arg="${o.id}">${icon('upload')}${c ? 'تعديل / استبدال' : 'رفع العقد / أمر التوريد'}</button>` : '';
+    let ocRow;
+    if (!oc) ocRow = `<span class="muted">لم يُصدر بعد</span>${canOutCheque() && open ? ` <button class="btn xs" data-action="outChequeNew" data-arg="${o.id}">${icon('camera')}رفع صورة الشيك</button>` : ''}`;
+    else {
+      const st = OUT_ST[oc.status] || OUT_ST.ready;
+      ocRow = `<div><span class="badge ${st[1]}">${st[0]}</span>${oc.chequeNo ? ` رقم <span class="ltr">${esc(oc.chequeNo)}</span>` : ''}${oc.bank ? ` · ${esc(oc.bank)}` : ''}${who(oc, 'رفعه ')}</div>`;
+      if (oc.status === 'delivered') ocRow += `<div class="small">اتسلّم ${fmtDate((oc.deliveredAt || '').slice(0, 10))}${oc.receivedByName ? ` — استلمه ${esc(oc.receivedByName)}` : ''}${oc.deliveredByName ? ` · سلّمه ${esc(oc.deliveredByName)}` : ''}</div>`;
+      if (oc.status === 'returned') ocRow += `<div class="small">استُرد ${fmtDate((oc.returnedAt || '').slice(0, 10))}${oc.returnedByName ? ` · ${esc(oc.returnedByName)}` : ''}</div>`;
+      if (money) ocRow += thumbs([oc.imageFileId, oc.receiptFileId, oc.returnedFileId]);
+      if (canCheque() && open) { if (oc.status === 'ready') ocRow += ` <button class="btn xs p" data-action="outChequeDeliver" data-arg="${o.id}">${icon('check')}اتسلّم للعميل</button>`; if (oc.status === 'delivered') ocRow += ` <button class="btn xs ghost" data-action="outChequeReturn" data-arg="${o.id}">استرداد الشيك</button>`; }
+      if (canOutCheque() && open && oc.status === 'ready') ocRow += ` <button class="btn xs ghost" data-action="outChequeNew" data-arg="${o.id}">استبدال</button>`;
+    }
+    const inRows = ins.length ? ins.map(p => {
+      const st = IN_ST[p.stage] || IN_ST.received; const late = (p.stage === 'received' && daysAgo(p.receivedAt) >= chequeDays()) || (p.stage === 'deposited' && p.dueDate && p.dueDate < todayISO().slice(0, 10) && daysAgo(p.depositedAt) >= chequeDays());
+      let h = `<div class="item" style="display:block;cursor:default${late ? ';border-color:var(--warn-ink)' : ''}"><div class="row small" style="gap:8px;flex-wrap:wrap"><span class="badge ${st[1]}">${st[0]}</span>${money ? `<b class="num">${fmtMoney(p.chequeAmount)} ${CUR()}</b>` : ''}${p.chequeNo ? `<span>رقم <span class="ltr">${esc(p.chequeNo)}</span></span>` : ''}${p.bank ? `<span>${esc(p.bank)}</span>` : ''}${p.dueDate ? `<span>استحقاق ${fmtDate(p.dueDate)}</span>` : ''}</div>`;
+      h += `<div class="tiny muted" style="margin-top:4px">استلام ${fmtDate((p.receivedAt || p.date || '').slice(0, 10))} — ${esc(p.receivedByName || p.byName || '')}${p.depositedAt ? ` · إيداع ${fmtDate(p.depositedAt.slice(0, 10))}${p.depositAccount ? ' في ' + esc(p.depositAccount) : ''} — ${esc(p.depositedByName || '')}` : ''}${p.clearedAt ? ` · تحصّل ${fmtDate(p.clearedAt.slice(0, 10))} — ${esc(p.clearedByName || '')}` : ''}${p.bouncedAt ? ` · مرتجع ${fmtDate(p.bouncedAt.slice(0, 10))}${p.bounceNote ? ': ' + esc(p.bounceNote) : ''}` : ''}${late ? ` · <b style="color:var(--warn-ink)">متأخر ${daysAgo(p.stage === 'received' ? p.receivedAt : p.depositedAt)} يوم</b>` : ''}</div>`;
+      if (p.note) h += `<div class="tiny muted">${esc(p.note)}</div>`;
+      if (money) h += thumbs([p.imageFileId, p.backFileId, p.depositSlipFileId, p.bounceFileId]);
+      if (canCheque() && open) { const b = []; if (p.stage === 'received') b.push(`<button class="btn xs p" data-action="inChequeDeposit" data-arg="${o.id}:${p.id}">${icon('money')}تسجيل الإيداع</button>`); if (p.stage === 'deposited') { b.push(`<button class="btn xs p" data-action="inChequeClear" data-arg="${o.id}:${p.id}">${icon('check')}تحصّل</button>`); b.push(`<button class="btn xs ghost" data-action="inChequeBounce" data-arg="${o.id}:${p.id}">مرتجع</button>`); } if (p.stage === 'received') b.push(`<button class="btn xs ghost" data-action="inChequeBounce" data-arg="${o.id}:${p.id}">مرفوض</button>`); if (b.length) h += `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${b.join('')}</div>`; }
+      return h + '</div>';
+    }).join('') : `<span class="muted">لم يُستلم شيك بعد</span>`;
+    const inBtn = canCheque() && open ? ` <button class="btn xs ${ins.length ? '' : 'p'}" data-action="inChequeNew" data-arg="${o.id}">${icon('plus')}تسجيل شيك من العميل</button>` : '';
+    const paid = money ? `<div class="tiny muted" style="margin-top:8px">المحصَّل من الشيكات يُحتسب عند «تحصّل» فقط · ${fmtNum(ins.filter(p => p.stage === 'cleared').length)} محصَّل من ${fmtNum(ins.length)}</div>` : '';
+    return `<div class="card" id="contract"><div class="cardhead"><h3>${icon('file')} التعاقد والدفعات</h3><div class="grow"></div><span class="tiny muted">مدير الحسابات يقفل كل خطوة بصورتها</span></div>
+      ${row('مستند التعاقد (عقد / أمر توريد)', cRow + cBtn)}
+      ${row('شيك صحة التوقيع (شيك المصنع للعميل)', ocRow)}
+      ${row('شيكات العميل (الداون بيمنت وباقي الدفعات)' + inBtn, `<div class="list" style="gap:8px">${inRows}</div>${paid}`)}
+    </div>`;
+  }
+  window.contractCard = contractCard;
+  if (typeof orderGateCard === 'function') orderGateCard = (base => function (o) {
+    let html = base.apply(this, arguments);
+    if (html && needsContract(o) && !orderReleased(o)) html = html.replace('<div class="grid g2" style="gap:10px 14px;font-size:13px">', `<div class="grid g2" style="gap:10px 14px;font-size:13px"><div style="grid-column:1/-1"><div class="tiny muted">مستند التعاقد</div>${contractOk(o) ? `<span style="color:var(--good-ink)">✓ ${esc(CONTRACT_KINDS[o.contract.kind] || '')}</span>` : `<span class="muted">مطلوب — يُرفع من كارت «التعاقد والدفعات» تحت</span>`}</div>`);
+    if (html && !orderReleased(o) && html.includes('بانتظار موافقة المالك وتحويل العميل')) html = html.replace('بانتظار موافقة المالك وتحويل العميل', 'بانتظار موافقة المالك وتحويل/شيك العميل');
+    return html + contractCard(o);
+  })(orderGateCard);
+
+  /* ---------- الإجراءات ---------- */
+  const save = (id, patch) => Store.update('orders', id, Object.assign({ gateRequired: true }, patch));
+  ACTIONS.contractSet = id => {
+    const o = byId('orders', id); if (!o || !canContract()) return; const c = o.contract || {};
+    openModal({ title: `مستند التعاقد — ${o.code}`, body: `<div class="form">${field('نوع المستند', `<select id="f-kind" name="kind">${opts(Object.keys(CONTRACT_KINDS).filter(k => k !== 'verbal' || isAdmin()).map(k => ({ id: k, name: CONTRACT_KINDS[k] })), c.kind || 'po')}</select>`)}${field('رقم المستند', inp('no', c.no || ''))}${field('تاريخ المستند', inp('date', c.date || todayISO(), 'type="date"'))}${attachInput('doc', c.fileId ? 'صورة / PDF المستند (اتركه فارغًا للإبقاء على الحالي)' : 'صورة / PDF المستند', false)}${field('ملاحظة', inp('note', c.note || ''), 'full')}<div class="tiny muted full">«تعاقد شفهي» يختاره المالك فقط لو مفيش مستند — ويُعتبر مكتمل للتشغيل.</div></div>`, submitLabel: 'حفظ',
+      onSubmit: async f => {
+        const d = formData(f); const file = pickFile(f, 'doc'); if (!file && !c.fileId && d.kind !== 'verbal') { toast('ارفع صورة أو PDF المستند', 'err'); return false; }
+        let fileId = c.fileId || null; if (file) { try { const att = await attachPriced(file, { kind: 'contract', ownerKind: 'contract', ownerId: id, note: `${o.code} — ${CONTRACT_KINDS[d.kind] || ''} ${d.no || ''}` }); fileId = att.id; } catch (e) { toast(String(e.message || e), 'err'); return false; } }
+        const contract = Object.assign({}, c, { kind: d.kind, no: d.no || '', date: d.date || '', note: d.note || '', fileId }, stamp(), { log: (c.log || []).concat([logLine(c.kind || null, d.kind)]) });
+        await save(id, { contract });
+        const t = byId('tasks', `hr_contract_${id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true });
+        if (!(await releaseCheck(byId('orders', id)))) toast('تم حفظ مستند التعاقد'); else toast('تم حفظ مستند التعاقد — واكتملت شروط التشغيل');
+        await notifyRole('admin', `مستند التعاقد لـ ${o.code} اتحفظ`, `${CONTRACT_KINDS[d.kind] || ''} ${d.no || ''} — ${o.title} · ${me().name || ''}`, { orderId: id, id: `own_contract_${id}` });
+      } });
+  };
+  ACTIONS.outChequeNew = id => {
+    const o = byId('orders', id); if (!o || !canOutCheque()) return; const oc = o.outCheque || {};
+    openModal({ title: `شيك صحة التوقيع — ${o.code}`, body: `<div class="form"><p class="small full muted">الشيك اللي بيصدره المصنع ويُعتمد من البنك (صحة توقيع) ويُسلَّم للعميل مقابل شيك الداون بيمنت.</p>${field('رقم الشيك', inp('chequeNo', oc.chequeNo || '', 'inputmode="numeric"'))}${field('البنك', inp('bank', oc.bank || ''))}${field('تاريخ الشيك', inp('date', oc.date || todayISO(), 'type="date"'))}${attachInput('img', 'صورة الشيك بعد اعتماد البنك (إلزامي)', !oc.imageFileId)}${field('ملاحظة', inp('note', oc.note || ''), 'full')}</div>`, submitLabel: 'حفظ — جاهز للتسليم',
+      onSubmit: async f => {
+        const d = formData(f); const file = pickFile(f, 'img'); if (!file && !oc.imageFileId) { toast('صورة الشيك إلزامية', 'err'); return false; }
+        let imageFileId = oc.imageFileId || null; if (file) { try { const att = await attachPriced(file, { kind: 'cheque_out', ownerKind: 'cheque', ownerId: id, note: `${o.code} — شيك صحة توقيع ${d.chequeNo || ''}` }); imageFileId = att.id; } catch (e) { toast(String(e.message || e), 'err'); return false; } }
+        const outCheque = Object.assign({}, oc, { status: 'ready', chequeNo: d.chequeNo || '', bank: d.bank || '', date: d.date || '', note: d.note || '', imageFileId }, stamp(), { log: (oc.log || []).concat([logLine(oc.status || null, 'ready')]) });
+        await save(id, { outCheque }); toast('تم حفظ شيك صحة التوقيع — جاهز للتسليم');
+        await notifyRole('hr', `شيك صحة التوقيع لـ ${o.code} جاهز للتسليم`, `${o.title} — استلمه من المالك وسلّمه للعميل وارفع إقرار الاستلام من صفحة الأمر.`, { orderId: id, id: `hr_outcheque_${id}`, priority: 'high' });
+      } });
+  };
+  ACTIONS.outChequeDeliver = id => {
+    const o = byId('orders', id); if (!o || !canCheque() || !o.outCheque) return; const oc = o.outCheque;
+    openModal({ title: `تسليم شيك صحة التوقيع للعميل — ${o.code}`, body: `<div class="form">${field('تاريخ التسليم', inp('date', todayISO(), 'type="date"'))}${field('اسم مستلم الشيك عند العميل', inp('receivedByName', '', 'required'))}${attachInput('receipt', 'صورة إقرار استلام الشيك ممضي من العميل (إلزامي)', true)}${field('ملاحظة', inp('note'), 'full')}</div>`, submitLabel: 'تسجيل التسليم',
+      onSubmit: async f => {
+        const d = formData(f); const file = pickFile(f, 'receipt'); if (!file) { toast('صورة إقرار الاستلام إلزامية', 'err'); return false; } if (!d.receivedByName) { toast('اكتب اسم المستلم', 'err'); return false; }
+        let att; try { att = await attachPriced(file, { kind: 'cheque_receipt', ownerKind: 'cheque', ownerId: id, note: `${o.code} — إقرار استلام شيك صحة التوقيع` }); } catch (e) { toast(String(e.message || e), 'err'); return false; }
+        const outCheque = Object.assign({}, oc, { status: 'delivered', deliveredAt: (d.date || todayISO()) + 'T12:00:00.000Z', deliveredBy: me().id || null, deliveredByName: me().name || '', receivedByName: d.receivedByName, receiptFileId: att.id, deliverNote: d.note || '', log: (oc.log || []).concat([logLine('ready', 'delivered', d.note)]) });
+        await save(id, { outCheque }); const t = byId('tasks', `hr_outcheque_${id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true });
+        toast('تم تسجيل تسليم الشيك للعميل');
+        await notifyRole('admin', `شيك صحة التوقيع لـ ${o.code} اتسلّم للعميل`, `استلمه ${d.receivedByName} — ${fmtDate(d.date)} · سلّمه ${me().name || ''}. ${inCheques(o).length ? '' : 'لسه ما اتسجلش شيك الداون بيمنت.'}`, { orderId: id, id: `own_outcheque_${id}` });
+      } });
+  };
+  ACTIONS.outChequeReturn = id => {
+    const o = byId('orders', id); if (!o || !canCheque() || !o.outCheque) return; const oc = o.outCheque;
+    openModal({ title: `استرداد شيك صحة التوقيع — ${o.code}`, body: `<div class="form">${field('تاريخ الاسترداد', inp('date', todayISO(), 'type="date"'))}${attachInput('img', 'صورة الشيك بعد استرداده', false)}${field('ملاحظة', inp('note'), 'full')}</div>`, submitLabel: 'تسجيل الاسترداد',
+      onSubmit: async f => {
+        const d = formData(f); const file = pickFile(f, 'img'); let returnedFileId = null; if (file) { try { const att = await attachPriced(file, { kind: 'cheque_out', ownerKind: 'cheque', ownerId: id, note: `${o.code} — شيك صحة التوقيع بعد الاسترداد` }); returnedFileId = att.id; } catch (e) { toast(String(e.message || e), 'err'); return false; } }
+        await save(id, { outCheque: Object.assign({}, oc, { status: 'returned', returnedAt: (d.date || todayISO()) + 'T12:00:00.000Z', returnedByName: me().name || '', returnedFileId, returnNote: d.note || '', log: (oc.log || []).concat([logLine('delivered', 'returned', d.note)]) }) });
+        toast('تم تسجيل استرداد الشيك');
+      } });
+  };
+  ACTIONS.inChequeNew = id => {
+    const o = byId('orders', id); if (!o || !canCheque()) return; const bal = fin() ? Math.max(0, (+o.value || 0) - orderPaid(o)) : 0;
+    openModal({ title: `تسجيل شيك من العميل — ${o.code}`, body: `<div class="form">${field(`مبلغ الشيك (${CUR()})`, inp('amount', bal > 0 && !inCheques(o).length ? Math.round(bal * 0.5) : '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('رقم الشيك', inp('chequeNo', '', 'inputmode="numeric" required'))}${field('البنك الساحب', inp('bank', '', 'required'))}${field('تاريخ الاستحقاق', inp('dueDate', todayISO(), 'type="date"'))}${field('تاريخ الاستلام', inp('date', todayISO(), 'type="date"'))}${attachInput('front', 'صورة الشيك — الوجه (إلزامي)', true)}${attachInput('back', 'صورة الشيك — الظهر', false)}${field('نوع الدفعة', `<select id="f-ptype" name="ptype">${opts([{ id: 'down', name: 'داون بيمنت (دفعة مقدمة)' }, { id: 'mid', name: 'دفعة قبل التسليم' }, { id: 'final', name: 'دفعة نهائية' }, { id: 'other', name: 'دفعة أخرى' }])}</select>`)}${field('ملاحظة', inp('note'), 'full')}</div>`, submitLabel: 'تسجيل الاستلام',
+      onSubmit: async f => {
+        const d = formData(f); const front = pickFile(f, 'front'), back = pickFile(f, 'back'); if (!num(d.amount)) { toast('أدخل مبلغ الشيك', 'err'); return false; } if (!front) { toast('صورة الشيك (الوجه) إلزامية', 'err'); return false; }
+        const pid = uid(); let imageFileId, backFileId = null;
+        try { imageFileId = (await attachPriced(front, { kind: 'cheque_in', ownerKind: 'payment', ownerId: pid, note: `${o.code} — شيك العميل ${d.chequeNo || ''}` })).id; if (back) backFileId = (await attachPriced(back, { kind: 'cheque_in', ownerKind: 'payment', ownerId: pid, note: `${o.code} — ظهر شيك ${d.chequeNo || ''}` })).id; } catch (e) { toast(String(e.message || e), 'err'); return false; }
+        const p = { id: pid, kind: 'cheque', stage: 'received', ptype: d.ptype || 'down', amount: 0, chequeAmount: num(d.amount), chequeNo: d.chequeNo || '', bank: d.bank || '', dueDate: d.dueDate || '', date: d.date || todayISO(), method: 'شيك', ref: d.chequeNo || '', note: d.note || '', receivedAt: (d.date || todayISO()) + 'T12:00:00.000Z', receivedBy: me().id || null, receivedByName: me().name || '', byName: me().name || '', imageFileId, backFileId, receiptFileId: imageFileId, log: [logLine(null, 'received', d.note)] };
+        const payments = (byId('orders', id).payments || []).filter(x => x && !x._ph).concat([p]);
+        await save(id, { payments });
+        if (!(await releaseCheck(byId('orders', id)))) toast('تم تسجيل استلام الشيك' + (orderApproved(byId('orders', id)) ? '' : ' — بانتظار موافقة المالك'));
+        await notifyRole('admin', `شيك ${fmtMoney(num(d.amount))} ${CUR()} من العميل على ${o.code} — مستلَم`, `${o.title} · رقم ${d.chequeNo || ''} · ${d.bank || ''} · استحقاق ${fmtDate(d.dueDate)} · سجّله ${me().name || ''}`, { orderId: id, id: `own_incheque_${pid}`, priority: 'high' });
+        await notifyRole('hr', `أودع شيك ${o.code} رقم ${d.chequeNo || ''}`, `مستلَم من العميل ${fmtDate(d.date)} — أودعه في البنك وارفع إيصال الإيداع من صفحة الأمر.`, { orderId: id, id: `hr_deposit_${pid}`, dueDate: d.dueDate || null });
+      } });
+  };
+  const withCheque = (arg, fn) => { const [id, pid] = String(arg || '').split(':'); const o = byId('orders', id); if (!o || !canCheque()) return; const p = inCheques(o).find(x => x.id === pid); if (!p) { toast('الشيك غير موجود', 'err'); return; } fn(o, p); };
+  const patchCheque = async (o, pid, patch) => { const payments = (byId('orders', o.id).payments || []).filter(x => x && !x._ph).map(x => x.id === pid ? Object.assign({}, x, patch) : x); await save(o.id, { payments }); };
+  ACTIONS.inChequeDeposit = arg => withCheque(arg, (o, p) => {
+    const accts = acctCfg().accounts || [];
+    openModal({ title: `إيداع شيك العميل رقم ${p.chequeNo || ''} — ${o.code}`, body: `<div class="form">${field('تاريخ الإيداع', inp('date', todayISO(), 'type="date"'))}${field('الحساب المودَع فيه', `<select id="f-acct" name="acct">${opts(accts.filter(a => a.id !== 'cash'), 'bank')}</select>`)}${attachInput('slip', 'صورة إيصال الإيداع (إلزامي)', true)}${field('ملاحظة', inp('note'), 'full')}</div>`, submitLabel: 'تسجيل الإيداع',
+      onSubmit: async f => {
+        const d = formData(f); const file = pickFile(f, 'slip'); if (!file) { toast('صورة إيصال الإيداع إلزامية', 'err'); return false; }
+        let att; try { att = await attachPriced(file, { kind: 'deposit_slip', ownerKind: 'payment', ownerId: p.id, note: `${o.code} — إيصال إيداع شيك ${p.chequeNo || ''}` }); } catch (e) { toast(String(e.message || e), 'err'); return false; }
+        const acct = accts.find(a => a.id === d.acct);
+        await patchCheque(o, p.id, { stage: 'deposited', depositedAt: (d.date || todayISO()) + 'T12:00:00.000Z', depositedBy: me().id || null, depositedByName: me().name || '', depositAccount: acct ? acct.name : (d.acct || ''), account: d.acct || 'bank', depositSlipFileId: att.id, depositNote: d.note || '', log: (p.log || []).concat([logLine('received', 'deposited', d.note)]) });
+        const t = byId('tasks', `hr_deposit_${p.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true });
+        toast('تم تسجيل الإيداع — بانتظار التحصيل');
+        await notifyRole('admin', `تم إيداع شيك ${o.code} رقم ${p.chequeNo || ''}`, `${fmtMoney(p.chequeAmount)} ${CUR()} · ${fmtDate(d.date)} · ${me().name || ''}`, { orderId: o.id, id: `own_deposit_${p.id}` });
+      } });
+  });
+  ACTIONS.inChequeClear = arg => withCheque(arg, (o, p) => {
+    openModal({ title: `تحصيل شيك العميل رقم ${p.chequeNo || ''} — ${o.code}`, body: `<div class="form"><p class="small full muted">بعد ما المبلغ يدخل الحساب فعلًا — من هنا الشيك يُحتسب محصَّلًا في حساب الأمر.</p>${field('تاريخ دخول المبلغ', inp('date', todayISO(), 'type="date"'))}${field(`المبلغ المحصَّل (${CUR()})`, inp('amount', p.chequeAmount, 'type="number" step="any" min="0" inputmode="decimal"'))}${field('ملاحظة', inp('note'), 'full')}</div>`, submitLabel: 'تأكيد التحصيل',
+      onSubmit: async f => {
+        const d = formData(f); const amt = num(d.amount) || +p.chequeAmount || 0; if (!(amt > 0)) { toast('أدخل المبلغ', 'err'); return false; }
+        await patchCheque(o, p.id, { stage: 'cleared', amount: amt, date: d.date || todayISO(), clearedAt: (d.date || todayISO()) + 'T12:00:00.000Z', clearedBy: me().id || null, clearedByName: me().name || '', clearNote: d.note || '', log: (p.log || []).concat([logLine('deposited', 'cleared', d.note)]) });
+        toast('تم التحصيل ✓ — أُضيف للمحصَّل من العميل');
+        await notifyRole('admin', `تحصّل شيك ${o.code} رقم ${p.chequeNo || ''} — ${fmtMoney(amt)} ${CUR()}`, `${o.title} · ${fmtDate(d.date)} · ${me().name || ''}`, { orderId: o.id, id: `own_clear_${p.id}` });
+      } });
+  });
+  ACTIONS.inChequeBounce = arg => withCheque(arg, (o, p) => {
+    openModal({ title: `شيك مرتجع / مرفوض — رقم ${p.chequeNo || ''}`, body: `<div class="form">${field('التاريخ', inp('date', todayISO(), 'type="date"'))}${field('سبب الرفض', inp('note', '', 'required'))}${attachInput('img', 'صورة إفادة البنك', false)}</div>`, submitLabel: 'تسجيل الارتجاع',
+      onSubmit: async f => {
+        const d = formData(f); if (!d.note) { toast('اكتب سبب الرفض', 'err'); return false; } const file = pickFile(f, 'img'); let bounceFileId = null; if (file) { try { bounceFileId = (await attachPriced(file, { kind: 'cheque_in', ownerKind: 'payment', ownerId: p.id, note: `${o.code} — إفادة ارتجاع شيك ${p.chequeNo || ''}` })).id; } catch (e) { toast(String(e.message || e), 'err'); return false; } }
+        await patchCheque(o, p.id, { stage: 'bounced', amount: 0, receiptFileId: null, bouncedAt: (d.date || todayISO()) + 'T12:00:00.000Z', bouncedByName: me().name || '', bounceNote: d.note, bounceFileId, log: (p.log || []).concat([logLine(p.stage, 'bounced', d.note)]) });
+        toast('تم تسجيل الشيك كمرتجع', 'err');
+        await notifyRole('admin', `⚠️ شيك ${o.code} رقم ${p.chequeNo || ''} مرتجع`, `${fmtMoney(p.chequeAmount)} ${CUR()} — ${d.note} · ${me().name || ''}`, { orderId: o.id, id: `own_bounce_${p.id}`, priority: 'urgent' });
+        await notifyRole('hr', `شيك ${o.code} رقم ${p.chequeNo || ''} مرتجع — تابع مع العميل`, d.note, { orderId: o.id, id: `hr_bounce_${p.id}`, priority: 'urgent' });
+      } });
+  });
+
+  /* ---------- الإشعار لمدير الحسابات مع كل أمر جديد (شغلانة اتعاقدت) ---------- */
+  if (typeof orderSavedHook === 'function') orderSavedHook = (base => async function (doc, prev) {
+    const r = await base.apply(this, arguments);
+    try { if (!prev.id && doc && doc.id && needsContract(doc) && !contractOk(doc)) await notifyRole('hr', `شغلانة جديدة متعاقَدة ${doc.code} — ارفع العقد / أمر التوريد`, `${doc.title} · ${clientName(doc.clientId)} — من صفحة الأمر ← «التعاقد والدفعات». ما ينزلش إنتاج قبل المستند وشيك/تحويل العميل وموافقة المالك.`, { orderId: doc.id, id: `hr_contract_${doc.id}`, priority: 'high' }); } catch (e) { console.warn('contract notify', e); }
+    return r;
+  })(orderSavedHook);
+
+  /* ---------- المتحصّلات: الشيك ما يدخلش الخزنة غير لما يتحصّل ---------- */
+  if (typeof receiptsAll === 'function') receiptsAll = (base => function () { return base.apply(this, arguments).filter(r => { const o = byId('orders', r.orderId); const p = o && (o.payments || []).find(x => x && (r.id === o.id + ':' + x.id)); return !(p && p.kind === 'cheque' && p.stage !== 'cleared'); }); })(receiptsAll);
+
+  /* ---------- لوحة الحسابات: كارت المتابعة ---------- */
+  function chequeFollowups() {
+    const out = { outReady: [], inWait: [], inDeposited: [], noContract: [] }; const N = chequeDays();
+    list('orders').filter(o => isOpen(o)).forEach(o => {
+      if (o.outCheque && o.outCheque.status === 'ready') out.outReady.push({ o, days: daysAgo(o.outCheque.at) });
+      inCheques(o).forEach(p => { if (p.stage === 'received') out.inWait.push({ o, p, days: daysAgo(p.receivedAt), late: daysAgo(p.receivedAt) >= N }); else if (p.stage === 'deposited') out.inDeposited.push({ o, p, days: daysAgo(p.depositedAt), late: !!(p.dueDate && p.dueDate < todayISO().slice(0, 10)) && daysAgo(p.depositedAt) >= N }); });
+      if (needsContract(o) && !contractOk(o) && !o.releasedAt) out.noContract.push({ o, days: daysAgo(o.createdAt) });
+    });
+    return out;
+  }
+  window.chequeFollowups = chequeFollowups;
+  function chequeFollowCard() {
+    if (!(isAdmin() || ['hr', 'acc'].includes(role()))) return ''; const f = chequeFollowups(); const money = fin();
+    const li = (x, txt, cls) => `<div class="item" data-action="go" data-arg="orders/${x.o.id}" style="padding:8px 12px${cls ? ';border-color:var(--' + cls + '-ink)' : ''}"><div class="main"><div class="small"><span class="code">${esc(x.o.code)}</span> ${esc(clientName(x.o.clientId))}</div><div class="meta">${txt}</div></div><div class="end"><span class="badge ${cls || ''}">${x.days} يوم</span></div></div>`;
+    const sec = (title, arr, fn) => arr.length ? `<div class="tiny muted" style="margin:8px 0 4px">${title} <b>${arr.length}</b></div><div class="list">${arr.map(fn).join('')}</div>` : '';
+    const total = f.outReady.length + f.inWait.length + f.inDeposited.length + f.noContract.length;
+    return `<div class="card" id="chequefollow"><div class="cardhead"><h3>${icon('file')} متابعة التعاقد والشيكات</h3><div class="grow"></div><span class="muted small">${total ? `${total} بند مفتوح` : 'كله تمام ✓'}</span></div>
+      ${sec('أوامر متعاقَدة بدون مستند تعاقد', sortBy(f.noContract, x => -x.days), x => li(x, 'ارفع العقد / أمر التوريد — الأمر ما ينزلش إنتاج قبله', 'crit'))}
+      ${sec('شيكات صحة توقيع عندنا لم تُسلَّم', sortBy(f.outReady, x => -x.days), x => li(x, `رقم ${esc(x.o.outCheque.chequeNo || '')} · ${esc(x.o.outCheque.bank || '')}`, x.days >= chequeDays() ? 'warn' : ''))}
+      ${sec('شيكات عميل مستلَمة لم تُودَع', sortBy(f.inWait, x => -x.days), x => li(x, `${money ? fmtMoney(x.p.chequeAmount) + ' ' + CUR() + ' · ' : ''}رقم ${esc(x.p.chequeNo || '')} · استحقاق ${fmtDate(x.p.dueDate)}`, x.late ? 'warn' : ''))}
+      ${sec('شيكات مودَعة لم تُحصَّل', sortBy(f.inDeposited, x => -x.days), x => li(x, `${money ? fmtMoney(x.p.chequeAmount) + ' ' + CUR() + ' · ' : ''}رقم ${esc(x.p.chequeNo || '')} · استحقاق ${fmtDate(x.p.dueDate)} · مودَع ${fmtDate((x.p.depositedAt || '').slice(0, 10))}`, x.late ? 'crit' : ''))}
+      ${total ? '' : '<div class="muted small">لا توجد بنود تحتاج تصرفًا — كل الشيكات محصَّلة والعقود مرفوعة.</div>'}
+      <div class="tiny muted" style="margin-top:8px">التنبيه بعد ${chequeDays()} أيام بدون إيداع، أو بعد تاريخ الاستحقاق بدون تحصيل.</div></div>`;
+  }
+  window.chequeFollowCard = chequeFollowCard;
+  if (typeof vAccounts === 'function') vAccounts = (base => function () { const html = base.apply(this, arguments); const card = chequeFollowCard(); if (!card) return html; const m = '<div class="grid gmain" style="margin-top:14px"><div class="stack">'; const i = html.indexOf(m); return i >= 0 ? html.slice(0, i + m.length) + card + html.slice(i + m.length) : html + card; })(vAccounts);
+  /* عدّاد على تبويب الحسابات في القائمة */
+  try { const n = NAV.find(x => x.id === 'accounts'); if (n && !n.count) { n.count = () => { if (!(isAdmin() || ['hr', 'acc'].includes(role()))) return 0; const f = chequeFollowups(); return f.noContract.length + f.outReady.filter(x => x.days >= chequeDays()).length + f.inWait.filter(x => x.late).length + f.inDeposited.filter(x => x.late).length; }; n.countCls = 'warn'; } } catch (e) { /* ignore */ }
+  Object.assign(ATT_KINDS, { contract: 'مستند التعاقد', cheque_out: 'شيك صحة التوقيع', cheque_receipt: 'إقرار استلام الشيك', cheque_in: 'شيك العميل', deposit_slip: 'إيصال الإيداع' });
+})();
+/* =====================================================================
+   v5.61 — صورة المنتج على كارت المنتج في عرض السعر / المشروع من غير ما تفتحه (طلب محمود — 30 سبتمبر)
+   مربع صغير 64×64 بزوايا دائرية على يمين الكارت (الكود + الاسم جنبه)، والضغط عليه بيفتحها كبيرة.
+   لو المنتج ماعندوش صورة: شكل هادي بأيقونة ولون مطفي — والصورة نفسها هي الـ thumbnail المحفوظ (مش الأصلية) علشان اللستة تفتح بسرعة.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PTHUMB__) return; window.__NF_PTHUMB__ = 1;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style id="nf-pthumb">
+.pthumb{flex:none;width:64px;height:64px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,.06);cursor:zoom-in;transition:transform .12s,box-shadow .12s}
+.pthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.pthumb.ph{cursor:default;color:var(--muted);background:linear-gradient(135deg,rgba(127,127,127,.08),rgba(127,127,127,.02))}
+.pthumb.ph svg{width:24px;height:24px;opacity:.55}
+.pthumb:not(.ph):hover{transform:scale(1.04);box-shadow:0 3px 10px rgba(0,0,0,.14)}
+.item:has(>.pthumb){padding:10px 12px}
+</style>`);
+  const thumbHtml = p => { const c = typeof productCover === 'function' ? productCover(p) : null; return c ? `<div class="pthumb" data-action="pthumbOpen" data-arg="${p.id}" data-stop="1" title="${esc(p.name || '')}"><img src="${esc(c)}" alt="" loading="lazy"></div>` : `<div class="pthumb ph" title="لا توجد صورة بعد">${icon('cube')}</div>`; };
+  window.productThumbHtml = thumbHtml;
+  ACTIONS.pthumbOpen = id => { const p = byId('products', id); if (!p) return; const fs = (typeof filesOf === 'function' ? filesOf('product', id) : []).filter(f => f.thumb); const cover = productCover(p); const f = fs.find(x => x.thumb === cover) || fs[0]; if (f && typeof ACTIONS.fileOpen === 'function') ACTIONS.fileOpen(f.id + ':att'); else if (cover && typeof lightbox === 'function') lightbox(cover, p.name || ''); else location.hash = '#/products/' + id; };
+  const RE = /<a class="item" href="#\/products\/([^"]+)"><div class="main">/g;
+  const inject = html => typeof html === 'string' && html.indexOf('href="#/products/') >= 0 ? html.replace(RE, (m, id) => { const p = byId('products', id); return p ? `<a class="item" href="#/products/${id}">${thumbHtml(p)}<div class="main">` : m; }) : html;
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return inject(base.apply(this, arguments)); })(vQuoteDetailBase);
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return inject(base.apply(this, arguments)); })(vOrderDetail);
+  /* الضغط على الصورة ما يفتحش صفحة المنتج (اللينك) — بيفتح الصورة كبيرة */
+  document.addEventListener('click', ev => { const t = ev.target.closest('.pthumb[data-action="pthumbOpen"]'); if (!t) return; ev.preventDefault(); ev.stopPropagation(); ACTIONS.pthumbOpen(t.dataset.arg); }, true);
+})();
+/* =====================================================================
+   v5.62 — ترتيب كارت المنتج في عرض السعر / المشروع (ملاحظة محمود على الصورة — 30 سبتمبر):
+   الكلام كان بيتزنق في عمود ضيق جنب شارة الحالة والسهم. دلوقتي: الصورة يمين (72×72) ← الكود + الشارة في سطر ←
+   اسم المنتج في سطر كامل ← المقاسات سطر رمادي ← حالة التصنيع تحتهم. من غير خطوط تحت الكلام.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PTHUMB2__) return; window.__NF_PTHUMB2__ = 1;
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style id="nf-pthumb2">
+.item.pitem{align-items:flex-start;gap:12px;padding:12px 14px;text-decoration:none!important}
+.item.pitem *{text-decoration:none!important}
+.item.pitem>.pthumb{width:72px;height:72px;margin-top:2px}
+.item.pitem>.main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px}
+.item.pitem .phead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.item.pitem .phead .code{font-size:13px;font-weight:600;letter-spacing:.3px}
+.item.pitem .pname{font-size:15.5px;font-weight:600;line-height:1.35;color:var(--ink)}
+.item.pitem .pdims{font-size:12.5px;color:var(--muted);line-height:1.45}
+.item.pitem .pstage{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.item.pitem .pstage .badge{font-size:11.5px}
+.item.pitem::after{align-self:center}
+</style>`);
+  const RE = /<a class="item" href="#\/products\/([^"]+)">(<div class="pthumb[^>]*>[\s\S]*?<\/div>)<div class="main"><div class="title">([\s\S]*?)<\/div><div class="meta">([\s\S]*?)<\/div><\/div>([\s\S]*?)<\/a>/g;
+  const fix = html => typeof html === 'string' && html.indexOf('class="pthumb') >= 0 ? html.replace(RE, (m, id, thumb, title, meta, rest) => {
+    const p = byId('products', id); if (!p) return m;
+    const kind = typeof pKindBadge === 'function' ? pKindBadge(p) : ''; const qty = (title.match(/<span class="muted">×[^<]*<\/span>/) || [''])[0];
+    const stage = (rest || '').trim();
+    return `<a class="item pitem" href="#/products/${id}">${thumb}<div class="main"><div class="phead"><span class="code">${esc(p.code || '')}</span>${kind}${qty}</div><div class="pname">${esc(p.name || '')}</div>${p.dims ? `<div class="pdims">${esc(p.dims)}</div>` : ''}${stage ? `<div class="pstage">${stage}</div>` : ''}</div></a>`;
+  }) : html;
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return fix(base.apply(this, arguments)); })(vQuoteDetailBase);
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return fix(base.apply(this, arguments)); })(vOrderDetail);
+})();
+/* =====================================================================
+   v5.63 — رسومات المنتجات بتتفتح من المصنع أو موقع المشروع بس («ابدأ» + PIN من محمود — 1 أكتوبر)
+   محمود: «أي رسومات متعلقة بالمنتجات للفنيين ورؤساء الأقسام مش عايزها تفتح غير في لوكيشن المصنع» +
+   «عايز بروتكشن — محدش يشغّل VPN ولا فيك لوكيشن» + «مش عايز رسالة تقوله إنها بتفتح من المصنع بس» +
+   «التركيبات: حط لوكيشن المشروع» + «في المصنع واي فاي، واللي فاتح فور جي تفتح معاه برضه».
+   · مين: رئيس القسم + الموظف (فنيين الأقسام). الملفات: أي ملف على منتج أو أمر تشغيل (رسومات/صور/3D/PDF/لينكات)،
+     مش الإثباتات/التحويلات/البطاقات، ومش اللي الشخص رفعه بنفسه.
+   · قبل الفتح: GPS دقيق (لحد 3 قراءات) ← edge function «fgate» (السيرفر هو اللي بيقرر وبيدّي لينك 60 ثانية).
+     التخزين مقفول عليهم لهذه الملفات (سياسة files_read_gate) — مفيش طريق تاني للملف.
+   · الرفض: «تعذّر تحميل الملف» زي أي مشكلة نت — من غير ذكر السبب. الصورة المصغّرة بتبان أيقونة عادية.
+   · المالك: الإعدادات ← «الرسومات ونت المصنع»: تسجيل IP واي فاي المصنع + آخر المحاولات وأسباب الرفض.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FGATE__) return; window.__NF_FGATE__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const GATED_ROLES = ['head', 'employee'];
+  const FREE_KINDS = ['proof', 'transfer', 'idcard', 'receipt'];
+  const gatedRole = () => !!S.session && !stu() && GATED_ROLES.includes(role()) && typeof sbOn === 'function' && sbOn();
+  const gatedFile = f => !!f && (!!f.productId || !!f.orderId || ['product', 'order'].includes(f.ownerKind)) && !FREE_KINDS.includes(f.kind) && !(f.byId && S.session && f.byId === S.session.id);
+  const needsGate = f => gatedRole() && gatedFile(f);
+  window.nfFileGated = needsGate;
+  const FAIL = 'تعذّر تحميل الملف — حاول تاني';
+  const cache = new Map(); /* fileId → {url, exp} */
+
+  function readPos(timeout) {
+    return new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      let done = false; const fin = v => { if (!done) { done = true; res(v); } };
+      setTimeout(() => fin(null), timeout + 400);
+      navigator.geolocation.getCurrentPosition(p => fin({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: p.timestamp || Date.now() }), () => fin(null), { enableHighAccuracy: true, maximumAge: 0, timeout });
+    });
+  }
+  async function bestPos() {
+    let best = null; const t0 = Date.now();
+    for (let i = 0; i < 3 && Date.now() - t0 < 12000; i++) {
+      const p = await readPos(i ? 4000 : 8000); if (!p) continue;
+      if (!best || p.acc < best.acc) best = p;
+      if (best.acc <= 15) break;
+    }
+    return best;
+  }
+  async function callGate(body) {
+    if (!S.sb || !S.sb.functions) return null;
+    try { const r = await S.sb.functions.invoke('fgate', { body }); if (r.error) return null; return r.data || null; } catch (e) { return null; }
+  }
+  const inflight = new Map();
+  async function gate(f) {
+    const c = cache.get(f.id); if (c && c.exp > Date.now()) return c;
+    if (inflight.has(f.id)) return inflight.get(f.id);
+    const run = (async () => {
+      const pos = await bestPos();
+      const r = await callGate({ action: 'open', fileId: f.id, pos: pos || {}, now: Date.now() });
+      if (!r || !r.ok) return null;
+      const v = { ok: true, url: r.url || null, exp: Date.now() + 50000 }; cache.set(f.id, v); return v;
+    })();
+    inflight.set(f.id, run); try { return await run; } finally { inflight.delete(f.id); }
+  }
+  window.nfFileGate = gate;
+
+  /* ---------- storage access goes through the gate ---------- */
+  if (typeof Files !== 'undefined') {
+    const url0 = Files.url, blob0 = Files.blob;
+    Files.url = async f => { if (!needsGate(f)) return url0(f); const g = await gate(f); if (!g) return null; return g.url || (f.store === 'link' ? f.url : null) || url0(f).catch(() => null); };
+    Files.blob = async f => { if (!needsGate(f)) return blob0(f); const g = await gate(f); if (!g) throw new Error(FAIL); if (!g.url) return blob0(f); const r = await fetch(g.url); if (!r.ok) throw new Error(FAIL); return await r.blob(); };
+  }
+  /* ---------- opening a file: check first, no hint about why ---------- */
+  if (ACTIONS.fileOpen) ACTIONS.fileOpen = (base => async function (arg) {
+    const f = byId('files', String(arg || '').split(':')[0]);
+    if (!needsGate(f)) return base.apply(this, arguments);
+    const tile = document.querySelector(`[data-action="fileOpen"][data-arg^="${CSS.escape(f.id)}"]`); if (tile) tile.classList.add('fgbusy');
+    let g = null; try { g = await gate(f); } finally { if (tile) tile.classList.remove('fgbusy'); }
+    if (!g) { toast(FAIL, 'err'); return; }
+    return base.apply(this, arguments);
+  })(ACTIONS.fileOpen);
+  /* ---------- thumbnails: plain icon for gated files ---------- */
+  if (typeof fileTile === 'function') fileTile = (base => function (f, ctx) {
+    if (!needsGate(f) || !f.thumb) return base.apply(this, arguments);
+    return base.call(this, Object.assign({}, f, { thumb: null, thumbTried: true }), ctx);
+  })(fileTile);
+  /* ---------- product picture on the project/quote product cards (v5.61 from the chat session): plain icon, opening goes through the gate ---------- */
+  const PTH = /<div class="pthumb" (data-action="pthumbOpen" data-arg="[^"]*" data-stop="1" title="[^"]*")><img [^>]*><\/div>/g;
+  const hidePth = html => (typeof html === 'string' && gatedRole() && html.indexOf('class="pthumb"') >= 0) ? html.replace(PTH, (m, attrs) => `<div class="pthumb ph" ${attrs}>${icon('cube')}</div>`) : html;
+  window.__nfHidePth = hidePth;
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return hidePth(base.apply(this, arguments)); })(vOrderDetail);
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return hidePth(base.apply(this, arguments)); })(vQuoteDetailBase);
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>.ftile.fgbusy{opacity:.55;pointer-events:none}.ftile.fgbusy .fthumb::after{content:"";position:absolute;inset:auto;width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent,#3b82f6);border-radius:50%;animation:fgspin .8s linear infinite}.ftile .fthumb{position:relative;display:flex;align-items:center;justify-content:center}@keyframes fgspin{to{transform:rotate(360deg)}}
+.fgips td,.fgips th{font-size:12.5px}.fglog .bad{color:var(--crit-ink)}.fglog .good{color:var(--good-ink)}</style>`);
+
+  /* ---------- owner settings: factory network + attempts log ---------- */
+  const RLABEL = { vpn: 'VPN/بروكسي', country: 'نت من برّه مصر', replay: 'GPS مزيف (نفس الإحداثيات)', jump: 'نطّة مستحيلة', acc_fake: 'دقة مش طبيعية', outside: 'برّه المكان', acc: 'GPS ضعيف', stale: 'موقع قديم', nopos: 'من غير موقع', iplookup: 'فحص النت فشل', cad: 'ملف مصدر' };
+  let ipsState = null, logState = null;
+  async function loadFg() {
+    const r = await callGate({ action: 'ips' }); ipsState = r && r.ok ? r : { list: [], ip: '' };
+    try { const { data } = await S.sb.from('nf_fgate').select('at,name,role,file_name,net,zone,ok,reasons,acc').order('at', { ascending: false }).limit(40); logState = (data || []).filter(x => x && x.at); } catch (e) { logState = []; }
+    if (S.route && S.route.view === 'settings') render(false);
+  }
+  if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.fgate = { label: 'الرسومات ونت المصنع', render: () => {
+    if (!isAdmin()) return '<div class="empty">للمالك بس</div>';
+    if (!ipsState) { setTimeout(loadFg, 0); return '<div class="card"><div class="muted">بيحمّل…</div></div>'; }
+    const ips = ipsState.list || [];
+    return `<div class="card"><h3>نت المصنع (الواي فاي)</h3><p class="small ink2" style="margin:6px 0 10px">رسومات المنتجات لرؤساء الأقسام والفنيين بتفتح بس من المصنع (واي فاي المصنع أو فور جي جوه نطاق المصنع) أو من موقع مشروع مفتوح لفرق التركيبات. افتح الصفحة دي وإنت على واي فاي المصنع ودوس «سجّل نت المصنع» — لو فيه أكتر من راوتر/خط، سجّل كل واحد.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn p" data-action="fgRegIp">${icon('plus')}سجّل نت المصنع (أنا على الواي فاي دلوقتي)</button><span class="tiny muted">النت اللي إنت عليه دلوقتي: <b class="ltr">${esc(ipsState.ip || '—')}</b>${ips.some(x => x.ip === ipsState.ip) ? ' <span class="badge good">متسجّل ✓</span>' : ''}</span></div>
+      ${ips.length ? `<div class="tablewrap" style="margin-top:10px"><table class="fgips"><thead><tr><th>النت</th><th>الاسم</th><th>اتسجّل</th><th></th></tr></thead><tbody>${ips.map(x => `<tr><td class="ltr">${esc(x.ip)}</td><td>${esc(x.label || '')}${x.asn ? ` <span class="tiny muted">${esc(x.asn)}</span>` : ''}</td><td>${x.at ? fmtDate(String(x.at).slice(0, 10)) : ''}</td><td><button class="btn xs ghost" data-action="fgDelIp" data-arg="${esc(x.ip)}">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="banner warn" style="margin-top:10px">لسه مفيش نت مصنع متسجّل — لحد ما تسجّله، الرسومات في المصنع بتفتح بالفور جي/الداتا بس (بالفحص الكامل).</div>'}</div>
+      <div class="card fglog"><div class="cardhead"><h3>آخر محاولات فتح الرسومات</h3><div class="grow"></div><button class="btn xs" data-action="fgReload">${icon('arrow')}تحديث</button></div>${(logState || []).length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>الشخص</th><th>الملف</th><th>النت</th><th>المكان</th><th>النتيجة</th></tr></thead><tbody>${logState.map(x => `<tr><td class="ltr tiny">${esc(new Date(x.at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</td><td>${esc(x.name || '')}</td><td class="small">${esc(x.file_name || '')}</td><td class="tiny">${x.net === 'wifi' ? 'واي فاي المصنع' : x.net === 'mobile' ? 'موبايل' : esc(x.net || '—')}</td><td class="tiny">${x.zone === 'factory' ? 'المصنع' : x.zone ? esc(String(x.zone).replace('site:', 'موقع ')) : '—'}${x.acc != null ? ` · ±${Math.round(x.acc)}م` : ''}</td><td class="${x.ok ? 'good' : 'bad'} small">${x.ok ? '✓ اتفتح' : '✗ ' + (x.reasons || []).map(r => RLABEL[r] || r).join('، ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">مفيش محاولات لسه</div>'}</div>`;
+  } };
+  ACTIONS.fgReload = () => { ipsState = null; render(false); };
+  ACTIONS.fgRegIp = async () => {
+    if (!isAdmin()) return; const label = 'واي فاي المصنع' + ((ipsState && (ipsState.list || []).length) ? ' ' + ((ipsState.list || []).length + 1) : '');
+    const r = await callGate({ action: 'regip', label });
+    if (r && r.ok) { toast(`اتسجّل نت المصنع ${r.ip}`); ipsState = r; render(false); }
+    else toast(r && r.error === 'vpn' ? 'إنت فاتح VPN — اقفله وجرّب تاني' : 'مقدرتش أسجّل النت — جرّب تاني', 'err');
+  };
+  ACTIONS.fgDelIp = async ip => { if (!isAdmin() || !(await confirmDlg(`تشيل ${ip} من نت المصنع؟`, 'شيل', true))) return; const r = await callGate({ action: 'delip', ip }); if (r && r.ok) { ipsState = r; render(false); } };
 })();
 </script>
 

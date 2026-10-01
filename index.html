@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20260930-2245-64e724";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-0446-47bc49";</script>
 
 <script>
 'use strict';
@@ -23970,6 +23970,120 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   }) : html;
   if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return fix(base.apply(this, arguments)); })(vQuoteDetailBase);
   if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return fix(base.apply(this, arguments)); })(vOrderDetail);
+})();
+/* =====================================================================
+   v5.63 — رسومات المنتجات بتتفتح من المصنع أو موقع المشروع بس («ابدأ» + PIN من محمود — 1 أكتوبر)
+   محمود: «أي رسومات متعلقة بالمنتجات للفنيين ورؤساء الأقسام مش عايزها تفتح غير في لوكيشن المصنع» +
+   «عايز بروتكشن — محدش يشغّل VPN ولا فيك لوكيشن» + «مش عايز رسالة تقوله إنها بتفتح من المصنع بس» +
+   «التركيبات: حط لوكيشن المشروع» + «في المصنع واي فاي، واللي فاتح فور جي تفتح معاه برضه».
+   · مين: رئيس القسم + الموظف (فنيين الأقسام). الملفات: أي ملف على منتج أو أمر تشغيل (رسومات/صور/3D/PDF/لينكات)،
+     مش الإثباتات/التحويلات/البطاقات، ومش اللي الشخص رفعه بنفسه.
+   · قبل الفتح: GPS دقيق (لحد 3 قراءات) ← edge function «fgate» (السيرفر هو اللي بيقرر وبيدّي لينك 60 ثانية).
+     التخزين مقفول عليهم لهذه الملفات (سياسة files_read_gate) — مفيش طريق تاني للملف.
+   · الرفض: «تعذّر تحميل الملف» زي أي مشكلة نت — من غير ذكر السبب. الصورة المصغّرة بتبان أيقونة عادية.
+   · المالك: الإعدادات ← «الرسومات ونت المصنع»: تسجيل IP واي فاي المصنع + آخر المحاولات وأسباب الرفض.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FGATE__) return; window.__NF_FGATE__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const GATED_ROLES = ['head', 'employee'];
+  const FREE_KINDS = ['proof', 'transfer', 'idcard', 'receipt'];
+  const gatedRole = () => !!S.session && !stu() && GATED_ROLES.includes(role()) && typeof sbOn === 'function' && sbOn();
+  const gatedFile = f => !!f && (!!f.productId || !!f.orderId || ['product', 'order'].includes(f.ownerKind)) && !FREE_KINDS.includes(f.kind) && !(f.byId && S.session && f.byId === S.session.id);
+  const needsGate = f => gatedRole() && gatedFile(f);
+  window.nfFileGated = needsGate;
+  const FAIL = 'تعذّر تحميل الملف — حاول تاني';
+  const cache = new Map(); /* fileId → {url, exp} */
+
+  function readPos(timeout) {
+    return new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      let done = false; const fin = v => { if (!done) { done = true; res(v); } };
+      setTimeout(() => fin(null), timeout + 400);
+      navigator.geolocation.getCurrentPosition(p => fin({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: p.timestamp || Date.now() }), () => fin(null), { enableHighAccuracy: true, maximumAge: 0, timeout });
+    });
+  }
+  async function bestPos() {
+    let best = null; const t0 = Date.now();
+    for (let i = 0; i < 3 && Date.now() - t0 < 12000; i++) {
+      const p = await readPos(i ? 4000 : 8000); if (!p) continue;
+      if (!best || p.acc < best.acc) best = p;
+      if (best.acc <= 15) break;
+    }
+    return best;
+  }
+  async function callGate(body) {
+    if (!S.sb || !S.sb.functions) return null;
+    try { const r = await S.sb.functions.invoke('fgate', { body }); if (r.error) return null; return r.data || null; } catch (e) { return null; }
+  }
+  const inflight = new Map();
+  async function gate(f) {
+    const c = cache.get(f.id); if (c && c.exp > Date.now()) return c;
+    if (inflight.has(f.id)) return inflight.get(f.id);
+    const run = (async () => {
+      const pos = await bestPos();
+      const r = await callGate({ action: 'open', fileId: f.id, pos: pos || {}, now: Date.now() });
+      if (!r || !r.ok) return null;
+      const v = { ok: true, url: r.url || null, exp: Date.now() + 50000 }; cache.set(f.id, v); return v;
+    })();
+    inflight.set(f.id, run); try { return await run; } finally { inflight.delete(f.id); }
+  }
+  window.nfFileGate = gate;
+
+  /* ---------- storage access goes through the gate ---------- */
+  if (typeof Files !== 'undefined') {
+    const url0 = Files.url, blob0 = Files.blob;
+    Files.url = async f => { if (!needsGate(f)) return url0(f); const g = await gate(f); if (!g) return null; return g.url || (f.store === 'link' ? f.url : null) || url0(f).catch(() => null); };
+    Files.blob = async f => { if (!needsGate(f)) return blob0(f); const g = await gate(f); if (!g) throw new Error(FAIL); if (!g.url) return blob0(f); const r = await fetch(g.url); if (!r.ok) throw new Error(FAIL); return await r.blob(); };
+  }
+  /* ---------- opening a file: check first, no hint about why ---------- */
+  if (ACTIONS.fileOpen) ACTIONS.fileOpen = (base => async function (arg) {
+    const f = byId('files', String(arg || '').split(':')[0]);
+    if (!needsGate(f)) return base.apply(this, arguments);
+    const tile = document.querySelector(`[data-action="fileOpen"][data-arg^="${CSS.escape(f.id)}"]`); if (tile) tile.classList.add('fgbusy');
+    let g = null; try { g = await gate(f); } finally { if (tile) tile.classList.remove('fgbusy'); }
+    if (!g) { toast(FAIL, 'err'); return; }
+    return base.apply(this, arguments);
+  })(ACTIONS.fileOpen);
+  /* ---------- thumbnails: plain icon for gated files ---------- */
+  if (typeof fileTile === 'function') fileTile = (base => function (f, ctx) {
+    if (!needsGate(f) || !f.thumb) return base.apply(this, arguments);
+    return base.call(this, Object.assign({}, f, { thumb: null, thumbTried: true }), ctx);
+  })(fileTile);
+  /* ---------- product picture on the project/quote product cards (v5.61 from the chat session): plain icon, opening goes through the gate ---------- */
+  const PTH = /<div class="pthumb" (data-action="pthumbOpen" data-arg="[^"]*" data-stop="1" title="[^"]*")><img [^>]*><\/div>/g;
+  const hidePth = html => (typeof html === 'string' && gatedRole() && html.indexOf('class="pthumb"') >= 0) ? html.replace(PTH, (m, attrs) => `<div class="pthumb ph" ${attrs}>${icon('cube')}</div>`) : html;
+  window.__nfHidePth = hidePth;
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function () { return hidePth(base.apply(this, arguments)); })(vOrderDetail);
+  if (typeof vQuoteDetailBase === 'function') vQuoteDetailBase = (base => function () { return hidePth(base.apply(this, arguments)); })(vQuoteDetailBase);
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>.ftile.fgbusy{opacity:.55;pointer-events:none}.ftile.fgbusy .fthumb::after{content:"";position:absolute;inset:auto;width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent,#3b82f6);border-radius:50%;animation:fgspin .8s linear infinite}.ftile .fthumb{position:relative;display:flex;align-items:center;justify-content:center}@keyframes fgspin{to{transform:rotate(360deg)}}
+.fgips td,.fgips th{font-size:12.5px}.fglog .bad{color:var(--crit-ink)}.fglog .good{color:var(--good-ink)}</style>`);
+
+  /* ---------- owner settings: factory network + attempts log ---------- */
+  const RLABEL = { vpn: 'VPN/بروكسي', country: 'نت من برّه مصر', replay: 'GPS مزيف (نفس الإحداثيات)', jump: 'نطّة مستحيلة', acc_fake: 'دقة مش طبيعية', outside: 'برّه المكان', acc: 'GPS ضعيف', stale: 'موقع قديم', nopos: 'من غير موقع', iplookup: 'فحص النت فشل', cad: 'ملف مصدر' };
+  let ipsState = null, logState = null;
+  async function loadFg() {
+    const r = await callGate({ action: 'ips' }); ipsState = r && r.ok ? r : { list: [], ip: '' };
+    try { const { data } = await S.sb.from('nf_fgate').select('at,name,role,file_name,net,zone,ok,reasons,acc').order('at', { ascending: false }).limit(40); logState = (data || []).filter(x => x && x.at); } catch (e) { logState = []; }
+    if (S.route && S.route.view === 'settings') render(false);
+  }
+  if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.fgate = { label: 'الرسومات ونت المصنع', render: () => {
+    if (!isAdmin()) return '<div class="empty">للمالك بس</div>';
+    if (!ipsState) { setTimeout(loadFg, 0); return '<div class="card"><div class="muted">بيحمّل…</div></div>'; }
+    const ips = ipsState.list || [];
+    return `<div class="card"><h3>نت المصنع (الواي فاي)</h3><p class="small ink2" style="margin:6px 0 10px">رسومات المنتجات لرؤساء الأقسام والفنيين بتفتح بس من المصنع (واي فاي المصنع أو فور جي جوه نطاق المصنع) أو من موقع مشروع مفتوح لفرق التركيبات. افتح الصفحة دي وإنت على واي فاي المصنع ودوس «سجّل نت المصنع» — لو فيه أكتر من راوتر/خط، سجّل كل واحد.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn p" data-action="fgRegIp">${icon('plus')}سجّل نت المصنع (أنا على الواي فاي دلوقتي)</button><span class="tiny muted">النت اللي إنت عليه دلوقتي: <b class="ltr">${esc(ipsState.ip || '—')}</b>${ips.some(x => x.ip === ipsState.ip) ? ' <span class="badge good">متسجّل ✓</span>' : ''}</span></div>
+      ${ips.length ? `<div class="tablewrap" style="margin-top:10px"><table class="fgips"><thead><tr><th>النت</th><th>الاسم</th><th>اتسجّل</th><th></th></tr></thead><tbody>${ips.map(x => `<tr><td class="ltr">${esc(x.ip)}</td><td>${esc(x.label || '')}${x.asn ? ` <span class="tiny muted">${esc(x.asn)}</span>` : ''}</td><td>${x.at ? fmtDate(String(x.at).slice(0, 10)) : ''}</td><td><button class="btn xs ghost" data-action="fgDelIp" data-arg="${esc(x.ip)}">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="banner warn" style="margin-top:10px">لسه مفيش نت مصنع متسجّل — لحد ما تسجّله، الرسومات في المصنع بتفتح بالفور جي/الداتا بس (بالفحص الكامل).</div>'}</div>
+      <div class="card fglog"><div class="cardhead"><h3>آخر محاولات فتح الرسومات</h3><div class="grow"></div><button class="btn xs" data-action="fgReload">${icon('arrow')}تحديث</button></div>${(logState || []).length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>الشخص</th><th>الملف</th><th>النت</th><th>المكان</th><th>النتيجة</th></tr></thead><tbody>${logState.map(x => `<tr><td class="ltr tiny">${esc(new Date(x.at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</td><td>${esc(x.name || '')}</td><td class="small">${esc(x.file_name || '')}</td><td class="tiny">${x.net === 'wifi' ? 'واي فاي المصنع' : x.net === 'mobile' ? 'موبايل' : esc(x.net || '—')}</td><td class="tiny">${x.zone === 'factory' ? 'المصنع' : x.zone ? esc(String(x.zone).replace('site:', 'موقع ')) : '—'}${x.acc != null ? ` · ±${Math.round(x.acc)}م` : ''}</td><td class="${x.ok ? 'good' : 'bad'} small">${x.ok ? '✓ اتفتح' : '✗ ' + (x.reasons || []).map(r => RLABEL[r] || r).join('، ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">مفيش محاولات لسه</div>'}</div>`;
+  } };
+  ACTIONS.fgReload = () => { ipsState = null; render(false); };
+  ACTIONS.fgRegIp = async () => {
+    if (!isAdmin()) return; const label = 'واي فاي المصنع' + ((ipsState && (ipsState.list || []).length) ? ' ' + ((ipsState.list || []).length + 1) : '');
+    const r = await callGate({ action: 'regip', label });
+    if (r && r.ok) { toast(`اتسجّل نت المصنع ${r.ip}`); ipsState = r; render(false); }
+    else toast(r && r.error === 'vpn' ? 'إنت فاتح VPN — اقفله وجرّب تاني' : 'مقدرتش أسجّل النت — جرّب تاني', 'err');
+  };
+  ACTIONS.fgDelIp = async ip => { if (!isAdmin() || !(await confirmDlg(`تشيل ${ip} من نت المصنع؟`, 'شيل', true))) return; const r = await callGate({ action: 'delip', ip }); if (r && r.ok) { ipsState = r; render(false); } };
 })();
 </script>
 
