@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261001-1345-f59c97";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261001-1403-db0329";</script>
 
 <script>
 'use strict';
@@ -23725,7 +23725,12 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   const stamp = () => ({ at: nowISO(), by: me().id || null, byName: me().name || '' });
   const daysAgo = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : 0;
   const fin = () => typeof seesFinance === 'function' && seesFinance();
-  const canContract = () => writable() && (isAdmin() || ['hr', 'office'].includes(role()) || canDo('sales'));
+  const canContract = () => writable() && (isAdmin() || ['hr', 'bdd'].includes(role()));
+  /* v5.77 (PIN اتأكد): التعاقدات والدفعات للمالك + مدير الحسابات (hr) + آلاء (bdd) بس — الباقي يشوف «معتمد للتشغيل» أو لأ */
+  const seeContract = () => !!S.session && (isAdmin() || ['hr', 'bdd'].includes(role()));
+  window.nfSeeContract = seeContract;
+  /* شارة حالة الاعتماد في القوائم/الصفحات: من غير ذكر تحويل/شيك لغير المصرّح لهم */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (seeContract()) return; document.querySelectorAll('.badge').forEach(b => { if (/تحويل|شيك|حوالة/.test(b.textContent) && /موافقة المالك|بانتظار|مسجّل/.test(b.textContent)) b.textContent = 'لسه مش معتمد للتشغيل'; }); });
   const canCheque = () => writable() && (isAdmin() || role() === 'hr'); /* الفلوس (payments) السيرفر بيقبلها من المالك/مدير الحسابات بس (v4.80) */
   const canOutCheque = () => writable() && (isAdmin() || role() === 'hr');
   const needsContract = o => contractGate() && !!o.createdAt && o.createdAt >= SINCE;
@@ -23788,6 +23793,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   }
   window.contractCard = contractCard;
   if (typeof orderGateCard === 'function') orderGateCard = (base => function (o) {
+    if (!seeContract()) { if (!o || o.status === 'cancelled' || (typeof gateRequired === 'function' && !gateRequired())) return ''; const rel = orderReleased(o); return `<div class="card" style="border-inline-start:4px solid var(--${rel ? 'good' : 'warn'}-ink)"><div class="cardhead"><h3>اعتماد التشغيل</h3><div class="grow"></div><span class="badge ${rel ? 'good' : 'warn'}">${rel ? '✓ معتمد للتشغيل' : 'لسه مش معتمد'}</span></div>${rel ? '' : '<div class="tiny muted">الأمر بيبدأ في الأقسام بعد ما يتعتمد للتشغيل.</div>'}</div>`; }
     let html = base.apply(this, arguments);
     if (html && needsContract(o) && !orderReleased(o)) html = html.replace('<div class="grid g2" style="gap:10px 14px;font-size:13px">', `<div class="grid g2" style="gap:10px 14px;font-size:13px"><div style="grid-column:1/-1"><div class="tiny muted">مستند التعاقد</div>${contractOk(o) ? `<span style="color:var(--good-ink)">✓ ${esc(CONTRACT_KINDS[o.contract.kind] || '')}</span>` : `<span class="muted">مطلوب — يُرفع من كارت «التعاقد والدفعات» تحت</span>`}</div>`);
     if (html && !orderReleased(o) && html.includes('بانتظار موافقة المالك وتحويل العميل')) html = html.replace('بانتظار موافقة المالك وتحويل العميل', 'بانتظار موافقة المالك وتحويل/شيك العميل');
@@ -23913,7 +23919,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   }
   window.chequeFollowups = chequeFollowups;
   function chequeFollowCard() {
-    if (!(isAdmin() || ['hr', 'acc'].includes(role()))) return ''; const f = chequeFollowups(); const money = fin();
+    if (!(isAdmin() || role() === 'hr')) return ''; const f = chequeFollowups(); const money = fin();
     const li = (x, txt, cls) => `<div class="item" data-action="go" data-arg="orders/${x.o.id}" style="padding:8px 12px${cls ? ';border-color:var(--' + cls + '-ink)' : ''}"><div class="main"><div class="small"><span class="code">${esc(x.o.code)}</span> ${esc(clientName(x.o.clientId))}</div><div class="meta">${txt}</div></div><div class="end"><span class="badge ${cls || ''}">${x.days} يوم</span></div></div>`;
     const sec = (title, arr, fn) => arr.length ? `<div class="tiny muted" style="margin:8px 0 4px">${title} <b>${arr.length}</b></div><div class="list">${arr.map(fn).join('')}</div>` : '';
     const total = f.outReady.length + f.inWait.length + f.inDeposited.length + f.noContract.length;
