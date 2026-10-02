@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-0551-f233fd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-0617-c57711";</script>
 
 <script>
 'use strict';
@@ -24542,7 +24542,9 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
    ===================================================================== */
 (function () {
   if (window.__NF_ULAYOUT__) return; window.__NF_ULAYOUT__ = 1;
-  const prefs = () => { const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; return (w && w.uiPrefs && typeof w.uiPrefs === 'object') ? w.uiPrefs : null; };
+  /* v5.98: المالك (من غير uiPrefs) بياخد نفس CRM آلاء للتلات براندات: تابات بالترتيب + مجموعة لكل براند في القائمة */
+  const OWNER_PREFS = { crmTabs: true, ownerCrm: true };
+  const prefs = () => { const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; if (w && w.uiPrefs && typeof w.uiPrefs === 'object') return w.uiPrefs; if (S.session && typeof isAdmin === 'function' && isAdmin() && !S.viewOrig && !(typeof isStuSys === 'function' && isStuSys())) return OWNER_PREFS; return null; };
   window.nfUiPrefs = prefs;
   document.head.insertAdjacentHTML('beforeend', '<style>.side .brand.ubrand{display:flex;justify-content:center;padding:10px 6px 14px;color:#fff}.side .brand.ubrand svg{height:58px;width:auto;display:block}</style>');
 
@@ -24576,7 +24578,9 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return `<div class="card"><div class="cardhead"><h3>عملاء ${esc(brandKit(b).name)}</h3><span class="muted small">${cs.length}</span><div class="grow"></div>${typeof ACTIONS.clientNew === 'function' ? `<button class="btn sm" data-action="clientNew">${icon('plus')}عميل</button>` : ''}</div><div class="list">${cs.map(c => { const nq = qs.filter(q => q.clientId === c.id).length, no = os.filter(o => o.clientId === c.id).length; return `<a class="item ${window.nfCavRow ? 'cavrow' : ''}" href="#/clients/${c.id}" style="${typeof nfCavHue === 'function' ? nfCavHue(c) : ''}">${typeof nfCav === 'function' ? nfCav(c) : ''}<div class="main"><div class="title"><b>${esc(c.name || '')}</b></div><div class="meta">${c.contact ? `<span>${esc(c.contact)}</span>` : ''}${c.phone ? `<span class="ltr">${esc(c.phone)}</span>` : ''}<span>${nq} عرض سعر</span><span>${no} أمر تشغيل</span></div></div></a>`; }).join('') || '<div class="muted small">مفيش عملاء لسه</div>'}</div></div>`;
   }
   if (typeof vCrmBrand === 'function') vCrmBrand = (base => function (b) {
-    const p = prefs(); if (!p || !p.crmTabs || S.route.id) return base.apply(this, arguments);
+    const p = prefs(); const TK = TABS.map(t => t[0]);
+    if (p && p.crmTabs && S.route.id && TK.includes(S.route.id)) { (S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' }).tab = S.route.id; S.route.id = null; try { history.replaceState(null, '', '#/' + S.route.view); } catch (e) { /* ignore */ } }
+    if (!p || !p.crmTabs || S.route.id) return base.apply(this, arguments);
     const f = S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' };
     if (OWN.includes(f.tab)) { S.ui.crmBrand = b; const body = f.tab === 'status' ? (typeof window.nfProjStatusBody === 'function' ? window.nfProjStatusBody(b) : '') : f.tab === 'quotes' ? quotesBody(b) : f.tab === 'invoices' ? (typeof crmInvoicesCard === 'function' ? crmInvoicesCard(b).replace('style="margin-top:14px"', '') : '') : clientsBody(b); return `<div class="crmb" style="${brandVars(b)}">${crmHeader(b)}${tabsHTML(f)}${body}</div>`; }
     let html = base.apply(this, arguments);
@@ -24584,11 +24588,36 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return html;
   })(vCrmBrand);
 
+  /* v5.98: #/crm-<b>/<tab> (من القائمة) = افتح التاب ده جوه CRM البراند — بيتظبط قبل العنوان والرسم */
+  if (typeof parseRoute === 'function') parseRoute = (base => function () { const r = base.apply(this, arguments); try { const p = prefs(); const TK = TABS.map(t => t[0]); if (p && p.crmTabs && /^crm-/.test(S.route.view || '') && S.route.id && TK.includes(S.route.id)) { (S.ui.filter.crm ||= { tab: 'board', q: '', owner: '' }).tab = S.route.id; S.route.id = null; history.replaceState(null, '', '#/' + S.route.view); } } catch (e) { /* ignore */ } return r; })(parseRoute);
+  /* ---------- 3b) v5.98 قائمة المالك: مجموعة «المبيعات» بتتقسم مكانها لمجموعة لكل CRM براند (المبيعات · العملاء · عروض الأسعار · الفواتير)
+     جوه CRM البراند نفسه، والصفحات العامة (كل البراندات) تحت في «كل البراندات». ---------- */
+  const OWNER_ITEMS = [['board', 'المبيعات', 'board'], ['clist', 'العملاء', 'clients'], ['quotes', 'عروض الأسعار', 'quote'], ['invoices', 'الفواتير', 'money']];
+  function ownerNav(html) {
+    const brands = (S.settings && S.settings.brands) || []; if (!brands.length || typeof CRM_VIEW !== 'function') return html;
+    const v = S.route.view, rid = S.route.id || ''; const TK = OWNER_ITEMS.map(x => x[0]);
+    const cur = TK.includes(rid) ? rid : (!rid ? ((S.ui.filter.crm || {}).tab || 'board') : '');
+    const groups = brands.filter(b => typeof canSee !== 'function' || canSee(CRM_VIEW(b.id))).map(b => { const cv = CRM_VIEW(b.id);
+      return `<div class="grp">CRM — ${esc(brandKit(b.id).name)}</div>` + OWNER_ITEMS.filter(([k]) => k !== 'invoices' || typeof canSee !== 'function' || canSee('invoices')).map(([k, l, ic]) => `<a href="#/${cv}/${k}" class="${v === cv && cur === k ? 'on' : ''}" data-action="navgo" data-crmtab="${k}">${icon(ic)}<span>${l}</span></a>`).join(''); }).join('');
+    const ALL = ['clients', 'quotes', 'invoices', 'cimport'];
+    const toks = []; const tail = html.replace(/<div class="grp">([^<]*)<\/div>|<a href="#\/([^"]*)"[\s\S]*?<\/a>/g, (m, g, id) => { toks.push(g !== undefined ? { grp: g.replace(/&amp;/g, '&'), m } : { id, m }); return ''; });
+    const allBr = toks.filter(t => t.id && ALL.includes(t.id.split('/')[0])).sort((x, y) => ALL.indexOf(x.id.split('/')[0]) - ALL.indexOf(y.id.split('/')[0])).map(t => t.m).join('');
+    let out = '', pend = null, placed = false;
+    toks.forEach(t => {
+      if (t.grp !== undefined) { if (t.grp === 'المبيعات') { out += groups + (allBr ? '<div class="grp">كل البراندات</div>' + allBr : ''); placed = true; pend = null; return; } pend = t.m; return; }
+      if (/^crm-/.test(t.id) || ALL.includes(t.id.split('/')[0])) return;
+      if (pend) { out += pend; pend = null; } out += t.m;
+    });
+    if (!placed) out += groups + (allBr ? '<div class="grp">كل البراندات</div>' + allBr : '');
+    return out + tail;
+  }
+
   /* ---------- 4) القائمة الجانبية: مجموعات فوق بالترتيب (navGroups) أو مجموعة واحدة (navTop)
      v5.72: عنصر { fromGrp: 'المخازن' } بياخد كل اللي باقي من مجموعة أصلية، وعنصر 'saleskit/catalogues' = صفحة فرعية.
      ده ترتيب بس — مفيش حاجة بتستخبى أو تظهر غير اللي canSee بيسمح بيه. ---------- */
   if (typeof navHTML === 'function') navHTML = (base => function () {
     const html = base.apply(this, arguments); const p = prefs(); if (!p) return html;
+    if (p.ownerCrm) return ownerNav(html);
     const groups = Array.isArray(p.navGroups) && p.navGroups.length ? p.navGroups : (Array.isArray(p.navTop) && p.navTop.length ? [{ label: p.navTopLabel || 'المبيعات', items: p.navTop.map(id => ({ id })) }] : null);
     if (!groups) return html;
     const v = S.route.view, rid = S.route.id || '';
