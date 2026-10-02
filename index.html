@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-1651-81cbfc";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-1741-7fe645";</script>
 
 <script>
 'use strict';
@@ -7895,7 +7895,7 @@ function shell() {
       <header class="topbar" id="topbar">${topbarInner()}</header>
       <section class="view" id="view">${viewHTML()}</section>
     </main>
-    <nav class="tabbar">${tabbarItems().map(t => { const n = NAV.find(x => x.id === t); return `<a href="#/${t}" class="${v === t ? 'on' : ''}">${icon(n ? n.icon : 'dashboard')}<span>${esc((VIEW_TITLES[t] || '').split(' — ')[0].split(' و')[0])}</span></a>`; }).join('')}<a href="#" data-action="openside" class="">${icon('menu')}<span>المزيد</span></a></nav>
+    <nav class="tabbar">${tabbarItems().map(t => { const n = NAV.find(x => x.id === t); return `<a href="#/${t}" class="${v === t ? 'on' : ''}">${icon(n ? n.icon : 'dashboard')}<span>${esc(n && n.short ? n.short : (VIEW_TITLES[t] || '').split(' — ')[0].split(' و')[0])}</span></a>`; }).join('')}<a href="#" data-action="openside" class="">${icon('menu')}<span>المزيد</span></a></nav>
   </div>
   <div id="modalroot"></div><div class="toasts" id="toasts"></div>`;
 }
@@ -13620,7 +13620,7 @@ function i18nMirrorCSS() {
     const d = st.getPropertyValue('direction'); if (d === 'rtl') out.push('direction:ltr');
     return out.join(';');
   };
-  const skipSel = /leaflet|langsw|\.ltr\b|#i18n|\.nf-en|\.nb\b/; // .nb = Ninety Board canvas (v6.06): a canvas is never mirrored
+  const skipSel = /leaflet|langsw|\.ltr\b|#i18n|\.nf-en|\.nb\b|pmx/; // .nb = Ninety Board canvas (v6.06): a canvas is never mirrored · pmx = Projects & Tasks (v6.09) uses logical CSS only
   const walk = (rules, into) => {
     for (const rule of rules) {
       if (rule.type === 1) { if (skipSel.test(rule.selectorText)) continue; const d = mirrorDecl(rule.style); if (d) into.push(rule.selectorText.split(',').map(x => x.trim()).map(x => /^html\b/.test(x) ? x.replace(/^html/, 'html[dir=ltr]') : 'html[dir=ltr] ' + x).join(',') + '{' + d + '}'); }
@@ -18069,7 +18069,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const isOwner = p => !!p && isMe(p.ownerId);
   const canSchedule = p => writable() && (isAD() || isOwner(p));          // create / edit the master schedule (shots, dates, assignees)
   const canStatus = p => writable() && (isAD() || isOwner(p));
-  const shotsOf = pid => sortBy(list('shots').filter(s => s.projectId === pid && !s.deleted), s => s.code || '');
+  const shotsOf = pid => sortBy(list('shots').filter(s => s.projectId === pid && !s.deleted && !s.movedTo), s => s.code || ''); // v6.09: shots moved into the project's task board live there now
   const pushTo = (ids, title, body, url) => { try { const to = []; (ids || []).filter(Boolean).forEach(id => { to.push(id, 'w:' + id); }); if (to.length && typeof pushSend === 'function') pushSend(Array.from(new Set(to)).filter(x => !isMe(x) && !isMe(x.replace(/^w:/, ''))), title, body, url, 'stuos'); } catch (e) { /* push is best effort */ } };
 
   /* ---------- dates: client deadline fixed, D-2 / D-1 internal (Friday is off) ---------- */
@@ -18149,6 +18149,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   ACTIONS.osUnblock = async pid => { const p = byId('projects', pid); if (!p || !canStatus(p) || !p.blocked) return; const log = (p.blockLog || []).slice(); if (log.length) log[log.length - 1] = Object.assign({}, log[log.length - 1], { until: nowISO() }); await Store.save('projects', Object.assign({}, p, { blocked: null, blockLog: log })); toast('المشروع رجع يمشي'); };
   ACTIONS.osOwner = pid => { const p = byId('projects', pid); if (!p || !isAD() || !writable()) return; openModal({ title: `Project Owner — ${p.name}`, body: `<div class="form">${field('الـProject Owner', `<select id="f-ownerId" name="ownerId"><option value="">—</option>${opts(people(), p.ownerId || '', x => x.name)}</select>`, 'full')}${field('نوع المشروع', `<select id="f-ptype" name="ptype">${pairOpts(Object.entries(OS_TYPES), p.ptype || 'archviz')}</select>`)}${field('موعد العميل النهائي', inp('clientDeadline', p.clientDeadline || '', 'type="date"'))}${field('موافقة العميل على الكاميرات', `<select id="f-camReq" name="camReq">${pairOpts([['req', 'مطلوبة قبل الإنتاج'], ['opt', 'اختيارية (العميل معتمد رؤية المكتب)']], p.camReq || 'req')}</select>`, 'full')}<div class="tiny muted full">مشروع واحد = Owner واحد. الـOwner بيعمل الـMaster Schedule ويوزع الشغل ويراجع أولًا. موعد العميل ثابت — التأخير الداخلي مايحركوش.</div></div>`, onSubmit: async f => { const d = formData(f); const team = (p.team || []).slice(); if (d.ownerId && !team.includes(d.ownerId)) team.push(d.ownerId); await Store.save('projects', Object.assign({}, p, { flow: 'os', ownerId: d.ownerId || null, ptype: d.ptype, clientDeadline: d.clientDeadline || null, camReq: d.camReq, team, osStatus: p.osStatus || 'data' })); if (d.ownerId && d.ownerId !== p.ownerId) pushTo([d.ownerId], `إنت Project Owner لـ ${p.name}`, d.clientDeadline ? `موعد العميل ${fmtDate(d.clientDeadline)} — اعمل الـMaster Schedule` : 'اعمل الـMaster Schedule', `/#/projects/${p.id}`); } }); };
 
+  const osShotsBlock = (p, shots) => `<div class="cardhead" style="margin-top:14px"><h3 style="margin:0">الـMaster Schedule — اللقطات (${shots.length})</h3><div class="grow"></div>${canSchedule(p) ? `<button class="btn sm p" data-action="osShotNew" data-arg="${p.id}">${icon('plus')}لقطة</button>` : ''}</div>
+      ${shots.length ? `<div class="tablewrap"><table class="tbl ostbl"><thead><tr><th>اللقطة</th><th>المرحلة</th><th>Artist</th><th>الموعد</th><th></th></tr></thead><tbody>${shots.map(s => shotRow(s, p)).join('')}</tbody></table></div>` : `<p class="small muted">${canSchedule(p) ? 'ضيف لقطات المشروع: كل لقطة بتعدي Composition ← Lighting ← Detailing + AI ← Final Post، وكل مرحلة محتاجة اعتماد.' : 'الـOwner لسه ماعملش الـMaster Schedule.'}</p>`}`;
   function osPanel(p) {
     loadDir();
     const st = osStatus(p.osStatus || 'data'); const idx = OS_STATUSES.findIndex(s => s.id === st.id); const shots = shotsOf(p.id);
@@ -18166,8 +18168,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
         <div><span>اللقطات</span><b>${done}/${shots.length}</b>${late ? `<small class="crit">${late} متأخرة</small>` : ''}${risk ? `<small class="warn">${risk} بعد D-2</small>` : ''}</div></div>
       ${blk ? `<div class="banner crit" style="margin-top:10px">${icon('alert')}<span><b>المشروع واقف</b> — ${esc(OS_CAUSES[blk.cause] || '')}: ${esc(blk.note || '')} · من ${waitTxt(blk.since)} · ${esc(pName(blk.by))}</span></div>` : ''}
       <div class="osflow">${steps.map((s, i) => { const j = OS_STATUSES.findIndex(x => x.id === s.id); return `<div class="${j < idx ? 'done' : j === idx ? 'on' : ''}" ${canStatus(p) ? `data-action="osStatus" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.ar)}"><b>${String(i + 1).padStart(2, '0')}</b>${esc(s.en)}</div>`; }).join('')}</div>
-      <div class="cardhead" style="margin-top:14px"><h3 style="margin:0">الـMaster Schedule — اللقطات (${shots.length})</h3><div class="grow"></div>${canSchedule(p) ? `<button class="btn sm p" data-action="osShotNew" data-arg="${p.id}">${icon('plus')}لقطة</button>` : ''}</div>
-      ${shots.length ? `<div class="tablewrap"><table class="tbl ostbl"><thead><tr><th>اللقطة</th><th>المرحلة</th><th>Artist</th><th>الموعد</th><th></th></tr></thead><tbody>${shots.map(s => shotRow(s, p)).join('')}</tbody></table></div>` : `<p class="small muted">${canSchedule(p) ? 'ضيف لقطات المشروع: كل لقطة بتعدي Composition ← Lighting ← Detailing + AI ← Final Post، وكل مرحلة محتاجة اعتماد.' : 'الـOwner لسه ماعملش الـMaster Schedule.'}</p>`}
+      ${typeof pmHasBoard === 'function' && pmHasBoard(p.id) && !shots.length ? `<div class="banner info" style="margin-top:14px">${icon('layers')}<span>اللقطات اتنقلت لمهام المشروع — المتابعة والاعتمادات بقت من لوحة المهام (مرحلة Render).</span><a class="btn sm" href="#/pm/${esc(p.id)}">افتح لوحة المهام</a></div>` : osShotsBlock(p, shots)}
     </div>`;
   }
   if (typeof stuProjectPage === 'function') {
@@ -19428,6 +19429,950 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .nbcall .nbcallc{display:flex;justify-content:center;gap:10px;padding:10px}
 .nbcall.min .nbtiles{display:none}.nbcall.min{width:auto}
 @media print{.nbcall{display:none}}
+</style>`);
+})();
+/* =====================================================================
+   v6.09 — Projects & Tasks (studio), ported from the agreed working model (artifact «Ninety Studioz Projects»), approved with the PIN.
+   · A board per studio project (pmboards, id = project id): agreed revision rounds, colour, template, stage groups, automation rules.
+   · Tasks (pmtasks, one doc each): owner, status, priority, start / due, progress, estimate, logged time, revision rounds, dependencies,
+     subitems, updates (@mentions), files, render versions with pinned notes, activity log.
+   · Views: table, kanban (drag), timeline, calendar, workload (40 h / week), render gallery · pages: my work, inbox, dashboard, templates.
+   · Render review: pin a note on the image, V1 / V2 / V3, «client requested changes» counts rounds; over the agreed rounds = extra.
+   · Dependencies lock a task until the one before it is done; moving a due date pushes the dependants. Start / stop timer per task.
+   · Automations «when … then …» with the six default rules. Notifications: module inbox (pmnotifs) + push to phone / watch.
+   · Money (offer value, cost, profitability) lives in pmfin — only the owner (admin) and HR (Said) can read it, also on the server.
+   · Studio OS shots move into the board as tasks (gate approvals become subitems) when a project gets its board.
+   Server: migration v609_pm (nf_pm_vis / nf_pm_full / docs_pm_guard). Only in the studioz build (STU_ON).
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  const PM = { view: 'table', dr: null, dtab: 'updates', q: '', fp: null, fs: '', calM: null, wlAll: false, pop: null, modal: null, pending: null, rv: null, side: false, imgs: new Map() };
+  ['pmboards', 'pmtasks', 'pmfin', 'pmnotifs'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; for (const c of ['pmboards', 'pmtasks', 'pmfin', 'pmnotifs']) { S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, e => console.warn('snapshot', c, e))); } })(Store.subscribeAll);
+
+  /* ---------- helpers ---------- */
+  const pad = n => String(n).padStart(2, '0');
+  const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const TODAY = () => iso(new Date());
+  const D = s => new Date(s + 'T00:00:00');
+  const addD = (s, n) => { const d = D(s); d.setDate(d.getDate() + n); return iso(d); };
+  const diff = (a, b) => Math.round((D(b) - D(a)) / 864e5);
+  const now = () => Date.now();
+  const ids = () => (typeof stuMeIds === 'function' ? stuMeIds() : [S.session && S.session.id]).filter(Boolean);
+  const meId = () => stuMe();
+  const isMine = v => !!v && ids().includes(v);
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const loc = () => (en() ? 'en-GB' : 'ar-EG');
+  const IC = { home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', inbox: 'M3 13h5l1 3h6l1-3h5M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z', dash: 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z', tpl: 'M5 3h10l4 4v14H5zM15 3v4h4M8 12h8M8 16h6', plus: 'M12 5v14M5 12h14', bolt: 'M13 2L4 14h7l-1 8 9-12h-7z', search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4', play: 'M7 5l12 7-12 7z', pause: 'M7 5h4v14H7zM13 5h4v14h-4z', lock: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3', chat: 'M4 5h16v11H9l-5 4z', close: 'M6 6l12 12M18 6L6 18', chev: 'M9 6l6 6-6 6', table: 'M3 5h18v14H3zM3 10h18M9 10v9', kanban: 'M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v13h-4z', timeline: 'M4 6h10M8 12h12M6 18h8', cal: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4', users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21c0-4 3-6 7-6s7 2 7 6M17 11a3 3 0 0 0 0-6M22 21c0-3-2-5-5-5', image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9h.01', menu: 'M4 7h16M4 12h16M4 17h16', upload: 'M12 16V4M7 9l5-5 5 5M4 20h16', check: 'M5 12l5 5 9-10', trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13', link: 'M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1', gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12l2-1-1-3-2 .3-1.4-1.4L17 5l-3-1-1 2h-2l-1-2-3 1 .3 2L6 8.4 4 8l-1 3 2 1-2 1 1 3 2-.3 1.4 1.4L7 19l3 1 1-2h2l1 2 3-1-.3-2 1.4-1.4 2 .4 1-3z', reset: 'M4 4v6h6M20 12a8 8 0 1 1-2.3-5.7L20 9' };
+  const ic = (n, c = '') => `<svg class="pmi ${c}" viewBox="0 0 24 24" aria-hidden="true"><path d="${IC[n]}"/></svg>`;
+  const STATUS = [
+    { k: 'idle', c: 'var(--pm-s-idle)', l: 'لم يبدأ' }, { k: 'work', c: 'var(--pm-s-work)', l: 'جاري العمل' }, { k: 'int', c: 'var(--pm-s-int)', l: 'مراجعة داخلية' },
+    { k: 'client', c: 'var(--pm-s-client)', l: 'عند العميل' }, { k: 'chg', c: 'var(--pm-s-chg)', l: 'تعديلات' }, { k: 'stuck', c: 'var(--pm-s-stuck)', l: 'متوقف' }, { k: 'done', c: 'var(--pm-s-done)', l: 'تم' }];
+  const PRI = [{ k: 'crit', c: 'var(--pm-p-crit)', l: 'حرجة' }, { k: 'high', c: 'var(--pm-p-high)', l: 'عالية' }, { k: 'med', c: 'var(--pm-p-med)', l: 'متوسطة' }, { k: 'low', c: 'var(--pm-p-low)', l: 'منخفضة' }];
+  const st = k => STATUS.find(s => s.k === k) || STATUS[0];
+  const pr = k => PRI.find(s => s.k === k) || PRI[2];
+  const COLORS = ['#c8a26a', '#5aa9dc', '#9b8df2', '#58b98a', '#e0896a', '#d9c08a', '#d97aa6', '#6fb3b8'];
+  /* ---------- people (HR data) ---------- */
+  const people = () => { const ws = (typeof stuPeople === 'function' ? stuPeople() : []).filter(p => p && p.id); return ws; };
+  const pName = id => { if (!id) return ''; if (String(id).startsWith('role:')) return id === 'role:admin' ? (en() ? 'Owner' : 'المالك') : id.slice(5); const p = typeof stuPerson === 'function' ? stuPerson(id) : null; if (p && p.name && p.name !== id) return p.name; const w = byId('workers', id); if (w) return w.name; if (isMine(id) && S.session) return S.session.name; return '—'; };
+  const pColor = id => { const h = [...String(id || '?')].reduce((a, c) => a + c.charCodeAt(0), 0); return COLORS[h % COLORS.length]; };
+  const ini = id => { const n = pName(id) || '?'; const w = n.trim().split(/\s+/); return (w[0] ? w[0][0] : '?') + (w[1] ? w[1][0] : ''); };
+  const av = (id, cls = '') => id ? `<span class="pmav ${cls}" style="background:${pColor(id)}" title="${esc(pName(id))}">${esc(ini(id))}</span>` : `<span class="pmav pnone ${cls}">+</span>`;
+  const firstBy = r => { const w = list('workers').find(x => x.status !== 'inactive' && x.role === r); return w ? w.id : 'role:' + r; };
+  /* ---------- access ---------- */
+  const canMoney = () => isAdmin() || role() === 'hr';
+  const proj = pid => byId('projects', pid);
+  const visP = p => !!p && (typeof stuProjectVisible === 'function' ? stuProjectVisible(p) : true);
+  const full = pid => { if (isAdmin() || role() === 'manager') return true; if (['viewer', 'kiosk'].includes(role())) return false; const p = proj(pid); if (!p) return false; if (isMine(p.ownerId)) return true; return role() === 'head' && visP(p); };
+  const canTask = it => full(it.projectId) || isMine(it.owner);
+  const canNewBoard = () => isAdmin() || role() === 'manager';
+  /* ---------- data ---------- */
+  const boards = () => list('pmboards').filter(b => { const p = proj(b.projectId); return p && p.status !== 'archived' && (visP(p) || list('pmtasks').some(t => t.boardId === b.id && isMine(t.owner))); }).sort((a, b) => String((proj(a.projectId) || {}).name || '').localeCompare(String((proj(b.projectId) || {}).name || ''), 'ar'));
+  const B = id => byId('pmboards', id);
+  const bName = b => (proj(b.projectId) || {}).name || '—';
+  const bClient = b => (proj(b.projectId) || {}).client || '';
+  const tasksOf = b => list('pmtasks').filter(t => t.boardId === b.id);
+  const T = id => byId('pmtasks', id);
+  const fin = b => byId('pmfin', b.id) || { value: 0 };
+  const grp = (b, gid) => (b.groups || []).find(g => g.id === gid) || (b.groups || [])[0] || { id: '', name: '—', c: '#888' };
+  const isLate = it => it.due && it.status !== 'done' && diff(it.due, TODAY()) > 0;
+  const blocked = it => (it.deps || []).some(d => { const x = T(d); return x && x.status !== 'done'; });
+  const liveMins = it => (+it.mins || 0) + (it.timer && it.timer.at ? (now() - it.timer.at) / 6e4 : 0);
+  const fmtMin = m => { m = Math.round(m || 0); const h = Math.floor(m / 60), r = m % 60; return h ? `${h}${en() ? 'h' : 'س'} ${pad(r)}${en() ? 'm' : 'د'}` : `${r}${en() ? 'm' : 'د'}`; };
+  const fmtD = s => (s ? D(s).toLocaleDateString(loc(), { day: 'numeric', month: 'short' }) : '—');
+  const money = n => Math.round(+n || 0).toLocaleString(en() ? 'en-US' : 'ar-EG') + (en() ? ' EGP' : ' ج.م');
+  const num = n => Number(n || 0).toLocaleString(en() ? 'en-US' : 'ar-EG');
+  const ago = ts => { const m = Math.round((now() - ts) / 6e4); const f = new Intl.RelativeTimeFormat(en() ? 'en' : 'ar-EG', { numeric: 'auto' }); if (m < 60) return f.format(-m, 'minute'); if (m < 1440) return f.format(-Math.round(m / 60), 'hour'); return f.format(-Math.round(m / 1440), 'day'); };
+  const boardProgress = b => { const its = tasksOf(b); if (!its.length) return 0; return Math.round(its.reduce((a, i) => a + (i.status === 'done' ? 100 : (+i.progress || 0)), 0) / its.length); };
+  const boardSpan = b => { const its = tasksOf(b); const s = its.map(i => i.start).filter(Boolean).sort(), e = its.map(i => i.due).filter(Boolean).sort(); return [s[0], e[e.length - 1]]; };
+  const rate = id => { const w = byId('workers', id); if (!w) return 0; if (+w.hourRate) return +w.hourRate; try { return typeof hourlyRate === 'function' ? (+hourlyRate(w) || 0) : 0; } catch (e) { return 0; } };
+  const costOf = b => { let mins = 0, cost = 0, plan = 0; tasksOf(b).forEach(i => { const m = liveMins(i); mins += m; cost += m / 60 * rate(i.owner); plan += (+i.est || 0) * rate(i.owner); }); return { mins, cost, plan }; };
+  const visible = b => { const q = PM.q.trim().toLowerCase(); return tasksOf(b).filter(it => (!q || String(it.name || '').toLowerCase().includes(q)) && (!PM.fp || it.owner === PM.fp) && (!PM.fs || it.status === PM.fs)); };
+  const save = it => Store.save('pmtasks', it, { silent: true }).catch(e => { console.warn('pm save', e); toast('مقدرتش أحفظ — مش معاك صلاحية', 'err'); });
+  const saveB = b => Store.save('pmboards', b, { silent: true }).catch(e => { console.warn('pm board', e); toast('مقدرتش أحفظ — مش معاك صلاحية', 'err'); });
+  const logIt = (it, k, x) => { it.log = [{ at: now(), by: meId(), k, x }].concat(it.log || []).slice(0, 200); };
+  const upd = async (id, fn) => { const cur = T(id); if (!cur) return null; const it = clone(cur); if (fn(it) === false) return null; await save(it); rerender(); return it; };
+
+  /* ---------- notifications (module inbox + push to phone / watch) ---------- */
+  function notifyText(n) {
+    const it = T(n.item); const name = it ? it.name : '';
+    if (n.type === 'mention') return `${pName(n.from)} عمل لك منشن في «${name}»`;
+    if (n.type === 'assigned') return `${pName(n.from)} سلّمك مهمة «${name}»`;
+    if (n.type === 'rev') return `«${name}» عدّت جولات التعديل المتفق عليها`;
+    if (n.type === 'pin') return `${pName(n.from)} حط ملاحظة على ريندر «${name}»`;
+    if (n.tr === 'status') return `«${name}» ← ${st(n.tv).l}`;
+    if (n.tr === 'due') return `«${name}» عدّى ميعاد التسليم`;
+    if (n.tr === 'dep') return `المهمة اللي قبل «${name}» خلصت — تقدر تبدأ`;
+    if (n.tr === 'created') return `مهمة جديدة: «${name}»`;
+    if (n.tr === 'rev') return `«${name}» — جولات التعديل عدّت المتفق عليه`;
+    return name;
+  }
+  async function notify(to, n) {
+    if (!to || isMine(to) || (to === 'role:' + role() && to !== 'role:admin' && isAdmin())) return;
+    if (to === 'role:admin' && isAdmin()) return;
+    const doc = Object.assign({ id: uid(), to, at: now(), read: false, from: meId() }, n);
+    try { await Store.save('pmnotifs', doc, { silent: true }); } catch (e) { /* best effort */ }
+    try { if (typeof pushSend === 'function') { const t = String(to).startsWith('role:') ? [to] : [to, 'w:' + to]; const it = T(n.item); pushSend(t, en() ? 'Projects & Tasks' : 'المشاريع والمهام', notifyText(doc), `#/pm/${it ? it.boardId : ''}`, 'pm'); } } catch (e) { /* best effort */ }
+  }
+  function fire(b, tr, it, ex = {}) {
+    (b.rules || []).filter(r => r.on && r.tr === tr && (tr !== 'status' || r.tv === ex.to)).forEach(r => {
+      const n = { type: 'rule', tr, tv: r.tv, item: it.id, board: b.id };
+      if (r.ac === 'notifyOwner') notify(it.owner, n); else if (r.ac === 'notifyP') notify(r.ap, n); else if (r.ac === 'prog') it.progress = 100; else if (r.ac === 'move' && r.ag && full(it.projectId)) it.g = r.ag;
+    });
+  }
+  async function setStatus(it0, v) {
+    if (!it0 || v === it0.status) return true; if (!canTask(it0)) { toast('المهمة دي مش بتاعتك', 'err'); return false; }
+    if (v !== 'idle' && it0.status === 'idle' && blocked(it0)) { toast('المهمة متوقفة على مهمة لسه ما خلصتش', 'err'); return false; }
+    const b = B(it0.boardId); const it = clone(it0); it.status = v; logIt(it, 'status', v); if (b) fire(b, 'status', it, { to: v }); await save(it);
+    if (v === 'done' && b) tasksOf(b).filter(x => (x.deps || []).includes(it.id)).forEach(x => fire(b, 'dep', x));
+    rerender(); return true;
+  }
+  async function shiftDeps(it, seen = new Set()) {
+    if (seen.has(it.id)) return; seen.add(it.id); const b = B(it.boardId); if (!b) return;
+    for (const x0 of tasksOf(b).filter(x => (x.deps || []).includes(it.id))) { if (x0.start && it.due && diff(it.due, x0.start) <= 0 && full(x0.projectId)) { const x = clone(x0); const len = diff(x.start, x.due || x.start); x.start = addD(it.due, 1); x.due = addD(x.start, len); logIt(x, 'due', x.due); await save(x); await shiftDeps(x, seen); } }
+  }
+  function checkDue() { if (!(isAdmin() || role() === 'manager')) return; list('pmtasks').forEach(it => { if (isLate(it) && it.lateN !== it.due) { const b = B(it.boardId); if (!b) return; const x = clone(it); x.lateN = x.due; fire(b, 'due', x); save(x); } }); }
+  async function timerToggle(it0) {
+    if (!canTask(it0)) return; const it = clone(it0);
+    if (it.timer && it.timer.at) { it.mins = (+it.mins || 0) + (now() - it.timer.at) / 6e4; it.timer = null; await save(it); rerender(); return; }
+    for (const x0 of list('pmtasks').filter(x => x.timer && x.timer.at && isMine(x.timer.by) && x.id !== it.id)) { const x = clone(x0); x.mins = (+x.mins || 0) + (now() - x.timer.at) / 6e4; x.timer = null; await save(x); }
+    it.timer = { by: meId(), at: now() }; await save(it); if (it.status === 'idle') await setStatus(T(it.id) || it, 'work'); rerender();
+  }
+  /* ---------- templates ---------- */
+  const TPL = {
+    stills: { l: 'ArchViz — صور ثابتة', d: 'من الموديلنج لحد تسليم الصور 4K، بمراحل الاستوديو الثابتة.', groups: [
+      ['Modeling', '#6b7f99', [['Site & context model', 3, 16], ['Building massing & facades', 4, 28], ['Lobby & amenities model', 3, 20]]],
+      ['Texturing', '#8a7a63', [['Material library setup', 2, 10], ['Facade & landscape materials', 2, 12]]],
+      ['Lighting', '#7d6f9c', [['Camera angles approval', 1, 4], ['Day / dusk lighting setup', 2, 12]]],
+      ['Render', '#b07d48', [['Test renders', 1, 6], ['Final 4K renders (3840×2160)', 2, 14]]],
+      ['Post', '#5f8f7a', [['Photoshop post & entourage', 2, 14], ['Color grading', 1, 5]]],
+      ['Client Review', '#4f86a8', [['Round 1 submission', 1, 3], ['Client comments round', 2, 8]]],
+      ['Delivery', '#3aa874', [['Final delivery package', 1, 2]]]] },
+    film: { l: 'ArchViz — فيلم', d: 'سكريبت وستوري بورد ثم أنيميشن وريندر ومونتاج وصوت.', groups: [
+      ['Script & storyboard', '#7d6f9c', [['Scenario & shot list', 2, 10], ['Storyboard frames', 3, 18]]],
+      ['Modeling', '#6b7f99', [['Buildings modeling', 5, 36], ['Landscape & environment', 4, 26]]],
+      ['Lighting & animation', '#8a7a63', [['Camera paths', 3, 18], ['Lifestyle shots', 3, 20]]],
+      ['Render', '#b07d48', [['Render queue — 4K 60fps', 4, 20]]],
+      ['Post', '#5f8f7a', [['Edit & motion graphics', 3, 18], ['Music & sound design', 1, 5]]],
+      ['Client Review', '#4f86a8', [['Preview cut to client', 1, 3], ['Client comments round', 2, 8]]],
+      ['Delivery', '#3aa874', [['Master export & delivery', 1, 2]]]] },
+    interior: { l: 'Interior', d: 'بريف ومود بورد وزوننج وثري دي ورسومات تفصيلية.', groups: [
+      ['Brief & survey', '#6b7f99', [['Client brief meeting', 1, 3], ['Site survey & measurements', 2, 10]]],
+      ['Concept & mood board', '#7d6f9c', [['Mood board', 2, 10], ['Concept presentation', 2, 12]]],
+      ['Modeling', '#8a7a63', [['Furniture layout & zoning', 3, 18]]],
+      ['Render', '#b07d48', [['Key space renders', 4, 26]]],
+      ['Post', '#5f8f7a', [['Ceiling & lighting plans', 3, 18], ['Joinery details', 3, 20]]],
+      ['Client Review', '#4f86a8', [['Design approval', 2, 6]]],
+      ['Delivery', '#3aa874', [['IFC drawing set', 1, 4]]]] }
+  };
+  const defaultRules = groups => { const dg = groups[groups.length - 1]; return [
+    { id: uid(), on: true, tr: 'status', tv: 'done', ac: 'prog' }, { id: uid(), on: true, tr: 'status', tv: 'client', ac: 'notifyP', ap: 'role:admin' },
+    { id: uid(), on: true, tr: 'status', tv: 'stuck', ac: 'notifyP', ap: firstBy('manager') }, { id: uid(), on: true, tr: 'dep', ac: 'notifyOwner' },
+    { id: uid(), on: true, tr: 'due', ac: 'notifyOwner' }, { id: uid(), on: true, tr: 'rev', ac: 'notifyP', ap: firstBy('hr') },
+    { id: uid(), on: false, tr: 'status', tv: 'done', ac: 'move', ag: dg ? dg.id : null }]; };
+  const mkTask = (b, gid, name, o = {}) => Object.assign({ id: uid(), boardId: b.id, projectId: b.projectId, g: gid, name, owner: null, status: 'idle', pri: 'med', start: null, due: null, progress: 0, rev: 0, mins: 0, timer: null, est: 8, deps: [], subs: [], upd: [], files: [], vers: [], log: [{ at: now(), by: meId(), k: 'created' }], created: now() }, o);
+  async function buildBoard(pid, tk, o) {
+    const Tp = TPL[tk] || TPL.stills; const b = { id: pid, projectId: pid, tpl: tk, allowed: Math.max(0, +o.allowed || 2), color: o.color || COLORS[list('pmboards').length % COLORS.length], groups: [], rules: [], createdAt: nowISO() };
+    const out = []; let cur = o.start || TODAY(); let prevLast = null;
+    Tp.groups.forEach(([gname, gc, tasks]) => {
+      const g = { id: uid(), name: gname, c: gc, open: true }; b.groups.push(g); let gEnd = cur; let first = true;
+      tasks.forEach(([tn, dur, est]) => { let s = cur; while (D(s).getDay() === 5) s = addD(s, 1); const it = mkTask(b, g.id, tn, { start: s, due: addD(s, dur - 1), est }); if (first && prevLast) it.deps = [prevLast]; first = false; out.push(it); if (diff(gEnd, it.due) > 0) gEnd = it.due; cur = addD(s, Math.max(1, Math.ceil(dur / 2))); });
+      prevLast = out[out.length - 1].id; cur = addD(gEnd, 1);
+    });
+    b.rules = defaultRules(b.groups);
+    // Studio OS shots → tasks in the Render stage (their 4 approval gates become subitems)
+    const rg = b.groups.find(g => /render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];
+    const GATES = [['comp', 'Composition'], ['light', 'Concept lighting'], ['detail', 'Detailing + AI'], ['post', 'Final post']];
+    list('shots').filter(s => s.projectId === pid && !s.movedTo).forEach(s => {
+      const gi = Math.max(0, GATES.findIndex(g => g[0] === s.gate)); const done = s.state === 'done';
+      const it = mkTask(b, rg.id, `${s.code || ''} ${s.name || s.title || 'Shot'}`.trim(), { owner: s.assigneeId || null, status: done ? 'done' : (s.state === 'work' ? 'work' : (['owner', 'ad'].includes(s.state) ? 'int' : 'idle')), progress: done ? 100 : Math.round(gi / 4 * 100), due: (s.due && (s.due[GATES[GATES.length - 1][0]] || s.due.post)) || s.dueDate || null, rev: +s.backs || 0, subs: GATES.map(([k, l], i) => ({ id: uid(), name: l, done: done || i < gi, owner: s.assigneeId || null })), fromShot: s.id });
+      out.push(it); Store.save('shots', Object.assign({}, s, { movedTo: it.id }), { silent: true }).catch(() => {});
+    });
+    await Store.save('pmboards', b, { silent: true });
+    for (const it of out) await save(it);
+    if (canMoney() && o.value != null) await Store.save('pmfin', { id: b.id, projectId: pid, value: Math.max(0, +o.value || 0) }, { silent: true }).catch(() => {});
+    return b;
+  }
+  window.pmBuildBoard = buildBoard; window.pmSetStatus = (id, v) => setStatus(T(id), v);
+
+  /* ---------- small view helpers ---------- */
+  const team = b => { const p = proj(b.projectId) || {}; const ids0 = new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean)); return people().sort((x, y) => (ids0.has(y.id) ? 1 : 0) - (ids0.has(x.id) ? 1 : 0)); };
+  const roleL = id => { const w = byId('workers', id); return w && typeof ROLES !== 'undefined' ? (ROLES[w.role] || '') : ''; };
+  const statusCell = (it, cls = 'stc') => { const s = st(it.status); return canTask(it) ? `<button type="button" class="${cls}" style="background:${s.c}" data-pa="pStatus" data-id="${it.id}">${s.l}</button>` : `<span class="${cls}" style="background:${s.c}">${s.l}</span>`; };
+  const priCell = it => { const p = pr(it.pri); return full(it.projectId) ? `<button type="button" class="prc" style="background:${p.c}" data-pa="pPri" data-id="${it.id}">${p.l}</button>` : `<span class="prc" style="background:${p.c}">${p.l}</span>`; };
+  const lastVer = it => (it.vers || [])[(it.vers || []).length - 1];
+  const imgTag = (v, cls = '', alt = '') => v ? `<img class="${cls}" src="${esc(PM.imgs.get(v.fileId) || v.thumb || '')}" data-fid="${esc(v.fileId || '')}" alt="${esc(alt)}" loading="lazy">` : '';
+  const unread = () => { const me = ids().concat(['role:' + role()]); return list('pmnotifs').filter(n => me.includes(n.to) && !n.read).length; };
+  const myNotifs = () => { const me = ids().concat(['role:' + role()]); return list('pmnotifs').filter(n => me.includes(n.to)).sort((a, b) => b.at - a.at); };
+  const mineOpen = () => list('pmtasks').filter(it => isMine(it.owner) && it.status !== 'done' && B(it.boardId));
+
+  /* ---------- board page ---------- */
+  const VIEWS = [['table', 'table', 'جدول'], ['kanban', 'kanban', 'كانبان'], ['timeline', 'timeline', 'تايملاين'], ['calendar', 'cal', 'تقويم'], ['workload', 'users', 'ضغط الشغل'], ['gallery', 'image', 'معرض الريندرات']];
+  function pBoard(b) {
+    const [s, e] = boardSpan(b); const prog = boardProgress(b); const its = tasksOf(b); const maxRev = Math.max(0, ...its.map(i => +i.rev || 0)); const F = full(b.projectId);
+    const owners = [...new Set(its.map(i => i.owner).filter(Boolean))];
+    return `<div class="bh"><div style="min-width:0"><h1><i class="bdot" style="background:${esc(b.color || '#c8a26a')}"></i>${esc(bName(b))}</h1>
+      <div class="qmeta">${bClient(b) ? `<span>العميل: <b>${esc(bClient(b))}</b></span>` : ''}<span class="mono">${fmtD(s)} ← ${fmtD(e)}</span><span>الإنجاز: <b class="mono">${prog}%</b></span>
+        <span class="chip ${maxRev > b.allowed ? 'warn' : ''}">جولات التعديل المتفق عليها: <b class="mono">${b.allowed}</b></span>${canMoney() ? `<span class="chip money">قيمة العرض: <b class="mono">${money(fin(b).value)}</b></span>` : ''}
+        <a class="chip" href="#/projects/${esc(b.projectId)}">${ic('link')}<span>صفحة المشروع</span></a></div></div>
+      <div class="bhact"><button type="button" class="pillbtn" data-pa="autos">${ic('bolt')}<span>الأتمتة</span> <span class="mono muted">${(b.rules || []).filter(r => r.on).length}</span></button>${F ? `<button type="button" class="qicon" data-pa="bset" title="إعدادات المشروع" aria-label="إعدادات المشروع">${ic('gear')}</button>` : ''}</div></div>
+    <div class="qtabs" role="tablist">${VIEWS.map(([v, i, l]) => `<button type="button" role="tab" data-pa="view" data-v="${v}" class="${PM.view === v ? 'pon' : ''}">${ic(i)}<span>${l}</span></button>`).join('')}</div>
+    <div class="qtoolbar">${F ? `<button type="button" class="pillbtn primary" data-pa="addTask" data-g="${(b.groups[0] || {}).id || ''}">${ic('plus')}<span>مهمة جديدة</span></button>` : ''}
+      <label class="qsearch">${ic('search')}<input id="pmq" data-pc="q" placeholder="ابحث في المهام" value="${esc(PM.q)}" autocomplete="off"></label>
+      <div class="avs">${owners.map(id => `<button type="button" data-pa="fp" data-id="${esc(id)}" aria-label="${esc(pName(id))}">${av(id, PM.fp === id ? 'pon' : (PM.fp ? '' : 'pon'))}</button>`).join('')}</div>
+      <select id="pmfs" class="inp" data-pc="fs" style="width:auto"><option value="">كل الحالات</option>${STATUS.map(x => `<option value="${x.k}" ${PM.fs === x.k ? 'selected' : ''}>${x.l}</option>`).join('')}</select></div>
+    ${({ table: vTable, kanban: vKanban, timeline: vTimeline, calendar: vCal, workload: vWork, gallery: vGallery })[PM.view](b)}`;
+  }
+  const closedG = new Set();
+  function vTable(b) {
+    const items = visible(b); const F = full(b.projectId);
+    if (!items.length && !(b.groups || []).length) return `<div class="qempty">مفيش مهام هنا</div>`;
+    return (b.groups || []).map(g => {
+      const gi = items.filter(i => i.g === g.id || (!b.groups.some(x => x.id === i.g) && g === b.groups[0])); if (!gi.length && (PM.q || PM.fp || PM.fs)) return '';
+      const cnt = {}; gi.forEach(i => { cnt[i.status] = (cnt[i.status] || 0) + 1; }); const open = !closedG.has(g.id);
+      const battery = `<div class="battery">${STATUS.filter(x => cnt[x.k]).map(x => `<i style="flex:${cnt[x.k]};background:${x.c}" title="${x.l}: ${cnt[x.k]}"></i>`).join('')}</div>`;
+      const gs = gi.map(i => i.start).filter(Boolean).sort()[0], ge = gi.map(i => i.due).filter(Boolean).sort().pop();
+      return `<section class="group" style="--gc:${esc(g.c)}"><div class="ghead"><button type="button" class="gt ${open ? 'open' : 'closed'}" data-pa="gToggle" data-g="${g.id}" style="color:${esc(g.c)}">${ic('chev')}<span class="notr">${esc(g.name)}</span></button><small>${gi.length} مهمة</small></div>
+      ${open ? `<div class="tw"><table class="bt"><thead><tr><th>المهمة</th><th>المسؤول</th><th>الحالة</th><th>الأولوية</th><th class="hide-s">المدة</th><th>التسليم</th><th>الإنجاز</th><th>جولات التعديل</th><th>الوقت</th><th>الملفات</th></tr></thead><tbody>
+        ${gi.map(it => row(b, it)).join('')}
+        ${F ? `<tr class="addrow"><td class="nm"><button type="button" data-pa="addTask" data-g="${g.id}">+ إضافة مهمة</button></td><td colspan="9"></td></tr>` : ''}
+        <tr class="sumrow"><td class="nm"></td><td></td><td>${battery}</td><td></td><td class="hide-s"><span class="mono muted" style="font-size:11px">${fmtD(gs)} ← ${fmtD(ge)}</span></td><td></td><td></td><td></td><td class="mono muted" style="font-size:12px">${fmtMin(gi.reduce((a, i) => a + liveMins(i), 0))}</td><td></td></tr>
+      </tbody></table></div>` : ''}</section>`;
+    }).join('');
+  }
+  function row(b, it) {
+    const g = grp(b, it.g); const lock = blocked(it) && it.status !== 'done'; const F = full(it.projectId); const C = canTask(it);
+    let tl = ''; if (it.start && it.due) { const total = Math.max(1, diff(it.start, it.due) + 1); const el = Math.min(total, Math.max(0, diff(it.start, TODAY()) + 1)); tl = `<span class="tl" style="--gc:${isLate(it) ? 'var(--pm-danger)' : esc(g.c)}"><i style="width:${it.status === 'done' ? 100 : Math.round(el / total * 100)}%"></i><span>${fmtD(it.start)} – ${fmtD(it.due)}</span></span>`; }
+    const subs = it.subs || []; const sd = subs.filter(x => x.done).length; const lv = lastVer(it); const pg = it.status === 'done' ? 100 : (+it.progress || 0);
+    return `<tr><td class="nm"><div class="nmw" style="--gc:${esc(g.c)}"><button type="button" class="t" data-pa="open" data-id="${it.id}">${esc(it.name)}</button>
+        ${lock ? `<span class="mini lock" title="المهمة متوقفة على مهمة لسه ما خلصتش">${ic('lock')}</span>` : ''}${subs.length ? `<span class="mini" title="المهام الفرعية">${ic('check')}${sd}/${subs.length}</span>` : ''}${(it.upd || []).length ? `<button type="button" class="mini" data-pa="open" data-id="${it.id}" data-t="updates" title="التحديثات">${ic('chat')}${it.upd.length}</button>` : ''}</div></td>
+      <td>${F ? `<button type="button" data-pa="pOwner" data-id="${it.id}" aria-label="المسؤول">${av(it.owner)}</button>` : av(it.owner)}</td>
+      <td>${statusCell(it)}</td><td>${priCell(it)}</td><td class="hide-s">${tl}</td>
+      <td><input type="date" class="dateinp ${isLate(it) ? 'late' : ''}" value="${esc(it.due || '')}" data-pc="due" data-id="${it.id}" aria-label="التسليم" ${F ? '' : 'disabled'}></td>
+      <td><div class="pg"><b><i style="width:${pg}%"></i></b><span class="mono">${pg}%</span></div></td>
+      <td><span class="rv mono ${(+it.rev || 0) > b.allowed ? 'over' : ''}">${+it.rev ? `${it.rev}/${b.allowed}` : '—'}</span></td>
+      <td><span class="tm">${C ? `<button type="button" class="${it.timer ? 'run' : ''}" data-pa="timer" data-id="${it.id}" aria-label="الوقت">${ic(it.timer ? 'pause' : 'play')}</button>` : ''}<span class="mono" data-live="${it.id}">${fmtMin(liveMins(it))}</span></span></td>
+      <td>${lv ? `<button type="button" data-pa="open" data-id="${it.id}" data-t="review">${imgTag(lv, 'qthumb')} <span class="mono muted" style="font-size:11px">V${lv.v}</span></button>` : ((it.files || []).length ? `<span class="mono" style="font-size:12px">${it.files.length}</span>` : '')}</td></tr>`;
+  }
+  function vKanban(b) {
+    const items = visible(b);
+    return `<div class="kb">${STATUS.map(s => { const its = items.filter(i => i.status === s.k); return `<div class="kcol" data-drop="${s.k}"><div class="kh"><i style="background:${s.c}"></i>${s.l}<small class="mono">${its.length}</small></div><div class="kbody">${its.map(it => { const lv = lastVer(it); return `<div class="kcard" ${canTask(it) ? `draggable="true" data-drag="${it.id}"` : ''} data-pa="open" data-id="${it.id}" role="button" tabindex="0">${lv ? imgTag(lv) : ''}<span class="g notr">${esc(grp(b, it.g).name)}</span><span>${blocked(it) && it.status !== 'done' ? ic('lock', 'sm') : ''}${esc(it.name)}</span><span class="qrow">${av(it.owner)}${canTask(it) ? `<button type="button" class="kst" style="background:${s.c}" data-pa="pStatus" data-id="${it.id}" aria-label="الحالة">${ic('chev')}</button>` : ''}<span class="mono" style="${isLate(it) ? 'color:var(--pm-danger)' : ''}">${fmtD(it.due)}</span></span></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
+  }
+  function vTimeline(b) {
+    const items = visible(b); let [s, e] = boardSpan(b); if (!s) return `<div class="qempty">مفيش مهام هنا</div>`;
+    const t0 = TODAY(); s = addD(s < t0 ? s : t0, -2); e = addD(e > t0 ? e : t0, 3);
+    const days = Math.min(400, diff(s, e) + 1), W = 30, width = days * W;
+    let grid = ''; for (let i = 0; i < days; i++) { const d = D(addD(s, i)); const we = d.getDay() === 5 || d.getDay() === 6; grid += `<i class="gday ${we ? 'we' : ''}" style="inset-inline-start:${i * W}px;width:${W}px"></i>`; }
+    const todayX = diff(s, t0) * W + W / 2;
+    let hdr = ''; for (let i = 0; i < days; i++) { const d = D(addD(s, i)); hdr += `<span style="inset-inline-start:${i * W + 1}px">${d.getDate() === 1 || i === 0 ? d.toLocaleDateString(loc(), { month: 'short' }) + ' ' : ''}${d.getDate()}</span>`; }
+    let rows = `<div class="grow ghdr"><div class="glabel gh">المهمة</div><div class="gtrack" style="width:${width}px;height:34px">${hdr}</div></div>`;
+    (b.groups || []).forEach(g => {
+      const gi = items.filter(i => i.g === g.id); if (!gi.length) return;
+      rows += `<div class="grow"><div class="glabel gh notr" style="color:${esc(g.c)}">${esc(g.name)}</div><div class="gtrack" style="width:${width}px">${grid}<i class="qgtoday" style="inset-inline-start:${todayX}px"></i></div></div>`;
+      gi.forEach(it => { const x = it.start ? diff(s, it.start) * W : 0, w = it.start && it.due ? (diff(it.start, it.due) + 1) * W - 4 : 0; const col = isLate(it) ? 'var(--pm-danger)' : st(it.status).c;
+        rows += `<div class="grow"><div class="glabel"><button type="button" data-pa="open" data-id="${it.id}" class="glb">${av(it.owner)}<span>${esc(it.name)}</span></button></div><div class="gtrack" style="width:${width}px">${grid}<i class="qgtoday" style="inset-inline-start:${todayX}px"></i>${w ? `<button type="button" class="qgbar" data-pa="open" data-id="${it.id}" style="inset-inline-start:${x + 2}px;width:${w}px;background:${col}">${(it.deps || []).length ? '↳ ' : ''}${st(it.status).l}</button>` : ''}</div></div>`; });
+    });
+    return `<div class="gw"><div class="qgantt" style="width:${width + 240}px">${rows}</div></div>`;
+  }
+  function vCal(b) {
+    const items = visible(b); PM.calM = PM.calM || TODAY().slice(0, 7); const [y, m] = PM.calM.split('-').map(Number);
+    const first = new Date(y, m - 1, 1); const off = (first.getDay() + 1) % 7; const start = iso(new Date(y, m - 1, 1 - off)); const t0 = TODAY();
+    const dn = []; for (let i = 0; i < 7; i++) dn.push(D(addD(start, i)).toLocaleDateString(loc(), { weekday: 'short' }));
+    let cells = ''; for (let i = 0; i < 42; i++) { const d = addD(start, i); const its = items.filter(it => it.due === d);
+      cells += `<div class="cd ${D(d).getMonth() !== m - 1 ? 'out' : ''} ${d === t0 ? 'today' : ''}"><span class="n">${D(d).getDate()}</span>${its.slice(0, 4).map(it => `<button type="button" class="ev" data-pa="open" data-id="${it.id}" style="background:${isLate(it) ? 'var(--pm-danger)' : st(it.status).c}">${esc(it.name)}</button>`).join('')}${its.length > 4 ? `<small class="muted">+${its.length - 4}</small>` : ''}</div>`; }
+    return `<div class="calhead"><button type="button" class="qicon" data-pa="calNav" data-d="-1" aria-label="السابق">${ic('chev', 'flipx')}</button><h3>${first.toLocaleDateString(loc(), { month: 'long', year: 'numeric' })}</h3><button type="button" class="qicon" data-pa="calNav" data-d="1" aria-label="التالي">${ic('chev', 'flipn')}</button></div>
+      <div style="overflow-x:auto"><div class="cal" style="min-width:640px">${dn.map(d => `<div class="dn">${d}</div>`).join('')}${cells}</div></div>`;
+  }
+  function vWork(b) {
+    const pool = PM.wlAll ? boards().flatMap(tasksOf) : visible(b); const t0 = TODAY(); const sat = addD(t0, -((D(t0).getDay() + 1) % 7)); const weeks = [0, 1, 2, 3].map(i => addD(sat, i * 7));
+    const who = [...new Set(pool.map(i => i.owner).filter(x => x && !String(x).startsWith('role:')))];
+    const rows = who.map(id => { const cells = weeks.map(w => { const we = addD(w, 6); let hrs = 0, n = 0;
+      pool.filter(i => i.owner === id && i.status !== 'done' && i.start && i.due).forEach(i => { const a = i.start > w ? i.start : w, z = i.due < we ? i.due : we; if (diff(a, z) < 0) return; const len = diff(i.start, i.due) + 1, ov = diff(a, z) + 1; hrs += (+i.est || 0) * (1 - (+i.progress || 0) / 100) * ov / len; n++; });
+      const pct = Math.min(100, hrs / 40 * 100); const col = hrs > 40 ? 'var(--pm-danger)' : hrs > 30 ? 'var(--pm-s-work)' : 'var(--pm-s-done)';
+      return `<td><div class="wlc"><b><i style="width:${pct}%;background:${col}"></i></b><span class="mono">${Math.round(hrs)} ${en() ? 'h' : 'س'} · ${n} مهمة</span></div></td>`; }).join('');
+      return `<tr><td><div class="who">${av(id)}<div>${esc(pName(id))}<small>${esc(roleL(id))}</small></div></div></td>${cells}</tr>`; }).join('');
+    return `<div class="qtoolbar"><div class="qtabs" style="margin:0;border:0"><button type="button" data-pa="wl" data-v="0" class="${!PM.wlAll ? 'pon' : ''}">المشروع الحالي</button><button type="button" data-pa="wl" data-v="1" class="${PM.wlAll ? 'pon' : ''}">كل المشاريع</button></div><span class="muted" style="font-size:12px">السعة ٤٠ ساعة/أسبوع</span></div>
+      <div class="wl"><table><thead><tr><th></th>${weeks.map(w => `<th>أسبوع <span class="mono">${fmtD(w)}</span></th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="5"><div class="qempty">مفيش مهام هنا</div></td></tr>`}</tbody></table></div>`;
+  }
+  function vGallery(b) {
+    const its = visible(b).filter(i => (i.vers || []).length); if (!its.length) return `<div class="qempty">لا توجد ريندرات بعد. ارفع أول نسخة.</div>`;
+    return `<div class="gal">${its.map(it => { const v = lastVer(it); return `<button type="button" class="gcard" data-pa="open" data-id="${it.id}" data-t="review">${imgTag(v, '', it.name)}<div><span class="ell">${esc(it.name)}</span><span class="spill" style="background:${st(it.status).c}">V${v.v}</span></div></button>`; }).join('')}</div>`;
+  }
+
+  /* ---------- pages: my work · inbox · dashboard · templates ---------- */
+  const liRow = it => { const b = B(it.boardId); const s = st(it.status); return `<button type="button" class="li" data-pa="open" data-id="${it.id}"><span class="spill" style="background:${s.c}">${s.l}</span><span class="nm2">${esc(it.name)}</span><span class="bn">${esc(b ? bName(b) : '')}</span><span class="mono" style="font-size:12px;color:${isLate(it) ? 'var(--pm-danger)' : 'var(--pm-muted)'}">${fmtD(it.due)}</span></button>`; };
+  function pMyWork() {
+    const t0 = TODAY(); const dw = D(t0).getDay(); const endW = addD(t0, (5 - dw + 7) % 7 || 7); const endN = addD(endW, 7);
+    const bk = [['late', 'متأخر', []], ['today', 'النهارده', []], ['week', 'باقي الأسبوع', []], ['next', 'الأسبوع الجاي', []], ['later', 'بعد كده', []], ['nodate', 'بدون تاريخ', []]]; const at = k => bk.find(x => x[0] === k)[2];
+    mineOpen().forEach(it => { const d = it.due; if (!d) at('nodate').push(it); else if (d < t0) at('late').push(it); else if (d === t0) at('today').push(it); else if (d <= endW) at('week').push(it); else if (d <= endN) at('next').push(it); else at('later').push(it); });
+    const run = list('pmtasks').find(x => x.timer && x.timer.at && isMine(x.timer.by));
+    return `<h2 class="h2">شغلي</h2><p class="sub">${esc((S.session && S.session.name) || '')}${run ? ` · <span class="runnow">${ic('play')} شغال دلوقتي على «${esc(run.name)}» <span class="mono" data-live="${run.id}">${fmtMin(liveMins(run))}</span></span>` : ''}</p>
+      ${bk.map(([k, l, a]) => `<div class="bucket"><h3 class="${k === 'late' && a.length ? 'late' : ''}">${l} <span class="mono">${a.length}</span></h3><div class="qlist">${a.length ? a.sort((x, y) => String(x.due || '').localeCompare(String(y.due || ''))).map(liRow).join('') : `<div class="qempty">مفيش مهام هنا</div>`}</div></div>`).join('')}`;
+  }
+  function pInbox() {
+    const ns = myNotifs().slice(0, 150);
+    return `<div class="phead"><div><h2 class="h2">الإشعارات</h2><p class="sub">${esc((S.session && S.session.name) || '')}</p></div>${ns.some(n => !n.read) ? `<button type="button" class="pillbtn" data-pa="readAll">${ic('check')}<span>تعليم الكل كمقروء</span></button>` : ''}</div>
+      <div class="qlist">${ns.length ? ns.map(n => { const it = T(n.item); const b = it ? B(it.boardId) : null; return `<button type="button" class="notif ${n.read ? '' : 'unread'}" data-pa="notif" data-id="${n.id}">${n.type === 'rule' ? `<span class="pmav bolt">${ic('bolt')}</span>` : av(n.from)}<div class="tx">${esc(notifyText(n))}<small>${ago(n.at)}${b ? ' · ' + esc(bName(b)) : ''}</small></div></button>`; }).join('') : `<div class="qempty">مفيش إشعارات جديدة</div>`}</div>`;
+  }
+  const machinesDoc = () => byId('pmboards', '_machines') || { id: '_machines', machines: [] };
+  function pDash() {
+    const bs = boards(); const all = bs.flatMap(tasksOf); const open = all.filter(i => i.status !== 'done'); const late = all.filter(isLate).length; const cl = all.filter(i => i.status === 'client').length;
+    const cnt = {}; all.forEach(i => { cnt[i.status] = (cnt[i.status] || 0) + 1; });
+    const perM = {}; open.forEach(i => { if (i.owner) perM[i.owner] = (perM[i.owner] || 0) + 1; }); const per = Object.entries(perM).sort((a, b) => b[1] - a[1]); const mx = Math.max(1, ...per.map(x => x[1]));
+    const md = machinesDoc(); const ms = md.machines || []; const canM = isAdmin() || role() === 'manager';
+    const rendTasks = bs.flatMap(b => tasksOf(b).filter(it => it.status !== 'done' && /render/i.test(grp(b, it.g).name + ' ' + it.name)).map(it => [b, it]));
+    return `<h2 class="h2">لوحة المتابعة</h2><p class="sub">NINETY Studioz · ${fmtD(TODAY())}</p>
+    <div class="qkpis"><div class="qkpi"><small>مشاريع شغالة</small><b>${num(bs.length)}</b></div><div class="qkpi"><small>مهام مفتوحة</small><b>${num(open.length)}</b></div><div class="qkpi ${late ? 'alert' : ''}"><small>متأخرة</small><b>${num(late)}</b></div><div class="qkpi"><small>عند العميل</small><b>${num(cl)}</b></div><div class="qkpi"><small>أجهزة الريندر</small><b>${num(ms.filter(m => m.job).length)}/${num(ms.length)}</b></div></div>
+    <div class="dgrid">
+      <div class="qcard"><h4>توزيع المهام حسب الحالة<small class="mono">${all.length} مهمة</small></h4><div class="qstack">${STATUS.filter(s => cnt[s.k]).map(s => `<i style="flex:${cnt[s.k]};background:${s.c}"></i>`).join('')}</div><div class="qlegend">${STATUS.map(s => `<span><i style="background:${s.c}"></i>${s.l} <b class="mono">${cnt[s.k] || 0}</b></span>`).join('')}</div></div>
+      <div class="qcard"><h4>المهام المفتوحة لكل شخص</h4><div class="bars">${per.map(([id, n]) => `<div class="r"><span class="who2">${av(id)}<span class="ell">${esc(pName(id))}</span></span><b><i style="width:${n / mx * 100}%;background:${pColor(id)}"></i></b><span class="mono">${n}</span></div>`).join('') || `<div class="qempty">مفيش مهام هنا</div>`}</div></div>
+      <div class="qcard"><h4>تقدم المشاريع</h4><table class="lt"><tbody>${bs.map(b => { const p = boardProgress(b); const [, e] = boardSpan(b); const lt = tasksOf(b).filter(isLate).length; return `<tr><td><a class="linky" href="#/pm/${esc(b.id)}"><i class="bdot" style="background:${esc(b.color || '#c8a26a')}"></i>${esc(bName(b))}</a>${lt ? ` <span class="chip warn">${lt} متأخر</span>` : ''}</td><td style="width:40%"><div class="pg" style="padding:0"><b><i style="width:${p}%"></i></b><span class="mono">${p}%</span></div></td><td class="n">${fmtD(e)}</td></tr>`; }).join('') || `<tr><td><div class="qempty">مفيش مشاريع لسه</div></td></tr>`}</tbody></table></div>
+      <div class="qcard"><h4>أجهزة الريندر${canM ? `<button type="button" class="pillbtn sm" data-pa="mAdd">${ic('plus')}<span>جهاز</span></button>` : ''}</h4><div class="machines">${ms.map((m, i) => { const j = m.job && T(m.job); return `<div class="mach"><i class="led" style="background:${j ? 'var(--pm-s-work)' : 'var(--pm-s-done)'}"></i><div style="min-width:0"><b class="mono notr">${esc(m.n)}</b> <span class="muted">· ${j ? 'يريندر' : 'متاح'}</span>${canM ? `<select id="pmm${i}" data-pc="mJob" data-i="${i}" aria-label="الشغل"><option value="">—</option>${rendTasks.map(([b, it]) => `<option value="${it.id}" ${m.job === it.id ? 'selected' : ''}>${esc(it.name)} · ${esc(bName(b))}</option>`).join('')}</select>` : (j ? `<div class="ell muted" style="font-size:12px">${esc(j.name)}</div>` : '')}</div>${canM ? `<span class="machr"><input class="inp mono" style="width:76px;padding:4px 6px" id="pme${i}" data-pc="mEta" data-i="${i}" value="${esc(m.eta || '')}" placeholder="يخلص" aria-label="يخلص"><button type="button" class="mini" data-pa="mDel" data-i="${i}" aria-label="مسح">${ic('trash')}</button></span>` : `<span class="mono muted">${esc(m.eta || '')}</span>`}</div>`; }).join('') || `<div class="qempty">${canM ? 'ضيف أجهزة الريندر بزرار «جهاز»' : 'مفيش أجهزة متسجلة'}</div>`}</div></div>
+      ${canMoney() ? `<div class="qcard" style="grid-column:1/-1"><h4>ربحية المشاريع<small>تظهر لمحمود وسعيد بس</small></h4><div style="overflow-x:auto"><table class="lt" style="min-width:620px"><thead><tr><th>المشاريع</th><th style="text-align:end">قيمة العرض</th><th style="text-align:end">الساعات</th><th style="text-align:end">التكلفة المخططة</th><th style="text-align:end">التكلفة الفعلية</th><th style="text-align:end">الهامش</th></tr></thead><tbody>${bs.map(b => { const c = costOf(b); const v = +fin(b).value || 0; const mg = v ? Math.round((v - c.cost) / v * 100) : null; return `<tr><td>${esc(bName(b))}</td><td class="n">${money(v)}</td><td class="n">${fmtMin(c.mins)}</td><td class="n">${money(c.plan)}</td><td class="n">${money(c.cost)}</td><td class="n" style="color:${mg == null ? 'var(--pm-muted)' : mg < 35 ? 'var(--pm-danger)' : 'var(--pm-ok)'}">${mg == null ? '—' : mg + '%'}</td></tr>`; }).join('')}</tbody></table></div><p class="muted" style="font-size:12px;margin:10px 0 0">التكلفة = الساعات المسجلة × سعر ساعة الموظف من ملف الموارد البشرية.</p></div>` : ''}
+    </div>`;
+  }
+  function pTpl() {
+    return `<h2 class="h2">القوالب</h2><p class="sub">${canNewBoard() ? 'اختار قالب وابدأ لوحة مهام لمشروع جديد أو لمشروع موجود' : 'القوالب اللي بتتعمل منها لوحات المشاريع'}</p><div class="tpls">${Object.entries(TPL).map(([k, Tp]) => `<div class="tpl"><h3>${esc(Tp.l)}</h3><p>${esc(Tp.d)}</p><div class="stages">${Tp.groups.map(g => `<span class="notr" style="background:${g[1]}">${esc(g[0])}</span>`).join('')}</div><p class="mono" style="font-size:12px">${Tp.groups.reduce((a, g) => a + g[2].length, 0)} مهمة · ${Tp.groups.reduce((a, g) => a + g[2].reduce((x, y) => x + y[2], 0), 0)} ساعة مقدرة</p>${canNewBoard() ? `<div><button type="button" class="pillbtn primary" data-pa="tplUse" data-t="${k}">${ic('plus')}<span>استخدم القالب</span></button></div>` : ''}</div>`).join('')}</div>`;
+  }
+
+  /* ---------- layer: drawer · popover · modal (outside #view, so live updates never close them) ---------- */
+  const DTABS = [['updates', 'التحديثات'], ['review', 'مراجعة الريندر'], ['subitems', 'المهام الفرعية'], ['files', 'الملفات'], ['activity', 'السجل']];
+  function drawer(it) {
+    const b = B(it.boardId); if (!b) return ''; const g = grp(b, it.g); const F = full(it.projectId); const C = canTask(it); const pg = it.status === 'done' ? 100 : (+it.progress || 0);
+    const deps = (it.deps || []).map(d => T(d)).filter(Boolean);
+    return `<div class="pmscrim" data-pa="closeDr"></div><aside class="pmdrawer" role="dialog" aria-label="${esc(it.name)}">
+    <div class="dh"><i class="gsq" style="background:${esc(g.c)}"></i><input id="pmTitle" data-pc="title" value="${esc(it.name)}" aria-label="المهمة" ${F ? '' : 'readonly'}>${F ? `<button type="button" class="qicon" data-pa="delTask" title="مسح المهمة" aria-label="مسح المهمة">${ic('trash')}</button>` : ''}<button type="button" class="qicon" data-pa="closeDr" aria-label="إغلاق">${ic('close')}</button></div>
+    <div class="dbody" id="pmdbody"><div class="dsub"><a href="#/pm/${esc(b.id)}" data-pa="goBoard">${esc(bName(b))}</a> · <span class="notr">${esc(g.name)}</span></div>
+    <div class="fields">
+      <div class="fld"><label>الحالة</label>${statusCell(it)}</div>
+      <div class="fld"><label>المسؤول</label><div class="val">${F ? `<button type="button" data-pa="pOwner" data-id="${it.id}" class="ownb">${av(it.owner)}<span>${esc(pName(it.owner) || '—')}</span></button>` : `${av(it.owner)}<span>${esc(pName(it.owner) || '—')}</span>`}</div></div>
+      <div class="fld"><label>الأولوية</label>${priCell(it)}</div>
+      <div class="fld"><label for="pmStart">البداية</label><input id="pmStart" type="date" class="inp mono" data-pc="start" value="${esc(it.start || '')}" ${F ? '' : 'disabled'}></div>
+      <div class="fld"><label for="pmDue">التسليم</label><input id="pmDue" type="date" class="inp mono ${isLate(it) ? 'late' : ''}" data-pc="due" data-id="${it.id}" value="${esc(it.due || '')}" ${F ? '' : 'disabled'}></div>
+      <div class="fld"><label for="pmProg">الإنجاز · <span class="mono" id="pmProgV">${pg}%</span></label><input id="pmProg" type="range" min="0" max="100" step="5" value="${pg}" data-pc="prog" ${C ? '' : 'disabled'}></div>
+      <div class="fld"><label for="pmEst">الساعات المقدرة</label><input id="pmEst" type="number" min="0" class="inp mono" data-pc="est" value="${+it.est || 0}" ${F ? '' : 'disabled'}></div>
+      <div class="fld"><label>الوقت</label><div class="val tm">${C ? `<button type="button" class="${it.timer ? 'run' : ''}" data-pa="timer" data-id="${it.id}" aria-label="الوقت">${ic(it.timer ? 'pause' : 'play')}</button>` : ''}<span class="mono" data-live="${it.id}">${fmtMin(liveMins(it))}</span><span class="muted" style="font-size:12px">/ ${+it.est || 0}${en() ? 'h' : 'س'}</span></div></div>
+      <div class="fld wide"><label>تعتمد على</label><div class="val wrap">${deps.map(x => `<button type="button" class="chip fg" data-pa="open" data-id="${x.id}">${x.status === 'done' ? ic('check') : ic('lock')} ${esc(x.name)}</button>`).join('') || `<span class="muted">لا يوجد</span>`}${F ? `<button type="button" class="chip" data-pa="pDeps" data-id="${it.id}">${ic('link')} تعتمد على</button>` : ''}</div></div>
+    </div>
+    <div class="dtabs" role="tablist">${DTABS.map(([k, l]) => `<button type="button" role="tab" data-pa="dtab" data-t="${k}" class="${PM.dtab === k ? 'pon' : ''}">${l}${k === 'updates' && (it.upd || []).length ? ` <span class="mono">${it.upd.length}</span>` : ''}${k === 'review' && (it.vers || []).length ? ` <span class="mono">V${it.vers.length}</span>` : ''}${k === 'subitems' && (it.subs || []).length ? ` <span class="mono">${it.subs.filter(s => s.done).length}/${it.subs.length}</span>` : ''}${k === 'files' && (it.files || []).length ? ` <span class="mono">${it.files.length}</span>` : ''}</button>`).join('')}</div>
+    <div class="dpane">${({ updates: dUpd, review: dRev, subitems: dSub, files: dFiles, activity: dAct })[PM.dtab](b, it)}</div>
+    </div></aside>`;
+  }
+  const handle = id => String(pName(id) || '').trim().split(/\s+/)[0] || '';
+  const hl = txt => { let h = esc(txt); team({ projectId: '' }).forEach(p => { const n = handle(p.id); if (n) h = h.split('@' + esc(n)).join(`<span class="mn">@${esc(n)}</span>`); }); return h; };
+  function dUpd(b, it) {
+    const C = canTask(it); const ppl = team(b).filter(p => !isMine(p.id)).slice(0, 14);
+    return `${C ? `<textarea id="pmUpd" class="inp" data-keep="1" placeholder="اكتب تحديث… استخدم @ لمنشن زميل"></textarea>
+      <div class="updbar"><div class="mentions">${ppl.map(p => `<button type="button" data-pa="mention" data-h="${esc(handle(p.id))}">@${esc(handle(p.id))}</button>`).join('')}</div><button type="button" class="pillbtn primary" data-pa="post">نشر</button></div>` : ''}
+      ${(it.upd || []).length ? it.upd.slice().reverse().map(u => `<article class="upd"><header>${av(u.by)}<b>${esc(pName(u.by))}</b><small>${ago(u.at)}</small></header><p>${hl(u.txt)}</p></article>`).join('') : `<div class="qempty">لا توجد تحديثات بعد. ابدأ الكلام هنا.</div>`}`;
+  }
+  function dRev(b, it) {
+    const vers = it.vers || []; const C = canTask(it); const vi = Math.min(PM.rv == null ? vers.length - 1 : PM.rv, vers.length - 1); const v = vers[vi]; const rv = +it.rev || 0; const over = rv > b.allowed;
+    const bar = `<div class="roundbar ${over ? 'over' : ''}">${ic('reset')}<span>جولات التعديل: <b>${rv}</b> من <b>${b.allowed}</b></span>${over ? `<span style="color:var(--pm-danger)">تعدّى الجولات المتفق عليها — تُحسب كتعديلات إضافية</span>` : ''}</div>`;
+    const actions = C ? `<div class="rowend"><label class="pillbtn upl">${ic('upload')}<span>رفع نسخة جديدة</span><input type="file" accept="image/*" data-pc="verUp"></label><button type="button" class="pillbtn" data-pa="clientRound">العميل طلب تعديلات</button><button type="button" class="pillbtn primary" data-pa="approve">${ic('check')}<span>العميل وافق</span></button></div>` : '';
+    if (!v) return bar + `<div class="qempty">لا توجد ريندرات بعد. ارفع أول نسخة.</div>` + actions;
+    const pins = (v.pins || []).map((p, i) => `<i class="pinm ${p.done ? 'done' : ''}" style="left:${p.x}%;top:${p.y}%">${i + 1}</i>`).join('') + (PM.pending ? `<i class="pinm new" style="left:${PM.pending.x}%;top:${PM.pending.y}%">+</i>` : '');
+    return `${bar}<div class="vtabs"><span class="muted" style="font-size:12px">النسخ</span>${vers.map((x, i) => `<button type="button" data-pa="ver" data-i="${i}" class="${i === vi ? 'pon' : ''}">V${x.v}</button>`).join('')}<span class="muted vby">${esc(pName(v.by))} · ${ago(v.at)}</span></div>
+      <div class="rimg" ${C ? `data-pa="pinAt" data-i="${vi}"` : ''}>${imgTag(v, '', 'V' + v.v)}${pins}</div>
+      ${C ? `<small class="muted">اضغط على الصورة لإضافة ملاحظة في مكانها${v.fileId ? ` · <button type="button" class="linkb" data-pa="fileOpen" data-f="${esc(v.fileId)}">افتح الصورة كاملة</button>` : ''}</small>` : ''}
+      ${PM.pending ? `<div class="upd"><label for="pmPin" style="font-size:12px" class="muted">ملاحظة على النقطة #${(v.pins || []).length + 1}</label><textarea id="pmPin" class="inp" data-keep="1" style="margin-top:6px"></textarea><div class="rowend" style="margin-top:8px"><button type="button" class="pillbtn" data-pa="pinCancel">إلغاء</button><button type="button" class="pillbtn primary" data-pa="pinSave" data-i="${vi}">حفظ</button></div></div>` : ''}
+      <div class="plist">${(v.pins || []).map((p, i) => `<div class="pitem ${p.done ? 'done' : ''}"><i>${i + 1}</i><p>${esc(p.txt)}<br><small class="muted">${esc(pName(p.by))}</small></p>${C ? `<button type="button" class="cb ${p.done ? 'pon' : ''}" data-pa="pinDone" data-i="${vi}" data-p="${i}" aria-label="تم">${p.done ? ic('check') : ''}</button>` : ''}</div>`).join('')}</div>${actions}`;
+  }
+  function dSub(b, it) {
+    const C = canTask(it);
+    return `${(it.subs || []).map((s, i) => `<div class="sub-i ${s.done ? 'done' : ''}">${C ? `<button type="button" class="cb ${s.done ? 'pon' : ''}" data-pa="subT" data-i="${i}" aria-label="تم">${s.done ? ic('check') : ''}</button>` : `<span class="cb ${s.done ? 'pon' : ''}">${s.done ? ic('check') : ''}</span>`}<span>${esc(s.name)}</span>${C ? `<button type="button" data-pa="pSubOwner" data-i="${i}" aria-label="المسؤول">${av(s.owner)}</button><button type="button" class="mini" data-pa="subDel" data-i="${i}" aria-label="مسح">${ic('trash')}</button>` : av(s.owner)}</div>`).join('') || (C ? '' : `<div class="qempty">لا يوجد</div>`)}
+      ${C ? `<input id="pmSub" class="inp" data-keep="1" placeholder="أضف مهمة فرعية واضغط Enter" enterkeyhint="done">` : ''}`;
+  }
+  function dFiles(b, it) {
+    const C = canTask(it); const fs = it.files || [];
+    return `${C ? `<div class="rowend" style="justify-content:flex-start"><label class="pillbtn upl">${ic('upload')}<span>رفع ملف</span><input type="file" multiple data-pc="fileUp"></label></div>` : ''}
+      ${fs.length ? `<div class="fgrid">${fs.map(f => `<figure data-pa="fileOpen" data-f="${esc(f.fileId || '')}" role="button" tabindex="0">${f.thumb ? `<img src="${esc(f.thumb)}" alt="">` : `<div class="doc">${esc((String(f.name || '').split('.').pop() || '').toUpperCase())}</div>`}<figcaption title="${esc(f.name)}">${esc(f.name)}</figcaption></figure>`).join('')}</div>` : `<div class="qempty">لا توجد ملفات</div>`}`;
+  }
+  function dAct(b, it) {
+    const txt = l => { const who = esc(pName(l.by)); switch (l.k) { case 'created': return `${who} أنشأ المهمة`; case 'status': return `${who} غيّر الحالة إلى <b>${st(l.x).l}</b>`; case 'owner': return `${who} غيّر المسؤول إلى <b>${esc(pName(l.x) || '—')}</b>`; case 'due': return `${who} غيّر التسليم إلى <b class="mono">${fmtD(l.x)}</b>`; case 'ver': return `${who} رفع نسخة <b class="mono">V${l.x}</b>`; case 'round': return `${who} سجّل جولة تعديل من العميل رقم <b class="mono">${l.x}</b>`; case 'approve': return `العميل وافق · ${who}`; case 'pin': return `${who} أضاف ملاحظة على <b class="mono">V${l.x}</b>`; case 'shot': return `اتنقلت من لوحة التشغيل (Studio OS)`; default: return who; } };
+    return (it.log || []).map(l => `<div class="act"><time>${new Date(l.at).toLocaleString(loc(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time><span>${txt(l)}</span></div>`).join('') || `<div class="qempty">لا يوجد</div>`;
+  }
+  function ruleText(b, r) {
+    const tr = r.tr === 'status' ? `الحالة تتغير إلى <b>${st(r.tv).l}</b>` : ({ created: 'مهمة جديدة تتضاف', due: 'ميعاد التسليم يعدّي والمهمة لسه ما خلصتش', rev: 'جولات التعديل تعدّي المتفق عليه', dep: 'المهمة اللي قبلها تخلص' })[r.tr];
+    const ac = r.ac === 'notifyOwner' ? 'بلّغ المسؤول' : r.ac === 'notifyP' ? `بلّغ <b>${esc(pName(r.ap) || '—')}</b>` : r.ac === 'prog' ? 'خلي الإنجاز ١٠٠٪' : `انقل المهمة لمرحلة <b class="notr">${esc(grp(b, r.ag).name)}</b>`;
+    return `<span>لما</span> ${tr}، <span>يتم</span> ${ac}`;
+  }
+  const mHead = t => `<header><h3>${t}</h3><button type="button" class="qicon" data-pa="closeModal" aria-label="إغلاق">${ic('close')}</button></header>`;
+  function mAutos() {
+    const b = B(PM.board); if (!b) return ''; const F = full(b.projectId);
+    return `${mHead(`${ic('bolt')} الأتمتة · ${esc(bName(b))}`)}<div class="mb">${(b.rules || []).map(r => `<div class="rule">${ic('bolt')}<p>${ruleText(b, r)}</p>${F ? `<button type="button" class="toggle ${r.on ? 'pon' : ''}" data-pa="ruleT" data-id="${r.id}" aria-label="تشغيل/إيقاف" aria-pressed="${!!r.on}"></button><button type="button" class="mini" data-pa="ruleDel" data-id="${r.id}" aria-label="مسح">${ic('trash')}</button>` : `<span class="toggle ${r.on ? 'pon' : ''}"></span>`}</div>`).join('')}
+    ${F ? `<div class="rform"><div><label for="pmrTr">لما</label><select id="pmrTr" class="inp"><option value="status">الحالة تتغير إلى</option><option value="created">مهمة جديدة تتضاف</option><option value="due">ميعاد التسليم يعدّي والمهمة لسه ما خلصتش</option><option value="rev">جولات التعديل تعدّي المتفق عليه</option><option value="dep">المهمة اللي قبلها تخلص</option></select></div>
+      <div><label for="pmrTv">الحالة</label><select id="pmrTv" class="inp">${STATUS.map(s => `<option value="${s.k}">${s.l}</option>`).join('')}</select></div>
+      <div><label for="pmrAc">يتم</label><select id="pmrAc" class="inp"><option value="notifyOwner">بلّغ المسؤول</option><option value="notifyP">بلّغ…</option><option value="prog">خلي الإنجاز ١٠٠٪</option><option value="move">انقل المهمة لمرحلة…</option></select></div>
+      <div><label for="pmrAp">بلّغ</label><select id="pmrAp" class="inp"><option value="role:admin">${esc(pName('role:admin'))}</option>${people().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div><label for="pmrAg">انقل المهمة لمرحلة</label><select id="pmrAg" class="inp notr">${(b.groups || []).map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div>
+      <div class="rfadd"><button type="button" class="pillbtn primary" data-pa="ruleAdd">${ic('plus')}<span>إضافة قاعدة</span></button></div></div>` : `<p class="muted" style="font-size:12px;margin:0">القواعد بيعدلها الآرت دايركتور ومسؤول المشروع.</p>`}</div>`;
+  }
+  function mSet() {
+    const b = B(PM.board); if (!b) return '';
+    return `${mHead('إعدادات المشروع')}<div class="mb"><p class="muted" style="margin:0;font-size:13px">اسم المشروع والعميل والفريق بيتعدلوا من <a href="#/projects/${esc(b.projectId)}" data-pa="closeModal">صفحة المشروع</a>.</p>
+      <div class="frow"><div><label for="pmsAllowed">جولات التعديل المتفق عليها</label><input id="pmsAllowed" type="number" min="0" class="inp mono" value="${+b.allowed || 0}"></div>${canMoney() ? `<div><label for="pmsValue">قيمة العرض</label><input id="pmsValue" type="number" min="0" class="inp mono" value="${+fin(b).value || 0}"></div>` : ''}</div>
+      <div><label>اللون</label><div class="colors">${COLORS.map(c => `<button type="button" class="csw ${b.color === c ? 'pon' : ''}" style="background:${c}" data-pa="setColor" data-c="${c}" aria-label="${c}"></button>`).join('')}</div></div>
+      <div class="rowend"><button type="button" class="pillbtn" data-pa="closeModal">إلغاء</button><button type="button" class="pillbtn primary" data-pa="setSave">حفظ</button></div></div>`;
+  }
+  function mTpl(k) {
+    const Tp = TPL[k]; const free = list('projects').filter(p => p.status !== 'archived' && visP(p) && !B(p.id));
+    return `${mHead(esc(Tp.l))}<div class="mb">
+      <div class="qseg"><button type="button" data-pa="tplMode" data-v="new" class="${PM.tplMode !== 'old' ? 'pon' : ''}">مشروع جديد</button><button type="button" data-pa="tplMode" data-v="old" class="${PM.tplMode === 'old' ? 'pon' : ''}" ${free.length ? '' : 'disabled'}>مشروع موجود (${free.length})</button></div>
+      ${PM.tplMode === 'old' && free.length ? `<div><label for="pmtProj">المشروع</label><select id="pmtProj" class="inp">${free.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.client ? ' · ' + esc(p.client) : ''}</option>`).join('')}</select></div>` : `<div class="frow"><div><label for="pmtName">اسم المشروع</label><input id="pmtName" class="inp"></div><div><label for="pmtClient">العميل</label><input id="pmtClient" class="inp"></div></div>`}
+      <div class="frow"><div><label for="pmtStart">تاريخ البدء</label><input id="pmtStart" type="date" class="inp mono" value="${TODAY()}"></div><div><label for="pmtAllowed">جولات التعديل المتفق عليها</label><input id="pmtAllowed" type="number" min="0" class="inp mono" value="2"></div>${canMoney() ? `<div><label for="pmtValue">قيمة العرض</label><input id="pmtValue" type="number" min="0" class="inp mono" value="0"></div>` : ''}</div>
+      <p class="muted" style="font-size:12px;margin:0">لو المشروع عليه لقطات في لوحة التشغيل، هتتنقل مهام في مرحلة Render ومراحل الاعتماد الأربعة تبقى مهام فرعية.</p>
+      <div class="rowend"><button type="button" class="pillbtn" data-pa="closeModal">إلغاء</button><button type="button" class="pillbtn primary" data-pa="tplCreate" data-t="${k}">إنشاء المشروع</button></div></div>`;
+  }
+  function renderLayer() {
+    let host = document.getElementById('pmlayer');
+    const on = S.session && S.route && S.route.view === 'pm';
+    if (!on) { if (host) host.innerHTML = ''; PM.dr = null; PM.modal = null; PM.pop = null; return; }
+    if (!host) { host = document.createElement('div'); host.id = 'pmlayer'; host.className = 'pmx-l'; document.body.appendChild(host); }
+    if (PM.dr && !T(PM.dr)) PM.dr = null;
+    // keep what the user is typing / where they scrolled while live data re-renders the layer
+    const keep = {}; host.querySelectorAll('[data-keep]').forEach(el => { keep[el.id] = el.value; });
+    const ae = document.activeElement; const focusId = ae && host.contains(ae) ? ae.id : null; const sel = focusId && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+    const db = document.getElementById('pmdbody'); const sc = db ? db.scrollTop : 0; const wasDr = !!db;
+    let h = '';
+    if (PM.dr) h += drawer(T(PM.dr));
+    if (PM.modal) h += `<div class="pmmodal-bg" data-pa="closeModal" data-self="1"><div class="pmmodal" role="dialog" aria-modal="true">${PM.modal()}</div></div>`;
+    if (PM.pop) h += `<div class="pmpop" id="pmpop">${PM.pop.html}</div>`;
+    host.innerHTML = h;
+    Object.entries(keep).forEach(([id, v]) => { const el = document.getElementById(id); if (el && v) el.value = v; });
+    if (focusId) { const el = document.getElementById(focusId); if (el) { try { el.focus({ preventScroll: true }); if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]); } catch (e) { /* ignore */ } } }
+    const db2 = document.getElementById('pmdbody'); if (db2 && wasDr) db2.scrollTop = sc;
+    document.documentElement.classList.toggle('pm-lock', !!(PM.dr || PM.modal));
+    if (PM.pop) placePop(); hydrate(host);
+  }
+  function placePop() { const p = document.getElementById('pmpop'); if (!p || !PM.pop) return; const a = PM.pop.a; const w = p.offsetWidth, h = p.offsetHeight; const rtl = document.documentElement.dir !== 'ltr'; let x = rtl ? a.right - w : a.left, y = a.bottom + 4; x = Math.max(8, Math.min(x, innerWidth - w - 8)); if (y + h > innerHeight - 8) y = Math.max(8, a.top - h - 4); p.style.left = x + 'px'; p.style.top = y + 'px'; }
+  const openPop = (el, html) => { PM.pop = { a: el.getBoundingClientRect(), html, id: el.dataset.id || '' }; renderLayer(); };
+  const closePop = () => { if (PM.pop) { PM.pop = null; renderLayer(); } };
+  /* full-size render images: thumbnails show first, the original is fetched once and cached */
+  function hydrate(root) {
+    (root || document).querySelectorAll('img[data-fid]').forEach(img => { const fid = img.dataset.fid; if (!fid) return; const big = img.closest('.rimg,.gcard,.kcard'); if (!big) return; const u = PM.imgs.get(fid); if (u) { if (img.getAttribute('src') !== u) img.src = u; return; } if (PM.imgs.has(fid)) return; PM.imgs.set(fid, null);
+      const f = byId('files', fid); if (!f || typeof Files === 'undefined') return; Promise.resolve(Files.url(f)).then(url => { if (!url) return; PM.imgs.set(fid, url); document.querySelectorAll(`img[data-fid="${CSS.escape(fid)}"]`).forEach(x => { if (x.closest('.rimg,.gcard,.kcard')) x.src = url; }); }).catch(() => {}); });
+  }
+
+  /* ---------- actions ---------- */
+  const curB = () => B(PM.board);
+  const A = {
+    view: e => { PM.view = e.dataset.v; try { localStorage.setItem('pm.view', PM.view); } catch (x) { /* ignore */ } rerender(); },
+    fp: e => { PM.fp = PM.fp === e.dataset.id ? null : e.dataset.id; rerender(); },
+    wl: e => { PM.wlAll = e.dataset.v === '1'; rerender(); },
+    calNav: e => { const [y, m] = (PM.calM || TODAY().slice(0, 7)).split('-').map(Number); PM.calM = iso(new Date(y, m - 1 + Number(e.dataset.d), 1)).slice(0, 7); rerender(); },
+    gToggle: e => { const g = e.dataset.g; if (closedG.has(g)) closedG.delete(g); else closedG.add(g); rerender(); },
+    side: () => { PM.side = !PM.side; rerender(); },
+    addTask: async e => { const b = curB(); if (!b || !full(b.projectId)) return; const gid = e.dataset.g || (b.groups[0] || {}).id; closedG.delete(gid); const t0 = TODAY(); const it = mkTask(b, gid, en() ? 'New task' : 'مهمة جديدة', { owner: meId(), start: t0, due: addD(t0, 2) }); fire(b, 'created', it); await save(it); PM.dr = it.id; PM.dtab = 'updates'; renderLayer(); rerender(); setTimeout(() => { const x = document.getElementById('pmTitle'); if (x) { x.focus(); x.select(); } }, 40); },
+    open: e => { const id = e.dataset.id; if (!T(id)) return; if (PM.dr !== id) { PM.rv = null; PM.pending = null; } PM.dr = id; if (e.dataset.t) PM.dtab = e.dataset.t; PM.pop = null; renderLayer(); },
+    closeDr: () => { PM.dr = null; PM.pending = null; PM.pop = null; renderLayer(); },
+    goBoard: () => { PM.dr = null; renderLayer(); },
+    dtab: e => { PM.dtab = e.dataset.t; PM.pending = null; renderLayer(); },
+    pStatus: e => openPop(e, STATUS.map(s => `<button type="button" class="sw" style="background:${s.c}" data-pa="setStatus" data-id="${e.dataset.id}" data-v="${s.k}">${s.l}</button>`).join('')),
+    setStatus: async e => { PM.pop = null; await setStatus(T(e.dataset.id), e.dataset.v); renderLayer(); },
+    pPri: e => openPop(e, PRI.map(s => `<button type="button" class="sw" style="background:${s.c}" data-pa="setPri" data-id="${e.dataset.id}" data-v="${s.k}">${s.l}</button>`).join('')),
+    setPri: async e => { PM.pop = null; const it0 = T(e.dataset.id); if (!it0 || !full(it0.projectId)) return; await upd(it0.id, it => { it.pri = e.dataset.v; }); renderLayer(); },
+    pOwner: e => { const it = T(e.dataset.id); const b = it && B(it.boardId); if (!b) return; openPop(e, `<div class="lbl">المسؤول</div>` + team(b).map(p => `<button type="button" class="opt" data-pa="setOwner" data-id="${it.id}" data-v="${esc(p.id)}">${av(p.id)}<span>${esc(p.name)}<br><small class="muted">${esc(roleL(p.id))}</small></span></button>`).join('')); },
+    setOwner: async e => { PM.pop = null; const it0 = T(e.dataset.id); if (!it0 || !full(it0.projectId)) return; const v = e.dataset.v; const it = await upd(it0.id, x => { x.owner = v; logIt(x, 'owner', v); }); if (it) notify(v, { type: 'assigned', item: it.id, board: it.boardId }); renderLayer(); },
+    pDeps: e => { const it = T(e.dataset.id); const b = it && B(it.boardId); if (!b) return; openPop(e, `<div class="lbl">تعتمد على</div>` + tasksOf(b).filter(x => x.id !== it.id).map(x => { const on = (it.deps || []).includes(x.id); return `<button type="button" class="opt" data-pa="depT" data-id="${it.id}" data-v="${x.id}"><span class="cb ${on ? 'pon' : ''}">${on ? ic('check') : ''}</span><span>${esc(x.name)}<br><small class="muted notr">${esc(grp(b, x.g).name)}</small></span></button>`; }).join('')); },
+    depT: async e => { const it0 = T(e.dataset.id); if (!it0 || !full(it0.projectId)) return; const v = e.dataset.v; const a = PM.pop && PM.pop.a; await upd(it0.id, it => { it.deps = (it.deps || []).includes(v) ? it.deps.filter(d => d !== v) : (it.deps || []).concat(v); }); if (a) { const fake = { dataset: { id: it0.id }, getBoundingClientRect: () => a }; A.pDeps(fake); } else renderLayer(); },
+    timer: async e => { await timerToggle(T(e.dataset.id)); renderLayer(); },
+    mention: e => { const x = document.getElementById('pmUpd'); if (!x) return; x.value += (x.value && !x.value.endsWith(' ') ? ' ' : '') + '@' + e.dataset.h + ' '; x.focus(); },
+    post: async () => { const x = document.getElementById('pmUpd'); const v = x ? x.value.trim() : ''; if (!v) return; const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; x.value = '';
+      await upd(it0.id, it => { it.upd = (it.upd || []).concat({ id: uid(), by: meId(), at: now(), txt: v }); });
+      const b = B(it0.boardId); const done = new Set(); team(b || {}).forEach(p => { const h = handle(p.id); if (h && !done.has(p.id) && new RegExp('(^|\\s)@' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[\\s.,،!?])').test(v)) { done.add(p.id); notify(p.id, { type: 'mention', item: it0.id, board: it0.boardId }); } });
+      if (it0.owner && !done.has(it0.owner) && !isMine(it0.owner)) notify(it0.owner, { type: 'mention', item: it0.id, board: it0.boardId }); renderLayer(); },
+    ver: e => { PM.rv = +e.dataset.i; PM.pending = null; renderLayer(); },
+    pinAt: (e, ev) => { if (ev.target.closest('.pinm')) return; const r = e.getBoundingClientRect(); PM.pending = { x: Math.round((ev.clientX - r.left) / r.width * 1000) / 10, y: Math.round((ev.clientY - r.top) / r.height * 1000) / 10 }; PM.rv = +e.dataset.i; renderLayer(); setTimeout(() => { const t = document.getElementById('pmPin'); if (t) t.focus(); }, 30); },
+    pinCancel: () => { PM.pending = null; renderLayer(); },
+    pinSave: async e => { const t = document.getElementById('pmPin'); const v = t ? t.value.trim() : ''; if (!v || !PM.pending) return; const it0 = T(PM.dr); if (!it0) return; const i = +e.dataset.i; const P0 = PM.pending; PM.pending = null;
+      const it = await upd(it0.id, x => { const ver = x.vers[i]; if (!ver) return false; ver.pins = (ver.pins || []).concat({ x: P0.x, y: P0.y, txt: v, by: meId(), at: now(), done: false }); logIt(x, 'pin', ver.v); });
+      if (it && it.owner) notify(it.owner, { type: 'pin', item: it.id, board: it.boardId }); renderLayer(); },
+    pinDone: async e => { const it0 = T(PM.dr); if (!it0) return; await upd(it0.id, x => { const p = ((x.vers[+e.dataset.i] || {}).pins || [])[+e.dataset.p]; if (!p) return false; p.done = !p.done; }); renderLayer(); },
+    clientRound: async () => { const it0 = T(PM.dr); const b = it0 && B(it0.boardId); if (!b || !canTask(it0)) return; const n = (+it0.rev || 0) + 1;
+      await upd(it0.id, x => { x.rev = n; logIt(x, 'round', n); }); await setStatus(T(it0.id), 'chg');
+      if (n > b.allowed) { const it = T(it0.id); fire(b, 'rev', clone(it)); notify('role:admin', { type: 'rev', item: it.id, board: b.id }); toast('تعدّى الجولات المتفق عليها — تُحسب كتعديلات إضافية', 'err'); } renderLayer(); },
+    approve: async () => { const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; await upd(it0.id, x => { logIt(x, 'approve'); }); await setStatus(T(it0.id), 'done'); renderLayer(); },
+    subT: async e => { const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; await upd(it0.id, it => { const s = it.subs[+e.dataset.i]; if (!s) return false; s.done = !s.done; if (it.subs.length) it.progress = Math.round(it.subs.filter(x => x.done).length / it.subs.length * 100); }); renderLayer(); },
+    subDel: async e => { const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; await upd(it0.id, it => { it.subs.splice(+e.dataset.i, 1); }); renderLayer(); },
+    pSubOwner: e => { const it = T(PM.dr); const b = it && B(it.boardId); if (!b) return; openPop(e, team(b).map(p => `<button type="button" class="opt" data-pa="setSubOwner" data-i="${e.dataset.i}" data-v="${esc(p.id)}">${av(p.id)}<span>${esc(p.name)}</span></button>`).join('')); },
+    setSubOwner: async e => { PM.pop = null; const it0 = T(PM.dr); if (!it0) return; await upd(it0.id, it => { const s = it.subs[+e.dataset.i]; if (!s) return false; s.owner = e.dataset.v; }); renderLayer(); },
+    delTask: async () => { const it = T(PM.dr); if (!it || !full(it.projectId)) return; if (!(await confirmDlg(`مسح المهمة «${it.name}» نهائيًا؟`, 'امسح'))) return; PM.dr = null; renderLayer(); try { await Store.remove('pmtasks', it.id); } catch (x) { toast('مقدرتش أمسح', 'err'); } rerender(); },
+    fileOpen: e => { const f = e.dataset.f; if (f && typeof ACTIONS.fileOpen === 'function') ACTIONS.fileOpen(f); },
+    autos: () => { PM.modal = mAutos; renderLayer(); },
+    bset: () => { const b = curB(); if (!b) return; PM.setColor = b.color; PM.modal = mSet; renderLayer(); },
+    setColor: e => { PM.setColor = e.dataset.c; document.querySelectorAll('#pmlayer .csw').forEach(x => x.classList.toggle('pon', x.dataset.c === PM.setColor)); },
+    setSave: async () => { const b0 = curB(); if (!b0 || !full(b0.projectId)) return; const b = clone(b0); const a = document.getElementById('pmsAllowed'); b.allowed = Math.max(0, +(a && a.value) || 0); b.color = PM.setColor || b.color; await saveB(b);
+      const vEl = document.getElementById('pmsValue'); if (vEl && canMoney()) await Store.save('pmfin', { id: b.id, projectId: b.projectId, value: Math.max(0, +vEl.value || 0) }, { silent: true }).catch(() => toast('مقدرتش أحفظ — مش معاك صلاحية', 'err'));
+      PM.modal = null; renderLayer(); rerender(); toast('تم الحفظ'); },
+    closeModal: (e, ev) => { if (e.dataset.self && ev.target !== e) return; PM.modal = null; renderLayer(); },
+    ruleT: async e => { const b = clone(curB()); const r = (b.rules || []).find(x => x.id === e.dataset.id); if (!r) return; r.on = !r.on; await saveB(b); renderLayer(); },
+    ruleDel: async e => { const b = clone(curB()); b.rules = (b.rules || []).filter(x => x.id !== e.dataset.id); await saveB(b); renderLayer(); },
+    ruleAdd: async () => { const b = clone(curB()); const g = id => (document.getElementById(id) || {}).value; b.rules = (b.rules || []).concat({ id: uid(), on: true, tr: g('pmrTr'), tv: g('pmrTv'), ac: g('pmrAc'), ap: g('pmrAp'), ag: g('pmrAg') }); await saveB(b); renderLayer(); },
+    tplUse: e => { if (!canNewBoard()) return; PM.tplMode = 'new'; PM.tplK = e.dataset.t; PM.modal = () => mTpl(PM.tplK); renderLayer(); setTimeout(() => { const x = document.getElementById('pmtName'); if (x) x.focus(); }, 40); },
+    tplMode: e => { PM.tplMode = e.dataset.v; renderLayer(); },
+    tplCreate: async e => { if (!canNewBoard()) return; const g = id => (document.getElementById(id) || {}).value; let pid = null;
+      if (PM.tplMode === 'old' && g('pmtProj')) pid = g('pmtProj');
+      else { const name = String(g('pmtName') || '').trim(); if (!name) { const x = document.getElementById('pmtName'); if (x) x.focus(); return; }
+        const doc = { id: uid(), name, client: String(g('pmtClient') || '').trim(), code: 'NS-' + String(list('projects').length + 1).padStart(3, '0'), stage: 'concept', dueDate: null, leadId: null, area: '', team: [meId()].filter(Boolean), desc: '', status: 'active', createdBy: S.session ? S.session.id : null };
+        try { await Store.save('projects', doc); } catch (x) { toast('مقدرتش أعمل المشروع', 'err'); return; } pid = doc.id; }
+      if (B(pid)) { toast('المشروع ده عليه لوحة مهام بالفعل'); go('pm/' + pid); return; }
+      e.disabled = true; try { await buildBoard(pid, e.dataset.t, { start: g('pmtStart') || TODAY(), allowed: g('pmtAllowed'), value: canMoney() ? g('pmtValue') : null }); } catch (x) { console.warn(x); toast('مقدرتش أعمل اللوحة', 'err'); e.disabled = false; return; }
+      PM.modal = null; PM.view = 'table'; renderLayer(); toast('اتعملت لوحة المشروع'); go('pm/' + pid); },
+    notif: async e => { const n = byId('pmnotifs', e.dataset.id); if (!n) return; if (!n.read) Store.save('pmnotifs', Object.assign({}, n, { read: true }), { silent: true }).catch(() => {}); if (T(n.item)) { PM.dr = n.item; PM.dtab = ['rev', 'pin'].includes(n.type) ? 'review' : 'updates'; PM.rv = null; renderLayer(); } },
+    readAll: async () => { for (const n of myNotifs().filter(x => !x.read)) await Store.save('pmnotifs', Object.assign({}, n, { read: true }), { silent: true }).catch(() => {}); rerender(); },
+    mAdd: () => { if (!(isAdmin() || role() === 'manager')) return; openModal({ title: 'جهاز ريندر جديد', body: `<div class="form">${field('اسم الجهاز', inp('n', '', 'required class="ltr"'), 'full')}</div>`, onSubmit: async f => { const n = String(formData(f).n || '').trim(); if (!n) return false; const d = clone(machinesDoc()); d.machines = (d.machines || []).concat({ n, job: null, eta: '' }); await Store.save('pmboards', d, { silent: true }); } }); },
+    mDel: async e => { const d = clone(machinesDoc()); const m = (d.machines || [])[+e.dataset.i]; if (!m || !(await confirmDlg(`مسح «${m.n}» من أجهزة الريندر؟`, 'امسح'))) return; d.machines.splice(+e.dataset.i, 1); await Store.save('pmboards', d, { silent: true }); }
+  };
+  const inPM = el => !!(el && el.closest && el.closest('.pmx,#pmlayer'));
+  document.addEventListener('click', ev => {
+    const el = ev.target.closest('[data-pa]');
+    if (PM.pop && !ev.target.closest('#pmpop') && !(el && /^p[A-Z]/.test(el.dataset.pa))) { PM.pop = null; if (!el) { renderLayer(); return; } }
+    if (!el || !inPM(el)) return; const f = A[el.dataset.pa]; if (!f) return;
+    if (el.tagName === 'BUTTON' || ['pinAt', 'closeModal', 'closeDr'].includes(el.dataset.pa)) ev.preventDefault();
+    try { const r = f(el, ev); if (r && r.catch) r.catch(x => console.warn('pm', x)); } catch (x) { console.warn('pm', x); }
+  });
+  document.addEventListener('keydown', ev => {
+    if (!S.route || S.route.view !== 'pm') return;
+    if (ev.key === 'Escape') { if (PM.pop) closePop(); else if (PM.modal) { PM.modal = null; renderLayer(); } else if (PM.dr) A.closeDr(); return; }
+    if (ev.key === 'Enter' && ev.target.id === 'pmSub' && !ev.isComposing) { const v = ev.target.value.trim(); if (!v) return; const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; ev.target.value = ''; upd(it0.id, it => { it.subs = (it.subs || []).concat({ id: uid(), name: v, done: false, owner: meId() }); }).then(() => { renderLayer(); setTimeout(() => { const s = document.getElementById('pmSub'); if (s) s.focus(); }, 20); }); return; }
+    if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && ev.target.id === 'pmUpd') { A.post(); return; }
+    if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches && ev.target.matches('.pmx .kcard,#pmlayer figure') && inPM(ev.target)) { ev.preventDefault(); ev.target.click(); }
+  });
+  document.addEventListener('input', ev => {
+    const el = ev.target; const c = el.dataset && el.dataset.pc; if (!c || !inPM(el)) return;
+    if (c === 'q') { PM.q = el.value; rerender(); }
+    if (c === 'prog') { const v = document.getElementById('pmProgV'); if (v) v.textContent = el.value + '%'; }
+  });
+  document.addEventListener('change', async ev => {
+    const el = ev.target; const c = el.dataset && el.dataset.pc; if (!c || !inPM(el)) return;
+    if (c === 'fs') { PM.fs = el.value; rerender(); return; }
+    if (c === 'due') { const it0 = T(el.dataset.id || PM.dr); if (!it0 || !full(it0.projectId)) return; const it = await upd(it0.id, x => { x.due = el.value || null; if (x.start && x.due && x.due < x.start) x.start = x.due; logIt(x, 'due', x.due); x.lateN = null; }); if (it) await shiftDeps(it); renderLayer(); rerender(); return; }
+    if (c === 'start') { const it0 = T(PM.dr); if (!it0 || !full(it0.projectId)) return; await upd(it0.id, x => { x.start = el.value || null; if (x.due && x.start && x.due < x.start) x.due = x.start; }); renderLayer(); return; }
+    if (c === 'prog') { const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; await upd(it0.id, x => { x.progress = +el.value; }); renderLayer(); return; }
+    if (c === 'est') { const it0 = T(PM.dr); if (!it0 || !full(it0.projectId)) return; await upd(it0.id, x => { x.est = Math.max(0, +el.value || 0); }); renderLayer(); return; }
+    if (c === 'title') { const it0 = T(PM.dr); if (!it0 || !full(it0.projectId)) return; const v = el.value.trim(); if (!v || v === it0.name) return; await upd(it0.id, x => { x.name = v; }); renderLayer(); return; }
+    if (c === 'mJob' || c === 'mEta') { const d = clone(machinesDoc()); const m = (d.machines || [])[+el.dataset.i]; if (!m) return; if (c === 'mJob') m.job = el.value || null; else m.eta = el.value; await Store.save('pmboards', d, { silent: true }).catch(() => {}); return; }
+    if (c === 'verUp' || c === 'fileUp') {
+      const it0 = T(PM.dr); if (!it0 || !canTask(it0)) return; const files = [...(el.files || [])]; if (!files.length) return;
+      if (typeof Files !== 'undefined' && Files.canUpload && !Files.canUpload()) { toast('الرفع غير مسموح من هذا الحساب', 'err'); return; }
+      toast('جارٍ الرفع…'); const ups = [];
+      for (const f of files) { try { const doc = await uploadOneBase(f, { kind: c === 'verUp' ? 'render' : undefined }); ups.push({ f, doc }); } catch (x) { console.warn(x); toast(typeof uploadErrText === 'function' ? uploadErrText(x) : 'فشل الرفع', 'err'); } }
+      if (!ups.length) return; let newV = 0;
+      await upd(it0.id, it => { ups.forEach(({ f, doc }) => { const fi = { id: uid(), fileId: doc.id, name: f.name, thumb: doc.thumb || null, at: now(), by: meId() }; it.files = (it.files || []).concat(fi);
+        if (c === 'verUp') { const v = ((it.vers || []).length ? it.vers[it.vers.length - 1].v : 0) + 1; it.vers = (it.vers || []).concat({ v, fileId: doc.id, thumb: doc.thumb || null, at: now(), by: meId(), pins: [] }); logIt(it, 'ver', v); newV = v; } }); });
+      PM.rv = null; const cur = T(it0.id); if (c === 'verUp' && cur && ['chg', 'idle', 'work'].includes(cur.status)) await setStatus(cur, 'int');
+      toast(newV ? `اترفعت V${newV}` : 'اترفع'); renderLayer();
+    }
+  });
+  /* kanban drag (desktop); on phones each card has its own status button */
+  document.addEventListener('dragstart', ev => { const c = ev.target.closest && ev.target.closest('.pmx [data-drag]'); if (c) { ev.dataTransfer.setData('text/plain', c.dataset.drag); ev.dataTransfer.effectAllowed = 'move'; } });
+  document.addEventListener('dragover', ev => { const c = ev.target.closest && ev.target.closest('.pmx [data-drop]'); if (c) { ev.preventDefault(); c.classList.add('over'); } });
+  document.addEventListener('dragleave', ev => { const c = ev.target.closest && ev.target.closest('.pmx [data-drop]'); if (c && !c.contains(ev.relatedTarget)) c.classList.remove('over'); });
+  document.addEventListener('drop', async ev => { const c = ev.target.closest && ev.target.closest('.pmx [data-drop]'); if (!c) return; ev.preventDefault(); c.classList.remove('over'); const id = ev.dataTransfer.getData('text/plain'); const it = T(id); if (it) await setStatus(it, c.dataset.drop); rerender(); });
+  window.addEventListener('resize', () => { if (PM.pop) closePop(); });
+
+  /* ---------- the page inside the app shell ---------- */
+  function pmView(r) {
+    const bs = boards(); let id = r.id;
+    if (!id) { let last = null; try { last = localStorage.getItem('pm.last'); } catch (x) { /* ignore */ } id = (last && (B(last) && bs.some(b => b.id === last) || ['my', 'inbox', 'dash', 'tpl'].includes(last)) ? last : null) || (bs[0] ? bs[0].id : 'my'); }
+    const pageK = ['my', 'inbox', 'dash', 'tpl'].includes(id) ? id : 'board'; const b = pageK === 'board' ? B(id) : null;
+    if (pageK === 'board' && (!b || !bs.some(x => x.id === b.id))) return `<div class="pmx"><div class="pmmain"><div class="qempty">${!S.loaded.pmboards ? 'جاري التحميل…' : 'اللوحة دي مش موجودة أو مش متاحة ليك'} · <a href="#/pm/my">شغلي</a></div></div></div>`;
+    if (PM.board !== (b ? b.id : null)) { PM.board = b ? b.id : null; PM.fp = null; PM.fs = ''; PM.q = ''; }
+    PM.page = pageK; try { localStorage.setItem('pm.last', id); } catch (x) { /* ignore */ }
+    const nu = unread(); const nav = (k, i, l, extra = '') => `<a href="#/pm/${k}" class="${PM.page === k ? 'pon' : ''}">${ic(i)}<span>${l}</span>${extra}</a>`;
+    const page = pageK === 'my' ? pMyWork() : pageK === 'inbox' ? pInbox() : pageK === 'dash' ? pDash() : pageK === 'tpl' ? pTpl() : pBoard(b);
+    return `<div class="pmx ${PM.side ? 'sideon' : ''}"><aside class="pmside"><nav class="pmnav">${nav('my', 'home', 'شغلي', mineOpen().length ? `<span class="cnt2 mono">${mineOpen().length}</span>` : '')}${nav('inbox', 'inbox', 'الإشعارات', nu ? `<span class="badge mono">${nu}</span>` : '')}${nav('dash', 'dash', 'لوحة المتابعة')}${nav('tpl', 'tpl', 'القوالب')}</nav>
+      <div class="sec"><span>المشاريع</span>${canNewBoard() ? `<a href="#/pm/tpl" title="مشروع جديد" aria-label="مشروع جديد">${ic('plus')}</a>` : ''}</div>
+      <div class="blist">${bs.map(x => `<a href="#/pm/${esc(x.id)}" class="${PM.page === 'board' && x.id === PM.board ? 'pon' : ''}"><i class="dot" style="background:${esc(x.color || '#c8a26a')}"></i><span>${esc(bName(x))}</span><small class="mono">${boardProgress(x)}%</small></a>`).join('') || `<p class="muted" style="font-size:12px;padding:6px 10px">${canNewBoard() ? 'لسه مفيش لوحات — ابدأ من القوالب' : 'مفيش مشاريع متاحة ليك لسه'}</p>`}</div></aside>
+      <div class="pmmain">${page}</div></div>`;
+  }
+  Object.assign(VIEW_TITLES, { pm: 'المشاريع والمهام' });
+  EXTRA_VIEWS.pm = r => pmView(r);
+  EXTRA_TITLES.pm = r => { const b = r.id && B(r.id); return { title: 'المشاريع والمهام', sub: b ? `${bName(b)}${bClient(b) ? ' · ' + bClient(b) : ''}` : 'لوحات المشاريع · المهام · الريندرات · الوقت' }; };
+  const addViews = (r, v) => { if (Array.isArray(ROLE_VIEWS[r])) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(v.filter(x => !ROLE_VIEWS[r].includes(x))); };
+  ['manager', 'head', 'office', 'employee', 'hr', 'acc'].forEach(r => addViews(r, ['pm']));
+  { const at = NAV.findIndex(n => n.id === 'studioos'); const at2 = at >= 0 ? at : NAV.findIndex(n => n.id === 'projects'); NAV.splice(at2 >= 0 ? at2 + 1 : 1, 0, { id: 'pm', label: 'المشاريع والمهام', short: 'لوحة المهام', icon: 'layers', count: () => unread() }); }
+  if (typeof TABBAR_PRIORITY !== 'undefined' && !TABBAR_PRIORITY.includes('pm')) { const i = TABBAR_PRIORITY.indexOf('projects'); TABBAR_PRIORITY.splice(i >= 0 ? i + 1 : 2, 0, 'pm'); }
+  try { const v = localStorage.getItem('pm.view'); if (VIEWS.some(x => x[0] === v)) PM.view = v; } catch (x) { /* ignore */ }
+  RENDER_HOOKS.push(() => { renderLayer(); if (S.route.view === 'pm') hydrate(document.getElementById('view')); });
+  /* the project page gets a link to its board (or a button to start one) */
+  if (EXTRA_TITLES.projects) { const baseT = EXTRA_TITLES.projects; EXTRA_TITLES.projects = function () { const t = Object.assign({}, baseT.apply(this, arguments)); const p = S.route.id && byId('projects', S.route.id); if (p) { const b = B(p.id); const btn = b ? `<a class="btn" href="#/pm/${esc(p.id)}">${icon('layers')}<span>لوحة المهام</span></a>` : (canNewBoard() ? `<button class="btn" data-action="pmStartBoard" data-arg="${esc(p.id)}">${icon('layers')}<span>اعمل لوحة مهام</span></button>` : ''); t.actions = btn + (t.actions || ''); } return t; }; }
+  ACTIONS.pmStartBoard = pid => { if (!canNewBoard() || !byId('projects', pid)) return; go('pm/tpl'); setTimeout(() => { PM.tplMode = 'old'; PM.tplK = 'stills'; PM.modal = () => mTpl(PM.tplK); renderLayer(); const s = document.getElementById('pmtProj'); if (s) s.value = pid; }, 120); };
+  window.pmHasBoard = pid => !!B(pid);
+  /* live timers + overdue check + tidy old read notifications */
+  setInterval(() => { document.querySelectorAll('[data-live]').forEach(el => { const it = T(el.dataset.live); if (it && it.timer) el.textContent = fmtMin(liveMins(it)); }); }, 15000);
+  setInterval(() => { if (S.session && S.loaded && S.loaded.pmtasks) checkDue(); }, 5 * 60000);
+  setTimeout(() => { if (S.session && S.loaded && S.loaded.pmtasks) checkDue(); }, 20000);
+  let tidied = false; setInterval(() => { if (tidied || !S.session || !(S.loaded && S.loaded.pmnotifs)) return; tidied = true; const old = now() - 30 * 864e5; myNotifs().filter(n => n.read && n.at < old && !String(n.to).startsWith('role:')).slice(0, 100).forEach(n => Store.remove('pmnotifs', n.id).catch(() => {})); }, 30000);
+
+  document.head.insertAdjacentHTML('beforeend', `<style id="pmcss">
+.pmx,.pmx-l{--pm-bg:#0e0f11;--pm-panel:#15171a;--pm-panel2:#1c1f23;--pm-panel3:#24282d;--pm-line:#2b3036;--pm-fg:#ecebe7;--pm-muted:#8e939a;--pm-faint:#5d636b;--pm-accent:#c8a26a;--pm-accent-ink:#17120a;--pm-accent-soft:rgba(200,162,106,.14);--pm-s-idle:#5b616a;--pm-s-work:#d99a3a;--pm-s-int:#8b7cf0;--pm-s-client:#3b9bd6;--pm-s-chg:#d9733f;--pm-s-stuck:#d85656;--pm-s-done:#3aa874;--pm-p-crit:#d85656;--pm-p-high:#d9733f;--pm-p-med:#c8a26a;--pm-p-low:#6b8aa6;--pm-danger:#e06464;--pm-ok:#3aa874;--pm-shadow:0 18px 50px rgba(0,0,0,.45);--pm-r:8px;--pm-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:dark}
+html[data-theme=light] .pmx,html[data-theme=light] .pmx-l{--pm-bg:#f3f2ef;--pm-panel:#fff;--pm-panel2:#f7f6f3;--pm-panel3:#ecebe6;--pm-line:#e1dfd9;--pm-fg:#1b1c1e;--pm-muted:#6c7077;--pm-faint:#a3a6ab;--pm-accent:#a07a3e;--pm-accent-ink:#fff;--pm-accent-soft:rgba(160,122,62,.12);--pm-shadow:0 18px 50px rgba(30,30,30,.16);color-scheme:light}
+@media (prefers-color-scheme:light){html:not([data-theme]) .pmx,html:not([data-theme]) .pmx-l{--pm-bg:#f3f2ef;--pm-panel:#fff;--pm-panel2:#f7f6f3;--pm-panel3:#ecebe6;--pm-line:#e1dfd9;--pm-fg:#1b1c1e;--pm-muted:#6c7077;--pm-faint:#a3a6ab;--pm-accent:#a07a3e;--pm-accent-ink:#fff;--pm-accent-soft:rgba(160,122,62,.12);--pm-shadow:0 18px 50px rgba(30,30,30,.16);color-scheme:light}}
+.pmx{display:grid;grid-template-columns:232px minmax(0,1fr);background:var(--pm-bg);color:var(--pm-fg);border:1px solid var(--pm-line);border-radius:14px;min-height:calc(100dvh - 150px);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.pmx-l{color:var(--pm-fg);font-size:14px;line-height:1.45}
+:is(.pmx,.pmx-l) *{box-sizing:border-box}
+:is(.pmx,.pmx-l) button{background:none;border:0;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;min-height:0;box-shadow:none;text-align:inherit}
+:is(.pmx,.pmx-l) a{color:inherit;text-decoration:none}
+:is(.pmx,.pmx-l) input,:is(.pmx,.pmx-l) select,:is(.pmx,.pmx-l) textarea{font:inherit;color:inherit}
+:is(.pmx,.pmx-l) table{background:none;box-shadow:none}
+:is(.pmx,.pmx-l) th,:is(.pmx,.pmx-l) td{background:none}
+:is(.pmx,.pmx-l) .pmi{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:middle}
+:is(.pmx,.pmx-l) .pmi.sm{width:13px;height:13px;margin-inline-end:4px}
+:is(.pmx,.pmx-l) .mono{font-family:var(--pm-mono);font-variant-numeric:tabular-nums}
+:is(.pmx,.pmx-l) .muted{color:var(--pm-muted)}
+:is(.pmx,.pmx-l) .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+:is(.pmx,.pmx-l) .inp{background:var(--pm-panel2);border:1px solid var(--pm-line);border-radius:7px;padding:7px 9px;width:100%;height:auto;min-height:0;color:var(--pm-fg);box-shadow:none}
+:is(.pmx,.pmx-l) textarea.inp{resize:vertical;min-height:70px}
+:is(.pmx,.pmx-l) .inp:disabled{opacity:.6}
+:is(.pmx,.pmx-l) input[type=date]{direction:ltr}
+.pmside{background:var(--pm-panel);border-inline-end:1px solid var(--pm-line);border-start-start-radius:14px;border-end-start-radius:14px;display:flex;flex-direction:column;min-height:0;padding-top:10px;position:sticky;top:64px;align-self:start;max-height:calc(100dvh - 80px)}
+.pmnav{display:flex;flex-direction:column;gap:2px;padding:6px 10px}
+.pmnav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:var(--pm-muted)}
+.pmnav a:hover{background:var(--pm-panel2);color:var(--pm-fg)}
+.pmnav a.pon{background:var(--pm-accent-soft);color:var(--pm-fg)}
+.pmnav .badge{margin-inline-start:auto;background:var(--pm-accent);color:var(--pm-accent-ink);border-radius:20px;font-size:11px;padding:0 7px;font-weight:600}
+.pmnav .cnt2{margin-inline-start:auto;color:var(--pm-faint);font-size:11px}
+.pmside .sec{padding:16px 20px 6px;font-size:11px;letter-spacing:.14em;color:var(--pm-faint);display:flex;justify-content:space-between;align-items:center}
+.pmside .sec a{color:var(--pm-muted)}
+.pmside .blist{overflow:auto;flex:1;padding:0 10px 12px}
+.pmside .blist a{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border-radius:7px;color:var(--pm-muted)}
+.pmside .blist a:hover{background:var(--pm-panel2);color:var(--pm-fg)}
+.pmside .blist a.pon{background:var(--pm-panel3);color:var(--pm-fg)}
+.pmside .blist small{margin-inline-start:auto;color:var(--pm-faint);font-size:10.5px}
+.pmside .dot{width:8px;height:8px;border-radius:2px;flex:none}
+.pmside .blist span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmmain{min-width:0;padding:20px 22px 48px}
+:is(.pmx,.pmx-l) .bh{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between;margin-bottom:14px}
+:is(.pmx,.pmx-l) .bh h1{margin:0;font-size:24px;font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+:is(.pmx,.pmx-l) .bdot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none;margin-inline-end:6px;vertical-align:middle}
+:is(.pmx,.pmx-l) .bh h1 .bdot{margin:0}
+:is(.pmx,.pmx-l) .qmeta{display:flex;flex-wrap:wrap;gap:8px 16px;color:var(--pm-muted);font-size:12.5px;margin-top:6px;align-items:center}
+:is(.pmx,.pmx-l) .qmeta b{color:var(--pm-fg);font-weight:500}
+:is(.pmx,.pmx-l) .bhact{display:flex;gap:8px;flex-wrap:wrap}
+:is(.pmx,.pmx-l) .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--pm-line);border-radius:20px;padding:2px 9px;font-size:11.5px;color:var(--pm-muted);white-space:nowrap;background:none}
+:is(.pmx,.pmx-l) .chip .pmi{width:13px;height:13px}
+:is(.pmx,.pmx-l) .chip.warn{border-color:var(--pm-s-chg);color:var(--pm-s-chg)}
+:is(.pmx,.pmx-l) .chip.money b{color:var(--pm-accent)}
+:is(.pmx,.pmx-l) .chip.fg{color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .qicon{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:8px;color:var(--pm-muted);border:1px solid var(--pm-line);background:var(--pm-panel);flex:none}
+:is(.pmx,.pmx-l) .qicon:hover{color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .pillbtn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--pm-line);background:var(--pm-panel);color:var(--pm-fg);white-space:nowrap}
+:is(.pmx,.pmx-l) .pillbtn.sm{height:28px;padding:0 9px;font-size:12px}
+:is(.pmx,.pmx-l) .pillbtn:hover{border-color:var(--pm-faint)}
+:is(.pmx,.pmx-l) .pillbtn.primary{background:var(--pm-accent);border-color:var(--pm-accent);color:var(--pm-accent-ink);font-weight:500}
+:is(.pmx,.pmx-l) .pillbtn:disabled{opacity:.5}
+:is(.pmx,.pmx-l) .qtabs{display:flex;gap:2px;border-bottom:1px solid var(--pm-line);margin-bottom:14px;overflow-x:auto;scrollbar-width:none}
+:is(.pmx,.pmx-l) .qtabs button{display:flex;align-items:center;gap:7px;padding:9px 12px;color:var(--pm-muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+:is(.pmx,.pmx-l) .qtabs button.pon{color:var(--pm-fg);border-color:var(--pm-accent)}
+:is(.pmx,.pmx-l) .qtoolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+:is(.pmx,.pmx-l) .qsearch{display:flex;align-items:center;gap:7px;background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:8px;padding:0 10px;height:34px;min-width:0;flex:0 1 240px;color:var(--pm-muted)}
+:is(.pmx,.pmx-l) .qsearch input{background:none;border:0;outline:0;width:100%;min-width:0;padding:0;height:32px;color:var(--pm-fg);box-shadow:none}
+:is(.pmx,.pmx-l) .avs{display:flex;align-items:center;padding-inline-start:8px}
+:is(.pmx,.pmx-l) .pmav{width:26px;height:26px;border-radius:50%;display:inline-grid;place-items:center;font-size:10.5px;font-weight:600;color:#111;flex:none;border:2px solid var(--pm-bg);vertical-align:middle}
+:is(.pmx,.pmx-l) .avs .pmav{margin-inline-start:-6px;opacity:.55}
+:is(.pmx,.pmx-l) .avs .pmav.pon{opacity:1;box-shadow:0 0 0 2px var(--pm-accent)}
+:is(.pmx,.pmx-l) .pmav.pnone{background:var(--pm-panel3);color:var(--pm-faint);border:1px dashed var(--pm-faint)}
+:is(.pmx,.pmx-l) .pmav.bolt{background:var(--pm-accent-soft);color:var(--pm-accent)}
+:is(.pmx,.pmx-l) .pmav.bolt .pmi{width:14px;height:14px}
+:is(.pmx,.pmx-l) .qempty{padding:22px;text-align:center;color:var(--pm-faint)}
+:is(.pmx,.pmx-l) .group{margin-bottom:26px}
+:is(.pmx,.pmx-l) .ghead{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+:is(.pmx,.pmx-l) .ghead .gt{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px}
+:is(.pmx,.pmx-l) .ghead .pmi{transition:transform .15s}
+:is(.pmx,.pmx-l) .ghead .open .pmi{transform:rotate(90deg)}
+[dir=rtl] :is(.pmx,.pmx-l) .ghead .closed .pmi{transform:rotate(180deg)}
+:is(.pmx,.pmx-l) .ghead small{color:var(--pm-faint)}
+:is(.pmx,.pmx-l) .tw{overflow-x:auto;border:1px solid var(--pm-line);border-radius:var(--pm-r);background:var(--pm-panel)}
+:is(.pmx,.pmx-l) table.bt{border-collapse:separate;border-spacing:0;width:100%;min-width:1080px;margin:0}
+:is(.pmx,.pmx-l) .bt th{font-weight:400;color:var(--pm-muted);font-size:12px;text-align:center;padding:8px 6px;border:0;border-bottom:1px solid var(--pm-line);white-space:nowrap;background:var(--pm-panel)}
+:is(.pmx,.pmx-l) .bt th:first-child{text-align:start;padding-inline-start:14px}
+:is(.pmx,.pmx-l) .bt td{border:0;border-bottom:1px solid var(--pm-line);border-inline-start:1px solid var(--pm-line);height:40px;padding:0;text-align:center;white-space:nowrap;vertical-align:middle;color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .bt tr:last-child td{border-bottom:0}
+:is(.pmx,.pmx-l) .bt td.nm{border-inline-start:0;text-align:start;position:sticky;inset-inline-start:0;background:var(--pm-panel);z-index:1;min-width:280px;max-width:360px}
+:is(.pmx,.pmx-l) .bt tr:hover td{background:var(--pm-panel2)}
+:is(.pmx,.pmx-l) .nmw{display:flex;align-items:center;gap:8px;height:40px;padding-inline:0 10px;border-inline-start:4px solid var(--gc)}
+:is(.pmx,.pmx-l) .nmw .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:start;padding-inline-start:10px;white-space:nowrap}
+:is(.pmx,.pmx-l) .nmw .t:hover{color:var(--pm-accent)}
+:is(.pmx,.pmx-l) .mini{display:inline-flex;align-items:center;gap:3px;color:var(--pm-faint);font-size:11.5px}
+:is(.pmx,.pmx-l) .mini.lock{color:var(--pm-s-chg)}
+:is(.pmx,.pmx-l) .mini .pmi{width:14px;height:14px}
+:is(.pmx,.pmx-l) .stc{display:block;width:100%;height:40px;line-height:40px;color:#fff;font-size:12.5px;font-weight:500;padding:0 8px;min-width:128px;text-align:center;text-shadow:0 1px 1px rgba(0,0,0,.15)}
+:is(.pmx,.pmx-l) button.stc:hover{filter:brightness(1.1)}
+:is(.pmx,.pmx-l) .prc{display:inline-flex;align-items:center;justify-content:center;height:24px;border-radius:5px;padding:0 10px;font-size:12px;color:#fff;min-width:74px}
+:is(.pmx,.pmx-l) .tl{display:block;margin:0 auto;width:150px;height:22px;border-radius:12px;background:var(--pm-panel3);position:relative;overflow:hidden;font-size:11.5px;text-align:center}
+:is(.pmx,.pmx-l) .tl i{position:absolute;inset-block:0;inset-inline-start:0;background:var(--gc)}
+:is(.pmx,.pmx-l) .tl span{position:relative;line-height:22px;color:var(--pm-fg);font-family:var(--pm-mono);font-size:11px}
+:is(.pmx,.pmx-l) .dateinp{background:none;border:0;color:var(--pm-fg);font-family:var(--pm-mono);font-size:12px;width:136px;direction:ltr;text-align:center;padding:0;height:auto;box-shadow:none}
+:is(.pmx,.pmx-l) .dateinp.late,:is(.pmx,.pmx-l) .inp.late{color:var(--pm-danger)}
+:is(.pmx,.pmx-l) .pg{display:flex;align-items:center;gap:7px;padding:0 10px;min-width:120px}
+:is(.pmx,.pmx-l) .pg b{flex:1;height:6px;border-radius:4px;background:var(--pm-panel3);position:relative;overflow:hidden;display:block}
+:is(.pmx,.pmx-l) .pg b i{position:absolute;inset-block:0;inset-inline-start:0;background:var(--pm-s-done);border-radius:4px}
+:is(.pmx,.pmx-l) .pg span{font-size:11.5px;width:34px;text-align:end}
+:is(.pmx,.pmx-l) .rv{font-size:12.5px}
+:is(.pmx,.pmx-l) .rv.over{color:var(--pm-danger);font-weight:600}
+:is(.pmx,.pmx-l) .tm{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+:is(.pmx,.pmx-l) .tm button{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--pm-line);color:var(--pm-muted)}
+:is(.pmx,.pmx-l) .tm button.run{background:var(--pm-s-work);border-color:var(--pm-s-work);color:#111}
+:is(.pmx,.pmx-l) .tm .pmi{width:12px;height:12px}
+:is(.pmx,.pmx-l) .qthumb{width:30px;height:22px;border-radius:4px;object-fit:cover;vertical-align:middle}
+:is(.pmx,.pmx-l) .addrow td{height:38px}
+:is(.pmx,.pmx-l) .addrow button{color:var(--pm-faint);padding-inline-start:18px;width:100%;text-align:start;height:38px}
+:is(.pmx,.pmx-l) .addrow button:hover{color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .sumrow td{height:34px;background:var(--pm-panel2)}
+:is(.pmx,.pmx-l) .battery{display:flex;height:16px;width:128px;margin:0 auto;border-radius:3px;overflow:hidden;background:var(--pm-panel3)}
+:is(.pmx,.pmx-l) .kb{display:flex;gap:12px;overflow-x:auto;padding-bottom:12px;align-items:flex-start}
+:is(.pmx,.pmx-l) .kcol{flex:0 0 260px;background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r);display:flex;flex-direction:column;max-height:calc(100dvh - 280px)}
+:is(.pmx,.pmx-l) .kcol.over{outline:2px dashed var(--pm-accent)}
+:is(.pmx,.pmx-l) .kh{padding:10px 12px;display:flex;align-items:center;gap:8px;font-weight:500;border-bottom:1px solid var(--pm-line)}
+:is(.pmx,.pmx-l) .kh i{width:10px;height:10px;border-radius:3px}
+:is(.pmx,.pmx-l) .kh small{color:var(--pm-faint);margin-inline-start:auto}
+:is(.pmx,.pmx-l) .kbody{padding:10px;display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:60px}
+:is(.pmx,.pmx-l) .kcard{background:var(--pm-panel2);border:1px solid var(--pm-line);border-radius:7px;padding:10px;cursor:pointer;display:flex;flex-direction:column;gap:8px;text-align:start}
+:is(.pmx,.pmx-l) .kcard[draggable=true]{cursor:grab}
+:is(.pmx,.pmx-l) .kcard:hover{border-color:var(--pm-faint)}
+:is(.pmx,.pmx-l) .kcard img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:5px;max-width:100%}
+:is(.pmx,.pmx-l) .kcard .qrow{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--pm-muted);font-size:12px}
+:is(.pmx,.pmx-l) .kcard .g{font-size:11px;color:var(--pm-faint)}
+:is(.pmx,.pmx-l) .kst{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:#fff;margin-inline-start:auto}
+:is(.pmx,.pmx-l) .kst .pmi{width:12px;height:12px;transform:rotate(90deg)}
+:is(.pmx,.pmx-l) .gw{overflow-x:auto;border:1px solid var(--pm-line);border-radius:var(--pm-r);background:var(--pm-panel)}
+:is(.pmx,.pmx-l) .qgantt{position:relative}
+:is(.pmx,.pmx-l) .grow{display:flex;border-bottom:1px solid var(--pm-line);min-height:36px;align-items:stretch;flex:none}
+:is(.pmx,.pmx-l) .glabel{flex:0 0 240px;position:sticky;inset-inline-start:0;background:var(--pm-panel);z-index:2;padding:0 12px;display:flex;align-items:center;gap:8px;border-inline-end:1px solid var(--pm-line);font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+:is(.pmx,.pmx-l) .glabel.gh{font-weight:600;background:var(--pm-panel2)}
+:is(.pmx,.pmx-l) .glb{display:flex;gap:8px;align-items:center;min-width:0;text-align:start}
+:is(.pmx,.pmx-l) .glb span{overflow:hidden;text-overflow:ellipsis}
+:is(.pmx,.pmx-l) .gtrack{position:relative;flex:none}
+:is(.pmx,.pmx-l) .qgbar{position:absolute;top:8px;height:20px;border-radius:5px;color:#fff;font-size:11px;padding:0 8px;line-height:20px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:start}
+:is(.pmx,.pmx-l) .qgbar:hover{filter:brightness(1.12)}
+:is(.pmx,.pmx-l) .gday{position:absolute;top:0;bottom:0;border-inline-start:1px solid var(--pm-line);opacity:.5}
+:is(.pmx,.pmx-l) .gday.we{background:rgba(127,127,127,.06)}
+:is(.pmx,.pmx-l) .qgtoday{position:absolute;top:0;bottom:0;width:2px;background:var(--pm-accent);z-index:1}
+:is(.pmx,.pmx-l) .ghdr .gtrack span{position:absolute;top:10px;font-size:10.5px;color:var(--pm-faint);font-family:var(--pm-mono);width:28px;text-align:center}
+:is(.pmx,.pmx-l) .calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+:is(.pmx,.pmx-l) .calhead h3{margin:0;font-weight:500;min-width:160px;text-align:center;font-size:16px}
+:is(.pmx,.pmx-l) .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--pm-line);border-radius:var(--pm-r);overflow:hidden;background:var(--pm-line);gap:1px}
+:is(.pmx,.pmx-l) .cal .dn{background:var(--pm-panel2);padding:8px;font-size:11.5px;color:var(--pm-muted);text-align:center}
+:is(.pmx,.pmx-l) .cal .cd{background:var(--pm-panel);min-height:108px;padding:6px;display:flex;flex-direction:column;gap:4px;min-width:0}
+:is(.pmx,.pmx-l) .cal .cd.out{opacity:.4}
+:is(.pmx,.pmx-l) .cal .cd.today .n{background:var(--pm-accent);color:var(--pm-accent-ink);border-radius:50%}
+:is(.pmx,.pmx-l) .cal .n{font-size:11.5px;width:22px;height:22px;display:grid;place-items:center;font-family:var(--pm-mono)}
+:is(.pmx,.pmx-l) .cal .ev{font-size:11px;border-radius:4px;padding:2px 6px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:start;width:100%}
+:is(.pmx,.pmx-l) .flipx{transform:scaleX(-1)}
+[dir=rtl] :is(.pmx,.pmx-l) .flipx{transform:none}
+[dir=rtl] :is(.pmx,.pmx-l) .flipn{transform:scaleX(-1)}
+:is(.pmx,.pmx-l) .wl{overflow-x:auto;border:1px solid var(--pm-line);border-radius:var(--pm-r);background:var(--pm-panel)}
+:is(.pmx,.pmx-l) .wl table{border-collapse:collapse;width:100%;min-width:760px;margin:0}
+:is(.pmx,.pmx-l) .wl th,:is(.pmx,.pmx-l) .wl td{border:0;border-bottom:1px solid var(--pm-line);padding:10px 12px;text-align:start;color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .wl th{font-weight:400;color:var(--pm-muted);font-size:12px}
+:is(.pmx,.pmx-l) .wlc{display:flex;flex-direction:column;gap:5px}
+:is(.pmx,.pmx-l) .wlc b{height:8px;border-radius:4px;background:var(--pm-panel3);position:relative;overflow:hidden;display:block}
+:is(.pmx,.pmx-l) .wlc b i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:4px}
+:is(.pmx,.pmx-l) .wlc span{font-size:11.5px;color:var(--pm-muted)}
+:is(.pmx,.pmx-l) .who{display:flex;align-items:center;gap:10px}
+:is(.pmx,.pmx-l) .who small{display:block;color:var(--pm-faint);font-size:11px}
+:is(.pmx,.pmx-l) .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+:is(.pmx,.pmx-l) .gcard{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r);overflow:hidden;text-align:start;display:flex;flex-direction:column}
+:is(.pmx,.pmx-l) .gcard img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;max-width:100%}
+:is(.pmx,.pmx-l) .gcard div{padding:10px 12px;display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:13px}
+:is(.pmx,.pmx-l) .h2{font-size:22px;font-weight:600;margin:0 0 4px;color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .sub{color:var(--pm-muted);margin:0 0 18px}
+:is(.pmx,.pmx-l) .runnow{color:var(--pm-s-work)}
+:is(.pmx,.pmx-l) .runnow .pmi{width:12px;height:12px}
+:is(.pmx,.pmx-l) .phead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+:is(.pmx,.pmx-l) .qkpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+:is(.pmx,.pmx-l) .qkpi{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r);padding:14px}
+:is(.pmx,.pmx-l) .qkpi small{color:var(--pm-muted);font-size:12px}
+:is(.pmx,.pmx-l) .qkpi b{display:block;font-size:28px;font-weight:500;font-family:var(--pm-mono);margin-top:4px}
+:is(.pmx,.pmx-l) .qkpi.alert b{color:var(--pm-danger)}
+:is(.pmx,.pmx-l) .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:14px}
+:is(.pmx,.pmx-l) .qcard{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r);padding:16px;min-width:0;box-shadow:none;margin:0}
+:is(.pmx,.pmx-l) .qcard h4{margin:0 0 12px;font-weight:500;font-size:14px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+:is(.pmx,.pmx-l) .qcard h4 small{color:var(--pm-faint);font-weight:400;font-size:11.5px}
+:is(.pmx,.pmx-l) .qstack{display:flex;height:14px;border-radius:4px;overflow:hidden;margin-bottom:12px;background:var(--pm-panel3)}
+:is(.pmx,.pmx-l) .qlegend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--pm-muted)}
+:is(.pmx,.pmx-l) .qlegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-inline-end:5px}
+:is(.pmx,.pmx-l) .bars{display:flex;flex-direction:column;gap:10px}
+:is(.pmx,.pmx-l) .bars .r{display:grid;grid-template-columns:140px 1fr 44px;gap:10px;align-items:center;font-size:12.5px}
+:is(.pmx,.pmx-l) .bars .r>b{height:10px;background:var(--pm-panel3);border-radius:5px;position:relative;overflow:hidden;display:block}
+:is(.pmx,.pmx-l) .bars .r>b i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:5px}
+:is(.pmx,.pmx-l) .who2{display:flex;gap:6px;align-items:center;min-width:0}
+:is(.pmx,.pmx-l) .lt{width:100%;border-collapse:collapse;font-size:12.5px;margin:0}
+:is(.pmx,.pmx-l) .lt th{color:var(--pm-faint);font-weight:400;text-align:start;padding:6px;border:0;border-bottom:1px solid var(--pm-line)}
+:is(.pmx,.pmx-l) .lt td{padding:8px 6px;border:0;border-bottom:1px solid var(--pm-line);color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .lt td.n{text-align:end;font-family:var(--pm-mono)}
+:is(.pmx,.pmx-l) .lt tr:last-child td{border-bottom:0}
+:is(.pmx,.pmx-l) .linky{color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .linky:hover{color:var(--pm-accent)}
+:is(.pmx,.pmx-l) .machines{display:flex;flex-direction:column;gap:8px}
+:is(.pmx,.pmx-l) .mach{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--pm-line);border-radius:7px;font-size:12.5px}
+:is(.pmx,.pmx-l) .mach .led{width:8px;height:8px;border-radius:50%}
+:is(.pmx,.pmx-l) .mach b{font-weight:500}
+:is(.pmx,.pmx-l) .mach select{background:var(--pm-panel2);border:1px solid var(--pm-line);border-radius:6px;padding:4px 6px;font-size:12px;min-width:0;width:100%;height:auto;margin-top:4px;color:var(--pm-fg)}
+:is(.pmx,.pmx-l) .machr{display:flex;align-items:center;gap:6px}
+:is(.pmx,.pmx-l) .bucket{margin-bottom:22px}
+:is(.pmx,.pmx-l) .bucket h3{font-size:13px;font-weight:500;color:var(--pm-muted);margin:0 0 8px;display:flex;gap:8px;align-items:center}
+:is(.pmx,.pmx-l) .bucket h3.late{color:var(--pm-danger)}
+:is(.pmx,.pmx-l) .qlist{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r)}
+:is(.pmx,.pmx-l) .li{display:grid;grid-template-columns:118px minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--pm-line);text-align:start;width:100%}
+:is(.pmx,.pmx-l) .li:last-child{border-bottom:0}
+:is(.pmx,.pmx-l) .li:hover{background:var(--pm-panel2)}
+:is(.pmx,.pmx-l) .li .bn{color:var(--pm-faint);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(.pmx,.pmx-l) .li .nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(.pmx,.pmx-l) .spill{display:inline-block;border-radius:5px;color:#fff;font-size:11.5px;padding:3px 8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:is(.pmx,.pmx-l) .notif{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-bottom:1px solid var(--pm-line);width:100%;text-align:start}
+:is(.pmx,.pmx-l) .notif:last-child{border-bottom:0}
+:is(.pmx,.pmx-l) .notif.unread{background:var(--pm-accent-soft)}
+:is(.pmx,.pmx-l) .notif .tx{flex:1;min-width:0}
+:is(.pmx,.pmx-l) .notif small{color:var(--pm-faint);display:block;font-size:11.5px;margin-top:2px}
+:is(.pmx,.pmx-l) .tpls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px}
+:is(.pmx,.pmx-l) .tpl{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:var(--pm-r);padding:18px;display:flex;flex-direction:column;gap:10px}
+:is(.pmx,.pmx-l) .tpl h3{margin:0;font-weight:500;font-size:16px}
+:is(.pmx,.pmx-l) .tpl p{margin:0;color:var(--pm-muted);font-size:13px}
+:is(.pmx,.pmx-l) .stages{display:flex;flex-wrap:wrap;gap:5px}
+:is(.pmx,.pmx-l) .stages span{font-size:11px;border-radius:4px;padding:2px 7px;color:#fff}
+.pmx-l .pmscrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40}
+.pmx-l .pmdrawer{position:fixed;inset-block:0;inset-inline-end:0;width:min(600px,100%);background:var(--pm-panel);border-inline-start:1px solid var(--pm-line);z-index:41;display:flex;flex-direction:column;box-shadow:var(--pm-shadow);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html.pm-lock{overflow:hidden}
+.pmx-l .dh{padding:12px 16px;border-bottom:1px solid var(--pm-line);display:flex;gap:8px;align-items:center}
+.pmx-l .dh input{flex:1;background:none;border:0;font-size:19px;font-weight:600;outline:0;min-width:0;padding:0;height:auto;box-shadow:none;color:var(--pm-fg)}
+.pmx-l .gsq{width:10px;height:10px;border-radius:3px;flex:none}
+.pmx-l .dbody{overflow:auto;flex:1;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.pmx-l .dsub{padding:8px 18px 0;font-size:12px;color:var(--pm-faint)}
+.pmx-l .dsub a:hover{color:var(--pm-accent)}
+.pmx-l .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 14px;padding:12px 18px 14px;border-bottom:1px solid var(--pm-line)}
+.pmx-l .fld label{display:block;font-size:11px;color:var(--pm-faint);margin-bottom:4px;letter-spacing:.04em}
+.pmx-l .fld.wide{grid-column:1/-1}
+.pmx-l .fld .stc,.pmx-l .fld .prc{height:32px;line-height:32px;border-radius:6px;width:100%}
+.pmx-l .fld input[type=range]{width:100%;accent-color:var(--pm-accent);height:32px}
+.pmx-l .val{display:flex;align-items:center;gap:8px;min-height:32px}
+.pmx-l .val.wrap{flex-wrap:wrap}
+.pmx-l .ownb{display:flex;gap:8px;align-items:center}
+.pmx-l .dtabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--pm-line);overflow-x:auto;position:sticky;top:0;background:var(--pm-panel);z-index:2;scrollbar-width:none}
+.pmx-l .dtabs button{padding:10px;color:var(--pm-muted);border-bottom:2px solid transparent;white-space:nowrap;font-size:13px}
+.pmx-l .dtabs button.pon{color:var(--pm-fg);border-color:var(--pm-accent)}
+.pmx-l .dpane{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.pmx-l .updbar{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+.pmx-l .upd{background:var(--pm-panel2);border:1px solid var(--pm-line);border-radius:8px;padding:12px}
+.pmx-l .upd header{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12.5px}
+.pmx-l .upd header b{font-weight:500}
+.pmx-l .upd header small{color:var(--pm-faint);margin-inline-start:auto}
+.pmx-l .upd p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.pmx-l .mn{color:var(--pm-accent)}
+.pmx-l .mentions{display:flex;flex-wrap:wrap;gap:6px}
+.pmx-l .mentions button{font-size:12px;border:1px solid var(--pm-line);border-radius:20px;padding:2px 9px;color:var(--pm-muted)}
+.pmx-l .rowend{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.pmx-l .vtabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pmx-l .vtabs button{border:1px solid var(--pm-line);border-radius:6px;padding:3px 10px;font-family:var(--pm-mono);font-size:12px;color:var(--pm-muted)}
+.pmx-l .vtabs button.pon{background:var(--pm-fg);color:var(--pm-bg);border-color:var(--pm-fg)}
+.pmx-l .vby{font-size:12px;margin-inline-start:auto}
+.pmx-l .rimg{position:relative;border-radius:8px;overflow:hidden;cursor:crosshair;border:1px solid var(--pm-line);background:var(--pm-panel2);min-height:80px}
+.pmx-l .rimg img{display:block;width:100%;max-width:100%}
+.pmx-l .pinm{position:absolute;width:26px;height:26px;transform:translate(-50%,-50%);border-radius:50%;background:var(--pm-accent);color:var(--pm-accent-ink);display:grid;place-items:center;font-size:12px;font-weight:700;font-style:normal;box-shadow:0 2px 8px rgba(0,0,0,.4);pointer-events:none}
+.pmx-l .pinm.done{background:var(--pm-s-done);color:#fff}
+.pmx-l .pinm.new{background:var(--pm-fg);color:var(--pm-bg)}
+.pmx-l .linkb{color:var(--pm-accent);text-decoration:underline}
+.pmx-l .plist{display:flex;flex-direction:column;gap:6px}
+.pmx-l .pitem{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--pm-line);border-radius:7px;font-size:13px}
+.pmx-l .pitem.done p{text-decoration:line-through;color:var(--pm-faint)}
+.pmx-l .pitem p{margin:0;flex:1;overflow-wrap:anywhere}
+.pmx-l .pitem i{font-style:normal;width:20px;height:20px;border-radius:50%;background:var(--pm-accent);color:var(--pm-accent-ink);display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+.pmx-l .roundbar{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--pm-panel2);border:1px solid var(--pm-line);font-size:13px;flex-wrap:wrap}
+.pmx-l .roundbar.over{border-color:var(--pm-danger)}
+.pmx-l .roundbar b{font-family:var(--pm-mono)}
+.pmx-l .sub-i{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--pm-line);border-radius:7px}
+.pmx-l .sub-i.done>span:not(.cb){text-decoration:line-through;color:var(--pm-faint)}
+.pmx-l .sub-i>span:not(.cb):not(.pmav){flex:1;min-width:0}
+:is(.pmx,.pmx-l) .cb{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--pm-faint);display:grid;place-items:center;flex:none}
+:is(.pmx,.pmx-l) .cb.pon{background:var(--pm-s-done);border-color:var(--pm-s-done);color:#fff}
+:is(.pmx,.pmx-l) .cb .pmi{width:12px;height:12px}
+.pmx-l .fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.pmx-l .fgrid figure{margin:0;border:1px solid var(--pm-line);border-radius:7px;overflow:hidden;background:var(--pm-panel2);cursor:pointer}
+.pmx-l .fgrid img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block}
+.pmx-l .fgrid figcaption{font-size:11px;padding:6px 8px;color:var(--pm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmx-l .fgrid .doc{aspect-ratio:4/3;display:grid;place-items:center;color:var(--pm-faint);font-family:var(--pm-mono);font-size:12px}
+.pmx-l .act{display:flex;gap:10px;font-size:12.5px;color:var(--pm-muted);padding:6px 0;border-bottom:1px dashed var(--pm-line)}
+.pmx-l .act time{color:var(--pm-faint);font-family:var(--pm-mono);font-size:11px;white-space:nowrap}
+.pmx-l .act b{color:var(--pm-fg);font-weight:500}
+.pmx-l .upl{cursor:pointer;position:relative}
+.pmx-l .upl input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.pmx-l .pmpop{position:fixed;z-index:49;background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:10px;box-shadow:var(--pm-shadow);padding:6px;min-width:190px;max-width:calc(100vw - 16px);max-height:340px;overflow:auto}
+.pmx-l .opt{display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border-radius:6px;text-align:start}
+.pmx-l .opt:hover{background:var(--pm-panel2)}
+.pmx-l .sw{width:100%;height:30px;border-radius:5px;color:#fff;font-size:12.5px;margin:2px 0;display:block;text-align:center}
+.pmx-l .sw:hover{filter:brightness(1.1)}
+.pmx-l .lbl{font-size:11px;color:var(--pm-faint);padding:6px 9px 4px}
+.pmx-l .pmmodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:46;display:grid;place-items:center;padding:16px}
+.pmx-l .pmmodal{background:var(--pm-panel);border:1px solid var(--pm-line);border-radius:12px;box-shadow:var(--pm-shadow);width:min(640px,100%);max-height:88dvh;overflow:auto}
+.pmx-l .pmmodal header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--pm-line)}
+.pmx-l .pmmodal header h3{margin:0;font-weight:500;font-size:16px;display:flex;align-items:center;gap:8px}
+.pmx-l .mb{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.pmx-l .mb label{font-size:12px;color:var(--pm-muted);display:block;margin-bottom:4px}
+.pmx-l .mb a{color:var(--pm-accent)}
+.pmx-l .rule{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--pm-line);border-radius:8px;font-size:13px}
+.pmx-l .rule p{flex:1;margin:0}
+.pmx-l .rule>.pmi{color:var(--pm-accent)}
+.pmx-l .toggle{width:34px;height:20px;border-radius:20px;background:var(--pm-panel3);position:relative;flex:none;border:1px solid var(--pm-line);display:inline-block}
+.pmx-l .toggle::after{content:"";position:absolute;top:2px;inset-inline-start:2px;width:14px;height:14px;border-radius:50%;background:var(--pm-faint);transition:all .15s}
+.pmx-l .toggle.pon{background:var(--pm-accent)}
+.pmx-l .toggle.pon::after{inset-inline-start:16px;background:var(--pm-accent-ink)}
+.pmx-l .rform{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;padding:12px;border:1px dashed var(--pm-line);border-radius:8px}
+.pmx-l .rform label{font-size:11px;color:var(--pm-faint)}
+.pmx-l .rfadd{display:flex;align-items:flex-end}
+.pmx-l .rfadd button{width:100%;justify-content:center}
+.pmx-l .frow{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.pmx-l .colors{display:flex;gap:8px;flex-wrap:wrap}
+.pmx-l .csw{width:28px;height:28px;border-radius:8px;border:2px solid transparent}
+.pmx-l .csw.pon{border-color:var(--pm-fg)}
+.pmx-l .qseg{display:flex;gap:4px;background:var(--pm-panel2);border:1px solid var(--pm-line);border-radius:9px;padding:3px}
+.pmx-l .qseg button{flex:1;padding:7px 10px;border-radius:7px;color:var(--pm-muted);text-align:center}
+.pmx-l .qseg button.pon{background:var(--pm-panel);color:var(--pm-fg);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.pmx-l .qseg button:disabled{opacity:.45}
+@media (max-width:820px){
+.pmx{grid-template-columns:minmax(0,1fr);border-radius:12px}
+.pmside{position:static;max-height:none;border-inline-end:0;border-bottom:1px solid var(--pm-line);border-radius:12px 12px 0 0;padding-top:6px}
+.pmnav{flex-direction:row;overflow-x:auto;scrollbar-width:none;padding:4px 8px}
+.pmnav a{flex:none;padding:7px 10px;font-size:13px}
+.pmnav a .pmi{width:16px;height:16px}
+.pmside .sec{display:none}
+.pmside .blist{display:flex;gap:6px;overflow-x:auto;padding:4px 8px 10px;scrollbar-width:none}
+.pmside .blist a{flex:none;width:auto;border:1px solid var(--pm-line);border-radius:20px;padding:5px 12px;font-size:12.5px;max-width:220px}
+.pmmain{padding:14px 12px 40px}
+:is(.pmx,.pmx-l) .hide-s{display:none!important}
+:is(.pmx,.pmx-l) .li{grid-template-columns:96px minmax(0,1fr) auto}
+:is(.pmx,.pmx-l) .li .bn{display:none}
+:is(.pmx,.pmx-l) .bh h1{font-size:20px}
+:is(.pmx,.pmx-l) .qsearch{flex:1 1 160px}
+:is(.pmx,.pmx-l) .bt td.nm{min-width:200px;max-width:230px}
+:is(.pmx,.pmx-l) .kcol{flex-basis:78vw;max-height:none}
+:is(.pmx,.pmx-l) .bars .r{grid-template-columns:110px 1fr 36px}
+.pmx-l .dh input{font-size:17px}
+.pmx-l .fields{grid-template-columns:1fr 1fr}
+.pmx-l .pmmodal-bg{place-items:end center;padding:0}
+.pmx-l .pmmodal{border-radius:14px 14px 0 0;width:100%;max-height:92dvh;padding-bottom:env(safe-area-inset-bottom,0px)}
+}
+@media (prefers-reduced-motion:reduce){:is(.pmx,.pmx-l) *{transition:none!important}}
 </style>`);
 })();
 /* =====================================================================
