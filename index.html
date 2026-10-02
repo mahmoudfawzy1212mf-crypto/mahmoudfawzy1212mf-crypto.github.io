@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-0809-72883e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-1302-0cce9f";</script>
 
 <script>
 'use strict';
@@ -11329,7 +11329,7 @@ async function pushSubscribe(silent) {
     const perm = await Notification.requestPermission(); if (perm !== 'granted') { if (!silent) toast('لم يُسمح بالإشعارات', 'err'); return false; }
     const reg = await navigator.serviceWorker.ready; const v = await S.sb.functions.invoke('push', { body: { action: 'vapid' } }); const key = v.data && v.data.publicKey; if (!key) throw new Error('no vapid');
     let sub = await reg.pushManager.getSubscription(), vk0 = ''; try { const ok0 = sub && sub.options && sub.options.applicationServerKey; if (ok0) { const b = new Uint8Array(ok0); let t = ''; for (let i = 0; i < b.length; i++) t += String.fromCharCode(b[i]); if (btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') !== key) { await sub.unsubscribe(); sub = null; } else vk0 = key; } } catch (e) { /* ignore */ } if (!sub) { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) }); vk0 = key; }
-    let r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: vk0 || undefined, personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error; if (r.data && r.data.stale) { try { await sub.unsubscribe(); } catch (e) { /* ignore */ } sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(r.data.publicKey || key) }); r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: r.data.publicKey || key, personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error; }
+    let r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: vk0 || undefined, personId: S.session?.id || '', ua: navigator.userAgent, lang: (typeof I18N !== 'undefined' ? I18N.lang : 'ar') } }); if (r.error) throw r.error; if (r.data && r.data.stale) { try { await sub.unsubscribe(); } catch (e) { /* ignore */ } sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(r.data.publicKey || key) }); r = await S.sb.functions.invoke('push', { body: { action: 'subscribe', sub: sub.toJSON(), vk: r.data.publicKey || key, personId: S.session?.id || '', ua: navigator.userAgent } }); if (r.error) throw r.error; }
     try { localStorage.setItem('nf.push.' + (S.session?.id || ''), '1'); } catch (e) { /* ignore */ }
     if (!silent) toast('تم تفعيل الإشعارات على هذا الجهاز ✓'); return true;
   } catch (e) { console.warn('push', e); if (!silent) toast('تعذّر تفعيل الإشعارات: ' + (e.message || e), 'err'); return false; }
@@ -13458,7 +13458,7 @@ function i18nNode(node) {
     const t = i18nTr(v); if (!t) return;
     const lead = v.match(/^\s*/)[0], tail = v.match(/\s*$/)[0];
     if (!I18N.base.has(node)) I18N.base.set(node, v);
-    node.__trv = lead + t + tail; node.nodeValue = node.__trv;
+    const nv = lead + t + tail; if (!I18N_AR.test(t)) node.__trv = nv; else node.__trv = null; if (node.nodeValue !== nv) node.nodeValue = nv; // v6.03: a result that still has Arabic is re-tried on the next pass (the typed part may get translated later)
     return;
   }
   if (node.nodeType !== 1) return;
@@ -13772,6 +13772,77 @@ if (typeof nameEnRegister === 'function') {
 }
 if (typeof myNameEn === 'function') myNameEn = (base => function () { const v = base.apply(this, arguments); if (v) return v; try { return S.session && S.session.name ? nfTranslit(S.session.name) : ''; } catch (e) { return ''; } })(myNameEn);
 Object.assign(window, { nfTranslit, nfTrWord, NF_NAMES, NF_WORDS });
+/* =====================================================================
+   v6.03 — "everything flips" (Mahmoud's standing rule): texts people type are translated too.
+   · English: any Arabic text left after the dictionary (product name, note, task title, item line, message…) is sent in
+     batches to Edge "tr" (Claude) and replaced by its English — each text is translated once on the server (cache nf_tr) and kept on the device.
+   · Arabic: a long English text someone typed (4+ words) is shown in Arabic — English that is part of the app design
+     (present in the app source, e.g. lōf taglines) is never touched; product and brand names stay as they are.
+   · Input fields (input / textarea / contenteditable) and .notr are never translated — what you type is saved as typed.
+   · Notifications: the device language is sent to the server (push action 'lang') so pushes arrive in your language.
+   ===================================================================== */
+const I18A = { mem: { en: new Map(), ar: new Map() }, q: { en: new Set(), ar: new Set() }, timer: 0, busy: false, sent: [], src: null, obs: null, saveT: 0, off: false };
+(function () {
+  const AR = /[\u0600-\u06FF]/g; const ART = /[\u0600-\u06FF]/; const LAT = /[A-Za-z]/;
+  const CAP = 3000, BUDGET = 800, WINDOW = 10 * 60 * 1000; // per device: max texts sent per 10 minutes
+  try { ['en', 'ar'].forEach(l => { const o = JSON.parse(localStorage.getItem('nf.tr.' + l) || '{}'); Object.keys(o).forEach(k => I18A.mem[l].set(k, o[k])); }); } catch (e) { /* private mode */ }
+  const save = () => { clearTimeout(I18A.saveT); I18A.saveT = setTimeout(() => { try { ['en', 'ar'].forEach(l => { const m = I18A.mem[l]; const ks = Array.from(m.keys()).filter(k => m.get(k) !== k).slice(-CAP); const o = {}; ks.forEach(k => { o[k] = m.get(k); }); localStorage.setItem('nf.tr.' + l, JSON.stringify(o)); }); } catch (e) { /* quota */ } }, 1500); };
+  const online = () => typeof S !== 'undefined' && S.sb && S.session && !I18A.off && navigator.onLine !== false;
+  const arCount = s => (s.match(AR) || []).length;
+  I18A.eligibleAr = s => s.length <= 2000 && arCount(s) >= 2;
+  /* English written on purpose in the app itself (lōf taglines, Sales Kit labels) stays English */
+  const inSource = s => { if (I18A.src == null) { try { I18A.src = Array.from(document.scripts).map(x => x.textContent || '').join('\n'); } catch (e) { I18A.src = ''; } } return s.length < 400 && I18A.src.indexOf(s) >= 0; };
+  I18A.eligibleEn = s => { if (s.length > 1200 || /[؀-ۿ]/.test(s) || !LAT.test(s)) return false; const words = s.match(/[A-Za-z][A-Za-z'’-]+/g) || []; if (words.length < 4) return false; if (/^(https?:\/\/|www\.)\S+$/.test(s) || /^\S+@\S+$/.test(s)) return false; return !inSource(s); };
+  function want(s, to) { if (!I18A.mem[to].has(s) && !I18A.q[to].has(s)) { I18A.q[to].add(s); clearTimeout(I18A.timer); I18A.timer = setTimeout(flush, 350); } }
+  async function flush() {
+    if (I18A.busy || !online()) { if (I18A.q.en.size || I18A.q.ar.size) { clearTimeout(I18A.timer); I18A.timer = setTimeout(flush, 4000); } return; }
+    const now = Date.now(); I18A.sent = I18A.sent.filter(t => now - t < WINDOW); if (I18A.sent.length >= BUDGET) { I18A.timer = setTimeout(flush, 60000); return; }
+    const to = I18A.q.en.size ? 'en' : I18A.q.ar.size ? 'ar' : ''; if (!to) return;
+    if (I18N.lang !== to) { I18A.q[to].clear(); if (I18A.q.en.size || I18A.q.ar.size) flush(); return; } // the language changed while waiting
+    const texts = Array.from(I18A.q[to]).slice(0, 60); texts.forEach(t => I18A.q[to].delete(t)); I18A.busy = true;
+    try {
+      const r = await S.sb.functions.invoke('tr', { body: { texts, to } }); texts.forEach(() => I18A.sent.push(now));
+      const out = r && r.data && Array.isArray(r.data.out) ? r.data.out : null;
+      if (out) { let n = 0; texts.forEach((t, i) => { const v = String(out[i] || ''); if (v && v !== t) { I18A.mem[to].set(t, v); n++; } else I18A.mem[to].set(t, t); }); save(); if (n) reapply(to); }
+      else if (r && r.error) { const st = r.error.context && r.error.context.status; if (st === 401 || st === 403 || st === 404 || /401|403|404|unauthorized|forbidden|not found/i.test(String(r.error.message || r.error))) I18A.off = true; }
+    } catch (e) { /* offline: the texts stay as they are */ }
+    finally { I18A.busy = false; if (I18A.q.en.size || I18A.q.ar.size) { clearTimeout(I18A.timer); I18A.timer = setTimeout(flush, 120); } }
+  }
+  function reapply(to) { if (I18N.lang !== to) return; if (to === 'en') { try { i18nApply(); } catch (e) { /* ignore */ } } else arScan(document.body); }
+  /* ---- English: anything the dictionary could not translate ---- */
+  if (typeof i18nTr === 'function') {
+    const baseTr = i18nTr;
+    i18nTr = function (text, depth) {
+      const r = baseTr(text, depth); if (depth || I18N.lang !== 'en') return r;
+      const s = i18nNorm(text); if (!I18A.eligibleAr(s)) return r;
+      if (r != null && !ART.test(r)) return r; // a dictionary hit that still carries Arabic (a typed value inside a pattern) → the full text from the translator when we have it
+      const hit = I18A.mem.en.get(s); if (hit && hit !== s) return hit; if (!hit) want(s, 'en'); return r;
+    };
+  }
+  /* ---- Arabic: long English texts people typed ---- */
+  const skip = p => !p || /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE|INPUT|OPTION)$/.test(p.nodeName) || (p.closest && p.closest('[contenteditable="true"],[contenteditable=""],.notr,svg,[data-notr],nav,.side,.nav'));
+  function arNode(n) {
+    const v = n.nodeValue; if (!v || n.__tra === v) return; const s = i18nNorm(v); if (!I18A.eligibleEn(s)) return; if (skip(n.parentNode)) return;
+    const hit = I18A.mem.ar.get(s); if (hit && hit !== s) { n.__tra = v.replace(v.trim(), hit); n.nodeValue = n.__tra; return; } if (!hit) want(s, 'ar');
+  }
+  function arScan(root) {
+    if (I18N.lang !== 'ar' || !root || !online()) return;
+    if (root.nodeType === 3) { arNode(root); return; } if (root.nodeType !== 1) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null); let n; const list = []; while ((n = w.nextNode())) list.push(n); list.forEach(arNode);
+  }
+  function arObserve() {
+    if (I18A.obs) return;
+    I18A.obs = new MutationObserver(recs => { if (I18N.lang !== 'ar' || !online()) return; recs.forEach(r => { if (r.type === 'characterData') arNode(r.target); else r.addedNodes.forEach(arScan); }); });
+    I18A.obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  }
+  /* ---- notifications follow the device language ---- */
+  async function pushLang() { try { if (!online()) return; const lang = I18N.lang; if (localStorage.getItem('nf.pushlang') === lang + ':' + (S.session.id || '')) return; const r = await S.sb.functions.invoke('push', { body: { action: 'lang', lang } }); if (r && r.data && r.data.ok) localStorage.setItem('nf.pushlang', lang + ':' + (S.session.id || '')); } catch (e) { /* later */ } }
+  I18A.pushLang = pushLang;
+  if (typeof i18nSet === 'function') { const baseSet = i18nSet; i18nSet = async function () { const r = await baseSet.apply(this, arguments); setTimeout(() => { pushLang(); if (I18N.lang === 'ar') arScan(document.body); }, 300); return r; }; }
+  let last = '';
+  setInterval(() => { const k = (typeof S !== 'undefined' && S.session ? (S.session.id || 'x') : '') + I18N.lang; if (k === last) return; last = k; if (!online()) { last = ''; return; } pushLang(); arObserve(); if (I18N.lang === 'ar') arScan(document.body); else if (I18N.exact) { try { i18nApply(); } catch (e) { /* ignore */ } } }, 2500);
+  I18A.flush = flush; I18A.arScan = arScan;
+})();
 /* =====================================================================
    v4.19 — one login for all Ninety apps (factory · studio · construction).
    The apps share one origin (github.io), so the browser already holds the
@@ -16499,7 +16570,7 @@ async function pushRefresh(force) {
     const have = subKey(sub);
     if (!sub || (have && have !== key)) { const r = await pushResub(reg, sub, key); if (!r) return; sub = r.sub; replace = r.oldEp; force = true; }
     const ep = sub.endpoint; if (!force && ep === prevEp && Date.now() - prevAt < PUSH_REFRESH_MS) return;
-    const body = () => ({ action: 'subscribe', sub: sub.toJSON(), vk: subKey(sub) || undefined, personId: S.session.id || '', ua: navigator.userAgent, replace: replace || (prevEp && prevEp !== ep ? prevEp : undefined) });
+    const body = () => ({ action: 'subscribe', sub: sub.toJSON(), vk: subKey(sub) || undefined, personId: S.session.id || '', ua: navigator.userAgent, lang: (typeof I18N !== 'undefined' ? I18N.lang : 'ar'), replace: replace || (prevEp && prevEp !== ep ? prevEp : undefined) });
     let r = await S.sb.functions.invoke('push', { body: body() });
     if (!r.error && r.data && r.data.stale) { if (r.data.publicKey) _vapidKey = r.data.publicKey; const x = await pushResub(reg, sub, _vapidKey); if (!x) return; sub = x.sub; replace = x.oldEp; r = await S.sb.functions.invoke('push', { body: body() }); }
     if (r.error || !(r.data && r.data.ok)) return;
