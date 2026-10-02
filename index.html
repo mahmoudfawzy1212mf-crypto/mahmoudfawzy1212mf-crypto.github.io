@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-0802-6f20ab";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-0809-72883e";</script>
 
 <script>
 'use strict';
@@ -22386,12 +22386,15 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (Notification.permission !== 'granted') { state.ok = false; state.why = 'default'; return; }
     try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); state.ok = !!sub; state.why = sub ? '' : 'nosub'; } catch (e) { state.ok = true; }
   }
+  /* v6.02: أزرار بتفتح صفحة إشعارات التطبيق/Chrome في إعدادات أندرويد على طول (intent) — والخطوات المكتوبة فاضلة لو الموبايل مافتحهاش */
+  const intentTo = (action, pkg) => `intent:#Intent;action=${action};${pkg ? `S.android.provider.extra.APP_PACKAGE=${pkg};` : ''}end`;
+  const andBtns = () => `<a class="btn sm p" href="${intentTo('android.settings.APP_NOTIFICATION_SETTINGS', 'app.ninety.fabrication')}">إعدادات إشعارات التطبيق</a><a class="btn sm" href="${intentTo('android.settings.APP_NOTIFICATION_SETTINGS', 'com.android.chrome')}">إعدادات إشعارات Chrome</a>`;
   function bar() {
     const why = state.why; const android = /Android/.test(navigator.userAgent);
     const help = why === 'ios' ? 'على الآيفون الإشعارات مابتشتغلش غير لما التطبيق يتضاف للشاشة الرئيسية: من Safari اضغط زرار المشاركة ⬆️ ← «Add to Home Screen» ← وافتح السيستم من الأيقونة الجديدة.'
       : why === 'denied' ? (android ? (standalone() ? 'الموبايل قافل الإشعارات للتطبيق: افتح «الإعدادات» في الموبايل ← التطبيقات ← Ninety (أو Chrome) ← الإشعارات ← «سماح» ← وارجع دوس «حدّثت — راجع تاني».' : 'الموبايل قافل الإشعارات: (1) اضغط علامة القفل 🔒 جنب العنوان فوق ← «الأذونات» ← الإشعارات ← «سماح». (2) لو لسه مقفولة: «الإعدادات» في الموبايل ← التطبيقات ← Chrome ← الإشعارات ← «سماح». وبعدين دوس «حدّثت — راجع تاني».') : 'المتصفح قافل الإشعارات: من إعدادات المتصفح ← إعدادات الموقع ← الإشعارات ← «سماح» للسيستم، وبعدين حدّث الصفحة.')
       : 'لازم تفعّل الإشعارات علشان توصلك المهام وأوامر التشغيل أول بأول.';
-    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:30;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
+    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:30;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? (android ? andBtns() : '') + `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
   }
   async function paint() {
     if (Date.now() - state.checked > 30000 || state.ok === null) { state.checked = Date.now(); await check(); }
