@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-1458-f06c99";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-1620-5c31e3";</script>
 
 <script>
 'use strict';
@@ -17161,8 +17161,8 @@ const stuBoardBusy = () => !!WB.drag || !!WB.stroke || !!WB.editing || (typeof D
 const stuBoardHeld = (col, id) => col === 'bitems' && (WB.held.has(id) || (WB.editing === id));
 const wbItems = () => list('bitems').filter(i => i.boardId === WB.id && !i.deleted);
 const wbBoard = () => byId('boards', WB.id);
-const wbCanEdit = () => { const b = wbBoard(); if (!b || !stuCanEdit()) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin(); return true; };
-const wbCanSee = b => { if (!b) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); const p = b.projectId ? byId('projects', b.projectId) : null; return p ? stuProjectVisible(p) : true; };
+const wbCanEdit = () => { const b = wbBoard(); if (!b || !stuCanEdit()) return false; if (typeof nbRank === 'function') return nbRank(b) >= 3; /* v6.07 board roles */ if (b.personal) return b.ownerId === stuMe() || isAdmin(); return true; };
+const wbCanSee = b => { if (!b) return false; if (typeof nbRank === 'function') return nbRank(b) >= 1; /* v6.07 board roles */ if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); const p = b.projectId ? byId('projects', b.projectId) : null; return p ? stuProjectVisible(p) : true; };
 const wbW2S = (x, y) => ({ x: x * WB.zoom + WB.pan.x, y: y * WB.zoom + WB.pan.y });
 const wbS2W = (sx, sy) => ({ x: (sx - WB.pan.x) / WB.zoom, y: (sy - WB.pan.y) / WB.zoom });
 const wbRect = i => ({ x: +i.x || 0, y: +i.y || 0, w: +i.w || 160, h: +i.h || 160 });
@@ -17452,7 +17452,7 @@ const DB = { id: null, drag: null, sel: null, panel: null, pick: null };
 const DB_NOTE_COLORS = [null, '#f7e463', '#f9b48d', '#f19ea6', '#c9a9f5', '#9ad6f7', '#a6e6a1'];
 const dbBoard = () => byId('boards', DB.id);
 const dbItems = () => sortBy(list('bitems').filter(i => i.boardId === DB.id && !i.deleted), i => +i.ord || 0);
-const dbCanEdit = () => { const b = dbBoard(); if (!b || !stuCanEdit()) return false; if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); return true; };
+const dbCanEdit = () => { const b = dbBoard(); if (!b || !stuCanEdit()) return false; if (typeof nbRank === 'function') return nbRank(b) >= 3; /* v6.07 board roles */ if (b.personal) return b.ownerId === stuMe() || isAdmin() || (b.shared || []).includes(stuMe()); return true; };
 const dbRoot = b => { let x = b, n = 0; while (x && x.parentId && n < 20) { x = byId('boards', x.parentId); n++; } return x || b; };
 const dbCrumbs = b => { const out = []; let x = b, n = 0; while (x && n < 20) { out.unshift(x); x = x.parentId ? byId('boards', x.parentId) : null; n++; } return out; };
 
@@ -18324,6 +18324,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const get = id => byId('bitems', id);
   const cur = id => NB.live.get(id) || get(id);
   const can = () => wbCanEdit();
+  const rank = () => (typeof nbRank === 'function' ? nbRank(wbBoard()) : (can() ? 3 : 1));
+  const canC = () => can() || (stuCanEdit() && rank() >= 2);
+  const canX = () => (typeof nbCanExport === 'function' ? nbCanExport(wbBoard()) : true);
   const me = () => stuMe();
   const r1 = v => Math.round(v * 10) / 10;
   const R = i => ({ x: +i.x || 0, y: +i.y || 0, w: +i.w || 160, h: +i.h || 160 });
@@ -18526,7 +18529,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const t = document.getElementById('nbtop'); if (!t) return; const b = wbBoard(); if (!b) return;
     const tm = b.timer && b.timer.end && new Date(b.timer.end).getTime() > Date.now() ? b.timer : null; const ppl = Object.values(NB.cursors);
     const nC = items().reduce((a, i) => a + (i.thread || []).length, 0);
-    const h = `<span class="nbppl" title="أونلاين دلوقتي">${stuAvatar(me(), 24)}${ppl.map(c => stuAvatar(c.person, 24)).join('')}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button><button type="button" data-nb="export" title="طباعة / PDF">${I(IC.print)}</button>`;
+    const h = `<span class="nbppl" title="أونلاين دلوقتي">${stuAvatar(me(), 24)}${ppl.map(c => stuAvatar(c.person, 24)).join('')}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${canX() ? `<button type="button" data-nb="export" title="طباعة / PDF">${I(IC.print)}</button>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
     if (t.__h !== h) { t.__h = h; t.innerHTML = h; tr(t); }
     const tl = document.getElementById('nbtools'); if (tl) { const th = toolsHTML(); if (tl.__h !== th) { tl.__h = th; tl.innerHTML = th; tr(tl); } }
     const u = document.getElementById('nbundo'); if (u) { u.querySelector('[data-nb="undo"]').disabled = !NB.undo.length; u.querySelector('[data-nb="redo"]').disabled = !NB.redo.length; }
@@ -18537,7 +18540,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const btn = (cmd, ic, label, on) => `<button type="button" data-nb="${cmd}" title="${label}" class="${on ? 'on' : ''}">${I(ic)}</button>`;
     const flyb = (k, inner, label) => `<button type="button" data-nbfly="${k}" title="${label}" class="${NB.fly === 'c:' + k ? 'on' : ''}">${inner}</button>`;
     const locked = ss.some(i => i.lock);
-    if (locked) return btn('unlock', IC.unlock, 'فك القفل (Ctrl+L)');
+    if (!can()) return btn('panel:comments', IC.comment, 'تعليق') + btn('vote', IC.vote, 'تصويت');
+    if (ss.some(i => i.lockAll) && rank() < 4) return `<span class="nbinfo">${I(IC.lock)}<span>مقفول من صاحب اللوحة</span></span>` + btn('panel:comments', IC.comment, 'تعليق');
+    if (locked) return btn('unlock', IC.unlock, 'فك القفل (Ctrl+L)') + btn('panel:comments', IC.comment, 'تعليق');
     if (only('sticky')) b.push(flyb('scol', `<i class="sw1" style="background:${ss[0].color || STICKY[0]}"></i>`, 'اللون'), `<span class="nbseg">${['S', 'M', 'L'].map(k => `<button type="button" data-nb="ssize:${k}" class="${one && (+one.w || 200) === SSIZE[k] ? 'on' : ''}">${k}</button>`).join('')}</span>`);
     if (only('shape')) b.push(flyb('shape', shapeIcon(one ? one.shape || 'rect' : 'rect'), 'الشكل'), flyb('fill', `<i class="sw1 ${ss[0].fill ? '' : 'none'}" style="${ss[0].fill ? `background:${ss[0].fill}` : ''}"></i>`, 'لون التعبئة'), flyb('border', `<i class="sw1 ring" style="border-color:${ss[0].stroke || 'var(--nb-ink)'}"></i>`, 'الإطار'));
     if (['sticky', 'text', 'shape'].some(t => T.has(t)) && ss.every(i => ['sticky', 'text', 'shape'].includes(i.type))) b.push(`<span class="nbseg"><button type="button" dir="ltr" data-nb="fs:-" title="تصغير الخط">A−</button><button type="button" dir="ltr" data-nb="fs:+" title="تكبير الخط">A+</button></span>`, btn('bold', IC.bold, 'عريض', ss.every(i => i.bold)), flyb('align', I(IC.alignL), 'محاذاة النص'), flyb('tcol', `<i class="sw1 txtc" style="color:${ss[0].tc || 'var(--nb-ink)'}">A</i>`, 'لون النص'));
@@ -18562,12 +18567,12 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (k === 'align') return `<div class="nbrow">${[['right', 'يمين'], ['center', 'وسط'], ['left', 'شمال']].map(([a, l]) => `<button type="button" data-nb="talign:${a}" class="${(s0.align || (s0.type === 'text' ? '' : 'center')) === a ? 'on' : ''}">${l}</button>`).join('')}</div>`;
     if (k === 'ccol') return `${swatches(INK, 'color', s0.color || '', 1)}<div class="nbrow">${[1, 2, 3, 5, 8].map(w => `<button type="button" data-nb="width:${w}" class="${(+s0.width || (s0.type === 'stroke' ? 3 : 2)) === w ? 'on' : ''}"><i class="ln" style="height:${w}px"></i></button>`).join('')}</div>`;
     if (k === 'arrange') return `<div class="nbgrid3">${[['left', 'شمال'], ['hcenter', 'وسط أفقي'], ['right', 'يمين'], ['top', 'فوق'], ['vcenter', 'وسط رأسي'], ['bottom', 'تحت']].map(([a, l]) => `<button type="button" data-nb="align:${a}">${l}</button>`).join('')}<button type="button" data-nb="dist:h">توزيع أفقي</button><button type="button" data-nb="dist:v">توزيع رأسي</button><button type="button" data-nb="tidy">رص في شبكة</button></div>`;
-    if (k === 'more') return `<div class="nbcol"><button type="button" data-nb="front">${I(IC.front)}<span>قدّام الكل (Ctrl+])</span></button><button type="button" data-nb="back">${I(IC.back)}<span>ورا الكل (Ctrl+[)</span></button><button type="button" data-nb="copy">${I(IC.dup)}<span>نسخ (Ctrl+C)</span></button>${wbBoard() && wbBoard().projectId ? `<button type="button" data-action="wbSendSel">${I(IC.send)}<span>ابعت للديزاين بورد</span></button>` : ''}<button type="button" data-action="stuAi" data-arg="ideas">${I(IC.ai)}<span>اسأل الذكاء الاصطناعي</span></button><button type="button" class="dng" data-nb="del">${I(IC.del)}<span>مسح (Delete)</span></button></div>`;
+    if (k === 'more') return `<div class="nbcol"><button type="button" data-nb="front">${I(IC.front)}<span>قدّام الكل (Ctrl+])</span></button><button type="button" data-nb="back">${I(IC.back)}<span>ورا الكل (Ctrl+[)</span></button>${canX() ? `<button type="button" data-nb="copy">${I(IC.dup)}<span>نسخ (Ctrl+C)</span></button>` : ''}${rank() >= 4 ? `<button type="button" data-nb="lockall">${I(IC.lock)}<span>قفل للباقيين (محدش يفكه غير الـOwners)</span></button>` : ''}${wbBoard() && wbBoard().projectId ? `<button type="button" data-action="wbSendSel">${I(IC.send)}<span>ابعت للديزاين بورد</span></button>` : ''}<button type="button" data-action="stuAi" data-arg="ideas">${I(IC.ai)}<span>اسأل الذكاء الاصطناعي</span></button><button type="button" class="dng" data-nb="del">${I(IC.del)}<span>مسح (Delete)</span></button></div>`;
     return '';
   }
   function ctx() {
     const c = document.getElementById('nbctx'); if (!c) return; const ss = sel();
-    if (!ss.length || !can() || NB.act || NB.editing && !ss.some(i => i.id === NB.editing)) { c.style.display = 'none'; c.__h = ''; return; }
+    if (!ss.length || !canC() || NB.act || NB.editing && !ss.some(i => i.id === NB.editing)) { c.style.display = 'none'; c.__h = ''; return; }
     const fk = NB.fly && NB.fly.startsWith('c:') ? NB.fly.slice(2) : null;
     const h = `<div class="nbctxbar">${ctxHTML(ss)}</div>${fk ? `<div class="nbctxfly">${ctxFlyHTML(fk, ss)}</div>` : ''}`;
     if (c.__h !== h) { c.__h = h; c.innerHTML = h; tr(c); }
@@ -18590,7 +18595,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const p = document.getElementById('nbpanel'); if (!p) return; if (NB.panel !== 'comments') { p.style.display = 'none'; p.__h = ''; return; }
     const ss = sel(); const one = ss.length === 1 ? ss[0] : null;
     const all = one ? (one.thread || []) : items().flatMap(i => (i.thread || []).map(c => Object.assign({ item: i }, c))).sort((a, c) => (a.at < c.at ? 1 : -1)).slice(0, 80);
-    const h = `<div class="ph">${I(IC.comment)}<b>${one ? 'تعليقات العنصر' : 'كل التعليقات'}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb">${all.length ? all.map(c => `<div class="nbcmt"><small>${esc(c.byName || '')} · ${esc(wbAgo2(c.at))}${c.item ? ` · <a href="#" data-nb="focus:${c.item.id}">${esc((c.item.text || c.item.type || '').slice(0, 26))}</a>` : ''}</small><div dir="auto">${esc(c.text)}</div></div>`).join('') : `<p class="muted small">${one ? 'مفيش تعليقات على العنصر ده — اكتب أول تعليق' : 'حدّد عنصر واكتب تعليق، أو اقرا كل تعليقات اللوحة هنا'}</p>`}</div>${one && can() ? `<div class="pf"><input id="nbcin" placeholder="تعليق… (@اسم للمنشن)" dir="auto"><button type="button" class="btn p sm" data-nb="csend:${one.id}">إرسال</button></div>` : ''}`;
+    const h = `<div class="ph">${I(IC.comment)}<b>${one ? 'تعليقات العنصر' : 'كل التعليقات'}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb">${all.length ? all.map(c => `<div class="nbcmt"><small>${esc(c.byName || '')} · ${esc(wbAgo2(c.at))}${c.item ? ` · <a href="#" data-nb="focus:${c.item.id}">${esc((c.item.text || c.item.type || '').slice(0, 26))}</a>` : ''}</small><div dir="auto">${esc(c.text)}</div></div>`).join('') : `<p class="muted small">${one ? 'مفيش تعليقات على العنصر ده — اكتب أول تعليق' : 'حدّد عنصر واكتب تعليق، أو اقرا كل تعليقات اللوحة هنا'}</p>`}</div>${one && canC() ? `<div class="pf"><input id="nbcin" placeholder="تعليق… (@اسم للمنشن)" dir="auto"><button type="button" class="btn p sm" data-nb="csend:${one.id}">إرسال</button></div>` : ''}`;
     if (p.__h !== h) { const v = (document.getElementById('nbcin') || {}).value || ''; p.__h = h; p.innerHTML = h; tr(p); const i2 = document.getElementById('nbcin'); if (i2 && v) i2.value = v; }
     p.style.display = '';
   }
@@ -18622,7 +18627,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   async function revert(ch, k) { const ups = []; for (const c of ch) { const st = c[k]; if (st) ups.push(put(clone(st))); else if (get(c.id)) ups.push(Store.remove('bitems', c.id)); } await Promise.all(ups.map(p => Promise.resolve(p).catch(() => {}))); syncSoon(); }
   async function undo() { if (!can()) return; const ch = NB.undo.pop(); if (!ch) return; endEdit(true); await revert(ch, 'before'); NB.redo.push(ch); WB.sel = new Set(ch.filter(c => c.before).map(c => c.id)); syncSoon(); }
   async function redo() { if (!can()) return; const ch = NB.redo.pop(); if (!ch) return; await revert(ch, 'after'); NB.undo.push(ch); WB.sel = new Set(ch.filter(c => c.after).map(c => c.id)); syncSoon(); }
-  async function mutate(ids, fn) { if (!can()) return; const ch = []; for (const id of ids) { const it = get(id); if (!it || (it.lock && !fn.unlock)) continue; const a = clone(it); if (fn(a) === false) continue; ch.push({ id, before: clone(it), after: clone(a) }); } if (!ch.length) return; pushUndo(ch); NB.fitCache.clear(); await saveAll(ch.map(c => clone(c.after))); }
+  async function mutate(ids, fn) { if (!can() && !(fn.comment && canC())) return; const ch = []; for (const id of ids) { const it = get(id); if (!it || (it.lock && !fn.unlock && !fn.comment) || (it.lockAll && rank() < 4 && !fn.comment)) continue; const a = clone(it); if (fn(a) === false) continue; ch.push({ id, before: clone(it), after: clone(a) }); } if (!ch.length) return; pushUndo(ch); NB.fitCache.clear(); await saveAll(ch.map(c => clone(c.after))); }
   async function create(list0, opts = {}) { if (!can() || !list0.length) return; list0.forEach(i => { i.by = i.by || me(); i.byName = i.byName || (S.session && S.session.name) || ''; if (i.z == null) i.z = topZ(); }); pushUndo(list0.map(i => ({ id: i.id, before: null, after: clone(i) }))); await saveAll(list0.map(clone)); if (opts.select !== false) WB.sel = new Set(list0.map(i => i.id)); syncSoon(); }
   async function removeIds(ids) {
     if (!can()) return; const all = new Set(ids); items().forEach(c => { if (c.type === 'conn' && (all.has(c.from) || all.has(c.to))) all.add(c.id); });
@@ -18804,11 +18809,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'fit': return fit(); case 'fitsel': return ss.length ? fit(ss) : fit();
       case 'mini': NB.mini = !NB.mini; lsv('nb.mini', NB.mini); return mini();
       case 'image': return pickImages(); case 'link': return linkDialog();
-      case 'export': return exportBoard();
+      case 'export': if (!canX()) return; return exportBoard();
       case 'bg': { const b = wbBoard(); if (!b || !can()) { NB.host.classList.toggle('dark'); return miniSoon(); } const dark = !(b.bg === 'dark'); await Store.save('boards', Object.assign({}, b, { bg: dark ? 'dark' : 'light' }), { silent: true }); NB.host.classList.toggle('dark', dark); miniSoon(); return; }
       case 'panel': NB.panel = v && NB.panel !== v ? v : null; top(); return;
       case 'focus': { const it = get(v); if (it) { WB.sel = new Set([v]); fit([it]); selChanged(); } return; }
-      case 'csend': { const it = get(v); const i2 = document.getElementById('nbcin'); const text = (i2 && i2.value.trim()) || ''; if (!it || !text) return; await mutate([v], a => { a.thread = (a.thread || []).concat([{ id: uid(), at: nowISO(), by: me(), byName: (S.session && S.session.name) || '', text }]); }); if (i2) i2.value = ''; if (typeof stuMentionNotify === 'function') stuMentionNotify(text, `تعليق على «${(it.text || it.type).slice(0, 30)}» في ${wbBoard().title}`, `#/ideas/${WB.id}`); top(); return; }
+      case 'csend': { const it = get(v); const i2 = document.getElementById('nbcin'); const text = (i2 && i2.value.trim()) || ''; if (!it || !text) return; const fc = a => { a.thread = (a.thread || []).concat([{ id: uid(), at: nowISO(), by: me(), byName: (S.session && S.session.name) || '', text }]); }; fc.comment = true; await mutate([v], fc); if (i2) i2.value = ''; if (typeof stuMentionNotify === 'function') stuMentionNotify(text, `تعليق على «${(it.text || it.type).slice(0, 30)}» في ${wbBoard().title}`, `#/ideas/${WB.id}`); top(); return; }
       case 'tsticky': NB.sticky = arg; setTool('sticky'); return closeFly();
       case 'tshape': NB.shape = arg; setTool('shape'); return closeFly();
       case 'tconn': NB.conn = arg; setTool('conn'); return closeFly();
@@ -18816,6 +18821,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'tpcol': NB.pen.color = arg; flyOpen('pen'); return;
       case 'tpw': NB.pen.width = +arg; flyOpen('pen'); return;
     }
+    if (c === 'vote' && ss.length && canC()) { const fv = a => { const vv = Object.assign({}, a.votes || {}); vv[me()] = vv[me()] ? 0 : 1; if (!vv[me()]) delete vv[me()]; a.votes = vv; }; fv.comment = true; return mutate(ids, fv); }
+    if (c === 'copy') return copySel();
     if (!can() || !ss.length) return;
     switch (c) {
       case 'color': return mutate(ids, a => { if (!['sticky', 'conn', 'stroke'].includes(a.type)) return false; a.color = v || (a.type === 'sticky' ? STICKY[0] : null); if (a.type === 'sticky') NB.sticky = a.color; });
@@ -18838,12 +18845,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'linkedit': return linkDialog(ss[0]);
       case 'open': return ss[0].url && window.open(ss[0].url, '_blank', 'noopener');
       case 'connect': setTool('conn'); toast('اسحب من العنصر للعنصر التاني'); return;
-      case 'vote': return mutate(ids, a => { const vv = Object.assign({}, a.votes || {}); vv[me()] = vv[me()] ? 0 : 1; if (!vv[me()]) delete vv[me()]; a.votes = vv; });
       case 'dup': return duplicate(ss, 30);
-      case 'copy': return copySel();
       case 'del': return removeIds(ids);
       case 'lock': return mutate(ids, a => { a.lock = true; });
-      case 'unlock': { const f = a => { a.lock = null; }; f.unlock = true; return mutate(ids, f); }
+      case 'lockall': if (rank() < 4) return; return mutate(ids, a => { a.lock = true; a.lockAll = true; });
+      case 'unlock': { if (ss.some(i => i.lockAll) && rank() < 4) { toast('العنصر ده قفله صاحب اللوحة — هو بس اللي يفكه', 'err'); return; } const f = a => { a.lock = null; a.lockAll = null; }; f.unlock = true; return mutate(ids, f); }
       case 'front': { let z = topZ(); return mutate(ss.slice().sort((a, b) => zs(a) - zs(b)).map(i => i.id), a => { a.z = z++; }); }
       case 'back': { let z = items().reduce((m, i) => Math.min(m, +i.z || 0), 0) - ss.length - 1; return mutate(ss.slice().sort((a, b) => zs(a) - zs(b)).map(i => i.id), a => { a.z = z++; }); }
       case 'group': { const g = uid(); return mutate(ids, a => { a.g = g; }); }
@@ -18868,7 +18874,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       if (i.att) c.att = map[i.att] || null; if (i.g) c.g = gmap[i.g] || (gmap[i.g] = uid()); delete c.createdAt; out.push(c); });
     await create(out);
   }
-  function copySel() { const ss = sel(); if (!ss.length) return; const ids = new Set(ss.map(i => i.id)); items().forEach(c => { if (c.type === 'conn' && ids.has(c.from) && ids.has(c.to)) ids.add(c.id); }); NB.clip = { at: Date.now(), items: [...ids].map(id => clone(get(id))) }; try { lsv('nb.clip', NB.clip); } catch (e) { /* ignore */ } toast('اتنسخ — Ctrl+V للصق'); }
+  function copySel() { const ss = sel(); if (!ss.length) return; if (!canX()) { toast('صاحب اللوحة مقفّل النسخ', 'err'); return; } const ids = new Set(ss.map(i => i.id)); items().forEach(c => { if (c.type === 'conn' && ids.has(c.from) && ids.has(c.to)) ids.add(c.id); }); NB.clip = { at: Date.now(), items: [...ids].map(id => clone(get(id))) }; try { lsv('nb.clip', NB.clip); } catch (e) { /* ignore */ } toast('اتنسخ — Ctrl+V للصق'); }
   const viewCenter = () => wbS2W(NB.host.clientWidth / 2, NB.host.clientHeight / 2);
   function pickImages(at) { if (!can()) return; const i0 = document.createElement('input'); i0.type = 'file'; i0.accept = 'image/*'; i0.multiple = true; i0.onchange = () => addImages([...i0.files], at || viewCenter()); i0.click(); }
   const loadImg = src => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
@@ -18926,7 +18932,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (KEYT[code] && (can() || ['select', 'hand'].includes(KEYT[code]))) { if (code === 'KeyP' && NB.pen.mode === 'eraser') NB.pen.mode = 'pen'; setTool(KEYT[code]); }
   }
   function keyup(e) { if (e.code === 'Space' && NB.space) { NB.space = false; if (NB.host) NB.host.classList.remove('grab'); } }
-  function onCopy(e) { if (!onBoard() || typing(e.target) || !WB.sel.size) return; copySel(); try { e.clipboardData.setData('text/plain', 'ninety-board:' + NB.clip.at); e.preventDefault(); } catch (x) { /* ignore */ } }
+  function onCopy(e) { if (!onBoard() || typing(e.target) || !WB.sel.size) return; if (!canX()) { e.preventDefault(); return copySel(); } copySel(); try { e.clipboardData.setData('text/plain', 'ninety-board:' + NB.clip.at); e.preventDefault(); } catch (x) { /* ignore */ } }
   async function onCut(e) { if (!onBoard() || typing(e.target) || !WB.sel.size || !can()) return; onCopy(e); await removeIds([...WB.sel]); }
   async function onPaste(e) {
     if (!onBoard() || typing(e.target) || !can()) return; const cd = e.clipboardData; const its = [...((cd && cd.items) || [])]; const txt = (cd && cd.getData('text/plain')) || ''; const at = NB.lastPt || viewCenter();
@@ -19068,6 +19074,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .nb .nbcol{display:flex;flex-direction:column;gap:2px;min-width:200px}.nb .nbcol button{justify-content:flex-start;padding:8px 10px;font-size:13px}.nb .nbcol button.dng{color:#e5484d}
 .nb .nbgrid3{display:grid;grid-template-columns:repeat(3,auto);gap:4px}.nb .nbgrid3 button{padding:8px 10px;font-size:12px}
 .nb .nbtop{right:12px;top:12px;display:flex;align-items:center;gap:4px;padding:5px}.nb .nbtop button{width:36px;height:36px;position:relative}.nb .nbtop sup{position:absolute;top:2px;left:2px;font-size:10px;background:var(--nb-acc);color:#fff;border-radius:999px;padding:0 4px;line-height:15px}
+.nb .nbsharebtn{width:auto!important;padding:0 14px;background:var(--nb-acc)!important;color:#fff!important;font-weight:600;font-size:13px}.nb .nbsharebtn:hover{filter:brightness(1.08)}.nb .nbrole{font-size:12px;color:var(--nb-ui-mute);padding:0 8px;border:1px solid var(--nb-ui-line);border-radius:999px;line-height:26px}.nb .nbinfo{display:inline-flex;align-items:center;gap:6px;padding:0 10px;font-size:12px;color:var(--nb-ui-mute)}.nb .nbinfo svg{width:16px;height:16px}
 .nb .nbppl{display:flex;direction:ltr;padding:0 6px}.nb .nbppl>*{margin-left:-6px;box-shadow:0 0 0 2px var(--nb-ui);border-radius:999px}
 .nb .nbtimer{display:inline-flex;align-items:center;gap:6px;padding:0 8px;font-variant-numeric:tabular-nums;font-weight:600}.nb .nbtimer.hot{color:#e5484d}.nb .nbtimer button{width:24px!important;height:24px!important}
 .nb .nbundo{left:12px;bottom:12px;display:flex;padding:4px;gap:2px}.nb .nbundo button{width:36px;height:36px}
@@ -19100,7 +19107,8 @@ html[dir=rtl] .nb .nbfly,html[dir=rtl] .nb .nbtop,html[dir=rtl] .nb .nbctx,html[
 if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const meId = () => stuMe();
   const starred = b => (b.stars || []).includes(meId());
-  const canManage = b => isAdmin() || role() === 'manager' || (b.personal ? b.ownerId === meId() : (b.by === meId() || (b.createdBy && S.session && b.createdBy === S.session.id)));
+  const canManage = b => (typeof nbRank === 'function' ? nbRank(b) >= 4 : isAdmin());
+  const canDelete = b => (typeof nbRank === 'function' ? nbRank(b) >= 5 : isAdmin());
   const projOpts = () => list('projects').filter(p => p.status !== 'archived' && (typeof stuProjectVisible !== 'function' || stuProjectVisible(p)));
   function thumb(b) {
     const its = list('bitems').filter(i => i.boardId === b.id && !i.deleted); const imgs = its.filter(i => i.type === 'image' && i.thumb).slice(-4); const cols = its.filter(i => i.type === 'sticky' && i.color).slice(-6);
@@ -19109,7 +19117,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function card(b) {
     const p = b.projectId ? byId('projects', b.projectId) : null;
     return `<div class="hubb nbhub"><a class="cov" href="#/${b.kind}/${b.id}"><span class="k">${b.kind === 'ideas' ? '✦ لوحة أفكار' : '▤ ديزاين بورد'}${p ? ' · ' + esc(p.name) : ''}${b.approved ? ' · معتمد ✓' : ''}</span><b>${esc(b.title)}</b>${thumb(b)}</a>
-      <div class="acts"><button type="button" class="iconbtn ${starred(b) ? 'on' : ''}" data-action="nbStar" data-arg="${b.id}" title="${starred(b) ? 'شيل النجمة' : 'نجمة — تثبيت فوق'}">${starred(b) ? '★' : '☆'}</button>${canManage(b) ? `<button type="button" class="iconbtn" data-action="nbRename" data-arg="${b.id}" title="تغيير الاسم">${icon('edit')}</button><button type="button" class="iconbtn" data-action="nbDelBoard" data-arg="${b.id}" title="مسح اللوحة">${icon('trash')}</button>` : ''}</div></div>`;
+      <div class="acts"><button type="button" class="iconbtn ${starred(b) ? 'on' : ''}" data-action="nbStar" data-arg="${b.id}" title="${starred(b) ? 'شيل النجمة' : 'نجمة — تثبيت فوق'}">${starred(b) ? '★' : '☆'}</button>${canManage(b) ? `<button type="button" class="iconbtn" data-action="nbRename" data-arg="${b.id}" title="تغيير الاسم">${icon('edit')}</button>` : ''}${canDelete(b) ? `<button type="button" class="iconbtn" data-action="nbDelBoard" data-arg="${b.id}" title="مسح اللوحة">${icon('trash')}</button>` : ''}<button type="button" class="iconbtn" data-action="nbShare" data-arg="${b.id}" title="مشاركة">${icon('users')}</button></div></div>`;
   }
   EXTRA_VIEWS.studio = () => {
     const me = meId(); const boards = list('boards').filter(b => !b.parentId && wbCanSee(b)); const st = boards.filter(starred);
@@ -19122,19 +19130,99 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (!stuCanEdit()) return; const ps = projOpts();
     openModal({ title: 'لوحة جديدة', body: `<div class="form">${field('اسم اللوحة', inp('title', '', 'required'), 'full')}${field('النوع', `<select name="kind"><option value="ideas">✦ لوحة أفكار (Whiteboard)</option><option value="design">▤ ديزاين بورد (أعمدة كروت)</option></select>`)}${field('تبع', `<select name="projectId"><option value="">شخصية — ليا بس</option>${ps.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>`)}</div>`,
       submitLabel: 'اعمل اللوحة', onSubmit: async f => { const d = formData(f); const title = (d.title || '').trim(); if (!title) { toast('اكتب اسم اللوحة', 'err'); return false; }
-        const b = { id: uid(), kind: d.kind === 'design' ? 'design' : 'ideas', title, by: meId(), createdBy: S.session ? S.session.id : null, cols: d.kind === 'design' ? [{ id: 'c1', title: 'مراجع' }, { id: 'c2', title: 'اتجاه التصميم' }, { id: 'c3', title: 'خامات وألوان' }] : [] };
+        const b = { id: uid(), kind: d.kind === 'design' ? 'design' : 'ideas', title, by: meId(), ownerId: meId(), createdBy: S.session ? S.session.id : null, cols: d.kind === 'design' ? [{ id: 'c1', title: 'مراجع' }, { id: 'c2', title: 'اتجاه التصميم' }, { id: 'c3', title: 'خامات وألوان' }] : [] };
         if (d.projectId) b.projectId = d.projectId; else { b.personal = true; b.ownerId = meId(); }
         await Store.save('boards', b, { silent: true }); go(`${b.kind}/${b.id}`); } });
   };
   ACTIONS.nbStar = async id => { const b = byId('boards', id); if (!b) return; const s = new Set(b.stars || []); if (s.has(meId())) s.delete(meId()); else s.add(meId()); await Store.save('boards', Object.assign({}, b, { stars: [...s] })); };
   ACTIONS.nbRename = id => { const b = byId('boards', id); if (!b || !canManage(b)) return; openModal({ title: 'تغيير اسم اللوحة', body: `<div class="form">${field('الاسم', inp('title', b.title || '', 'required'), 'full')}</div>`, onSubmit: async f => { const t = (formData(f).title || '').trim(); if (!t) return false; await Store.save('boards', Object.assign({}, b, { title: t })); toast('اتغير الاسم'); } }); };
   ACTIONS.nbDelBoard = async id => {
-    const b = byId('boards', id); if (!b || !canManage(b)) return; const its = list('bitems').filter(i => i.boardId === id);
+    const b = byId('boards', id); if (!b || !canDelete(b)) return; const its = list('bitems').filter(i => i.boardId === id);
     if (!(await confirmDlg(`مسح «${b.title}» وكل اللي عليها (${its.length} عنصر) نهائيًا؟`, 'امسح'))) return;
     for (const i of its) { try { await Store.remove('bitems', i.id); } catch (e) { /* keep going */ } } await Store.remove('boards', id); toast('اتمسحت اللوحة');
   };
   document.head.insertAdjacentHTML('beforeend', `<style>.hubb.nbhub{position:relative;padding:0}.hubb.nbhub .cov{display:flex;flex-direction:column;gap:6px;padding:inherit;padding:14px;color:inherit;text-decoration:none}.hubb.nbhub .acts{position:absolute;top:8px;inset-inline-end:8px;display:flex;gap:2px;opacity:.55}.hubb.nbhub:hover .acts{opacity:1}.hubb.nbhub .acts .on{color:#f5b301;opacity:1}.hubb.nbhub .acts .iconbtn{width:28px;height:28px}</style>`);
 })();
+/* =====================================================================
+   v6.07 — Board permissions like Miro (approved by Mahmoud with the PIN):
+   · Roles per board: Owner · Co-owner · Editor · Commenter · Viewer (rank 5..1). Admin = owner powers everywhere;
+     the art director (manager) = owner powers on project boards.
+   · board.share = { team: edit|comment|view|none (project team role, default edit), people: {personId: coowner|edit|comment|view},
+     sharer: owners|editors (who may change sharing), export: all|editors|owners (copy / print), link: { on, mode, token, exp, passHash } }.
+   · Ownership transfer (the old owner stays as co-owner). «Lock for others»: only owners / co-owners unlock.
+   · Outside link (client): view or comment only, optional expiry + password, served by the board-share function and b.html.
+   · Enforced on the server too (nf_board_rank / docs_board_guard, migration v607_board_permissions); this file mirrors the rules.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  const RANK = { owner: 5, coowner: 4, edit: 3, comment: 2, view: 1 };
+  const ROLE_AR = { coowner: 'Co-owner (شريك في الملكية)', edit: 'تعديل', comment: 'تعليق بس', view: 'فرجة بس' };
+  const rootOf = b => { let x = b, n = 0; while (x && x.parentId && n < 10) { const p = byId('boards', x.parentId); if (!p) break; x = p; n++; } return x || b; };
+  const ownerOf = b => b.ownerId || b.by || b.createdBy || '';
+  window.nbRank = b0 => {
+    if (!b0 || !S.session) return 0; const r = role(); if (r === 'kiosk') return 0; if (isAdmin()) return 5;
+    const b = rootOf(b0); const ids = stuMeIds(); const has = v => !!v && ids.includes(v);
+    if (has(ownerOf(b))) return 5;
+    const ppl = (b.share && b.share.people) || {}; let rk = Math.max(0, ...ids.map(i => RANK[ppl[i]] || 0));
+    if (b.personal) { if ((b.shared || []).some(has)) rk = Math.max(rk, b.kind === 'design' ? 3 : 1); return rk; }
+    if (b.projectId) { if (r === 'manager') return 5; const p = byId('projects', b.projectId); const vis = ['hr', 'acc'].includes(r) || (p && ((p.team || []).some(has) || has(p.leadId) || has(p.ownerId) || has(p.createdBy))); if (vis) rk = Math.max(rk, RANK[(b.share && b.share.team) || 'edit'] || 0); return rk; }
+    return Math.max(rk, r === 'viewer' ? 1 : 3);
+  };
+  window.nbRoleLabel = rk => ['—', 'فرجة بس', 'تعليق بس', 'تعديل', 'Co-owner', 'Owner'][rk] || '—';
+  window.nbCanExport = b => { if (!b) return false; const rk = nbRank(b); const e = (rootOf(b).share || {}).export || 'all'; return rk >= (e === 'owners' ? 4 : e === 'editors' ? 3 : 1); };
+  window.nbCanShare = b => { if (!b) return false; const rk = nbRank(b); return rk >= 4 || (rk === 3 && ((rootOf(b).share || {}).sharer === 'editors')); };
+  const nameOf = id => { const p = (typeof stuPerson === 'function') ? stuPerson(id) : null; if (p && p.name && p.name !== id) return p.name; if (S.session && stuMeIds().includes(id)) return S.session.name || id; const w = byId('workers', id); return w ? w.name : (id === 'owner' ? 'المالك' : id); };
+  const people = () => (typeof stuPeople === 'function' ? stuPeople() : []).filter(p => p && p.id);
+  const sha = async s => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))).map(x => x.toString(16).padStart(2, '0')).join('');
+  const token = () => { const a = new Uint8Array(24); crypto.getRandomValues(a); return btoa(String.fromCharCode(...a)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  const linkUrl = t => location.origin + location.pathname.replace(/[^/]*$/, '') + 'b.html#t=' + t;
+  const sel = (name, opts, cur, dis) => `<select name="${name}" ${dis ? 'disabled' : ''}>${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+
+  ACTIONS.nbShare = id => {
+    const b0 = byId('boards', id || WB.id); if (!b0) return; const b = rootOf(b0); const rk = nbRank(b); if (rk < 1) return;
+    const sh = Object.assign({ team: 'edit', people: {}, sharer: 'owners', export: 'all', link: null }, b.share || {}); const canS = nbCanShare(b); const owners = rk >= 4; const lk = sh.link || {};
+    const roleOpts = (allowCo) => [['coowner', ROLE_AR.coowner], ['edit', ROLE_AR.edit], ['comment', ROLE_AR.comment], ['view', ROLE_AR.view]].filter(o => allowCo || o[0] !== 'coowner');
+    const ownerId = ownerOf(b); const ppl = Object.entries(sh.people || {});
+    const others = people().filter(p => p.id !== ownerId && !(sh.people || {})[p.id]);
+    const body = `<div class="form nbshare">
+      <div class="field full"><label>صاحب اللوحة (Owner)</label><div class="row" style="gap:8px;align-items:center">${typeof stuAvatar === 'function' ? stuAvatar(ownerId, 26) : ''}<b>${esc(nameOf(ownerId) || '—')}</b><span class="tiny muted">· دورك: ${esc(nbRoleLabel(rk))}</span></div>
+        ${rk >= 5 && people().some(p => p.id !== ownerId) ? `<div style="margin-top:6px">${sel('xfer', [['', '— نقل الملكية لحد تاني —']].concat(people().filter(p => p.id !== ownerId).map(p => [p.id, p.name])), '', false)}<div class="tiny muted">صاحب اللوحة القديم بيفضل Co-owner.</div></div>` : ''}</div>
+      ${b.projectId ? `<div class="field full"><label>فريق المشروع</label>${sel('team', [['edit', 'يعدّلوا'], ['comment', 'يعلّقوا بس'], ['view', 'يتفرجوا بس'], ['none', 'مالهومش دخول']], sh.team || 'edit', !canS)}</div>` : ''}
+      <div class="field full"><label>ناس معزومين على اللوحة</label>${ppl.length ? ppl.map(([pid, r]) => `<div class="row nbsp" style="gap:8px;align-items:center;margin-bottom:6px"><span style="flex:1">${esc(nameOf(pid))}</span>${sel('pp_' + pid, roleOpts(owners || r === 'coowner').concat([['-', 'شيله']]), r, !canS)}</div>`).join('') : '<div class="tiny muted">مفيش حد معزوم بالاسم.</div>'}
+        ${canS && others.length ? `<div class="row" style="gap:8px;margin-top:6px">${sel('add_id', [['', '+ اعزم حد…']].concat(others.map(p => [p.id, p.name])), '', false)}${sel('add_role', roleOpts(owners), 'edit', false)}</div>` : ''}</div>
+      ${owners ? `<div class="field"><label>مين يغيّر المشاركة</label>${sel('sharer', [['owners', 'الـOwner والـCo-owners بس'], ['editors', 'واللي بيعدّلوا كمان']], sh.sharer || 'owners')}</div>
+      <div class="field"><label>مين ينسخ ويطبع ويصدّر</label>${sel('export', [['all', 'أي حد بيشوف اللوحة'], ['editors', 'اللي بيعدّلوا وفوق'], ['owners', 'الـOwners بس']], sh.export || 'all')}</div>
+      <div class="field full nblink"><label class="check"><input type="checkbox" name="lon" ${lk.on ? 'checked' : ''}> لينك لحد برا السيستم (عميل مثلاً)</label>
+        <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">${sel('lmode', [['view', 'فرجة بس'], ['comment', 'فرجة + تعليق']], lk.mode || 'view')}<input type="date" name="lexp" value="${esc(lk.exp || '')}" title="ميعاد انتهاء اللينك (اختياري)"><input type="text" name="lpass" placeholder="${lk.passHash ? 'فيه باسورد — اكتب جديد لو عايز تغيّره' : 'باسورد (اختياري)'}" autocomplete="off" style="min-width:180px"></div>
+        ${lk.passHash ? '<label class="check" style="margin-top:6px"><input type="checkbox" name="lnopass"> شيل الباسورد</label>' : ''}
+        ${lk.on && lk.token ? `<div class="row" style="gap:6px;margin-top:8px"><input class="ltr" readonly value="${esc(linkUrl(lk.token))}" style="flex:1" id="nblinkv"><button type="button" class="btn sm" data-action="nbCopyLink">نسخ اللينك</button></div><label class="check" style="margin-top:6px"><input type="checkbox" name="lnew"> اعمل لينك جديد (القديم يبطّل يشتغل)</label>` : ''}
+        <div class="tiny muted" style="margin-top:4px">اللي معاه اللينك بيشوف اللوحة دي بس — من غير ما يدخل السيستم. مفيش تعديل من اللينك.</div></div>` : ''}
+    </div>`;
+    openModal({ title: 'مشاركة اللوحة', wide: true, body, footer: canS ? undefined : '<button type="button" class="btn" data-action="closemodal">إغلاق</button>', submitLabel: 'حفظ المشاركة',
+      onSubmit: async f => {
+        if (!canS) return true; const d = formData(f); const fresh = byId('boards', b.id); const nb = Object.assign({}, fresh); const s2 = Object.assign({ team: 'edit', people: {}, sharer: 'owners', export: 'all' }, clone(fresh.share || {}));
+        if (b.projectId && d.team) s2.team = d.team;
+        const pp = Object.assign({}, s2.people || {}); Object.keys(pp).forEach(pid => { const v = d['pp_' + pid]; if (v === '-') delete pp[pid]; else if (v && (owners || v !== 'coowner')) pp[pid] = v; });
+        if (d.add_id && d.add_role && (owners || d.add_role !== 'coowner')) pp[d.add_id] = d.add_role; s2.people = pp;
+        if (owners) {
+          s2.sharer = d.sharer === 'editors' ? 'editors' : 'owners'; s2.export = ['editors', 'owners'].includes(d.export) ? d.export : 'all';
+          const L = Object.assign({}, s2.link || {}); L.on = !!d.lon; L.mode = d.lmode === 'comment' ? 'comment' : 'view'; L.exp = d.lexp || null;
+          if (L.on && (!L.token || d.lnew)) { const had = !!L.passHash; L.token = token(); if (had && !d.lpass) { delete L.passHash; toast('اللينك اتغير — الباسورد اتشال، اكتبه تاني لو محتاجه'); } }
+          if (d.lnopass) delete L.passHash; if (d.lpass && L.token) L.passHash = await sha('nf-board:' + L.token + ':' + d.lpass);
+          s2.link = (L.on || L.token) ? L : null;
+        }
+        if (d.xfer && rk >= 5) { const old = ownerOf(fresh); nb.ownerId = d.xfer; if (old && old !== d.xfer) s2.people[old] = 'coowner'; delete s2.people[d.xfer]; }
+        nb.share = s2;
+        try { await Store.save('boards', nb); } catch (e) { toast('مقدرتش أحفظ — مش معاك صلاحية تغيير المشاركة', 'err'); return false; }
+        toast('اتحفظت المشاركة');
+        if (s2.link && s2.link.on && s2.link.token) setTimeout(() => ACTIONS.nbLinkReady(s2.link.token), 50);
+      } });
+  };
+  ACTIONS.nbLinkReady = t => openModal({ title: 'لينك اللوحة جاهز', body: `<div class="form"><div class="field full"><label>ابعته للي عايزه يشوف اللوحة</label><div class="row" style="gap:6px"><input class="ltr" readonly value="${esc(linkUrl(t))}" id="nblinkv" style="flex:1"><button type="button" class="btn p sm" data-action="nbCopyLink">نسخ</button></div></div></div>`, footer: '<button type="button" class="btn" data-action="closemodal">تمام</button>' });
+  ACTIONS.nbCopyLink = async () => { const i = document.getElementById('nblinkv'); if (!i) return; try { await navigator.clipboard.writeText(i.value); toast('اتنسخ اللينك'); } catch (e) { i.select(); document.execCommand('copy'); toast('اتنسخ اللينك'); } };
+})();
+/* the design board gets the same «share» button in its header */
+if (typeof STU_ON !== 'undefined' && STU_ON && typeof EXTRA_TITLES !== 'undefined' && EXTRA_TITLES.design) EXTRA_TITLES.design = (base => () => { const t = Object.assign({}, base()); const b = typeof dbBoard === 'function' ? dbBoard() : null; if (b) t.actions = (t.actions || '') + `<button type="button" class="btn sm" data-action="nbShare" data-arg="${b.id}">${icon('users')}<span>مشاركة</span></button>`; return t; })(EXTRA_TITLES.design);
+if (typeof STU_ON !== 'undefined' && STU_ON) document.head.insertAdjacentHTML('beforeend', '<style>.nbshare .row{display:flex;flex-wrap:nowrap}.nbshare .row select,.nbshare .row input{width:auto;min-width:150px;flex:0 1 auto}.nbshare .nbsp{padding:6px 8px;border:1px solid var(--line);border-radius:10px}.nbshare .nblink{border-top:1px solid var(--line);padding-top:10px}.nbshare .nblink .row{flex-wrap:wrap}</style>');
 /* =====================================================================
    v4.x — quotation: send to the client by WhatsApp or e-mail (25 Sep 2026)
    Buttons on the quotation page open WhatsApp (wa.me, the client's mobile) or the mail app (mailto, the client's registered e-mail)
