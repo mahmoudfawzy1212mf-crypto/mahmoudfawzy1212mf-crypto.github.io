@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-1302-0cce9f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-1349-ae1e2f";</script>
 
 <script>
 'use strict';
@@ -17917,6 +17917,239 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     .replace('تلقائي — المصنع، وموقع المشروع فقط أثناء التركيب', 'تلقائي — المكتب').replace('المصنع فقط', 'المكتب فقط').replace('المصنع أو مواقع العمل', 'المكتب أو موقع المشروع')
     .replace('للمهندسين والإداريين الذين يعملون عن بُعد: البصمة والمهام والملفات تصلهم في أي مكان', 'المهندس الذي يعمل من البيت بإذن الآرت دايركتور يبصم من أي مكان');
   if (typeof workerFormJobs === 'function') workerFormJobs = (base => function () { return stuWording(base.apply(this, arguments)); })(workerFormJobs);
+}
+/* =====================================================================
+   v6.04 — Ninety Studio OS, phase 1 "Foundation" (from the office operating document V2.1, after Mahmoud's go-ahead):
+   · Official structure by titles + current people (stuorg/org) — titles stay even when people change.
+   · Project Owner: one owner per project, chosen by the Art Director (or the CEO); type ArchViz / Interior / Film / Mixed.
+   · 12 project statuses + BLOCKED (with cause, note, since) — owner escalates.
+   · Client deadline is fixed (set by management); internal final target D-2, maximum D-1; internal delays never move it.
+   · Shots (still / animation): each moves gate by gate — Composition → Concept Lighting → Detailing + AI → Final Post;
+     artist submits → Project Owner first review → Art Director final confirm (no gate is skipped without approval).
+   · Master schedule: shot due dates against D-2, overdue / at-risk flags, approvals waiting (with waiting time).
+   · Evidence for later KPI phases is logged on every shot (submits, returns, approval waits, delay causes).
+   Only active in the studioz build (STU_ON). Projects made before v6.04 keep their old stage bar.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) {
+  /* ---------- reference data (labels are UI text → dictionary) ---------- */
+  const OS_STATUSES = [
+    { id: 'data', en: 'Data Received', ar: 'استلام الداتا' }, { id: 'setup', en: 'Project Setup', ar: 'تجهيز المشروع' },
+    { id: 'creative', en: 'Creative Direction', ar: 'الاتجاه البصري' }, { id: 'camera', en: 'Client Camera Approval', ar: 'اعتماد العميل للكاميرات' },
+    { id: 'kickoff', en: 'Team Kickoff', ar: 'بداية الفريق' }, { id: 'production', en: 'Production', ar: 'الإنتاج' },
+    { id: 'review', en: 'Internal Review', ar: 'المراجعة الداخلية' }, { id: 'client', en: 'Client Review', ar: 'مراجعة العميل' },
+    { id: 'revisions', en: 'Revisions', ar: 'التعديلات' }, { id: 'qc', en: 'Final QC', ar: 'المراجعة النهائية' },
+    { id: 'delivered', en: 'Delivered', ar: 'اتسلّم' }, { id: 'closed', en: 'Closed', ar: 'اتقفل' },
+  ];
+  const OS_TYPES = { archviz: 'ArchViz', interior: 'Interior', film: 'Film', mixed: 'Mixed' };
+  const OS_GATES = [{ id: 'comp', en: 'Composition', ar: 'الكومبوزيشن' }, { id: 'light', en: 'Concept Lighting', ar: 'الإضاءة' }, { id: 'detail', en: 'Detailing + AI', ar: 'التفاصيل + AI' }, { id: 'post', en: 'Final Post', ar: 'البوست النهائي' }];
+  const OS_CAUSES = { data: 'داتا ناقصة من العميل', client: 'قرار من العميل', drone: 'الدرون', tech: 'مشكلة تقنية', approval: 'مستني اعتماد', internal: 'تأخير داخلي' };
+  const OS_TITLES = [
+    { id: 'ceo', t: 'CEO & Co-Founder', grp: 'الإدارة' }, { id: 'ad', t: 'Co-Founder & Art Director', grp: 'الإدارة' },
+    { id: 'avlead', t: 'ArchViz Team Lead', grp: 'ARCHVIZ' }, { id: 'senior', t: 'Senior 3D Artist / Visual Lead', grp: 'ARCHVIZ' }, { id: 'mid', t: 'Mid-Level 3D Artist', grp: 'ARCHVIZ' }, { id: 'jrp', t: 'Junior+ 3D Artist', grp: 'ARCHVIZ' }, { id: 'jr', t: 'Junior 3D Artist', grp: 'ARCHVIZ' },
+    { id: 'intlead', t: 'Interior Lead', grp: 'INTERIOR' }, { id: 'hybrid', t: 'Hybrid Interior / Exterior 3D Artist', grp: 'INTERIOR' },
+    { id: 'film', t: 'Film & Animation Artist', grp: 'MEDIA / CONTENT' }, { id: 'content', t: 'Content Creator', grp: 'MEDIA / CONTENT' }, { id: 'brand', t: 'Graphic / Brand Support', grp: 'MEDIA / CONTENT' },
+  ];
+  const pairOpts = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const osStatus = id => OS_STATUSES.find(s => s.id === id) || OS_STATUSES[0];
+  const osGate = id => OS_GATES.find(g => g.id === id) || OS_GATES[0];
+  const ORG_ID = 'org';
+
+  /* ---------- data: shots + office structure ---------- */
+  ['shots', 'stuorg'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; for (const c of ['shots', 'stuorg']) { S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; rerender(); }, e => console.warn('snapshot', c, e))); } })(Store.subscribeAll);
+
+  /* ---------- who is who ---------- */
+  const me = () => (typeof stuMe === 'function' ? stuMe() : (S.session && (S.session.workerId || S.session.id))) || '';
+  const meIds = () => { const st = S.session || {}; return [st.workerId, st.id].filter(Boolean); };
+  const isMe = id => !!id && meIds().includes(id);
+  const isAD = () => isAdmin() || role() === 'manager';
+  const adIds = () => list('workers').filter(w => w.role === 'manager' && w.status !== 'inactive').map(w => w.id);
+  /* names directory (RPC nf_people_dir: id / name / title only) — the art director and team leads can't read full worker records */
+  let DIR = null, dirAsked = false;
+  const loadDir = () => { if (dirAsked || !S.sb || !S.session) return; dirAsked = true; Promise.resolve(S.sb.rpc('nf_people_dir')).then(r => { if (r && Array.isArray(r.data)) { DIR = r.data; rerender(); } }).catch(() => { dirAsked = false; }); };
+  const dirGet = id => { const k = String(id || '').replace(/^w:/, ''); return (DIR || []).find(x => x.id === k) || null; };
+  const pName = id => { const p = typeof stuPerson === 'function' ? stuPerson(id) : null; if (p && p.name && p.name !== id) return p.name; const d = dirGet(id); if (d) return d.name; loadDir(); return p ? p.name : '—'; };
+  const people = () => { const base = typeof stuPeople === 'function' ? stuPeople() : list('workers').filter(w => w.status !== 'inactive').map(w => ({ id: w.id, name: w.name })); if (base.length >= (DIR || []).length && base.length) return base; loadDir(); return DIR ? DIR.filter(x => !['admin'].includes(x.role)).map(x => ({ id: x.id, name: x.name, role: x.role })) : base; };
+  const isOS = p => !!p && (p.flow === 'os' || !!p.ownerId || !!p.osStatus);
+  const isOwner = p => !!p && isMe(p.ownerId);
+  const canSchedule = p => writable() && (isAD() || isOwner(p));          // create / edit the master schedule (shots, dates, assignees)
+  const canStatus = p => writable() && (isAD() || isOwner(p));
+  const shotsOf = pid => sortBy(list('shots').filter(s => s.projectId === pid && !s.deleted), s => s.code || '');
+  const pushTo = (ids, title, body, url) => { try { const to = []; (ids || []).filter(Boolean).forEach(id => { to.push(id, 'w:' + id); }); if (to.length && typeof pushSend === 'function') pushSend(Array.from(new Set(to)).filter(x => !isMe(x) && !isMe(x.replace(/^w:/, ''))), title, body, url, 'stuos'); } catch (e) { /* push is best effort */ } };
+
+  /* ---------- dates: client deadline fixed, D-2 / D-1 internal (Friday is off) ---------- */
+  const isFri = iso => new Date(iso + 'T00:00:00').getDay() === 5;
+  const backWork = (iso, n) => { let d = iso; let k = 0; while (k < n) { d = addDays(d, -1); if (!isFri(d)) k++; } return d; };
+  const d2 = p => (p && p.clientDeadline ? backWork(p.clientDeadline, 2) : null);
+  const d1 = p => (p && p.clientDeadline ? backWork(p.clientDeadline, 1) : null);
+  const gateDue = s => (s.gateDue && s.gateDue[s.gate]) || s.due || null;
+  const shotLate = s => s.state !== 'done' && gateDue(s) && gateDue(s) < todayISO();
+  const shotRisk = (s, p) => s.state !== 'done' && s.due && d2(p) && s.due > d2(p);
+  const hoursSince = iso => iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 36e5)) : 0;
+  const waitTxt = iso => { const h = hoursSince(iso); return h < 1 ? 'دلوقتي' : h < 24 ? `${h} س` : `${Math.round(h / 24)} يوم`; };
+  const lastLog = (s, act) => (s.log || []).slice().reverse().find(l => !act || l.act === act);
+
+  /* ---------- shot workflow ---------- */
+  async function shotAct(id, act, note) {
+    const s = byId('shots', id); if (!s) return; const p = byId('projects', s.projectId); if (!p) return;
+    const now = nowISO(); const entry = { at: now, by: me(), act, gate: s.gate, note: note || '' }; const next = Object.assign({}, s, { log: (s.log || []).concat([entry]), updatedAt: now });
+    const gi = OS_GATES.findIndex(g => g.id === s.gate); const gate = osGate(s.gate);
+    const ownerIsAD = adIds().includes(p.ownerId) || !p.ownerId;
+    if (act === 'submit') { next.state = 'owner'; next.submittedAt = now; if (ownerIsAD) next.state = 'ad'; pushTo(ownerIsAD ? adIds() : [p.ownerId], `طلب اعتماد: ${s.code} · ${gate.en}`, `${p.name} — ${pName(s.assigneeId)}`, `/#/projects/${p.id}`); }
+    else if (act === 'ok1') { next.state = 'ad'; next.ok1At = now; pushTo(adIds(), `اعتماد نهائي مطلوب: ${s.code} · ${gate.en}`, `${p.name} — راجعه ${pName(me())}`, `/#/projects/${p.id}`); }
+    else if (act === 'ok2') { if (gi >= OS_GATES.length - 1) { next.state = 'done'; next.doneAt = now; } else { next.gate = OS_GATES[gi + 1].id; next.state = 'work'; } pushTo([s.assigneeId], next.state === 'done' ? `اللقطة ${s.code} اتعتمدت نهائي ✓` : `اتعتمد ${gate.en} — ${s.code}`, next.state === 'done' ? p.name : `ابدأ ${osGate(next.gate).en}`, `/#/projects/${p.id}`); }
+    else if (act === 'back') { next.state = 'work'; next.backs = (s.backs || 0) + 1; pushTo([s.assigneeId], `ملاحظات على ${s.code} · ${gate.en}`, note || p.name, `/#/projects/${p.id}`); }
+    await Store.save('shots', next);
+  }
+  const shotStateTxt = s => s.state === 'done' ? 'اتعتمدت ✓' : s.state === 'owner' ? 'مستنية مراجعة الـOwner' : s.state === 'ad' ? 'مستنية اعتماد الآرت دايركتور' : 'شغّالة';
+  function shotActions(s, p) {
+    const out = []; const mine = isMe(s.assigneeId);
+    if (s.state === 'work' && (mine || canSchedule(p))) out.push(`<button class="btn xs p" data-action="osShot" data-arg="${s.id}:submit">سلّم للمراجعة</button>`);
+    if (s.state === 'owner' && (isOwner(p) || isAD())) out.push(`<button class="btn xs a" data-action="osShot" data-arg="${s.id}:ok1">موافقة مبدئية</button>`, `<button class="btn xs" data-action="osShot" data-arg="${s.id}:back">رجّع بملاحظة</button>`);
+    if (s.state === 'ad' && isAD()) out.push(`<button class="btn xs a" data-action="osShot" data-arg="${s.id}:ok2">اعتماد</button>`, `<button class="btn xs" data-action="osShot" data-arg="${s.id}:back">رجّع بملاحظة</button>`);
+    if (canSchedule(p)) out.push(`<button class="btn xs ghost" data-action="osShotEdit" data-arg="${s.id}" title="تعديل">${icon('edit')}</button>`);
+    return out.join('');
+  }
+  function shotRow(s, p) {
+    const gi = OS_GATES.findIndex(g => g.id === s.gate); const late = shotLate(s); const risk = shotRisk(s, p);
+    const bar = OS_GATES.map((g, i) => `<i class="${s.state === 'done' || i < gi ? 'ok' : i === gi ? (s.state === 'work' ? 'on' : 'rv') : ''}" title="${esc(g.en)}"></i>`).join('');
+    const waiting = (s.state === 'owner' || s.state === 'ad') ? ` · ${waitTxt(s.state === 'ad' ? (s.ok1At || s.submittedAt) : s.submittedAt)}` : '';
+    return `<tr class="${late ? 'oslate' : ''}"><td><b class="ltr">${esc(s.code || '')}</b> ${esc(s.name || '')}<div class="tiny muted">${s.kind === 'anim' ? 'Animation' : 'Still'}${s.backs ? ` · رجعت ${s.backs}×` : ''}</div></td>
+      <td><div class="osgates">${bar}</div><div class="tiny">${s.state === 'done' ? '' : esc(osGate(s.gate).en) + ' — '}${esc(shotStateTxt(s))}${waiting}</div></td>
+      <td>${s.assigneeId ? esc(pName(s.assigneeId)) : '<span class="muted">—</span>'}</td>
+      <td class="nowrap">${gateDue(s) ? fmtDate(gateDue(s)) : '—'}${late ? ' <span class="badge crit">متأخرة</span>' : risk ? ' <span class="badge warn">بعد D-2</span>' : ''}</td>
+      <td class="row" style="gap:4px;flex-wrap:wrap">${shotActions(s, p)}</td></tr>`;
+  }
+  function shotForm(s, p) {
+    const ppl = people(); const gd = s.gateDue || {};
+    return `<div class="form">${field('كود اللقطة', inp('code', s.code || '', 'class="ltr" required placeholder="S01"'))}${field('اسم / وصف', inp('name', s.name || '', 'placeholder="Main entrance — sunset"'))}
+      ${field('النوع', `<select id="f-kind" name="kind">${pairOpts([['still', 'Still'], ['anim', 'Animation']], s.kind || 'still')}</select>`)}
+      ${field('المسؤول (Artist)', `<select id="f-assigneeId" name="assigneeId"><option value="">—</option>${opts(ppl, s.assigneeId || '', x => x.name)}</select>`)}
+      ${OS_GATES.map(g => field(`موعد ${g.en}`, inp('gd_' + g.id, gd[g.id] || '', 'type="date"'))).join('')}
+      ${field('موعد التسليم النهائي للقطة', inp('due', s.due || '', 'type="date"'))}
+      <div class="tiny muted full">D-2 للمشروع: ${d2(p) ? fmtDate(d2(p)) : 'حدد موعد العميل الأول'} — أي لقطة بعده بتتعلّم «بعد D-2».</div></div>`;
+  }
+  async function shotSave(f, s, p) {
+    const d = formData(f); if (!d.code) { toast('اكتب كود اللقطة', 'err'); return false; }
+    const gateDueMap = {}; OS_GATES.forEach(g => { if (d['gd_' + g.id]) gateDueMap[g.id] = d['gd_' + g.id]; });
+    const doc = Object.assign({ gate: 'comp', state: 'work', log: [], createdAt: nowISO(), createdBy: me() }, s, { projectId: p.id, code: d.code.trim(), name: d.name || '', kind: d.kind || 'still', assigneeId: d.assigneeId || null, gateDue: gateDueMap, due: d.due || null, updatedAt: nowISO() });
+    if (!doc.id) doc.id = uid();
+    if (s.assigneeId !== doc.assigneeId && doc.assigneeId) pushTo([doc.assigneeId], `لقطة جديدة ليك: ${doc.code}`, p.name, `/#/projects/${p.id}`);
+    await Store.save('shots', doc);
+    if (doc.assigneeId && !(p.team || []).includes(doc.assigneeId)) await Store.save('projects', Object.assign({}, p, { team: (p.team || []).concat([doc.assigneeId]) })); // the artist sees the project he works on
+    return doc;
+  }
+  ACTIONS.osShotNew = pid => { const p = byId('projects', pid); if (!p || !canSchedule(p)) return; const n = shotsOf(pid).length + 1; openModal({ title: `لقطة جديدة — ${p.name}`, wide: true, body: shotForm({ code: 'S' + String(n).padStart(2, '0') }, p), onSubmit: async f => (await shotSave(f, {}, p)) ? undefined : false }); };
+  ACTIONS.osShotEdit = id => { const s = byId('shots', id); const p = s && byId('projects', s.projectId); if (!p || !canSchedule(p)) return; openModal({ title: `تعديل ${s.code}`, wide: true, body: shotForm(s, p), extra: `<button type="button" class="btn d" data-action="osShotDel" data-arg="${s.id}">حذف</button>`, onSubmit: async f => (await shotSave(f, s, p)) ? undefined : false }); };
+  ACTIONS.osShotDel = async id => { const s = byId('shots', id); const p = s && byId('projects', s.projectId); if (!p || !canSchedule(p)) return; if (!(await confirmDlg(`حذف اللقطة ${s.code}؟`, 'حذف'))) return; await Store.save('shots', Object.assign({}, s, { deleted: true, updatedAt: nowISO() })); closeModal(); };
+  ACTIONS.osShot = async arg => {
+    const [id, act] = arg.split(':'); const s = byId('shots', id); if (!s) return;
+    if (act === 'back') { openModal({ title: `رجّع ${s.code} · ${osGate(s.gate).en}`, body: `<div class="form">${field('الملاحظة (مطلوبة)', '<textarea id="f-note" name="note" rows="3" required></textarea>', 'full')}</div>`, submitLabel: 'رجّع', onSubmit: async f => { const d = formData(f); if (!d.note) { toast('اكتب الملاحظة', 'err'); return false; } await shotAct(id, 'back', d.note); toast('اترجعت للـArtist'); } }); return; }
+    await shotAct(id, act); toast(act === 'submit' ? 'اتبعتت للمراجعة' : act === 'ok1' ? 'اتبعتت للآرت دايركتور' : 'اتعتمدت');
+  };
+
+  /* ---------- project: owner, type, deadline, status, blocked ---------- */
+  ACTIONS.osStatus = async arg => { const [pid, st] = arg.split(':'); const p = byId('projects', pid); if (!p || !canStatus(p) || p.osStatus === st) return; if (st === 'delivered' && !isAD()) { toast('إطلاق التسليم النهائي للآرت دايركتور بس', 'err'); return; } await Store.save('projects', Object.assign({}, p, { flow: 'os', osStatus: st, osStatusAt: Object.assign({}, p.osStatusAt || {}, { [st]: nowISO() }) })); toast(`الحالة: ${osStatus(st).en}`); };
+  ACTIONS.osBlock = pid => { const p = byId('projects', pid); if (!p || !canStatus(p)) return; openModal({ title: `المشروع واقف — ${p.name}`, body: `<div class="form">${field('السبب', `<select id="f-cause" name="cause">${pairOpts(Object.entries(OS_CAUSES), 'data')}</select>`)}${field('التفاصيل', '<textarea id="f-note" name="note" rows="3" required placeholder="إيه اللي ناقص ومين عليه"></textarea>', 'full')}</div>`, submitLabel: 'تعليم «واقف»', onSubmit: async f => { const d = formData(f); if (!d.note) return false; await Store.save('projects', Object.assign({}, p, { flow: 'os', blocked: { cause: d.cause, note: d.note, since: nowISO(), by: me() }, blockLog: (p.blockLog || []).concat([{ cause: d.cause, note: d.note, since: nowISO(), by: me() }]) })); if (!isAD()) pushTo(adIds(), `مشروع واقف: ${p.name}`, `${OS_CAUSES[d.cause]} — ${d.note}`, `/#/projects/${p.id}`); toast('اتعلّم واقف واتبلّغ الآرت دايركتور'); } }); };
+  ACTIONS.osUnblock = async pid => { const p = byId('projects', pid); if (!p || !canStatus(p) || !p.blocked) return; const log = (p.blockLog || []).slice(); if (log.length) log[log.length - 1] = Object.assign({}, log[log.length - 1], { until: nowISO() }); await Store.save('projects', Object.assign({}, p, { blocked: null, blockLog: log })); toast('المشروع رجع يمشي'); };
+  ACTIONS.osOwner = pid => { const p = byId('projects', pid); if (!p || !isAD() || !writable()) return; openModal({ title: `Project Owner — ${p.name}`, body: `<div class="form">${field('الـProject Owner', `<select id="f-ownerId" name="ownerId"><option value="">—</option>${opts(people(), p.ownerId || '', x => x.name)}</select>`, 'full')}${field('نوع المشروع', `<select id="f-ptype" name="ptype">${pairOpts(Object.entries(OS_TYPES), p.ptype || 'archviz')}</select>`)}${field('موعد العميل النهائي', inp('clientDeadline', p.clientDeadline || '', 'type="date"'))}${field('موافقة العميل على الكاميرات', `<select id="f-camReq" name="camReq">${pairOpts([['req', 'مطلوبة قبل الإنتاج'], ['opt', 'اختيارية (العميل معتمد رؤية المكتب)']], p.camReq || 'req')}</select>`, 'full')}<div class="tiny muted full">مشروع واحد = Owner واحد. الـOwner بيعمل الـMaster Schedule ويوزع الشغل ويراجع أولًا. موعد العميل ثابت — التأخير الداخلي مايحركوش.</div></div>`, onSubmit: async f => { const d = formData(f); const team = (p.team || []).slice(); if (d.ownerId && !team.includes(d.ownerId)) team.push(d.ownerId); await Store.save('projects', Object.assign({}, p, { flow: 'os', ownerId: d.ownerId || null, ptype: d.ptype, clientDeadline: d.clientDeadline || null, camReq: d.camReq, team, osStatus: p.osStatus || 'data' })); if (d.ownerId && d.ownerId !== p.ownerId) pushTo([d.ownerId], `إنت Project Owner لـ ${p.name}`, d.clientDeadline ? `موعد العميل ${fmtDate(d.clientDeadline)} — اعمل الـMaster Schedule` : 'اعمل الـMaster Schedule', `/#/projects/${p.id}`); } }); };
+
+  function osPanel(p) {
+    loadDir();
+    const st = osStatus(p.osStatus || 'data'); const idx = OS_STATUSES.findIndex(s => s.id === st.id); const shots = shotsOf(p.id);
+    const done = shots.filter(s => s.state === 'done').length; const late = shots.filter(shotLate).length; const risk = shots.filter(s => shotRisk(s, p)).length;
+    const left = p.clientDeadline ? daysBetween(todayISO(), p.clientDeadline) : null;
+    const steps = OS_STATUSES.filter(s => s.id !== 'camera' || p.camReq !== 'opt');
+    const blk = p.blocked;
+    return `<div class="card osp" style="margin-top:14px">
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">تشغيل المشروع</h3><span class="stg"><i></i>${esc(st.en)}</span>${p.ptype ? `<span class="badge">${esc(OS_TYPES[p.ptype] || p.ptype)}</span>` : ''}<div class="grow"></div>
+        ${isAD() && writable() ? `<button class="btn sm ghost" data-action="osOwner" data-arg="${p.id}">${icon('user')}الـOwner والموعد</button>` : ''}
+        ${canStatus(p) ? (blk ? `<button class="btn sm a" data-action="osUnblock" data-arg="${p.id}">رجّعه يمشي</button>` : `<button class="btn sm ghost" data-action="osBlock" data-arg="${p.id}">${icon('alert')}واقف</button>`) : ''}</div>
+      <div class="osfacts"><div><span>Project Owner</span><b>${p.ownerId ? esc(pName(p.ownerId)) : '<span class="muted">لسه ماتحددش</span>'}</b></div>
+        <div><span>موعد العميل (ثابت)</span><b>${p.clientDeadline ? fmtDate(p.clientDeadline) : '—'}</b>${left != null ? `<small class="${left < 3 ? 'crit' : ''}">${left >= 0 ? `فاضل ${left} يوم` : `متأخر ${-left} يوم`}</small>` : ''}</div>
+        <div><span>الهدف الداخلي D-2</span><b>${d2(p) ? fmtDate(d2(p)) : '—'}</b><small>أقصى حد D-1: ${d1(p) ? fmtDate(d1(p)) : '—'}</small></div>
+        <div><span>اللقطات</span><b>${done}/${shots.length}</b>${late ? `<small class="crit">${late} متأخرة</small>` : ''}${risk ? `<small class="warn">${risk} بعد D-2</small>` : ''}</div></div>
+      ${blk ? `<div class="banner crit" style="margin-top:10px">${icon('alert')}<span><b>المشروع واقف</b> — ${esc(OS_CAUSES[blk.cause] || '')}: ${esc(blk.note || '')} · من ${waitTxt(blk.since)} · ${esc(pName(blk.by))}</span></div>` : ''}
+      <div class="osflow">${steps.map((s, i) => { const j = OS_STATUSES.findIndex(x => x.id === s.id); return `<div class="${j < idx ? 'done' : j === idx ? 'on' : ''}" ${canStatus(p) ? `data-action="osStatus" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.ar)}"><b>${String(i + 1).padStart(2, '0')}</b>${esc(s.en)}</div>`; }).join('')}</div>
+      <div class="cardhead" style="margin-top:14px"><h3 style="margin:0">الـMaster Schedule — اللقطات (${shots.length})</h3><div class="grow"></div>${canSchedule(p) ? `<button class="btn sm p" data-action="osShotNew" data-arg="${p.id}">${icon('plus')}لقطة</button>` : ''}</div>
+      ${shots.length ? `<div class="tablewrap"><table class="tbl ostbl"><thead><tr><th>اللقطة</th><th>المرحلة</th><th>Artist</th><th>الموعد</th><th></th></tr></thead><tbody>${shots.map(s => shotRow(s, p)).join('')}</tbody></table></div>` : `<p class="small muted">${canSchedule(p) ? 'ضيف لقطات المشروع: كل لقطة بتعدي Composition ← Lighting ← Detailing + AI ← Final Post، وكل مرحلة محتاجة اعتماد.' : 'الـOwner لسه ماعملش الـMaster Schedule.'}</p>`}
+    </div>`;
+  }
+  if (typeof stuProjectPage === 'function') {
+    const basePage = stuProjectPage;
+    const page = function (id) {
+      const p = byId('projects', id); let html = basePage.apply(this, arguments); if (!p || !(typeof stuProjectVisible !== 'function' || stuProjectVisible(p) || isOwner(p))) return html;
+      if (isOS(p)) html = html.replace(/<div class="spsteps">[\s\S]*?<\/div>\s*(?=<div class="sptiles">)/, '');
+      if (isOS(p)) html = html.replace(/(<\/h2>)<span class="stg"><i><\/i>[^<]*<\/span>/, `$1<span class="stg"><i></i>${esc(osStatus(p.osStatus || 'data').en)}</span>${p.blocked ? '<span class="badge crit">واقف</span>' : ''}`);
+      const i = html.indexOf('<div class="card" style="margin-top:14px">');
+      const panel = isOS(p) ? osPanel(p) : (isAD() && writable() ? `<div class="banner info" style="margin-top:14px">${icon('info')}<span>المشروع ده على المراحل القديمة.</span><button class="btn sm" data-action="osOwner" data-arg="${p.id}">حوّله لنظام التشغيل (Owner + موعد + لقطات)</button></div>` : '');
+      return i >= 0 ? html.slice(0, i) + panel + html.slice(i) : html + panel;
+    };
+    vProjects = (base => function () { if (S.route.id) return page(S.route.id); return base.apply(this, arguments); })(vProjects);
+  }
+  if (EXTRA_TITLES.projects) { const baseT = EXTRA_TITLES.projects; EXTRA_TITLES.projects = function () { const t = baseT.apply(this, arguments); const p = S.route.id && byId('projects', S.route.id); if (p && isOS(p)) t.sub = `${osStatus(p.osStatus || 'data').en}${p.ownerId ? ' · Owner: ' + pName(p.ownerId) : ''} · ${p.client || ''}`; return t; }; }
+  /* the owner always sees his project */
+  if (typeof stuProjectVisible === 'function') { const baseVis = stuProjectVisible; window.stuProjectVisible = p => baseVis(p) || isOwner(p); }
+  /* new projects start in the operating system (intake = management only) */
+  Store.save = (base => function (col, doc, opt) { if (col === 'projects' && doc && !doc.flow && (!doc.id || !byId('projects', doc.id))) doc = Object.assign({}, doc, { flow: 'os', osStatus: 'data', camReq: 'req' }); return base.call(this, col, doc, opt); })(Store.save);
+  const baseNew = ACTIONS.stuProjectNew; ACTIONS.stuProjectNew = () => { if (!isAD()) { toast('دخول المشروع من الإدارة (المدير التنفيذي أو الآرت دايركتور)', 'err'); return; } return baseNew(); };
+
+  /* ---------- operations board: approvals, delays, blocked, my shots ---------- */
+  function osBoard() {
+    loadDir();
+    const ps = list('projects').filter(p => p.status !== 'archived' && isOS(p) && !['delivered', 'closed'].includes(p.osStatus));
+    const vis = ps.filter(p => isAD() || isOwner(p) || (p.team || []).includes(me()) || shotsOf(p.id).some(s => isMe(s.assigneeId)));
+    const allShots = vis.flatMap(p => shotsOf(p.id).map(s => ({ s, p })));
+    const myApprovals = allShots.filter(({ s, p }) => (s.state === 'owner' && (isOwner(p) || (isAD() && !p.ownerId))) || (s.state === 'ad' && isAD()));
+    const mine = allShots.filter(({ s }) => isMe(s.assigneeId) && s.state !== 'done');
+    const late = allShots.filter(({ s, p }) => shotLate(s) && (isAD() || isOwner(p) || isMe(s.assigneeId)));
+    const blocked = vis.filter(p => p.blocked);
+    const row = ({ s, p }, extra) => `<a class="osrow" href="#/projects/${p.id}"><b class="ltr">${esc(s.code)}</b><span>${esc(p.name)}</span><span class="muted">${esc(osGate(s.gate).en)}</span><div class="grow"></div>${extra || ''}</a>`;
+    const sec = (t, arr, fn, empty) => `<div class="card"><div class="cardhead"><h3 style="margin:0">${t}</h3><span class="muted small">${arr.length}</span></div>${arr.length ? arr.map(fn).join('') : `<p class="small muted">${empty}</p>`}</div>`;
+    return `<div class="osboard">
+      <div class="oskpis"><div class="kpi"><span>مشاريع شغالة</span><b>${vis.length}</b></div><div class="kpi"><span>مستني اعتمادي</span><b>${myApprovals.length}</b></div><div class="kpi ${late.length ? 'crit' : ''}"><span>لقطات متأخرة</span><b>${late.length}</b></div><div class="kpi ${blocked.length ? 'crit' : ''}"><span>مشاريع واقفة</span><b>${blocked.length}</b></div></div>
+      <div class="grid2">${sec('مستني اعتمادي', myApprovals, x => row(x, `<span class="badge">${x.s.state === 'ad' ? 'اعتماد نهائي' : 'مراجعة أولى'} · ${waitTxt(x.s.state === 'ad' ? (x.s.ok1At || x.s.submittedAt) : x.s.submittedAt)}</span>`), 'مفيش حاجة مستنياك ✓')}
+      ${sec('لقطاتي', mine, x => row(x, `<span class="badge ${shotLate(x.s) ? 'crit' : ''}">${gateDue(x.s) ? fmtDate(gateDue(x.s)) : '—'} · ${esc(shotStateTxt(x.s))}</span>`), 'مفيش لقطات عليك دلوقتي')}
+      ${sec('متأخر', late, x => row(x, `<span class="badge crit">${fmtDate(gateDue(x.s))} · ${esc(pName(x.s.assigneeId))}</span>`), 'مفيش تأخير ✓')}
+      ${sec('واقف', blocked, p => `<a class="osrow" href="#/projects/${p.id}"><b>${esc(p.name)}</b><span class="muted">${esc(OS_CAUSES[p.blocked.cause] || '')}</span><div class="grow"></div><span class="badge crit">${waitTxt(p.blocked.since)}</span></a>`, 'كله ماشي ✓')}</div>
+      <div class="card"><div class="cardhead"><h3 style="margin:0">المشاريع</h3></div><div class="tablewrap"><table class="tbl"><thead><tr><th>المشروع</th><th>الحالة</th><th>Owner</th><th>موعد العميل</th><th>D-2</th><th>اللقطات</th></tr></thead><tbody>${vis.map(p => { const sh = shotsOf(p.id); const lt = sh.filter(shotLate).length; return `<tr><td><a href="#/projects/${p.id}">${esc(p.name)}</a>${p.blocked ? ' <span class="badge crit">واقف</span>' : ''}</td><td>${esc(osStatus(p.osStatus || 'data').en)}</td><td>${p.ownerId ? esc(pName(p.ownerId)) : '<span class="badge warn">بدون Owner</span>'}</td><td>${p.clientDeadline ? fmtDate(p.clientDeadline) : '—'}</td><td>${d2(p) ? fmtDate(d2(p)) : '—'}</td><td>${sh.filter(s => s.state === 'done').length}/${sh.length}${lt ? ` <span class="badge crit">${lt} متأخرة</span>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">مفيش مشاريع على نظام التشغيل لسه</td></tr>'}</tbody></table></div></div>
+    </div>`;
+  }
+  EXTRA_VIEWS.studioos = () => osBoard();
+  EXTRA_TITLES.studioos = () => ({ title: 'لوحة التشغيل', sub: 'إيه شغال · إيه متأخر · إيه مستني اعتماد · مين Owner كل مشروع' });
+
+  /* ---------- official structure ---------- */
+  const org = () => byId('stuorg', ORG_ID) || { id: ORG_ID, titles: {} };
+  function orgView() {
+    loadDir();
+    const o = org(); const can = writable() && (isAD() || role() === 'hr'); const grps = [...new Set(OS_TITLES.map(t => t.grp))];
+    return `<div class="card"><div class="cardhead"><h2 style="margin:0">الهيكل الرسمي — بالمسميات</h2><div class="grow"></div>${can ? `<button class="btn sm" data-action="osOrgEdit">${icon('edit')}تعديل الأسماء</button>` : ''}</div>
+      <p class="small muted" style="margin-top:0">المسميات ثابتة حتى لو الأشخاص اتغيروا. الأسماء هي «الوضع الحالي». الـProject Owner مسؤولية لكل مشروع مش مسمى وظيفي.</p>
+      <div class="osorg">${grps.map(g => `<div class="osog"><div class="h">${esc(g)}</div>${OS_TITLES.filter(t => t.grp === g).map(t => { const ids = (o.titles || {})[t.id] || []; const hire = ((o.hiring || {})[t.id]) || 0; return `<div class="ost"><b>${esc(t.t)}</b><div>${ids.map(id => `<span class="chip">${esc(pName(id))}</span>`).join('')}${hire ? `<span class="chip hire">Hiring ×${hire}</span>` : ''}${!ids.length && !hire ? '<span class="muted small">—</span>' : ''}</div></div>`; }).join('')}</div>`).join('')}</div></div>`;
+  }
+  ACTIONS.osOrgEdit = () => { if (!(writable() && (isAD() || role() === 'hr'))) return; const o = org(); const ppl = people(); openModal({ title: 'الوضع الحالي — مين في كل مسمى', wide: true, body: `<div class="form">${OS_TITLES.map(t => { const ids = new Set((o.titles || {})[t.id] || []); return `<div class="field full"><label>${esc(t.t)} <span class="tiny muted">· Hiring</span> <input type="number" min="0" max="9" name="h_${t.id}" value="${((o.hiring || {})[t.id]) || 0}" style="width:54px"></label><div class="row" style="flex-wrap:wrap;gap:6px">${ppl.map(x => `<label class="check ${ids.has(x.id) ? 'on' : ''}" style="padding:3px 9px"><input type="checkbox" name="t_${t.id}_${x.id}" ${ids.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></div>`; }).join('')}</div>`, onSubmit: async f => { const d = formData(f); const titles = {}; const hiring = {}; OS_TITLES.forEach(t => { titles[t.id] = ppl.filter(x => d[`t_${t.id}_${x.id}`]).map(x => x.id); const h = +d['h_' + t.id] || 0; if (h) hiring[t.id] = h; }); await Store.save('stuorg', Object.assign({}, o, { id: ORG_ID, titles, hiring, updatedAt: nowISO(), by: me() })); toast('اتحفظ الهيكل'); } }); };
+  EXTRA_VIEWS.stuorg = () => orgView();
+  EXTRA_TITLES.stuorg = () => ({ title: 'هيكل الاستوديو', sub: 'المسميات الرسمية + الوضع الحالي بالأسماء' });
+
+  /* ---------- navigation & roles ---------- */
+  Object.assign(VIEW_TITLES, { studioos: 'لوحة التشغيل', stuorg: 'هيكل الاستوديو' });
+  const addViews = (r, v) => { if (ROLE_VIEWS[r] && ROLE_VIEWS[r] !== null) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(v.filter(x => !ROLE_VIEWS[r].includes(x))); };
+  ['manager', 'head', 'office', 'employee', 'hr'].forEach(r => addViews(r, ['studioos', 'stuorg']));
+  const at = NAV.findIndex(n => n.id === 'projects'); const ins = at >= 0 ? at + 1 : 1;
+  NAV.splice(ins, 0, { id: 'studioos', label: 'لوحة التشغيل', icon: 'dashboard', count: () => { const ps = list('projects').filter(p => p.status !== 'archived' && isOS(p)); return ps.flatMap(p => shotsOf(p.id).map(s => ({ s, p }))).filter(({ s, p }) => (s.state === 'owner' && isOwner(p)) || (s.state === 'ad' && isAD())).length; } }, { id: 'stuorg', label: 'هيكل الاستوديو', icon: 'users' });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.osfacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px}.osfacts>div{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}.osfacts span{font-size:11px;color:var(--muted)}.osfacts b{font-size:15px}.osfacts small{font-size:11px;color:var(--muted)}.osfacts small.crit{color:var(--crit-ink,#e66)}.osfacts small.warn{color:var(--warn-ink,#d9a400)}
+.osflow{display:flex;gap:4px;margin-top:12px;overflow-x:auto;padding-bottom:4px}.osflow>div{flex:1 0 96px;font-size:11px;padding:8px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);cursor:pointer;line-height:1.3}.osflow>div b{display:block;font-size:10px;opacity:.7}.osflow>div.done{color:var(--good-ink);border-color:transparent;background:var(--surface-2)}.osflow>div.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.osgates{display:flex;gap:3px;margin-bottom:3px}.osgates i{flex:1;height:5px;border-radius:3px;background:var(--line-2);min-width:22px}.osgates i.ok{background:var(--good-ink,#3a9)}.osgates i.on{background:var(--accent)}.osgates i.rv{background:#d9a400}
+.ostbl td{vertical-align:middle}.ostbl tr.oslate td{background:rgba(220,60,60,.06)}
+.osboard{display:flex;flex-direction:column;gap:14px}.oskpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.oskpis .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;gap:4px}.oskpis .kpi span{font-size:12px;color:var(--muted)}.oskpis .kpi b{font-size:26px;font-weight:600}.oskpis .kpi.crit b{color:var(--crit-ink,#e66)}.osboard .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.osrow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;color:inherit;text-decoration:none}.osrow:last-child{border-bottom:0}
+.osorg{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.osog{border:1px solid var(--line);border-radius:14px;padding:12px}.osog .h{font-size:11px;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-bottom:8px}.ost{padding:8px 0;border-top:1px solid var(--line)}.ost:first-of-type{border-top:0}.ost b{display:block;font-size:13px;margin-bottom:4px}.ost .chip{display:inline-block;font-size:12px;padding:2px 9px;border-radius:999px;background:var(--surface-2);margin:2px 4px 2px 0}.ost .chip.hire{background:transparent;border:1px dashed var(--line-2);color:var(--muted)}
+</style>`);
+  if (!ICONS.users) ICONS.users = '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2c3 .2 5.5 2.6 5.5 5.8"/>';
+  if (!ICONS.dashboard) ICONS.dashboard = '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="10" width="8" height="11" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/>';
+  Object.assign(window, { OS_STATUSES, OS_GATES, osShotAct: shotAct, osD2: d2, osShotsOf: shotsOf });
 }
 /* =====================================================================
    v4.x — quotation: send to the client by WhatsApp or e-mail (25 Sep 2026)
