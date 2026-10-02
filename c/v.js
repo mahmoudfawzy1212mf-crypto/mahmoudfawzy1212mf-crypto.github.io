@@ -48,14 +48,14 @@
       (w ? '<a class="b wa" href="' + w + '" target="_blank" rel="noopener">' + WA + '<span class="t2">Contact us</span></a>' : '') + '</header>' +
       '<div class="nfc-main"><div class="nfc-th"></div><div class="nfc-stage"><button type="button" class="nav l" data-a="prev" aria-label="Previous">‹</button>' +
       '<div class="bk"><div class="sl l"></div><div class="sl r"></div></div><button type="button" class="nav r" data-a="next" aria-label="Next">›</button>' +
-      '<div class="hint">Swipe or tap the arrows to turn the page</div></div></div><div class="nfc-zoom"></div></div>';
+      '<div class="hint"><span class="h1">Swipe or tap the arrows to turn the page</span><span class="h2">Turn your phone sideways for a bigger view</span></div></div></div><div class="nfc-zoom"></div></div>';
     var box = root.querySelector('.nfc'), bk = box.querySelector('.bk'), L = bk.querySelector('.sl.l'), R = bk.querySelector('.sl.r'), stage = box.querySelector('.nfc-stage'), th = box.querySelector('.nfc-th'), zm = box.querySelector('.nfc-zoom');
     var spread = false, views = [], vi = 0, W = 0, H = 0, busy = false;
     var cache = {}; var load = function (id) { if (!id || !byId[id]) return Promise.resolve(''); if (cache[id]) return cache[id]; var u = byId[id].u; cache[id] = new Promise(function (res) { var im = new Image(); im.decoding = 'async'; im.onload = function () { res(u); }; im.onerror = function () { delete cache[id]; res(u); }; im.src = u; }); return cache[id]; };
     function setSlot(el, id) { el.dataset.pg = id || ''; if (!id) { el.classList.remove('has'); el.innerHTML = ''; return Promise.resolve(); } el.classList.add('has'); if (!el.querySelector('img')) el.innerHTML = '<div class="ld"></div>'; return load(id).then(function (u) { if (el.dataset.pg === String(id)) el.innerHTML = '<img src="' + u + '" alt="" draggable="false">'; }); }
     function layout() {
-      var mob = window.innerWidth < 700; var sw = stage.clientWidth - (mob ? 16 : 140), sh = stage.clientHeight - (mob ? 24 : 40);
-      spread = window.innerWidth >= 800 && asp < 1.2; var cols = spread ? 2 : 1;
+      var mob = window.innerWidth < 700 || window.innerHeight < 500; var sw = stage.clientWidth - (mob ? 16 : 140), sh = stage.clientHeight - (mob ? 16 : 40);
+      spread = asp < 1.2; var cols = spread ? 2 : 1;
       W = Math.floor(Math.min(sw / cols, sh * asp)); H = Math.floor(W / asp);
       bk.style.width = W * cols + 'px'; bk.style.height = H + 'px'; [L, R].forEach(function (el) { el.style.width = W + 'px'; el.style.height = H + 'px'; }); L.style.display = spread ? '' : 'none';
       var cur = views[vi] ? (views[vi][1] || views[vi][0]) : list[0]; var curP = pnum(cur); views = [];
