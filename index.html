@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-0617-c57711";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-0738-0ea265";</script>
 
 <script>
 'use strict';
@@ -16483,8 +16483,8 @@ async function pushResub(reg, old, key) { const oldEp = old ? old.endpoint : '';
 function pushNeedTap(on) {
   S._pushNeedTap = !!on; const el = document.getElementById('nf-pushfix');
   if (!on) { if (el) el.remove(); return; }
-  if (el || !document.body) return;
-  document.body.insertAdjacentHTML('beforeend', `<div id="nf-pushfix" data-action="pushFix" style="position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9000;background:#b45309;color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.35);cursor:pointer">${icon('bell')}<b style="flex:1;font-size:14px">${typeof role === 'function' && ['bdd', 'tech', 'kiosk'].includes(role()) ? 'الإشعارات وقفت على الجهاز ده — دوس هنا لتفعيلها تاني' : 'الإشعارات والمكالمات وقفت على الجهاز ده — دوس هنا لتفعيلها تاني'}</b></div>`);
+  if (el || !document.body || document.getElementById('pushreq')) return; // v5.99: شريط «الإشعارات مش شغالة» فوق كفاية — مش شريطين
+  document.body.insertAdjacentHTML('beforeend', `<div id="nf-pushfix" data-action="pushFix" style="position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9000;background:#b45309;color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.35);cursor:pointer"><span style="width:22px;height:22px;flex:none;display:inline-flex">${icon('bell')}</span><b style="flex:1;font-size:14px">${typeof role === 'function' && ['bdd', 'tech', 'kiosk'].includes(role()) ? 'الإشعارات وقفت على الجهاز ده — دوس هنا لتفعيلها تاني' : 'الإشعارات والمكالمات وقفت على الجهاز ده — دوس هنا لتفعيلها تاني'}</b></div>`);
 }
 ACTIONS.pushFix = async () => { const ok = await pushSubscribe(false); if (ok) { pushNeedTap(false); pushRefresh(true); } };
 async function pushRefresh(force) {
@@ -22391,14 +22391,17 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const help = why === 'ios' ? 'على الآيفون الإشعارات مابتشتغلش غير لما التطبيق يتضاف للشاشة الرئيسية: من Safari اضغط زرار المشاركة ⬆️ ← «Add to Home Screen» ← وافتح السيستم من الأيقونة الجديدة.'
       : why === 'denied' ? (android ? 'المتصفح قافل الإشعارات: اضغط علامة القفل 🔒 جنب العنوان فوق ← «الأذونات» / Permissions ← الإشعارات ← «سماح» ← وبعدين حدّث الصفحة.' : 'المتصفح قافل الإشعارات: من إعدادات المتصفح ← إعدادات الموقع ← الإشعارات ← «سماح» للسيستم، وبعدين حدّث الصفحة.')
       : 'لازم تفعّل الإشعارات علشان توصلك المهام وأوامر التشغيل أول بأول.';
-    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:60;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
+    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:30;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
   }
   async function paint() {
     if (Date.now() - state.checked > 30000 || state.ok === null) { state.checked = Date.now(); await check(); }
     const v = document.getElementById('view'); const old = document.getElementById('pushreq');
     if (state.ok || !v || document.querySelector('#loginform')) { if (old) old.remove(); return; }
     if (!old) v.insertAdjacentHTML('afterbegin', bar());
+    const fx = document.getElementById('nf-pushfix'); if (fx) fx.remove();
   }
+  /* v5.99: الشريط مايغطّيش القائمة الجانبية على الموبايل، والأيقونة بحجمها */
+  document.head.insertAdjacentHTML('beforeend', '<style>#pushreq svg,#nf-pushfix svg{width:20px;height:20px;flex:none}body:has(.side.open) #nf-pushfix{display:none}</style>');
   RENDER_HOOKS.push(() => { setTimeout(paint, 400); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { state.checked = 0; setTimeout(paint, 800); } });
   document.addEventListener('click', async e => {
