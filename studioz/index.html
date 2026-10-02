@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-1620-5c31e3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-1651-81cbfc";</script>
 
 <script>
 'use strict';
@@ -18319,19 +18319,26 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const SSIZE = { S: 120, M: 200, L: 300 };
   const EDITABLE = ['sticky', 'text', 'shape', 'frame'];
   const SVGT = ['stroke', 'conn'];
-  const NB = { host: null, tool: 'select', shape: 'rect', conn: 'curve', pen: { mode: 'pen', color: '#1a1a1a', width: 3 }, sticky: STICKY[0], act: null, editing: null, undo: [], redo: [], clip: null, els: new Map(), sigs: new Map(), order: '', live: new Map(), temp: null, guides: [], fly: null, panel: null, mini: true, hires: new Map(), hiresAsk: new Set(), ptrs: new Map(), pinch: null, space: false, fitPending: false, cursors: {}, chan: null, chanId: null, fitCache: new Map() };
+  const NB = { host: null, tool: 'select', shape: 'rect', conn: 'curve', pen: { mode: 'pen', color: '#1a1a1a', width: 3 }, sticky: STICKY[0], act: null, editing: null, undo: [], redo: [], clip: null, els: new Map(), sigs: new Map(), order: '', live: new Map(), temp: null, guides: [], fly: null, panel: null, mini: true, hires: new Map(), hiresAsk: new Set(), ptrs: new Map(), pinch: null, space: false, fitPending: false, cursors: {}, chan: null, chanId: null, fitCache: new Map(), rlive: new Map(), editors: {}, vps: {}, follow: null, showResolved: false, reactOpen: false, sessOpen: false };
   const items = () => wbItems();
   const get = id => byId('bitems', id);
-  const cur = id => NB.live.get(id) || get(id);
+  const cur = id => NB.live.get(id) || NB.rlive.get(id) || get(id);
   const can = () => wbCanEdit();
   const rank = () => (typeof nbRank === 'function' ? nbRank(wbBoard()) : (can() ? 3 : 1));
   const canC = () => can() || (stuCanEdit() && rank() >= 2);
   const canX = () => (typeof nbCanExport === 'function' ? nbCanExport(wbBoard()) : true);
+  const voteS = () => { const b = wbBoard(); const v = b && b.vote; return v && v.sid ? v : null; };
+  const voteOn = () => { const v = voteS(); return !!(v && v.on && new Date(v.end).getTime() > Date.now()); };
+  const privOn = () => { const b = wbBoard(); return !!(b && b.priv && b.priv.on); };
+  const VOTABLE = ['sticky', 'shape', 'image', 'text', 'link'];
+  const myVotesUsed = () => { const v = voteS(); if (!v) return 0; return items().reduce((a, i) => a + ((i.sv && i.sv.sid === v.sid && i.sv.v && +i.sv.v[me()]) || 0), 0); };
+  const svCount = i => { const v = voteS(); if (!v || !i.sv || i.sv.sid !== v.sid) return 0; return Object.values(i.sv.v || {}).reduce((a, n) => a + (+n || 0), 0); };
+  const isHidden = i => privOn() && i.hid && i.hid !== me();
   const me = () => stuMe();
   const r1 = v => Math.round(v * 10) / 10;
   const R = i => ({ x: +i.x || 0, y: +i.y || 0, w: +i.w || 160, h: +i.h || 160 });
   const center = i => { const r = R(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; };
-  const zs = i => (i.type === 'frame' ? -1e9 : 0) + (+i.z || 0);
+  const zs = i => (i.type === 'frame' ? -1e9 : i.type === 'pin' ? 1e9 : 0) + (+i.z || 0);
   const topZ = () => items().reduce((m, i) => Math.max(m, +i.z || 0), 0) + 1;
   const union = rs => { if (!rs.length) return { x: 0, y: 0, w: 0, h: 0 }; let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; rs.forEach(r => { a = Math.min(a, r.x); b = Math.min(b, r.y); c = Math.max(c, r.x + r.w); d = Math.max(d, r.y + r.h); }); return { x: a, y: b, w: c - a, h: d - b }; };
   const sel = () => [...WB.sel].map(get).filter(x => x && !x.deleted);
@@ -18411,9 +18418,13 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function badges(i) {
     const v = Object.values(i.votes || {}).reduce((a, b) => a + b, 0), c = (i.thread || []).length;
-    return (v ? `<span class="nbv">${'<i></i>'.repeat(Math.min(v, 12))}</span>` : '') + (c ? `<span class="nbcm">${c}</span>` : '') + (i.lock ? '<span class="nblk"></span>' : '');
+    const vs = voteS(); let sv = '';
+    if (vs && i.sv && i.sv.sid === vs.sid) { if (voteOn()) { const mine = +((i.sv.v || {})[me()] || 0); if (mine) sv = `<span class="nbsv mine">${mine}</span>`; } else { const n = svCount(i); if (n) sv = `<span class="nbsv">${n}</span>`; } }
+    return (v ? `<span class="nbv">${'<i></i>'.repeat(Math.min(v, 12))}</span>` : '') + (c ? `<span class="nbcm">${c}</span>` : '') + (i.lock ? '<span class="nblk"></span>' : '') + sv;
   }
   function itemInner(i) {
+    if (i.type === 'pin') { const n = (i.thread || []).length; const who = (i.thread && i.thread[0] && i.thread[0].byName) || i.byName || '?'; return `<span class="pinb${i.resolved ? ' ok' : ''}">${esc(String(who).trim().charAt(0))}</span>${n > 1 ? `<span class="pinc">${n}</span>` : ''}`; }
+    if (isHidden(i)) return `<div class="txt nbhid"><span>فكرة مخفية</span></div>`;
     const txt = `<div class="txt" dir="auto" contenteditable="false">${esc(i.text || '')}</div>`; const r = R(i);
     if (i.type === 'frame') return `<span class="ttl" dir="auto">${esc(i.text || 'Frame')}</span>${badges(i)}`;
     if (i.type === 'image') return `<img src="${esc(NB.hires.get(i.id) || i.thumb || '')}" alt="" draggable="false">${badges(i)}`;
@@ -18421,7 +18432,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (i.type === 'shape') { const sw = i.sw == null ? 2 : +i.sw; return `<svg class="shp" width="${r.w}" height="${r.h}" viewBox="0 0 ${r.w} ${r.h}"><path d="${shapeD(i.shape || 'rect', r.w, r.h)}" fill="${auto(i.fill, 'none')}" stroke="${sw ? auto(i.stroke, 'var(--nb-ink)') : 'none'}" stroke-width="${sw}" ${i.dash ? `stroke-dasharray="${sw * 4} ${sw * 3}"` : ''} stroke-linejoin="round"></path></svg>${txt}${badges(i)}`; }
     return txt + badges(i);
   }
-  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '']);
+  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '', i.sv, i.resolved, isHidden(i), (voteS() || {}).sid, voteOn(), NB.showResolved]);
   function fitText(el, i) {
     if (i.type !== 'sticky' || i.size) return; const t = el.querySelector('.txt'); if (!t) return;
     const key = (i.text || '') + '|' + i.w + 'x' + i.h; const c = NB.fitCache.get(key); if (c && NB.editing !== i.id) { t.style.fontSize = c + 'px'; return; }
@@ -18439,18 +18450,21 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- rendering ---------- */
   function drawSvg() {
     const gs = document.getElementById('nbstrokes'), gc = document.getElementById('nbconns'); if (!gs || !gc) return;
-    const its = items().map(i => NB.live.get(i.id) || i);
+    const its = items().map(i => NB.live.get(i.id) || NB.rlive.get(i.id) || i);
     gs.innerHTML = its.filter(i => i.type === 'stroke').sort((a, b) => zs(a) - zs(b)).map(strokeSvg).join('');
     gc.innerHTML = its.filter(i => i.type === 'conn').map(connSvg).join('') + (NB.temp && NB.temp.type === 'conn' ? connSvg(NB.temp) : '');
   }
-  function paintEl(el, i) { el.className = `nbi ${i.type}${i.type === 'shape' ? ' sh-' + (i.shape || 'rect') : ''}${i.lock ? ' locked' : ''}`; el.setAttribute('style', itemStyle(i)); el.innerHTML = itemInner(i); if (i.type === 'sticky') fitText(el, i); }
+  function paintEl(el, i) { el.className = `nbi ${i.type}${i.type === 'shape' ? ' sh-' + (i.shape || 'rect') : ''}${i.lock ? ' locked' : ''}${i.type === 'pin' && i.resolved && !NB.showResolved ? ' gone' : ''}${isHidden(i) ? ' hidd' : ''}`; el.setAttribute('style', itemStyle(i)); el.innerHTML = itemInner(i); if (i.type === 'sticky') fitText(el, i); }
   function sync() {
     const host = NB.host; if (!host || !host.isConnected) return; const box = document.getElementById('nbitems'); if (!box) return;
     const its = items().slice().sort((a, b) => zs(a) - zs(b)); const seen = new Set(), order = [];
     for (const i of its) {
       if (SVGT.includes(i.type)) continue; seen.add(i.id); order.push(i.id); let el = NB.els.get(i.id);
       if (!el || !el.isConnected) { el = document.createElement('div'); el.dataset.id = i.id; NB.els.set(i.id, el); box.appendChild(el); NB.sigs.delete(i.id); }
-      const s = sig(i); if (NB.sigs.get(i.id) !== s && NB.editing !== i.id && !NB.live.has(i.id)) { paintEl(el, i); NB.sigs.set(i.id, s); }
+      const rl = NB.rlive.get(i.id); if (rl && rl.end && (Date.now() - rl.end > 2500 || (rl.x === i.x && rl.y === i.y && rl.w === i.w && rl.h === i.h))) { NB.rlive.delete(i.id); el.classList.remove('rmove'); }
+      const src = NB.rlive.get(i.id) ? Object.assign({}, i, NB.rlive.get(i.id)) : i;
+      const s = sig(src); if (NB.sigs.get(i.id) !== s && NB.editing !== i.id && !NB.live.has(i.id)) { paintEl(el, src); NB.sigs.set(i.id, s); }
+      const ed = NB.editors[i.id]; const rb = (ed && ed.person !== me()) ? ed.name : (NB.rlive.get(i.id) && NB.rlive.get(i.id).rby) || ''; if ((el.dataset.rby || '') !== rb) { if (rb) el.dataset.rby = rb; else delete el.dataset.rby; } el.classList.toggle('rbusy', !!rb);
     }
     for (const [id, el] of NB.els) if (!seen.has(id)) { el.remove(); NB.els.delete(id); NB.sigs.delete(id); }
     const os = order.join(','); if (os !== NB.order) { NB.order = os; order.forEach(id => { const el = NB.els.get(id); if (el && el !== document.activeElement && !el.contains(document.activeElement)) box.appendChild(el); }); }
@@ -18464,7 +18478,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const w = document.getElementById('wbworld'); if (w) w.style.transform = `translate(${WB.pan.x}px,${WB.pan.y}px) scale(${WB.zoom})`;
     const g = document.getElementById('nbgrid'); if (g) { let s = 24 * WB.zoom; while (s < 12) s *= 4; g.style.backgroundSize = `${s}px ${s}px`; g.style.backgroundPosition = `${WB.pan.x}px ${WB.pan.y}px`; }
     const z = document.getElementById('nbzp'); if (z) z.textContent = Math.round(WB.zoom * 100) + '%';
-    overlay(); ctxPos(); miniSoon(); cursors(); hiresSoon();
+    overlay(); ctxPos(); miniSoon(); cursors(); hiresSoon(); vpSoon();
     if (WB.id) { clearTimeout(applyView.t); applyView.t = setTimeout(() => lsv('nb.view.' + WB.id, { z: WB.zoom, x: WB.pan.x, y: WB.pan.y }), 400); }
   }
   function zoomAt(f, sx, sy) { const z = Math.min(8, Math.max(0.05, WB.zoom * f)); const w = wbS2W(sx, sy); WB.zoom = z; WB.pan.x = sx - w.x * z; WB.pan.y = sy - w.y * z; applyView(); }
@@ -18480,7 +18494,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (ss.length === 1 && ss[0].type === 'conn') { const g = connGeo(ss[0]); if (g && can() && !ss[0].lock) { const a = wbW2S(g.a.x, g.a.y), b = wbW2S(g.b.x, g.b.y); h += `<i class="nbep" data-ep="1" style="left:${a.x}px;top:${a.y}px"></i><i class="nbep" data-ep="2" style="left:${b.x}px;top:${b.y}px"></i>`; } }
     else if (ss.length) {
       const b = union(ss.map(boxOf)), p = wbW2S(b.x, b.y), locked = ss.some(i => i.lock);
-      const one = ss.length === 1 ? ss[0] : null; const hs = !locked && can() && !NB.editing && !(NB.act && NB.act.k === 'move') ? (one && one.type === 'stroke' ? [] : ['nw', 'ne', 'sw', 'se'].concat(one && !['image', 'sticky'].includes(one.type) ? ['n', 'e', 's', 'w'] : [])) : [];
+      const one = ss.length === 1 ? ss[0] : null; const hs = !locked && can() && !NB.editing && !(NB.act && NB.act.k === 'move') ? (one && (one.type === 'stroke' || one.type === 'pin') ? [] : ['nw', 'ne', 'sw', 'se'].concat(one && !['image', 'sticky'].includes(one.type) ? ['n', 'e', 's', 'w'] : [])) : [];
       h += `<div class="nbsel${locked ? ' lk' : ''}" style="left:${p.x}px;top:${p.y}px;width:${b.w * WB.zoom}px;height:${b.h * WB.zoom}px">${hs.map(k => `<i class="nbh ${k}" data-h="${k}"></i>`).join('')}</div>`;
       if (ss.length > 1) ss.forEach(i => { const r = boxOf(i), q = wbW2S(r.x, r.y); h += `<div class="nbsel2" style="left:${q.x}px;top:${q.y}px;width:${r.w * WB.zoom}px;height:${r.h * WB.zoom}px"></div>`; });
     }
@@ -18515,7 +18529,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const tb = (tool, label, ic, fly) => `<button type="button" class="${NB.tool === tool ? 'on' : ''}" data-nbtool="${tool}" title="${label}">${I(ic)}${fly ? '<em></em>' : ''}</button>`;
   function toolsHTML() {
     const penIc = NB.pen.mode === 'hl' ? IC.hl : NB.pen.mode === 'eraser' ? IC.eraser : IC.pen;
-    return `${tb('select', 'تحديد (V)', IC.select)}${tb('hand', 'تحريك اللوحة (H — أو مسافة + سحب)', IC.hand)}<hr>${tb('sticky', 'ستيكي نوت (N)', IC.sticky, 1)}${tb('text', 'نص (T)', IC.text)}${tb('shape', 'أشكال (S)', IC.shape, 1)}${tb('conn', 'خط / سهم (L)', IC.conn, 1)}${tb('pen', 'قلم (P)', penIc, 1)}${tb('frame', 'فريم (F)', IC.frame)}<hr><button type="button" data-nb="image" title="صورة (I)">${I(IC.image)}</button><button type="button" data-nb="link" title="لينك">${I(IC.link)}</button><hr><button type="button" data-action="stuAi" data-arg="ideas" title="مساعد الذكاء الاصطناعي">${I(IC.ai)}</button>`;
+    return `${tb('select', 'تحديد (V)', IC.select)}${tb('hand', 'تحريك اللوحة (H — أو مسافة + سحب)', IC.hand)}<hr>${tb('sticky', 'ستيكي نوت (N)', IC.sticky, 1)}${tb('text', 'نص (T)', IC.text)}${tb('shape', 'أشكال (S)', IC.shape, 1)}${tb('conn', 'خط / سهم (L)', IC.conn, 1)}${tb('pen', 'قلم (P)', penIc, 1)}${tb('frame', 'فريم (F)', IC.frame)}${tb('pin', 'تعليق على اللوحة (C)', IC.comment)}<hr><button type="button" data-nb="image" title="صورة (I)">${I(IC.image)}</button><button type="button" data-nb="link" title="لينك">${I(IC.link)}</button><hr><button type="button" data-action="stuAi" data-arg="ideas" title="مساعد الذكاء الاصطناعي">${I(IC.ai)}</button>`;
   }
   const swatches = (list0, cmd, curv, round) => `<div class="nbsw">${list0.map(c => `<span class="${round ? 'r' : ''}${(c || '') === (curv || '') ? ' on' : ''}${c ? '' : ' none'}" style="${c ? `background:${c}` : ''}" data-nb="${cmd}:${c || '-'}" title="${c ? c : 'تلقائي'}"></span>`).join('')}</div>`;
   function flyHTML(k) {
@@ -18529,7 +18543,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const t = document.getElementById('nbtop'); if (!t) return; const b = wbBoard(); if (!b) return;
     const tm = b.timer && b.timer.end && new Date(b.timer.end).getTime() > Date.now() ? b.timer : null; const ppl = Object.values(NB.cursors);
     const nC = items().reduce((a, i) => a + (i.thread || []).length, 0);
-    const h = `<span class="nbppl" title="أونلاين دلوقتي">${stuAvatar(me(), 24)}${ppl.map(c => stuAvatar(c.person, 24)).join('')}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${canX() ? `<button type="button" data-nb="export" title="طباعة / PDF">${I(IC.print)}</button>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
+    const vs = voteS(); const vOn = voteOn();
+    const chips = (vOn ? `<span class="nbchip vote">${I(IC.vote)}<span>تصويت · فاضلك ${Math.max(0, (+vs.n || 5) - myVotesUsed())} من ${+vs.n || 5}</span><b id="nbvleft">${fmtLeft(new Date(vs.end).getTime() - Date.now())}</b></span>` : '') + (privOn() ? `<span class="nbchip priv">${I(IC.lock)}<span>وضع خاص — الأفكار مخفية لحد ما تتكشف</span></span>` : '');
+    const h = `${chips}<span class="nbppl" title="أونلاين دلوقتي — اضغط على حد عشان تتابعه">${stuAvatar(me(), 24)}${ppl.map(c => `<button type="button" class="nbav${NB.follow === c.person ? ' on' : ''}" data-nb="follow:${esc(c.person)}" title="تابع ${esc((c.name || '').split(' ')[0])}">${stuAvatar(c.person, 24)}</button>`).join('')}</span><span class="nbrel"><button type="button" class="${NB.reactOpen ? 'on' : ''}" data-nb="reacts" title="ريأكشن">🙂</button>${NB.reactOpen ? `<span class="nbpop nbreacts">${REACTS.map(e => `<button type="button" data-nb="react:${e}">${e}</button>`).join('')}</span>` : ''}</span><span class="nbrel"><button type="button" class="${NB.sessOpen ? 'on' : ''}" data-nb="sess" title="أدوات الجلسة: تصويت، وضع خاص، هات الكل عندي، تايمر">${I(IC.more)}</button>${NB.sessOpen ? `<span class="nbpop nbsess">${sessHTML()}</span>` : ''}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${canX() ? `<button type="button" data-nb="export" title="طباعة / PDF">${I(IC.print)}</button>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}${typeof nbCallBtn === 'function' ? nbCallBtn(b) : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
     if (t.__h !== h) { t.__h = h; t.innerHTML = h; tr(t); }
     const tl = document.getElementById('nbtools'); if (tl) { const th = toolsHTML(); if (tl.__h !== th) { tl.__h = th; tl.innerHTML = th; tr(tl); } }
     const u = document.getElementById('nbundo'); if (u) { u.querySelector('[data-nb="undo"]').disabled = !NB.undo.length; u.querySelector('[data-nb="redo"]').disabled = !NB.redo.length; }
@@ -18592,10 +18608,13 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const closeFly = () => { if (!NB.fly) return; NB.fly = null; flyOpen(null); ctx(); };
   const wbAgo2 = iso => (typeof wbAgo === 'function' ? wbAgo(iso) : '');
   function panel() {
-    const p = document.getElementById('nbpanel'); if (!p) return; if (NB.panel !== 'comments') { p.style.display = 'none'; p.__h = ''; return; }
+    const p = document.getElementById('nbpanel'); if (!p) return;
+    if (NB.panel === 'votes') { const v = voteS(); const res = v ? items().map(i => ({ i, n: svCount(i) })).filter(x => x.n).sort((a, b2) => b2.n - a.n).slice(0, 20) : []; const h2 = `<div class="ph">${I(IC.vote)}<b>نتيجة التصويت</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb">${voteOn() ? '<p class="muted small">النتيجة بتظهر لما التصويت يخلص.</p>' : res.length ? res.map((x, k) => `<a href="#" class="nbres" data-nb="focus:${x.i.id}"><b>${k + 1}</b><span dir="auto">${esc((x.i.text || x.i.url || x.i.type).slice(0, 60))}</span><em>${x.n}</em></a>`).join('') : '<p class="muted small">محدش صوّت.</p>'}</div>`; if (p.__h !== h2) { p.__h = h2; p.innerHTML = h2; tr(p); } p.style.display = ''; return; }
+    if (NB.panel !== 'comments') { p.style.display = 'none'; p.__h = ''; return; }
     const ss = sel(); const one = ss.length === 1 ? ss[0] : null;
-    const all = one ? (one.thread || []) : items().flatMap(i => (i.thread || []).map(c => Object.assign({ item: i }, c))).sort((a, c) => (a.at < c.at ? 1 : -1)).slice(0, 80);
-    const h = `<div class="ph">${I(IC.comment)}<b>${one ? 'تعليقات العنصر' : 'كل التعليقات'}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb">${all.length ? all.map(c => `<div class="nbcmt"><small>${esc(c.byName || '')} · ${esc(wbAgo2(c.at))}${c.item ? ` · <a href="#" data-nb="focus:${c.item.id}">${esc((c.item.text || c.item.type || '').slice(0, 26))}</a>` : ''}</small><div dir="auto">${esc(c.text)}</div></div>`).join('') : `<p class="muted small">${one ? 'مفيش تعليقات على العنصر ده — اكتب أول تعليق' : 'حدّد عنصر واكتب تعليق، أو اقرا كل تعليقات اللوحة هنا'}</p>`}</div>${one && canC() ? `<div class="pf"><input id="nbcin" placeholder="تعليق… (@اسم للمنشن)" dir="auto"><button type="button" class="btn p sm" data-nb="csend:${one.id}">إرسال</button></div>` : ''}`;
+    const all = one ? (one.thread || []) : items().filter(i => NB.showResolved || !i.resolved).flatMap(i => (i.thread || []).map(c => Object.assign({ item: i }, c))).sort((a, c) => (a.at < c.at ? 1 : -1)).slice(0, 80);
+    const pinBar = one && one.type === 'pin' && (rank() >= 3 || one.by === me()) ? `<div class="nbpinbar"><button type="button" class="btn sm ${one.resolved ? '' : 'p'}" data-nb="resolve:${one.id}">${one.resolved ? 'افتح تاني' : '✓ اتحلّت'}</button></div>` : '';
+    const h = `<div class="ph">${I(IC.comment)}<b>${one ? 'تعليقات العنصر' : 'كل التعليقات'}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div>${pinBar}<div class="pb">${all.length ? all.map(c => `<div class="nbcmt"><small>${esc(c.byName || '')} · ${esc(wbAgo2(c.at))}${c.item ? ` · <a href="#" data-nb="focus:${c.item.id}">${esc((c.item.text || c.item.type || '').slice(0, 26))}</a>` : ''}</small><div dir="auto">${esc(c.text)}</div></div>`).join('') : `<p class="muted small">${one ? 'مفيش تعليقات على العنصر ده — اكتب أول تعليق' : 'حدّد عنصر واكتب تعليق، أو اقرا كل تعليقات اللوحة هنا'}</p>`}</div>${one && canC() ? `<div class="pf"><input id="nbcin" placeholder="تعليق… (@اسم للمنشن)" dir="auto"><button type="button" class="btn p sm" data-nb="csend:${one.id}">إرسال</button></div>` : ''}`;
     if (p.__h !== h) { const v = (document.getElementById('nbcin') || {}).value || ''; p.__h = h; p.innerHTML = h; tr(p); const i2 = document.getElementById('nbcin'); if (i2 && v) i2.value = v; }
     p.style.display = '';
   }
@@ -18628,17 +18647,17 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   async function undo() { if (!can()) return; const ch = NB.undo.pop(); if (!ch) return; endEdit(true); await revert(ch, 'before'); NB.redo.push(ch); WB.sel = new Set(ch.filter(c => c.before).map(c => c.id)); syncSoon(); }
   async function redo() { if (!can()) return; const ch = NB.redo.pop(); if (!ch) return; await revert(ch, 'after'); NB.undo.push(ch); WB.sel = new Set(ch.filter(c => c.after).map(c => c.id)); syncSoon(); }
   async function mutate(ids, fn) { if (!can() && !(fn.comment && canC())) return; const ch = []; for (const id of ids) { const it = get(id); if (!it || (it.lock && !fn.unlock && !fn.comment) || (it.lockAll && rank() < 4 && !fn.comment)) continue; const a = clone(it); if (fn(a) === false) continue; ch.push({ id, before: clone(it), after: clone(a) }); } if (!ch.length) return; pushUndo(ch); NB.fitCache.clear(); await saveAll(ch.map(c => clone(c.after))); }
-  async function create(list0, opts = {}) { if (!can() || !list0.length) return; list0.forEach(i => { i.by = i.by || me(); i.byName = i.byName || (S.session && S.session.name) || ''; if (i.z == null) i.z = topZ(); }); pushUndo(list0.map(i => ({ id: i.id, before: null, after: clone(i) }))); await saveAll(list0.map(clone)); if (opts.select !== false) WB.sel = new Set(list0.map(i => i.id)); syncSoon(); }
+  async function create(list0, opts = {}) { if ((!can() && !(opts.comment && canC())) || !list0.length) return; list0.forEach(i => { if (privOn() && ['sticky', 'text', 'shape'].includes(i.type) && i.hid === undefined) i.hid = me(); i.by = i.by || me(); i.byName = i.byName || (S.session && S.session.name) || ''; if (i.z == null) i.z = topZ(); }); pushUndo(list0.map(i => ({ id: i.id, before: null, after: clone(i) }))); await saveAll(list0.map(clone)); if (opts.select !== false) WB.sel = new Set(list0.map(i => i.id)); syncSoon(); }
   async function removeIds(ids) {
     if (!can()) return; const all = new Set(ids); items().forEach(c => { if (c.type === 'conn' && (all.has(c.from) || all.has(c.to))) all.add(c.id); });
     const ch = [...all].map(id => get(id)).filter(Boolean).filter(i => !i.lock).map(i => ({ id: i.id, before: clone(i), after: null })); if (!ch.length) return;
     pushUndo(ch); ch.forEach(c => WB.sel.delete(c.id)); await Promise.all(ch.map(c => Store.remove('bitems', c.id).catch(() => {}))); syncSoon();
   }
-  async function commitLive() { const ch = []; for (const [id, it] of NB.live) { const b = get(id); if (b) ch.push({ id, before: clone(b), after: clone(it) }); } NB.live.clear(); WB.held = new Set(); if (!ch.length) { syncSoon(); return; } pushUndo(ch); NB.fitCache.clear(); ch.forEach(c => NB.sigs.delete(c.id)); await saveAll(ch.map(c => clone(c.after))); }
+  async function commitLive() { if (NB.live.size) bc('mvend', { ids: [...NB.live.keys()] }); const ch = []; for (const [id, it] of NB.live) { const b = get(id); if (b) ch.push({ id, before: clone(b), after: clone(it) }); } NB.live.clear(); WB.held = new Set(); if (!ch.length) { syncSoon(); return; } pushUndo(ch); NB.fitCache.clear(); ch.forEach(c => NB.sigs.delete(c.id)); await saveAll(ch.map(c => clone(c.after))); }
 
   /* ---------- text editing ---------- */
   function startEdit(id, isNew) {
-    const it = get(id); if (!it || !can() || it.lock || !EDITABLE.includes(it.type)) return; endEdit(true);
+    const it = get(id); if (!it || !can() || it.lock || !EDITABLE.includes(it.type)) return; if (isHidden(it)) return; const ed = NB.editors[id]; if (ed && ed.person !== me()) { toast(`${ed.name} بيكتب هنا دلوقتي`, 'err'); return; } endEdit(true); bc('edit', { id });
     const el = NB.els.get(id); if (!el) return; const t = el.querySelector(it.type === 'frame' ? '.ttl' : '.txt'); if (!t) return;
     NB.editing = id; WB.editing = id; el.classList.add('editing'); t.setAttribute('contenteditable', 'true'); t.focus();
     const rg = document.createRange(); rg.selectNodeContents(t); if (!isNew) rg.collapse(false); const s = window.getSelection(); s.removeAllRanges(); s.addRange(rg);
@@ -18649,7 +18668,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     overlay(); ctx();
   }
   async function endEdit(quiet) {
-    const id = NB.editing; if (!id) return; NB.editing = null; WB.editing = null; const it = get(id); const el = NB.els.get(id); if (!it || !el) return;
+    const id = NB.editing; if (!id) return; NB.editing = null; WB.editing = null; bc('edit', { id, off: true }); const it = get(id); const el = NB.els.get(id); if (!it || !el) return;
     el.classList.remove('editing'); const t = el.querySelector(it.type === 'frame' ? '.ttl' : '.txt'); if (!t) return; t.setAttribute('contenteditable', 'false'); t.oninput = t.onkeydown = t.onblur = t.onpaste = null;
     const txt = (t.innerText || '').replace(/\n+$/, ''); const a = clone(it); a.text = it.type === 'frame' ? txt.replace(/\n/g, ' ').slice(0, 80) : txt;
     if (it.type === 'text') { if (!txt.trim()) { await removeIds([id]); return; } a.h = Math.max(24, Math.round(el.offsetHeight)); }
@@ -18686,7 +18705,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function paintLive(full) {
     for (const [id, it] of NB.live) { if (SVGT.includes(it.type)) continue; const el = NB.els.get(id); if (!el) continue; if (full) { paintEl(el, it); NB.sigs.delete(id); } else { el.style.left = it.x + 'px'; el.style.top = it.y + 'px'; } }
-    drawSvg(); overlay();
+    drawSvg(); overlay(); sendLive();
   }
 
   function down(e) {
@@ -18697,11 +18716,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (NB.ptrs.size === 2) { const [p1, p2] = [...NB.ptrs.values()]; const hr = NB.host.getBoundingClientRect(); const c = { x: (p1.x + p2.x) / 2 - hr.left, y: (p1.y + p2.y) / 2 - hr.top }; NB.live.clear(); NB.temp = null; NB.act = null; NB.pinch = { d0: Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, z0: WB.zoom, w0: wbS2W(c.x, c.y) }; busy(true); syncSoon(); return; }
     const p = wpt(e); const it = hitItem(e);
     const touchPan = e.pointerType === 'touch' && NB.tool === 'select' && !it && !e.target.closest('[data-h],[data-ep]');
-    if (e.button === 1 || NB.space || NB.tool === 'hand' || touchPan) { NB.act = { k: 'pan', sx: e.clientX, sy: e.clientY, px: WB.pan.x, py: WB.pan.y }; NB.host.classList.add('panning'); busy(true); e.preventDefault(); return; }
+    if (e.button === 1 || NB.space || NB.tool === 'hand' || touchPan) { stopFollow(); NB.act = { k: 'pan', sx: e.clientX, sy: e.clientY, px: WB.pan.x, py: WB.pan.y }; NB.host.classList.add('panning'); busy(true); e.preventDefault(); return; }
     if (e.button !== 0) return;
     const h = e.target.closest('[data-h]'); if (h) { const ss = sel(); NB.act = { k: 'resize', hk: h.dataset.h, base: new Map(ss.map(i => [i.id, clone(i)])), bb: union(ss.map(boxOf)), x0: p.x, y0: p.y, keep: ss.length > 1 || ss.some(i => ['image', 'sticky'].includes(i.type)) }; WB.held = new Set(NB.act.base.keys()); busy(true); e.preventDefault(); return; }
     const ep = e.target.closest('[data-ep]'); if (ep) { const c = sel()[0]; NB.act = { k: 'ep', n: +ep.dataset.ep, id: c.id, base: clone(c) }; WB.held = new Set([c.id]); busy(true); e.preventDefault(); return; }
     const t = NB.tool;
+    if (t === 'pin') { if (!canC()) return; const pin = { id: uid(), type: 'pin', x: Math.round(p.x - 16), y: Math.round(p.y - 32), w: 32, h: 32, thread: [] }; create([pin], { comment: true }).then(() => { setTool('select'); WB.sel = new Set([pin.id]); NB.panel = 'comments'; sync(); setTimeout(() => { const i2 = document.getElementById('nbcin'); if (i2) i2.focus(); }, 60); }); e.preventDefault(); return; }
+    if (t === 'select' && it && voteOn() && VOTABLE.includes(it.type) && canC()) { castVote(it, e.shiftKey || e.altKey); e.preventDefault(); return; }
+    if (t === 'select' && it && it.type === 'pin') { WB.sel = new Set([it.id]); NB.panel = 'comments'; selChanged(); top(); if (!can() || it.by !== me() && rank() < 3) { e.preventDefault(); return; } }
     if (t === 'select') {
       if (it) {
         if (e.detail === 2 && EDITABLE.includes(it.type)) return;
@@ -18790,7 +18812,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (!it && NB.tool === 'select') { const p = wpt(e); const t = { id: uid(), type: 'text', x: Math.round(p.x - 130), y: Math.round(p.y - 17), w: 260, h: 34, text: '', size: 24 }; create([t]).then(() => { sync(); startEdit(t.id, true); }); }
   }
   function wheel(e) {
-    if (e.target.closest('.nbpanel,.nbctxfly,.nbfly')) return; e.preventDefault(); const p = wpt(e);
+    if (e.target.closest('.nbpanel,.nbctxfly,.nbfly,.nbsess')) return; e.preventDefault(); stopFollow(); const p = wpt(e);
     const mouse = !e.ctrlKey && (e.deltaMode === 1 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Math.abs(e.deltaY) % 1 === 0 && Math.abs(e.deltaY) % 50 === 0));
     if (e.ctrlKey || e.metaKey || mouse) { const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY; zoomAt(Math.exp(-dy * (e.ctrlKey ? 0.012 : 0.0022)), p.sx, p.sy); }
     else { WB.pan = { x: WB.pan.x - (e.shiftKey ? e.deltaY : e.deltaX), y: WB.pan.y - (e.shiftKey ? 0 : e.deltaY) }; applyView(); }
@@ -18802,6 +18824,19 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   async function cmd(c, arg) {
     const ids = [...WB.sel]; const ss = sel(); const v = arg === '-' ? null : arg;
     switch (c) {
+      case 'follow': return NB.follow === v ? stopFollow() : startFollow(v);
+      case 'unfollow': return stopFollow();
+      case 'reacts': NB.reactOpen = !NB.reactOpen; NB.sessOpen = false; return top();
+      case 'react': { NB.reactOpen = false; top(); const at = NB.lastPt || viewCenter(); showReact(arg, at.x, at.y, ''); bc('react', { e: arg, x: Math.round(at.x), y: Math.round(at.y) }); return; }
+      case 'sess': NB.sessOpen = !NB.sessOpen; NB.reactOpen = false; return top();
+      case 'resolved': NB.showResolved = !NB.showResolved; NB.sigs.clear(); sync(); return top();
+      case 'summon': { if (rank() < 3) return; NB.sessOpen = false; const c0 = viewCenter(); bc('summon', { c: { x: Math.round(c0.x), y: Math.round(c0.y) }, z: WB.zoom }); toast('اتبعتت للكل — هيتابعوك'); return top(); }
+      case 'resolve': { const it = get(v); if (!it || !(rank() >= 3 || it.by === me())) return; const f = a => { a.resolved = a.resolved ? null : true; }; f.comment = true; await mutate([v], f); if (get(v) && get(v).resolved && !NB.showResolved) { WB.sel = new Set(); NB.panel = null; } NB.sigs.delete(v); syncSoon(); return top(); }
+      case 'votestart': { if (rank() < 4) return; NB.sessOpen = false; top(); openModal({ title: 'جلسة تصويت', body: `<div class="form">${field('أصوات لكل واحد', inp('n', '5', 'type="number" min="1" max="30"'))}${field('المدة (دقايق)', inp('m', '5', 'type="number" min="1" max="120"'))}<div class="full tiny muted">اللي بيصوّت يضغط على العنصر (Shift + كليك يشيل الصوت). النتيجة بتظهر للكل لما الوقت يخلص أو لما تنهيه.</div></div>`, submitLabel: 'ابدأ التصويت', onSubmit: async f => { const d = formData(f); const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { vote: { sid: uid(), on: true, n: Math.max(1, +d.n || 5), end: new Date(Date.now() + Math.max(1, +d.m || 5) * 60000).toISOString(), by: me(), byName: myName() } })); NB.sigs.clear(); syncSoon(); } }); return; }
+      case 'voteend': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { vote: Object.assign({}, b0.vote, { on: false, end: nowISO() }) })); NB.sigs.clear(); NB.panel = 'votes'; syncSoon(); return top(); }
+      case 'voteclear': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { vote: null })); NB.sigs.clear(); if (NB.panel === 'votes') NB.panel = null; syncSoon(); return top(); }
+      case 'privstart': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { priv: { on: true, by: me(), byName: myName(), since: nowISO() } })); NB.sigs.clear(); syncSoon(); toast('الوضع الخاص شغال — اللي هيتكتب مش هيبان للباقيين لحد ما تكشفه'); return top(); }
+      case 'privend': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { priv: null })); const hid = items().filter(i => i.hid).map(i => i.id); if (hid.length) { const f = a => { a.hid = null; }; f.comment = true; await mutate(hid, f); } NB.sigs.clear(); syncSoon(); toast('اتكشفت كل الأفكار'); return top(); }
       case 'undo': return undo(); case 'redo': return redo();
       case 'zin': return zoomAt(1.25, NB.host.clientWidth / 2, NB.host.clientHeight / 2);
       case 'zout': return zoomAt(0.8, NB.host.clientWidth / 2, NB.host.clientHeight / 2);
@@ -18904,7 +18939,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- keyboard & clipboard ---------- */
   const typing = t => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
   const onBoard = () => NB.host && NB.host.isConnected && S.route && S.route.view === 'ideas' && !document.getElementById('overlay');
-  const KEYT = { KeyV: 'select', KeyH: 'hand', KeyN: 'sticky', KeyT: 'text', KeyS: 'shape', KeyL: 'conn', KeyP: 'pen', KeyF: 'frame' };
+  const KEYT = { KeyC: 'pin', KeyV: 'select', KeyH: 'hand', KeyN: 'sticky', KeyT: 'text', KeyS: 'shape', KeyL: 'conn', KeyP: 'pen', KeyF: 'frame' };
   function key(e) {
     if (!onBoard() || typing(e.target)) return; const mod = e.ctrlKey || e.metaKey; const code = e.code;
     if (code === 'Space') { if (!NB.space) { NB.space = true; NB.host.classList.add('grab'); } e.preventDefault(); return; }
@@ -18929,7 +18964,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (code === 'KeyR' && can()) { NB.shape = 'rect'; return setTool('shape'); } if (code === 'KeyO' && can()) { NB.shape = 'ellipse'; return setTool('shape'); }
     if (code === 'KeyE' && can()) { NB.pen.mode = 'eraser'; return setTool('pen'); }
     if (code === 'KeyI' && can()) return pickImages();
-    if (KEYT[code] && (can() || ['select', 'hand'].includes(KEYT[code]))) { if (code === 'KeyP' && NB.pen.mode === 'eraser') NB.pen.mode = 'pen'; setTool(KEYT[code]); }
+    if (KEYT[code] && (can() || ['select', 'hand'].includes(KEYT[code]) || (KEYT[code] === 'pin' && canC()))) { if (code === 'KeyP' && NB.pen.mode === 'eraser') NB.pen.mode = 'pen'; setTool(KEYT[code]); }
   }
   function keyup(e) { if (e.code === 'Space' && NB.space) { NB.space = false; if (NB.host) NB.host.classList.remove('grab'); } }
   function onCopy(e) { if (!onBoard() || typing(e.target) || !WB.sel.size) return; if (!canX()) { e.preventDefault(); return copySel(); } copySel(); try { e.clipboardData.setData('text/plain', 'ninety-board:' + NB.clip.at); e.preventDefault(); } catch (x) { /* ignore */ } }
@@ -18945,13 +18980,61 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     return create(lines.map((t, k) => ({ id: uid(), type: 'sticky', color: NB.sticky, w: SSIZE.M, h: SSIZE.M, x: Math.round(at.x - 100 + (k % n) * 220), y: Math.round(at.y - 100 + Math.floor(k / n) * 220), text: t.slice(0, 600) })));
   }
 
+  /* ---------- v6.08 live collaboration: moves while dragging, who is typing, follow / summon, reactions, voting session ---------- */
+  const myName = () => (S.session && S.session.name) || '';
+  const bc = (event, payload) => { if (!NB.chan) return; try { NB.chan.send({ type: 'broadcast', event, payload: Object.assign({ person: me(), name: myName() }, payload) }); } catch (e) { /* ignore */ } };
+  let _lt = 0; function sendLive() {
+    if (!NB.chan || !NB.live.size || Date.now() - _lt < 60) return; _lt = Date.now();
+    const its = [...NB.live.values()].slice(0, 60).map(i => { const o = { id: i.id, x: i.x, y: i.y, w: i.w, h: i.h }; if (i.size) o.size = i.size; if (i.type === 'stroke' && (i.points || []).length < 400) o.points = i.points; if (i.type === 'conn') Object.assign(o, { from: i.from, to: i.to, x1: i.x1, y1: i.y1, x2: i.x2, y2: i.y2 }); return o; });
+    bc('mv', { items: its });
+  }
+  function onMv(p) {
+    if (!p || p.person === me() || !Array.isArray(p.items)) return; const first = (p.name || '').split(' ')[0];
+    p.items.forEach(o => { const base = get(o.id); if (!base || NB.live.has(o.id)) return; const it = Object.assign(clone(base), o, { rby: first, end: 0 }); NB.rlive.set(o.id, it); const el = NB.els.get(o.id);
+      if (el) { if (it.w !== base.w || it.h !== base.h || it.size !== base.size) { paintEl(el, it); NB.sigs.delete(o.id); } else { el.style.left = it.x + 'px'; el.style.top = it.y + 'px'; } el.classList.add('rmove', 'rbusy'); el.dataset.rby = first; } });
+    drawSvg(); overlay(); clearTimeout(onMv.t); onMv.t = setTimeout(() => { NB.rlive.forEach(v => { if (!v.end) v.end = Date.now(); }); syncSoon(); }, 4000);
+  }
+  function onMvEnd(p) { if (!p || p.person === me()) return; (p.ids || []).forEach(id => { const v = NB.rlive.get(id); if (v) v.end = Date.now(); }); setTimeout(syncSoon, 2600); syncSoon(); }
+  function onEdit(p) { if (!p || p.person === me() || !p.id) return; if (p.off) delete NB.editors[p.id]; else NB.editors[p.id] = { person: p.person, name: (p.name || '').split(' ')[0] }; NB.sigs.delete(p.id); syncSoon(); }
+  let _vt = 0, _vq = 0; function vpSoon() { if (!NB.chan || !NB.host) return; clearTimeout(_vq); const go = () => { _vt = Date.now(); const c = wbS2W(NB.host.clientWidth / 2, NB.host.clientHeight / 2); bc('vp', { c: { x: Math.round(c.x), y: Math.round(c.y) }, z: WB.zoom }); }; if (Date.now() - _vt > 250) go(); else _vq = setTimeout(go, 260); }
+  function goView(c, z) { if (!NB.host || !c) return; NB._fv = true; WB.zoom = Math.min(8, Math.max(0.05, +z || 1)); WB.pan = { x: NB.host.clientWidth / 2 - c.x * WB.zoom, y: NB.host.clientHeight / 2 - c.y * WB.zoom }; applyView(); NB._fv = false; }
+  function onVp(p) { if (!p || p.person === me()) return; NB.vps[p.person] = { c: p.c, z: p.z, name: p.name }; if (NB.follow === p.person) goView(p.c, p.z); }
+  function startFollow(pid) { if (pid === me()) return; NB.follow = pid; const v = NB.vps[pid]; if (v) goView(v.c, v.z); followBar(); top(); }
+  function stopFollow() { if (!NB.follow) return; NB.follow = null; followBar(); top(); }
+  function followBar() { let f = document.getElementById('nbfollow'); if (!NB.host) return; if (!NB.follow) { if (f) f.remove(); return; } if (!f) { f = document.createElement('div'); f.id = 'nbfollow'; f.className = 'nbui nbfollow'; NB.host.appendChild(f); } const c = NB.cursors[NB.follow] || NB.vps[NB.follow] || {}; f.innerHTML = `<span>بتتابع ${esc((c.name || '').split(' ')[0])}</span><button type="button" data-nb="unfollow">إيقاف</button>`; tr(f); }
+  function onSummon(p) { if (!p || p.person === me()) return; goView(p.c, p.z); NB.follow = p.person; NB.vps[p.person] = { c: p.c, z: p.z, name: p.name }; followBar(); top(); toast(`${(p.name || '').split(' ')[0]} جابك عنده`); }
+  function showReact(e, wx, wy, name) { const box = document.getElementById('nbcursors'); if (!box) return; const s0 = wbW2S(wx, wy); const d = document.createElement('div'); d.className = 'nbreact'; d.style.left = Math.round(s0.x) + 'px'; d.style.top = Math.round(s0.y) + 'px'; d.innerHTML = `<b>${esc(e)}</b>${name ? `<span>${esc(name.split(' ')[0])}</span>` : ''}`; box.appendChild(d); setTimeout(() => d.remove(), 2600); }
+  function onReact(p) { if (!p || p.person === me() || !p.e) return; showReact(p.e, p.x, p.y, p.name); }
+  async function castVote(it, remove) {
+    const v = voteS(); if (!v) return; const mine = +(((it.sv && it.sv.sid === v.sid && it.sv.v) || {})[me()] || 0); const used = myVotesUsed();
+    if (!remove && used >= (+v.n || 5)) { toast('خلّصت أصواتك — Shift + كليك يشيل صوت', 'err'); return; } if (remove && !mine) return;
+    const f = a => { const sv = a.sv && a.sv.sid === v.sid ? clone(a.sv) : { sid: v.sid, v: {} }; const n = (+sv.v[me()] || 0) + (remove ? -1 : 1); if (n > 0) sv.v[me()] = n; else delete sv.v[me()]; a.sv = sv; }; f.comment = true; await mutate([it.id], f); top();
+  }
+  function sessHTML() {
+    const b = wbBoard() || {}; const v = voteS(); const owner = rank() >= 4;
+    const rows = [];
+    if (owner) rows.push(voteOn() ? `<button type="button" data-nb="voteend">${I(IC.vote)}<span>إنهاء التصويت وإظهار النتيجة</span></button>` : `<button type="button" data-nb="votestart">${I(IC.vote)}<span>ابدأ جلسة تصويت</span></button>`);
+    if (v && !voteOn()) rows.push(`<button type="button" data-nb="panel:votes">${I(IC.vote)}<span>نتيجة آخر تصويت</span></button>`); if (v && !voteOn() && owner) rows.push(`<button type="button" data-nb="voteclear">${I(IC.del)}<span>امسح نتيجة التصويت</span></button>`);
+    if (owner) rows.push(privOn() ? `<button type="button" data-nb="privend">${I(IC.unlock)}<span>اكشف كل الأفكار (إنهاء الوضع الخاص)</span></button>` : `<button type="button" data-nb="privstart">${I(IC.lock)}<span>وضع خاص — كل واحد يكتب من غير ما حد يشوف</span></button>`);
+    if (rank() >= 3) rows.push(`<button type="button" data-nb="summon">${I(IC.send)}<span>هات الكل عندي</span></button>`);
+    if (can()) rows.push(b.timer && b.timer.end && new Date(b.timer.end) > Date.now() ? `<button type="button" data-action="wbTimerStop">${I(IC.timer)}<span>وقّف التايمر</span></button>` : `<button type="button" data-action="wbTimerStart">${I(IC.timer)}<span>تايمر للسيشن</span></button>`);
+    rows.push(`<label class="nbchk"><input type="checkbox" data-nb="resolved" ${NB.showResolved ? 'checked' : ''}> <span>اعرض التعليقات المحلولة</span></label>`);
+    return `<div class="nbcol">${rows.join('')}</div>`;
+  }
+  const REACTS = ['👍', '❤️', '😂', '🎉', '🔥', '👏', '😮', '🤔'];
+  const fmtLeft = ms => { const s1 = Math.max(0, Math.round(ms / 1000)); return `${String(Math.floor(s1 / 60)).padStart(2, '0')}:${String(s1 % 60).padStart(2, '0')}`; };
+  setInterval(() => { const el = document.getElementById('nbvleft'); if (!el) return; const v = voteS(); if (!v) return; const left = new Date(v.end).getTime() - Date.now(); el.textContent = fmtLeft(left); if (left <= 0 && el.dataset.done !== '1') { el.dataset.done = '1'; NB.sigs.clear(); syncSoon(); toast('خلص التصويت — دي النتيجة'); NB.panel = 'votes'; top(); } }, 1000);
+
   /* ---------- presence: cursors of the others on this board ---------- */
   function presence(id) {
     if (!S.sb || !id || NB.chanId === id) return; presenceStop();
     try { const m = me(); const ch = S.sb.channel('wb:' + id, { config: { presence: { key: m } } });
       if (!ch || typeof ch.track !== 'function' || typeof ch.presenceState !== 'function') { NB.chanId = id; return; }
-      ch.on('presence', { event: 'sync' }, () => { const st = ch.presenceState(); const nx = {}; Object.entries(st).forEach(([k, arr]) => { if (k === m) return; const c = arr[arr.length - 1]; if (c) nx[k] = Object.assign({ person: k }, NB.cursors[k] || {}, c); }); NB.cursors = nx; cursors(); top(); })
+      ch.on('presence', { event: 'sync' }, () => { const st = ch.presenceState(); const nx = {}; Object.entries(st).forEach(([k, arr]) => { if (k === m) return; const c = arr[arr.length - 1]; if (c) nx[k] = Object.assign({ person: k }, NB.cursors[k] || {}, c); }); NB.cursors = nx; Object.keys(NB.editors).forEach(k => { if (!nx[NB.editors[k].person]) delete NB.editors[k]; }); if (NB.follow && !nx[NB.follow]) stopFollow(); cursors(); top(); syncSoon(); })
         .on('broadcast', { event: 'cur' }, ({ payload }) => { if (!payload || payload.person === m) return; NB.cursors[payload.person] = Object.assign(NB.cursors[payload.person] || { person: payload.person }, payload); cursors(); })
+        .on('broadcast', { event: 'mv' }, ({ payload }) => onMv(payload)).on('broadcast', { event: 'mvend' }, ({ payload }) => onMvEnd(payload))
+        .on('broadcast', { event: 'edit' }, ({ payload }) => onEdit(payload)).on('broadcast', { event: 'vp' }, ({ payload }) => onVp(payload))
+        .on('broadcast', { event: 'summon' }, ({ payload }) => onSummon(payload)).on('broadcast', { event: 'react' }, ({ payload }) => onReact(payload))
         .subscribe(async status => { if (status === 'SUBSCRIBED') await ch.track({ name: (S.session && S.session.name) || '', at: Date.now() }); });
       NB.chan = ch; NB.chanId = id; } catch (e) { console.warn('presence', e); }
   }
@@ -18983,9 +19066,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     host.addEventListener('dragover', e => { if (can()) e.preventDefault(); });
     host.addEventListener('drop', e => { if (!can()) return; const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])]; if (!fs.length) return; e.preventDefault(); const p = wpt(e); addImages(fs, { x: p.x, y: p.y }); });
     host.addEventListener('click', e => {
-      const t = e.target.closest('[data-nbtool]'); if (t) { const k = t.dataset.nbtool; const flyable = ['sticky', 'shape', 'conn', 'pen'].includes(k); if (!can() && !['select', 'hand'].includes(k)) return; if (NB.tool === k && flyable) { NB.fly = NB.fly === k ? null : k; flyOpen(NB.fly); return; } setTool(k); NB.fly = flyable ? k : null; flyOpen(NB.fly); return; }
+      const t = e.target.closest('[data-nbtool]'); if (t) { const k = t.dataset.nbtool; const flyable = ['sticky', 'shape', 'conn', 'pen'].includes(k); if (!can() && !['select', 'hand'].includes(k) && !(k === 'pin' && canC())) return; if (NB.tool === k && flyable) { NB.fly = NB.fly === k ? null : k; flyOpen(NB.fly); return; } setTool(k); NB.fly = flyable ? k : null; flyOpen(NB.fly); return; }
       const f = e.target.closest('[data-nbfly]'); if (f) { const k = 'c:' + f.dataset.nbfly; NB.fly = NB.fly === k ? null : k; flyOpen(null); ctx(); return; }
-      const c = e.target.closest('[data-nb]'); if (c) { e.preventDefault(); const [k, ...rest] = c.dataset.nb.split(':'); const keepFly = /^(tpcol|tpw|tpen)$/.test(k); if (!keepFly && NB.fly && NB.fly.startsWith('c:') && !['fs', 'bold', 'sw', 'width', 'dash'].includes(k)) NB.fly = null; cmd(k, rest.join(':')); return; }
+      const c = e.target.closest('[data-nb]'); if (c) { if (c.tagName !== 'INPUT') e.preventDefault(); const [k, ...rest] = c.dataset.nb.split(':'); const keepFly = /^(tpcol|tpw|tpen)$/.test(k); if (!keepFly && NB.fly && NB.fly.startsWith('c:') && !['fs', 'bold', 'sw', 'width', 'dash'].includes(k)) NB.fly = null; cmd(k, rest.join(':')); return; }
     });
     host.addEventListener('keydown', e => { if (e.target.id === 'nbcin' && e.key === 'Enter') { e.preventDefault(); const b = host.querySelector('[data-nb^="csend:"]'); if (b) b.click(); } });
     const mc = host.querySelector('#nbmini'); if (mc) { const go2 = e => { const T = NB.miniT; if (!T) return; const r = mc.getBoundingClientRect(); const wx = (e.clientX - r.left - T.ox) / T.s, wy = (e.clientY - r.top - T.oy) / T.s; WB.pan = { x: host.clientWidth / 2 - wx * WB.zoom, y: host.clientHeight / 2 - wy * WB.zoom }; applyView(); }; mc.addEventListener('pointerdown', e => { e.stopPropagation(); go2(e); const mv = ev => go2(ev); const u2 = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', u2); }; window.addEventListener('pointermove', mv); window.addEventListener('pointerup', u2); }); }
@@ -19014,7 +19097,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   window.addEventListener('keydown', key); window.addEventListener('keyup', keyup); window.addEventListener('blur', () => { NB.space = false; });
   document.addEventListener('copy', onCopy); document.addEventListener('cut', onCut); document.addEventListener('paste', onPaste);
   window.addEventListener('resize', () => { if (NB.host && NB.host.isConnected) applyView(); });
-  window.nbBoard = { NB, sync, fit, cmd, undo, redo, setTool, shapeD, connGeo, startEdit, endEdit };
+  window.nbBoard = { NB, sync, fit, cmd, undo, redo, setTool, shapeD, connGeo, startEdit, endEdit, top, rank, bc, goView };
   window.wbNew = async (type, x, y, extra = {}) => { const base = { sticky: { w: SSIZE.M, h: SSIZE.M, color: NB.sticky }, text: { w: 260, h: 34, size: 24 }, frame: { w: 800, h: 520, text: 'Frame' }, image: { w: 300, h: 220 }, link: { w: 260, h: 76 } }[type] || { w: 160, h: 160 }; const it = Object.assign({ id: uid(), type, text: '' }, base, extra); it.x = Math.round(x - it.w / 2); it.y = Math.round(y - it.h / 2); await create([it]); return it; };
 
   document.head.insertAdjacentHTML('beforeend', `<style>
@@ -19093,6 +19176,18 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .nb .nbpanel .pb{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}.nb .nbcmt{background:var(--nb-ui-hover);border-radius:10px;padding:8px 10px;font-size:13px}.nb .nbcmt small{display:block;color:var(--nb-ui-mute);font-size:11px;margin-bottom:2px}.nb .nbcmt a{color:var(--nb-acc)}
 .nb .nbpanel .pf{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--nb-ui-line)}.nb .nbpanel .pf input{flex:1;min-width:0;background:var(--nb-ui-hover);border:1px solid var(--nb-ui-line);border-radius:10px;color:inherit;padding:8px 10px;font:inherit}
 html[dir=rtl] .nb .nbfly,html[dir=rtl] .nb .nbtop,html[dir=rtl] .nb .nbctx,html[dir=rtl] .nb .nbpanel,html[dir=rtl] .nb .nbempty{direction:rtl}
+.nb .nbi.pin{width:32px;height:32px;z-index:1;cursor:pointer}.nb .nbi.pin .pinb{position:absolute;inset:0;border-radius:50% 50% 50% 4px;background:var(--nb-acc);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px;box-shadow:0 0 0 2px #fff,0 4px 12px -4px rgba(0,0,0,.45)}.nb .nbi.pin .pinb.ok{background:#3aa76d}.nb .nbi.pin .pinc{position:absolute;right:-6px;top:-6px;background:#fff;color:#111;border-radius:999px;font-size:10px;padding:0 5px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}.nb .nbi.gone{display:none}
+.nb .nbi.rbusy{box-shadow:0 0 0 2px #f0447a!important}.nb .nbi.rbusy::after{content:attr(data-rby);position:absolute;left:0;top:-20px;font-size:11px;background:#f0447a;color:#fff;padding:1px 7px;border-radius:999px;white-space:nowrap;z-index:2}
+.nb .nbi.hidd{filter:none}.nb .nbhid{display:flex!important;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 8px,transparent 8px 16px);color:rgba(0,0,0,.45);font-size:14px!important;border-radius:2px}
+.nb .nbsv{position:absolute;left:-8px;top:-8px;min-width:22px;height:22px;border-radius:999px;background:#e5484d;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;padding:0 5px;box-shadow:0 0 0 2px #fff}.nb .nbsv.mine{background:var(--nb-acc)}
+.nb .nbchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:0 10px;height:30px;border-radius:999px;background:var(--nb-acc-soft);color:var(--nb-acc);white-space:nowrap}.nb .nbchip svg{width:16px;height:16px}.nb .nbchip.priv{background:rgba(229,72,77,.12);color:#e5484d}.nb .nbchip b{font-variant-numeric:tabular-nums}
+.nb .nbav{width:auto!important;height:auto!important;padding:0!important;border-radius:999px!important;margin-left:-6px}.nb .nbav.on{box-shadow:0 0 0 2px var(--nb-acc)}
+.nb .nbrel{position:relative;display:inline-flex}.nb .nbpop{position:absolute;top:calc(100% + 8px);inset-inline-end:0;background:var(--nb-ui);border-radius:12px;box-shadow:0 0 0 1px var(--nb-ui-line),0 8px 26px -8px rgba(0,0,0,.32);padding:8px;z-index:8}.nb .nbreacts{display:flex;gap:2px}.nb .nbreacts button{font-size:20px;width:38px!important;height:38px!important}.nb .nbsess{min-width:280px}
+.nb .nbchk{display:flex;align-items:center;gap:8px;font-size:13px;padding:8px 10px;cursor:pointer}
+.nb .nbfollow{top:64px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:6px 6px 6px 14px;font-size:13px;box-shadow:0 0 0 2px var(--nb-acc),0 6px 22px -8px rgba(0,0,0,.28)}.nb .nbfollow button{background:var(--nb-acc)!important;color:#fff!important;padding:4px 10px;font-size:12px}
+.nb .nbreact{position:absolute;pointer-events:none;z-index:7;transform:translate(-50%,-50%);animation:nbfly 2.5s ease-out forwards;display:flex;flex-direction:column;align-items:center}.nb .nbreact b{font-size:34px}.nb .nbreact span{font-size:11px;background:rgba(0,0,0,.6);color:#fff;border-radius:999px;padding:1px 7px}@keyframes nbfly{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}15%{opacity:1;transform:translate(-50%,-60%) scale(1.15)}100%{opacity:0;transform:translate(-50%,-220%) scale(1)}}
+.nb .nbpinbar{padding:8px 12px;border-bottom:1px solid var(--nb-ui-line)}.nb .nbres{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;background:var(--nb-ui-hover);color:inherit;text-decoration:none;font-size:13px}.nb .nbres b{width:22px;color:var(--nb-ui-mute)}.nb .nbres span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nb .nbres em{font-style:normal;font-weight:700;color:#e5484d}
+.nb[data-tool=pin]{cursor:crosshair}
 .nb .nbcur{position:absolute;left:0;top:0;pointer-events:none;z-index:6;transition:transform .08s linear}.nb .nbcur svg{width:16px;height:16px;display:block}.nb .nbcur span{position:absolute;left:14px;top:12px;font-size:11px;padding:2px 7px;border-radius:999px;color:#fff;white-space:nowrap}
 @media (max-width:760px){.wbwrap.nb{height:calc(100vh - 150px)}.nb .nbctxbar{flex-wrap:wrap;white-space:normal;max-width:calc(100vw - 48px)}.nb .nbctxfly{max-width:calc(100vw - 48px)}.nb .nbtop{top:8px;right:8px}.nb .nbminiw{display:none}.nb .nbtools{top:auto;bottom:60px;transform:none;left:8px}.nb .nbtools button{width:36px;height:36px}.nb .nbpanel{width:min(300px,86vw)}.nb .nbfly{left:56px}}
 @media print{.nb .nbui,.nb #nbover,.nb #nbcursors{display:none!important}.wbwrap.nb{border:0}body.stuprint .wbwrap.nb{height:auto;min-height:0;aspect-ratio:1.414;background:#fff!important}}
@@ -19223,6 +19318,118 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 /* the design board gets the same «share» button in its header */
 if (typeof STU_ON !== 'undefined' && STU_ON && typeof EXTRA_TITLES !== 'undefined' && EXTRA_TITLES.design) EXTRA_TITLES.design = (base => () => { const t = Object.assign({}, base()); const b = typeof dbBoard === 'function' ? dbBoard() : null; if (b) t.actions = (t.actions || '') + `<button type="button" class="btn sm" data-action="nbShare" data-arg="${b.id}">${icon('users')}<span>مشاركة</span></button>`; return t; })(EXTRA_TITLES.design);
 if (typeof STU_ON !== 'undefined' && STU_ON) document.head.insertAdjacentHTML('beforeend', '<style>.nbshare .row{display:flex;flex-wrap:nowrap}.nbshare .row select,.nbshare .row input{width:auto;min-width:150px;flex:0 1 auto}.nbshare .nbsp{padding:6px 8px;border:1px solid var(--line);border-radius:10px}.nbshare .nblink{border-top:1px solid var(--line);padding-top:10px}.nbshare .nblink .row{flex-wrap:wrap}</style>');
+/* =====================================================================
+   v6.08 — Voice / video call inside a board (Ninety Board release 1).
+   · «Talk to the team» in the board's top bar: everyone who has a role on the board can join (rank ≥ 1).
+   · WebRTC mesh, device to device (encrypted DTLS-SRTP); signalling over the realtime channel call:<boardId>
+     (presence = who is in the call; broadcast 'sig' = offer / answer / ICE addressed to one peer).
+   · Up to 6 cameras; from the 7th person on, people join with audio only. Mic / camera / screen share / leave.
+   · The call window floats over the whole app, so the call goes on while moving around the system.
+   · ICE: public STUN. Some mobile networks need a TURN relay — admin_config.turn_cfg can be added later.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+  const MAXV = 6;
+  const C = { on: false, bid: null, id: null, ch: null, local: null, screen: null, camTrack: null, peers: new Map(), people: {}, mic: true, cam: true, watch: null, watchBid: null, watchN: 0, min: false };
+  const me = () => stuMe(); const myName = () => (S.session && S.session.name) || '';
+  const first = n => String(n || '').split(' ')[0];
+  const refreshTop = () => { try { if (window.nbBoard && nbBoard.top) nbBoard.top(); } catch (e) { /* ignore */ } };
+  /* who is in the call — watched while a board is open, even before joining */
+  function watch(bid) {
+    if (!S.sb || !S.sb.channel || C.watchBid === bid) return; unwatch();
+    try {
+      const ob = S.sb.channel('call:' + bid, { config: { presence: { key: 'obs-' + uid() } } }); if (!ob || typeof ob.presenceState !== 'function') return;
+      ob.on('presence', { event: 'sync' }, () => { const st = ob.presenceState(); C.watchN = Object.keys(st).filter(k => !k.startsWith('obs-')).length; refreshTop(); }).subscribe(() => {});
+      C.watch = ob; C.watchBid = bid; } catch (e) { /* ignore */ }
+  }
+  function unwatch() { if (C.watch) { try { C.watch.unsubscribe(); } catch (e) { /* ignore */ } } C.watch = null; C.watchBid = null; C.watchN = 0; }
+  window.nbCallBtn = b => {
+    if (!b) return ''; if (!C.on) watch(b.id); const n = C.on && C.bid === b.id ? Object.keys(C.people).length : C.watchN;
+    return `<button type="button" class="nbcallbtn${C.on ? ' on' : ''}" data-action="nbCall" data-arg="${b.id}" title="${C.on ? 'إنت في المكالمة' : 'كلّم الفريق (صوت وفيديو)'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/></svg>${n ? `<sup>${n}</sup>` : ''}</button>`;
+  };
+  ACTIONS.nbCall = async bid => { if (C.on) { C.min = false; render(); return; } await join(bid || WB.id); };
+  async function getMedia(video) { try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 20 } } : false }); } catch (e) { if (video) return getMedia(false); throw e; } }
+  async function join(bid) {
+    const b = byId('boards', bid); if (!b || (typeof nbRank === 'function' && nbRank(b) < 1)) return;
+    if (!S.sb || !S.sb.channel || !navigator.mediaDevices) { toast('المكالمات محتاجة اتصال بالسيرفر ومتصفح بيدعم الكاميرا', 'err'); return; }
+    const video = (C.watchN || 0) < MAXV;
+    try { C.local = await getMedia(video); } catch (e) { toast('مقدرتش أوصل للمايك — اسمح للمتصفح باستخدامه', 'err'); return; }
+    C.cam = C.local.getVideoTracks().length > 0; C.mic = true; C.camTrack = C.local.getVideoTracks()[0] || null;
+    C.on = true; C.bid = bid; C.id = me() + '~' + uid(); C.min = false; unwatch();
+    const ch = S.sb.channel('call:' + bid, { config: { presence: { key: C.id } } });
+    ch.on('presence', { event: 'sync' }, () => {
+      const st = ch.presenceState(); const ppl = {}; Object.entries(st).forEach(([k, arr]) => { if (k.startsWith('obs-')) return; const v = arr[arr.length - 1]; if (v) ppl[k] = v; }); C.people = ppl;
+      Object.keys(ppl).forEach(k => { if (k !== C.id && !C.peers.has(k) && C.id < k) connect(k, true); });
+      [...C.peers.keys()].forEach(k => { if (!ppl[k]) drop(k); }); render(); refreshTop();
+    }).on('broadcast', { event: 'sig' }, ({ payload }) => onSig(payload))
+      .subscribe(async s => { if (s === 'SUBSCRIBED') await ch.track({ name: myName(), person: me(), at: Date.now() }); });
+    C.ch = ch; render(); refreshTop();
+  }
+  const send = (to, data) => { try { C.ch && C.ch.send({ type: 'broadcast', event: 'sig', payload: Object.assign({ from: C.id, to }, data) }); } catch (e) { /* ignore */ } };
+  function connect(k, initiator) {
+    const pc = new RTCPeerConnection({ iceServers: ICE }); const P = { pc, k, stream: null, q: [], ready: false }; C.peers.set(k, P);
+    const vt = C.screen ? C.screen.getVideoTracks()[0] : C.camTrack;
+    C.local.getAudioTracks().forEach(t => pc.addTrack(t, C.local)); if (vt) pc.addTrack(vt, C.local);
+    pc.ontrack = ev => { P.stream = ev.streams[0] || new MediaStream([ev.track]); render(); };
+    pc.onicecandidate = ev => { if (ev.candidate) send(k, { ice: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate }); };
+    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') { drop(k); if (C.id < k) setTimeout(() => { if (C.on && C.people[k] && !C.peers.has(k)) connect(k, true); }, 1500); } render(); };
+    if (initiator) pc.onnegotiationneeded = async () => { try { await pc.setLocalDescription(await pc.createOffer()); send(k, { sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription }); } catch (e) { console.warn('offer', e); } };
+    return P;
+  }
+  async function onSig(p) {
+    if (!C.on || !p || p.to !== C.id || !p.from) return; let P = C.peers.get(p.from); if (!P) P = connect(p.from, false); const pc = P.pc;
+    try {
+      if (p.sdp) { await pc.setRemoteDescription(p.sdp); P.ready = true; for (const c of P.q.splice(0)) { try { await pc.addIceCandidate(c); } catch (e) { /* ignore */ } } if (p.sdp.type === 'offer') { await pc.setLocalDescription(await pc.createAnswer()); send(p.from, { sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription }); } }
+      else if (p.ice) { if (!P.ready) P.q.push(p.ice); else await pc.addIceCandidate(p.ice); }
+    } catch (e) { console.warn('sig', e); }
+  }
+  function drop(k) { const P = C.peers.get(k); if (P) { try { P.pc.close(); } catch (e) { /* ignore */ } } C.peers.delete(k); }
+  function leave() {
+    [...C.peers.keys()].forEach(drop); [C.local, C.screen].forEach(s => s && s.getTracks().forEach(t => t.stop()));
+    if (C.ch) { try { C.ch.unsubscribe(); } catch (e) { /* ignore */ } }
+    Object.assign(C, { on: false, bid: null, id: null, ch: null, local: null, screen: null, camTrack: null, people: {} }); render(); refreshTop();
+  }
+  function setVideoTrack(t) { C.peers.forEach(P => { const snd = P.pc.getSenders().find(s => s.track && s.track.kind === 'video') || P.pc.getSenders().find(s => !s.track); if (snd) snd.replaceTrack(t).catch(() => {}); else if (t) P.pc.addTrack(t, C.local); }); }
+  async function toggleScreen() {
+    if (C.screen) { C.screen.getTracks().forEach(t => t.stop()); C.screen = null; setVideoTrack(C.cam ? C.camTrack : null); render(); return; }
+    try { C.screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }); } catch (e) { return; }
+    const t = C.screen.getVideoTracks()[0]; t.onended = () => { if (C.screen) toggleScreen(); }; setVideoTrack(t); render();
+  }
+  ACTIONS.nbCallMic = () => { if (!C.local) return; C.mic = !C.mic; C.local.getAudioTracks().forEach(t => { t.enabled = C.mic; }); render(); };
+  ACTIONS.nbCallCam = async () => { if (!C.local) return; if (!C.camTrack) { try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 } } }); C.camTrack = s.getVideoTracks()[0]; C.local.addTrack(C.camTrack); C.cam = true; if (!C.screen) setVideoTrack(C.camTrack); render(); } catch (e) { toast('مقدرتش أوصل للكاميرا', 'err'); } return; } C.cam = !C.cam; C.camTrack.enabled = C.cam; render(); };
+  ACTIONS.nbCallScreen = () => toggleScreen();
+  ACTIONS.nbCallLeave = () => leave();
+  ACTIONS.nbCallMin = () => { C.min = !C.min; render(); };
+  const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const ICM = { mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>', micoff: '<path d="M3 3l18 18"/><path d="M9 9v2a3 3 0 005 2.2M15 9.3V6a3 3 0 00-5.7-1.3"/><path d="M5 11a7 7 0 0011.5 5.3M19 11a7 7 0 01-.6 2.8M12 18v3"/>', cam: '<rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/>', camoff: '<path d="M3 3l18 18"/><path d="M15 10l6-3v10l-6-3M8 6h5a2 2 0 012 2v5M15 16v0a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 011.5-1.9"/>', screen: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>', leave: '<path d="M3 15c5-5 13-5 18 0l-2.5 2.5-3-1.5v-2.5a10 10 0 00-7 0V16l-3 1.5z"/>', min: '<path d="M5 12h14"/>' };
+  function tile(stream, name, local, muted) { return `<div class="nbtile${local ? ' me' : ''}"><video autoplay playsinline ${local || muted ? 'muted' : ''} data-sid="${stream ? stream.id : ''}"></video><span>${esc(first(name))}${local ? ' (إنت)' : ''}</span></div>`; }
+  function render() {
+    let box = document.getElementById('nbcall');
+    if (!C.on) { if (box) box.remove(); return; }
+    if (!box) { box = document.createElement('div'); box.id = 'nbcall'; document.body.appendChild(box); }
+    const remote = [...C.peers.values()]; const nm = k => (C.people[k] && C.people[k].name) || '';
+    box.className = 'nbcall' + (C.min ? ' min' : '');
+    const html = `<div class="nbcallh"><b>مكالمة اللوحة</b><span>${Object.keys(C.people).length || 1} في المكالمة</span><span class="grow"></span><button type="button" data-action="nbCallMin" title="تصغير">${svg(ICM.min)}</button></div>
+      <div class="nbtiles">${tile(C.screen || C.local, myName(), true)}${remote.map(P => tile(P.stream, nm(P.k), false)).join('')}</div>
+      <div class="nbcallc"><button type="button" class="${C.mic ? '' : 'off'}" data-action="nbCallMic" title="${C.mic ? 'اقفل المايك' : 'افتح المايك'}">${svg(C.mic ? ICM.mic : ICM.micoff)}</button><button type="button" class="${C.cam ? '' : 'off'}" data-action="nbCallCam" title="${C.cam ? 'اقفل الكاميرا' : 'افتح الكاميرا'}">${svg(C.cam ? ICM.cam : ICM.camoff)}</button><button type="button" class="${C.screen ? 'on' : ''}" data-action="nbCallScreen" title="${C.screen ? 'وقّف مشاركة الشاشة' : 'شارك الشاشة'}">${svg(ICM.screen)}</button><button type="button" class="end" data-action="nbCallLeave" title="اخرج من المكالمة">${svg(ICM.leave)}</button></div>`;
+    if (box.__h !== html) { box.__h = html; box.innerHTML = html; try { if (typeof I18N !== 'undefined' && I18N.lang === 'en' && typeof i18nApply === 'function') i18nApply(box); } catch (e) { /* ignore */ } }
+    const vids = box.querySelectorAll('video'); const streams = [C.screen || C.local].concat(remote.map(P => P.stream));
+    vids.forEach((v, k) => { const st = streams[k]; if (st && v.srcObject !== st) { v.srcObject = st; v.play().catch(() => {}); } });
+  }
+  window.addEventListener('beforeunload', () => { if (C.on) leave(); });
+  window.nbCall = C;
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.nb .nbcallbtn{position:relative}.nb .nbcallbtn.on{background:#3aa76d!important;color:#fff!important}.nb .nbcallbtn sup{position:absolute;top:2px;left:2px;font-size:10px;background:#3aa76d;color:#fff;border-radius:999px;padding:0 4px;line-height:15px}
+.nbcall{position:fixed;left:16px;bottom:16px;z-index:60;width:min(380px,calc(100vw - 32px));background:#1d2128;color:#eef1f4;border-radius:16px;box-shadow:0 18px 50px -12px rgba(0,0,0,.55);overflow:hidden;direction:rtl;font-family:var(--font)}
+.nbcall .nbcallh{display:flex;align-items:center;gap:8px;padding:8px 10px 6px 12px;font-size:13px}.nbcall .nbcallh span{color:#9aa4af;font-size:12px}.nbcall .grow{flex:1}
+.nbcall button{border:0;background:rgba(255,255,255,.08);color:inherit;width:40px;height:40px;border-radius:999px;display:grid;place-items:center;cursor:pointer}.nbcall button:hover{background:rgba(255,255,255,.16)}.nbcall button svg{width:20px;height:20px}.nbcall .nbcallh button{width:28px;height:28px;background:transparent}
+.nbcall button.off{background:#e5484d}.nbcall button.on{background:#2d6cdf}.nbcall button.end{background:#e5484d;width:52px}
+.nbcall .nbtiles{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;padding:0 8px;max-height:52vh;overflow:auto;direction:ltr}.nbcall .nbtile{position:relative;aspect-ratio:16/10;background:#0f1216;border-radius:10px;overflow:hidden}.nbcall .nbtile video{width:100%;height:100%;object-fit:cover;display:block}.nbcall .nbtile.me video{transform:scaleX(-1)}.nbcall .nbtile span{position:absolute;left:6px;bottom:6px;font-size:11px;background:rgba(0,0,0,.55);padding:1px 7px;border-radius:999px}
+.nbcall .nbcallc{display:flex;justify-content:center;gap:10px;padding:10px}
+.nbcall.min .nbtiles{display:none}.nbcall.min{width:auto}
+@media print{.nbcall{display:none}}
+</style>`);
+})();
 /* =====================================================================
    v4.x — quotation: send to the client by WhatsApp or e-mail (25 Sep 2026)
    Buttons on the quotation page open WhatsApp (wa.me, the client's mobile) or the mail app (mailto, the client's registered e-mail)
