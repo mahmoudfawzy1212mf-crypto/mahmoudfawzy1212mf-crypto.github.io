@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261002-0511-5e7e6b';
+const BUILD = '20261002-0551-f233fd';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
@@ -34,6 +34,7 @@ self.addEventListener('fetch', e => {
   const same = url.origin === self.location.origin;
   if (same && !url.pathname.startsWith(SCOPE)) return; // another Ninety app on this origin — not ours
   if (same && SCOPE === '/' && /^\/(studioz|construction)\//.test(url.pathname)) return; // the root app never handles a sibling app's files
+  if (same && /^\/c\//.test(url.pathname)) return; // v5.97: public client catalogue pages (/c/<slug>/) are not part of the app
   if (same && (req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html'))) {
     // app page: network first (so updates arrive), cached copy when offline
     // (cache: 'no-cache' revalidates with the host even when it sends a max-age, e.g. GitHub Pages)

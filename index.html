@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-0511-5e7e6b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261002-0551-f233fd";</script>
 
 <script>
 'use strict';
@@ -26121,7 +26121,135 @@ form:not(.lofqf) .qcx{display:none!important}
     window._ecat = { go, get vi() { return vi; }, get views() { return views; }, get spread() { return spread; }, get split() { return split; }, get pre() { return !!pre; } };
     await openFile();
   }
+  window.skPreUrl = preUrl; window.skIsReady = isReady;
   window.skECat = (id, files) => { const f = byId('files', id); const all = (files && files.length ? files : [f]).filter(x => x && kindOf(x) === 'pdf'); if (all.length) ecat(all, Math.max(0, all.findIndex(x => x.id === id))); };
+})();
+/* ===================== v5.97 — «لينك للعميل»: e-catalogue بلينك قصير وصورة في الواتساب =====================
+   زرار الواتساب/الإيميل على كتالوج PDF جاهز للعرض السريع بيفتح نافذة:
+   - تختار صورة الرسالة (أي صفحة من الكتالوج — الـspread بيملا الصورة، الصفحة المربعة بتتحط على خلفية من نفسها)
+   - عنوان الرسالة + سطر صغير + رقم واتساب للتواصل (بيظهر للعميل كزرار)
+   - «اعمل لينك» → Edge Function share: صفحة ثابتة c/<slug>/ على GitHub Pages فيها OG للواتساب + لينك متتبّع ?s=<token>
+   - اللينكات اللي اتبعتت: اتفتح كام مرة وآخر مرة، ووقّف/شغّل — واللي بعت بيجيله إشعار أول ما العميل يفتح
+   الصفحة العامة: server/share/web (v.js/v.css على /c/) — العميل مش بيشوف السيستم ولا الأسعار ولا الملف الأصلي. */
+(function () {
+  if (typeof ACTIONS === 'undefined') return;
+  const BRAND = 'lof';
+  const SITE = () => (S.settings && S.settings.shareBase) || 'https://mahmoudfawzy1212mf-crypto.github.io';
+  const host = () => SITE().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  async function call(body) {
+    const r = await S.sb.functions.invoke('share', { body });
+    if (r.error) { let m = r.error.message || 'error'; try { const j = await r.error.context.json(); m = j.error || m; } catch (e) { /* no body */ } throw new Error(m); }
+    if (r.data && r.data.error) throw new Error(r.data.error); return r.data || {};
+  }
+  const css = `<style id="shx-css">
+.shx{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px}.shx label.l{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 6px}
+.shwa{background:#e7ddd3;border-radius:14px;padding:14px;position:sticky;top:0}.shwa .bub{background:#d9fdd3;border-radius:10px;padding:5px;max-width:330px;box-shadow:0 1px 1px rgba(0,0,0,.12);margin-inline-start:auto}
+.shwa .card{background:#cfeec8;border-radius:7px;overflow:hidden}.shwa .card .im{aspect-ratio:1200/630;background:#bbb center/cover no-repeat;display:grid;place-items:center;color:#555;font-size:12px}.shwa .card canvas{width:100%;display:block}
+.shwa .card .tx{padding:7px 9px 8px;direction:ltr;text-align:left}.shwa .card b{display:block;font-size:13.5px;color:#111;line-height:1.3}.shwa .card small{display:block;font-size:12px;color:#3d4a3d;margin-top:2px}.shwa .card .dm{display:block;font-size:11.5px;color:#6b7a6b;margin-top:3px}
+.shwa .lnk{direction:ltr;text-align:left;font-size:12.5px;color:#027eb5;padding:6px 6px 2px;word-break:break-all}.shwa .tip{font-size:11.5px;color:#5b5047;margin-top:10px;line-height:1.6}
+.shpg{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;max-height:190px;overflow:auto;padding:2px}.shpg button{border:2px solid transparent;border-radius:6px;padding:0;background:var(--surface-2);cursor:pointer;overflow:hidden;position:relative;aspect-ratio:1}
+.shpg button.w{grid-column:span 2;aspect-ratio:2}.shpg button img{width:100%;height:100%;object-fit:cover;display:block}.shpg button.on{border-color:var(--acc,#2a5250)}.shpg button i{position:absolute;bottom:2px;inset-inline-start:3px;font-style:normal;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px}
+.shres{border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:12px;display:none}.shres.on{display:block}.shres .u{direction:ltr;text-align:left;font-size:13px;word-break:break-all;background:var(--surface-2);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.shx input{width:100%}.shres .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.shres .row .btn{display:inline-flex;flex-direction:row;align-items:center;gap:6px;flex:none;height:auto;width:auto;text-decoration:none}.shres .row .btn svg{width:16px;height:16px}.shres .shw{background:#25d366;color:#0b2414;border-color:#25d366}.shnote{font-size:12px;color:#b07a2a;margin-top:6px}
+.shlist{margin-top:16px;border-top:1px solid var(--line);padding-top:10px;grid-column:1/-1}.shlist h4{margin:0 0 8px;font-size:13px}.shrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:12.5px}.shrow b{font-weight:600}.shrow .m{color:var(--muted);font-size:11.5px}.shrow .g{flex:1;min-width:0}.shrow.off{opacity:.55}.shrow .op{color:#4f8a6d;font-weight:600}.shrow .op.z{color:var(--muted);font-weight:400}
+@media(max-width:760px){.shx{grid-template-columns:1fr}.shwa{position:static}}
+</style>`;
+  /* صورة الرسالة 1200×630: الـspread بيملاها، والصفحة المربعة/الطولية بتتحط في النص على خلفية متغبّشة من نفسها */
+  async function ogCanvas(f, id) {
+    const pages = f.ecat.pages; const by = new Map(pages.map(p => [p.id, p]));
+    const load = ref => window.skPreUrl(ref).then(u => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = u; }));
+    const c = document.createElement('canvas'); c.width = 1200; c.height = 630; const x = c.getContext('2d');
+    let src; if (/L$/.test(id) && by.has(id.replace(/L$/, 'R'))) { const [a, b] = await Promise.all([load(by.get(id).ref), load(by.get(id.replace(/L$/, 'R')).ref)]); src = document.createElement('canvas'); src.width = a.naturalWidth + b.naturalWidth; src.height = Math.max(a.naturalHeight, b.naturalHeight); const sx = src.getContext('2d'); sx.drawImage(a, 0, 0); sx.drawImage(b, a.naturalWidth, 0); }
+    else src = await load((by.get(id) || pages[0]).ref);
+    const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, r = sw / sh;
+    const cover = () => { const k = Math.max(1200 / sw, 630 / sh); x.drawImage(src, (1200 - sw * k) / 2, (630 - sh * k) / 2, sw * k, sh * k); };
+    if (r > 1.55 && r < 2.3) cover();
+    else { x.save(); try { x.filter = 'blur(28px) brightness(.72)'; } catch (e) { /* old */ } cover(); x.restore(); x.fillStyle = 'rgba(0,0,0,.18)'; x.fillRect(0, 0, 1200, 630); const k = Math.min(1080 / sw, 590 / sh); const w = sw * k, h = sh * k; x.shadowColor = 'rgba(0,0,0,.45)'; x.shadowBlur = 30; x.shadowOffsetY = 10; x.drawImage(src, (1200 - w) / 2, (630 - h) / 2, w, h); }
+    return c;
+  }
+  const toB64 = c => { let q = .86, d = c.toDataURL('image/jpeg', q); while (d.length > 620000 && q > .55) { q -= .08; d = c.toDataURL('image/jpeg', q); } return d; };
+  const defTitle = f => { const k = typeof brandKit === 'function' ? brandKit(BRAND).name : 'lōf'; const coll = String(f.collection || (/garden/i.test(f.title || '') ? 'garden' : '') || ''); return coll ? `${k} ${coll.charAt(0).toUpperCase() + coll.slice(1)} Furniture — e-catalogue` : `${k} — e-catalogue`; };
+  const defWa = () => { try { const L = (brandKit(BRAND).legal || {}); return L.phone || ''; } catch (e) { return ''; } };
+  const ago = iso => { if (!iso) return ''; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'دلوقتي' : m < 60 ? `من ${m} دقيقة` : m < 1440 ? `من ${Math.round(m / 60)} ساعة` : `من ${Math.round(m / 1440)} يوم`; };
+
+  function openShare(f0) {
+    const f = byId('files', f0.id) || f0; const sh = f.share || {}; const pages = f.ecat.pages;
+    const firstIds = []; const seen = new Set(); pages.forEach(p => { const n = parseInt(p.id, 10); if (seen.has(n)) return; seen.add(n); firstIds.push(p.id); });
+    let cover = sh.cover && pages.some(p => p.id === sh.cover) ? sh.cover : firstIds[0]; let ogDirty = !sh.slug || cover !== sh.cover; let made = null;
+    const body = `${document.getElementById('shx-css') ? '' : css}<div class="shx">
+      <div><div class="shwa"><div class="bub"><div class="card"><div class="im" id="sh-og">…</div><div class="tx"><b id="sh-t"></b><small id="sh-d"></small><span class="dm">${esc(host())}</span></div></div><div class="lnk" id="sh-lnk">${esc(SITE())}/c/${esc(sh.slug || '…')}/?s=…</div></div>
+        <div class="tip">ده شكل الرسالة عند العميل. لو مش عايز اللينك يبان: الصق اللينك في الواتساب، استنى ثانيتين لحد ما الصورة تطلع، وامسح نص اللينك. الصورة والعنوان هيفضلوا، ولما العميل يدوس على الصورة الكتالوج هيفتح.</div></div></div>
+      <div>
+        <label class="l">صورة الرسالة — اختار صفحة</label><div class="shpg" id="sh-pg">${firstIds.map(id => `<button type="button" class="${/L$/.test(id) ? 'w' : ''}${id === cover ? ' on' : ''}" data-shpick="${esc(id)}"><i>${parseInt(id, 10)}</i></button>`).join('')}</div>
+        <label class="l">عنوان الرسالة</label><input class="ltr" id="sh-title" maxlength="90" value="${esc(sh.title || defTitle(f))}">
+        <label class="l">سطر صغير تحت العنوان</label><input class="ltr" id="sh-desc" maxlength="160" value="${esc(sh.desc ?? 'Outdoor furniture collection ' + new Date().getFullYear())}">
+        <label class="l">رقم واتساب للتواصل (بيظهر للعميل زرار «Contact us»)</label><input class="ltr" id="sh-wa" inputmode="tel" placeholder="01xxxxxxxxx" value="${esc(sh.wa || defWa())}">
+        <label class="l">اسم العميل (اختياري — علشان يجيلك إشعار باسمه لما يفتح)</label><input id="sh-client" maxlength="80" placeholder="مثلاً: جاردينيا">
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn p" id="sh-make">${icon('link')}اعمل لينك</button><span class="small muted" id="sh-st"></span></div>
+        <div class="shres" id="sh-res"><div class="u" id="sh-u"></div><div class="row"><a class="btn shw" id="sh-wa-go" target="_blank" rel="noopener">${icon('wa')}ابعت واتساب</a><button type="button" class="btn" id="sh-copy">${icon('copy')}انسخ اللينك</button><a class="btn" id="sh-mail">${icon('send')}إيميل</a><a class="btn" id="sh-open" target="_blank" rel="noopener">${icon('play')}افتحه</a></div><div class="shnote" id="sh-note"></div></div>
+      </div>
+      <div class="shlist"><h4>اللينكات اللي اتبعتت للكتالوج ده</h4><div id="sh-list" class="small muted">بيحمّل…</div></div></div>`;
+    openModal({ title: `لينك للعميل — ${f.title || f.name || 'الكتالوج'}`, body, wide: true, footer: null, onOpen: fm => wire(fm) });
+
+    function wire(fm) {
+      const $$ = s => fm.querySelector(s);
+      const sync = () => { $$('#sh-t').textContent = $$('#sh-title').value || defTitle(f); $$('#sh-d').textContent = $$('#sh-desc').value; };
+      ['#sh-title', '#sh-desc'].forEach(s => $$(s).addEventListener('input', sync)); sync();
+      let tok = 0; const drawOg = async () => { const my = ++tok; try { const c = await ogCanvas(f, cover); if (my !== tok) return; const box = $$('#sh-og'); box.innerHTML = ''; box.style.background = 'none'; box.appendChild(c); } catch (e) { $$('#sh-og').textContent = 'مقدرتش أرسم الصورة'; } };
+      drawOg();
+      const pg = $$('#sh-pg'); const by = new Map(pages.map(p => [p.id, p]));
+      const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const id = e.target.dataset.shpick; const p = by.get(id); if (p) window.skPreUrl(p.ref).then(u => { if (!e.target.querySelector('img')) e.target.insertAdjacentHTML('afterbegin', `<img src="${u}" alt="">`); }).catch(() => {}); }), { root: pg }) : null;
+      pg.querySelectorAll('button').forEach(b => { if (io) io.observe(b); });
+      pg.addEventListener('click', e => { const b = e.target.closest('[data-shpick]'); if (!b) return; cover = b.dataset.shpick; ogDirty = true; pg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); drawOg(); });
+      const st = t => { $$('#sh-st').textContent = t || ''; };
+      $$('#sh-make').addEventListener('click', async () => {
+        const btn = $$('#sh-make'); btn.disabled = true; let fresh = false;
+        try {
+          const cur = (byId('files', f.id) || f).share || {};
+          const title = $$('#sh-title').value.trim() || defTitle(f), desc = $$('#sh-desc').value.trim(), wa = $$('#sh-wa').value.trim();
+          if (!cur.slug || ogDirty || title !== cur.title || desc !== (cur.desc || '') || wa.replace(/[^\d+]/g, '') !== (cur.wa || '')) {
+            st('بجهّز صفحة الكتالوج وصورة الرسالة… (أقل من دقيقة)');
+            const og = (!cur.slug || ogDirty) ? toB64(await ogCanvas(f, cover)) : null;
+            const r = await call({ action: 'page', fileId: f.id, title, desc, wa, cover, og });
+            fresh = true; ogDirty = false;
+            const nf = Object.assign({}, cur, { slug: r.slug, title, desc, wa: wa.replace(/[^\d+]/g, ''), cover, ver: r.ver, at: nowISO() }); const live = byId('files', f.id); if (live) live.share = nf;
+          }
+          st('بعمل اللينك…');
+          const r2 = await call({ action: 'create', fileId: f.id, client: $$('#sh-client').value.trim() });
+          made = r2.url; $$('#sh-u').textContent = made; $$('#sh-lnk').textContent = made;
+          $$('#sh-wa-go').href = 'https://wa.me/?text=' + encodeURIComponent(made);
+          $$('#sh-mail').href = 'mailto:?subject=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(title + '\n' + made);
+          $$('#sh-open').href = made;
+          $$('#sh-note').textContent = fresh ? 'الصفحة لسه متحدّثة — استنى دقيقة قبل ما تبعته علشان صورة الواتساب تطلع صح.' : '';
+          $$('#sh-res').classList.add('on'); st(''); loadList();
+        } catch (e) { st(''); toast('مقدرتش أعمل اللينك: ' + (e.message || e), 'err'); }
+        finally { btn.disabled = false; }
+      });
+      $$('#sh-copy').addEventListener('click', async () => { if (!made) return; try { await navigator.clipboard.writeText(made); toast('اتنسخ اللينك'); } catch (e) { prompt('انسخ اللينك', made); } });
+      async function loadList() {
+        const el = $$('#sh-list'); if (!el) return;
+        try { const r = await call({ action: 'list', fileId: f.id }); const rows = r.shares || [];
+          if (!rows.length) { el.textContent = 'لسه مفيش لينكات.'; return; }
+          el.classList.remove('muted');
+          el.innerHTML = rows.map(s => { const u = `${r.base || SITE()}/c/${s.slug}/?s=${s.id}`; return `<div class="shrow${s.active === false ? ' off' : ''}"><div class="g"><b>${esc(s.client || 'بدون اسم')}</b> <span class="m">· ${esc(s.byName || '')} · ${esc(ago(s.at))}</span><div>${s.opens ? `<span class="op">اتفتح ${s.opens} ${s.opens === 1 ? 'مرة' : 'مرات'}</span> <span class="m">· آخر مرة ${esc(ago(s.lastOpenAt))}</span>` : '<span class="op z">لسه مااتفتحش</span>'}${s.active === false ? ' <span class="m">· متوقف</span>' : ''}</div></div>
+            <button type="button" class="btn sm" data-shcopy="${esc(u)}" title="انسخ">${icon('copy')}</button><button type="button" class="btn sm" data-shtog="${esc(s.id)}" data-on="${s.active === false ? '0' : '1'}">${s.active === false ? 'شغّل' : 'وقّف'}</button></div>`; }).join('');
+        } catch (e) { el.textContent = 'مقدرتش أجيب اللينكات: ' + (e.message || e); }
+      }
+      $$('#sh-list').addEventListener('click', async e => {
+        const c = e.target.closest('[data-shcopy]'); if (c) { try { await navigator.clipboard.writeText(c.dataset.shcopy); toast('اتنسخ'); } catch (er) { prompt('انسخ اللينك', c.dataset.shcopy); } return; }
+        const t = e.target.closest('[data-shtog]'); if (t) { const on = t.dataset.on === '1'; if (on && !confirm('توقف اللينك ده؟ العميل مش هيقدر يفتح الكتالوج منه.')) return; t.disabled = true; try { await call({ action: on ? 'stop' : 'resume', token: t.dataset.shtog }); toast(on ? 'اللينك اتوقف' : 'اللينك اشتغل تاني'); } catch (er) { toast('مقدرتش: ' + (er.message || er), 'err'); } loadList(); }
+      });
+      loadList();
+    }
+  }
+  const prev = ACTIONS.skShare;
+  ACTIONS.skShare = async arg => {
+    const [, id] = String(arg || '').split(':'); const f = byId('files', id);
+    if (f && window.skIsReady && window.skIsReady(f) && typeof sbOn === 'function' && sbOn()) return openShare(f);
+    if (f && /\.pdf$/i.test(f.name || '') && window.skIsReady && !window.skIsReady(f)) toast('علشان تبعته للعميل بلينك قصير وصورة: جهّز الكتالوج للعرض السريع الأول ⚡ — هبعته دلوقتي بلينك مؤقت');
+    return prev(arg);
+  };
+  window.skShareOpen = id => { const f = byId('files', id); if (f) openShare(f); };
 })();
 </script>
 
