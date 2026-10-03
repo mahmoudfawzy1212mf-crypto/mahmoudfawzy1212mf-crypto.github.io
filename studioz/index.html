@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-1750-b34360";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-1858-d007a2";</script>
 
 <script>
 'use strict';
@@ -30548,7 +30548,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function timeline(p, es) {
     const list0 = ST.who ? es.filter(e => e.by === ST.who) : es; let last = '';
     return `<div class="pstl">${list0.map(e => { const i = es.indexOf(e); const d = dayKey(e.at); const head = d !== last ? `<div class="psday"><b>${esc(fmtDay(e.at))}</b></div>` : ''; last = d;
-      return `${head}<div class="psrow" data-psi="${i}"><div class="pst">${esc(fmtTime(e.at))}</div><div class="psdot" style="background:${e.by === 'client' ? 'var(--muted)' : colorOf(e.by)}"></div><div class="psc"><div class="psh">${av(e.by, e, 24)}<b class="notr" dir="auto">${esc(nameOf(e.by, e))}</b><span class="pschip">${esc(stepL(e.step))}</span>${e.fin ? `<span class="pschip fin">${isEn() ? 'Owner & HR only' : 'للمالك وHR بس'}</span>` : ''}</div><p class="notr" dir="auto">${esc(txtOf(e))}</p>${e.link ? `<button type="button" class="btn xs ghost" data-action="psOpen" data-arg="${i}">${icon('link')}${isEn() ? 'Open the screen' : 'افتح الشاشة'}</button>` : ''}</div></div>`; }).join('')}</div>`;
+      return `${head}<div class="psrow" data-psi="${i}"><div class="pst">${esc(fmtTime(e.at))}</div><div class="psdot" style="background:${e.by === 'client' ? 'var(--muted)' : colorOf(e.by)}"></div><div class="psc"><div class="psh">${av(e.by, e, 24)}<b class="notr" dir="auto">${esc(nameOf(e.by, e))}</b><span class="pschip">${esc(stepL(e.step))}</span>${(e.by === 'client' || CL_STEPS.includes(e.step)) ? `<span class="pschip fin">${isEn() ? 'Owner only' : 'ليك إنت بس'}</span>` : e.fin ? `<span class="pschip fin">${isEn() ? 'Owner & HR only' : 'للمالك وHR بس'}</span>` : ''}</div><p class="notr" dir="auto">${esc(txtOf(e))}</p>${e.link ? `<button type="button" class="btn xs ghost" data-action="psOpen" data-arg="${i}">${icon('link')}${isEn() ? 'Open the screen' : 'افتح الشاشة'}</button>` : ''}</div></div>`; }).join('')}</div>`;
   }
   function player(p, es) {
     if (ST.play == null || !es.length) return ''; const i = Math.max(0, Math.min(es.length - 1, ST.play)); const e = es[i];
@@ -30907,7 +30907,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     clearTimeout(rqT); rqT = setTimeout(flushR, 900);
   }
   function flushR() { const all = [...RQ.values()]; RQ.clear(); all.forEach(d => Store.save('pchatr', d, { silent: true }).catch(e => console.warn('pchatr', e))); }
-  window.addEventListener('pagehide', flushR);
+  window.addEventListener('pagehide', () => { flushR(); micRelease(); });
 
   /* delivered: whenever new messages reach this device · read: when the chat is open and visible */
   const dlvAt = new Map();
@@ -31148,7 +31148,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     PC.pid = pid; PC.auto = false; PC.min = false; PC.closedFor = null; PC.routeOpen = !!o.route; place(); setTimeout(() => { if (!isMob() && CONV) CONV.querySelector('textarea').focus({ preventScroll: true }); markRead(); }, 60);
   }
   function closeChat(fromPop) {
-    const pid = PC.pid; flushR(); typingSub(null); PC.pid = null; PC.min = false; PC.side = null; if (projPage() === pid) PC.closedFor = pid;
+    const pid = PC.pid; flushR(); typingSub(null); micRelease(); PC.pid = null; PC.min = false; PC.side = null; if (projPage() === pid) PC.closedFor = pid;
     if (PC.push && !fromPop) { PC.push = false; try { history.back(); } catch (e) { /* ignore */ } }
     if (S.route.view === 'pchats' && S.route.id) { go('pchats'); return; } place(); rerender();
   }
@@ -31254,7 +31254,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- voice notes ---------- */
   async function recStart() {
     if (PC.rec) return; if (!navigator.mediaDevices || !window.MediaRecorder) { toast(L('التسجيل الصوتي مش مدعوم في المتصفح ده', 'Voice recording is not supported in this browser'), 'err'); return; }
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch (e) { toast(L('اسمح للسيستم بالمايك عشان تسجّل', 'Allow the microphone to record'), 'err'); return; }
+    /* the mic stream is kept for the rest of the chat session (one permission prompt), released after 3 minutes without recording or when the chat closes */
+    let stream = MIC.s && MIC.s.active && MIC.s.getAudioTracks().some(t => t.readyState === 'live') ? MIC.s : null;
+    if (!stream) try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); MIC.s = stream; } catch (e) { toast(L('اسمح للسيستم بالمايك عشان تسجّل', 'Allow the microphone to record'), 'err'); return; }
     const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', ''].find(x => !x || MediaRecorder.isTypeSupported(x)) || '';
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); const R0 = { rec, stream, chunks: [], t0: now(), wave: [], pid: PC.pid };
     try { const ac = new (window.AudioContext || window.webkitAudioContext)(); const an = ac.createAnalyser(); an.fftSize = 256; ac.createMediaStreamSource(stream).connect(an); const buf = new Uint8Array(an.frequencyBinCount); R0.ac = ac; R0.iv = setInterval(() => { an.getByteTimeDomainData(buf); let mx = 0; for (const v of buf) mx = Math.max(mx, Math.abs(v - 128)); R0.wave.push(Math.round(mx / 128 * 100)); recRender(); }, 120); } catch (e) { R0.iv = setInterval(recRender, 250); }
@@ -31263,13 +31265,16 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function recStop(send) {
     const R0 = PC.rec; if (!R0) return; PC.rec = null; clearInterval(R0.iv); try { R0.ac && R0.ac.close(); } catch (e) { /* ignore */ }
-    R0.rec.onstop = async () => { R0.stream.getTracks().forEach(t => t.stop()); recRender(); if (!send) return; const dur = (now() - R0.t0) / 1000; if (dur < 0.8) { toast(L('اضغط مطوّل شوية — الرسالة قصيرة قوي', 'Too short — hold a little longer'), 'err'); return; }
+    R0.rec.onstop = async () => { micIdle(); recRender(); if (!send) return; const dur = (now() - R0.t0) / 1000; if (dur < 0.8) { toast(L('اضغط مطوّل شوية — الرسالة قصيرة قوي', 'Too short — hold a little longer'), 'err'); return; }
       const type = R0.rec.mimeType || 'audio/webm'; const blob = new Blob(R0.chunks, { type }); const ext = /mp4|aac/.test(type) ? 'm4a' : 'webm';
       const w = R0.wave; const n = 40; const wave = Array.from({ length: n }, (_, i) => { const a = w.slice(Math.floor(i * w.length / n), Math.floor((i + 1) * w.length / n)); return a.length ? Math.max(...a) : 10; }).map(v => Math.max(10, Math.min(100, v * 1.6)));
       sendFile(R0.pid, new File([blob], `voice-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`, { type }), '', false, { k: 'voice', f: { dur: Math.round(dur), wave } }); };
-    try { R0.rec.stop(); } catch (e) { R0.stream.getTracks().forEach(t => t.stop()); }
+    try { R0.rec.stop(); } catch (e) { micRelease(); }
     recRender();
   }
+  const MIC = { s: null, t: null };
+  function micRelease() { clearTimeout(MIC.t); MIC.t = null; if (MIC.s) { try { MIC.s.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } } MIC.s = null; }
+  function micIdle() { clearTimeout(MIC.t); MIC.t = setTimeout(micRelease, 3 * 60000); }
   function recRender() {
     if (!CONV) return; const el = CONV.querySelector('.pcrec'); CONV.classList.toggle('recording', !!PC.rec); if (!PC.rec) { el.innerHTML = ''; return; }
     const s = (now() - PC.rec.t0) / 1000; const w = PC.rec.wave.slice(-46);
@@ -31726,6 +31731,281 @@ html[dir=rtl] body.pc-dock .fab,html[dir=rtl] body.pc-dock .aifab{left:418px!imp
 html[data-theme="light"] .pmav.sil,html[data-theme="light"] .psav.sil,html[data-theme="light"] .stuav.sil,html[data-theme="light"] .pcav.sil{background:#dfe5e7!important}
 html[data-theme="light"] .nfsil{fill:#fff}`;
   document.head.appendChild(css);
+})();
+/* =====================================================================
+   v6.31 — Ninety Studioz: the login screen in the studio's identity, the welcome after login, the footer.
+   · Login: the ENAR film (or the renders when the video cannot play) full screen, the white NINETY wordmark, the slogan
+     «A story in every frame», the sign-in card, the language switch, the website + social links.
+     Desktop ≥ 1100px: split (film left, sign-in panel right) · tablet: card over the film · phone: card at the bottom.
+   · Media lives on our server (bucket app / brand/stu — copied from ninetystudioz.com 3 Oct 2026); Settings → login-screen tab
+     can replace the video / stills links. The posters start first; the video streams behind them.
+   · Welcome once a day after login: name + photo, today's work, unread chats, approvals waiting (auto-dismiss 4 s / tap).
+   · Desktop footer: small wordmark + website + socials.
+   Studio only. The form keeps the same ids/actions as the base login (loginform, lg-user, lg-pass, lg-remember, lg-err, activate, forgotPw, sbBootstrap).
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_STULOGIN__) return; window.__NF_STULOGIN__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const BASE = 'https://erhcnkjyaumdoixkksbz.supabase.co/storage/v1/object/public/app/brand/stu/';
+  const DEF = { video: BASE + 'hero.mp4', poster: BASE + 'hero-poster.webp', logo: BASE + 'wordmark-white.png', stills: [BASE + 'still-1.webp', BASE + 'still-2.webp', BASE + 'still-3.webp', BASE + 'still-4.webp'], slogan: 'A story in every frame', sub: 'Architectural visualization studio', site: 'https://ninetystudioz.com', ig: 'https://instagram.com/ninety_studioz', fb: 'https://facebook.com/ninetystudioz', li: 'https://linkedin.com/company/ninety-studio', be: 'https://behance.net/ninety_studio', vm: 'https://vimeo.com/ninetystudio' };
+  const cfg = () => Object.assign({}, DEF, (S.settings && S.settings.stuLogin) || {});
+  const SOC = {
+    site: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-2.95a15.6 15.6 0 0 0-1.3-5.4A8 8 0 0 1 18.9 11zM12 4c.9 1.2 1.7 3.6 1.95 7h-3.9C10.3 7.6 11.1 5.2 12 4zM5.1 11a8 8 0 0 1 4.25-5.4c-.6 1.6-1.05 3.5-1.3 5.4zm0 2h2.95c.25 1.9.7 3.8 1.3 5.4A8 8 0 0 1 5.1 13zM12 20c-.9-1.2-1.7-3.6-1.95-7h3.9c-.25 3.4-1.05 5.8-1.95 7zm2.65-.6c.6-1.6 1.05-3.5 1.3-5.4h2.95a8 8 0 0 1-4.25 5.4z',
+    ig: 'M7.5 2h9A5.5 5.5 0 0 1 22 7.5v9a5.5 5.5 0 0 1-5.5 5.5h-9A5.5 5.5 0 0 1 2 16.5v-9A5.5 5.5 0 0 1 7.5 2zm0 2A3.5 3.5 0 0 0 4 7.5v9A3.5 3.5 0 0 0 7.5 20h9a3.5 3.5 0 0 0 3.5-3.5v-9A3.5 3.5 0 0 0 16.5 4zM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm5.3-3.2a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4z',
+    fb: 'M13.5 22v-8h2.7l.4-3.2h-3.1V8.8c0-.9.3-1.6 1.6-1.6h1.7V4.4c-.3 0-1.3-.1-2.5-.1-2.5 0-4.1 1.5-4.1 4.2v2.3H7.4V14h2.8v8z',
+    li: 'M6.5 8.5h-3V21h3zM5 3.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zM21 13.3c0-3.3-1.8-4.9-4.2-4.9-1.9 0-2.8 1-3.3 1.8V8.5h-3V21h3v-6.6c0-1.7.3-3.4 2.4-3.4 2 0 2.1 1.9 2.1 3.5V21h3z',
+    be: 'M2 5.5h5.3c2.9 0 4.3 1.2 4.3 3.2 0 1.3-.6 2.1-1.7 2.6 1.5.4 2.3 1.5 2.3 3 0 2.5-1.9 3.7-4.6 3.7H2zm2.6 5.1h2.3c1.2 0 1.9-.5 1.9-1.4s-.6-1.4-1.9-1.4H4.6zm0 5.3h2.6c1.4 0 2.2-.5 2.2-1.6s-.8-1.6-2.2-1.6H4.6zM14 6.3h5.4v1.3H14zm7.9 7.3h-6.7c.1 1.5 1 2.3 2.4 2.3 1 0 1.7-.4 2-1.1h2.2c-.5 2-2.1 3.2-4.3 3.2-2.9 0-4.7-1.9-4.7-4.7s1.8-4.7 4.6-4.7c2.9 0 4.6 2.1 4.5 5zm-2.3-1.6c-.1-1.3-.9-2-2.2-2-1.2 0-2 .8-2.2 2z',
+    vm: 'M22 7.3c-.1 2-1.5 4.7-4.2 8.1-2.8 3.6-5.2 5.4-7.1 5.4-1.2 0-2.2-1.1-3-3.3L6 11.8C5.4 9.6 4.8 8.5 4.1 8.5c-.2 0-.7.3-1.5.9L1.7 8.3c.9-.8 1.9-1.7 2.8-2.5 1.3-1.1 2.2-1.7 2.9-1.7 1.5-.1 2.4 1 2.8 3.2.4 2.4.6 3.9.8 4.5.4 1.9.9 2.9 1.4 2.9.4 0 1-.6 1.8-1.9.8-1.3 1.2-2.2 1.3-2.9.1-1.1-.3-1.6-1.3-1.6-.5 0-1 .1-1.4.3.9-3.1 2.8-4.6 5.5-4.5 2 .1 2.9 1.4 2.7 4z'
+  };
+  const socials = (c, sz = 40) => [['site', c.site, 'Website'], ['ig', c.ig, 'Instagram'], ['fb', c.fb, 'Facebook'], ['li', c.li, 'LinkedIn'], ['be', c.be, 'Behance'], ['vm', c.vm, 'Vimeo']].filter(x => x[1]).map(([k, u, t]) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="${t}" class="notr" style="width:${sz}px;height:${sz}px"><svg viewBox="0 0 24 24"><path d="${SOC[k]}"/></svg></a>`).join('');
+  window.stuSocialsHTML = socials;
+
+  /* ---------- the login screen ---------- */
+  function scene(c) {
+    const stills = (c.stills || []).filter(Boolean);
+    return `<div class="slscene" id="slscene"><img class="slposter" src="${esc(c.poster)}" alt="">${c.video ? `<video class="slvid" muted loop playsinline preload="metadata" poster="${esc(c.poster)}" src="${esc(c.video)}"></video>` : ''}${stills.map(u => `<img class="slstill" src="${esc(u)}" alt="" loading="lazy">`).join('')}</div><div class="slgrain"></div>`;
+  }
+  function formHTML() {
+    const sb = sbOn();
+    return `${!S.staffReady ? `<p class="muted" style="text-align:center">${L('جارٍ تحميل المستخدمين…', 'Loading users…')}</p>` : `
+    <form id="loginform" autocomplete="on" class="slform">
+      <h2>${L('ادخل على الاستوديو', 'Sign in to the studio')}</h2>
+      <div class="slf"><input id="lg-user" name="username" class="ltr" autocomplete="username" inputmode="tel" required placeholder="${L('رقم الموبايل أو اسم المستخدم', 'Mobile number or username')}" value="${esc(S.ui.loginPrefill || '')}"><label for="lg-user">${L('رقم الموبايل أو اسم المستخدم', 'Mobile number or username')}</label></div>
+      <div class="slf"><input id="lg-pass" name="password" type="password" class="ltr" autocomplete="current-password" required placeholder="${L('كلمة السر', 'Password')}"><label for="lg-pass">${L('كلمة السر', 'Password')}</label></div>
+      <label class="slchk"><input type="checkbox" id="lg-remember" name="remember" checked> ${L('افتكرني على الجهاز ده', 'Remember me on this device')}</label>
+      <p id="lg-err" class="slerr"></p>
+      <button type="submit" class="slbtn">${L('دخول', 'Sign in')}</button>
+      <div class="slalt"><button type="button" data-action="activate">${L('أول مرة؟ فعّل حسابك', 'First time? Activate your account')}</button><button type="button" data-action="forgotPw">${L('نسيت كلمة السر', 'Forgot password')}</button></div>
+    </form>`}
+    ${sb && S.sbBootstrap ? `<button type="button" class="slbtn" data-action="sbBootstrap">${icon('star')}${L('إنشاء حساب المدير الأول (مرة واحدة)', 'Create the first admin account (once)')}</button>` : ''}
+    ${!sb && S.staffReady && !loginPeople().length && S.canWrite !== false ? `<button type="button" class="slbtn" data-action="firstAdmin">${L('الدخول كمدير لإعداد النظام', 'Enter as admin to set up')}</button>` : ''}`;
+  }
+  function stuLogin() {
+    const c = cfg();
+    return `<div class="slogin" dir="${en() ? 'ltr' : 'rtl'}">${scene(c)}
+      <div class="slwrap">
+        <div class="slhero"><img class="slmark" src="${esc(c.logo)}" alt="NINETY"><h1 class="slslogan notr">${esc(c.slogan)}</h1><p class="slsub notr">${esc(c.sub)}</p></div>
+        <div class="slside"><div class="slcard">${formHTML()}</div>
+          <div class="langrow">${typeof i18nToggleHTML === 'function' ? i18nToggleHTML() : ''}</div>
+          <div class="slsoc">${socials(c)}</div>
+          <div class="slfoot notr" dir="ltr">© ${new Date().getFullYear()} Ninety Studioz · <a href="${esc(c.site)}" target="_blank" rel="noopener">${esc(String(c.site).replace(/^https?:\/\//, ''))}</a><br><span class="muted">${esc(APP.build || '')}</span></div>
+        </div>
+      </div></div><div id="modalroot"></div><div class="toasts" id="toasts"></div>`;
+  }
+  if (typeof loginScreen === 'function') loginScreen = (base => function () {
+    if (typeof nfRestoring === 'function' && nfRestoring()) return base.apply(this, arguments);
+    return stuLogin();
+  })(loginScreen);
+  /* the film: play when it can, otherwise cross-fade the renders; never block the first paint */
+  let sv = null;
+  function sceneStart() {
+    const sc = document.getElementById('slscene'); if (!sc || sc.__on) return; sc.__on = 1;
+    const v = sc.querySelector('video'); const stills = [...sc.querySelectorAll('.slstill')]; let i = 0;
+    const slideshow = () => { if (v) v.classList.remove('on'); if (!stills.length) return; stills[0].classList.add('on'); sv = setInterval(() => { if (!sc.isConnected) { clearInterval(sv); return; } stills[i].classList.remove('on'); i = (i + 1) % stills.length; stills[i].classList.add('on'); }, 5000); };
+    const slow = navigator.connection && (navigator.connection.saveData || /2g|3g/.test(navigator.connection.effectiveType || ''));
+    if (!v || slow) { slideshow(); return; }
+    let ok = false; v.addEventListener('playing', () => { ok = true; v.classList.add('on'); }, { once: true });
+    v.addEventListener('error', () => { if (!ok) slideshow(); }, { once: true });
+    v.play().catch(() => slideshow()); setTimeout(() => { if (!ok && !sv) slideshow(); }, 7000);
+  }
+  if (typeof afterRender === 'function') afterRender = (base => function () { const r = base.apply(this, arguments); try { sceneStart(); } catch (e) { /* ignore */ } return r; })(afterRender);
+
+  /* ---------- welcome after login (once a day) ---------- */
+  const key = () => 'nf.wel.' + ((S.session && (S.session.workerId || S.session.id)) || '');
+  const todayK = () => new Date().toISOString().slice(0, 10);
+  function welcome() {
+    if (!S.session || document.getElementById('stuwel')) return; try { if (localStorage.getItem(key()) === todayK()) return; localStorage.setItem(key(), todayK()); } catch (e) { return; }
+    const me = S.session.workerId || S.session.id; const ph = (window.nfPhoto && nfPhoto(me)) || S.session.avatar || null;
+    const mine = typeof stuMeIds === 'function' ? stuMeIds() : [me];
+    const tasks = list('pmtasks').filter(t => mine.includes(t.owner) && !['done'].includes(t.status) && (t.due === todayK() || t.status === 'work' || (t.due && t.due < todayK()))).length;
+    const chats = window.nfPChat ? nfPChat.totalUnread() : 0;
+    const appr = typeof awaitingMe === 'function' ? list('requests').filter(r => { try { return awaitingMe(r); } catch (e) { return false; } }).length : 0;
+    const h = new Date().getHours(); const greet = h < 12 ? L('صباح الخير', 'Good morning') : h < 18 ? L('مساء الخير', 'Good afternoon') : L('مساء الخير', 'Good evening');
+    const first = String(S.session.name || '').trim().split(/\s+/)[0];
+    const date = new Date().toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
+    const el = document.createElement('div'); el.id = 'stuwel'; el.className = 'stuwel';
+    el.innerHTML = `<div class="box"><div class="av">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : '')}</div><h1>${greet}، <b class="notr">${esc(first)}</b></h1><div class="d">${esc(date)}</div>
+      <div class="k"><div><b>${tasks}</b><span>${L('مهام النهارده', 'tasks today')}</span></div><div><b>${chats}</b><span>${L('رسايل جديدة', 'unread chats')}</span></div><div><b>${appr}</b><span>${L('اعتمادات مستنياك', 'approvals waiting')}</span></div></div>
+      <div class="go">${L('بنفتحلك شغلك…', 'Opening your work…')}</div><div class="bar"><i></i></div></div>`;
+    el.addEventListener('click', () => el.remove()); document.body.appendChild(el); setTimeout(() => { if (el.isConnected) el.remove(); }, 4200);
+  }
+  document.addEventListener('nf:login', () => setTimeout(welcome, 700));
+
+  /* ---------- footer on desktop ---------- */
+  function footer() {
+    const v = document.getElementById('view'); if (!v || !S.session) return; if (v.querySelector('.stufoot')) return; const c = cfg();
+    v.insertAdjacentHTML('beforeend', `<div class="stufoot notr"><img src="${esc(c.logo)}" alt="NINETY"><a href="${esc(c.site)}" target="_blank" rel="noopener">${esc(String(c.site).replace(/^https?:\/\//, ''))}</a><span class="grow"></span><div class="slsoc sm">${socials(c, 30)}</div></div>`);
+  }
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(footer);
+
+  /* ---------- settings: the login screen media ---------- */
+  EXTRA_SETTINGS.stulogin = { label: 'شاشة الدخول', render: () => { const c = cfg(); const f = (k, l, v) => `<div class="field full"><label>${l}</label><input name="${k}" class="ltr notr" value="${esc(v || '')}"></div>`; return `<form class="card" id="stuloginform"><h3>${L('شاشة الدخول — الفيديو والصور', 'Login screen — video and stills')}</h3><p class="small muted">${L('روابط الفيديو والصور اللي بتظهر خلف شاشة الدخول. الحالية متخزنة على سيرفر السيستم من موقع ninetystudioz.com.', 'Links of the video and stills shown behind the login screen. The current ones are stored on the system server, copied from ninetystudioz.com.')}</p><div class="form">${f('slogan', L('السلوجان', 'Slogan'), c.slogan)}${f('sub', L('السطر تحت السلوجان', 'Line under the slogan'), c.sub)}${f('video', L('رابط الفيديو (mp4)', 'Video link (mp4)'), c.video)}${f('poster', L('صورة البداية', 'Poster image'), c.poster)}${f('logo', L('اللوجو الأبيض (PNG)', 'White logo (PNG)'), c.logo)}${f('stills', L('الريندرات (رابط في كل سطر)', 'Renders (one link per line)'), '')}<div class="field full"><textarea name="stillsTa" class="ltr notr" rows="4">${esc((c.stills || []).join('\n'))}</textarea></div>${f('site', 'Website', c.site)}${f('ig', 'Instagram', c.ig)}${f('fb', 'Facebook', c.fb)}${f('li', 'LinkedIn', c.li)}${f('be', 'Behance', c.be)}${f('vm', 'Vimeo', c.vm)}</div><div class="row" style="justify-content:flex-end;margin-top:12px"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button></div></form>`; },
+  };
+  document.addEventListener('submit', async ev => { if (ev.target.id !== 'stuloginform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); const o = {}; ['slogan', 'sub', 'video', 'poster', 'logo', 'site', 'ig', 'fb', 'li', 'be', 'vm'].forEach(k => { o[k] = String(d[k] || '').trim(); }); o.stills = String(d.stillsTa || '').split('\n').map(x => x.trim()).filter(Boolean); try { await Store.saveSettings(Object.assign({}, S.settings, { stuLogin: o })); toast(L('اتحفظت', 'Saved')); } catch (e) { toast(L('ماتحفظتش', 'Not saved'), 'err'); } });
+
+  const css = document.createElement('style'); css.textContent = `
+.slogin{position:fixed;inset:0;background:#0b0d10;color:#eceff3;font-weight:300;overflow:auto;font-family:var(--font)}
+.slscene{position:fixed;inset:0;overflow:hidden;background:#0b0d10}.slscene img,.slscene video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity 2.4s ease}
+.slscene .slposter{opacity:1}.slscene .on{opacity:1;z-index:1}.slscene::after{content:"";position:absolute;inset:0;z-index:2;background:linear-gradient(180deg,rgba(11,13,16,.3) 0%,rgba(11,13,16,.55) 55%,rgba(11,13,16,.92) 100%)}
+.slgrain{position:fixed;inset:0;pointer-events:none;background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1.2px);background-size:26px 26px;opacity:.6;z-index:2}
+.slwrap{position:relative;z-index:3;min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 16px calc(24px + env(safe-area-inset-bottom,0px));gap:26px;text-align:center}
+.slhero,.slside{display:contents}
+.slmark{width:min(240px,56vw);height:auto;display:block;filter:drop-shadow(0 6px 24px rgba(0,0,0,.6))}
+.slslogan{font-size:clamp(28px,4.6vw,44px);font-weight:300;line-height:1.1;margin:0;letter-spacing:.01em}.slsub{color:#9aa3ad;font-size:13px;letter-spacing:.08em;margin:-12px 0 0;text-transform:uppercase}
+.slcard{width:min(380px,100%);background:rgba(12,14,17,.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:24px 22px 18px;box-shadow:0 30px 80px -30px rgba(0,0,0,.9);text-align:start}
+.slform{display:flex;flex-direction:column;gap:10px}.slform h2{margin:0 0 6px;font-weight:400;font-size:15px;color:#9aa3ad;letter-spacing:.04em;text-align:center}
+.slf{position:relative}.slf label{position:absolute;inset-inline-start:14px;top:-7px;font-size:11px;color:#9aa3ad;background:#111419;padding:0 6px;border-radius:6px;opacity:0;transition:.15s}.slf input:not(:placeholder-shown)+label{opacity:1}
+.slf input{width:100%;height:48px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#eceff3;padding:0 16px;font:inherit;font-size:15px;outline:0;box-shadow:none;text-align:start;direction:ltr}
+.slf input:focus{border-color:rgba(255,255,255,.5)}.slf input::placeholder{color:#7f8893}.slf input[type=password],.slf input[data-eye]{direction:inherit;padding-inline-end:46px}.slf .pwwrap{display:block;position:relative}.slf .pweye{position:absolute;top:50%;transform:translateY(-50%);inset-inline-end:10px;color:#9aa3ad}
+.slchk{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#9aa3ad}.slchk input{accent-color:#fff;width:16px;height:16px}
+.slerr{color:#ff8b8b;font-size:12.5px;min-height:16px;margin:0}
+.slbtn{height:48px;border:0;border-radius:12px;background:#fff;color:#0b0d10;font:inherit;font-weight:500;font-size:15px;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px}.slbtn:hover{filter:brightness(.92)}.slbtn svg{width:18px;height:18px}
+.slalt{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.slalt button{border:0;background:none;color:#9aa3ad;font:inherit;font-size:12.5px;cursor:pointer;padding:0;border-bottom:1px solid rgba(255,255,255,.14)}
+.slogin .langrow{margin:0}.slogin .langsw{color:#eceff3}
+.slsoc{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}.slsoc a{border-radius:50%;border:1px solid rgba(255,255,255,.14);display:grid;place-items:center;color:#eceff3;text-decoration:none;background:rgba(255,255,255,.04);transition:.2s}.slsoc a:hover{background:#fff;color:#0b0d10}.slsoc svg{width:45%;height:45%;fill:currentColor}
+.slfoot{color:#9aa3ad;font-size:12px;letter-spacing:.03em}.slfoot a{color:#eceff3;text-decoration:none}
+@media (min-width:1100px){
+  .slwrap{display:grid;grid-template-columns:1.25fr .75fr;align-items:stretch;justify-items:stretch;padding:0;gap:0;text-align:start;min-height:100vh}
+  .slhero{display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start;gap:14px;padding:56px 64px}.slhero .slslogan{font-size:clamp(44px,4.4vw,64px)}.slhero .slsub{margin-top:-4px}
+  .slside{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:48px 40px;background:rgba(11,13,16,.72);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-inline-start:1px solid rgba(255,255,255,.14);text-align:center}
+  .slcard{background:transparent;border:0;box-shadow:none;padding:0;width:min(340px,100%)}
+}
+@media (max-width:600px){.slwrap{justify-content:flex-end;gap:14px;padding-top:30px}.slmark{width:50vw}.slslogan{font-size:30px}.slsub{font-size:11.5px}.slcard{padding:18px 16px 12px;border-radius:20px}.slf input,.slbtn{height:46px}}
+.stuwel{position:fixed;inset:0;z-index:95;background:rgba(11,13,16,.9);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#eceff3;cursor:pointer}
+.stuwel .box{width:min(460px,100%);text-align:center;animation:stuwup .6s ease}@keyframes stuwup{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.stuwel .av{width:92px;height:92px;border-radius:50%;margin:0 auto 14px;overflow:hidden;background:#2b3138;border:3px solid #fff}.stuwel .av img,.stuwel .av svg{width:100%;height:100%;object-fit:cover;display:block}
+.stuwel h1{font-weight:300;font-size:32px;margin:0}.stuwel h1 b{font-weight:500}.stuwel .d{color:#9aa3ad;margin:6px 0 20px;font-size:13px;letter-spacing:.06em}
+.stuwel .k{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stuwel .k div{border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:14px 8px;background:rgba(255,255,255,.04)}.stuwel .k b{display:block;font-size:30px;font-weight:300}.stuwel .k span{font-size:12px;color:#9aa3ad}
+.stuwel .go{margin-top:20px;color:#9aa3ad;font-size:13px}.stuwel .bar{height:2px;background:rgba(255,255,255,.12);border-radius:2px;margin-top:12px;overflow:hidden}.stuwel .bar i{display:block;height:100%;width:0;background:#fff;animation:stuwfill 4s linear forwards}@keyframes stuwfill{to{width:100%}}
+.stufoot{display:none}
+@media (min-width:761px){.stufoot{display:flex;align-items:center;gap:14px;margin:28px 0 4px;padding:14px 0 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.stufoot img{height:14px;width:auto;opacity:.8}html[data-theme="light"] .stufoot img{filter:invert(1)}.stufoot a{color:var(--ink-2);text-decoration:none}.stufoot .grow{flex:1}.slsoc.sm a{color:var(--muted);border-color:var(--line);background:transparent}.slsoc.sm a:hover{background:var(--ink);color:var(--bg)}}
+@media print{.stufoot,.stuwel{display:none!important}}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v6.31 — Ninety Studioz: the system locks itself and asks for the password again.
+   · Locks: when the employee takes a break (new break button next to the punch button — break start/end are written on the
+     attendance row as brk[]), when he punches out, after N minutes without touching the system (Settings, default 10),
+     and whenever the app is reopened while locked.
+   · The lock screen: the studio login look, the person's photo + name, the password only, "not me" goes to the normal sign-in.
+   · The lock is also written on the server (workers.sessLock — a person can write his own record) so another device of his
+     finds it locked too; unlocking re-checks the password with the server (signInWithPassword) and clears it.
+   · Settings → system-lock tab: minutes, and whether the owner / art director are exempt.
+   Studio only.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_STULOCK__) return; window.__NF_STULOCK__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const cfg = () => Object.assign({ minutes: 10, exempt: true, on: true }, (S.settings && S.settings.stuLock) || {});
+  const LK = { on: false, why: '', last: Date.now(), busy: false };
+  const wrec = () => (S.session && S.session.workerId ? byId('workers', S.session.workerId) : null);
+  const exempt = () => { const c = cfg(); return !c.on || (c.exempt && (isAdmin() || role() === 'manager')); };
+  const lsKey = () => 'nf.lock.' + ((S.session && (S.session.workerId || S.session.id)) || '');
+  const savedLock = () => { try { return JSON.parse(localStorage.getItem(lsKey()) || 'null'); } catch (e) { return null; } };
+
+  async function lock(why) {
+    if (!S.session || LK.on || exempt()) return; LK.on = true; LK.why = why || '';
+    try { localStorage.setItem(lsKey(), JSON.stringify({ at: Date.now(), why: LK.why })); } catch (e) { /* ignore */ }
+    const w = wrec(); if (w && !w.sessLock) { try { await Store.update('workers', w.id, { sessLock: nowISO() }, { silent: true }); } catch (e) { /* offline: the device lock still holds */ } }
+    try { closeModal(); } catch (e) { /* ignore */ }
+    paint();
+  }
+  async function unlock() {
+    LK.on = false; LK.why = ''; LK.last = Date.now(); try { localStorage.removeItem(lsKey()); } catch (e) { /* ignore */ }
+    const w = wrec(); if (w && w.sessLock) { try { await Store.update('workers', w.id, { sessLock: null }, { silent: true }); } catch (e) { /* ignore */ } }
+    const el = document.getElementById('stulock'); if (el) el.remove(); document.body.classList.remove('stu-locked');
+  }
+  /* verify the password with the server (or the local hash when offline / local mode) */
+  async function verify(pw) {
+    if (!pw) return false;
+    if (typeof sbOn === 'function' && sbOn() && S.sb) {
+      const email = (S.sbUser && S.sbUser.email) || (wrec() ? sbEmail(loginIdOf(wrec())) : null); if (!email) return false;
+      const { error } = await S.sb.auth.signInWithPassword({ email, password: pw }); return !error;
+    }
+    const w = wrec(); if (w && w.passHash && w.salt) return (await hashPassword(w.salt, pw)) === w.passHash;
+    const st = S.session && byId('staff', S.session.id); if (st && st.passHash && st.salt) return (await hashPassword(st.salt, pw)) === st.passHash;
+    return false;
+  }
+  function paint() {
+    if (!LK.on || document.getElementById('stulock')) return; document.body.classList.add('stu-locked');
+    const c = typeof stuSocialsHTML === 'function' ? (S.settings && S.settings.stuLogin) || {} : {}; const me = S.session.workerId || S.session.id; const ph = (window.nfPhoto && nfPhoto(me)) || S.session.avatar || null;
+    const why = LK.why === 'break' ? L('إنت في بريك — اكتب كلمة السر لما ترجع', 'You are on a break — type your password when you are back') : LK.why === 'out' ? L('سجّلت انصراف — السيستم اتقفل', 'You punched out — the system is locked') : LK.why === 'idle' ? L('اتقفل لأنك سبته شوية', 'Locked after a while without use') : L('اكتب كلمة السر عشان تكمّل', 'Type your password to continue');
+    const el = document.createElement('div'); el.id = 'stulock'; el.className = 'stulock'; el.setAttribute('dir', en() ? 'ltr' : 'rtl');
+    el.innerHTML = `<div class="slscene"><img class="slposter" src="${esc(c.poster || 'https://erhcnkjyaumdoixkksbz.supabase.co/storage/v1/object/public/app/brand/stu/hero-poster.webp')}" alt=""></div><div class="slgrain"></div>
+      <div class="box"><img class="slmark" src="${esc(c.logo || 'https://erhcnkjyaumdoixkksbz.supabase.co/storage/v1/object/public/app/brand/stu/wordmark-white.png')}" alt="NINETY">
+        <div class="av">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : '')}</div><h1 class="notr">${esc(S.session.name || '')}</h1><p class="why">${why}</p>
+        <form id="stulockform" class="slform"><div class="slf"><input type="password" name="pw" id="lk-pw" class="ltr" autocomplete="current-password" required placeholder="${L('كلمة السر', 'Password')}" autofocus></div><p id="lk-err" class="slerr"></p><button type="submit" class="slbtn">${LK.why === 'break' ? L('رجعت من البريك', 'Back from the break') : L('افتح', 'Unlock')}</button></form>
+        <button type="button" class="lkalt" data-action="stuLockNotMe">${L('مش أنا؟ ادخل بحساب تاني', 'Not you? Sign in as someone else')}</button></div>`;
+    document.body.appendChild(el); const fm = el.querySelector('#stulockform'); fm.querySelector('.slbtn').addEventListener('click', ev => { ev.preventDefault(); fm.requestSubmit ? fm.requestSubmit() : fm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true })); }); setTimeout(() => { const i = el.querySelector('#lk-pw'); if (i) i.focus(); }, 80);
+  }
+  document.addEventListener('submit', async ev => {
+    if (ev.target.id !== 'stulockform') return; ev.preventDefault(); if (LK.busy) return; LK.busy = true; const f = ev.target; const b = f.querySelector('button'); b.disabled = true; const err = f.querySelector('#lk-err');
+    try { const ok = await verify(f.pw.value); if (!ok) { err.textContent = L('كلمة السر غلط', 'Wrong password'); f.pw.value = ''; f.pw.focus(); return; } const why = LK.why; await unlock(); if (why === 'break') await breakEnd(); toast(L('أهلًا بيك تاني', 'Welcome back')); }
+    finally { LK.busy = false; b.disabled = false; }
+  });
+  ACTIONS.stuLockNotMe = async () => { await unlock(); const a = document.querySelector('[data-action="logout"]'); if (a) a.click(); else { lsSet('nf.staff', null); S.session = null; render(true); } };
+
+  /* ---------- breaks: a button next to the punch button; start / end on the attendance row ---------- */
+  const today = () => todayISO();
+  const onBreak = w => { const r = attendanceFor(today())[w.id] || {}; const b = (r.brk || []).slice(-1)[0]; return !!(b && !b.e); };
+  async function breakStart() {
+    const w = wrec(); if (!w) return; const r = attendanceFor(today())[w.id] || {}; if (!r.in) { toast(L('سجّل حضور الأول', 'Punch in first'), 'err'); return; } if (onBreak(w)) { lock('break'); return; }
+    const brk = (r.brk || []).concat([{ s: nowISO() }]); try { await setAtt(today(), w, Object.assign({}, r, { brk })); } catch (e) { toast(L('ماتسجلش البريك', 'Break not recorded'), 'err'); return; }
+    await lock('break');
+  }
+  async function breakEnd() {
+    const w = wrec(); if (!w) return; const r = attendanceFor(today())[w.id] || {}; const brk = (r.brk || []).slice(); const last = brk[brk.length - 1]; if (!last || last.e) return;
+    last.e = nowISO(); try { await setAtt(today(), w, Object.assign({}, r, { brk })); } catch (e) { /* ignore */ }
+  }
+  ACTIONS.stuBreak = () => breakStart();
+  /* punch out → lock */
+  if (typeof ACTIONS.selfPunch === 'function') ACTIONS.selfPunch = (base => async function (arg, btn) {
+    const w = wrec(); const before = w ? !!(attendanceFor(today())[w.id] || {}).out : false;
+    const r = await base.apply(this, arguments);
+    if (w && !before) { setTimeout(() => { const now = attendanceFor(today())[w.id] || {}; if (now.out && !exempt()) lock('out'); }, 600); }
+    return r;
+  })(ACTIONS.selfPunch);
+  /* the break button on «بوابتي» next to the punch button */
+  if (typeof vMeBase === 'function') vMeBase = (base => function () {
+    const html = base.apply(this, arguments); const w = wrec(); if (!w || exempt()) return html; const r = attendanceFor(today())[w.id] || {}; if (!r.in || r.out) return html;
+    const btn = `<button type="button" class="btn" style="font-size:16px;padding:12px 22px;margin-top:12px;border-radius:14px;margin-inline-start:8px" data-action="stuBreak">${icon('moon')}<span>${onBreak(w) ? L('راجع من البريك', 'Back from break') : L('بريك', 'Break')}</span></button>`;
+    const i = html.search(/<button class="btn p"[^>]*data-action="selfPunch"[\s\S]*?<\/button>/); if (i < 0) return html; const j = html.indexOf('</button>', i) + 9; return html.slice(0, j) + btn + html.slice(j);
+  })(vMeBase);
+
+  /* ---------- idle + reopen ---------- */
+  const touch = () => { LK.last = Date.now(); }; ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(ev => document.addEventListener(ev, touch, { passive: true, capture: true }));
+  setInterval(() => { if (!S.session || LK.on || exempt() || document.querySelector('#loginform')) return; const m = +cfg().minutes || 10; if (Date.now() - LK.last > m * 60000) lock('idle'); }, 15000);
+  function checkOnOpen() {
+    if (!S.session || LK.on || exempt()) return; const w = wrec(); const dev = savedLock();
+    if (dev || (w && w.sessLock)) { LK.on = true; LK.why = (dev && dev.why) || 'reopen'; paint(); }
+  }
+  document.addEventListener('nf:ready', () => setTimeout(checkOnOpen, 400)); document.addEventListener('nf:login', () => { LK.last = Date.now(); const w = wrec(); if (w && w.sessLock) Store.update('workers', w.id, { sessLock: null }, { silent: true }).catch(() => {}); try { localStorage.removeItem(lsKey()); } catch (e) { /* ignore */ } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkOnOpen(); });
+  let tries = 0; const iv = setInterval(() => { tries++; if (tries > 60) clearInterval(iv); if (S.session && S.loaded && S.loaded.workers) { clearInterval(iv); checkOnOpen(); } }, 1000);
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (LK.on && !document.getElementById('stulock')) paint(); });
+
+  /* ---------- settings ---------- */
+  EXTRA_SETTINGS.stulock = { label: 'قفل السيستم', render: () => { const c = cfg(); return `<form class="card" id="stulockcfg"><h3>${L('قفل السيستم بكلمة السر', 'System lock with the password')}</h3><p class="small muted">${L('السيستم بيتقفل لوحده عند البريك والانصراف ولما يتساب من غير استخدام، ومايفتحش غير بكلمة السر.', 'The system locks itself on breaks, on punch-out and after a while without use, and only the password opens it.')}</p><div class="form">
+    <label class="check full"><input type="checkbox" name="on" ${c.on ? 'checked' : ''}> ${L('تفعيل القفل', 'Lock enabled')}</label>
+    ${field(L('يتقفل بعد (دقايق من غير استخدام)', 'Lock after (minutes without use)'), inp('minutes', c.minutes, 'type="number" min="1" max="120" class="ltr"'))}
+    <label class="check full"><input type="checkbox" name="exempt" ${c.exempt ? 'checked' : ''}> ${L('المالك والمدير الفني معفيين', 'Owner and art director exempt')}</label>
+    </div><div class="row" style="justify-content:flex-end;margin-top:12px"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button></div></form>`; } };
+  document.addEventListener('submit', async ev => { if (ev.target.id !== 'stulockcfg') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); try { await Store.saveSettings(Object.assign({}, S.settings, { stuLock: { on: !!d.on, minutes: Math.max(1, +d.minutes || 10), exempt: !!d.exempt } })); toast(L('اتحفظت', 'Saved')); } catch (e) { toast(L('ماتحفظتش', 'Not saved'), 'err'); } });
+
+  const css = document.createElement('style'); css.textContent = `
+.stulock{position:fixed;inset:0;z-index:200;background:#0b0d10;color:#eceff3;display:flex;align-items:center;justify-content:center;padding:24px 16px;font-family:var(--font);font-weight:300;overflow:auto}
+.stulock .slscene{position:absolute}.stulock .slscene::after{background:rgba(11,13,16,.82)}
+.stulock .box{position:relative;z-index:3;width:min(360px,100%);text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px}
+.stulock .slmark{width:150px;margin-bottom:10px}
+.stulock .av{width:96px;height:96px;border-radius:50%;overflow:hidden;background:#2b3138;border:3px solid #fff}.stulock .av img,.stulock .av svg{width:100%;height:100%;object-fit:cover;display:block}
+.stulock h1{font-weight:400;font-size:24px;margin:0}.stulock .why{color:#9aa3ad;font-size:13.5px;margin:-6px 0 6px}
+.stulock .slform{width:100%}.stulock .slf input{text-align:center}
+.lkalt{border:0;background:none;color:#9aa3ad;font:inherit;font-size:12.5px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);padding:0;margin-top:6px}
+body.stu-locked #root{filter:blur(6px);pointer-events:none;user-select:none}`;
+  document.head.appendChild(css);
+  window.nfLock = { lock, unlock, state: LK };
 })();
 </script>
 
