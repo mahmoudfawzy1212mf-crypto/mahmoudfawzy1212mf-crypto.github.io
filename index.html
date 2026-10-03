@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-0748-d3b3de";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-0843-cf0f6b";</script>
 
 <script>
 'use strict';
@@ -30065,6 +30065,137 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 [dir=ltr] .psentry > svg:last-child{transform:none}
 @media (max-width:700px){.psrow{grid-template-columns:44px 12px 1fr}.psplay{inset-inline:10px;bottom:10px}}
 `; document.head.appendChild(css);
+})();
+/* =====================================================================
+   v6.18 — (المصنع) دورة اعتماد أمر الشراء بالأسماء
+   محمود: مدير المصنع يعتمد ← المورد الجديد يتسجل لوحده + الصنف ياخد كوده ← أمر الشراء جاهز لبهاء (مهمة باسمه)
+   ← بهاء يبعته ← مهمة لأحمد عبد الظاهر (مسؤول الحسابات) ← يعتمد ← مهمة لسعيد (مدير الحسابات والموارد البشرية) يعتمد
+   ← بعدها بس يوصل للمالك يحوّل أو يأجّل.
+   - عرض من مورد مش متسجل: بهاء يكتب اسمه وتليفونه بس (أو يختار من المقترحين) — المورد بيتحفظ «مقترح» ومش بيظهر
+     في قائمة الموردين، ولما مدير المصنع يعتمد عرضه بيتسجل لوحده (ومهمة لبهاء يكمّل الموقع والضريبة).
+   - نصوص المهام والإشعارات من غير مبالغ. مفيش أي تغيير في مين يشوف الأسعار.
+   ===================================================================== */
+(function () {
+  if (window.__NF_POFLOW__) return; window.__NF_POFLOW__ = 1;
+  const fac = () => !(typeof isStuSys === 'function' && isStuSys());
+  const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+  const allSups = () => Array.from(S.data.suppliers.values()).filter(s => s && !s.deleted);
+  const projOf = p => { const o = p && p.orderId && byId('orders', p.orderId); return o ? `${o.code || ''}${o.title ? ' — ' + o.title : ''}` : (p && p.deptId ? deptName(p.deptId) : '—'); };
+  const namesOf = rl => list('workers').filter(w => w.role === rl && w.status !== 'inactive').map(w => w.name).filter(Boolean).join('، ');
+  const stepWho = rl => { const n = namesOf(rl); return `${CHAIN_LABEL[rl] || rl}${n ? ` (${n})` : ''}`; };
+  window.nfPoFlow = { projOf, stepWho };
+
+  /* ---------- 1) provisional suppliers stay out of every supplier list until the manager approves ---------- */
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) { const a = base.call(this, col, arr); return col === 'suppliers' ? a.filter(s => !s || !s.prov) : a; })(listScope);
+
+  /* the offer dialog: «مورد مش متسجل» = name + phone only */
+  openModal = (base => function (o) {
+    if (!fac() || !o || typeof o.title !== 'string' || !/عرض مورد —/.test(o.title) || typeof o.onSubmit !== 'function') return base.apply(this, arguments);
+    const p = list('purchases').find(x => x.kind === 'rfq' && x.number && o.title.includes(x.number)); if (!p) return base.apply(this, arguments);
+    const used = new Set((p.rfqOffers || []).map(x => x.supplierId)); const provs = allSups().filter(s => s.prov && used.has(s.id));
+    const others = ((p.rfqSuggest || {}).others || []).filter(x => !allSups().some(s => digits(s.phone) && digits(s.phone) === digits(x.phone)));
+    const box = `<div class="qsbox" style="margin-top:8px;padding:8px;border:1px dashed var(--line);border-radius:10px"><div class="small bold">مورد مش متسجل؟ اكتب اسمه وتليفونه بس</div><div class="tiny muted">هيتسجل في الموردين لوحده لما مدير المصنع يعتمد عرضه.</div>${others.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin:6px 0">${others.map(x => `<button type="button" class="btn xs" data-qsname="${esc(x.name)}" data-qsphone="${esc(x.phone || '')}">${esc(x.name)}${x.phone ? ' · ' + esc(x.phone) : ''}</button>`).join('')}</div>` : ''}<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><input class="inp" id="f-qsName" placeholder="اسم المورد" style="flex:2;min-width:140px"><input class="inp ltr" id="f-qsPhone" placeholder="التليفون" style="flex:1;min-width:120px"></div></div>`;
+    const esid = window.__nfEditSid || ''; window.__nfEditSid = null;
+    const provOpts = provs.map(s => `<option value="${s.id}" ${s.id === esid ? 'selected' : ''}>${esc(s.name)} — مقترح (مش متسجل لسه)</option>`).join('');
+    let body = String(o.body || '');
+    body = body.replace('<option value="">— اختر المورد —</option>', `<option value="">— اختر المورد —</option>${provOpts}`);
+    const k = body.indexOf('data-action="rfqNewSupplier"'); if (k > 0) { const e = body.indexOf('</button>', k); if (e > 0) body = body.slice(0, e + 9) + box + body.slice(e + 9); }
+    const sub0 = o.onSubmit;
+    const o2 = Object.assign({}, o, { body, onSubmit: async f => {
+      const nm = (f.querySelector('#f-qsName') || {}).value || ''; const ph = (f.querySelector('#f-qsPhone') || {}).value || ''; const sel = f.querySelector('#f-supplierId');
+      if (nm.trim() && sel) {
+        if (!digits(ph) || digits(ph).length < 7) { toast('اكتب تليفون المورد', 'err'); return false; }
+        let s = allSups().find(x => digits(x.phone) && digits(x.phone) === digits(ph)) || allSups().find(x => (x.name || '').trim() === nm.trim());
+        if (s && !s.prov) toast(`${s.name} متسجل بالفعل — اتختار`);
+        if (!s) { const me = S.session || {}; s = { id: uid(), name: nm.trim(), phone: ph.trim(), prov: true, provFrom: p.id, notes: 'مورد مقترح — يتسجل لوحده بعد اعتماد مدير المصنع', createdAt: nowISO(), createdByName: me.name || '' }; await Store.save('suppliers', s, { silent: true }); }
+        if (![...sel.options].some(x => x.value === s.id)) sel.insertAdjacentHTML('beforeend', `<option value="${s.id}">${esc(s.name)}</option>`);
+        sel.value = s.id;
+      }
+      return sub0(f);
+    } });
+    const r = base.call(this, o2);
+    setTimeout(() => { document.querySelectorAll('#mform [data-qsname]').forEach(b => b.addEventListener('click', () => { const f = document.getElementById('mform'); f.querySelector('#f-qsName').value = b.dataset.qsname; f.querySelector('#f-qsPhone').value = b.dataset.qsphone; const sel = f.querySelector('#f-supplierId'); if (sel) sel.value = ''; })); }, 0);
+    return r;
+  })(openModal);
+
+  if (ACTIONS.rfqOfferEdit) ACTIONS.rfqOfferEdit = (base => arg => { try { const [id, oid] = String(arg).split(':'); const of = ((byId('purchases', id) || {}).rfqOffers || []).find(x => x.id === oid); window.__nfEditSid = of ? of.supplierId : null; } catch (e) { /* ignore */ } return base(arg); })(ACTIONS.rfqOfferEdit);
+
+  /* ---------- 2) manager approval → the supplier is registered by itself, items coded, PO ready for purchasing ---------- */
+  if (typeof rfqCodeAndOrder === 'function') rfqCodeAndOrder = (base => async function (p, by) {
+    if (!fac()) return base.apply(this, arguments);
+    const q = (byId('purchases', p.id) || p).rfqQuote || {}; const s = q.supplierId && byId('suppliers', q.supplierId); let auto = null;
+    if (s && s.prov) { auto = s; await Store.update('suppliers', s.id, { prov: false, autoReg: { from: p.id, number: p.number, byName: by || '', at: nowISO() }, incomplete: !s.location, notes: `اتسجل لوحده بعد اعتماد مدير المصنع لعرضه في ${p.number}` }, { silent: true }); }
+    const r = await base.apply(this, arguments);
+    if (auto && !auto.location) await notifyRole('purch', `كمّل بيانات المورد ${auto.name}`, `اتسجل لوحده بعد اعتماد مدير المصنع (${p.number}).\nضيف موقعه على الخريطة ونوع الضريبة من «الموردون» قبل الاستلام.`, { id: `supdata_${auto.id}`, kind: 'task', fields: { link: '/#/suppliers' } });
+    return r;
+  })(rfqCodeAndOrder);
+
+  /* ---------- 3) the chain: … ← accounts officer ← Accounts & HR manager ← owner transfer ---------- */
+  if (typeof poChainFor === 'function') poChainFor = (base => p => { const c = base(p).slice(); if (!fac()) return c; const i = c.indexOf('acc'); if (i >= 0 && !c.includes('hr')) c.splice(i + 1, 0, 'hr'); return c; })(poChainFor);
+  /* the accounts officer's step is his — the Accounts & HR manager approves after him, not in his place */
+  stepActor = (base => function (step, r) { if (fac() && r && r.type === 'po' && step === 'acc' && role() === 'hr') return false; return base.apply(this, arguments); })(stepActor);
+
+  /* ---------- 4) task texts: named steps, project + supplier, no amounts ---------- */
+  const poTexts = (p, rl, prevName) => {
+    const sup = p.supplier || (supplierOf(p) || {}).name || '—'; const proj = projOf(p); const items = (p.items || []).map(it => `${byId('materials', it.materialId)?.code || ''} ${it.name || byId('materials', it.materialId)?.name || ''} × ${fmtNum(it.qty)}`.trim()).join('، ');
+    if (rl === 'acc') return { title: `أمر شراء جاي لمشروع ${proj} للمورد ${sup}${p.rfqPrice && p.rfqPrice.ok ? ' — اتعتمد من مدير المصنع' : ''}`, desc: `${p.number}: ${items}\nراجع المورد والأسعار من صفحة الأمر واعتمده — بعدك ${stepWho('hr')} ثم تحويل المالك.` };
+    if (rl === 'hr') return { title: `أمر شراء لمشروع ${proj} للمورد ${sup} — اعتمده ${prevName || CHAIN_LABEL.acc}`, desc: `${p.number}: ${items}\nراجعه واعتمده — بعدك يروح للمالك يحوّل للمورد.` };
+    if (rl === 'manager') return { title: `اعتماد أمر شراء لمشروع ${proj} — مورد جديد ${sup}`, desc: `${p.number}: ${items}\nاعتمده أو ارفضه من «الطلبات».` };
+    return null;
+  };
+  notifyRole = (base => async function (toRole, title, desc, extra = {}) {
+    try {
+      const id = String(extra.id || ''); const pid = extra.fields && extra.fields.purchaseId; const p = pid && byId('purchases', pid);
+      if (fac() && p && id === `rfqok_${p.id}` && toRole === 'purch') {
+        const nb = p.items || []; title = `أمر شراء جاهز: مشروع ${projOf(p)} ← المورد ${p.supplier || '—'}`;
+        desc = `${p.number}: ${nb.map(x => `${byId('materials', x.materialId)?.code || ''} ${x.name}`).join('، ')}\nمدير المصنع اعتمد والصنف اتكوّد. راجعه وابعته: ${stepWho('acc')} ← ${stepWho('hr')} ← تحويل المالك.`;
+        extra = Object.assign({}, extra, { kind: 'task', priority: 'high' });
+      } else if (fac() && p && id === `po_appr_${p.id}`) { const t = poTexts(p, toRole); if (t) { title = t.title; desc = t.desc; extra = Object.assign({}, extra, { kind: 'task', priority: 'high' }); } }
+      else if (fac() && p && id === `po_hr_${p.id}` && ((p.approval && p.approval.chain) || []).includes('hr')) return null; /* he approved it himself */
+    } catch (e) { /* ignore */ }
+    return base.call(this, toRole, title, desc, extra);
+  })(notifyRole);
+  if (typeof pushSend === 'function') pushSend = (base => async function (to, title, body, url, tag) { try { const m = /^po-hr-(.+)$/.exec(String(tag || '')); if (m && fac()) { const p = byId('purchases', m[1]); if (p && ((p.approval && p.approval.chain) || []).includes('hr')) return; } } catch (e) { /* ignore */ } return base.apply(this, arguments); })(pushSend);
+
+  /* ---------- 5) each step → a named task for the next approver; the steps are logged on the PO ---------- */
+  const closeT = async (id, note) => { const t = byId('tasks', id); if (t && t.status !== 'done') await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', proof: note ? { note, at: nowISO() } : t.proof }, { silent: true }); };
+  decideRequest = (base => async function (id, status, note, opts = {}) {
+    const before = byId('requests', id); const stepRole = before && before.chain ? before.chain[before.step] : null;
+    const ok = await base.apply(this, arguments); if (ok === false || !fac()) return ok;
+    try {
+      const r = byId('requests', id); if (!r || !before || r.type !== 'po' || !r.purchaseId) return ok; const p = byId('purchases', r.purchaseId); if (!p) return ok;
+      const me = S.session || {}; const log = (p.poSteps || []).concat([{ role: stepRole, byName: me.name || '', status, note: note || '', at: nowISO() }]);
+      await Store.update('purchases', p.id, { poSteps: log }, { silent: true });
+      const cur = byId('purchases', p.id) || p;
+      if (r.status === 'pending' && r.step !== before.step) {
+        await closeT(`po_appr_${p.id}`); for (const rl of r.chain.slice(0, r.step)) await closeT(`po_step_${p.id}_${rl}`);
+        const nx = r.chain[r.step]; const t = poTexts(cur, nx, me.name);
+        if (t) await notifyRole(nx, t.title, t.desc, { id: `po_step_${p.id}_${nx}`, kind: 'task', priority: 'high', fields: { purchaseId: p.id, link: `/#/purchases/${p.id}` } });
+      } else if (r.status !== 'pending') {
+        await closeT(`po_appr_${p.id}`); for (const rl of r.chain || []) await closeT(`po_step_${p.id}_${rl}`, r.status === 'approved' ? 'اعتُمد' : 'رُفض');
+      }
+    } catch (e) { /* ignore */ }
+    return ok;
+  })(decideRequest);
+
+  /* the owner's transfer task names who approved it */
+  if (typeof notifyOwner === 'function') notifyOwner = (base => async function (title, desc, opts = {}) {
+    try { const m = /^trf_(.+)$/.exec(String(opts.id || '')); const p = m && fac() && byId('purchases', m[1]); if (p) { const r = p.approval && p.approval.reqId && byId('requests', p.approval.reqId); const last = r && r.chain ? r.chain[r.chain.length - 1] : 'acc'; const who = (p.poSteps || []).filter(x => x.status === 'approved').concat([{ role: last, byName: (S.session || {}).name || '' }]).map(x => `${CHAIN_LABEL[x.role] || x.role}: ${x.byName}`).join(' ← '); desc = `مشروع ${projOf(p)} — ${p.number}\nاعتمده ${who}. حوّل للمورد وارفق صورة التحويل من صفحة الأمر، أو أجّل.`; } } catch (e) { /* ignore */ }
+    return base.call(this, title, desc, opts);
+  })(notifyOwner);
+
+  /* ---------- 6) purchasing follows its PO: «عند مين دلوقتي» ---------- */
+  if (typeof vPurchaseDetail === 'function') vPurchaseDetail = (base => function (id) {
+    let h = base.apply(this, arguments); const p = byId('purchases', id); if (!fac() || !p) return h;
+    const r = p.approval && p.approval.reqId && byId('requests', p.approval.reqId); const chain = (r && r.chain) || (p.approval && p.approval.chain) || [];
+    let line = '';
+    if (p.status === 'approval' && r && r.status === 'pending') line = `${chain.map((c, i) => `<span class="fs ${i < r.step ? 'done' : i === r.step ? 'now' : ''}">${i < r.step ? '✓ ' : ''}${esc(stepWho(c))}</span>`).join('<span class="fa">←</span>')}<span class="fa">←</span><span class="fs">تحويل المالك</span>`;
+    else if (p.status === 'transfer') line = `${chain.map(c => `<span class="fs done">✓ ${esc(stepWho(c))}</span>`).join('<span class="fa">←</span>')}<span class="fa">←</span><span class="fs now">عند المالك — التحويل</span>`;
+    const auto = p.supplierId && byId('suppliers', p.supplierId); const autoNote = auto && auto.autoReg && auto.autoReg.from === p.id ? `<div class="tiny muted" style="margin-top:6px">المورد ${esc(auto.name)} اتسجل لوحده بعد اعتماد مدير المصنع${auto.incomplete ? ' — ناقص موقعه ونوع الضريبة' : ''}.</div>` : '';
+    if (!line && !autoNote) return h;
+    const card = `<div class="card poflow"><div class="cardhead"><h3>مسار اعتماد أمر الشراء</h3></div>${line ? `<div class="flowline">${line}</div>` : ''}${autoNote}</div>`;
+    const i = h.indexOf('<div class="card tight">'); return i > 0 ? h.slice(0, i) + card + h.slice(i) : h + card;
+  })(vPurchaseDetail);
 })();
 </script>
 
