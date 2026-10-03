@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261002-1942-6602a6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-0258-5b9d0f";</script>
 
 <script>
 'use strict';
@@ -18151,6 +18151,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
 
   const osShotsBlock = (p, shots) => `<div class="cardhead" style="margin-top:14px"><h3 style="margin:0">الـMaster Schedule — اللقطات (${shots.length})</h3><div class="grow"></div>${canSchedule(p) ? `<button class="btn sm p" data-action="osShotNew" data-arg="${p.id}">${icon('plus')}لقطة</button>` : ''}</div>
       ${shots.length ? `<div class="tablewrap"><table class="tbl ostbl"><thead><tr><th>اللقطة</th><th>المرحلة</th><th>Artist</th><th>الموعد</th><th></th></tr></thead><tbody>${shots.map(s => shotRow(s, p)).join('')}</tbody></table></div>` : `<p class="small muted">${canSchedule(p) ? 'ضيف لقطات المشروع: كل لقطة بتعدي Composition ← Lighting ← Detailing + AI ← Final Post، وكل مرحلة محتاجة اعتماد.' : 'الـOwner لسه ماعملش الـMaster Schedule.'}</p>`}`;
+  const moodsWaiting = ps => list('boards').filter(b => b.kind === 'ideas' && b.projectId && b.mood && ['sent', 'ok1'].includes(b.mood.state)).map(b => ({ b, p: ps.find(x => x.id === b.projectId) })).filter(({ b, p }) => p && ((b.mood.state === 'sent' && (isOwner(p) || (isAD() && !p.ownerId))) || (b.mood.state === 'ok1' && isAD())));
+  const MOOD_TXT = { sent: ['مستني مراجعة الـOwner', 'warn'], ok1: ['مستني اعتماد الآرت دايركتور', 'warn'], ok: ['اتعتمد ✓', 'good'], back: ['رجع بملاحظات', 'crit'] };
+  const moodLine = p => { const bs = list('boards').filter(b => b.kind === 'ideas' && b.projectId === p.id && b.mood && MOOD_TXT[b.mood.state]); return bs.length ? `<div class="osmood">${bs.map(b => `<a href="#/ideas/${b.id}" class="badge ${MOOD_TXT[b.mood.state][1]}">المود بورد «${esc(b.title || '')}»: ${MOOD_TXT[b.mood.state][0]}</a>`).join(' ')}</div>` : ''; };
   function osPanel(p) {
     loadDir();
     const st = osStatus(p.osStatus || 'data'); const idx = OS_STATUSES.findIndex(s => s.id === st.id); const shots = shotsOf(p.id);
@@ -18167,7 +18170,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
         <div><span>الهدف الداخلي D-2</span><b>${d2(p) ? fmtDate(d2(p)) : '—'}</b><small>أقصى حد D-1: ${d1(p) ? fmtDate(d1(p)) : '—'}</small></div>
         <div><span>اللقطات</span><b>${done}/${shots.length}</b>${late ? `<small class="crit">${late} متأخرة</small>` : ''}${risk ? `<small class="warn">${risk} بعد D-2</small>` : ''}</div></div>
       ${blk ? `<div class="banner crit" style="margin-top:10px">${icon('alert')}<span><b>المشروع واقف</b> — ${esc(OS_CAUSES[blk.cause] || '')}: ${esc(blk.note || '')} · من ${waitTxt(blk.since)} · ${esc(pName(blk.by))}</span></div>` : ''}
-      <div class="osflow">${steps.map((s, i) => { const j = OS_STATUSES.findIndex(x => x.id === s.id); return `<div class="${j < idx ? 'done' : j === idx ? 'on' : ''}" ${canStatus(p) ? `data-action="osStatus" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.ar)}"><b>${String(i + 1).padStart(2, '0')}</b>${esc(s.en)}</div>`; }).join('')}</div>
+      ${moodLine(p)}<div class="osflow">${steps.map((s, i) => { const j = OS_STATUSES.findIndex(x => x.id === s.id); return `<div class="${j < idx ? 'done' : j === idx ? 'on' : ''}" ${canStatus(p) ? `data-action="osStatus" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.ar)}"><b>${String(i + 1).padStart(2, '0')}</b>${esc(s.en)}</div>`; }).join('')}</div>
       ${typeof pmHasBoard === 'function' && pmHasBoard(p.id) && !shots.length ? `<div class="banner info" style="margin-top:14px">${icon('layers')}<span>اللقطات اتنقلت لمهام المشروع — المتابعة والاعتمادات بقت من لوحة المهام (مرحلة Render).</span><a class="btn sm" href="#/pm/${esc(p.id)}">افتح لوحة المهام</a></div>` : osShotsBlock(p, shots)}
     </div>`;
   }
@@ -18197,14 +18200,15 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const vis = ps.filter(p => isAD() || isOwner(p) || (p.team || []).includes(me()) || shotsOf(p.id).some(s => isMe(s.assigneeId)));
     const allShots = vis.flatMap(p => shotsOf(p.id).map(s => ({ s, p })));
     const myApprovals = allShots.filter(({ s, p }) => (s.state === 'owner' && (isOwner(p) || (isAD() && !p.ownerId))) || (s.state === 'ad' && isAD()));
+    const moodWait = moodsWaiting(vis); // v6.13: moodboards waiting for the owner / the art director
     const mine = allShots.filter(({ s }) => isMe(s.assigneeId) && s.state !== 'done');
     const late = allShots.filter(({ s, p }) => shotLate(s) && (isAD() || isOwner(p) || isMe(s.assigneeId)));
     const blocked = vis.filter(p => p.blocked);
     const row = ({ s, p }, extra) => `<a class="osrow" href="#/projects/${p.id}"><b class="ltr">${esc(s.code)}</b><span>${esc(p.name)}</span><span class="muted">${esc(osGate(s.gate).en)}</span><div class="grow"></div>${extra || ''}</a>`;
     const sec = (t, arr, fn, empty) => `<div class="card"><div class="cardhead"><h3 style="margin:0">${t}</h3><span class="muted small">${arr.length}</span></div>${arr.length ? arr.map(fn).join('') : `<p class="small muted">${empty}</p>`}</div>`;
     return `<div class="osboard">${myJdCard()}
-      <div class="oskpis"><div class="kpi"><span>مشاريع شغالة</span><b>${vis.length}</b></div><div class="kpi"><span>مستني اعتمادي</span><b>${myApprovals.length}</b></div><div class="kpi ${late.length ? 'crit' : ''}"><span>لقطات متأخرة</span><b>${late.length}</b></div><div class="kpi ${blocked.length ? 'crit' : ''}"><span>مشاريع واقفة</span><b>${blocked.length}</b></div></div>
-      <div class="grid2">${sec('مستني اعتمادي', myApprovals, x => row(x, `<span class="badge">${x.s.state === 'ad' ? 'اعتماد نهائي' : 'مراجعة أولى'} · ${waitTxt(x.s.state === 'ad' ? (x.s.ok1At || x.s.submittedAt) : x.s.submittedAt)}</span>`), 'مفيش حاجة مستنياك ✓')}
+      <div class="oskpis"><div class="kpi"><span>مشاريع شغالة</span><b>${vis.length}</b></div><div class="kpi"><span>مستني اعتمادي</span><b>${myApprovals.length + moodWait.length}</b></div><div class="kpi ${late.length ? 'crit' : ''}"><span>لقطات متأخرة</span><b>${late.length}</b></div><div class="kpi ${blocked.length ? 'crit' : ''}"><span>مشاريع واقفة</span><b>${blocked.length}</b></div></div>
+      <div class="grid2">${moodWait.length ? `<div class="card" style="grid-column:1/-1"><div class="cardhead"><h3 style="margin:0">مود بوردات مستنية اعتمادي</h3><span class="muted small">${moodWait.length}</span></div>${moodWait.map(({ b, p }) => `<a class="osrow" href="#/ideas/${b.id}"><b>${esc(b.title || '')}</b><span>${esc(p.name)}</span><div class="grow"></div><span class="badge">${b.mood.state === 'ok1' ? 'اعتماد نهائي' : 'مراجعة أولى'} · ${waitTxt(new Date(b.mood.at).toISOString())}</span></a>`).join('')}</div>` : ''}${sec('مستني اعتمادي', myApprovals, x => row(x, `<span class="badge">${x.s.state === 'ad' ? 'اعتماد نهائي' : 'مراجعة أولى'} · ${waitTxt(x.s.state === 'ad' ? (x.s.ok1At || x.s.submittedAt) : x.s.submittedAt)}</span>`), 'مفيش حاجة مستنياك ✓')}
       ${sec('لقطاتي', mine, x => row(x, `<span class="badge ${shotLate(x.s) ? 'crit' : ''}">${gateDue(x.s) ? fmtDate(gateDue(x.s)) : '—'} · ${esc(shotStateTxt(x.s))}</span>`), 'مفيش لقطات عليك دلوقتي')}
       ${sec('متأخر', late, x => row(x, `<span class="badge crit">${fmtDate(gateDue(x.s))} · ${esc(pName(x.s.assigneeId))}</span>`), 'مفيش تأخير ✓')}
       ${sec('واقف', blocked, p => `<a class="osrow" href="#/projects/${p.id}"><b>${esc(p.name)}</b><span class="muted">${esc(OS_CAUSES[p.blocked.cause] || '')}</span><div class="grow"></div><span class="badge crit">${waitTxt(p.blocked.since)}</span></a>`, 'كله ماشي ✓')}</div>
@@ -18286,6 +18290,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   NAV.splice(ins, 0, { id: 'studioos', label: 'لوحة التشغيل', icon: 'dashboard', count: () => { const ps = list('projects').filter(p => p.status !== 'archived' && isOS(p)); return ps.flatMap(p => shotsOf(p.id).map(s => ({ s, p }))).filter(({ s, p }) => (s.state === 'owner' && isOwner(p)) || (s.state === 'ad' && isAD())).length; } }, { id: 'stuorg', label: 'هيكل الاستوديو', icon: 'users' });
 
   document.head.insertAdjacentHTML('beforeend', `<style>
+.osmood{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.osmood a{text-decoration:none}
 .osfacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px}.osfacts>div{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}.osfacts span{font-size:11px;color:var(--muted)}.osfacts b{font-size:15px}.osfacts small{font-size:11px;color:var(--muted)}.osfacts small.crit{color:var(--crit-ink,#e66)}.osfacts small.warn{color:var(--warn-ink,#d9a400)}
 .osflow{display:flex;gap:4px;margin-top:12px;overflow-x:auto;padding-bottom:4px}.osflow>div{flex:1 0 96px;font-size:11px;padding:8px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);cursor:pointer;line-height:1.3}.osflow>div b{display:block;font-size:10px;opacity:.7}.osflow>div.done{color:var(--good-ink);border-color:transparent;background:var(--surface-2)}.osflow>div.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
 .osgates{display:flex;gap:3px;margin-bottom:3px}.osgates i{flex:1;height:5px;border-radius:3px;background:var(--line-2);min-width:22px}.osgates i.ok{background:var(--good-ink,#3a9)}.osgates i.on{background:var(--accent)}.osgates i.rv{background:#d9a400}
@@ -18427,7 +18432,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (i.type === 'pin') { const n = (i.thread || []).length; const who = (i.thread && i.thread[0] && i.thread[0].byName) || i.byName || '?'; return `<span class="pinb${i.resolved ? ' ok' : ''}">${esc(String(who).trim().charAt(0))}</span>${n > 1 ? `<span class="pinc">${n}</span>` : ''}`; }
     if (isHidden(i)) return `<div class="txt nbhid"><span>فكرة مخفية</span></div>`;
     const txt = `<div class="txt" dir="auto" contenteditable="false">${esc(i.text || '')}</div>`; const r = R(i);
-    if (i.type === 'frame') return `<span class="ttl" dir="auto">${esc(i.text || 'Frame')}</span>${badges(i)}`;
+    if (i.type === 'frame') { const sl = i.shotId ? shotLabel(i.shotId) : null; return `<span class="ttl" dir="auto">${esc(i.text || 'Frame')}${sl ? `<span class="shotst ${sl.k}">${esc(sl.t)}</span>` : ''}</span>${badges(i)}`; }
     if (i.type === 'image') return `<img src="${esc(NB.hires.get(i.id) || i.thumb || '')}" alt="" draggable="false">${badges(i)}`;
     if (i.type === 'link') { let host = ''; try { host = new URL(i.url).hostname.replace(/^www\./, ''); } catch (e) { /* ignore */ } return `<div class="lk"><span class="fav">${esc((host || '?').charAt(0).toUpperCase())}</span><div><b dir="auto">${esc(i.text || host || 'Link')}</b><small>${esc(host)}</small></div></div>${badges(i)}`; }
     if (i.type === 'table') return tableHTML(i) + badges(i);
@@ -18437,7 +18442,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (i.type === 'shape') { const sw = i.sw == null ? 2 : +i.sw; return `<svg class="shp" width="${r.w}" height="${r.h}" viewBox="0 0 ${r.w} ${r.h}"><path d="${shapeD(i.shape || 'rect', r.w, r.h)}" fill="${auto(i.fill, 'none')}" stroke="${sw ? auto(i.stroke, 'var(--nb-ink)') : 'none'}" stroke-width="${sw}" ${i.dash ? `stroke-dasharray="${sw * 4} ${sw * 3}"` : ''} stroke-linejoin="round"></path></svg>${txt}${badges(i)}`; }
     return txt + badges(i);
   }
-  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '', i.sv, i.resolved, isHidden(i), (voteS() || {}).sid, voteOn(), NB.showResolved, i.rows, i.cw, i.desc, i.owner, i.due, i.tag, i.name, i.pages, i.mm]);
+  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '', i.sv, i.resolved, isHidden(i), (voteS() || {}).sid, voteOn(), NB.showResolved, i.rows, i.cw, i.desc, i.owner, i.due, i.tag, i.name, i.pages, i.mm, i.shotId ? JSON.stringify(shotLabel(i.shotId)) : '']);
   function fitText(el, i) {
     if (i.type !== 'sticky' || i.size) return; const t = el.querySelector('.txt'); if (!t) return;
     const key = (i.text || '') + '|' + i.w + 'x' + i.h; const c = NB.fitCache.get(key); if (c && NB.editing !== i.id) { t.style.fontSize = c + 'px'; return; }
@@ -18516,6 +18521,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- icons ---------- */
   const I = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   const IC = {
+    shot: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M3 15h18M7 5v4M12 5v4M17 5v4M7 15v4M12 15v4M17 15v4"/>', aistar: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
     present: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8M10.5 7.5l3.5 2.5-3.5 2.5z"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>', hist: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5M12 7.5V12l3 2"/>',
     plus2: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>', table: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9.5h18M3 15h18M9 4v16M15 4v16"/>', card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9.5h10M7 13h6"/><path d="M3 5v14" stroke-width="3.5"/>', mind: '<circle cx="12" cy="12" r="3"/><circle cx="4.5" cy="5.5" r="2"/><circle cx="19.5" cy="5.5" r="2"/><circle cx="19.5" cy="18.5" r="2"/><path d="M9.8 10L6 7M14.2 10L18 7M14.2 14l3.8 3"/>', file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>', video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>', tpl: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>',
     select: '<path d="M5 3l14 8-6.2 1.8L10 19z"/>', hand: '<path d="M8 13V6a1.5 1.5 0 013 0v5m0-1V4.5a1.5 1.5 0 013 0V11m0-4.5a1.5 1.5 0 013 0V14c0 4-2.6 7-6.5 7-3 0-4.6-1.6-5.7-3.7L3.5 13a1.5 1.5 0 012.6-1.5L8 14"/>',
@@ -18538,10 +18544,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const tb = (tool, label, ic, fly) => `<button type="button" class="${NB.tool === tool ? 'on' : ''}" data-nbtool="${tool}" title="${label}">${I(ic)}${fly ? '<em></em>' : ''}</button>`;
   function toolsHTML() {
     const penIc = NB.pen.mode === 'hl' ? IC.hl : NB.pen.mode === 'eraser' ? IC.eraser : IC.pen;
-    return `${tb('select', 'تحديد (V)', IC.select)}${tb('hand', 'تحريك اللوحة (H — أو مسافة + سحب)', IC.hand)}<hr>${tb('sticky', 'ستيكي نوت (N)', IC.sticky, 1)}${tb('text', 'نص (T)', IC.text)}${tb('shape', 'أشكال (S)', IC.shape, 1)}${tb('conn', 'خط / سهم (L)', IC.conn, 1)}${tb('pen', 'قلم (P)', penIc, 1)}${tb('frame', 'فريم (F)', IC.frame)}${tb('pin', 'تعليق على اللوحة (C)', IC.comment)}<hr><button type="button" data-nb="image" title="صورة (I)">${I(IC.image)}</button><button type="button" data-nb="insfly" data-flyk="ins" class="${NB.fly === 'ins' ? 'on' : ''}" title="جدول · كارت · خريطة ذهنية · ملف · فيديو · لينك">${I(IC.plus2)}<em></em></button><button type="button" data-nb="tpl" class="${NB.panel === 'tpl' ? 'on' : ''}" title="القوالب">${I(IC.tpl)}</button><hr><button type="button" data-action="stuAi" data-arg="ideas" title="مساعد الذكاء الاصطناعي">${I(IC.ai)}</button>`;
+    return `${tb('select', 'تحديد (V)', IC.select)}${tb('hand', 'تحريك اللوحة (H — أو مسافة + سحب)', IC.hand)}<hr>${tb('sticky', 'ستيكي نوت (N)', IC.sticky, 1)}${tb('text', 'نص (T)', IC.text)}${tb('shape', 'أشكال (S)', IC.shape, 1)}${tb('conn', 'خط / سهم (L)', IC.conn, 1)}${tb('pen', 'قلم (P)', penIc, 1)}${tb('frame', 'فريم (F)', IC.frame)}${tb('pin', 'تعليق على اللوحة (C)', IC.comment)}<hr><button type="button" data-nb="image" title="صورة (I)">${I(IC.image)}</button><button type="button" data-nb="insfly" data-flyk="ins" class="${NB.fly === 'ins' ? 'on' : ''}" title="جدول · كارت · خريطة ذهنية · ملف · فيديو · لينك">${I(IC.plus2)}<em></em></button><button type="button" data-nb="tpl" class="${NB.panel === 'tpl' ? 'on' : ''}" title="القوالب">${I(IC.tpl)}</button><hr><button type="button" data-nb="aifly" data-flyk="aifly" class="${NB.fly === 'aifly' ? 'on' : ''}" title="الذكاء الاصطناعي">${I(IC.ai)}<em></em></button>`;
   }
   const swatches = (list0, cmd, curv, round) => `<div class="nbsw">${list0.map(c => `<span class="${round ? 'r' : ''}${(c || '') === (curv || '') ? ' on' : ''}${c ? '' : ' none'}" style="${c ? `background:${c}` : ''}" data-nb="${cmd}:${c || '-'}" title="${c ? c : 'تلقائي'}"></span>`).join('')}</div>`;
   function flyHTML(k) {
+    if (k === 'aifly') return `<div class="nbcol"><button type="button" data-nb="aiideas">${I(IC.aistar)}<span>${L2('أفكار جديدة', 'New ideas')}</span></button><button type="button" data-nb="aisum">${I(IC.aistar)}<span>${L2('لخّص اللوحة (أو المحدد)', 'Summarise the board (or selection)')}</span></button><button type="button" data-nb="aiclus">${I(IC.aistar)}<span>${L2('جمّع الستيكيز المحددة في مجموعات', 'Group the selected stickies into themes')}</span></button><button type="button" data-action="stuAi" data-arg="ideas">${I(IC.ai)}<span>${L2('صور وكونسبت (مساعد الاستوديو)', 'Images & concept (studio assistant)')}</span></button></div>`;
     if (k === 'ins') return `<div class="nbcol">${[['tbl', IC.table, 'جدول'], ['tcard', IC.card, 'كارت مهمة'], ['tmind', IC.mind, 'خريطة ذهنية'], ['tfile', IC.file, 'ملف / PDF'], ['tvideo', IC.video, 'فيديو (يوتيوب / فيميو)'], ['link', IC.link, 'لينك']].map(([c, ic, l]) => `<button type="button" data-nb="${c}" title="${l}">${I(ic)}<span>${l}</span></button>`).join('')}</div>`;
     if (k === 'sticky') return `<div class="nbflyt">لون الستيكي</div>${swatches(STICKY, 'tsticky', NB.sticky)}`;
     if (k === 'shape') return `<div class="nbflyt">الأشكال</div><div class="nbshapes">${SHAPES.map(([s, l]) => `<button type="button" class="${NB.shape === s ? 'on' : ''}" data-nb="tshape:${s}" title="${l}">${shapeIcon(s)}</button>`).join('')}</div>`;
@@ -18555,7 +18562,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const nC = items().reduce((a, i) => a + (i.thread || []).length, 0);
     const vs = voteS(); const vOn = voteOn();
     const chips = (vOn ? `<span class="nbchip vote">${I(IC.vote)}<span>تصويت · فاضلك ${Math.max(0, (+vs.n || 5) - myVotesUsed())} من ${+vs.n || 5}</span><b id="nbvleft">${fmtLeft(new Date(vs.end).getTime() - Date.now())}</b></span>` : '') + (privOn() ? `<span class="nbchip priv">${I(IC.lock)}<span>وضع خاص — الأفكار مخفية لحد ما تتكشف</span></span>` : '');
-    const h = `${chips}<span class="nbppl" title="أونلاين دلوقتي — اضغط على حد عشان تتابعه">${stuAvatar(me(), 24)}${ppl.map(c => `<button type="button" class="nbav${NB.follow === c.person ? ' on' : ''}" data-nb="follow:${esc(c.person)}" title="تابع ${esc((c.name || '').split(' ')[0])}">${stuAvatar(c.person, 24)}</button>`).join('')}</span><span class="nbrel"><button type="button" class="${NB.reactOpen ? 'on' : ''}" data-nb="reacts" title="ريأكشن">🙂</button>${NB.reactOpen ? `<span class="nbpop nbreacts">${REACTS.map(e => `<button type="button" data-nb="react:${e}">${e}</button>`).join('')}</span>` : ''}</span><span class="nbrel"><button type="button" class="${NB.sessOpen ? 'on' : ''}" data-nb="sess" title="أدوات الجلسة: تصويت، وضع خاص، هات الكل عندي، تايمر">${I(IC.more)}</button>${NB.sessOpen ? `<span class="nbpop nbsess">${sessHTML()}</span>` : ''}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button><button type="button" class="${NB.panel === 'frames' ? 'on' : ''}" data-nb="panel:frames" title="عرض — كل فريم سلايد">${I(IC.present)}</button><button type="button" class="${NB.panel === 'search' ? 'on' : ''}" data-nb="panel:search" title="بحث في اللوحة (Ctrl+F)">${I(IC.search)}</button><button type="button" class="${NB.panel === 'history' ? 'on' : ''}" data-nb="panel:history" title="تاريخ النسخ">${I(IC.hist)}</button>${canX() ? `<span class="nbrel"><button type="button" class="${NB.xOpen ? 'on' : ''}" data-nb="xmenu" title="تصدير: صورة / PDF / طباعة">${I(IC.print)}</button>${NB.xOpen ? xmenuHTML() : ''}</span>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}${typeof nbCallBtn === 'function' ? nbCallBtn(b) : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
+    const bp = boardProj(); const ms = moodSt(b); const moodChip = bp ? `<span class="nbrel"><button type="button" class="nbmood${NB.moodOpen ? ' on' : ''}" data-nb="moodpop" title="${L2('اعتماد المود بورد', 'Moodboard approval')}"><i style="background:${MOODS[ms][1]}"></i><span>${L2('المود بورد', 'Moodboard')}: ${MOODS[ms][0]}</span></button>${NB.moodOpen ? moodPopHTML(b) : ''}</span>` : '';
+    const h = `${chips}${moodChip}<span class="nbppl" title="أونلاين دلوقتي — اضغط على حد عشان تتابعه">${stuAvatar(me(), 24)}${ppl.map(c => `<button type="button" class="nbav${NB.follow === c.person ? ' on' : ''}" data-nb="follow:${esc(c.person)}" title="تابع ${esc((c.name || '').split(' ')[0])}">${stuAvatar(c.person, 24)}</button>`).join('')}</span><span class="nbrel"><button type="button" class="${NB.reactOpen ? 'on' : ''}" data-nb="reacts" title="ريأكشن">🙂</button>${NB.reactOpen ? `<span class="nbpop nbreacts">${REACTS.map(e => `<button type="button" data-nb="react:${e}">${e}</button>`).join('')}</span>` : ''}</span><span class="nbrel"><button type="button" class="${NB.sessOpen ? 'on' : ''}" data-nb="sess" title="أدوات الجلسة: تصويت، وضع خاص، هات الكل عندي، تايمر">${I(IC.more)}</button>${NB.sessOpen ? `<span class="nbpop nbsess">${sessHTML()}</span>` : ''}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${bp && shotsHere().length ? `<button type="button" class="${NB.panel === 'shots' ? 'on' : ''}" data-nb="panel:shots" title="لقطات المشروع (لوحة التشغيل)">${I(IC.shot)}</button>` : ''}<button type="button" class="${NB.panel === 'frames' ? 'on' : ''}" data-nb="panel:frames" title="عرض — كل فريم سلايد">${I(IC.present)}</button><button type="button" class="${NB.panel === 'search' ? 'on' : ''}" data-nb="panel:search" title="بحث في اللوحة (Ctrl+F)">${I(IC.search)}</button><button type="button" class="${NB.panel === 'history' ? 'on' : ''}" data-nb="panel:history" title="تاريخ النسخ">${I(IC.hist)}</button>${canX() ? `<span class="nbrel"><button type="button" class="${NB.xOpen ? 'on' : ''}" data-nb="xmenu" title="تصدير: صورة / PDF / طباعة">${I(IC.print)}</button>${NB.xOpen ? xmenuHTML() : ''}</span>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}${typeof nbCallBtn === 'function' ? nbCallBtn(b) : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
     if (t.__h !== h) { t.__h = h; t.innerHTML = h; tr(t); }
     const tl = document.getElementById('nbtools'); if (tl) { const th = toolsHTML(); if (tl.__h !== th) { tl.__h = th; tl.innerHTML = th; tr(tl); } }
     const u = document.getElementById('nbundo'); if (u) { u.querySelector('[data-nb="undo"]').disabled = !NB.undo.length; u.querySelector('[data-nb="redo"]').disabled = !NB.redo.length; }
@@ -18577,6 +18585,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (only('frame')) b.push(flyb('ffill', `<i class="sw1 ${ss[0].fill ? '' : 'none'}" style="${ss[0].fill ? `background:${ss[0].fill}` : ''}"></i>`, 'لون الفريم'));
     if (one && EDITABLE.includes(one.type)) b.push(btn('edit', IC.edit, one.type === 'frame' ? 'اسم الفريم' : 'اكتب (Enter)'));
     if (one && one.type === 'link') b.push(btn('linkedit', IC.edit, 'تعديل اللينك'), btn('open', IC.open, 'افتح اللينك'));
+    if (ss.length >= 3 && ss.filter(i => ['sticky', 'text', 'card'].includes(i.type)).length >= 3) b.push(btn('aiclus', IC.aistar, 'جمّع في مجموعات بالذكاء الاصطناعي'));
+    if (ss.length >= 2) b.push(btn('aisum', IC.aistar, 'لخّص المحدد بالذكاء الاصطناعي'));
     if (ss.length > 1) b.push(flyb('arrange', I(IC.alignL) , 'محاذاة وتوزيع'), ss.some(i => i.g) && new Set(ss.map(i => i.g)).size === 1 && ss.every(i => i.g) ? btn('ungroup', IC.ungroup, 'فك التجميع (Ctrl+Shift+G)') : btn('group', IC.group, 'تجميع (Ctrl+G)'));
     if (one && one.type === 'table') b.push(`<span class="nbseg"><button type="button" data-nb="trow:1" title="صف جديد">${enOn() ? '+ Row' : '+ صف'}</button><button type="button" data-nb="tcol:1" title="عمود جديد">${enOn() ? '+ Col' : '+ عمود'}</button><button type="button" data-nb="trow:-1" title="امسح آخر صف">${enOn() ? '− Row' : '− صف'}</button><button type="button" data-nb="tcol:-1" title="امسح آخر عمود">${enOn() ? '− Col' : '− عمود'}</button></span>`);
     if (one && one.type === 'card') b.push(btn('cardedit', IC.edit, 'تعديل الكارت'));
@@ -18629,6 +18639,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (NB.panel === 'frames') { const fr = framesOrd(); const h4 = `<div class="ph">${I(IC.present)}<b>${L2('العرض', 'Present')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="nbpinbar"><button type="button" class="btn sm p" data-nb="pres:0" ${fr.length ? '' : 'disabled'}>▶ ${L2('ابدأ العرض', 'Start presenting')}</button></div><div class="pb">${fr.length ? fr.map((f, k) => `<div class="nbfr"><b>${k + 1}</b><a href="#" data-nb="focus:${f.id}" dir="auto">${esc(f.text || 'Frame')}</a>${can() ? `<button type="button" data-nb="frmv:${f.id}:-1" ${k ? '' : 'disabled'} title="${L2('لفوق', 'Up')}">↑</button><button type="button" data-nb="frmv:${f.id}:1" ${k < fr.length - 1 ? '' : 'disabled'} title="${L2('لتحت', 'Down')}">↓</button>` : ''}<button type="button" data-nb="pres:${k}" title="${L2('اعرض من هنا', 'Present from here')}">▶</button></div>`).join('') : `<p class="muted small">${L2('كل فريم على اللوحة بيبقى سلايد. اعمل فريمات بأداة الفريم (F) ورتّبها هنا.', 'Each frame becomes a slide. Make frames with the frame tool (F) and order them here.')}</p>`}</div>`; if (p.__h !== h4) { p.__h = h4; p.innerHTML = h4; tr(p); } p.style.display = ''; return; }
     if (NB.panel === 'search') { if (!p.querySelector('#nbsq')) { p.innerHTML = `<div class="ph">${I(IC.search)}<b>${L2('بحث في اللوحة', 'Search the board')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="nbsq"><input id="nbsq" dir="auto" autocomplete="off" placeholder="${L2('دوّر…', 'Search…')}" value="${esc(NB.q || '')}"></div><div class="pb" id="nbsr">${resHTML()}</div>`; tr(p); p.__h = 'search'; } p.style.display = ''; return; }
     if (NB.panel === 'history') { histPanel(p); return; }
+    if (NB.panel === 'shots') { shotsPanel(p); return; }
     if (NB.panel === 'tpl') { const h3 = `<div class="ph">${I(IC.tpl)}<b>القوالب</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb nbtpls">${TPLS.map(([k, l, d]) => `<button type="button" class="nbtpl" data-nb="tplput:${k}" ${can() ? '' : 'disabled'}><i class="tk tk-${k}"></i><span><b>${l}</b><small>${d}</small></span></button>`).join('')}</div>`; if (p.__h !== h3) { p.__h = h3; p.innerHTML = h3; tr(p); } p.style.display = ''; return; }
     if (NB.panel !== 'comments') { p.style.display = 'none'; p.__h = ''; return; }
     const ss = sel(); const one = ss.length === 1 ? ss[0] : null;
@@ -18731,7 +18742,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function down(e) {
     if (!NB.host) return; if (NB.pres) { if (!e.target.closest('.nbpresbar')) { e.preventDefault(); presGo(NB.pres.i + (e.button === 2 ? -1 : 1)); } return; }
     if (NB.xOpen && !e.target.closest('.nbxmenu,[data-nb="xmenu"]')) { NB.xOpen = false; top(); }
+    if (NB.moodOpen && !e.target.closest('.nbmoodpop,[data-nb="moodpop"]')) { NB.moodOpen = false; top(); }
     if (e.target.closest('.nbui')) return;
+    if (e.pointerType === 'touch' && !NB.editing) { const it0 = hitItem(e); const t0 = Date.now(); if (it0 && NB.lastTap && NB.lastTap.id === it0.id && t0 - NB.lastTap.t < 340) { NB.lastTap = null; e.preventDefault(); dbl(e); return; } NB.lastTap = it0 ? { id: it0.id, t: t0 } : null; }
     if (NB.editing) { const ed = e.target.closest('[data-id]'); if (ed && ed.dataset.id === NB.editing) return; endEdit(); }
     if (NB.fly) closeFly();
     NB.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -18851,6 +18864,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const ids = [...WB.sel]; const ss = sel(); const v = arg === '-' ? null : arg;
     if (NB.fly === 'ins' && c !== 'insfly') { NB.fly = null; flyOpen(null); }
     if (NB.xOpen && c !== 'xmenu') NB.xOpen = false;
+    if (NB.fly === 'aifly' && c !== 'aifly') { NB.fly = null; flyOpen(null); }
+    if (NB.moodOpen && c !== 'moodpop' && c !== 'mood') NB.moodOpen = false;
     switch (c) {
       case 'insfly': if (!can()) return; NB.fly = NB.fly === 'ins' ? null : 'ins'; flyOpen(NB.fly); return top();
       case 'follow': return NB.follow === v ? stopFollow() : startFollow(v);
@@ -18868,6 +18883,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'privend': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { priv: null })); const hid = items().filter(i => i.hid).map(i => i.id); if (hid.length) { const f = a => { a.hid = null; }; f.comment = true; await mutate(hid, f); } NB.sigs.clear(); syncSoon(); toast('اتكشفت كل الأفكار'); return top(); }
       case 'pmtask': { const o = ss[0]; const b0 = wbBoard(); if (!o || !b0 || typeof pmFromIdea !== 'function') return; return pmFromIdea({ projectId: b0.projectId, text: [o.title, o.text, o.desc, o.url].filter(Boolean).join('\n').replace(/<[^>]+>/g, ' '), fileId: ['image', 'file'].includes(o.type) ? o.fileId : null, thumb: o.type === 'image' ? o.thumb : null, src: 'ideas', boardId: b0.id, itemId: o.id }); }
       case 'tpl': NB.panel = NB.panel === 'tpl' ? null : 'tpl'; return top();
+      case 'moodpop': NB.moodOpen = !NB.moodOpen; return top();
+      case 'mood': return moodAct(arg);
+      case 'shotgo': { const ex = items().find(i => i.type === 'frame' && i.shotId === arg); if (ex) { WB.sel = new Set([ex.id]); fit([ex]); selChanged(); return; } return shotFrame(arg); }
+      case 'shotall': return shotFramesAll();
+      case 'aifly': NB.fly = NB.fly === 'aifly' ? null : 'aifly'; flyOpen(NB.fly); return top();
+      case 'aiideas': return aiIdeas();
+      case 'aisum': return aiSum();
+      case 'aiclus': return aiCluster();
       case 'pres': return presStart(+arg || 0);
       case 'presgo': return NB.pres && presGo(NB.pres.i + (+arg || 1));
       case 'presend': return presEnd();
@@ -19013,7 +19036,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (e.shiftKey && code === 'Digit2') { e.preventDefault(); return cmd('fitsel'); }
     if (mod) return;
     if (code === 'Delete' || code === 'Backspace') { if (WB.sel.size) { e.preventDefault(); return cmd('del'); } return; }
-    if (code === 'Escape') { if (NB.fly) return closeFly(); WB.sel = new Set(); setTool('select'); return selChanged(); }
+    if (code === 'Escape') { if (NB.moodOpen || NB.xOpen) { NB.moodOpen = false; NB.xOpen = false; return top(); } if (NB.fly) return closeFly(); WB.sel = new Set(); setTool('select'); return selChanged(); }
     if (code === 'Tab') { const ss = sel(); if (ss.length === 1 && ss[0].mm && can()) { e.preventDefault(); return mmAdd(ss[0], e.shiftKey && !!ss[0].mmp); } return; }
     if (code === 'Enter') { const ss = sel(); if (ss.length === 1 && EDITABLE.includes(ss[0].type)) { e.preventDefault(); return startEdit(ss[0].id); } return; }
     if (/^Arrow/.test(code) && WB.sel.size) { e.preventDefault(); const d = e.shiftKey ? 10 : 1; const dx = code === 'ArrowLeft' ? -d : code === 'ArrowRight' ? d : 0, dy = code === 'ArrowUp' ? -d : code === 'ArrowDown' ? d : 0; return mutate([...WB.sel], a => { const s = shifted(a, dx, dy); Object.assign(a, s); }); }
@@ -19114,7 +19137,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   EXTRA_VIEWS.ideas = r => {
     const b = byId('boards', r.id); if (!b) return '<div class="banner crit">البورد غير موجود</div>'; if (!wbCanSee(b)) return '<div class="banner warn">البورد ده خاص بصاحبه</div>';
-    if (WB.id !== b.id) { WB.id = b.id; WB.sel = new Set(); NB.undo = []; NB.redo = []; NB.live.clear(); NB.editing = null; NB.tool = 'select'; NB.panel = null; NB.hires = new Map(); NB.hiresAsk = new Set(); const v = lsv('nb.view.' + b.id); if (v && isFinite(v.z)) { WB.zoom = v.z; WB.pan = { x: v.x, y: v.y }; NB.fitPending = false; } else NB.fitPending = true; }
+    if (WB.id !== b.id) { WB.id = b.id; WB.sel = new Set(); NB.moodOpen = false; NB.xOpen = false; NB.undo = []; NB.redo = []; NB.live.clear(); NB.editing = null; NB.tool = 'select'; NB.panel = null; NB.hires = new Map(); NB.hiresAsk = new Set(); const v = lsv('nb.view.' + b.id); if (v && isFinite(v.z)) { WB.zoom = v.z; WB.pan = { x: v.x, y: v.y }; NB.fitPending = false; } else NB.fitPending = true; }
     return shellHTML(b);
   };
   /* ---------- v6.11 — Ninety Board release 2: tables, cards, mind maps, files / PDFs, video links, templates ---------- */
@@ -19408,6 +19431,121 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .nb .nbver b{display:block;font-size:13px}
 .nb .nbver small{display:block;font-size:11px;opacity:.65}
 .nb .nbver span{display:flex;gap:4px;flex:none}
+</style>`);
+  /* ---------- v6.13 — Ninety Board release 4: Studio OS shots on the board, moodboard approval gate (Owner → AD), AI on the board, phone polish ---------- */
+  const boardProj = () => { const b = wbBoard(); return b && b.projectId ? byId('projects', b.projectId) : null; };
+  const myIds = () => (typeof stuMeIds === 'function' ? stuMeIds() : [me()]).filter(Boolean);
+  const isPOwner = p => !!(p && p.ownerId && myIds().includes(p.ownerId));
+  const isAD2 = () => isAdmin() || role() === 'manager';
+  const MOODS = { draft: ['مسودة', '#9aa5b1'], sent: ['مستني مراجعة الـOwner', '#fac710'], ok1: ['مستني اعتماد الآرت دايركتور', '#ff9d48'], ok: ['اتعتمد ✓', '#3aa874'], back: ['رجع بملاحظات', '#f24726'] };
+  const moodSt = b => (b && b.mood && b.mood.state) || 'draft';
+  const moodCan = (b, act) => { const p = boardProj(); const s = moodSt(b); if (!b || !p) return false;
+    if (act === 'send') return can() && ['draft', 'back', 'ok'].includes(s);
+    if (act === 'ok1') return s === 'sent' && (isPOwner(p) || (isAD2() && !p.ownerId));
+    if (act === 'ok') return (s === 'ok1' && isAD2()) || (s === 'sent' && isAD2() && !p.ownerId);
+    if (act === 'back') return (s === 'sent' && (isPOwner(p) || isAD2())) || (s === 'ok1' && isAD2());
+    return false; };
+  const adIds2 = () => list('workers').filter(w => w.role === 'manager' && w.status !== 'inactive').map(w => w.id);
+  const pushIds = (ids, body, b) => { try { const to = []; (ids || []).filter(Boolean).forEach(id => { if (!myIds().includes(id)) to.push(id, 'w:' + id); }); if (to.length && typeof pushSend === 'function') pushSend([...new Set(to)], 'Ninety Board', body, `#/ideas/${b.id}`, 'board'); } catch (e) { /* best effort */ } };
+  function moodPopHTML(b) {
+    const s = moodSt(b); const m = b.mood || {}; const p = boardProj(); const acts = [];
+    if (moodCan(b, 'send')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:send">${s === 'ok' ? L2('ابعت تعديل للاعتماد', 'Send changes for approval') : L2('ابعت للاعتماد', 'Send for approval')}</button>`);
+    if (moodCan(b, 'ok1')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:ok1">${L2('موافقة مبدئية (Owner)', 'Owner approval')}</button>`);
+    if (moodCan(b, 'ok')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:ok">${L2('اعتماد نهائي', 'Final approval')}</button>`);
+    if (moodCan(b, 'back')) acts.push(`<button type="button" class="btn sm" data-nb="mood:back">${L2('رجّعه بملاحظات', 'Return with notes')}</button>`);
+    const hist = (m.hist || []).slice(-6).reverse().map(h => `<div class="nbmh"><i style="background:${(MOODS[h.s] || MOODS.draft)[1]}"></i><span><b>${esc((MOODS[h.s] || MOODS.draft)[0])}</b> · ${esc(h.byName || '')} · ${esc(new Date(h.at).toLocaleString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${h.note ? `<br><em dir="auto">${esc(h.note)}</em>` : ''}</span></div>`).join('');
+    return `<span class="nbpop nbmoodpop"><b>${L2('اعتماد المود بورد', 'Moodboard approval')}</b><small>${L2('الـOwner يراجع ← الآرت دايركتور يعتمد', 'Owner reviews → art director approves')}${p && !p.ownerId ? ' · ' + L2('المشروع مالوش Owner — الآرت دايركتور يعتمد على طول', 'No project owner — the art director approves directly') : ''}</small>${m.note && s === 'back' ? `<div class="nbmnote" dir="auto">${esc(m.note)}</div>` : ''}<span class="nbmacts">${acts.join('') || `<span class="muted small">${L2('مفيش حاجة مطلوبة منك دلوقتي', 'Nothing needed from you now')}</span>`}</span>${hist ? `<div class="nbmhist">${hist}</div>` : ''}</span>`;
+  }
+  async function moodAct(act) {
+    const b0 = wbBoard(); const p = boardProj(); if (!b0 || !p || !moodCan(b0, act)) return; NB.moodOpen = false;
+    let note = ''; if (act === 'back') { note = await new Promise(res => openModal({ title: L2('رجّع المود بورد بملاحظات', 'Return the moodboard with notes'), body: `<div class="form">${field(L2('الملاحظات', 'Notes'), '<textarea name="note" rows="4" required></textarea>', 'full')}</div>`, submitLabel: L2('رجّعه', 'Return'), onSubmit: f => { const n = String(formData(f).note || '').trim(); if (!n) return false; res(n); } })); if (!note) return; }
+    const next = act === 'send' ? 'sent' : act === 'ok1' ? 'ok1' : act === 'ok' ? 'ok' : 'back'; const now0 = Date.now(); const m = Object.assign({}, b0.mood || {}); const h = { s: next, by: me(), byName: myName(), at: now0, note };
+    Object.assign(m, { state: next, at: now0, by: me(), byName: myName(), note: act === 'back' ? note : (next === 'sent' ? '' : m.note || ''), hist: (m.hist || []).concat(h).slice(-30) }); if (next === 'sent') m.sentBy = me(); if (next === 'ok1') { m.ok1By = me(); m.ok1At = now0; } if (next === 'ok') { m.okBy = me(); m.okAt = now0; }
+    try { await Store.save('boards', Object.assign({}, b0, { mood: m }), { silent: true }); } catch (e) { toast(L2('مقدرتش أحفظ — مش معاك صلاحية', 'Could not save — no permission'), 'err'); return; }
+    const t = b0.title || ''; const owner = p.ownerId ? [p.ownerId] : adIds2();
+    if (next === 'sent') pushIds(owner, L2(`مود بورد «${t}» مستني مراجعتك`, `Moodboard «${t}» is waiting for your review`), b0);
+    if (next === 'ok1') pushIds(adIds2(), L2(`مود بورد «${t}» مستني اعتمادك`, `Moodboard «${t}» is waiting for your approval`), b0);
+    if (next === 'ok') { pushIds([m.sentBy, p.ownerId, p.leadId].concat(p.team || []), L2(`مود بورد «${t}» اتعتمد ✓`, `Moodboard «${t}» approved ✓`), b0); vSave(L2('اعتماد المود بورد', 'Moodboard approved'), false).catch(() => {}); try { await Store.save('projects', Object.assign({}, p, { approvals: Object.assign({}, p.approvals || {}, { [b0.id]: { at: nowISO(), byName: myName(), title: t, kind: 'moodboard' } }) }), { silent: true }); } catch (e) { /* not critical */ } }
+    if (next === 'back') pushIds([m.sentBy], L2(`مود بورد «${t}» رجع بملاحظات: ${note.slice(0, 80)}`, `Moodboard «${t}» returned with notes: ${note.slice(0, 80)}`), b0);
+    toast((MOODS[next] || MOODS.draft)[0]); top();
+  }
+  window.nbMoodState = bid => moodSt(byId('boards', bid));
+  /* Studio OS shots ↔ frames on the board */
+  const shotsHere = () => { const p = boardProj(); if (!p) return []; return list('shots').filter(s => s.projectId === p.id && !s.deleted).sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''))); };
+  const PMST = { idle: 'لم يبدأ', work: 'جاري العمل', int: 'مراجعة داخلية', client: 'عند العميل', chg: 'تعديلات', stuck: 'متوقف', done: 'تم' };
+  function shotLabel(id) { const s = byId('shots', id); if (!s) return null; if (s.movedTo) { const t = byId('pmtasks', s.movedTo); if (t) return { t: PMST[t.status] || t.status, k: t.status === 'done' ? 'ok' : ['chg', 'stuck'].includes(t.status) ? 'bad' : t.status === 'idle' ? '' : 'on' }; } const st = s.state; return st === 'done' ? { t: 'اتعتمدت ✓', k: 'ok' } : st === 'owner' ? { t: 'مستنية الـOwner', k: 'on' } : st === 'ad' ? { t: 'مستنية الآرت دايركتور', k: 'on' } : st === 'back' ? { t: 'رجعت بملاحظات', k: 'bad' } : st === 'work' ? { t: 'شغالة', k: 'on' } : { t: 'لسه', k: '' }; }
+  const shotName = s => `${s.code || ''} ${s.name || s.title || ''}`.trim();
+  async function shotFrame(id, many) {
+    if (!can()) return null; const s = byId('shots', id); if (!s) return null; const ex = items().find(i => i.type === 'frame' && i.shotId === id); if (ex) { if (!many) { WB.sel = new Set([ex.id]); fit([ex]); selChanged(); } return null; }
+    const fr = items().filter(i => i.type === 'frame' && i.shotId); const all = items().filter(i => !SVGT.includes(i.type) && i.type !== 'pin'); let x, y;
+    if (fr.length) { const last = fr.reduce((a, b) => (b.y > a.y || (b.y === a.y && b.x > a.x) ? b : a)); const n = fr.length; const col = n % 3; x = col === 0 ? Math.min(...fr.map(f => f.x)) : last.x + last.w + 60; y = col === 0 ? Math.max(...fr.map(f => f.y + f.h)) + 80 : last.y; } else { const u = all.length ? union(all.map(R)) : { x: 0, y: 0, w: 0, h: 0 }; x = all.length ? u.x + u.w + 240 : 0; y = all.length ? u.y : 0; }
+    const it = { id: uid(), type: 'frame', x: Math.round(x), y: Math.round(y), w: 640, h: 360, text: shotName(s), shotId: id, z: 0 }; if (many) return it; await create([it]); fit([it]); return it;
+  }
+  async function shotFramesAll() { const out = []; for (const s of shotsHere()) { if (items().some(i => i.type === 'frame' && i.shotId === s.id) || out.some(o => o.shotId === s.id)) continue; const it = await shotFrame(s.id, true); if (it) { if (out.length) { const prev = out[out.length - 1]; const col = out.length % 3; it.x = col === 0 ? out[out.length - 3 < 0 ? 0 : out.length - 3].x : prev.x + prev.w + 60; it.y = col === 0 ? prev.y + prev.h + 80 : prev.y; } out.push(it); } } if (!out.length) { toast(L2('كل اللقطات ليها فريمات بالفعل', 'Every shot already has a frame')); return; } await create(out); fit(out); toast(L2(`اتعمل ${out.length} فريم للقطات`, `${out.length} shot frames added`)); }
+  function shotsPanel(p) {
+    const ss = shotsHere(); const h = `<div class="ph">${I(IC.shot)}<b>${L2('لقطات المشروع', 'Project shots')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div>${ss.length && can() ? `<div class="nbpinbar"><button type="button" class="btn sm p" data-nb="shotall">${L2('فريم لكل لقطة', 'A frame for every shot')}</button></div>` : ''}<div class="pb">${ss.length ? ss.map(s => { const l = shotLabel(s.id) || { t: '', k: '' }; const has = items().some(i => i.type === 'frame' && i.shotId === s.id); return `<div class="nbfr"><a href="#" data-nb="shotgo:${s.id}" dir="auto">${esc(shotName(s))}</a><span class="shotst ${l.k}">${esc(l.t)}</span>${can() || has ? `<button type="button" data-nb="shotgo:${s.id}" title="${has ? L2('روح للفريم', 'Go to frame') : L2('اعمل فريم', 'Make a frame')}">${has ? '↗' : '+'}</button>` : ''}</div>`; }).join('') : `<p class="muted small">${L2('المشروع ده مالوش لقطات في لوحة التشغيل لسه', 'This project has no shots on the operations board yet')}</p>`}</div>`;
+    if (p.__h !== h) { p.__h = h; p.innerHTML = h; tr(p); } p.style.display = '';
+  }
+  /* AI on the board (studio «ai» function → Anthropic; the key stays in studio settings) */
+  const aiErr2 = e => { const m = String((e && (e.code || e.message)) || e); if (/no_key|not_configured|missing|no_ai|api key/i.test(m)) return L2('مفتاح Anthropic مش متسجل — الإعدادات ← الذكاء الاصطناعي', 'The Anthropic key is not set — Settings → AI'); if (/cap|quota|rate/i.test(m)) return L2('وصلت للحد المسموح — جرّب كمان شوية', 'Limit reached — try again later'); return L2('حصل خطأ في الذكاء الاصطناعي: ', 'AI error: ') + m.slice(0, 100); };
+  async function aiJSON(prompt) { if (typeof aiText !== 'function') throw { code: 'no_ai' }; const r = await aiText(prompt, { max_tokens: 3000 }); const t = String((r && (r.text || r.content)) || r || ''); const m = t.match(/\{[\s\S]*\}/); return JSON.parse(m ? m[0] : t); }
+  const aiCtx = () => { const b = wbBoard(); const p = boardProj(); return `Ninety Studioz (architectural visualisation & interior design studio). Board: ${b ? b.title : ''}${p ? ` · Project: ${p.name}${p.client ? ' · Client: ' + p.client : ''}` : ''}.`; };
+  const aiLang = () => (enOn() ? 'Write in English.' : 'اكتب بالعربي المصري البسيط، والمصطلحات الفنية تقدر تسيبها بالإنجليزي.');
+  const itemTxt = i => [i.text, i.desc, i.name, (i.rows || []).map(r => r.join(' | ')).join('\n')].filter(Boolean).join(' — ');
+  async function aiRun2(label, fn) { if (NB.aiBusy) return; NB.aiBusy = true; toast('✦ ' + label + '…'); try { await fn(); } catch (e) { console.warn('ai', e); toast(aiErr2(e), 'err'); } finally { NB.aiBusy = false; } }
+  function aiIdeas() {
+    if (!can()) return; const seed = sel().map(itemTxt).filter(Boolean).join('\n').slice(0, 1500);
+    openModal({ title: L2('✦ أفكار جديدة', '✦ New ideas'), body: `<div class="form">${field(L2('عن إيه؟', 'About what?'), `<textarea name="topic" rows="3" placeholder="${L2('مثال: مدخل فيلا مودرن بإضاءة دافية', 'e.g. a modern villa entrance with warm lighting')}">${esc(seed)}</textarea>`, 'full')}${field(L2('العدد', 'How many'), `<select name="n"><option>6</option><option selected>9</option><option>12</option></select>`)}</div>`, submitLabel: L2('ولّد', 'Generate'),
+      onSubmit: f => { const d = formData(f); const topic = String(d.topic || '').trim(); if (!topic) { toast(L2('اكتب الموضوع', 'Write the topic'), 'err'); return false; } const n = Math.max(3, Math.min(15, +d.n || 9));
+        aiRun2(L2('بيولّد أفكار', 'Generating ideas'), async () => { const j = await aiJSON(`${aiCtx()}\nGenerate ${n} distinct, concrete design ideas for: ${topic}\nEach idea: a short title (max 6 words) and one sentence. ${aiLang()}\nReturn JSON only: {"ideas":[{"title":"…","text":"…"}]}`); const ideas = (j.ideas || []).filter(x => x && (x.title || x.text)).slice(0, n); if (!ideas.length) throw new Error('empty');
+          const base = sel().length ? union(sel().map(R)) : null; const c = base ? { x: base.x + base.w + 120, y: base.y } : (() => { const v = viewCenter(); return { x: v.x - 330, y: v.y - 330 }; })(); const cols = 3;
+          const out = ideas.map((x, k) => ({ id: uid(), type: 'sticky', x: Math.round(c.x + (k % cols) * 220), y: Math.round(c.y + Math.floor(k / cols) * 220), w: 200, h: 200, color: STICKY[[0, 5, 2, 6, 8, 10][k % 6]], text: [x.title, x.text].filter(Boolean).join('\n'), ai: true }));
+          await create(out); fit(out); toast(L2(`اتضاف ${out.length} فكرة ✦`, `${out.length} ideas added ✦`)); }); } });
+  }
+  function aiSum() {
+    const its = (sel().length ? sel() : items()).filter(i => !isHidden(i) && i.type !== 'stroke' && i.type !== 'conn' && itemTxt(i)); if (!its.length) { toast(L2('مفيش كلام على اللوحة يتلخّص', 'Nothing to summarise on the board'), 'err'); return; }
+    const txt = its.map(i => `- [${i.type}] ${itemTxt(i).replace(/\s+/g, ' ')}`).join('\n').slice(0, 14000);
+    aiRun2(L2('بيلخّص', 'Summarising'), async () => { const j = await aiJSON(`${aiCtx()}\nSummarise these board items for the design team: the main direction, key decisions and open questions, then 3-6 next actions. ${aiLang()}\nItems:\n${txt}\nReturn JSON only: {"title":"…","summary":"…","decisions":["…"],"questions":["…"],"actions":["…"]}`);
+      const parts = [j.summary, (j.decisions || []).length ? L2('القرارات:', 'Decisions:') + '\n' + j.decisions.map(x => '• ' + x).join('\n') : '', (j.questions || []).length ? L2('أسئلة مفتوحة:', 'Open questions:') + '\n' + j.questions.map(x => '• ' + x).join('\n') : '', (j.actions || []).length ? L2('الخطوات الجاية:', 'Next actions:') + '\n' + j.actions.map(x => '• ' + x).join('\n') : ''].filter(Boolean).join('\n\n');
+      const u = union(its.map(R)); const card = { id: uid(), type: 'card', x: Math.round(u.x + u.w + 120), y: Math.round(u.y), w: 420, h: Math.min(720, 140 + Math.ceil(parts.length / 46) * 18), text: (j.title || L2('ملخص اللوحة', 'Board summary')).slice(0, 120), desc: parts.slice(0, 2000), tag: '#652cb3', ai: true };
+      if (!can()) { openModal({ title: card.text, footer: null, body: `<div style="white-space:pre-wrap" dir="auto">${esc(parts)}</div>` }); return; } await create([card]); fit([card]); toast(L2('اتضاف الملخص ✦', 'Summary added ✦')); });
+  }
+  function aiCluster() {
+    if (!can()) return; const st = sel().filter(i => ['sticky', 'text', 'card'].includes(i.type) && itemTxt(i) && !i.lock); if (st.length < 3) { toast(L2('حدّد 3 ستيكيز أو أكتر الأول', 'Select 3 or more stickies first'), 'err'); return; }
+    aiRun2(L2('بيجمّع', 'Clustering'), async () => { const j = await aiJSON(`${aiCtx()}\nGroup these notes into 2-6 clear themes. Every note goes to exactly one theme. ${aiLang()}\nNotes:\n${st.map((i, k) => `${k + 1}. ${itemTxt(i).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')}\nReturn JSON only: {"groups":[{"name":"…","items":[1,2]}]}`);
+      const used = new Set(); const groups = (j.groups || []).map(g => ({ name: String(g.name || '').slice(0, 60), its: (g.items || []).map(n => st[(+n) - 1]).filter(i => i && !used.has(i.id) && used.add(i.id)) })).filter(g => g.its.length); const rest = st.filter(i => !used.has(i.id)); if (rest.length) groups.push({ name: L2('تانية', 'Other'), its: rest }); if (!groups.length) throw new Error('empty');
+      const u = union(st.map(R)); const pos = {}; const frames = []; let x = u.x; const G = 24, CW = 220;
+      groups.forEach(g => { const cols = g.its.length > 3 ? 2 : 1; const fw = cols * CW + G * 2; let yy = u.y + 64; let maxH = 0; g.its.forEach((i, k) => { const c = k % cols; if (c === 0 && k) { yy += maxH + G; maxH = 0; } const w = Math.min(+i.w || 200, CW - 20); pos[i.id] = { x: Math.round(x + G + c * CW), y: Math.round(yy) }; maxH = Math.max(maxH, +i.h || 200); }); const fh = yy + maxH + G - u.y; frames.push({ id: uid(), type: 'frame', x: Math.round(x), y: Math.round(u.y), w: fw, h: Math.round(fh), text: g.name, z: 0, ai: true }); x += fw + 60; });
+      await mutate(Object.keys(pos), a => { const q = pos[a.id]; if (q) { a.x = q.x; a.y = q.y; } }); await create(frames, { select: false }); WB.sel = new Set(); syncSoon(); fit(frames); toast(L2(`اتجمّعوا في ${groups.length} مجموعات ✦`, `Grouped into ${groups.length} themes ✦`)); });
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style id="nbr4css">
+.nb .nbmood{display:inline-flex!important;align-items:center;gap:6px;width:auto!important;padding:0 10px!important;border-radius:18px;font-size:12px;white-space:nowrap}
+.nb .nbmood i{width:9px;height:9px;border-radius:50%;flex:none}
+.nb .nbtop .nbmoodpop{display:flex;flex-direction:column;gap:6px;min-width:270px;max-width:320px;white-space:normal;text-align:start}
+.nb .nbtop .nbmoodpop small{opacity:.65;font-size:11px}
+.nb .nbtop .nbmoodpop .nbmacts{display:flex;gap:6px;flex-wrap:wrap}
+.nb .nbtop .nbmoodpop .nbmacts button{width:auto;height:30px;padding:0 10px}
+.nb .nbmnote{background:#fff1f0;color:#a8071a;border-radius:8px;padding:6px 8px;font-size:12px}
+.nb .nbmhist{display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--nb-ui-line);padding-top:6px;max-height:180px;overflow:auto}
+.nb .nbmh{display:flex;gap:6px;font-size:11.5px;line-height:1.4}
+.nb .nbmh i{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
+.nb .nbmh em{font-style:normal;opacity:.75}
+.nb .shotst{font-size:10.5px;padding:1px 7px;border-radius:10px;background:#eef1f5;color:#555;white-space:nowrap}
+.nb .shotst.on{background:#fff4d6;color:#8a5a00}.nb .shotst.ok{background:#e3f6e8;color:#1f7a3a}.nb .shotst.bad{background:#fde7e7;color:#b42318}
+.nb .nbi.frame .ttl .shotst{margin-inline-start:8px;vertical-align:middle}
+@media (max-width:760px){
+.nb .nbtools{flex-direction:row!important;top:auto!important;bottom:8px!important;left:8px!important;right:8px!important;transform:none!important;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;max-width:none}
+.nb .nbtools hr{border-top:0;border-left:1px solid var(--nb-ui-line);margin:6px 2px}
+.nb .nbtools button{flex:none}
+.nb .nbundo{bottom:66px!important}
+.nb .nbnav{bottom:66px!important}
+.nb .nbfly{left:8px!important;right:8px;top:auto!important;bottom:66px!important;max-width:none}
+.nb .nbtop{left:8px;right:8px!important;max-width:none;overflow-x:auto;scrollbar-width:none;justify-content:flex-start}
+.nb .nbpanel{left:8px!important;right:8px!important;width:auto!important;top:auto!important;height:58%;bottom:66px!important}
+.nb .nbctx{max-width:calc(100% - 16px)}
+.nb .nbtop .nbpop{position:fixed;left:8px;right:8px;top:auto;bottom:70px;max-width:none}
+}
+@media (pointer:coarse){.nb .nbh{width:18px;height:18px;margin:-10px 0 0 -10px;border-radius:5px}}
 </style>`);
   function bind(host) {
     host.addEventListener('pointerdown', down); host.addEventListener('dblclick', dbl); host.addEventListener('wheel', wheel, { passive: false });
