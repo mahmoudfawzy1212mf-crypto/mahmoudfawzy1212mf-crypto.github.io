@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-1720-1f2af3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-1744-703d48";</script>
 
 <script>
 'use strict';
@@ -17003,7 +17003,7 @@ const stuMeIds = () => { const st = S.session || {}; return [st.workerId, st.id]
 const stuPerson = id => { if (!id) return null; const w = byId('workers', String(id).replace(/^w:/, '')); if (w) return { id: w.id, name: w.name, role: w.role, avatar: w.avatar || null }; const st = byId('staff', id); if (st) return { id: st.id, name: st.name, role: st.role, avatar: null }; if (S.session && (S.session.id === id || S.session.workerId === id)) return { id, name: S.session.name, role: role(), avatar: S.session.avatar || null }; return { id, name: '—', role: '', avatar: null }; };
 const stuPeople = () => list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended').map(w => ({ id: w.id, name: w.name, role: w.role, deptId: w.deptId }));
 const stuInitial = name => (String(name || '').trim().split(/\s+/)[0] || '?').slice(0, 1);
-const stuAvatar = (p, sz = 26) => { const q = typeof p === 'string' ? stuPerson(p) : p; if (!q) return ''; const hue = [...String(q.id || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360; return `<span class="stuav" title="${esc(q.name)}" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .42)}px;background:hsl(${hue} 30% 35%)">${q.avatar ? `<img src="${esc(q.avatar)}" alt="">` : esc(stuInitial(q.name))}</span>`; };
+const stuAvatar = (p, sz = 26) => { const q = typeof p === 'string' ? stuPerson(p) : p; if (!q) return ''; const ph = q.avatar || (window.nfPhoto ? nfPhoto(q.id) : null); return `<span class="stuav ${ph ? 'ph' : 'sil'}" title="${esc(q.name)}" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .42)}px">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : esc(stuInitial(q.name)))}</span>`; };
 const stuManager = () => isAdmin() || role() === 'manager';
 const stuCanEdit = () => !!S.session && writable() && !['viewer', 'kiosk'].includes(role());
 
@@ -20578,7 +20578,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const pName = id => { if (!id) return ''; if (String(id).startsWith('role:')) return id === 'role:admin' ? (en() ? 'Owner' : 'المالك') : id.slice(5); const p = typeof stuPerson === 'function' ? stuPerson(id) : null; if (p && p.name && p.name !== id) return p.name; const w = byId('workers', id); if (w) return w.name; if (isMine(id) && S.session) return S.session.name; return '—'; };
   const pColor = id => { const h = [...String(id || '?')].reduce((a, c) => a + c.charCodeAt(0), 0); return COLORS[h % COLORS.length]; };
   const ini = id => { const n = pName(id) || '?'; const w = n.trim().split(/\s+/); return (w[0] ? w[0][0] : '?') + (w[1] ? w[1][0] : ''); };
-  const av = (id, cls = '') => id ? `<span class="pmav ${cls}" style="background:${pColor(id)}" title="${esc(pName(id))}">${esc(ini(id))}</span>` : `<span class="pmav pnone ${cls}">+</span>`;
+  const av = (id, cls = '') => id ? (ph => `<span class="pmav ${cls} ${ph ? 'ph' : 'sil'}" title="${esc(pName(id))}">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : esc(ini(id)))}</span>`)(window.nfPhoto ? nfPhoto(id) : null) : `<span class="pmav pnone ${cls}">+</span>`;
   const firstBy = r => { const w = list('workers').find(x => x.status !== 'inactive' && x.role === r); return w ? w.id : 'role:' + r; };
   /* ---------- access ---------- */
   const canMoney = () => isAdmin() || role() === 'hr';
@@ -30521,7 +30521,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const COLORS = ['#c8a26a', '#5aa9dc', '#9b8df2', '#58b98a', '#e0896a', '#d9c08a', '#d97aa6', '#6fb3b8'];
   const colorOf = id => COLORS[[...String(id || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
   const ini = n => { const w = String(n || '?').trim().split(/\s+/); return (w[0] ? w[0][0] : '?') + (w[1] ? w[1][0] : ''); };
-  const av = (id, e, sz = 34) => id === 'client' ? `<span class="psav cl" style="width:${sz}px;height:${sz}px">${esc(ini(nameOf(id, e)))}</span>` : `<span class="psav" style="width:${sz}px;height:${sz}px;background:${colorOf(id)}">${esc(ini(nameOf(id, e)))}</span>`;
+  const av = (id, e, sz = 34) => id === 'client' ? `<span class="psav cl" style="width:${sz}px;height:${sz}px">${esc(ini(nameOf(id, e)))}</span>` : (ph => `<span class="psav ${ph ? 'ph' : 'sil'}" style="width:${sz}px;height:${sz}px">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : esc(ini(nameOf(id, e))))}</span>`)(id === 'ceo' ? (window.nfPhoto ? nfPhoto('owner') : null) : (window.nfPhoto ? nfPhoto(id) : null));
   const txtOf = e => (isEn() && e.en) ? e.en : e.t;
   const D = iso => new Date(iso);
   const dayKey = iso => String(iso).slice(0, 10);
@@ -30852,14 +30852,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const enName = w => { const n = w.name || ''; if (!en() || !/[\u0600-\u06FF]/.test(n)) return n; return (typeof nameEnOf === 'function' && nameEnOf(w)) || (typeof nfTranslit === 'function' ? nfTranslit(n) : n) || n; };
   const person = id => {
     id = String(id || '').replace(/^w:/, '');
-    if (id === 'owner') return { id, name: CEO(), role: 'admin', avatar: (S.session && S.session.owner && S.session.avatar) || null };
+    if (id === 'owner') return { id, name: CEO(), role: 'admin', avatar: (window.nfPhoto && nfPhoto('owner')) || null };
     const w = byId('workers', id); if (w) return { id, name: enName(w), role: w.role, avatar: w.avatar || w.photo || null };
     const p = typeof stuPerson === 'function' ? stuPerson(id) : null; return { id, name: (p && p.name && p.name !== '—') ? p.name : (isMine(id) && S.session ? S.session.name : '—'), role: p ? p.role : '', avatar: p ? p.avatar : null };
   };
   const SEP = () => (en() ? ', ' : '، ');
   const first = n => String(n || '').trim().split(/\s+/)[0] || '';
   const ini = n => { const w = String(n || '?').trim().split(/\s+/); return ((w[0] || '?')[0] + ((w[1] || '')[0] || '')).toUpperCase(); };
-  const av = (id, sz = 36) => { const p = person(id); return p.avatar ? `<img class="pcav" src="${esc(p.avatar)}" style="width:${sz}px;height:${sz}px" alt="">` : `<span class="pcav" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .38)}px;background:${col(id)}">${esc(ini(p.name))}</span>`; };
+  const av = (id, sz = 36) => { const p = person(id); return p.avatar ? `<img class="pcav" src="${esc(p.avatar)}" style="width:${sz}px;height:${sz}px" alt="">` : `<span class="pcav sil" style="width:${sz}px;height:${sz}px" title="${esc(p.name)}">${window.nfSil ? nfSil() : esc(ini(p.name))}</span>`; };
   const pAv = (p, sz = 40) => `<span class="pcav pcgav" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz * .36)}px;background:${col(p.id)}">${esc(ini(p.name))}</span>`;
   const roleName = r => r === 'admin' ? L('المالك', 'Owner') : r === 'manager' ? L('المدير الفني', 'Art director') : r === 'head' ? L('رئيس فريق', 'Team lead') : (typeof ROLES !== 'undefined' && ROLES[r] ? ROLES[r] : '');
 
@@ -31112,7 +31112,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function place() {
     if (!S.session || !canUse()) { if (HOST) HOST.className = 'off'; if (BUB) BUB.className = 'off'; document.body.classList.remove('pc-dock'); return; }
     const onPage = S.route.view === 'pchats'; const pp = projPage(); const mob = isMob();
-    if (pp && !mob && !PC.dockOff && !PC.pid && !PC.closedFor) { PC.pid = pp; PC.unreadFrom = myR(pp).rd || 0; PC.toUnread = true; }
+    if (pp && !mob && !PC.dockOff && !PC.pid && !PC.closedFor) { PC.pid = pp; PC.auto = true; PC.unreadFrom = myR(pp).rd || 0; PC.toUnread = true; }
+    if (PC.auto && (mob || pp !== PC.pid)) { PC.pid = null; PC.auto = false; } /* the auto-docked panel never turns into a full-screen / floating chat */
     let mode = 'off';
     if (PC.pid && !PC.min) {
       if (onPage && !mob) mode = 'page';
@@ -31140,7 +31141,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function openChat(pid, o = {}) {
     if (!canSee(pid)) { toast(L('الشات ده لفريق المشروع بس', 'This chat is for the project team only'), 'err'); return; }
     if (PC.pid !== pid) { PC.unreadFrom = myR(pid).rd || 0; PC.toUnread = true; PC.limit = 200; }
-    PC.pid = pid; PC.min = false; PC.closedFor = null; PC.routeOpen = !!o.route; place(); setTimeout(() => { if (!isMob() && CONV) CONV.querySelector('textarea').focus({ preventScroll: true }); markRead(); }, 60);
+    PC.pid = pid; PC.auto = false; PC.min = false; PC.closedFor = null; PC.routeOpen = !!o.route; place(); setTimeout(() => { if (!isMob() && CONV) CONV.querySelector('textarea').focus({ preventScroll: true }); markRead(); }, 60);
   }
   function closeChat(fromPop) {
     const pid = PC.pid; flushR(); typingSub(null); PC.pid = null; PC.min = false; PC.side = null; if (projPage() === pid) PC.closedFor = pid;
@@ -31700,6 +31701,27 @@ html[dir=rtl] body.pc-dock .fab,html[dir=rtl] body.pc-dock .aifab{left:418px!imp
     const h = base.apply(this, arguments); if (!can() || (S.route && S.route.id)) return h; const n = pending().length; if (!n) return h;
     return `<div class="banner warn" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${icon('info')}<span style="flex:1">${L(`${n} من الفريق لسه مافعّلوش حساباتهم على السيستم`, `${n} people have not activated their accounts yet`)}</span><button type="button" class="btn sm p" data-action="teamActivate">${L('فعّل الكل', 'Activate all')}</button></div>` + h;
   })(vWorkers);
+})();
+/* v6.29 — profile photos everywhere in the studio people chips (task board, project story, studio chips, chat):
+   the person's own photo when he has one, otherwise a WhatsApp-style grey silhouette instead of initials. */
+(function () {
+  if (window.__NF_AVS__) return; window.__NF_AVS__ = 1;
+  window.nfPhoto = id => {
+    id = String(id || '').replace(/^w:/, ''); if (!id) return null; const set = (S.settings && S.settings.avatars) || {};
+    if (id === 'owner' || id === 'role:admin') return set.owner || (S.session && S.session.owner && S.session.avatar) || null;
+    const w = byId('workers', id); if (w) return w.avatar || w.photo || null;
+    const st = byId('staff', id); if (st) return st.avatar || st.photo || set[id] || null;
+    return set[id] || null;
+  };
+  window.nfSil = () => '<svg class="nfsil" viewBox="0 0 212 212" aria-hidden="true"><path d="M106 50c-21.5 0-39 17.5-39 39s17.5 39 39 39 39-17.5 39-39-17.5-39-39-39zm0 92c-38 0-76 19-76 47v23h152v-23c0-28-38-47-76-47z"/></svg>';
+  const css = document.createElement('style');
+  css.textContent = `.pmav,.psav,.stuav,.pcav{overflow:hidden}
+.pmav img,.psav img,.stuav img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.nfsil{width:100%;height:100%;display:block;fill:#cfd4d6}
+.pmav.sil,.psav.sil,.stuav.sil,.pcav.sil{background:#6a7175!important;padding:0}
+html[data-theme="light"] .pmav.sil,html[data-theme="light"] .psav.sil,html[data-theme="light"] .stuav.sil,html[data-theme="light"] .pcav.sil{background:#dfe5e7!important}
+html[data-theme="light"] .nfsil{fill:#fff}`;
+  document.head.appendChild(css);
 })();
 </script>
 
