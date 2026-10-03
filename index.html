@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-0258-5b9d0f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-0346-b58cad";</script>
 
 <script>
 'use strict';
@@ -18336,7 +18336,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const voteS = () => { const b = wbBoard(); const v = b && b.vote; return v && v.sid ? v : null; };
   const voteOn = () => { const v = voteS(); return !!(v && v.on && new Date(v.end).getTime() > Date.now()); };
   const privOn = () => { const b = wbBoard(); return !!(b && b.priv && b.priv.on); };
-  const VOTABLE = ['sticky', 'shape', 'image', 'text', 'link', 'card', 'file', 'video', 'table'];
+  const VOTABLE = ['sticky', 'shape', 'image', 'text', 'link', 'card', 'file', 'video', 'table', 'embed'];
   const myVotesUsed = () => { const v = voteS(); if (!v) return 0; return items().reduce((a, i) => a + ((i.sv && i.sv.sid === v.sid && i.sv.v && +i.sv.v[me()]) || 0), 0); };
   const svCount = i => { const v = voteS(); if (!v || !i.sv || i.sv.sid !== v.sid) return 0; return Object.values(i.sv.v || {}).reduce((a, n) => a + (+n || 0), 0); };
   const isHidden = i => privOn() && i.hid && i.hid !== me();
@@ -18435,6 +18435,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (i.type === 'frame') { const sl = i.shotId ? shotLabel(i.shotId) : null; return `<span class="ttl" dir="auto">${esc(i.text || 'Frame')}${sl ? `<span class="shotst ${sl.k}">${esc(sl.t)}</span>` : ''}</span>${badges(i)}`; }
     if (i.type === 'image') return `<img src="${esc(NB.hires.get(i.id) || i.thumb || '')}" alt="" draggable="false">${badges(i)}`;
     if (i.type === 'link') { let host = ''; try { host = new URL(i.url).hostname.replace(/^www\./, ''); } catch (e) { /* ignore */ } return `<div class="lk"><span class="fav">${esc((host || '?').charAt(0).toUpperCase())}</span><div><b dir="auto">${esc(i.text || host || 'Link')}</b><small>${esc(host)}</small></div></div>${badges(i)}`; }
+    if (i.type === 'embed') return embedHTML(i) + badges(i);
     if (i.type === 'table') return tableHTML(i) + badges(i);
     if (i.type === 'card') return `<div class="cdx"><i class="bar" style="background:${esc(i.tag || '#2d9bf0')}"></i><b dir="auto">${esc(i.text || '')}</b>${i.desc ? `<p dir="auto">${esc(i.desc)}</p>` : ''}<div class="ft">${i.owner && typeof stuAvatar === 'function' ? stuAvatar(i.owner, 20) : ''}${i.due ? `<span class="due">${esc(fmtDue(i.due))}</span>` : ''}</div></div>${badges(i)}`;
     if (i.type === 'file') { const ext = (String(i.name || '').split('.').pop() || '').toUpperCase().slice(0, 5); return `<div class="flx">${i.thumb ? `<img src="${esc(i.thumb)}" alt="" draggable="false">` : `<span class="ext">${esc(ext || 'FILE')}</span>`}<div class="fn"><b dir="auto">${esc(i.name || '')}</b><small>${esc(ext)}${i.pages ? ' · ' + i.pages + ' ' + (enOn() ? 'pages' : 'صفحة') : ''}</small></div></div>${badges(i)}`; }
@@ -18442,7 +18443,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (i.type === 'shape') { const sw = i.sw == null ? 2 : +i.sw; return `<svg class="shp" width="${r.w}" height="${r.h}" viewBox="0 0 ${r.w} ${r.h}"><path d="${shapeD(i.shape || 'rect', r.w, r.h)}" fill="${auto(i.fill, 'none')}" stroke="${sw ? auto(i.stroke, 'var(--nb-ink)') : 'none'}" stroke-width="${sw}" ${i.dash ? `stroke-dasharray="${sw * 4} ${sw * 3}"` : ''} stroke-linejoin="round"></path></svg>${txt}${badges(i)}`; }
     return txt + badges(i);
   }
-  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '', i.sv, i.resolved, isHidden(i), (voteS() || {}).sid, voteOn(), NB.showResolved, i.rows, i.cw, i.desc, i.owner, i.due, i.tag, i.name, i.pages, i.mm, i.shotId ? JSON.stringify(shotLabel(i.shotId)) : '']);
+  const sig = i => JSON.stringify([i.type, i.x, i.y, i.w, i.h, i.text, i.color, i.size, i.fill, i.stroke, i.sw, i.dash, i.shape, i.tc, i.bold, i.ital, i.align, i.thumb, i.url, i.lock, i.votes, (i.thread || []).length, NB.hires.get(i.id) || '', i.sv, i.resolved, isHidden(i), (voteS() || {}).sid, voteOn(), NB.showResolved, i.rows, i.cw, i.desc, i.owner, i.due, i.tag, i.name, i.pages, i.mm, i.shotId ? JSON.stringify(shotLabel(i.shotId)) : '', i.src, i.prov, i.unknown]);
   function fitText(el, i) {
     if (i.type !== 'sticky' || i.size) return; const t = el.querySelector('.txt'); if (!t) return;
     const key = (i.text || '') + '|' + i.w + 'x' + i.h; const c = NB.fitCache.get(key); if (c && NB.editing !== i.id) { t.style.fontSize = c + 'px'; return; }
@@ -18464,7 +18465,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     gs.innerHTML = its.filter(i => i.type === 'stroke').sort((a, b) => zs(a) - zs(b)).map(strokeSvg).join('');
     gc.innerHTML = its.filter(i => i.type === 'conn').map(connSvg).join('') + (NB.temp && NB.temp.type === 'conn' ? connSvg(NB.temp) : '');
   }
-  function paintEl(el, i) { el.className = `nbi ${i.type}${i.type === 'shape' ? ' sh-' + (i.shape || 'rect') : ''}${i.lock ? ' locked' : ''}${i.type === 'pin' && i.resolved && !NB.showResolved ? ' gone' : ''}${isHidden(i) ? ' hidd' : ''}`; el.setAttribute('style', itemStyle(i)); el.innerHTML = itemInner(i); if (i.type === 'sticky') fitText(el, i); }
+  function paintEl(el, i) { el.className = `nbi ${NB.emActive === i.id ? 'emact ' : ''}${i.type}${i.type === 'shape' ? ' sh-' + (i.shape || 'rect') : ''}${i.lock ? ' locked' : ''}${i.type === 'pin' && i.resolved && !NB.showResolved ? ' gone' : ''}${isHidden(i) ? ' hidd' : ''}`; el.setAttribute('style', itemStyle(i)); el.innerHTML = itemInner(i); if (i.type === 'sticky') fitText(el, i); }
   function sync() {
     const host = NB.host; if (!host || !host.isConnected) return; const box = document.getElementById('nbitems'); if (!box) return;
     const its = items().slice().sort((a, b) => zs(a) - zs(b)); const seen = new Set(), order = [];
@@ -18490,7 +18491,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const w = document.getElementById('wbworld'); if (w) w.style.transform = `translate(${WB.pan.x}px,${WB.pan.y}px) scale(${WB.zoom})`;
     const g = document.getElementById('nbgrid'); if (g) { let s = 24 * WB.zoom; while (s < 12) s *= 4; g.style.backgroundSize = `${s}px ${s}px`; g.style.backgroundPosition = `${WB.pan.x}px ${WB.pan.y}px`; }
     const z = document.getElementById('nbzp'); if (z) z.textContent = Math.round(WB.zoom * 100) + '%';
-    overlay(); ctxPos(); miniSoon(); cursors(); hiresSoon(); vpSoon();
+    overlay(); ctxPos(); miniSoon(); cursors(); hiresSoon(); vpSoon(); if (NB.rec) ttRecView();
     if (WB.id) { clearTimeout(applyView.t); applyView.t = setTimeout(() => lsv('nb.view.' + WB.id, { z: WB.zoom, x: WB.pan.x, y: WB.pan.y }), 400); }
   }
   function zoomAt(f, sx, sy) { const z = Math.min(8, Math.max(0.05, WB.zoom * f)); const w = wbS2W(sx, sy); WB.zoom = z; WB.pan.x = sx - w.x * z; WB.pan.y = sy - w.y * z; applyView(); }
@@ -18521,6 +18522,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- icons ---------- */
   const I = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   const IC = {
+    ttmic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>', emb: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M9.5 12.5L7 15l2.5 2.5M14.5 12.5L17 15l-2.5 2.5"/>',
     shot: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M3 15h18M7 5v4M12 5v4M17 5v4M7 15v4M12 15v4M17 15v4"/>', aistar: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
     present: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8M10.5 7.5l3.5 2.5-3.5 2.5z"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>', hist: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5M12 7.5V12l3 2"/>',
     plus2: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/>', table: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9.5h18M3 15h18M9 4v16M15 4v16"/>', card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9.5h10M7 13h6"/><path d="M3 5v14" stroke-width="3.5"/>', mind: '<circle cx="12" cy="12" r="3"/><circle cx="4.5" cy="5.5" r="2"/><circle cx="19.5" cy="5.5" r="2"/><circle cx="19.5" cy="18.5" r="2"/><path d="M9.8 10L6 7M14.2 10L18 7M14.2 14l3.8 3"/>', file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>', video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>', tpl: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>',
@@ -18549,7 +18551,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const swatches = (list0, cmd, curv, round) => `<div class="nbsw">${list0.map(c => `<span class="${round ? 'r' : ''}${(c || '') === (curv || '') ? ' on' : ''}${c ? '' : ' none'}" style="${c ? `background:${c}` : ''}" data-nb="${cmd}:${c || '-'}" title="${c ? c : 'تلقائي'}"></span>`).join('')}</div>`;
   function flyHTML(k) {
     if (k === 'aifly') return `<div class="nbcol"><button type="button" data-nb="aiideas">${I(IC.aistar)}<span>${L2('أفكار جديدة', 'New ideas')}</span></button><button type="button" data-nb="aisum">${I(IC.aistar)}<span>${L2('لخّص اللوحة (أو المحدد)', 'Summarise the board (or selection)')}</span></button><button type="button" data-nb="aiclus">${I(IC.aistar)}<span>${L2('جمّع الستيكيز المحددة في مجموعات', 'Group the selected stickies into themes')}</span></button><button type="button" data-action="stuAi" data-arg="ideas">${I(IC.ai)}<span>${L2('صور وكونسبت (مساعد الاستوديو)', 'Images & concept (studio assistant)')}</span></button></div>`;
-    if (k === 'ins') return `<div class="nbcol">${[['tbl', IC.table, 'جدول'], ['tcard', IC.card, 'كارت مهمة'], ['tmind', IC.mind, 'خريطة ذهنية'], ['tfile', IC.file, 'ملف / PDF'], ['tvideo', IC.video, 'فيديو (يوتيوب / فيميو)'], ['link', IC.link, 'لينك']].map(([c, ic, l]) => `<button type="button" data-nb="${c}" title="${l}">${I(ic)}<span>${l}</span></button>`).join('')}</div>`;
+    if (k === 'ins') return `<div class="nbcol">${[['tbl', IC.table, 'جدول'], ['tcard', IC.card, 'كارت مهمة'], ['tmind', IC.mind, 'خريطة ذهنية'], ['tfile', IC.file, 'ملف / PDF'], ['tvideo', IC.video, 'فيديو (يوتيوب / فيميو)'], ['emb', IC.emb, 'تضمين لينك (Figma · Google · Matterport…)'], ['link', IC.link, 'لينك']].map(([c, ic, l]) => `<button type="button" data-nb="${c}" title="${l}">${I(ic)}<span>${l}</span></button>`).join('')}</div>`;
     if (k === 'sticky') return `<div class="nbflyt">لون الستيكي</div>${swatches(STICKY, 'tsticky', NB.sticky)}`;
     if (k === 'shape') return `<div class="nbflyt">الأشكال</div><div class="nbshapes">${SHAPES.map(([s, l]) => `<button type="button" class="${NB.shape === s ? 'on' : ''}" data-nb="tshape:${s}" title="${l}">${shapeIcon(s)}</button>`).join('')}</div>`;
     if (k === 'conn') return `<div class="nbflyt">نوع الخط</div><div class="nbrow">${CSTYLES.map(([s, l]) => `<button type="button" class="${NB.conn === s ? 'on' : ''}" data-nb="tconn:${s}">${l}</button>`).join('')}</div>`;
@@ -18563,7 +18565,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const vs = voteS(); const vOn = voteOn();
     const chips = (vOn ? `<span class="nbchip vote">${I(IC.vote)}<span>تصويت · فاضلك ${Math.max(0, (+vs.n || 5) - myVotesUsed())} من ${+vs.n || 5}</span><b id="nbvleft">${fmtLeft(new Date(vs.end).getTime() - Date.now())}</b></span>` : '') + (privOn() ? `<span class="nbchip priv">${I(IC.lock)}<span>وضع خاص — الأفكار مخفية لحد ما تتكشف</span></span>` : '');
     const bp = boardProj(); const ms = moodSt(b); const moodChip = bp ? `<span class="nbrel"><button type="button" class="nbmood${NB.moodOpen ? ' on' : ''}" data-nb="moodpop" title="${L2('اعتماد المود بورد', 'Moodboard approval')}"><i style="background:${MOODS[ms][1]}"></i><span>${L2('المود بورد', 'Moodboard')}: ${MOODS[ms][0]}</span></button>${NB.moodOpen ? moodPopHTML(b) : ''}</span>` : '';
-    const h = `${chips}${moodChip}<span class="nbppl" title="أونلاين دلوقتي — اضغط على حد عشان تتابعه">${stuAvatar(me(), 24)}${ppl.map(c => `<button type="button" class="nbav${NB.follow === c.person ? ' on' : ''}" data-nb="follow:${esc(c.person)}" title="تابع ${esc((c.name || '').split(' ')[0])}">${stuAvatar(c.person, 24)}</button>`).join('')}</span><span class="nbrel"><button type="button" class="${NB.reactOpen ? 'on' : ''}" data-nb="reacts" title="ريأكشن">🙂</button>${NB.reactOpen ? `<span class="nbpop nbreacts">${REACTS.map(e => `<button type="button" data-nb="react:${e}">${e}</button>`).join('')}</span>` : ''}</span><span class="nbrel"><button type="button" class="${NB.sessOpen ? 'on' : ''}" data-nb="sess" title="أدوات الجلسة: تصويت، وضع خاص، هات الكل عندي، تايمر">${I(IC.more)}</button>${NB.sessOpen ? `<span class="nbpop nbsess">${sessHTML()}</span>` : ''}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${bp && shotsHere().length ? `<button type="button" class="${NB.panel === 'shots' ? 'on' : ''}" data-nb="panel:shots" title="لقطات المشروع (لوحة التشغيل)">${I(IC.shot)}</button>` : ''}<button type="button" class="${NB.panel === 'frames' ? 'on' : ''}" data-nb="panel:frames" title="عرض — كل فريم سلايد">${I(IC.present)}</button><button type="button" class="${NB.panel === 'search' ? 'on' : ''}" data-nb="panel:search" title="بحث في اللوحة (Ctrl+F)">${I(IC.search)}</button><button type="button" class="${NB.panel === 'history' ? 'on' : ''}" data-nb="panel:history" title="تاريخ النسخ">${I(IC.hist)}</button>${canX() ? `<span class="nbrel"><button type="button" class="${NB.xOpen ? 'on' : ''}" data-nb="xmenu" title="تصدير: صورة / PDF / طباعة">${I(IC.print)}</button>${NB.xOpen ? xmenuHTML() : ''}</span>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}${typeof nbCallBtn === 'function' ? nbCallBtn(b) : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
+    const h = `${chips}${moodChip}<span class="nbppl" title="أونلاين دلوقتي — اضغط على حد عشان تتابعه">${stuAvatar(me(), 24)}${ppl.map(c => `<button type="button" class="nbav${NB.follow === c.person ? ' on' : ''}" data-nb="follow:${esc(c.person)}" title="تابع ${esc((c.name || '').split(' ')[0])}">${stuAvatar(c.person, 24)}</button>`).join('')}</span><span class="nbrel"><button type="button" class="${NB.reactOpen ? 'on' : ''}" data-nb="reacts" title="ريأكشن">🙂</button>${NB.reactOpen ? `<span class="nbpop nbreacts">${REACTS.map(e => `<button type="button" data-nb="react:${e}">${e}</button>`).join('')}</span>` : ''}</span><span class="nbrel"><button type="button" class="${NB.sessOpen ? 'on' : ''}" data-nb="sess" title="أدوات الجلسة: تصويت، وضع خاص، هات الكل عندي، تايمر">${I(IC.more)}</button>${NB.sessOpen ? `<span class="nbpop nbsess">${sessHTML()}</span>` : ''}</span>${tm ? `<span class="nbtimer" id="nbtimer" data-end="${tm.end}">${I(IC.timer)}<b>--:--</b>${can() ? `<button type="button" data-action="wbTimerStop" title="إيقاف">✕</button>` : ''}</span>` : (can() ? `<button type="button" data-action="wbTimerStart" title="تايمر للسيشن">${I(IC.timer)}</button>` : '')}<button type="button" class="${NB.panel === 'comments' ? 'on' : ''}" data-nb="panel:comments" title="التعليقات">${I(IC.comment)}${nC ? `<sup>${nC}</sup>` : ''}</button><button type="button" data-nb="bg" title="لوحة فاتحة / غامقة">${I(IC.sun)}</button>${bp && shotsHere().length ? `<button type="button" class="${NB.panel === 'shots' ? 'on' : ''}" data-nb="panel:shots" title="لقطات المشروع (لوحة التشغيل)">${I(IC.shot)}</button>` : ''}<button type="button" class="${NB.panel === 'tracks' ? 'on' : ''}${NB.rec ? ' rec' : ''}" data-nb="panel:tracks" title="شرح مسجّل (Talktrack)">${I(IC.ttmic)}</button><button type="button" class="${NB.panel === 'frames' ? 'on' : ''}" data-nb="panel:frames" title="عرض — كل فريم سلايد">${I(IC.present)}</button><button type="button" class="${NB.panel === 'search' ? 'on' : ''}" data-nb="panel:search" title="بحث في اللوحة (Ctrl+F)">${I(IC.search)}</button><button type="button" class="${NB.panel === 'history' ? 'on' : ''}" data-nb="panel:history" title="تاريخ النسخ">${I(IC.hist)}</button>${canX() ? `<span class="nbrel"><button type="button" class="${NB.xOpen ? 'on' : ''}" data-nb="xmenu" title="تصدير: صورة / PDF / طباعة">${I(IC.print)}</button>${NB.xOpen ? xmenuHTML() : ''}</span>` : ''}${rank() < 3 ? `<span class="nbrole">${esc(typeof nbRoleLabel === 'function' ? nbRoleLabel(rank()) : '')}</span>` : ''}${typeof nbCallBtn === 'function' ? nbCallBtn(b) : ''}<button type="button" class="nbsharebtn" data-action="nbShare" data-arg="${b.id}">مشاركة</button>`;
     if (t.__h !== h) { t.__h = h; t.innerHTML = h; tr(t); }
     const tl = document.getElementById('nbtools'); if (tl) { const th = toolsHTML(); if (tl.__h !== th) { tl.__h = th; tl.innerHTML = th; tr(tl); } }
     const u = document.getElementById('nbundo'); if (u) { u.querySelector('[data-nb="undo"]').disabled = !NB.undo.length; u.querySelector('[data-nb="redo"]').disabled = !NB.redo.length; }
@@ -18591,10 +18593,13 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (one && one.type === 'table') b.push(`<span class="nbseg"><button type="button" data-nb="trow:1" title="صف جديد">${enOn() ? '+ Row' : '+ صف'}</button><button type="button" data-nb="tcol:1" title="عمود جديد">${enOn() ? '+ Col' : '+ عمود'}</button><button type="button" data-nb="trow:-1" title="امسح آخر صف">${enOn() ? '− Row' : '− صف'}</button><button type="button" data-nb="tcol:-1" title="امسح آخر عمود">${enOn() ? '− Col' : '− عمود'}</button></span>`);
     if (one && one.type === 'card') b.push(btn('cardedit', IC.edit, 'تعديل الكارت'));
     if (one && one.type === 'file') b.push(btn('fopen', IC.open, 'افتح الملف'));
+    if (one && isPdf(one)) b.push(`<span class="nbseg"><button type="button" data-nb="pdfpages" title="افرد صفحات الـPDF على اللوحة">${enOn() ? 'Pages' : 'افرد الصفحات'}</button></span>`);
+    if (one && one.type === 'embed') b.push(btn('emuse', '<path d="M5 3l14 8-6.2 1.8L10 19z"/>', 'استخدمه (دبل كليك)'), btn('emedit', IC.edit, 'تعديل اللينك'), btn('emopen', IC.open, 'افتح في تبويب جديد'));
+    if (one && one.type === 'link' && one.url && embedOf(one.url) && !embedOf(one.url).unknown) b.push(btn('link2emb', IC.emb, 'اعرضه جوه اللوحة'));
     if (one && one.type === 'video') b.push(btn('vplay', '<path d="M8 5l12 7-12 7z"/>', 'شغّل الفيديو'), btn('open', IC.open, 'افتح اللينك'));
     if (one && one.mm) b.push(`<span class="nbseg"><button type="button" data-nb="mmchild" title="فرع جديد (Tab)">${enOn() ? '+ Branch' : '+ فرع'}</button>${one.mmp ? `<button type="button" data-nb="mmsib" title="فرع جنبه (Shift+Tab)">${enOn() ? '+ Sibling' : '+ جنبه'}</button>` : ''}<button type="button" data-nb="mmtidy" title="رتّب الخريطة">${enOn() ? 'Tidy' : 'رتّب'}</button></span>`);
     if (one && !SVGT.includes(one.type)) b.push(btn('connect', IC.conn, 'وصّل بسهم'));
-    if (one && ['sticky', 'text', 'image', 'shape', 'link', 'card', 'file', 'video'].includes(one.type) && typeof pmIdeaOk === 'function' && pmIdeaOk((wbBoard() || {}).projectId)) b.push(btn('pmtask', '<path d="M5 12l5 5 9-10"/><path d="M3 4h8"/>', 'حوّلها لمهمة في لوحة المشروع')); // v6.10
+    if (one && ['sticky', 'text', 'image', 'shape', 'link', 'card', 'file', 'video', 'embed'].includes(one.type) && typeof pmIdeaOk === 'function' && pmIdeaOk((wbBoard() || {}).projectId)) b.push(btn('pmtask', '<path d="M5 12l5 5 9-10"/><path d="M3 4h8"/>', 'حوّلها لمهمة في لوحة المشروع')); // v6.10
     b.push('<i class="nbsep"></i>', btn('panel:comments', IC.comment, 'تعليق'), btn('vote', IC.vote, 'تصويت'), btn('dup', IC.dup, 'تكرار (Ctrl+D)'), btn('lock', IC.lock, 'قفل (Ctrl+L)'), flyb('more', I(IC.more), 'المزيد'));
     return b.join('');
   }
@@ -18640,6 +18645,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (NB.panel === 'search') { if (!p.querySelector('#nbsq')) { p.innerHTML = `<div class="ph">${I(IC.search)}<b>${L2('بحث في اللوحة', 'Search the board')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="nbsq"><input id="nbsq" dir="auto" autocomplete="off" placeholder="${L2('دوّر…', 'Search…')}" value="${esc(NB.q || '')}"></div><div class="pb" id="nbsr">${resHTML()}</div>`; tr(p); p.__h = 'search'; } p.style.display = ''; return; }
     if (NB.panel === 'history') { histPanel(p); return; }
     if (NB.panel === 'shots') { shotsPanel(p); return; }
+    if (NB.panel === 'tracks') { tracksPanel(p); return; }
     if (NB.panel === 'tpl') { const h3 = `<div class="ph">${I(IC.tpl)}<b>القوالب</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div><div class="pb nbtpls">${TPLS.map(([k, l, d]) => `<button type="button" class="nbtpl" data-nb="tplput:${k}" ${can() ? '' : 'disabled'}><i class="tk tk-${k}"></i><span><b>${l}</b><small>${d}</small></span></button>`).join('')}</div>`; if (p.__h !== h3) { p.__h = h3; p.innerHTML = h3; tr(p); } p.style.display = ''; return; }
     if (NB.panel !== 'comments') { p.style.display = 'none'; p.__h = ''; return; }
     const ss = sel(); const one = ss.length === 1 ? ss[0] : null;
@@ -18714,7 +18720,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   function hitAt(e, except) { const els = document.elementsFromPoint(e.clientX, e.clientY); for (const el of els) { const g = el.closest && el.closest('#nbitems [data-id]'); if (g && g.dataset.id !== except) { const it = get(g.dataset.id); if (it && !SVGT.includes(it.type)) return it; } } return null; }
   const groupIds = it => (it.g ? items().filter(x => x.g === it.g).map(x => x.id) : [it.id]);
   function selectHit(it, shift) { const ids = groupIds(it); if (shift) { const on = WB.sel.has(it.id); ids.forEach(id => (on ? WB.sel.delete(id) : WB.sel.add(id))); } else if (!WB.sel.has(it.id)) WB.sel = new Set(ids); selChanged(); }
-  function selChanged() { NB.fly = NB.fly && NB.fly.startsWith('c:') ? null : NB.fly; drawSvg(); overlay(); ctx(); panel(); }
+  function selChanged() { if (NB.rec) ttRecSel(); NB.fly = NB.fly && NB.fly.startsWith('c:') ? null : NB.fly; drawSvg(); overlay(); ctx(); panel(); }
   const busy = on => { WB.drag = on ? true : null; };
   function snapTargets(ids) { const host = NB.host; const tl = wbS2W(-200, -200), br = wbS2W(host.clientWidth + 200, host.clientHeight + 200); const xs = [], ys = []; items().forEach(i => { if (ids.has(i.id) || SVGT.includes(i.type)) return; const r = R(i); if (r.x > br.x || r.y > br.y || r.x + r.w < tl.x || r.y + r.h < tl.y) return; xs.push(r.x, r.x + r.w / 2, r.x + r.w); ys.push(r.y, r.y + r.h / 2, r.y + r.h); }); return { xs, ys }; }
   function snap(bb, dx, dy, T, off) {
@@ -18743,6 +18749,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (!NB.host) return; if (NB.pres) { if (!e.target.closest('.nbpresbar')) { e.preventDefault(); presGo(NB.pres.i + (e.button === 2 ? -1 : 1)); } return; }
     if (NB.xOpen && !e.target.closest('.nbxmenu,[data-nb="xmenu"]')) { NB.xOpen = false; top(); }
     if (NB.moodOpen && !e.target.closest('.nbmoodpop,[data-nb="moodpop"]')) { NB.moodOpen = false; top(); }
+    if (NB.emActive) { const inEm = e.target.closest && e.target.closest('.nbi.embed.emact'); if (!inEm) emDeactivate(); else if (!e.target.closest('.emh')) return; }
+    if (NB.play && !NB.play.free && !e.target.closest('.nbttbar,.nbui')) { NB.play.free = true; ttBar(); }
+    if (e.target.closest('.nbttbar')) return;
     if (e.target.closest('.nbui')) return;
     if (e.pointerType === 'touch' && !NB.editing) { const it0 = hitItem(e); const t0 = Date.now(); if (it0 && NB.lastTap && NB.lastTap.id === it0.id && t0 - NB.lastTap.t < 340) { NB.lastTap = null; e.preventDefault(); dbl(e); return; } NB.lastTap = it0 ? { id: it0.id, t: t0 } : null; }
     if (NB.editing) { const ed = e.target.closest('[data-id]'); if (ed && ed.dataset.id === NB.editing) return; endEdit(); }
@@ -18848,10 +18857,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (it && it.type === 'card') { e.preventDefault(); return cardDialog(it); }
     if (it && it.type === 'file') { e.preventDefault(); if (it.fileId && typeof ACTIONS.fileOpen === 'function') ACTIONS.fileOpen(it.fileId); return; }
     if (it && it.type === 'video') { e.preventDefault(); return playVideo(it); }
+    if (it && it.type === 'embed') { e.preventDefault(); WB.sel = new Set(); selChanged(); return emActivate(it.id); }
     if (!it && NB.tool === 'select') { const p = wpt(e); const t = { id: uid(), type: 'text', x: Math.round(p.x - 130), y: Math.round(p.y - 17), w: 260, h: 34, text: '', size: 24 }; create([t]).then(() => { sync(); startEdit(t.id, true); }); }
   }
   function wheel(e) {
-    if (NB.pres) { e.preventDefault(); return; } if (e.target.closest('.nbpanel,.nbctxfly,.nbfly,.nbsess')) return; e.preventDefault(); stopFollow(); const p = wpt(e);
+    if (NB.pres) { e.preventDefault(); return; } if (NB.play && !NB.play.free) { NB.play.free = true; ttBar(); } if (e.target.closest('.nbpanel,.nbctxfly,.nbfly,.nbsess')) return; e.preventDefault(); stopFollow(); const p = wpt(e);
     const mouse = !e.ctrlKey && (e.deltaMode === 1 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Math.abs(e.deltaY) % 1 === 0 && Math.abs(e.deltaY) % 50 === 0));
     if (e.ctrlKey || e.metaKey || mouse) { const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY; zoomAt(Math.exp(-dy * (e.ctrlKey ? 0.012 : 0.0022)), p.sx, p.sy); }
     else { WB.pan = { x: WB.pan.x - (e.shiftKey ? e.deltaY : e.deltaX), y: WB.pan.y - (e.shiftKey ? 0 : e.deltaY) }; applyView(); }
@@ -18883,6 +18893,21 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'privend': { if (rank() < 4) return; NB.sessOpen = false; const b0 = wbBoard(); await Store.save('boards', Object.assign({}, b0, { priv: null })); const hid = items().filter(i => i.hid).map(i => i.id); if (hid.length) { const f = a => { a.hid = null; }; f.comment = true; await mutate(hid, f); } NB.sigs.clear(); syncSoon(); toast('اتكشفت كل الأفكار'); return top(); }
       case 'pmtask': { const o = ss[0]; const b0 = wbBoard(); if (!o || !b0 || typeof pmFromIdea !== 'function') return; return pmFromIdea({ projectId: b0.projectId, text: [o.title, o.text, o.desc, o.url].filter(Boolean).join('\n').replace(/<[^>]+>/g, ' '), fileId: ['image', 'file'].includes(o.type) ? o.fileId : null, thumb: o.type === 'image' ? o.thumb : null, src: 'ideas', boardId: b0.id, itemId: o.id }); }
       case 'tpl': NB.panel = NB.panel === 'tpl' ? null : 'tpl'; return top();
+      case 'emb': return embedDialog(null);
+      case 'emedit': return ss[0] && embedDialog(ss[0]);
+      case 'emuse': return ss[0] && (WB.sel = new Set(), selChanged(), emActivate(ss[0].id));
+      case 'emopen': { const e0 = (arg && get(arg)) || ss[0]; if (e0 && e0.url) window.open(e0.url, '_blank', 'noopener'); return; }
+      case 'link2emb': { const l = ss[0]; const e = l && embedOf(l.url); if (!e) return; await mutate([l.id], a => { a.type = 'embed'; a.src = e.src; a.prov = e.prov; a.unknown = !!e.unknown; a.w = Math.max(+a.w || 0, 640); a.h = Math.max(+a.h || 0, 400); }); return; }
+      case 'pdfpages': return ss[0] && pdfPagesDialog(ss[0]);
+      case 'ttrec': return ttStartDialog();
+      case 'ttstop': return ttStop(false);
+      case 'ttcancel': return ttCancel();
+      case 'ttplay': return ttPlay(arg);
+      case 'ttdel': return ttDel(arg);
+      case 'ttpp': { const P = NB.play; if (!P) return; if (P.media.paused) { if (P.media.ended) P.media.currentTime = 0; P.media.play().catch(() => {}); } else P.media.pause(); return ttBar(); }
+      case 'ttspeed': { const P = NB.play; if (!P) return; P.speed = P.speed === 1 ? 1.5 : P.speed === 1.5 ? 2 : 1; P.media.playbackRate = P.speed; return ttBar(); }
+      case 'ttfollow': if (NB.play) { NB.play.free = false; ttBar(); } return;
+      case 'ttclose': return ttClose();
       case 'moodpop': NB.moodOpen = !NB.moodOpen; return top();
       case 'mood': return moodAct(arg);
       case 'shotgo': { const ex = items().find(i => i.type === 'frame' && i.shotId === arg); if (ex) { WB.sel = new Set([ex.id]); fit([ex]); selChanged(); return; } return shotFrame(arg); }
@@ -18922,7 +18947,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       case 'image': return pickImages(); case 'link': return linkDialog();
       case 'export': if (!canX()) return; return exportBoard();
       case 'bg': { const b = wbBoard(); if (!b || !can()) { NB.host.classList.toggle('dark'); return miniSoon(); } const dark = !(b.bg === 'dark'); await Store.save('boards', Object.assign({}, b, { bg: dark ? 'dark' : 'light' }), { silent: true }); NB.host.classList.toggle('dark', dark); miniSoon(); return; }
-      case 'panel': NB.panel = v && NB.panel !== v ? v : null; if (NB.panel === 'history') NB.vers = null; top(); hitMarks(); if (NB.panel === 'search') setTimeout(() => { const q = document.getElementById('nbsq'); if (q) { q.focus(); q.select(); } }, 30); return;
+      case 'panel': NB.panel = v && NB.panel !== v ? v : null; if (NB.panel === 'history') NB.vers = null; if (NB.panel === 'tracks') NB.tracks = null; top(); hitMarks(); if (NB.panel === 'search') setTimeout(() => { const q = document.getElementById('nbsq'); if (q) { q.focus(); q.select(); } }, 30); return;
       case 'focus': { const it = get(v); if (it) { WB.sel = new Set([v]); fit([it]); selChanged(); } return; }
       case 'csend': { const it = get(v); const i2 = document.getElementById('nbcin'); const text = (i2 && i2.value.trim()) || ''; if (!it || !text) return; const fc = a => { a.thread = (a.thread || []).concat([{ id: uid(), at: nowISO(), by: me(), byName: (S.session && S.session.name) || '', text }]); }; fc.comment = true; await mutate([v], fc); if (i2) i2.value = ''; if (typeof stuMentionNotify === 'function') stuMentionNotify(text, `تعليق على «${(it.text || it.type).slice(0, 30)}» في ${wbBoard().title}`, `#/ideas/${WB.id}`); top(); return; }
       case 'tsticky': NB.sticky = arg; setTool('sticky'); return closeFly();
@@ -19036,7 +19061,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (e.shiftKey && code === 'Digit2') { e.preventDefault(); return cmd('fitsel'); }
     if (mod) return;
     if (code === 'Delete' || code === 'Backspace') { if (WB.sel.size) { e.preventDefault(); return cmd('del'); } return; }
-    if (code === 'Escape') { if (NB.moodOpen || NB.xOpen) { NB.moodOpen = false; NB.xOpen = false; return top(); } if (NB.fly) return closeFly(); WB.sel = new Set(); setTool('select'); return selChanged(); }
+    if (code === 'Escape') { if (NB.emActive) { emDeactivate(); return; } if (NB.play) { ttClose(); return; } if (NB.moodOpen || NB.xOpen) { NB.moodOpen = false; NB.xOpen = false; return top(); } if (NB.fly) return closeFly(); WB.sel = new Set(); setTool('select'); return selChanged(); }
     if (code === 'Tab') { const ss = sel(); if (ss.length === 1 && ss[0].mm && can()) { e.preventDefault(); return mmAdd(ss[0], e.shiftKey && !!ss[0].mmp); } return; }
     if (code === 'Enter') { const ss = sel(); if (ss.length === 1 && EDITABLE.includes(ss[0].type)) { e.preventDefault(); return startEdit(ss[0].id); } return; }
     if (/^Arrow/.test(code) && WB.sel.size) { e.preventDefault(); const d = e.shiftKey ? 10 : 1; const dx = code === 'ArrowLeft' ? -d : code === 'ArrowRight' ? d : 0, dy = code === 'ArrowUp' ? -d : code === 'ArrowDown' ? d : 0; return mutate([...WB.sel], a => { const s = shifted(a, dx, dy); Object.assign(a, s); }); }
@@ -19055,6 +19080,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const img = its.filter(x => x.type && x.type.startsWith('image/')); if (img.length) { e.preventDefault(); return addImages(img.map(x => x.getAsFile()), at); }
     if (!txt.trim()) return; e.preventDefault();
     if (vidOf(txt.trim())) return createVideo(txt.trim(), at);
+    { const e0 = /^https?:\/\/\S+$/.test(txt.trim()) && embedOf(txt.trim()); if (e0 && !e0.unknown) return createEmbed(txt.trim(), at); }
     if (/^https?:\/\/\S+$/.test(txt.trim())) return create([{ id: uid(), type: 'link', x: Math.round(at.x - 130), y: Math.round(at.y - 38), w: 260, h: 76, url: txt.trim(), text: '' }]);
     const lines = txt.split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 40); const n = Math.ceil(Math.sqrt(lines.length));
     return create(lines.map((t, k) => ({ id: uid(), type: 'sticky', color: NB.sticky, w: SSIZE.M, h: SSIZE.M, x: Math.round(at.x - 100 + (k % n) * 220), y: Math.round(at.y - 100 + Math.floor(k / n) * 220), text: t.slice(0, 600) })));
@@ -19321,6 +19347,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       else if (i.type === 'link') { rrect(ctx, r.x, r.y, r.w, r.h, 10); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1; ctx.stroke(); drawText(ctx, i.text || i.url, r.x + 8, r.y, r.w - 16, r.h, { size: 14, bold: true, align: 'start', color: '#1a1a1a' }); }
       else if (i.type === 'card') { rrect(ctx, r.x, r.y, r.w, r.h, 8); ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 6; ctx.fill(); ctx.shadowColor = 'transparent'; ctx.fillStyle = i.tag || '#2d9bf0'; ctx.fillRect(isAr(i.text) ? r.x + r.w - 6 : r.x, r.y, 6, r.h); drawText(ctx, i.text, r.x + 10, r.y + 4, r.w - 20, 28, { size: 15, bold: true, align: 'start', pad: 4 }); if (i.desc) drawText(ctx, i.desc, r.x + 10, r.y + 34, r.w - 20, r.h - 44, { size: 12.5, align: 'start', color: '#555', top: true, pad: 4 }); }
       else if (i.type === 'file') { rrect(ctx, r.x, r.y, r.w, r.h, 8); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1; ctx.stroke(); const im = srcs[i.id]; const fh = 40; if (im) { ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h - fh); ctx.clip(); const k = Math.max(r.w / im.width, (r.h - fh) / im.height); ctx.drawImage(im, r.x, r.y, im.width * k, im.height * k); ctx.restore(); } else drawText(ctx, (String(i.name || '').split('.').pop() || 'FILE').toUpperCase(), r.x, r.y, r.w, r.h - fh, { size: 22, bold: true, color: '#e5484d' }); drawText(ctx, i.name, r.x, r.y + r.h - fh, r.w, fh, { size: 13, bold: true, align: 'start' }); }
+      else if (i.type === 'embed') { rrect(ctx, r.x, r.y, r.w, r.h, 10); ctx.fillStyle = '#f7f8fa'; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.15)'; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = '#eef1f5'; ctx.fillRect(r.x, r.y + 36, r.w, r.h - 36); drawText(ctx, i.text || i.prov || i.url, r.x + 8, r.y, r.w - 16, 36, { size: 13, bold: true, align: 'start' }); drawText(ctx, (i.prov || '') + ' ↗', r.x, r.y + 36, r.w, r.h - 36, { size: 22, color: '#6b7280' }); }
       else if (i.type === 'video') { rrect(ctx, r.x, r.y, r.w, r.h, 10); ctx.fillStyle = '#111'; ctx.fill(); const im = srcs[i.id]; if (im) { ctx.save(); ctx.clip(); ctx.drawImage(im, r.x, r.y, r.w, r.h); ctx.restore(); } ctx.beginPath(); ctx.arc(r.x + r.w / 2, r.y + r.h / 2, 28, 0, 7); ctx.fillStyle = 'rgba(229,72,77,.92)'; ctx.fill(); ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 8, r.y + r.h / 2 - 12); ctx.lineTo(r.x + r.w / 2 + 13, r.y + r.h / 2); ctx.lineTo(r.x + r.w / 2 - 8, r.y + r.h / 2 + 12); ctx.closePath(); ctx.fillStyle = '#fff'; ctx.fill(); }
       else if (i.type === 'table') { const rows = (i.rows && i.rows.length) ? i.rows : [['']]; const nc = Math.max(1, ...rows.map(x => x.length)); const cw = i.cw && i.cw.length === nc ? i.cw.map(Number) : Array(nc).fill(1); const tw = cw.reduce((a, b) => a + (b || 1), 0); const rh = r.h / rows.length; ctx.fillStyle = '#fff'; ctx.fillRect(r.x, r.y, r.w, r.h); let cx = r.x; const xs = cw.map(w0 => { const s = cx; cx += (w0 || 1) / tw * r.w; return s; }); rows.forEach((row, ri) => { if (ri === 0 && i.hdr !== false) { ctx.fillStyle = '#eef1f5'; ctx.fillRect(r.x, r.y, r.w, rh); } for (let ci = 0; ci < nc; ci++) { const w0 = (cw[ci] || 1) / tw * r.w; drawText(ctx, row[ci] || '', xs[ci], r.y + ri * rh, w0, rh, { size: 13, bold: ri === 0 && i.hdr !== false, align: 'start', pad: 7 }); } }); ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = 0; k <= rows.length; k++) { ctx.moveTo(r.x, r.y + k * rh); ctx.lineTo(r.x + r.w, r.y + k * rh); } xs.concat(r.x + r.w).forEach(x0 => { ctx.moveTo(x0, r.y); ctx.lineTo(x0, r.y + r.h); }); ctx.stroke(); }
       ctx.restore();
@@ -19446,7 +19473,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (act === 'back') return (s === 'sent' && (isPOwner(p) || isAD2())) || (s === 'ok1' && isAD2());
     return false; };
   const adIds2 = () => list('workers').filter(w => w.role === 'manager' && w.status !== 'inactive').map(w => w.id);
-  const pushIds = (ids, body, b) => { try { const to = []; (ids || []).filter(Boolean).forEach(id => { if (!myIds().includes(id)) to.push(id, 'w:' + id); }); if (to.length && typeof pushSend === 'function') pushSend([...new Set(to)], 'Ninety Board', body, `#/ideas/${b.id}`, 'board'); } catch (e) { /* best effort */ } };
+  const pushIds = (ids, body, b, url) => { try { const to = []; (ids || []).filter(Boolean).forEach(id => { if (!myIds().includes(id)) to.push(id, 'w:' + id); }); if (to.length && typeof pushSend === 'function') pushSend([...new Set(to)], 'Ninety Board', body, url || `#/ideas/${b.id}`, 'board'); } catch (e) { /* best effort */ } };
   function moodPopHTML(b) {
     const s = moodSt(b); const m = b.mood || {}; const p = boardProj(); const acts = [];
     if (moodCan(b, 'send')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:send">${s === 'ok' ? L2('ابعت تعديل للاعتماد', 'Send changes for approval') : L2('ابعت للاعتماد', 'Send for approval')}</button>`);
@@ -19547,6 +19574,148 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 }
 @media (pointer:coarse){.nb .nbh{width:18px;height:18px;margin:-10px 0 0 -10px;border-radius:5px}}
 </style>`);
+  /* ---------- v6.14 — Talktrack (recorded walkthroughs), PDF pages on the board, live embeds ---------- */
+  /* live embeds: Figma, Google Docs / Sheets / Slides / Drive, Google Maps, Matterport, Sketchfab, Canva, Loom, any other site */
+  function embedOf(url) {
+    let u; try { u = new URL(String(url || '').trim()); } catch (e) { return null; } if (!/^https?:$/.test(u.protocol)) return null; const h = u.hostname.replace(/^www\./, ''); const href = u.href; let m;
+    if (/(^|\.)figma\.com$/.test(h) && /^\/(file|design|proto|board|slides|deck)\//.test(u.pathname)) return { prov: 'Figma', src: `https://www.figma.com/embed?embed_host=ninety&url=${encodeURIComponent(href)}` };
+    if (h === 'docs.google.com' && (m = u.pathname.match(/^\/(document|spreadsheets|presentation|forms)\/d\/([\w-]+)/))) return { prov: { document: 'Google Docs', spreadsheets: 'Google Sheets', presentation: 'Google Slides', forms: 'Google Forms' }[m[1]], src: `https://docs.google.com/${m[1]}/d/${m[2]}/${m[1] === 'presentation' ? 'embed' : m[1] === 'forms' ? 'viewform?embedded=true' : 'preview'}` };
+    if (h === 'drive.google.com' && (m = u.pathname.match(/^\/file\/d\/([\w-]+)/))) return { prov: 'Google Drive', src: `https://drive.google.com/file/d/${m[1]}/preview` };
+    if ((/(^|\.)google\.[a-z.]+$/.test(h) && /^\/maps/.test(u.pathname)) || h === 'maps.google.com') { const at = href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/); const q = at ? `${at[1]},${at[2]}` : (u.searchParams.get('q') || decodeURIComponent((u.pathname.match(/\/maps\/(?:place|search)\/([^/]+)/) || [])[1] || '').replace(/\+/g, ' ')); if (q) return { prov: 'Google Maps', src: `https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=16&output=embed` }; }
+    if (/(^|\.)matterport\.com$/.test(h) && u.searchParams.get('m')) return { prov: 'Matterport', src: `https://my.matterport.com/show/?m=${encodeURIComponent(u.searchParams.get('m'))}&play=1` };
+    if (h === 'sketchfab.com' && (m = u.pathname.match(/([0-9a-f]{32})/))) return { prov: 'Sketchfab', src: `https://sketchfab.com/models/${m[1]}/embed` };
+    if (/(^|\.)canva\.com$/.test(h) && (m = u.pathname.match(/^\/design\/([\w-]+)\/([\w-]+)/))) return { prov: 'Canva', src: `https://www.canva.com/design/${m[1]}/${m[2]}/view?embed` };
+    if (h === 'loom.com' && (m = u.pathname.match(/^\/share\/([\w-]+)/))) return { prov: 'Loom', src: `https://www.loom.com/embed/${m[1]}` };
+    return { prov: h, src: href, unknown: true };
+  }
+  function embedHTML(i) { const host = (() => { try { return new URL(i.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })(); return `<div class="emx"><div class="emh"><span class="fav">${esc((i.prov || host || '?').charAt(0).toUpperCase())}</span><b dir="auto">${esc(i.text || i.prov || host)}</b><small>${esc(host)}</small><button type="button" data-nb="emopen:${i.id}" title="${L2('افتح في تبويب جديد', 'Open in a new tab')}">↗</button></div><div class="emb"><iframe src="${esc(i.src || i.url)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-presentation allow-downloads" allow="fullscreen; xr-spatial-tracking; clipboard-write; autoplay" allowfullscreen title="${esc(i.text || i.prov || 'embed')}"></iframe><span class="emhint">${L2('دبل كليك عشان تستخدمه', 'Double-click to use it')}</span>${i.unknown ? `<span class="emwarn">${L2('لو مش ظاهر، الموقع مانع العرض — افتحه ↗', 'If it stays blank the site blocks embedding — open it ↗')}</span>` : ''}</div></div>`; }
+  function emActivate(id) { emDeactivate(); const el = NB.els.get(id); if (!el) return; NB.emActive = id; el.classList.add('emact'); }
+  function emDeactivate() { if (!NB.emActive) return; const el = NB.els.get(NB.emActive); if (el) el.classList.remove('emact'); NB.emActive = null; }
+  async function createEmbed(url, at, title) { const e = embedOf(url); if (!e || !can()) return; const p = at || viewCenter(); const big = /Docs|Sheets|Slides|Drive|Figma|Canva|Forms/.test(e.prov); const w = big ? 800 : 640, h = big ? 560 : 400; let x = Math.round(p.x - w / 2), y = Math.round(p.y - h / 2); if (!at) { const hit = (X, Y) => items().some(o => o.type !== 'frame' && !SVGT.includes(o.type) && X < o.x + (o.w || 0) && X + w > o.x && Y < o.y + (o.h || 0) && Y + h > o.y); for (let k = 1; k <= 12 && hit(x, y); k++) if (!hit(x + k * (w + 40), y)) { x += k * (w + 40); break; } } await create([{ id: uid(), type: 'embed', x, y, w, h, url: String(url).trim(), src: e.src, prov: e.prov, unknown: !!e.unknown, text: title || '' }]); }
+  function embedDialog(it) { if (!can()) return; openModal({ title: L2('تضمين لينك جوه اللوحة', 'Embed a link on the board'), body: `<div class="form">${field(L2('اللينك', 'Link'), inp('url', it ? it.url : '', 'required class="ltr" placeholder="https://"'), 'full')}${field(L2('العنوان (اختياري)', 'Title (optional)'), inp('text', it ? it.text || '' : ''), 'full')}<p class="tiny muted full">${L2('بيشتغل مع Figma و Google Docs / Sheets / Slides و خرائط جوجل و Matterport و Sketchfab و Canva و Loom — وأي موقع بيسمح بالعرض.', 'Works with Figma, Google Docs / Sheets / Slides, Google Maps, Matterport, Sketchfab, Canva, Loom — and any site that allows embedding.')}</p></div>`, submitLabel: L2('ضمّن', 'Embed'), onSubmit: async f => { const d = formData(f); if (!embedOf(d.url)) { toast(L2('اكتب لينك صحيح يبدأ بـ https', 'Enter a valid https link'), 'err'); return false; } if (vidOf(d.url)) { await createVideo(String(d.url).trim(), null, String(d.text || '').trim()); return; } if (it) { const e = embedOf(d.url); await mutate([it.id], a => { a.url = String(d.url).trim(); a.src = e.src; a.prov = e.prov; a.unknown = !!e.unknown; a.text = String(d.text || '').trim(); }); return; } await createEmbed(d.url, null, String(d.text || '').trim()); } }); }
+  /* PDF pages laid out on the board as images (pdf.js on the device, uploaded like any board image) */
+  const isPdf = i => i && i.type === 'file' && (/pdf/i.test(i.mime || '') || /\.pdf$/i.test(i.name || ''));
+  function pdfPagesDialog(it) {
+    if (!can() || !isPdf(it)) return; const n = +it.pages || 0;
+    openModal({ title: L2('افرد صفحات الـPDF على اللوحة', 'Lay the PDF pages out on the board'), body: `<div class="form">${field(L2('الصفحات', 'Pages'), inp('range', n ? (n <= 30 ? `1-${n}` : '1-30') : '1-10', 'class="ltr" placeholder="1-5, 8"'), 'full')}<p class="tiny muted full">${n ? L2(`الملف فيه ${n} صفحة`, `The file has ${n} pages`) + ' · ' : ''}${L2('بحد أقصى 30 صفحة في المرة — كل صفحة بتبقى صورة تقدر تكتب وترسم عليها', 'Up to 30 pages at a time — each page becomes an image you can draw and comment on')}</p></div>`, submitLabel: L2('افرد الصفحات', 'Lay out the pages'),
+      onSubmit: f => { const want = parseRange(formData(f).range || ''); if (!want.length) { toast(L2('اكتب الصفحات زي 1-5', 'Write the pages like 1-5'), 'err'); return false; } pdfPages(it, want.slice(0, 30)); } });
+  }
+  const parseRange = s => { const out = []; String(s).split(/[,،\s]+/).forEach(p => { const m = p.match(/^(\d+)(?:-(\d+))?$/); if (!m) return; const a = +m[1], b = +(m[2] || m[1]); for (let k = Math.min(a, b); k <= Math.max(a, b) && out.length < 200; k++) if (k > 0 && !out.includes(k)) out.push(k); }); return out; };
+  async function pdfPages(it, want) {
+    const fd = byId('files', it.fileId); if (!fd) { toast(L2('الملف مش متاح', 'File not available'), 'err'); return; } if (NB.pdfBusy) return; NB.pdfBusy = true;
+    try {
+      toast(L2('جارٍ قراءة الـPDF…', 'Reading the PDF…')); await vendorLoad('pdf'); const lib = pdfLib(); const blob = await Files.blob(fd); const doc = await lib.getDocument({ data: await blob.arrayBuffer() }).promise; const pages = want.filter(k => k <= doc.numPages); if (!pages.length) { toast(L2('الصفحات دي مش موجودة في الملف', 'Those pages are not in the file'), 'err'); return; }
+      const g = uid(); const out = []; const W0 = 600, gap = 50, perRow = 5; const x0 = Math.round(+it.x), y0 = Math.round(+it.y + (+it.h || 100) + 80); let k = 0;
+      for (const pn of pages) { toast(L2(`صفحة ${k + 1} من ${pages.length}…`, `Page ${k + 1} of ${pages.length}…`)); const page = await doc.getPage(pn); const v1 = page.getViewport({ scale: 1 }); const sc = Math.min(3, 2000 / v1.width); const vp = page.getViewport({ scale: sc }); const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const b = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.88)); const file = new File([b], `${String(it.name || 'pdf').replace(/\.pdf$/i, '')}-p${pn}.jpg`, { type: 'image/jpeg' }); const up = await uploadOneBase(file, { kind: 'render', projectId: (wbBoard() || {}).projectId || null });
+        const h = Math.round(W0 * cv.height / cv.width); const col = k % perRow, row = Math.floor(k / perRow); const rowH = out.filter(o => o.type === 'image' && o.row === row).reduce((m, o) => Math.max(m, o.h), h); const x = x0 + col * (W0 + gap); const y = y0 + row * (Math.max(rowH, h) + 110);
+        out.push({ id: uid(), type: 'image', x, y, w: W0, h, fileId: up.id, thumb: up.thumb, g, row, page: pn, src: it.id }, { id: uid(), type: 'text', x, y: y + h + 12, w: W0, h: 30, text: `${L2('صفحة', 'Page')} ${pn} — ${it.name || ''}`.slice(0, 120), size: 18, g, row }); k++; }
+      out.forEach(o => { delete o.row; }); await create(out); fit(out); toast(L2(`اتفردت ${pages.length} صفحة ✓ — تقدر تكتب وترسم عليها`, `${pages.length} pages laid out ✓ — draw and comment on them`));
+    } catch (e) { console.warn('pdf pages', e); toast(L2('مقدرتش أقرا الـPDF', 'Could not read the PDF'), 'err'); } finally { NB.pdfBusy = false; }
+  }
+  /* Talktrack: voice (+ optional camera) recorded with the board moves; playback drives the live board */
+  const TT_MAX = 10 * 60 * 1000;
+  const ttMime = video => { const c = video ? ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'] : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac']; return c.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || ''; };
+  function ttStartDialog() {
+    if (!can()) return; if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)) { toast(L2('الجهاز ده مش بيدعم التسجيل', 'This device cannot record'), 'err'); return; } if (NB.rec || NB.play) return;
+    openModal({ title: L2('سجّل شرح للوحة (Talktrack)', 'Record a board walkthrough (Talktrack)'), body: `<div class="form">${field(L2('العنوان', 'Title'), inp('title', `${L2('شرح', 'Walkthrough')} — ${new Date().toLocaleDateString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short' })}`), 'full')}<label class="check full"><input type="checkbox" name="cam"> ${L2('شغّل الكاميرا كمان (الصوت بس هو الأخف)', 'Turn on the camera too (voice only is lighter)')}</label><p class="tiny muted full">${L2('اتكلم وانت بتتحرك في اللوحة وبتشاور على الحاجات — كل حركة بتتسجل مع صوتك. الحد الأقصى 10 دقايق.', 'Talk while you move around the board and point at things — every move is recorded with your voice. Up to 10 minutes.')}</p></div>`, submitLabel: L2('ابدأ التسجيل', 'Start recording'), onSubmit: f => { const d = formData(f); ttStart(String(d.title || '').trim(), !!d.cam); } });
+  }
+  async function ttStart(title, cam) {
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: cam ? { width: { ideal: 480 }, height: { ideal: 360 }, facingMode: 'user', frameRate: { ideal: 20 } } : false }); } catch (e) { toast(cam ? L2('محتاج إذن الميكروفون والكاميرا', 'Microphone and camera permission needed') : L2('محتاج إذن الميكروفون', 'Microphone permission needed'), 'err'); return; }
+    const mime = ttMime(cam); let rec; try { rec = new MediaRecorder(stream, Object.assign(mime ? { mimeType: mime } : {}, cam ? { videoBitsPerSecond: 350000, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 32000 })); } catch (e) { stream.getTracks().forEach(t => t.stop()); toast(L2('الجهاز ده مش بيدعم التسجيل', 'This device cannot record'), 'err'); return; }
+    const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    endEdit(true); NB.rec = { title, cam, stream, rec, chunks, t0: performance.now(), ev: [], w: NB.host.clientWidth, lastV: '', lastP: 0, mime: rec.mimeType || mime || (cam ? 'video/webm' : 'audio/webm') }; rec.start(1000); ttRecView(true); ttBar(); NB.rec.timer = setInterval(() => { ttBar(); if (NB.rec && performance.now() - NB.rec.t0 > TT_MAX) ttStop(true); }, 500);
+  }
+  const ttT = () => Math.round(performance.now() - NB.rec.t0);
+  function ttRecView(force) { if (!NB.rec || !NB.host) return; const c = wbS2W(NB.host.clientWidth / 2, NB.host.clientHeight / 2); const k = `${Math.round(c.x)},${Math.round(c.y)},${WB.zoom.toFixed(3)}`; if (!force && k === NB.rec.lastV) return; const t = ttT(); if (!force && t - (NB.rec.lastVt || 0) < 100) { clearTimeout(NB.rec.vq); NB.rec.vq = setTimeout(() => ttRecView(), 110); return; } NB.rec.lastV = k; NB.rec.lastVt = t; NB.rec.ev.push([t, 'v', Math.round(c.x), Math.round(c.y), +WB.zoom.toFixed(3)]); }
+  function ttRecPtr(e) { if (!NB.rec) return; const t = ttT(); if (t - NB.rec.lastP < 80) return; NB.rec.lastP = t; const p = wpt(e); NB.rec.ev.push([t, 'p', Math.round(p.x), Math.round(p.y)]); }
+  function ttRecSel() { if (!NB.rec) return; NB.rec.ev.push([ttT(), 's', [...WB.sel].slice(0, 30)]); }
+  function ttBar() {
+    let b = document.getElementById('nbttbar'); if (!NB.rec && !NB.play) { if (b) b.remove(); const v = document.getElementById('nbttcam'); if (v) v.remove(); const c = document.getElementById('nbttcur'); if (c) c.remove(); return; }
+    if (!b || !NB.host.contains(b)) { b = document.createElement('div'); b.id = 'nbttbar'; b.className = 'nbttbar'; NB.host.appendChild(b); }
+    const fmt = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+    if (NB.rec) { const t = ttT(); const h = `<i class="recdot"></i><b>${L2('بيسجّل', 'Recording')}</b><span class="mono">${fmt(t)} / 10:00</span><button type="button" data-nb="ttstop" class="ok">${L2('خلّص واحفظ', 'Finish & save')}</button><button type="button" data-nb="ttcancel">${L2('إلغاء', 'Cancel')}</button>`; if (b.__h !== h) { b.__h = h; b.innerHTML = h; }
+      if (NB.rec.cam && !document.getElementById('nbttcam')) { const v = document.createElement('video'); v.id = 'nbttcam'; v.className = 'nbttcam'; v.muted = true; v.playsInline = true; v.autoplay = true; v.srcObject = NB.rec.stream; NB.host.appendChild(v); } return; }
+    const P = NB.play; const dur = P.track.meta.dur || 1; const cur = P.media ? P.media.currentTime * 1000 : 0;
+    const h = `<button type="button" data-nb="ttpp" title="${P.media && !P.media.paused ? L2('إيقاف مؤقت', 'Pause') : L2('تشغيل', 'Play')}">${P.media && !P.media.paused ? '❚❚' : '▶'}</button><span class="mono">${fmt(cur)} / ${fmt(dur)}</span><input type="range" id="nbttseek" min="0" max="${Math.round(dur)}" value="${Math.round(cur)}" step="100" aria-label="seek"><button type="button" data-nb="ttspeed" title="${L2('السرعة', 'Speed')}">${P.speed || 1}x</button>${P.free ? `<button type="button" data-nb="ttfollow" class="ok">${L2('ارجع للشرح', 'Back to the walkthrough')}</button>` : ''}<b dir="auto" class="tt">${esc(P.track.meta.title || '')}</b><button type="button" data-nb="ttclose">✕</button>`;
+    if (b.__h !== h) { const sk = document.getElementById('nbttseek'); const dragging = sk && document.activeElement === sk; if (!dragging) { b.__h = h; b.innerHTML = h; tr(b); } else { const sp = b.querySelector('.mono'); if (sp) sp.textContent = `${fmt(cur)} / ${fmt(dur)}`; } }
+  }
+  async function ttStop(auto) {
+    const R0 = NB.rec; if (!R0) return; clearInterval(R0.timer); const dur = ttT(); ttRecView(true);
+    await new Promise(res => { R0.rec.onstop = res; try { R0.rec.stop(); } catch (e) { res(); } }); R0.stream.getTracks().forEach(t => t.stop()); NB.rec = null; ttBar();
+    if (dur < 1500) { toast(L2('التسجيل قصير أوي — اتلغى', 'Too short — discarded'), 'err'); return; }
+    const blob = new Blob(R0.chunks, { type: R0.mime.split(';')[0] }); const ext = /mp4|aac/.test(R0.mime) ? (R0.cam ? 'mp4' : 'm4a') : 'webm';
+    toast(L2('جارٍ حفظ الشرح…', 'Saving the walkthrough…') + (auto ? ' (' + L2('وصل للحد الأقصى', 'reached the limit') + ')' : ''));
+    try { const file = new File([blob], `talktrack-${Date.now()}.${ext}`, { type: blob.type }); const up = await uploadOneBase(file, { kind: R0.cam ? 'video' : 'audio', projectId: (wbBoard() || {}).projectId || null });
+      const b = wbBoard(); const doc = { id: uid(), boardId: WB.id, meta: { title: R0.title || L2('شرح', 'Walkthrough'), by: me(), byName: myName(), at: Date.now(), dur, cam: !!R0.cam, size: blob.size }, media: { fileId: up.id, mime: blob.type }, w: R0.w, ev: R0.ev };
+      await Store.save('btracks', doc, { silent: true }); NB.tracks = null; NB.panel = 'tracks'; top();
+      const p = boardProj(); if (p) pushIds([p.ownerId, p.leadId].concat(p.team || []), L2(`${myName()} سجّل شرح على «${b.title}»: ${doc.meta.title}`, `${myName()} recorded a walkthrough on «${b.title}»: ${doc.meta.title}`), b, `#/ideas/${b.id}/tt-${doc.id}`);
+      toast(L2('اتحفظ الشرح ✓', 'Walkthrough saved ✓'));
+    } catch (e) { console.warn('talktrack', e); toast(typeof uploadErrText === 'function' ? uploadErrText(e) : L2('مقدرتش أحفظ الشرح', 'Could not save the walkthrough'), 'err'); }
+  }
+  function ttCancel() { const R0 = NB.rec; if (!R0) return; clearInterval(R0.timer); try { R0.rec.stop(); } catch (e) { /* ignore */ } R0.stream.getTracks().forEach(t => t.stop()); NB.rec = null; ttBar(); toast(L2('اتلغى التسجيل', 'Recording cancelled')); }
+  S.data.btracks = S.data.btracks || new Map();
+  async function ttList() {
+    const local = [...S.data.btracks.values()].filter(v => v.boardId === WB.id).map(v => Object.assign({ id: v.id }, v.meta));
+    try { if (typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from) { const r = await S.sb.from('docs').select('id,meta:data->meta').eq('col', 'btracks').eq('data->>boardId', WB.id); if (!r.error && Array.isArray(r.data)) { const m = new Map(local.map(v => [v.id, v])); r.data.forEach(x => { if (x && x.meta) m.set(x.id, Object.assign({ id: x.id }, x.meta)); }); return [...m.values()].sort((a, b) => b.at - a.at); } } } catch (e) { /* local */ }
+    return local.sort((a, b) => b.at - a.at);
+  }
+  async function ttGet(id) { const l = S.data.btracks.get(id); if (l) return l; try { const r = await S.sb.from('docs').select('data').eq('col', 'btracks').eq('id', id).single(); return r.data && r.data.data; } catch (e) { return null; } }
+  function tracksPanel(p) {
+    if (!NB.tracks && !NB.tracksLoading) { NB.tracksLoading = true; ttList().then(v => { NB.tracks = v; NB.tracksLoading = false; p.__h = ''; panel(); }); }
+    const ts = NB.tracks || []; const fmt = ms => { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+    const h = `<div class="ph">${I(IC.ttmic)}<b>${L2('الشروحات المسجّلة', 'Recorded walkthroughs')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div>${can() ? `<div class="nbpinbar"><button type="button" class="btn sm p" data-nb="ttrec">● ${L2('سجّل شرح', 'Record a walkthrough')}</button></div>` : ''}<div class="pb">${!NB.tracks ? '<p class="muted small">…</p>' : ts.length ? ts.map(t => `<div class="nbver"><div><b dir="auto">${esc(t.title || '')}</b><small>${esc(t.byName || '')} · ${fmt(t.dur)}${t.cam ? ' · 🎥' : ''} · ${esc(new Date(t.at).toLocaleDateString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short' }))}</small></div><span><button type="button" class="btn sm p" data-nb="ttplay:${t.id}">▶</button>${t.by === me() || rank() >= 4 ? `<button type="button" class="btn sm" data-nb="ttdel:${t.id}" title="${L2('مسح', 'Delete')}">✕</button>` : ''}</span></div>`).join('') : `<p class="muted small">${L2('لسه مفيش شروحات — سجّل شرح بصوتك وانت بتتحرك في اللوحة، والعميل أو الفريق يتفرج عليه في أي وقت', 'No walkthroughs yet — record one with your voice while you move around the board; the client or the team can watch it any time')}</p>`}</div>`;
+    if (p.__h !== h) { p.__h = h; p.innerHTML = h; tr(p); } p.style.display = '';
+  }
+  async function ttPlay(id) {
+    if (NB.rec) return; ttClose(); const t = await ttGet(id); if (!t || !t.media) { toast(L2('الشرح مش متاح', 'Walkthrough not available'), 'err'); return; } const f = byId('files', t.media.fileId); let url = null; try { url = f ? await Files.url(f) : null; if (!url && f) { const bl = await Files.blob(f); url = bl ? URL.createObjectURL(bl) : null; } } catch (e) { url = null; } if (!url) { toast(L2('ملف الصوت مش متاح', 'The recording file is not available'), 'err'); return; }
+    const vid = !!t.meta.cam; const m = document.createElement(vid ? 'video' : 'audio'); m.src = url; m.preload = 'auto'; m.playsInline = true; if (vid) { m.id = 'nbttcam'; m.className = 'nbttcam'; NB.host.appendChild(m); }
+    const ev = (t.ev || []).slice().sort((a, b) => a[0] - b[0]); NB.play = { track: t, media: m, ev, vs: ev.filter(e => e[1] === 'v'), ps: ev.filter(e => e[1] === 'p'), ss: ev.filter(e => e[1] === 's'), free: false, speed: 1 }; NB.panel = null; top();
+    const cur = document.createElement('div'); cur.id = 'nbttcur'; cur.className = 'nbttcur'; cur.innerHTML = `<svg viewBox="0 0 24 24"><path d="M4 3l16 7-7 2-3 7z" fill="#f24726" stroke="#fff" stroke-width="1.5"/></svg><span>${esc((t.meta.byName || '').split(' ')[0])}</span>`; NB.host.appendChild(cur);
+    m.onended = () => { ttBar(); }; m.onplay = m.onpause = () => ttBar(); try { await m.play(); } catch (e) { /* the bar's ▶ starts it */ } ttTick(); ttBar();
+  }
+  const lerp = (a, b, k) => a + (b - a) * k;
+  function atT(arr, t) { if (!arr.length) return null; let lo = 0, hi = arr.length - 1; if (t <= arr[0][0]) return [arr[0], arr[0], 0]; if (t >= arr[hi][0]) return [arr[hi], arr[hi], 0]; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (arr[mid][0] <= t) lo = mid; else hi = mid; } const a = arr[lo], b = arr[hi], gap = Math.max(1, b[0] - a[0]); return [a, b, gap > 500 ? Math.max(0, 1 - (b[0] - t) / 300) : (t - a[0]) / gap]; }
+  function ttTick() {
+    const P = NB.play; if (!P || !NB.host || !NB.host.isConnected) return; const t = P.media.currentTime * 1000;
+    if (!P.free) { const v = atT(P.vs, t); if (v) { const [a, b, k] = v; const sc = NB.host.clientWidth / (P.track.w || NB.host.clientWidth); const z = lerp(a[4], b[4], k) * sc, cx = lerp(a[2], b[2], k), cy = lerp(a[3], b[3], k); WB.zoom = Math.min(8, Math.max(0.05, z)); WB.pan = { x: NB.host.clientWidth / 2 - cx * WB.zoom, y: NB.host.clientHeight / 2 - cy * WB.zoom }; applyView(); } }
+    const pe = atT(P.ps, t); const cur = document.getElementById('nbttcur'); if (cur && pe) { const [a, b, k] = pe; const s0 = wbW2S(lerp(a[2], b[2], k), lerp(a[3], b[3], k)); cur.style.transform = `translate(${s0.x}px,${s0.y}px)`; cur.style.display = ''; }
+    const se = P.ss.filter(e => e[0] <= t).pop(); const ids = new Set(se ? se[2] : []); for (const [id, el] of NB.els) el.classList.toggle('nbttsel', ids.has(id));
+    if (Math.floor(t / 500) !== P.lastBar) { P.lastBar = Math.floor(t / 500); ttBar(); }
+    P.raf = requestAnimationFrame(ttTick);
+  }
+  function ttClose() { const P = NB.play; if (!P) return; cancelAnimationFrame(P.raf); try { P.media.pause(); } catch (e) { /* ignore */ } if (/^blob:/.test(P.media.src)) URL.revokeObjectURL(P.media.src); NB.play = null; for (const el of NB.els.values()) el.classList.remove('nbttsel'); ttBar(); }
+  async function ttDel(id) { const t = (NB.tracks || []).find(x => x.id === id); if (!t || !(t.by === me() || rank() >= 4)) return; if (!(await confirmDlg(L2(`مسح الشرح «${t.title}»؟`, `Delete the walkthrough «${t.title}»?`), L2('امسح', 'Delete')))) return; try { const full = await ttGet(id); await Store.remove('btracks', id); S.data.btracks.delete(id); const f = full && full.media && byId('files', full.media.fileId); if (f) { try { await Files.remove(f); await Store.remove('files', f.id); } catch (e) { /* keep going */ } } } catch (e) { toast(L2('مقدرتش أمسح', 'Could not delete'), 'err'); } NB.tracks = null; panel(); }
+  document.head.insertAdjacentHTML('beforeend', `<style id="nbr5css">
+.nb .nbi.embed{background:#fff;border-radius:10px;box-shadow:0 0 0 1px rgba(0,0,0,.14),0 4px 14px -4px rgba(0,0,0,.25);overflow:hidden;color:#1a1a1a}
+.nb .emx{height:100%;display:flex;flex-direction:column}
+.nb .emh{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.1);background:#f7f8fa;cursor:move;flex:none}
+.nb .emh .fav{width:20px;height:20px;border-radius:5px;background:#2d9bf0;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+.nb .emh b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.nb .emh small{font-size:11px;opacity:.55;white-space:nowrap}
+.nb .emh button{margin-inline-start:auto;width:26px;height:26px;border-radius:6px;border:0;background:transparent;cursor:pointer;font-size:14px}
+.nb .emb{position:relative;flex:1;min-height:0;background:#eef1f5}
+.nb .emb iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;background:#fff}
+.nb .nbi.embed.emact .emb iframe{pointer-events:auto}
+.nb .nbi.embed.emact{box-shadow:0 0 0 3px var(--nb-sel,#2d9bf0),0 4px 14px -4px rgba(0,0,0,.25)}
+.nb .emhint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(20,22,26,.78);color:#fff;font-size:11.5px;padding:4px 10px;border-radius:12px;pointer-events:none;opacity:0;transition:opacity .15s;white-space:nowrap}
+.nb .nbi.embed:hover:not(.emact) .emhint{opacity:1}
+.nb .emwarn{position:absolute;top:6px;inset-inline:6px;font-size:11px;color:#8a5a00;background:#fff4d6;border-radius:6px;padding:3px 8px;pointer-events:none;text-align:center}
+.nb .nbttbar{position:absolute;top:66px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(20,22,26,.9);color:#fff;border-radius:14px;z-index:31;max-width:calc(100% - 20px);font-size:13px;backdrop-filter:blur(8px)}
+.nb .nbttbar button{height:32px;min-width:32px;padding:0 10px;border:0;border-radius:9px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12.5px;white-space:nowrap}
+.nb .nbttbar button.ok{background:#e5484d}
+.nb .nbttbar .mono{font-variant-numeric:tabular-nums;opacity:.85;white-space:nowrap}
+.nb .nbttbar input[type=range]{width:min(260px,30vw);accent-color:#e5484d}
+.nb .nbttbar .tt{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;opacity:.85}
+.nb .recdot{width:10px;height:10px;border-radius:50%;background:#e5484d;animation:nbrec 1s infinite}
+@keyframes nbrec{50%{opacity:.25}}
+.nb .nbttcam{position:absolute;inset-inline-end:16px;bottom:120px;width:150px;height:150px;border-radius:50%;object-fit:cover;z-index:31;box-shadow:0 6px 24px rgba(0,0,0,.4);border:3px solid #fff;background:#111}
+.nb .nbttcur{position:absolute;left:0;top:0;z-index:30;pointer-events:none;display:none;transition:transform .08s linear}
+.nb .nbttcur svg{width:22px;height:22px}
+.nb .nbttcur span{position:absolute;left:18px;top:16px;background:#f24726;color:#fff;font-size:11px;padding:1px 7px;border-radius:8px;white-space:nowrap}
+.nb .nbi.nbttsel{outline:3px solid #f24726;outline-offset:3px}
+@media (max-width:760px){.nb .nbttbar{top:auto;bottom:122px;flex-wrap:wrap;justify-content:center}.nb .nbttbar .tt{display:none}.nb .nbttcam{width:96px;height:96px;bottom:190px}}
+</style>`);
   function bind(host) {
     host.addEventListener('pointerdown', down); host.addEventListener('dblclick', dbl); host.addEventListener('wheel', wheel, { passive: false });
     host.addEventListener('contextmenu', e => { if (!e.target.closest('.nbpanel input')) e.preventDefault(); });
@@ -19557,13 +19726,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       const f = e.target.closest('[data-nbfly]'); if (f) { const k = 'c:' + f.dataset.nbfly; NB.fly = NB.fly === k ? null : k; flyOpen(null); ctx(); return; }
       const c = e.target.closest('[data-nb]'); if (c) { if (c.tagName !== 'INPUT') e.preventDefault(); const [k, ...rest] = c.dataset.nb.split(':'); const keepFly = /^(tpcol|tpw|tpen)$/.test(k); if (!keepFly && NB.fly && NB.fly.startsWith('c:') && !['fs', 'bold', 'sw', 'width', 'dash'].includes(k)) NB.fly = null; cmd(k, rest.join(':')); return; }
     });
-    host.addEventListener('input', e => { if (e.target.id !== 'nbsq') return; NB.q = e.target.value; const r0 = document.getElementById('nbsr'); if (r0) { r0.innerHTML = resHTML(); tr(r0); } NB.hitI = -1; });
+    host.addEventListener('pointermove', e => { if (NB.rec) ttRecPtr(e); });
+    host.addEventListener('input', e => { if (e.target.id === 'nbttseek' && NB.play) { NB.play.media.currentTime = (+e.target.value || 0) / 1000; NB.play.free = false; return; } if (e.target.id !== 'nbsq') return; NB.q = e.target.value; const r0 = document.getElementById('nbsr'); if (r0) { r0.innerHTML = resHTML(); tr(r0); } NB.hitI = -1; });
     host.addEventListener('keydown', e => { if (e.target.id === 'nbsq') { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); const rs = searchRes(); if (!rs.length) return; NB.hitI = ((NB.hitI == null ? -1 : NB.hitI) + (e.shiftKey ? rs.length - 1 : 1)) % rs.length; const it = rs[NB.hitI]; WB.sel = new Set([it.id]); fit([it]); selChanged(); } if (e.key === 'Escape') { NB.panel = null; top(); hitMarks(); } return; } if (e.target.id === 'nbcin' && e.key === 'Enter') { e.preventDefault(); const b = host.querySelector('[data-nb^="csend:"]'); if (b) b.click(); } });
     const mc = host.querySelector('#nbmini'); if (mc) { const go2 = e => { const T = NB.miniT; if (!T) return; const r = mc.getBoundingClientRect(); const wx = (e.clientX - r.left - T.ox) / T.s, wy = (e.clientY - r.top - T.oy) / T.s; WB.pan = { x: host.clientWidth / 2 - wx * WB.zoom, y: host.clientHeight / 2 - wy * WB.zoom }; applyView(); }; mc.addEventListener('pointerdown', e => { e.stopPropagation(); go2(e); const mv = ev => go2(ev); const u2 = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', u2); }; window.addEventListener('pointermove', mv); window.addEventListener('pointerup', u2); }); }
   }
   function mount(host) {
     if (NB.host !== host) { NB.host = host; NB.els = new Map(); NB.sigs = new Map(); NB.order = ''; bind(host); const m = lsv('nb.mini'); if (m === false) NB.mini = false; }
-    presence(host.dataset.board); applyView(); sync(); top(); if (NB.vAutoFor !== host.dataset.board) { NB.vAutoFor = host.dataset.board; setTimeout(() => { if (NB.host && NB.host.isConnected && WB.id === NB.vAutoFor) vAuto().catch(() => {}); }, 4000); } if (NB.fitPending && items().length) { NB.fitPending = false; fit(); }
+    presence(host.dataset.board); applyView(); sync(); top(); if (S.route.sub && /^tt-/.test(S.route.sub) && NB.ttDeep !== S.route.sub) { NB.ttDeep = S.route.sub; setTimeout(() => ttPlay(S.route.sub.slice(3)), 900); } if (NB.vAutoFor !== host.dataset.board) { NB.vAutoFor = host.dataset.board; setTimeout(() => { if (NB.host && NB.host.isConnected && WB.id === NB.vAutoFor) vAuto().catch(() => {}); }, 4000); } if (NB.fitPending && items().length) { NB.fitPending = false; fit(); }
   }
   // the v4.18 renderer's hook would attach its own handlers to #wbwrap — the new engine replaces it (design-board class toggle kept)
   for (let k = RENDER_HOOKS.length - 1; k >= 0; k--) if (String(RENDER_HOOKS[k]).includes('wbMount(host)')) RENDER_HOOKS.splice(k, 1);
