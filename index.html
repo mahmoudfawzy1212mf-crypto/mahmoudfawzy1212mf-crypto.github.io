@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-1329-cf3419";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-1422-8e206b";</script>
 
 <script>
 'use strict';
@@ -31647,6 +31647,45 @@ html[dir=rtl] body.pc-dock .fab,html[dir=rtl] body.pc-dock .aifab{left:418px!imp
 @media print{#pchost,#pcbub{display:none!important}}
 `; document.head.appendChild(css);
   setTimeout(() => { if (S.session) place(); }, 1200);
+})();
+/* v6.25 — activate the whole team in one go (owner / HR).
+   The team list shows how many people still have no account; «Activate all» makes a one-time code (48 h) for each of them and opens a list
+   with a WhatsApp button per person — the message carries the link that opens the app with the code filled. Each person sets his own
+   password; the codes are shown only on this screen (never stored in clear — only their hash, same as the single activation-code button). */
+(function () {
+  if (window.__NF_TEAMACT__) return; window.__NF_TEAMACT__ = 1;
+  const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
+  const srv = () => typeof sbOn === 'function' && sbOn();
+  const can = () => !!S.session && (isAdmin() || (typeof canEditHr === 'function' && canEditHr()));
+  const done = w => (srv() ? !!(w.sbUid || w.activatedAt) : !!w.passHash);
+  const pending = () => list('workers').filter(w => !['inactive', 'suspended'].includes(w.status) && w.role && w.role !== 'none' && !done(w));
+  const roleL = r => (typeof ROLES !== 'undefined' && ROLES[r]) || r || '';
+  ACTIONS.teamActivate = async () => {
+    if (!can()) return; const ws = pending().sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+    if (!ws.length) { toast(L('كل الفريق متفعّل ✓', 'Everyone is activated ✓')); return; }
+    if (!(await confirmDlg(L(`هيتعمل كود تفعيل جديد لـ${ws.length} من الفريق (صالح 48 ساعة) — وبعدها تبعته لكل واحد على واتساب. نكمّل؟`, `A new activation code will be made for ${ws.length} people (valid 48 hours) — then you send it to each one on WhatsApp. Continue?`), L('ولّد الأكواد', 'Make the codes')))) return;
+    const codes = {};
+    for (const w of ws) {
+      if (!loginIdOf(w)) continue; const code = String(Math.floor(100000 + Math.random() * 900000));
+      try { await Store.update('workers', w.id, { actCodeHash: await hashPin(w.id, code), actCodeExp: new Date(Date.now() + 48 * 3600 * 1000).toISOString() }); codes[w.id] = code; } catch (e) { console.warn('actcode', w.id, e); }
+    }
+    const rows = ws.map(w => {
+      const c = codes[w.id]; const ph = normPhone(w.phone || w.workPhone || '');
+      if (!c) return `<tr><td class="notr">${esc(w.name)}</td><td>${esc(roleL(w.role))}</td><td colspan="2" class="muted small">${loginIdOf(w) ? L('ماتعملش — جرّب تاني', 'Not made — try again') : L('مفيش رقم موبايل — ضيفه في ملف الموظف الأول', 'No mobile number — add it in the employee file first')}</td></tr>`;
+      const text = smsCodeText(loginIdOf(w), c, false);
+      return `<tr><td class="notr">${esc(w.name)}</td><td>${esc(roleL(w.role))}</td><td class="num ltr" style="letter-spacing:2px;font-weight:700">${c}</td><td style="white-space:nowrap">${ph ? `<a class="btn xs p" href="${waLink(ph, text)}" target="_blank" rel="noopener" data-tasent>${icon('wa')}${L('واتساب', 'WhatsApp')}</a> ` : ''}<button type="button" class="btn xs ghost" data-tacopy="${esc(w.id)}">${icon('copy')}${L('نسخ', 'Copy')}</button></td></tr>`;
+    }).join('');
+    const texts = {}; ws.forEach(w => { if (codes[w.id]) texts[w.id] = smsCodeText(loginIdOf(w), codes[w.id], false); });
+    openModal({ title: L('تفعيل حسابات الفريق', 'Activate the team accounts'), wide: true, footer: `<button type="button" class="btn p" data-action="closemodal">${L('تم', 'Done')}</button>`,
+      body: `<div class="banner info" style="margin:0 0 12px">${icon('info')}<span>${L('ابعت لكل واحد رسالته من الزرار. الرابط بيفتح السيستم والكود مكتوب، وهو يختار كلمة السر بتاعته. الأكواد مش هتظهر تاني بعد ما تقفل الشاشة دي — لو حد ماوصلوش اعمله كود جديد من ملفه.', 'Send each person his message with the button. The link opens the system with the code filled in, and he picks his own password. The codes are not shown again after you close this screen — if someone misses it, make a new code from his file.')}</span></div>
+        <div class="tablewrap"><table class="table"><thead><tr><th>${L('الاسم', 'Name')}</th><th>${L('الدور', 'Role')}</th><th>${L('الكود', 'Code')}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`,
+      onOpen: f => { f.addEventListener('click', async ev => { const a = ev.target.closest('[data-tasent]'); if (a) { setTimeout(() => { a.classList.remove('p'); a.innerHTML = '✓ ' + L('اتفتح', 'Opened'); }, 300); return; } const b = ev.target.closest('[data-tacopy]'); if (b) { ev.preventDefault(); try { await navigator.clipboard.writeText(texts[b.dataset.tacopy] || ''); toast(L('اتنسخت الرسالة', 'Message copied')); } catch (e) { toast(L('مقدرتش أنسخ', 'Could not copy'), 'err'); } } }); } });
+  };
+  /* the team list: a banner with the count + the button */
+  if (typeof vWorkers === 'function') vWorkers = (base => function () {
+    const h = base.apply(this, arguments); if (!can() || (S.route && S.route.id)) return h; const n = pending().length; if (!n) return h;
+    return `<div class="banner warn" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${icon('info')}<span style="flex:1">${L(`${n} من الفريق لسه مافعّلوش حساباتهم على السيستم`, `${n} people have not activated their accounts yet`)}</span><button type="button" class="btn sm p" data-action="teamActivate">${L('فعّل الكل', 'Activate all')}</button></div>` + h;
+  })(vWorkers);
 })();
 </script>
 
