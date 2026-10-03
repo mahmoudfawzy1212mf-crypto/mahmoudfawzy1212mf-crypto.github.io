@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261003-1708-b59fa0';
+const BUILD = '20261003-1716-69b879';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
