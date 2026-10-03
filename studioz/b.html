@@ -29,6 +29,11 @@ svg#lines{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 #panel form{display:flex;flex-direction:column;gap:6px;padding:10px;border-top:1px solid var(--uil)}input,textarea{font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--uil);background:transparent;color:inherit}
 .btnp{background:var(--acc);color:#fff;font-weight:600}.btnp:hover{background:var(--acc);filter:brightness(1.08)}
 #msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;background:var(--bg)}#msg .box{background:var(--ui);padding:24px;border-radius:14px;box-shadow:0 0 0 1px var(--uil);max-width:360px;width:90%;text-align:center;display:flex;flex-direction:column;gap:10px}
+#eng{position:fixed;z-index:7;left:50%;bottom:64px;transform:translateX(-50%);width:min(440px,calc(100vw - 24px));background:var(--ui);border-radius:16px;box-shadow:0 0 0 1px var(--uil),0 18px 44px -14px rgba(0,0,0,.4);padding:12px 14px;display:none;flex-direction:column;gap:10px}
+#eng .q{font-weight:700;font-size:16px;line-height:1.5;unicode-bidi:plaintext}#eng .pill{font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(127,127,127,.15);color:var(--mute)}
+#eng .opts{display:flex;flex-direction:column;gap:6px}#eng .opts.img{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}#eng .opts button{border:1px solid var(--uil);border-radius:12px;padding:9px 12px;text-align:start;display:flex;flex-direction:column;gap:6px}
+#eng .opts img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px}#eng .opts button.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc) inset}
+#eng .rate{display:flex;justify-content:center;gap:6px}#eng .rate button{font-size:30px;color:#cfcfcf;padding:0 4px}#eng .rate button.on{color:#f5b800}#eng .row{display:flex;gap:6px;align-items:center}#eng .row input{flex:1;min-width:0}#eng .ft{font-size:12px;color:var(--mute)}
 .mark{font-weight:800;letter-spacing:.08em}.mark span{font-weight:400;opacity:.6;letter-spacing:.2em;font-size:11px;display:block}
 </style>
 </head>
@@ -38,12 +43,13 @@ svg#lines{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 <div class="bar" id="zoom"><button id="zo">−</button><span id="zp">100%</span><button id="zi">+</button><button id="zf">⤢</button></div>
 <div id="panel"><div style="display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--uil)"><b id="ptitle" style="flex:1"></b><button id="pclose">✕</button></div><div class="pb" id="plist"></div>
 <form id="pform"><input id="pname" maxlength="60" required><textarea id="ptext" rows="3" maxlength="1000" required></textarea><button class="btnp" type="submit" id="psend"></button></form></div>
+<div id="eng"></div>
 <div id="msg"><div class="box"><div class="mark">NINETY<span>STUDIOZ</span></div><div id="mtext"></div><form id="mform" style="display:none;flex-direction:column;gap:8px"><input id="mpass" type="password" autocomplete="off"><button class="btnp" type="submit" id="mgo"></button></form></div></div>
 <script>
 (() => {
   const FN = 'https://rekmppawmxerlqxqpqni.supabase.co/functions/v1/board-share';
-  const T = { ar: { view: 'للفرجة', comment: 'فرجة وتعليق — اضغط على أي عنصر وعلّق', comments: 'التعليقات', none: 'مفيش تعليقات لسه', name: 'اسمك', text: 'تعليقك…', send: 'إرسال', pass: 'اللوحة دي عليها باسورد', passph: 'الباسورد', open: 'افتح', wrong: 'الباسورد غلط', expired: 'اللينك ده انتهى — اطلب لينك جديد', gone: 'اللينك ده مش شغال', err: 'حصلت مشكلة — جرّب تاني', sent: 'اتبعت التعليق', loading: 'جارٍ التحميل…', lang: 'English' },
-             en: { view: 'View only', comment: 'View & comment — tap any item to comment', comments: 'Comments', none: 'No comments yet', name: 'Your name', text: 'Your comment…', send: 'Send', pass: 'This board is password protected', passph: 'Password', open: 'Open', wrong: 'Wrong password', expired: 'This link has expired — ask for a new one', gone: 'This link is not active', err: 'Something went wrong — try again', sent: 'Comment sent', loading: 'Loading…', lang: 'عربي' } };
+  const T = { ar: { view: 'للفرجة', comment: 'فرجة وتعليق — اضغط على أي عنصر وعلّق', comments: 'التعليقات', none: 'مفيش تعليقات لسه', name: 'اسمك', text: 'تعليقك…', send: 'إرسال', pass: 'اللوحة دي عليها باسورد', passph: 'الباسورد', open: 'افتح', wrong: 'الباسورد غلط', expired: 'اللينك ده انتهى — اطلب لينك جديد', gone: 'اللينك ده مش شغال', err: 'حصلت مشكلة — جرّب تاني', sent: 'اتبعت التعليق', loading: 'جارٍ التحميل…', lang: 'English' , eTitle: 'سؤال سريع من الاستوديو', eName: 'اسمك', eSend: 'إرسال', eDone: 'إجابتك اتسجلت ✓ — تقدر تغيّرها لحد ما الوقت يخلص', eMulti: 'تقدر تختار أكتر من حاجة', eText: 'اكتب إجابتك', eWords: 'كلمة أو كلمتين', eEnd: 'فاضل', eNeed: 'اكتب اسمك الأول' },
+             en: { view: 'View only', comment: 'View & comment — tap any item to comment', comments: 'Comments', none: 'No comments yet', name: 'Your name', text: 'Your comment…', send: 'Send', pass: 'This board is password protected', passph: 'Password', open: 'Open', wrong: 'Wrong password', expired: 'This link has expired — ask for a new one', gone: 'This link is not active', err: 'Something went wrong — try again', sent: 'Comment sent', loading: 'Loading…', lang: 'عربي', eTitle: 'Quick question from the studio', eName: 'Your name', eSend: 'Send', eDone: 'Your answer is in ✓ — you can change it until the time ends', eMulti: 'You can pick more than one', eText: 'Write your answer', eWords: 'A word or two', eEnd: 'ends in', eNeed: 'Write your name first' } };
   let L = (() => { try { return localStorage.getItem('nbs.lang') || ((navigator.language || '').startsWith('ar') ? 'ar' : 'en'); } catch (e) { return 'ar'; } })();
   const t = k => T[L][k]; const $ = id => document.getElementById(id);
   const tok = (location.hash.match(/t=([A-Za-z0-9_-]+)/) || [])[1] || ''; let pass = ''; let B = null; let V = { z: 1, x: 0, y: 0 }; let selId = null;
@@ -53,11 +59,29 @@ svg#lines{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
   $('lang').onclick = () => { L = L === 'ar' ? 'en' : 'ar'; try { localStorage.setItem('nbs.lang', L); } catch (e) {} applyLang(); };
   function msg(text, askPass) { $('msg').style.display = 'flex'; $('mtext').textContent = text; $('mform').style.display = askPass ? 'flex' : 'none'; if (askPass) setTimeout(() => $('mpass').focus(), 50); }
   async function call(body) { const r = await fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ t: tok, p: pass }, body)) }); let j = {}; try { j = await r.json(); } catch (e) {} return { s: r.status, j }; }
+  /* v6.17 Engage: the studio's live question, answered from the share link */
+  let E = null, En = 0, Emine = null;
+  const sget = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }; const sset = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  async function engPoll() { if (!B) return; try { const { s, j } = await call({ action: 'engage' }); if (s !== 200) return; const a = j.act; if (!a) { E = null; engDraw(); return; } if (!E || E.id !== a.id) { Emine = (() => { try { return JSON.parse(sget('nbs.ans.' + a.id) || 'null'); } catch (e) { return null; } })(); } E = a; En = j.n || 0; engDraw(); } catch (e) {} }
+  function engDraw() {
+    const el = $('eng'); if (!E) { el.style.display = 'none'; el.innerHTML = ''; return; } const ae = document.activeElement; if (ae && el.contains(ae) && ae.tagName === 'INPUT') return;
+    const left = E.end ? Math.max(0, Math.round((E.end - Date.now()) / 1000)) : null; const sv = new Set(Array.isArray(Emine) ? Emine : Emine != null ? [Emine] : []);
+    let inner = '';
+    if (E.type === 'poll' || E.type === 'vote') inner = `<div class="opts ${E.type === 'vote' ? 'img' : ''}">${E.opts.map(o => `<button data-eo="${esc(o.id)}" class="${sv.has(o.id) ? 'on' : ''}">${o.thumb ? `<img src="${esc(o.thumb)}" alt="">` : ''}<span>${esc(o.t)}</span></button>`).join('')}</div>${E.multi ? `<div class="ft">${t('eMulti')}</div>` : ''}`;
+    else if (E.type === 'rate') inner = `<div class="rate">${[1, 2, 3, 4, 5].map(k => `<button data-er="${k}" class="${+Emine >= k ? 'on' : ''}">★</button>`).join('')}</div>`;
+    else inner = `<form class="row" id="etxt"><input id="ev" maxlength="${E.type === 'words' ? 60 : 300}" placeholder="${t(E.type === 'words' ? 'eWords' : 'eText')}" value="${esc(typeof Emine === 'string' ? Emine : '')}"><button class="btnp" type="submit">${t('eSend')}</button></form>`;
+    el.innerHTML = `<div class="row"><span class="pill">${t('eTitle')}</span><span style="flex:1"></span>${left != null ? `<span class="ft">${t('eEnd')} ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</span>` : ''}</div><div class="q">${esc(E.q)}</div>${inner}<div class="row"><input id="ename" maxlength="60" placeholder="${t('eName')}" value="${esc(sget('nbs.name') || $('pname').value || '')}"></div>${Emine != null ? `<div class="ft">${t('eDone')}</div>` : ''}`;
+    el.style.display = 'flex';
+  }
+  async function engSend(v) { const name = (($('ename') || {}).value || '').trim(); if (!name) { alert(t('eNeed')); return; } sset('nbs.name', name); const { s } = await call({ action: 'answer', act: E.id, name, v }); if (s === 200) { Emine = v; sset('nbs.ans.' + E.id, JSON.stringify(v)); engDraw(); } else alert(t('err')); }
+  $('eng').addEventListener('click', e => { const o = e.target.closest('[data-eo]'); if (o && E) { const id = o.dataset.eo; let v; if (E.multi) { const cur = new Set(Array.isArray(Emine) ? Emine : []); cur.has(id) ? cur.delete(id) : cur.add(id); v = [...cur]; } else v = [id]; return engSend(v); } const r = e.target.closest('[data-er]'); if (r && E) return engSend(+r.dataset.er); });
+  $('eng').addEventListener('submit', e => { if (e.target.id !== 'etxt') return; e.preventDefault(); const v = ($('ev').value || '').trim(); if (v) engSend(v); });
+  setInterval(() => { if (document.hidden) return; engPoll(); }, 6000); setInterval(() => { if (E && E.end) { const el = $('eng'); const ae = document.activeElement; if (!(ae && el.contains(ae))) engDraw(); } }, 1000);
   async function load() {
     if (!tok) return msg(t('gone')); msg(t('loading'));
     const { s, j } = await call({ action: 'get' });
     if (s === 401) return msg(pass ? t('wrong') : t('pass'), true); if (s === 410) return msg(t('expired')); if (s !== 200) return msg(s === 404 ? t('gone') : t('err'));
-    $('msg').style.display = 'none'; B = j; document.body.classList.toggle('dark', j.bg === 'dark'); $('ttl').textContent = j.title; document.title = j.title + ' — Ninety Studioz'; applyLang(); draw(); fit();
+    $('msg').style.display = 'none'; B = j; document.body.classList.toggle('dark', j.bg === 'dark'); $('ttl').textContent = j.title; document.title = j.title + ' — Ninety Studioz'; applyLang(); draw(); fit(); engPoll();
   }
   $('mform').onsubmit = e => { e.preventDefault(); pass = $('mpass').value; load(); };
   /* geometry — same as the in-app board */
