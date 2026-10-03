@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261003-0843-cf0f6b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261003-0914-ca2d99";</script>
 
 <script>
 'use strict';
@@ -30196,6 +30196,53 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const card = `<div class="card poflow"><div class="cardhead"><h3>مسار اعتماد أمر الشراء</h3></div>${line ? `<div class="flowline">${line}</div>` : ''}${autoNote}</div>`;
     const i = h.indexOf('<div class="card tight">'); return i > 0 ? h.slice(0, i) + card + h.slice(i) : h + card;
   })(vPurchaseDetail);
+})();
+/* v6.19 — camera permission: ask as soon as the app opens on a phone, and say exactly why the camera did not open */
+(function () {
+  if (window.__NF_CAMPERM__) return; window.__NF_CAMPERM__ = 1;
+  let lastErr = null;
+  const why = e => {
+    const n = (e && e.name) || '';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'المتصفح ده مش بيسمح بالكاميرا — افتح السيستم من كروم.';
+    if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') return 'الكاميرا مقفولة للسيستم: افتح كروم ← ⋮ ← الإعدادات ← إعدادات المواقع ← الكاميرا ← اسمح للرابط. واتأكد إن كروم نفسه مسموحله بالكاميرا من إعدادات الموبايل ← التطبيقات ← Chrome ← الأذونات.';
+    if (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') return 'الكاميرا مشغولة مع برنامج تاني — اقفل أي برنامج بيستخدمها (واتساب، الكاميرا، مكالمة فيديو) أو اعمل ريستارت للموبايل وجرّب تاني.';
+    if (n === 'NotFoundError' || n === 'DevicesNotFoundError' || n === 'OverconstrainedError') return 'مش لاقي كاميرا على الجهاز ده.';
+    return `الكاميرا مافتحتش (${n || 'خطأ'}) — جرّب تاني.`;
+  };
+  const stopAll = s => { try { s && s.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } };
+  /* openCamera: fall back to any camera, and remember the real reason */
+  if (typeof openCamera === 'function') openCamera = (base => async function (video) {
+    try { lastErr = null; return await base.apply(this, arguments); }
+    catch (e) {
+      lastErr = e;
+      if (e && ['OverconstrainedError', 'NotReadableError', 'AbortError', 'NotFoundError'].includes(e.name) && navigator.mediaDevices) {
+        try { const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); video.srcObject = s; await video.play().catch(() => { }); lastErr = null; return s; } catch (e2) { lastErr = e2; }
+      }
+      setTimeout(() => {
+        const msg = why(lastErr);
+        document.querySelectorAll('#modalroot .muted, #modalroot .small, #modalroot div, #modalroot p').forEach(el => { if (el.children.length === 0 && /لم يُسمح بالوصول للكاميرا|Camera access was not allowed|camera access/i.test(el.textContent || '')) { el.textContent = msg; el.style.whiteSpace = 'normal'; el.style.color = 'var(--crit-ink, #b4483c)'; } });
+      }, 30);
+      throw lastErr || e;
+    }
+  })(openCamera);
+  window.nfCamWhy = () => why(lastErr);
+
+  /* on a phone: ask for the camera once per session as soon as the app opens */
+  const needsCam = () => { const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; if (!w) return false; const pm = typeof punchMethodsOf === 'function' ? punchMethodsOf(w) : {}; return pm.selfie !== false || pm.face !== false; };
+  const isPhone = () => { try { return matchMedia('(pointer:coarse)').matches; } catch (e) { return false; } };
+  const deniedHelp = () => openModal({ title: 'اسمح للسيستم بالكاميرا', body: `<div class="form"><p class="small" style="line-height:1.9">${esc(why({ name: 'NotAllowedError' }))}</p><p class="small muted">بعد ما تسمح، اقفل التطبيق وافتحه تاني.</p></div>`, submitLabel: 'جرّب تاني', onSubmit: async () => { try { const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }); stopAll(s); toast('الكاميرا اتسمحت ✓'); return true; } catch (e) { toast(why(e), 'err'); return false; } } });
+  async function askOnce() {
+    try {
+      if (!isPhone() || !needsCam() || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      if (sessionStorage.getItem('nf.camAsked')) return; sessionStorage.setItem('nf.camAsked', '1');
+      let st = 'prompt'; try { st = (await navigator.permissions.query({ name: 'camera' })).state; } catch (e) { /* not supported */ }
+      if (st === 'granted') return;
+      if (st === 'denied') { deniedHelp(); return; }
+      try { const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }); stopAll(s); }
+      catch (e) { if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) deniedHelp(); }
+    } catch (e) { /* ignore */ }
+  }
+  let tries = 0; const iv = setInterval(() => { tries++; if (tries > 120) { clearInterval(iv); return; } if (S && S.session && S.session.workerId && S.data && S.data.workers && S.data.workers.size) { clearInterval(iv); setTimeout(askOnce, 1200); } }, 1000);
 })();
 </script>
 
