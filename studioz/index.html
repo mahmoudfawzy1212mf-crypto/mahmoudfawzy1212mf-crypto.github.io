@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1349-066db3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1424-807568";</script>
 
 <script>
 'use strict';
@@ -27905,6 +27905,8 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         if (!(await releaseCheck(byId('orders', id)))) toast('تم تسجيل استلام الشيك' + (orderApproved(byId('orders', id)) ? '' : ' — بانتظار موافقة المالك'));
         await notifyRole('admin', `شيك ${fmtMoney(num(d.amount))} ${CUR()} من العميل على ${o.code} — مستلَم`, `${o.title} · رقم ${d.chequeNo || ''} · ${d.bank || ''} · استحقاق ${fmtDate(d.dueDate)} · سجّله ${me().name || ''}`, { orderId: id, id: `own_incheque_${pid}`, priority: 'high' });
         await notifyRole('hr', `أودع شيك ${o.code} رقم ${d.chequeNo || ''}`, `مستلَم من العميل ${fmtDate(d.date)} — أودعه في البنك وارفع إيصال الإيداع من صفحة الأمر.`, { orderId: id, id: `hr_deposit_${pid}`, dueDate: d.dueDate || null });
+        /* v6.42: the owner's earlier "our cheque was delivered — the client's cheque is not registered yet" note is now answered → close it and drop that sentence */
+        const prevNote = byId('tasks', `own_outcheque_${id}`); if (prevNote && prevNote.status !== 'done') await Store.update('tasks', prevNote.id, { status: 'done', doneAt: nowISO(), desc: String(prevNote.desc || '').replace(' لسه ما اتسجلش شيك الداون بيمنت.', '') }, { silent: true });
       } });
   };
   const withCheque = (arg, fn) => { const [id, pid] = String(arg || '').split(':'); const o = byId('orders', id); if (!o || !canCheque()) return; const p = inCheques(o).find(x => x.id === pid); if (!p) { toast('الشيك غير موجود', 'err'); return; } fn(o, p); };
@@ -32426,6 +32428,175 @@ if (STU_ON) {
     return col === 'tasks' && Array.isArray(out) ? out.filter(t => !isFleetTask(t)) : out;
   })(listScope);
   window.nfIsFleetTask = isFleetTask;
+}
+/* =====================================================================
+   v6.42 — notifications that belong to a request close themselves once the request is decided (Mahmoud, 4 Oct):
+   Saeed approved a running-cost request on the computer, and days later the «for approval» note was still sitting in
+   his tasks on the phone (7 such notes were open on the factory while their requests were already approved/rejected).
+   · any open «update / notice» task tied to a request (reqId, or the request id inside the task id, e.g. opx_hr_<req>)
+     is marked done the moment the request leaves «pending» — from whichever device decided it (decideRequest wrapper)
+   · a catch-up sweep on load and every few minutes closes any that were missed (an older build, a decision made
+     straight in the DB, a device that was offline at the time) — the change is saved to the server, so every other
+     device drops it too
+   · catch-up sync: while the page is open, every 30 s the shared collections are checked for changes since the last
+     check (one small query) — a safety net for a realtime socket that died quietly on a phone or a long-open PC
+   ===================================================================== */
+(function () {
+  const NOTE_KINDS = new Set(['update', 'notice']);
+  const DECIDED = new Set(['approved', 'rejected', 'paid', 'cancelled', 'done', 'closed']);
+  const allReq = () => (S.data && S.data.requests) ? Array.from(S.data.requests.values()) : [];
+  const allTasks = () => (S.data && S.data.tasks) ? Array.from(S.data.tasks.values()) : [];
+  const reqOfTask = (t, reqMap) => {
+    if (!t || !NOTE_KINDS.has(t.kind) || !['open', 'doing'].includes(t.status)) return null;
+    if (t.reqId && reqMap.has(t.reqId)) return reqMap.get(t.reqId);
+    const id = String(t.id || ''); const link = String(t.link || (t.fields && t.fields.link) || '');
+    for (const [rid, r] of reqMap) { if (rid && (id.indexOf('_' + rid) >= 0 || id.endsWith(rid) || link.indexOf('/' + rid) >= 0)) return r; }
+    return null;
+  };
+  async function closeFor(t, r) {
+    try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: r.status === 'approved' ? 'تمت الموافقة على الطلب' : r.status === 'rejected' ? 'تم رفض الطلب' : 'الطلب اتقفل' }, { silent: true }); return true; }
+    catch (e) { return false; }
+  }
+  window.nfCloseNotesFor = async function (reqId) {
+    const r = S.data.requests && S.data.requests.get(reqId); if (!r || !DECIDED.has(r.status)) return 0; let n = 0;
+    const one = new Map([[reqId, r]]);
+    for (const t of allTasks()) if (reqOfTask(t, one)) { if (await closeFor(t, r)) n++; }
+    if (n) rerender(); return n;
+  };
+  if (typeof decideRequest === 'function') decideRequest = (base => async function (id, status, note, opts = {}) {
+    const ok = await base.apply(this, arguments);
+    if (ok !== false) { try { await window.nfCloseNotesFor(id); } catch (e) { /* ignore */ } }
+    return ok;
+  })(decideRequest);
+  /* catch-up sweep */
+  let _sweepAt = 0;
+  async function sweep() {
+    if (!S.session || !writable() || !S.data || !S.data.tasks || !S.data.requests || Date.now() - _sweepAt < 3 * 60000) return; _sweepAt = Date.now();
+    const reqMap = new Map(allReq().filter(r => r && DECIDED.has(r.status)).map(r => [r.id, r])); if (!reqMap.size) return; let n = 0;
+    for (const t of allTasks()) { const r = reqOfTask(t, reqMap); if (!r) continue; if (typeof canSee === 'function' && !canSee('tasks')) break; if (await closeFor(t, r)) n++; if (n >= 40) break; }
+    if (n) { console.info('nf autoclose', n); rerender(); }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(sweep, 1500); });
+
+  /* ---------- catch-up sync (30 s) ---------- */
+  const COLS_SYNC = ['tasks', 'requests', 'attendance', 'orders', 'projects', 'pmtasks', 'expenses', 'purchases', 'trips', 'penalties', 'advances', 'files', 'changes'];
+  let _since = null, _busy = false;
+  async function catchUp() {
+    if (_busy || document.hidden || typeof sbOn !== 'function' || !sbOn() || !S.sbUser || !S.session || navigator.onLine === false) return; _busy = true;
+    try {
+      const cols = COLS_SYNC.filter(c => S.data && S.data[c]); const since = _since || new Date(Date.now() - 10 * 60000).toISOString(); const started = new Date().toISOString();
+      const { data, error } = await S.sb.from('docs').select('col,id,data,updated_at').in('col', cols).gte('updated_at', since).limit(500);
+      if (error || !data) return; let changed = 0;
+      data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); });
+      _since = started; S._lastSyncAt = Date.now();
+      if (changed) { S._syncChanged = (S._syncChanged || 0) + changed; render(false); }
+    } catch (e) { /* offline */ } finally { _busy = false; }
+  }
+  setInterval(catchUp, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(catchUp, 600); });
+  window.nfCatchUp = catchUp;
+})();
+/* =====================================================================
+   Ninety Fabrication v6.42 — what happens when someone finishes a task (Mahmoud said ok, 4 Oct):
+   1. anyone marks a task done → the owner gets a push + a note at once ("X finished a task: …", never an amount)
+   2. the task leaves the person's list immediately (done is not in the open list; other devices follow by realtime)
+   3. a task the owner creates can be flagged "needs my approval to close": when the person finishes it, it stays with
+      him as "awaiting the owner" until the owner approves (→ done) or sends it back with a note (→ open again)
+   4. every message written on a task the owner created pings him (the one who wrote it is not pinged)
+   Factory only.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) {
+  const sess = () => S.session || {};
+  const ownerIds = () => { const ids = new Set(); try { list('staff').filter(s => s.role === 'admin').forEach(s => ids.add(s.id)); list('workers').filter(w => w.role === 'admin').forEach(w => ids.add(w.id)); } catch (e) { /* ignore */ } return ids; };
+  const byOwner = t => !!(t && t.createdBy && ownerIds().has(t.createdBy));
+  const awaiting = t => !!(t && t.awaitOwner && ['open', 'doing'].includes(t.status));
+  const short = s => { s = String(s || '').trim(); return s.length > 90 ? s.slice(0, 88) + '…' : s; };
+  const pingOwner = async (title, desc, opts) => {
+    if (typeof notifyOwner !== 'function' || isAdmin()) return; try { await notifyOwner(title, desc, opts); } catch (e) { return; }
+    try { if (opts && opts.id && opts.fields) await Store.update('tasks', opts.id, opts.fields, { silent: true }); } catch (e) { /* ignore */ }
+  };
+  const pushTo = (wid, title, body, url) => { if (!wid || typeof pushSend !== 'function') return; pushSend(['w:' + wid], title, body, url, 'tdf').catch(() => { }); };
+
+  /* ---- 1 + 3: finishing ---- */
+  ACTIONS.taskStatus = (base => async function (arg) {
+    const [id, st] = String(arg || '').split(':'); const before = byId('tasks', id);
+    if (before && st === 'done' && before.needOwnerOk && !isAdmin() && canTasks() && taskVisible(before) && before.kind !== 'update' && before.kind !== 'notice') {
+      /* needs the owner's approval: hold it with the person instead of closing it */
+      const me = sess(); let note = '';
+      if (typeof proofRequired === 'function' && proofRequired() && !before.proof && typeof proofDialog === 'function') {
+        const pr = await proofDialog({ title: `توثيق إنهاء: ${before.title}`, requireFile: false, intro: 'اكتب ملاحظة قصيرة عن الإنهاء — المهمة هتفضل معاك لحد ما المالك يعتمدها', kind: 'proof', ownerKind: 'task', ownerId: before.id, multiple: true });
+        if (!pr) return; await Store.update('tasks', id, { proof: pr }); note = pr.note || '';
+      }
+      await Store.update('tasks', id, { status: 'doing', awaitOwner: { at: nowISO(), by: me.workerId || me.id || null, byName: me.name || '', note }, ownerNote: null, updatedAt: nowISO() });
+      toast('اتبعتت للمالك للاعتماد — هتفضل معاك لحد ما يعتمدها');
+      await pingOwner(`${me.name || 'موظف'} خلّص مهمة وبينتظر اعتمادك: ${short(before.title)}`, `${note ? note + ' · ' : ''}اعتمد الإنهاء أو رجّعها بملاحظة من المهمة نفسها`, { id: `tdone_${id}`, orderId: before.orderId || null, fields: { link: `/#/tasks/${id}`, taskRef: id } });
+      return;
+    }
+    const r = await base.apply(this, arguments);
+    const after = byId('tasks', id);
+    if (before && after && st === 'done' && after.status === 'done' && before.status !== 'done' && !isAdmin() && after.kind !== 'update' && after.kind !== 'notice') {
+      const me = sess(); const o = after.orderId ? byId('orders', after.orderId) : null;
+      await pingOwner(`${me.name || 'موظف'} خلّص مهمة: ${short(after.title)}`, `${o ? o.code + ' · ' : ''}${after.deptId ? deptName(after.deptId) + ' · ' : ''}${after.proof && after.proof.note ? short(after.proof.note) : 'اتقفلت ' + fmtDate(todayISO())}`, { id: `tdone_${id}`, orderId: after.orderId || null, priority: 'normal', fields: { link: `/#/tasks/${id}`, taskRef: id } });
+    }
+    return r;
+  })(ACTIONS.taskStatus);
+
+  /* owner decides */
+  ACTIONS.taskOwnerOk = async id => {
+    const t = byId('tasks', id); if (!t || !isAdmin() || !awaiting(t)) return; const a = t.awaitOwner;
+    await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: a.byName || '', ownerOk: { at: nowISO(), byName: sess().name || '' }, awaitOwner: null, updatedAt: nowISO() });
+    const n = byId('tasks', `tdone_${id}`); if (n && n.status !== 'done') await Store.update('tasks', n.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم' }, { silent: true });
+    toast('تم اعتماد الإنهاء'); pushTo(a.by, 'المالك اعتمد إنهاء المهمة ✓', short(t.title), `/#/tasks/${id}`);
+  };
+  ACTIONS.taskOwnerBack = id => {
+    const t = byId('tasks', id); if (!t || !isAdmin() || !awaiting(t)) return;
+    openModal({ title: `رجّع المهمة: ${t.title}`, submitLabel: 'رجّعها', body: `<div class="form">${field('ملاحظة للمكلَّف (إلزامي)', `<textarea name="note" required placeholder="إيه الناقص عشان تتقفل؟"></textarea>`, 'full')}</div>`,
+      onSubmit: async f => { const d = formData(f); const note = String(d.note || '').trim(); if (!note) { toast('اكتب الملاحظة', 'err'); return false; }
+        const a = t.awaitOwner; await Store.update('tasks', id, { status: 'open', awaitOwner: null, ownerNote: { at: nowISO(), note, byName: sess().name || '' }, updatedAt: nowISO() });
+        try { if (typeof taskPost === 'function') await taskPost(byId('tasks', id), `رجّعها المالك: ${note}`); } catch (e) { /* ignore */ }
+        const n = byId('tasks', `tdone_${id}`); if (n && n.status !== 'done') await Store.update('tasks', n.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم' }, { silent: true });
+        toast('اترجعت للمكلَّف'); pushTo(a.by, 'المالك رجّع المهمة بملاحظة', `${short(t.title)} — ${short(note)}`, `/#/tasks/${id}`); } });
+  };
+
+  /* ---- 3: the flag on the form (owner only) ---- */
+  if (typeof taskForm === 'function') taskForm = (base => function (t) {
+    let html = base.apply(this, arguments); if (!isAdmin()) return html; t = t || {};
+    const extra = `<div class="field full" id="needokfield"><label class="check"><input type="checkbox" name="needOwnerOk" ${t.needOwnerOk ? 'checked' : ''}> تحتاج موافقتي على الإنهاء — لما المكلَّف يدوس «تم» تفضل معاه «بانتظار اعتماد المالك» لحد ما أعتمدها</label></div>`;
+    const i = html.lastIndexOf('</div>'); return i > 0 ? html.slice(0, i) + extra + html.slice(i) : html + extra;
+  })(taskForm);
+  if (typeof saveTask === 'function') saveTask = (base => async function (f, t) {
+    const want = isAdmin() && !!f.querySelector('[name=needOwnerOk]:checked'); const had = f.querySelector('#needokfield');
+    const r = await base.apply(this, arguments); if (r === false || !had) return r;
+    const d = formData(f); const doc = t.id ? byId('tasks', t.id) : sortBy(list('tasks').filter(x => x.title === d.title && x.createdBy === (sess().id || null)), x => x.createdAt || '', true)[0];
+    if (doc && !!doc.needOwnerOk !== want) await Store.update('tasks', doc.id, { needOwnerOk: want }, { silent: true });
+    return r;
+  })(saveTask);
+
+  /* ---- the card ---- */
+  if (typeof taskItem === 'function') taskItem = (base => function (t, o) {
+    let h = base.apply(this, arguments); if (!t) return h;
+    if (awaiting(t)) {
+      /* the person: no more buttons, just the badge; the owner: approve / send back */
+      h = h.replace(/<button class="btn xs" data-action="taskStatus" data-arg="[^"]*:doing">[^<]*<\/button>/, '').replace(/<button class="btn xs p" data-action="taskStatus" data-arg="[^"]*:done">[\s\S]*?<\/button>/, '');
+      const badge = `<span class="badge warn" title="${esc(t.awaitOwner.byName || '')} · ${fmtDate((t.awaitOwner.at || '').slice(0, 10))}">⏳ بانتظار اعتماد المالك</span>`;
+      const btns = isAdmin() ? `<button class="btn xs p" data-action="taskOwnerOk" data-arg="${t.id}">${icon('check')}اعتمد الإنهاء</button><button class="btn xs" data-action="taskOwnerBack" data-arg="${t.id}">رجّعها بملاحظة</button>` : '';
+      h = h.replace('<div class="end"><div class="row"', `<div class="end"><div class="row" data-tdf="1"`).replace(/(<div class="end"><div class="row"[^>]*>)/, `$1${badge}${btns}`);
+    } else if (t.needOwnerOk && ['open', 'doing'].includes(t.status)) h = h.replace('</div></div><div class="end">', `<span class="tiny muted">🔒 إنهاؤها يحتاج اعتماد المالك</span></div></div><div class="end">`);
+    if (t.kind === 'notice' && t.taskRef && ['open', 'doing'].includes(t.status)) {
+      const ref = byId('tasks', t.taskRef); const pend = ref && awaiting(ref) && isAdmin();
+      const btns = `<a class="btn xs" href="#/tasks/${esc(t.taskRef)}">افتح المهمة</a>${pend ? `<button class="btn xs p" data-action="taskOwnerOk" data-arg="${esc(t.taskRef)}">${icon('check')}اعتمد الإنهاء</button><button class="btn xs" data-action="taskOwnerBack" data-arg="${esc(t.taskRef)}">رجّعها بملاحظة</button>` : ''}`;
+      h = h.replace(/(<div class="end"><div class="row"[^>]*>)/, `$1${btns}`);
+    }
+    if (t.ownerNote && ['open', 'doing'].includes(t.status)) h = h.replace('<div class="meta">', `<div class="small" style="color:var(--crit-ink)">↩ رجّعها المالك: ${esc(t.ownerNote.note || '')}</div><div class="meta">`);
+    return h;
+  })(taskItem);
+
+  /* ---- 4: messages on the owner's tasks ---- */
+  if (typeof taskPost === 'function') taskPost = (base => async function (t, text, file, opts) {
+    const r = await base.apply(this, arguments);
+    try { if (r && t && byOwner(t) && !isAdmin()) await pingOwner(`${sess().name || 'موظف'} كتب على مهمتك: ${short(t.title)}`, short(text || (file ? 'صورة' : '')), { id: `tmsg_${t.id}`, orderId: t.orderId || null, priority: 'normal', fields: { link: `/#/tasks/${t.id}`, taskRef: t.id } }); } catch (e) { /* ignore */ }
+    return r;
+  })(taskPost);
 }
 </script>
 
