@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261004-0552-3ef0c2';
+const BUILD = '20261004-0652-14e4cd';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
@@ -28,6 +28,32 @@ async function callPush(d, title, body, url) {
     actions: [{ action: 'accept', title: 'رد' }, { action: 'decline', title: 'رفض' }] }).catch(() => self.registration.showNotification(title, { body, tag: pre, data }));
 }
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
+/* v6.34 — brand media cache: one copy per file on the device, independent of the app build.
+   The full file is stored once; <video> range requests (Range: bytes=a-b) are answered as 206 slices of that copy, so the film never streams twice.
+   A link's ?v= is its version: caching ?v=N drops every older ?v= of the same path. */
+const MEDIA = 'nf-media';
+async function mediaFetch(req, url) {
+  const key = url.origin + url.pathname + url.search;
+  const c = await caches.open(MEDIA);
+  let full = await c.match(key);
+  if (!full) {
+    let r; try { r = await fetch(new Request(key, { mode: 'cors', credentials: 'omit' })); } catch (x) { return fetch(req); }
+    if (!r.ok || r.status === 206) return r;   // not a full copy → pass through, cache nothing
+    full = r.clone();
+    const ks = await c.keys().catch(() => []);
+    for (const k of ks) { try { const u = new URL(k.url); if (u.origin === url.origin && u.pathname === url.pathname && (u.origin + u.pathname + u.search) !== key) await c.delete(k); } catch (x) { /* ignore */ } }
+    c.put(key, r).catch(() => { });
+  }
+  const range = req.headers.get('range');
+  if (!range) return full;
+  const buf = await full.arrayBuffer(); const total = buf.byteLength;
+  const m = /bytes=(\d*)-(\d*)/.exec(range); let a = m && m[1] ? parseInt(m[1], 10) : 0; let b = m && m[2] ? parseInt(m[2], 10) : total - 1;
+  if (isNaN(a) || a >= total) return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + total } });
+  if (isNaN(b) || b >= total) b = total - 1;
+  const h = new Headers(); const ct = full.headers.get('content-type'); if (ct) h.set('Content-Type', ct);
+  h.set('Content-Range', 'bytes ' + a + '-' + b + '/' + total); h.set('Content-Length', String(b - a + 1)); h.set('Accept-Ranges', 'bytes');
+  return new Response(buf.slice(a, b + 1), { status: 206, statusText: 'Partial Content', headers: h });
+}
 self.addEventListener('fetch', e => {
   const req = e.request; if (req.method !== 'GET') return;
   const url = new URL(req.url);
@@ -44,6 +70,11 @@ self.addEventListener('fetch', e => {
   if (same && url.pathname.endsWith('/config.js')) {
     // backend settings: network first so a changed key reaches devices without a new build
     e.respondWith(fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)).catch(() => { }); return r; }).catch(() => caches.match(req)));
+    return;
+  }
+  if (/\/storage\/v1\/object\/public\/app\/brand\//.test(url.pathname) && /\.supabase\.co$/.test(url.host)) {
+    // v6.34: brand media (login film, posters, renders, logo) — kept on the device across builds; a new version of a file arrives as a new ?v= on its link
+    e.respondWith(mediaFetch(req, url));
     return;
   }
   if (same || /cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/.test(url.host)) {
