@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-0652-14e4cd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-0731-84e84c";</script>
 
 <script>
 'use strict';
@@ -32174,6 +32174,73 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 @media (max-width:600px){.shhero{height:min(58vh,420px);border-radius:18px}.sht{inset-inline:16px;bottom:16px}.shk b{font-size:28px}.shk{padding:12px 14px}.shnav{display:none}}`;
   document.head.appendChild(css);
 })();
+/* =====================================================================
+   Ninety Studioz v6.35 — file storage on Cloudflare R2.
+   · Settings → Storage tab: the owner pastes the R2 keys here (they go to admin_config through RPC nf_set_secret and are never shown again);
+     the test-connection button asks the Edge function `files` to list the bucket; the CORS rule the bucket needs is shown ready to copy.
+   · window.nfFiles — the one door for heavy files: put(file, path) uploads straight from the browser to R2 with a signed link
+     (10 min), url(path) / urls(paths) give signed read links (1 h, cached on the device), del(path) for owner / manager.
+   Keys never leave the server: the app only ever sees short-lived signed links.
+   ===================================================================== */
+if (STU_ON) {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const CORS_RULE = [{ AllowedOrigins: ['https://mahmoudfawzy1212mf-crypto.github.io', 'https://app.ninetystudioz.com', 'http://localhost:8080'], AllowedMethods: ['GET', 'PUT', 'HEAD'], AllowedHeaders: ['*'], ExposeHeaders: ['ETag'], MaxAgeSeconds: 3600 }];
+
+  /* ---------- nfFiles ---------- */
+  const cache = new Map();   // path → { url, exp }
+  const call = async body => { if (!sbOn()) throw new Error('offline'); const r = await S.sb.functions.invoke('files', { body }); if (r.error) throw new Error(String(r.error.message || r.error)); const j = r.data || {}; if (j.error) throw new Error(j.error); return j; };
+  const safeName = n => String(n || 'file').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+  async function put(file, path, onProgress) {
+    const p = String(path || '').replace(/^\/+/, '') || ('studio/misc/' + Date.now() + '_' + safeName(file.name));
+    const { url } = await call({ action: 'put', path: p, type: file.type || 'application/octet-stream', size: file.size || 0 });
+    await new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open('PUT', url); x.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); if (onProgress) x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); }; x.onload = () => (x.status >= 200 && x.status < 300 ? res() : rej(new Error('upload ' + x.status))); x.onerror = () => rej(new Error('upload failed')); x.send(file); });
+    return { path: p, size: file.size || 0, type: file.type || '' };
+  }
+  async function urls(paths) {
+    const want = [...new Set((paths || []).filter(Boolean))]; const out = {}; const miss = [];
+    const now = Date.now(); want.forEach(p => { const c = cache.get(p); if (c && c.exp > now) out[p] = c.url; else miss.push(p); });
+    for (let i = 0; i < miss.length; i += 100) { const j = await call({ action: 'get', paths: miss.slice(i, i + 100) }); const exp = now + ((j.ttl || 3600) - 300) * 1000; Object.keys(j.urls || {}).forEach(p => { cache.set(p, { url: j.urls[p], exp }); out[p] = j.urls[p]; }); }
+    return out;
+  }
+  const url = async p => (await urls([p]))[p] || '';
+  const del = p => call({ action: 'del', path: p });
+  const ping = () => call({ action: 'ping' });
+  window.nfFiles = { put, url, urls, del, ping, safeName };
+
+  /* ---------- Settings → «التخزين» ---------- */
+  EXTRA_SETTINGS.stustore = { label: 'التخزين', render: () => {
+    if (!isAdmin()) return `<div class="card"><p class="small muted">${L('للمالك فقط', 'Owner only')}</p></div>`;
+    const st = S.ui.stuSecret || {};
+    if (!S.ui.stuSecretAsked && sbOn()) { S.ui.stuSecretAsked = true; Promise.resolve().then(() => S.sb.rpc('nf_secret_status')).then(r => { S.ui.stuSecret = (r && r.data) || {}; rerender(); }, () => { S.ui.stuSecret = {}; }); }
+    const f = (k, l, v, extra) => `<div class="field full"><label>${l}</label><input name="${k}" class="ltr notr" value="${esc(v || '')}" ${extra || ''}></div>`;
+    const ok = !!st.r2;
+    return `<form class="card" id="stustoreform"><h3>${L('التخزين — Cloudflare R2', 'Storage — Cloudflare R2')}</h3>
+      <p class="small muted">${L('الصور والريندرات والمرفقات بتتخزن على R2 (مفيش رسوم تحميل). المفاتيح بتتحفظ على السيرفر بس ومش بتتعرض تاني.', 'Photos, renders and attachments are stored on R2 (no download fees). Keys are kept on the server only and never shown again.')}</p>
+      <p class="small"><b>${L('الحالة:', 'Status:')}</b> ${ok ? `<span style="color:var(--ok,#2a9d5c)">${L('المفاتيح مسجّلة ✓', 'Keys saved ✓')}</span>` : `<span style="color:var(--warn,#d98c00)">${L('المفاتيح لسه ما اتسجلتش', 'Keys not saved yet')}</span>`}</p>
+      <div class="form">
+        ${f('r2_account', 'Account ID', st.r2_account)}
+        ${f('r2_bucket', 'Bucket', st.r2_bucket || 'ninety-files')}
+        ${f('r2_key', 'Access Key ID' + (ok ? ' — ' + L('مسجّل ✓', 'saved ✓') : ''), '', `type="password" autocomplete="new-password" placeholder="${ok ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : ''}"`)}
+        ${f('r2_secret', 'Secret Access Key' + (ok ? ' — ' + L('مسجّل ✓', 'saved ✓') : ''), '', `type="password" autocomplete="new-password" placeholder="${ok ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : ''}"`)}
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button><button type="button" class="btn" data-action="stuStorePing">${L('اختبار الاتصال', 'Test connection')}</button><span class="tiny muted" id="stustoremsg"></span></div>
+      <details style="margin-top:14px"><summary class="small">${L('إعداد CORS على البكت (مرة واحدة)', 'Bucket CORS rule (once)')}</summary>
+        <p class="small muted">${L('في Cloudflare: R2 ← البكت ← Settings ← CORS Policy ← Edit، والزق ده:', 'In Cloudflare: R2 → the bucket → Settings → CORS Policy → Edit, paste this:')}</p>
+        <textarea class="ltr notr" rows="7" readonly style="width:100%;font-family:monospace;font-size:12px">${esc(JSON.stringify(CORS_RULE, null, 2))}</textarea>
+        <button type="button" class="btn" data-action="stuStoreCorsCopy" style="margin-top:6px">${L('نسخ', 'Copy')}</button>
+      </details></form>`;
+  } };
+  document.addEventListener('submit', async ev => {
+    if (ev.target.id !== 'stustoreform') return; ev.preventDefault(); if (!isAdmin() || !sbOn()) return;
+    const d = formData(ev.target); let n = 0;
+    for (const k of ['r2_account', 'r2_bucket', 'r2_key', 'r2_secret']) { const v = String(d[k] || '').trim(); if (!v) continue; const { error } = await S.sb.rpc('nf_set_secret', { p_key: k, p_value: v }); if (error) { toast(L('فشل الحفظ: ', 'Save failed: ') + error.message, 'err'); return; } n++; }
+    ev.target.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); S.ui.stuSecretAsked = false; cache.clear();
+    toast(n ? L('اتحفظت', 'Saved') : L('مفيش تغيير', 'No change')); rerender();
+  });
+  ACTIONS.stuStorePing = async () => { const m = document.getElementById('stustoremsg'); if (m) m.textContent = '…'; try { const j = await ping(); if (m) m.textContent = j.ok ? L('متصل ✓ — البكت ', 'Connected ✓ — bucket ') + j.bucket : L('مش متصل: ', 'Not connected: ') + (j.status || '') + ' ' + (j.detail || ''); toast(j.ok ? L('الاتصال شغال', 'Connection works') : L('الاتصال مش شغال', 'Connection failed'), j.ok ? undefined : 'err'); } catch (e) { const t = String(e.message || e); if (m) m.textContent = t === 'no_r2' ? L('سجّل المفاتيح الأول', 'Save the keys first') : t; toast(L('الاتصال مش شغال', 'Connection failed'), 'err'); } };
+  ACTIONS.stuStoreCorsCopy = async () => { try { await navigator.clipboard.writeText(JSON.stringify(CORS_RULE, null, 2)); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(L('انسخه يدوي من الخانة', 'Copy it from the box'), 'err'); } };
+}
 </script>
 
 </body>
