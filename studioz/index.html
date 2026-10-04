@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1653-f3ae25";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1747-c7d9da";</script>
 
 <script>
 'use strict';
@@ -28156,6 +28156,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
 /* =====================================================================
    v5.64 — قراءة الشيكات وإيصالات الإيداع (المالك ومدير الحسابات بس)
    · صورة شيك العميل / شيك صحة التوقيع → Edge `chqread` يقرا الرقم والبنك والمبلغ والتاريخ ويملأ الخانات.
+   · v6.49: the server now reads twice independently and reads the date digit by digit; a date far from today is never autofilled, and the person sees the date as it was read off the picture.
    · إيصال الإيداع → يقرا رقم الشيك والمبلغ والتاريخ والحساب ويقارنهم بالشيك المتسجّل؛ أي اختلاف = تحذير أحمر
      قبل الحفظ + يتسجّل على الشيك + إشعار للمالك.
    · القراءة على السيرفر؛ الأرقام اللي اتقرت بتتحفظ جوه الدفعة (نفس صلاحيات الشيكات — admin/hr).
@@ -28166,6 +28167,8 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   const digits = v => String(v == null ? '' : v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
   const sameNo = (a, b) => { const x = digits(a).replace(/^0+/, ''), y = digits(b).replace(/^0+/, ''); return !!x && !!y && (x === y || (x.length >= 5 && y.length >= 5 && (x.endsWith(y) || y.endsWith(x)))); };
   const isoOk = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  /* v6.49: a due date years away from today is almost always a misread — never autofill it */
+  const dateOk = v => { if (!isoOk(v)) return false; const t = new Date(v).getTime(); return t >= Date.now() - 400 * 864e5 && t <= Date.now() + 3 * 365 * 864e5; };
   const dayDiff = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
   const ctx = { mode: null, orderId: null, pid: null, res: { front: null, slip: null, img: null } };
   window.__nfChqCtx = ctx;
@@ -28243,10 +28246,14 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
       const filled = [];
       if (setVal(form, 'chequeNo', digits(d.chequeNo))) filled.push('رقم الشيك');
       if (setVal(form, 'bank', d.bank)) filled.push('البنك');
-      if (input.name === 'front') { if (num(d.amount) > 0 && setVal(form, 'amount', num(d.amount))) filled.push('المبلغ'); if (isoOk(d.date) && setVal(form, 'dueDate', d.date)) filled.push('تاريخ الاستحقاق'); }
-      else if (isoOk(d.date) && setVal(form, 'date', d.date)) filled.push('التاريخ');
+      const missing = [];
+      if (input.name === 'front') { if (num(d.amount) > 0 && setVal(form, 'amount', num(d.amount))) filled.push('المبلغ'); else missing.push('المبلغ'); if (dateOk(d.date) && setVal(form, 'dueDate', d.date)) filled.push('تاريخ الاستحقاق'); else missing.push('تاريخ الاستحقاق'); }
+      else if (dateOk(d.date) && setVal(form, 'date', d.date)) filled.push('التاريخ'); else missing.push('التاريخ');
+      if (!digits(d.chequeNo)) missing.push('رقم الشيك');
       const iss = chequeIssues(d, null);
-      b.innerHTML = `<div>${filled.length ? `✓ اتقرا من الصورة: <b>${filled.join('، ')}</b> — راجعهم` : 'مقدرتش أطلع بيانات واضحة — اكتبها بإيدك'}${d.drawer ? ` · الساحب: ${esc(d.drawer)}` : ''}${d.payee ? ` · لأمر: ${esc(d.payee)}` : ''}${d.confidence === 'low' ? ' · <span style="color:#d97706">الصورة مش واضحة</span>' : ''}</div>${iss.length ? issuesHtml(iss) : ''}`;
+      const seen = d.dateRaw ? `<div class="tiny muted">التاريخ على الشيك زي ما السيستم شافه: <b dir="ltr">${esc(d.dateRaw)}</b>${d.secondRead && d.secondRead.date && d.date && d.secondRead.date === d.date ? ' · اتأكد منه بقراءة تانية ✓' : ''}</div>` : '';
+      const note = d.notes && /[؀-ۿ]/.test(d.notes) ? `<div class="tiny" style="color:#d97706">${esc(d.notes)}</div>` : '';
+      b.innerHTML = `<div>${filled.length ? `✓ اتقرا من الصورة: <b>${filled.join('، ')}</b> — راجعهم` : 'مقدرتش أطلع بيانات واضحة — اكتبها بإيدك'}${missing.length && filled.length ? ` · <span style="color:#d97706">اكتب بإيدك: ${missing.join('، ')}</span>` : ''}${d.drawer ? ` · الساحب: ${esc(d.drawer)}` : ''}${d.payee ? ` · لأمر: ${esc(d.payee)}` : ''}${d.confidence === 'low' ? ' · <span style="color:#d97706">الصورة مش واضحة</span>' : ''}</div>${seen}${note}${iss.length ? issuesHtml(iss) : ''}`;
     } else {
       const o = byId('orders', ctx.orderId); const p = o && (o.payments || []).find(x => x && x.id === ctx.pid); if (!p) { b.innerHTML = '<span class="muted">اتقرا الإيصال</span>'; return; }
       if (isoOk(d.depositDate)) setVal(form, 'date', d.depositDate);
