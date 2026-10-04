@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1803-ef1dfc";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1828-dabad1";</script>
 
 <script>
 'use strict';
@@ -33048,6 +33048,31 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(lateSweep, 3000); });
   window.nfLateSweep = () => { _lateAt = 0; return lateSweep(); };
 }
+/* =====================================================================
+   v6.51 — «factory location not set» must not fire from a phone whose settings copy is stale or not loaded yet
+   (Mahmoud, 4 Oct — Hussein's first punch on 3 Oct was blocked and the owner got the notice while the location was set):
+   before a mobile punch is refused for "no zones", the settings document is re-read from the server once; only if the
+   server copy really has no factory location does the punch stay blocked and the owner get the note.
+   ===================================================================== */
+(function () {
+  async function freshSettings() {
+    try {
+      if (typeof sbOn !== 'function' || !sbOn() || !S.sb) return false;
+      const { data, error } = await S.sb.from('docs').select('data').eq('col', 'settings').eq('id', 'general').maybeSingle();
+      if (error || !data || !data.data) return false;
+      S.settings = typeof mergeSettings === 'function' ? mergeSettings(data.data) : Object.assign({}, S.settings, data.data);
+      if (S.db && S.db.prime) S.db.prime('settings', 'general', data.data);
+      return true;
+    } catch (e) { return false; }
+  }
+  if (typeof punchGeoBase === 'function') punchGeoBase = (base => async function (w, method) {
+    if (method === 'self' && typeof zonesFor === 'function') {
+      let z = null; try { z = zonesFor(w || {}); } catch (e) { /* ignore */ }
+      if (z && !z.unrestricted && !(z.zones || []).length) { await freshSettings(); }
+    }
+    return base.apply(this, arguments);
+  })(punchGeoBase);
+})();
 </script>
 
 </body>
