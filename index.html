@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1641-8f193c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1653-f3ae25";</script>
 
 <script>
 'use strict';
@@ -32878,6 +32878,75 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
       return warn + html;
     } catch (e) { return html; }
   })(vPayroll);
+}
+/* =====================================================================
+   Ninety Fabrication v6.48 — the inquiry button on a file goes to the right people (Mahmoud, 4 Oct):
+   a question on a drawing / model still goes to the technical office; a question on a money document (contract, our
+   cheque, the receipt, the client's cheque, a transfer / deposit slip, an invoice) goes to accounts & HR (Saeed),
+   with the owner in copy — not to the technical office.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) {
+  const MONEY = new Set(['contract', 'cheque_out', 'cheque_receipt', 'cheque_in', 'deposit_slip', 'receipt', 'invoice', 'quote']);
+  const isMoneyDoc = f => !!f && (MONEY.has(f.kind) || ['cheque', 'payment', 'contract'].includes(String(f.ownerKind || '')));
+  if (typeof openInquiry === 'function') openInquiry = (base => function (f, ctx, extra = {}) {
+    if (!isMoneyDoc(f)) return base.apply(this, arguments);
+    const o = ctx && String(ctx).startsWith('order-') ? byId('orders', String(ctx).slice(6)) : null; const kind = (typeof ATT_KINDS !== 'undefined' && ATT_KINDS[f.kind]) || 'مستند';
+    openModal({ title: `استفسار على ${kind}`, body: `<div class="form"><div class="full small muted">${esc(f.name)}${o ? ` · ${esc(o.code)}` : ''}</div>${field('السؤال / الملاحظة', `<textarea id="f-text" name="text" required placeholder="مثال: الإقرار مش مختوم — محتاجين ختم العميل على الأصل"></textarea>`, 'full')}${field('الأولوية', `<select id="f-priority" name="priority">${opts(Object.keys(TASK_PRIORITY), 'high', k => TASK_PRIORITY[k][0])}</select>`)}<div class="full tiny muted">بيروح لمدير الحسابات والموارد البشرية، والمالك بيوصله إشعار.</div></div>`, submitLabel: 'إرسال للحسابات', onSubmit: async fm => {
+      const d = formData(fm); if (!d.text) return false;
+      const t = { id: uid(), title: `استفسار على ${kind}: ${f.name}${o ? ` — ${o.code}` : ''}`, desc: d.text, deptId: null, fromDeptId: role() === 'head' ? (myDepts()[0] || null) : null, assigneeId: null, orderId: o ? o.id : null, fileId: f.id, dueDate: addDays(todayISO(), 1), priority: d.priority || 'high', status: 'open', kind: 'task', source: 'inquiry', toRole: 'hr', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() };
+      await Store.save('tasks', t); toast('تم إرسال الاستفسار للحسابات');
+      if (!isAdmin() && typeof notifyOwner === 'function') notifyOwner(`استفسار على ${kind}${o ? ` — ${o.code}` : ''}`, `${S.session?.name || ''}: ${String(d.text).slice(0, 160)}`, { id: `inq_${t.id}`, orderId: o ? o.id : null }).catch(() => { });
+    } });
+  })(openInquiry);
+}
+/* =====================================================================
+   Ninety Fabrication v6.48 — cheque data can be corrected, and a wrong date read off the picture is caught (Mahmoud, 4 Oct):
+   · an edit button next to every client cheque (owner + accounts/HR): number, bank, due date, amount (money roles) —
+     the change is logged on the cheque.
+   · the cheque forms refuse an unlikely due date (more than 60 days in the past or 3 years ahead — e.g. 2022 read off
+     the image) until the person confirms it on purpose.
+   Factory only.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) {
+  const canEdit = () => writable() && (isAdmin() || role() === 'hr');
+  const fin = () => typeof seesFinance === 'function' && seesFinance();
+  const me = () => S.session || {};
+  /* ---- edit ---- */
+  ACTIONS.chqEdit = arg => {
+    const [oid, pid] = String(arg || '').split(':'); const o = byId('orders', oid); if (!o || !canEdit()) return;
+    const p = (o.payments || []).find(x => x && x.id === pid); if (!p) { toast('الشيك غير موجود', 'err'); return; }
+    openModal({ title: `تعديل بيانات الشيك ${p.chequeNo || ''}`, submitLabel: 'حفظ التعديل', body: `<div class="form">${field('رقم الشيك', inp('chequeNo', p.chequeNo || '', 'inputmode="numeric" required'))}${field('البنك الساحب', inp('bank', p.bank || '', 'required'))}${field('تاريخ الاستحقاق', inp('dueDate', p.dueDate || '', 'type="date" required'))}${fin() ? field(`مبلغ الشيك (${CUR()})`, inp('amount', p.chequeAmount || '', 'type="number" step="any" min="0" inputmode="decimal"')) : ''}${field('سبب التعديل', inp('why', '', 'required placeholder="مثال: السيستم قرا تاريخ الاستحقاق غلط من الصورة"'), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const dd = String(d.dueDate || ''); if (!d.chequeNo || !d.bank || !dd) { toast('اكمل البيانات', 'err'); return false; }
+        if (!okDate(dd) && !f.dataset.sure) { f.dataset.sure = '1'; toast(`تاريخ الاستحقاق ${fmtDate(dd)} بعيد عن المعتاد — لو متأكد دوس حفظ تاني`, 'err'); return false; }
+        const before = { chequeNo: p.chequeNo, bank: p.bank, dueDate: p.dueDate, chequeAmount: p.chequeAmount };
+        const patch = { chequeNo: String(d.chequeNo).trim(), bank: String(d.bank).trim(), dueDate: dd, ref: String(d.chequeNo).trim() };
+        if (fin() && d.amount !== undefined && d.amount !== '') patch.chequeAmount = +String(d.amount).replace(/[^\d.]/g, '') || 0;
+        const changed = Object.keys(patch).filter(k => k !== 'ref' && String(patch[k] ?? '') !== String(before[k] ?? ''));
+        if (!changed.length) { toast('مفيش تغيير'); return; }
+        const log = (p.log || []).concat([{ at: nowISO(), by: me().id || null, byName: me().name || '', edit: changed.map(k => `${k}: ${before[k] ?? '—'} → ${patch[k]}`).join(' · '), note: String(d.why || '').trim() }]);
+        const payments = (byId('orders', oid).payments || []).map(x => x && x.id === pid ? Object.assign({}, x, patch, { log }) : x);
+        await Store.update('orders', oid, { payments }); toast('اتعدّل'); rerender();
+        if (!isAdmin() && typeof notifyOwner === 'function') notifyOwner(`تعديل بيانات شيك على ${o.code}`, `${me().name || ''}: ${changed.map(k => ({ chequeNo: 'الرقم', bank: 'البنك', dueDate: 'الاستحقاق', chequeAmount: 'المبلغ' }[k] || k)).join('، ')} — ${String(d.why || '').slice(0, 120)}`, { id: `chqedit_${pid}_${Date.now()}`, orderId: oid }).catch(() => { });
+      } });
+  };
+  function okDate(iso) { if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false; const t = new Date(iso).getTime(); const now = Date.now(); return t >= now - 60 * 864e5 && t <= now + 3 * 365 * 864e5; }
+  /* the button next to the deposit / clear / bounce actions of each cheque */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!canEdit()) return; const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('[data-action="inChequeDeposit"],[data-action="inChequeClear"],[data-action="inChequeBounce"]').forEach(b => {
+      const row = b.parentElement; if (!row || row.querySelector('[data-action="chqEdit"]')) return;
+      row.insertAdjacentHTML('beforeend', ` <button type="button" class="btn xs" data-action="chqEdit" data-arg="${esc(b.dataset.arg)}" title="تعديل رقم الشيك / البنك / الاستحقاق">${icon('edit')}تعديل البيانات</button>`);
+    });
+  });
+  /* ---- the new-cheque form: an unlikely due date (read off the picture) must be confirmed on purpose ---- */
+  document.addEventListener('submit', ev => {
+    const f = ev.target; if (!f || f.id !== 'mform') return; const dd = f.querySelector('[name="dueDate"]'); const front = f.querySelector('[name="front"]'); if (!dd || !front) return;
+    const v = String(dd.value || ''); if (!v || okDate(v) || f.dataset.sureDate === v) return;
+    ev.preventDefault(); ev.stopImmediatePropagation(); f.dataset.sureDate = v; dd.focus();
+    toast(`تاريخ الاستحقاق ${fmtDate(v)} شكله غلط (اتقرا من الصورة؟) — صلّحه، أو لو متأكد دوس حفظ تاني`, 'err');
+    dd.style.outline = '2px solid #dc2626'; setTimeout(() => { dd.style.outline = ''; }, 4000);
+  }, true);
 }
 </script>
 
