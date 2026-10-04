@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1440-432864";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1513-bdbe8f";</script>
 
 <script>
 'use strict';
@@ -32598,6 +32598,155 @@ if (STU_ON) {
     try { if (r && t && byOwner(t) && !isAdmin()) await pingOwner(`${sess().name || 'موظف'} كتب على مهمتك: ${short(t.title)}`, short(text || (file ? 'صورة' : '')), { id: `tmsg_${t.id}`, orderId: t.orderId || null, priority: 'normal', fields: { link: `/#/tasks/${t.id}`, taskRef: t.id } }); } catch (e) { /* ignore */ }
     return r;
   })(taskPost);
+}
+/* =====================================================================
+   Ninety Studioz v6.44 — the mail page: the office inbox read from inside the system (Mahmoud, 4 Oct — start).
+   · page #/mail: a tab per mailbox the role may open (the server decides, admin_config.mail_boxes), the inbox list,
+     the message with its attachments, reply from the same address.
+   · quick actions on a message: new client (CRM) · task · link to a project (col `mails`, metadata only) ·
+     save an attachment on the system (R2 through nfFiles).
+   · the Settings mail tab gets the Microsoft 365 block: tenant / client / secret (kept on the server, never shown
+     again), the mailbox list with the roles allowed, and a connection test.
+   · messages are read live from Microsoft (10-minute cache on the device) — nothing is stored unless linked.
+   ===================================================================== */
+if (STU_ON) {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const MB = { boxes: null, box: '', list: {}, msg: null, busy: false, unread: 0, cacheAt: {} };
+  const call = async body => { const r = await S.sb.functions.invoke('mailbox', { body }); const j = (r && r.data) || {}; if (r.error && !j.error) throw new Error(String(r.error.message || r.error)); if (j.error) throw new Error(j.error + (j.detail ? ': ' + j.detail : '')); return j; };
+  const fmtAt = iso => { if (!iso) return ''; const d = new Date(iso); const today = todayISO(); const day = iso.slice(0, 10); return (day === today ? '' : fmtDate(day) + ' ') + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const who = p => p ? (p.name && p.name !== p.addr ? `${p.name} <${p.addr}>` : p.addr) : '';
+  async function loadBoxes(force) { if (MB.boxes && !force) return MB.boxes; try { const j = await call({ action: 'boxes' }); MB.boxes = j.boxes || []; MB.ms = !!j.ms; } catch (e) { MB.boxes = []; MB.err = String(e.message || e); } if (!MB.box && MB.boxes.length) MB.box = MB.boxes[0].addr; return MB.boxes; }
+  async function loadList(box, force) {
+    if (!box) return []; const fresh = MB.cacheAt[box] && Date.now() - MB.cacheAt[box] < 10 * 60000;
+    if (MB.list[box] && fresh && !force) return MB.list[box];
+    MB.busy = true; rerender();
+    try { const j = await call({ action: 'list', box, top: 50 }); MB.list[box] = j.items || []; MB.cacheAt[box] = Date.now(); MB.err = ''; }
+    catch (e) { MB.err = String(e.message || e); MB.list[box] = MB.list[box] || []; }
+    finally { MB.busy = false; rerender(); }
+    return MB.list[box];
+  }
+  const linked = (box, id) => list('mails').find(m => m.box === box && m.msgId === id);
+  const projName = id => { const p = id ? byId('projects', id) : null; return p ? p.name : ''; };
+  const clientName = id => { const c = id ? byId('clients', id) : null; return c ? c.name : ''; };
+
+  /* ---------- page ---------- */
+  function page() {
+    if (!sbOn()) return `<div class="card"><p class="muted">${L('البريد بيشتغل على النسخة المتصلة بس', 'Mail works on the connected version only')}</p></div>`;
+    if (MB.boxes === null) { loadBoxes().then(() => { if (MB.box) loadList(MB.box); rerender(); }); return `<div class="card"><p class="muted small">${L('جارٍ التحميل…', 'Loading…')}</p></div>`; }
+    if (!MB.boxes.length) return `<div class="card"><h3>${L('البريد', 'Mail')}</h3><p class="muted">${MB.ms ? L('مفيش صندوق بريد متاح لدورك — المالك بيحدد مين يشوف إيه من إعدادات ← البريد.', 'No mailbox is open to your role — the owner sets who sees what in Settings → Mail.') : L('ربط Microsoft 365 لسه ما اتعملش — إعدادات ← البريد (بعد ما الـIT يسلّم بيانات التطبيق).', 'Microsoft 365 is not connected yet — Settings → Mail (after IT hands over the app details).')}</p>${MB.err ? `<p class="tiny muted">${esc(MB.err)}</p>` : ''}</div>`;
+    const items = MB.list[MB.box] || []; if (!MB.list[MB.box] && !MB.busy) loadList(MB.box);
+    const tabs = `<div class="tabs">${MB.boxes.map(b => `<button class="${b.addr === MB.box ? 'on' : ''}" data-action="mbBox" data-arg="${esc(b.addr)}">${esc(b.label || b.addr)}</button>`).join('')}</div>`;
+    const rows = items.map(m => { const lk = linked(MB.box, m.id); return `<div class="item mbrow ${m.read ? '' : 'unread'} ${MB.msg && MB.msg.id === m.id ? 'on' : ''}" data-action="mbOpen" data-arg="${esc(m.id)}"><div class="main"><div class="title"><span class="mbfrom">${esc((m.from && (m.from.name || m.from.addr)) || '')}</span>${m.hasAtt ? ' 📎' : ''}${lk ? ` <span class="badge acc">${esc(projName(lk.projectId) || clientName(lk.clientId) || L('مربوط', 'linked'))}</span>` : ''}</div><div class="small"><b>${esc(m.subject || L('(بدون موضوع)', '(no subject)'))}</b> <span class="muted">— ${esc(m.preview || '')}</span></div></div><div class="end"><span class="tiny muted">${fmtAt(m.at)}</span></div></div>`; }).join('');
+    return `<div class="mbwrap"><div class="mblist card">${tabs}<div class="row" style="gap:8px;align-items:center;margin:8px 0"><span class="muted small">${items.length} ${L('رسالة', 'messages')} · ${items.filter(x => !x.read).length} ${L('غير مقروءة', 'unread')}</span><div class="grow"></div><button class="btn sm" data-action="mbRefresh">${icon('refresh')}${L('تحديث', 'Refresh')}</button>${canSend() ? `<button class="btn sm p" data-action="mbCompose">${icon('send')}${L('رسالة جديدة', 'New message')}</button>` : ''}</div>${MB.err ? `<div class="banner warn">${esc(MB.err)}</div>` : ''}${MB.busy && !items.length ? `<div class="empty small">${L('جارٍ التحميل…', 'Loading…')}</div>` : items.length ? `<div class="list">${rows}</div>` : `<div class="empty small">${L('مفيش رسائل', 'No messages')}</div>`}</div>
+      <div class="mbread card">${MB.msg ? msgView(MB.msg) : `<div class="empty small">${L('اختار رسالة من القائمة', 'Pick a message from the list')}</div>`}</div></div>`;
+  }
+  const canSend = () => ['admin', 'manager', 'hr', 'acc', 'office'].includes(role());
+  function msgView(m) {
+    const lk = linked(MB.box, m.id); const atts = (m.attachments || []);
+    const frame = `<iframe class="mbhtml" sandbox="" referrerpolicy="no-referrer" srcdoc="${esc(`<!doctype html><meta charset="utf-8"><base target="_blank"><style>body{font:14px/1.5 system-ui,Segoe UI,Tahoma,sans-serif;margin:12px;color:#222;background:#fff;word-break:break-word}img{max-width:100%;height:auto}a{color:#1d5fd1}</style>${m.html || ''}`)}"></iframe>`;
+    return `<div class="mbhead"><h3>${esc(m.subject || L('(بدون موضوع)', '(no subject)'))}</h3><div class="small"><b>${esc(who(m.from))}</b> → ${esc((m.to || []).map(who).join('، '))}${(m.cc || []).length ? ` · CC ${esc(m.cc.map(who).join('، '))}` : ''}</div><div class="tiny muted">${fmtAt(m.at)}${m.webLink ? ` · <a href="${esc(m.webLink)}" target="_blank" rel="noopener">${L('افتح في Outlook', 'Open in Outlook')}</a>` : ''}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${canSend() ? `<button class="btn sm p" data-action="mbReply">${icon('send')}${L('رد', 'Reply')}</button>` : ''}<button class="btn sm" data-action="mbToClient">${icon('users')}${L('عميل جديد', 'New client')}</button><button class="btn sm" data-action="mbToTask">${icon('check')}${L('مهمة', 'Task')}</button><button class="btn sm" data-action="mbLink">${icon('layers')}${lk ? L('تعديل الربط', 'Edit link') : L('ربط بمشروع / عميل', 'Link to project / client')}</button></div>
+      ${lk ? `<div class="banner info" style="margin-top:8px">${L('مربوطة بـ', 'Linked to')} ${esc([projName(lk.projectId), clientName(lk.clientId)].filter(Boolean).join(' · '))}</div>` : ''}</div>
+      ${frame}
+      ${atts.length ? `<div class="mbatts"><div class="tiny muted" style="margin:8px 0 4px">${L('المرفقات', 'Attachments')} (${atts.length})</div>${atts.map(a => `<div class="row" style="gap:8px;align-items:center;padding:4px 0"><span class="small grow">📎 ${esc(a.name)} <span class="tiny muted">${Math.round((a.size || 0) / 1024)} KB</span></span><button class="btn xs" data-action="mbAttOpen" data-arg="${esc(a.id)}">${L('افتح', 'Open')}</button>${window.nfFiles ? `<button class="btn xs" data-action="mbAttSave" data-arg="${esc(a.id)}">${L('احفظ على السيستم', 'Save on the system')}</button>` : ''}</div>`).join('')}</div>` : ''}`;
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.mbwrap{display:grid;grid-template-columns:minmax(280px,420px) minmax(0,1fr);gap:14px;align-items:start}
+.mbwrap .card{margin:0}.mblist .list{max-height:calc(100vh - 260px);overflow:auto}
+.mbrow.unread .mbfrom{font-weight:700}.mbrow.unread .title::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-inline-end:6px}
+.mbrow.on{outline:2px solid var(--accent);outline-offset:-2px}
+.mbhtml{width:100%;height:min(60vh,620px);border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:10px}
+@media (max-width:900px){.mbwrap{grid-template-columns:1fr}.mbread{order:-1}.mbhtml{height:50vh}}
+</style>`);
+  Object.assign(VIEW_TITLES, { mail: 'البريد' });
+  EXTRA_VIEWS.mail = () => page();
+  EXTRA_TITLES.mail = () => ({ title: L('البريد', 'Mail'), sub: L('الوارد على إيميلات المكتب — من جوه السيستم', 'The office inboxes — from inside the system') });
+  const addViews = (r, v) => { if (Array.isArray(ROLE_VIEWS[r])) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(v.filter(x => !ROLE_VIEWS[r].includes(x))); };
+  ['manager', 'hr', 'acc', 'office'].forEach(r => addViews(r, ['mail']));
+  { const at = NAV.findIndex(n => n.id === 'clients'); NAV.splice(at >= 0 ? at + 1 : 2, 0, { id: 'mail', label: 'البريد', short: 'البريد', icon: 'send', count: () => MB.unread || 0 }); }
+  if (!COLS.includes('mails')) { COLS.push('mails'); S.data.mails = S.data.mails || new Map(); }
+
+  /* ---------- actions ---------- */
+  ACTIONS.mbBox = async addr => { MB.box = addr; MB.msg = null; rerender(); await loadList(addr); };
+  ACTIONS.mbRefresh = async () => { await loadBoxes(true); await loadList(MB.box, true); };
+  ACTIONS.mbOpen = async id => {
+    const cur = (MB.list[MB.box] || []).find(x => x.id === id); MB.msg = Object.assign({ loading: true }, cur || { id }); rerender();
+    try { const j = await call({ action: 'get', box: MB.box, id }); MB.msg = j.msg; if (cur && !cur.read) { cur.read = true; call({ action: 'read', box: MB.box, id, read: true }).catch(() => { }); } }
+    catch (e) { toast(String(e.message || e), 'err'); MB.msg = null; }
+    rerender();
+  };
+  ACTIONS.mbAttOpen = async attId => {
+    const m = MB.msg; if (!m) return; toast(L('جارٍ التحميل…', 'Loading…'));
+    try { const a = await call({ action: 'attach', box: MB.box, id: m.id, att: attId }); const bin = atob(a.b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const blob = new Blob([u8], { type: a.type || 'application/octet-stream' }); const url = URL.createObjectURL(blob); if (/^image\//.test(a.type || '') && typeof lightbox === 'function') lightbox(url, a.name); else window.open(url, '_blank'); }
+    catch (e) { toast(String(e.message || e), 'err'); }
+  };
+  ACTIONS.mbAttSave = async attId => {
+    const m = MB.msg; if (!m || !window.nfFiles) return; toast(L('جارٍ الحفظ…', 'Saving…'));
+    try { const a = await call({ action: 'attach', box: MB.box, id: m.id, att: attId }); const bin = atob(a.b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const file = new File([u8], a.name || 'attachment', { type: a.type || 'application/octet-stream' });
+      const lk = linked(MB.box, m.id); const folder = lk && lk.projectId ? `studio/projects/${lk.projectId}/mail` : `studio/mail/${MB.box.split('@')[0]}`; const r = await nfFiles.put(file, `${folder}/${Date.now()}_${nfFiles.safeName(file.name)}`);
+      await Store.save('files', { id: uid(), kind: 'mail', name: file.name, size: file.size, type: file.type, r2: r.path, ownerKind: lk && lk.projectId ? 'project' : 'mail', ownerId: lk && lk.projectId ? lk.projectId : MB.box, note: `${m.subject || ''} — ${who(m.from)}`, byName: S.session && S.session.name || '', createdAt: nowISO() }, { silent: true });
+      toast(L('اتحفظ على السيستم', 'Saved on the system')); }
+    catch (e) { toast(String(e.message || e), 'err'); }
+  };
+  ACTIONS.mbReply = () => {
+    const m = MB.msg; if (!m || !canSend()) return;
+    openModal({ title: L('رد: ', 'Reply: ') + (m.subject || ''), submitLabel: L('إرسال', 'Send'), body: `<div class="form"><div class="field full"><label>${L('إلى', 'To')}</label><input name="to" class="ltr" value="${esc((m.from && m.from.addr) || '')}"></div><div class="field full"><label>${L('الرد', 'Reply')}</label><textarea name="html" rows="8" required></textarea></div><div class="tiny muted full">${L('بيتبعت من', 'Sent from')} ${esc(MB.box)}</div></div>`,
+      onSubmit: async f => { const d = formData(f); const txt = String(d.html || '').trim(); if (!txt) { toast(L('اكتب الرد', 'Write the reply'), 'err'); return false; } try { await call({ action: 'send', box: MB.box, to: d.to, subject: 'RE: ' + (m.subject || ''), html: esc(txt).replace(/\n/g, '<br>'), replyTo: m.id }); toast(L('اتبعت', 'Sent')); } catch (e) { toast(String(e.message || e), 'err'); return false; } } });
+  };
+  ACTIONS.mbCompose = () => {
+    if (!canSend()) return;
+    openModal({ title: L('رسالة جديدة من ', 'New message from ') + MB.box, submitLabel: L('إرسال', 'Send'), body: `<div class="form">${field(L('إلى', 'To'), inp('to', '', 'class="ltr" required placeholder="name@company.com"'), 'full')}${field(L('الموضوع', 'Subject'), inp('subject', '', 'required'), 'full')}<div class="field full"><label>${L('النص', 'Message')}</label><textarea name="html" rows="8" required></textarea></div></div>`,
+      onSubmit: async f => { const d = formData(f); try { await call({ action: 'send', box: MB.box, to: d.to, subject: d.subject, html: esc(String(d.html || '')).replace(/\n/g, '<br>') }); toast(L('اتبعت', 'Sent')); } catch (e) { toast(String(e.message || e), 'err'); return false; } } });
+  };
+  ACTIONS.mbToClient = () => {
+    const m = MB.msg; if (!m) return; const from = m.from || {}; const dom = (from.addr || '').split('@')[1] || '';
+    openModal({ title: L('عميل جديد من الرسالة', 'New client from the message'), body: clientForm({ name: from.name && !/@/.test(from.name) ? from.name : dom.split('.')[0], contact: from.name || '', email: from.addr || '' }), onSubmit: async f => { const d = formData(f); if (!d.name) { toast(L('اكتب اسم العميل', 'Enter the client name'), 'err'); return false; } const c = await Store.save('clients', Object.assign({ id: uid(), email: from.addr || '' }, d)); await Store.save('mails', { id: `${MB.box}|${m.id}`.replace(/[^\w@.|-]/g, '_').slice(0, 120), box: MB.box, msgId: m.id, subject: m.subject || '', from: from.addr || '', fromName: from.name || '', at: m.at, clientId: c.id, projectId: null, webLink: m.webLink || null, byName: S.session && S.session.name || '', createdAt: nowISO() }, { silent: true }); toast(L('تمت إضافة العميل وربط الرسالة', 'Client added and the message linked')); rerender(); } });
+  };
+  ACTIONS.mbToTask = () => { const m = MB.msg; if (!m || typeof taskForm !== 'function') return; const t = { title: m.subject || '', desc: `${L('من', 'From')}: ${who(m.from)}\n${(m.preview || '').slice(0, 300)}${m.webLink ? '\n' + m.webLink : ''}` }; openModal({ title: L('مهمة من الرسالة', 'Task from the message'), body: taskForm(t), onSubmit: f => saveTask(f, t) }); };
+  ACTIONS.mbLink = () => {
+    const m = MB.msg; if (!m) return; const lk = linked(MB.box, m.id) || {};
+    const projects = list('projects').filter(p => p.status !== 'archived'); const clients = sortBy(list('clients'), c => c.name || '');
+    openModal({ title: L('ربط الرسالة', 'Link the message'), submitLabel: L('حفظ', 'Save'), body: `<div class="form"><div class="field full"><label>${L('المشروع', 'Project')}</label><select name="projectId"><option value="">—</option>${projects.map(p => `<option value="${esc(p.id)}" ${lk.projectId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div><div class="field full"><label>${L('العميل', 'Client')}</label><select name="clientId"><option value="">—</option>${clients.map(c => `<option value="${esc(c.id)}" ${lk.clientId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div></div>`,
+      onSubmit: async f => { const d = formData(f); const id = lk.id || `${MB.box}|${m.id}`.replace(/[^\w@.|-]/g, '_').slice(0, 120); if (!d.projectId && !d.clientId) { if (lk.id) await Store.remove('mails', lk.id); toast(L('اتشال الربط', 'Link removed')); rerender(); return; } await Store.save('mails', Object.assign({}, lk, { id, box: MB.box, msgId: m.id, subject: m.subject || '', from: (m.from && m.from.addr) || '', fromName: (m.from && m.from.name) || '', at: m.at, projectId: d.projectId || null, clientId: d.clientId || null, webLink: m.webLink || null, byName: S.session && S.session.name || '', createdAt: lk.createdAt || nowISO() }), { silent: true }); toast(L('اتربطت', 'Linked')); rerender(); } });
+  };
+  /* the project page lists its linked mails */
+  if (typeof EXTRA_TITLES !== 'undefined' && typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'projects' || !S.route.id) return; const v = document.getElementById('view'); if (!v || v.querySelector('#mblinked')) return;
+    const ms = list('mails').filter(x => x.projectId === S.route.id); if (!ms.length) return;
+    v.insertAdjacentHTML('beforeend', `<div class="card" id="mblinked"><div class="cardhead"><h3>${icon('send')}${L('إيميلات مربوطة', 'Linked emails')}</h3><span class="badge">${ms.length}</span></div><div class="list">${sortBy(ms, x => x.at || '', true).map(x => `<div class="item" style="padding:8px 12px"><div class="main"><div class="title">${esc(x.subject || '')}</div><div class="small muted">${esc(x.fromName || x.from || '')} · ${fmtAt(x.at)} · ${esc(x.box)}</div></div>${x.webLink ? `<div class="end"><a class="btn xs" href="${esc(x.webLink)}" target="_blank" rel="noopener">Outlook</a></div>` : ''}</div>`).join('')}</div></div>`);
+  });
+  /* unread badge in the menu: a light check every 5 minutes while the page is open */
+  async function unreadTick() { if (!sbOn() || !S.session || document.hidden || !MB.boxes || !MB.boxes.length) return; try { let n = 0; for (const b of MB.boxes.slice(0, 4)) { const j = await call({ action: 'list', box: b.addr, top: 30, unread: true }); n += (j.items || []).length; } if (n !== MB.unread) { MB.unread = n; rerender(); } } catch (e) { /* offline */ } }
+  setInterval(unreadTick, 5 * 60000);
+  document.addEventListener('nf:login', () => setTimeout(() => { loadBoxes().then(unreadTick); }, 4000));
+
+  /* ---------- Settings → «البريد»: the Microsoft 365 block ---------- */
+  const ROLE_OPTS = [['manager', 'الآرت دايركتور'], ['hr', 'الموارد البشرية والحسابات'], ['acc', 'مسؤول الحسابات'], ['office', 'مهندس (مكتب)']];
+  if (EXTRA_SETTINGS.stumail) { const base = EXTRA_SETTINGS.stumail.render; EXTRA_SETTINGS.stumail.render = function () {
+    const html = base.apply(this, arguments); if (!isAdmin()) return html; const st = S.ui.stuSecret || {};
+    let boxes = []; try { boxes = JSON.parse(st.mail_boxes || '[]'); } catch (e) { boxes = []; }
+    const rows = boxes.map((b, i) => `<tr><td><input name="mb_addr_${i}" class="ltr" value="${esc(b.addr || '')}" placeholder="info@ninetystudioz.com"></td><td><input name="mb_label_${i}" value="${esc(b.label || '')}" placeholder="${L('الاسم', 'Label')}"></td><td>${ROLE_OPTS.map(([k, l]) => `<label class="check tiny"><input type="checkbox" name="mb_role_${i}_${k}" ${(b.roles || []).includes(k) ? 'checked' : ''}> ${l}</label>`).join(' ')}</td></tr>`).join('');
+    const f = (k, l, v, extra) => `<div class="field full"><label>${l}</label><input name="${k}" class="ltr notr" value="${esc(v || '')}" ${extra || ''}></div>`;
+    return html + `<form class="card" id="stumsform" style="margin-top:14px"><h3>${L('قراءة البريد من جوه السيستم — Microsoft 365', 'Reading mail inside the system — Microsoft 365')}</h3>
+      <p class="small muted">${L('بيانات التطبيق اللي بيسلّمها الـIT (الجزء 4 في صفحة الـIT). السر بيتحفظ على السيرفر بس ومش بيتعرض تاني.', 'The app details IT hands over (part 4 of the IT page). The secret is kept on the server only and never shown again.')}</p>
+      <p class="small"><b>${L('الحالة:', 'Status:')}</b> ${st.ms ? `<span style="color:var(--ok,#2a9d5c)">${L('متصل ✓', 'Connected ✓')}</span>` : `<span style="color:var(--warn,#d98c00)">${L('لسه ما اتربطش', 'Not connected yet')}</span>`}</p>
+      <div class="form">${f('ms_tenant', 'Tenant ID', st.ms ? '' : '', `placeholder="${st.ms ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : 'xxxxxxxx-xxxx-…'}"`)}${f('ms_client', 'Application (client) ID', '', `placeholder="${st.ms ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : 'xxxxxxxx-xxxx-…'}"`)}${f('ms_secret', 'Client secret', '', `type="password" autocomplete="new-password" placeholder="${st.ms ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : '…'}"`)}</div>
+      <h4 style="margin:14px 0 6px">${L('الصناديق ومين يشوفها', 'Mailboxes and who sees them')} <span class="tiny muted">(${L('المالك بيشوف الكل دايمًا', 'the owner always sees all')})</span></h4>
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>${L('العنوان', 'Address')}</th><th>${L('الاسم', 'Label')}</th><th>${L('مين يقدر يفتحه', 'Who may open it')}</th></tr></thead><tbody id="mbrows">${rows}</tbody></table></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button type="button" class="btn sm" data-action="mbAddRow">${icon('plus')}${L('صندوق', 'Mailbox')}</button><button type="submit" class="btn p">${L('حفظ', 'Save')}</button><button type="button" class="btn" data-action="mbPing">${L('اختبار الاتصال', 'Test connection')}</button><span class="tiny muted" id="stumsmsg"></span></div></form>`;
+  }; }
+  ACTIONS.mbAddRow = () => { const tb = document.getElementById('mbrows'); if (!tb) return; const i = tb.children.length; tb.insertAdjacentHTML('beforeend', `<tr><td><input name="mb_addr_${i}" class="ltr" placeholder="hello@ninetystudioz.com"></td><td><input name="mb_label_${i}" placeholder="${L('الاسم', 'Label')}"></td><td>${ROLE_OPTS.map(([k, l]) => `<label class="check tiny"><input type="checkbox" name="mb_role_${i}_${k}"> ${l}</label>`).join(' ')}</td></tr>`); };
+  document.addEventListener('submit', async ev => {
+    if (ev.target.id !== 'stumsform') return; ev.preventDefault(); if (!isAdmin() || !sbOn()) return;
+    const d = formData(ev.target); let n = 0;
+    for (const k of ['ms_tenant', 'ms_client', 'ms_secret']) { const v = String(d[k] || '').trim(); if (!v) continue; const { error } = await S.sb.rpc('nf_set_secret', { p_key: k, p_value: v }); if (error) { toast(L('فشل الحفظ: ', 'Save failed: ') + error.message, 'err'); return; } n++; }
+    const boxes = []; for (let i = 0; i < 20; i++) { if (!(`mb_addr_${i}` in d)) continue; const addr = String(d[`mb_addr_${i}`] || '').trim().toLowerCase(); if (!addr) continue; boxes.push({ addr, label: String(d[`mb_label_${i}`] || '').trim() || addr, roles: ROLE_OPTS.map(([k]) => k).filter(k => ev.target.querySelector(`[name="mb_role_${i}_${k}"]`) && ev.target.querySelector(`[name="mb_role_${i}_${k}"]`).checked) }); }
+    const { error } = await S.sb.rpc('nf_set_secret', { p_key: 'mail_boxes', p_value: boxes.length ? JSON.stringify(boxes) : '' }); if (error) { toast(L('فشل الحفظ: ', 'Save failed: ') + error.message, 'err'); return; }
+    ev.target.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; }); S.ui.stuSecretAsked = false; MB.boxes = null;
+    toast(L('اتحفظت', 'Saved')); rerender();
+  });
+  ACTIONS.mbPing = async () => { const m = document.getElementById('stumsmsg'); if (m) m.textContent = '…'; try { const j = await call({ action: 'ping' }); if (j.ok) { const parts = Object.keys(j.boxes || {}).map(a => `${a}: ${j.boxes[a].ok ? `${j.boxes[a].unread}/${j.boxes[a].total}` : '✗ ' + (j.boxes[a].detail || '')}`); if (m) m.textContent = L('متصل ✓ ', 'Connected ✓ ') + parts.join(' · '); toast(L('متصل', 'Connected')); } else { if (m) m.textContent = (j.step || '') + ' ' + (j.detail || j.error || ''); toast(L('مش متصل', 'Not connected'), 'err'); } } catch (e) { if (m) m.textContent = String(e.message || e); toast(L('مش متصل', 'Not connected'), 'err'); } };
 }
 </script>
 
