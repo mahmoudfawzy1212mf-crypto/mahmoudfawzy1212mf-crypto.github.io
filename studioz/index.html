@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1321-525834";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1349-066db3";</script>
 
 <script>
 'use strict';
@@ -32404,6 +32404,28 @@ if (STU_ON) {
     else { delete doc.noPunch; delete doc.selfOt; if (w) { if (w.noPunch !== undefined) doc.noPunch = w.noPunch; if (w.selfOt !== undefined) doc.selfOt = w.selfOt; } }
     return doc;
   })(workerFromForm);
+}
+/* =====================================================================
+   Ninety Studioz v6.41 — nothing of the factory shows in the office (Mahmoud, 4 Oct):
+   · a fleet-maintenance task (maintenance due on a Chevrolet) appeared on the studio after the owner switched systems in the same
+     tab: the factory's vehicles were still in memory, so the hourly maintenance sweep wrote its task to the studio DB.
+   · here: the sweep never runs on the studio, factory-only collections (vehicles / trips / fuel) are emptied as soon
+     as the studio is active, and any task that belongs to the fleet (vehicleId / deptId fleet / toRole fleet) is
+     hidden from every list.
+   ===================================================================== */
+if (STU_ON) {
+  const FACTORY_COLS = ['vehicles', 'trips', 'fuel', 'cctv', 'inventory', 'products', 'suppliers', 'purchases'];
+  const isFleetTask = t => !!(t && (t.vehicleId || t.deptId === 'fleet' || t.toRole === 'fleet' || /^maint_veh_/.test(String(t.id || ''))));
+  const purge = () => { try { FACTORY_COLS.forEach(c => { const m = S.data && S.data[c]; if (m && m.size) m.clear(); }); } catch (e) { /* ignore */ } };
+  purge();
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.unshift(purge);
+  /* the maintenance sweep (47-fleet-plus) keys off this timestamp — pushed far into the future it never fires here */
+  try { if (typeof _maintSweepAt !== 'undefined') _maintSweepAt = Number.MAX_SAFE_INTEGER; } catch (e) { /* const in an old build */ }
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) {
+    const out = base.apply(this, arguments);
+    return col === 'tasks' && Array.isArray(out) ? out.filter(t => !isFleetTask(t)) : out;
+  })(listScope);
+  window.nfIsFleetTask = isFleetTask;
 }
 </script>
 
