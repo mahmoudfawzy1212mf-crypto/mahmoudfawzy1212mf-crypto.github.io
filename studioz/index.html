@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1747-c7d9da";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1803-ef1dfc";</script>
 
 <script>
 'use strict';
@@ -32954,6 +32954,99 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
     toast(`تاريخ الاستحقاق ${fmtDate(v)} شكله غلط (اتقرا من الصورة؟) — صلّحه، أو لو متأكد دوس حفظ تاني`, 'err');
     dd.style.outline = '2px solid #dc2626'; setTimeout(() => { dd.style.outline = ''; }, 4000);
   }, true);
+}
+/* =====================================================================
+   Ninety Fabrication v6.50 — attendance corrections stay with the chain, the owner only hears about delays
+   (PIN approved 4 Oct):
+   · direct attendance edits on the attendance page: HR (Saeed) only — never his own row (that was already a request to
+     the owner, 78-owner-approvals). The factory manager and the department heads no longer edit directly; they approve.
+   · an employee's attendance request (edit / forgotten punch-out / forgotten punch): head → factory manager → HR, HR is
+     the final decision. The owner does not see these in his requests list (a small toggle shows them) and they are
+     never escalated to him.
+   · HR's own attendance request goes straight to the owner.
+   · the owner gets one grouped notice a day per person who let requests sit past the grace period
+     (settings → escalateHours): «<name> (<role>) took no action on N requests for H hours: …». The notice closes
+     itself once that person's queue is clear. Applies to every request type, not just attendance.
+   Factory only.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) {
+  const ATT_TYPES = new Set(['attedit', 'outfix', 'punch']);
+  const myWid = () => (S.session && S.session.workerId) || null;
+  if (typeof DEFAULT_CHAINS !== 'undefined') DEFAULT_CHAINS.outfix = ['head', 'manager', 'hr'];
+
+  /* 1) direct edit = HR only */
+  if (typeof canDo === 'function') canDo = (base => function (act, ctx = {}) {
+    if (act === 'attendance.edit' && !isAdmin()) { if (role() !== 'hr') return false; if (ctx.workerId && ctx.workerId === myWid()) return false; }
+    return base.apply(this, arguments);
+  })(canDo);
+  /* HR's own row stays read-only on the attendance table (a change there would only become a request anyway) */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'attendance' || isAdmin() || !myWid()) return; const v = document.getElementById('view'); if (!v) return; const w = myWid();
+    v.querySelectorAll(`[data-tm$=":${w}"],[data-ot$=":${w}"],[data-action="attSet"][data-arg*=":${w}:"],[data-action="attFlags"][data-arg$=":${w}"],[data-action="attAlloc"][data-arg$=":${w}"]`).forEach(el => { el.disabled = true; el.title = 'حضورك الشخصي بيتعدل بطلب للمالك'; });
+  });
+
+  /* 2) chain: HR's own request → owner; anyone else never approves himself */
+  const ownRole = w => (w && ['hr', 'manager', 'head', 'acc'].includes(w.role)) ? w.role : null;
+  Store.save = (base => function (col, doc, opts) {
+    try {
+      if (col === 'requests' && doc && ATT_TYPES.has(doc.type) && doc.status === 'pending' && !(doc.step > 0)) {
+        const w = byId('workers', doc.workerId); const r = ownRole(w);
+        if (r === 'hr') doc.chain = ['admin'];
+        else if (r && Array.isArray(doc.chain)) { const c = doc.chain.filter(x => x !== r); doc.chain = c.length ? c : ['admin']; }
+      }
+    } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(Store.save);
+  /* no silent escalation past HR to the owner for attendance requests */
+  if (typeof reqStage === 'function') reqStage = (base => function (r) {
+    const st = base.apply(this, arguments);
+    if (r && ATT_TYPES.has(r.type) && st.beyond && !st.chain.includes('admin')) { const last = st.chain[st.chain.length - 1]; st.escalated = st.escalated.filter(e => e.to !== 'admin'); st.beyond = false; st.role = last; st.idx = st.chain.length - 1; const at = st.escalated.length ? st.escalated[st.escalated.length - 1].at : (r.stepAt || r.createdAt); st.sinceAt = at; st.hours = Math.floor((Date.now() - new Date(at).getTime()) / 36e5); }
+    return st;
+  })(reqStage);
+  /* the owner's list: attendance requests hidden unless he asks */
+  if (typeof requestVisible === 'function') requestVisible = (base => function (r) {
+    if (r && isAdmin() && ATT_TYPES.has(r.type) && !(Array.isArray(r.chain) && r.chain.includes('admin')) && !(S.ui.filter.requests || {}).showAtt) return false;
+    return base.apply(this, arguments);
+  })(requestVisible);
+  if (typeof vRequests === 'function') vRequests = (base => function () {
+    const html = base.apply(this, arguments); if (!isAdmin()) return html;
+    const f = S.ui.filter.requests || {}; const n = list('requests').filter(r => r.status === 'pending' && ATT_TYPES.has(r.type) && !(Array.isArray(r.chain) && r.chain.includes('admin'))).length;
+    const btn = `<button type="button" class="btn ghost sm" data-action="reqShowAtt" title="طلبات تعديل الحضور والانصراف بتتقفل عند مدير الحسابات — بتوصلك بس لو اتأخر">${f.showAtt ? 'اخفِ طلبات الحضور' : `اعرض طلبات الحضور (${n})`}</button>`;
+    return html.replace('<div class="grow"></div>', btn + '<div class="grow"></div>');
+  })(vRequests);
+  ACTIONS.reqShowAtt = () => { const f = S.ui.filter.requests || (S.ui.filter.requests = { status: 'pending', type: '' }); f.showAtt = !f.showAtt; render(false); };
+
+  /* 3) late approvers → one grouped notice a day per person to the owner */
+  const SEES_ALL = () => ['admin', 'hr', 'manager'].includes(role());
+  const whoFor = (step, r) => {
+    if (step === 'head') { const w = byId('workers', r.workerId); const h = list('workers').find(x => x.status !== 'inactive' && x.role === 'head' && w && x.deptId === w.deptId); return h ? { key: 'head:' + h.id, name: h.name, label: `رئيس ${deptName(h.deptId)}` } : { key: 'head:' + ((w && w.deptId) || '?'), name: `رئيس ${deptName(w && w.deptId)}`, label: 'رئيس القسم' }; }
+    if (step === 'manager' || step === 'hr' || step === 'acc') { const p = list('workers').find(x => x.status !== 'inactive' && x.role === step); return { key: step, name: p ? p.name : CHAIN_LABEL[step], label: CHAIN_LABEL[step] }; }
+    return null;
+  };
+  const short = r => { try { const w = byId('workers', r.workerId); return `${REQ_TYPES[r.type] || r.type}${w ? ' ' + w.name : ''}`; } catch (e) { return r.type; } };
+  let _lateAt = 0;
+  async function lateSweep() {
+    if (!S.session || !writable() || !SEES_ALL() || Date.now() - _lateAt < 10 * 60000) return; _lateAt = Date.now();
+    const H = escalateHours(); const groups = new Map();
+    list('requests').filter(r => r.status === 'pending').forEach(r => {
+      let st; try { st = reqStage(r); } catch (e) { return; }
+      const lateSteps = st.escalated.map(e => e.from).filter(s => s !== 'admin');
+      if (st.role !== 'admin' && st.hours >= H && !lateSteps.includes(st.role)) lateSteps.push(st.role);
+      lateSteps.forEach(step => { const who = whoFor(step, r); if (!who) return; const g = groups.get(who.key) || { who, items: [], hours: 0 }; g.items.push(r); g.hours = Math.max(g.hours, st.hours); groups.set(who.key, g); });
+    });
+    const today = todayISO(); const open = list('tasks').filter(t => /^late_/.test(String(t.id || '')) && ['open', 'doing'].includes(t.status));
+    for (const t of open) { const m = /^late_(.+)_(\d{4}-\d{2}-\d{2})$/.exec(t.id); if (!m || !groups.has(m[1]) || m[2] !== today) { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: 'اتردّ على الطلبات' }, { silent: true }); } catch (e) { /* ignore */ } } }
+    for (const [key, g] of groups) {
+      const id = `late_${key}_${today}`; const cur = byId('tasks', id); const n = g.items.length;
+      const title = key === 'hr' && g.items.every(r => ATT_TYPES.has(r.type)) ? `${g.who.name} لم يرد على ${n} ${n === 1 ? 'طلب' : 'طلبات'} تعديل حضور وانصراف` : `${g.who.name} (${g.who.label}) ما خدش أكشن في ${n} ${n === 1 ? 'طلب' : 'طلبات'}`;
+      const desc = `من ${g.hours >= 48 ? Math.floor(g.hours / 24) + ' يوم' : g.hours + ' ساعة'} (فترة السماح ${H} ساعة): ${g.items.slice(0, 5).map(short).join('، ')}${n > 5 ? ` و${n - 5} غيرهم` : ''}`;
+      if (cur && ['open', 'doing'].includes(cur.status)) { if (cur.title !== title || cur.desc !== desc) { try { await Store.update('tasks', id, { title, desc, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } continue; }
+      if (cur) continue;
+      try { await notifyRole('admin', title, desc, { id, kind: 'notice', priority: 'high', fields: { link: '/#/requests', lateKey: key } }); } catch (e) { /* ignore */ }
+    }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(lateSweep, 3000); });
+  window.nfLateSweep = () => { _lateAt = 0; return lateSweep(); };
 }
 </script>
 
