@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1623-4b114e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1641-8f193c";</script>
 
 <script>
 'use strict';
@@ -32468,15 +32468,34 @@ if (STU_ON) {
     if (ok !== false) { try { await window.nfCloseNotesFor(id); } catch (e) { /* ignore */ } }
     return ok;
   })(decideRequest);
+  /* escalation notices (esc<n>_<taskId>_<target>) and task-linked notes (taskRef): closed once the task was seen by its
+     assignee or is finished — the owner should not keep seeing "not seen yet" days after it was seen (Mahmoud, 4 Oct) */
+  const seenByAssignee = t => !!(t && t.assigneeId && (t.seenAt || {})[t.assigneeId]);
+  const TASK_DONE = new Set(['done', 'cancelled']);
+  function taskOfNote(n, byId_) {
+    if (!n || !NOTE_KINDS.has(n.kind) || !['open', 'doing'].includes(n.status)) return null;
+    if (n.taskRef) { const t = byId_(n.taskRef); return t && TASK_DONE.has(t.status) ? { t, why: 'done' } : null; }
+    const m = /^esc(\d)_(.+)$/.exec(String(n.id || '')); if (!m) return null;
+    for (const t of allTasks()) { if (!t || !m[2].startsWith(t.id + '_')) continue; if (TASK_DONE.has(t.status)) return { t, why: 'done' }; if (seenByAssignee(t)) return { t, why: 'seen' }; return null; }
+    return null;
+  }
+  async function closeNote(n, why) { try { await Store.update('tasks', n.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: why === 'seen' ? 'المكلَّف شاف المهمة' : 'المهمة خلصت' }, { silent: true }); return true; } catch (e) { return false; } }
   /* catch-up sweep */
   let _sweepAt = 0;
   async function sweep() {
     if (!S.session || !writable() || !S.data || !S.data.tasks || !S.data.requests || Date.now() - _sweepAt < 3 * 60000) return; _sweepAt = Date.now();
-    const reqMap = new Map(allReq().filter(r => r && DECIDED.has(r.status)).map(r => [r.id, r])); if (!reqMap.size) return; let n = 0;
-    for (const t of allTasks()) { const r = reqOfTask(t, reqMap); if (!r) continue; if (typeof canSee === 'function' && !canSee('tasks')) break; if (await closeFor(t, r)) n++; if (n >= 40) break; }
+    if (typeof canSee === 'function' && !canSee('tasks')) return;
+    const reqMap = new Map(allReq().filter(r => r && DECIDED.has(r.status)).map(r => [r.id, r])); let n = 0;
+    const byId_ = id => S.data.tasks.get(id);
+    for (const t of allTasks()) {
+      const r = reqMap.size ? reqOfTask(t, reqMap) : null; if (r) { if (await closeFor(t, r)) n++; }
+      else { const x = taskOfNote(t, byId_); if (x && await closeNote(t, x.why)) n++; }
+      if (n >= 40) break;
+    }
     if (n) { console.info('nf autoclose', n); rerender(); }
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(sweep, 1500); });
+  window.nfAutocloseNow = () => { _sweepAt = 0; return sweep(); };
 
   /* ---------- catch-up sync (30 s) ---------- */
   const COLS_SYNC = ['tasks', 'requests', 'attendance', 'orders', 'projects', 'pmtasks', 'expenses', 'purchases', 'trips', 'penalties', 'advances', 'files', 'changes'];
