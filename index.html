@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1220-07d514";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1309-599aba";</script>
 
 <script>
 'use strict';
@@ -32329,6 +32329,80 @@ if (STU_ON) {
     toast(n ? L('اتحفظت', 'Saved') : L('مفيش تغيير', 'No change')); rerender();
   });
   ACTIONS.stuMailTest = async () => { const f = document.getElementById('stumailform'); const to = String((f && f.querySelector('[name="testto"]') || {}).value || '').trim(); const m = document.getElementById('stumailmsg'); if (!to) { toast(L('اكتب إيميل للتجربة', 'Enter an email for the test'), 'err'); return; } if (m) m.textContent = '…'; try { const r = await S.sb.functions.invoke('mail', { body: { action: 'test', to } }); const j = (r && r.data) || {}; if (j.status === 'ok') { if (m) m.textContent = L('اتبعت ✓ — بص في الإيميل (والـSpam)', 'Sent ✓ — check the inbox (and spam)'); toast(L('اتبعت', 'Sent')); } else { if (m) m.textContent = (j.detail || j.status || j.error || ''); toast(L('ماتبعتش', 'Not sent'), 'err'); } } catch (e) { if (m) m.textContent = String(e.message || e); toast(L('ماتبعتش', 'Not sent'), 'err'); } };
+}
+/* =====================================================================
+   Ninety Studioz v6.39 — overtime logged by the person himself (approved by PIN, 4 Oct):
+   · worker flags (owner only, on the card): selfOt — logs his own extra hours, no approval;
+     noPunch — exempt from punching: no absence / lateness is ever counted for him.
+   · my-portal card: day + hours + project/note → written at once to the day's attendance row
+     (the existing `ot` field, so payroll picks it up like everyone else) + a month summary with the pay total.
+   · the owner gets a push on every entry (hours only, no money in the text).
+   ===================================================================== */
+if (STU_ON) {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const me = () => (S.session && S.session.workerId ? byId('workers', S.session.workerId) : null);
+  const canSelf = w => !!(w && w.selfOt && w.status !== 'inactive');
+
+  /* exempt from punching: a working day with no punch (or an automatic absence) counts as present, nothing late */
+  if (typeof classifyDay === 'function') classifyDay = (base => function (w, date, row) {
+    const c = base.call(this, w, date, row);
+    if (w && w.noPunch && ['unrecorded', 'absent'].includes(c.kind) && date <= todayISO()) return { kind: 'present', label: L('معفي من البصمة', 'No punch required') };
+    return c;
+  })(classifyDay);
+
+  const hourRate = w => { const hpd = +S.settings.hoursPerDay || 8; const otm = +S.settings.otMultiplier || 1.5; return dailyRate(w) / hpd * otm; };
+  const fmtH = h => (Math.round(h * 100) / 100).toString();
+  function card(w) {
+    const f = S.ui.filter.selfot ||= { ym: monthOf(todayISO()) }; const ym = f.ym;
+    const rows = attMonthRows(w, ym); const today = todayISO();
+    const days = monthDates(ym).filter(d => d <= today && rows[d] && +rows[d].ot > 0).reverse();
+    const hours = days.reduce((a, d) => a + (+rows[d].ot || 0), 0);
+    const pr = typeof payrollRow === 'function' ? payrollRow(w, ym) : null;
+    const projName = id => { const p = id ? byId('projects', id) : null; return p ? p.name : ''; };
+    const tr = days.map(d => { const r = rows[d]; return `<tr><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="n">${fmtH(+r.ot)}</td><td>${esc(projName(r.otProject) || r.otNote || '')}</td><td><button class="btn xs" data-action="selfOtEdit" data-arg="${d}">${icon('edit')}</button></td></tr>`; }).join('');
+    return `<div class="card selfot" id="selfotcard"><div class="cardhead"><h3>${icon('attendance')}${L('ساعاتي الإضافية', 'My overtime')}</h3><div class="grow"></div>${monthNavBar('selfot')}<button class="btn p sm" data-action="selfOtAdd">${icon('plus')}${L('سجّل ساعات', 'Log hours')}</button></div>
+      <div class="kp"><div><b class="num">${fmtH(hours)}</b><span>${L('ساعة إضافية الشهر ده', 'overtime hours this month')}</span></div><div><b class="num">${fmtMoney(hourRate(w))}</b><span>${L('سعر الساعة الإضافية', 'overtime hour rate')} ×${+S.settings.otMultiplier || 1.5}</span></div><div><b class="num">${pr ? fmtMoney(pr.otPay) : '—'}</b><span>${L('قيمة الساعات', 'overtime pay')}</span></div><div><b class="num">${pr ? fmtMoney(pr.net) : '—'}</b><span>${L('إجمالي الراتب المتوقع', 'expected total salary')}</span></div></div>
+      ${tr ? `<div class="tablewrap"><table><thead><tr><th>${L('اليوم', 'Day')}</th><th class="n">${L('ساعات', 'Hours')}</th><th>${L('المشروع / السبب', 'Project / reason')}</th><th></th></tr></thead><tbody>${tr}</tbody></table></div>` : `<div class="empty small">${L('لسه ماسجّلتش ساعات الشهر ده', 'No hours logged this month yet')}</div>`}
+      <div class="tiny muted" style="margin-top:8px">${L('الساعات بتتسجل فورًا وبتدخل في حساب الراتب، والمالك بيوصله إشعار بكل تسجيل.', 'Hours are recorded at once and count towards your salary; the owner is notified of every entry.')}</div></div>`;
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style>.selfot .kp{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}.selfot .kp div{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}.selfot .kp b{display:block;font-size:18px}.selfot .kp span{font-size:11px;color:var(--muted)}@media (max-width:600px){.selfot .kp{grid-template-columns:repeat(2,minmax(0,1fr))}}</style>`);
+  if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); const w = me(); return canSelf(w) ? card(w) + h : h; })(vMe);
+
+  function form(date) {
+    const w = me(); if (!canSelf(w)) return;
+    const d0 = date || todayISO(); const cur = date ? (attMonthRows(w, monthOf(date))[date] || {}) : {};
+    const projects = list('projects').filter(p => p.status !== 'archived' && (typeof nfPmVisible !== 'function' || nfPmVisible(p)));
+    openModal({ title: L('تسجيل ساعات إضافية', 'Log overtime hours'), submitLabel: L('حفظ', 'Save'), body: `<div class="form">
+      ${field(L('اليوم', 'Day'), inp('date', d0, `type="date" max="${todayISO()}" required`))}${field(L('عدد الساعات', 'Hours'), inp('ot', cur.ot || '', 'type="number" step="0.5" min="0.5" max="12" required inputmode="decimal"'))}
+      <div class="field full"><label>${L('المشروع', 'Project')}</label><select name="otProject"><option value="">${L('— بدون مشروع —', '— no project —')}</option>${projects.map(p => `<option value="${esc(p.id)}" ${cur.otProject === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+      ${field(L('السبب / ملاحظة', 'Reason / note'), inp('otNote', cur.otNote || '', 'placeholder="' + L('مثال: تسليم ريندرات العميل', 'e.g. client renders delivery') + '"'), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const date = d.date; const ot = Math.round((+arDigits(String(d.ot || '')) || 0) * 2) / 2;
+        if (!date || date > todayISO()) { toast(L('اختار يوم صح', 'Pick a valid day'), 'err'); return false; }
+        if (!(ot > 0)) { toast(L('اكتب عدد الساعات', 'Enter the hours'), 'err'); return false; }
+        const prev = attMonthRows(w, monthOf(date))[date] || {};
+        await setAtt(date, w, Object.assign({}, prev, { s: prev.s || 'P', ot, otOk: true, otProject: d.otProject || null, otNote: String(d.otNote || '').trim(), otBy: 'self', otAt: nowISO() }));
+        toast(L('اتسجلت', 'Saved'));
+        if (typeof notifyOwner === 'function') notifyOwner(L('ساعات إضافية — ', 'Overtime — ') + w.name, `${fmtDate(date)}: ${fmtH(ot)} ${L('ساعة', 'h')}${d.otNote ? ' · ' + String(d.otNote).trim() : ''}`, { id: `sot_${w.id}_${date}` }).catch(() => { });
+        render(false);
+      } });
+  }
+  ACTIONS.selfOtAdd = () => form(null);
+  ACTIONS.selfOtEdit = date => form(date);
+
+  /* owner-only flags on the worker card (studio) */
+  if (typeof workerForm === 'function') workerForm = (base => function (w) {
+    const html = base.apply(this, arguments); if (!isAdmin()) return html; w = w || {};
+    const fld = `<div class="field full" id="selfotflags"><label>${L('الحضور والساعات الإضافية (المالك بس)', 'Attendance & overtime (owner only)')}</label><label class="check"><input type="checkbox" name="noPunch" ${w.noPunch ? 'checked' : ''}> ${L('معفي من البصمة — مفيش غياب أو تأخير بيتحسب عليه', 'No punch required — no absence or lateness counted')}</label><label class="check"><input type="checkbox" name="selfOt" ${w.selfOt ? 'checked' : ''}> ${L('يسجّل ساعاته الإضافية بنفسه من غير اعتماد (بتدخل في مرتبه مباشرة)', 'Logs his own overtime without approval (counts in his salary directly)')}</label></div>`;
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + fld : html.slice(0, i) + fld + html.slice(i);
+  })(workerForm);
+  if (typeof workerFromForm === 'function') workerFromForm = (base => async function (f, w) {
+    const doc = await base.apply(this, arguments); if (!doc) return doc;
+    if (isAdmin() && f.querySelector('#selfotflags')) { doc.noPunch = !!f.querySelector('[name=noPunch]:checked'); doc.selfOt = !!f.querySelector('[name=selfOt]:checked'); }
+    else { delete doc.noPunch; delete doc.selfOt; if (w) { if (w.noPunch !== undefined) doc.noPunch = w.noPunch; if (w.selfOt !== undefined) doc.selfOt = w.selfOt; } }
+    return doc;
+  })(workerFromForm);
 }
 </script>
 
