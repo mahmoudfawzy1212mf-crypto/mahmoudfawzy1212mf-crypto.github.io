@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-0731-84e84c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1100-9e971a";</script>
 
 <script>
 'use strict';
@@ -31928,8 +31928,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const el = document.getElementById('stulock'); if (el) el.remove(); document.body.classList.remove('stu-locked');
   }
   /* verify the password with the server (or the local hash when offline / local mode) */
+  /* v6.36: the phone keyboard may type Arabic-Indic digits or add a trailing space — try the typed text, then the normalised one */
+  const norm = pw => (typeof arDigits === 'function' ? arDigits(String(pw)) : String(pw)).trim();
   async function verify(pw) {
     if (!pw) return false;
+    const ok = await verify1(pw); if (ok) return true;
+    const n = norm(pw); return n && n !== pw ? verify1(n) : false;
+  }
+  async function verify1(pw) {
     if (typeof sbOn === 'function' && sbOn() && S.sb) {
       const email = (S.sbUser && S.sbUser.email) || (wrec() ? sbEmail(loginIdOf(wrec())) : null); if (!email) return false;
       const { error } = await S.sb.auth.signInWithPassword({ email, password: pw }); return !error;
@@ -31943,18 +31949,20 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const c = typeof stuSocialsHTML === 'function' ? (S.settings && S.settings.stuLogin) || {} : {}; const me = S.session.workerId || S.session.id; const ph = (window.nfPhoto && nfPhoto(me)) || S.session.avatar || null;
     const why = LK.why === 'break' ? L('إنت في بريك — اكتب كلمة السر لما ترجع', 'You are on a break — type your password when you are back') : LK.why === 'out' ? L('سجّلت انصراف — السيستم اتقفل', 'You punched out — the system is locked') : LK.why === 'idle' ? L('اتقفل لأنك سبته شوية', 'Locked after a while without use') : L('اكتب كلمة السر عشان تكمّل', 'Type your password to continue');
     const el = document.createElement('div'); el.id = 'stulock'; el.className = 'stulock'; el.setAttribute('dir', en() ? 'ltr' : 'rtl');
-    el.innerHTML = `<div class="slscene"><img class="slposter" src="${esc(c.poster || 'https://rekmppawmxerlqxqpqni.supabase.co/storage/v1/object/public/app/brand/stu/hero-poster.webp')}" alt=""></div><div class="slgrain"></div>
-      <div class="box"><img class="slmark" src="${esc(c.logo || 'https://rekmppawmxerlqxqpqni.supabase.co/storage/v1/object/public/app/brand/stu/wordmark-white.png')}" alt="NINETY">
+    el.innerHTML = `<div class="slscene"><img class="slposter" src="${esc((window.nfMediaUrl || (x => x))(c.poster || 'https://rekmppawmxerlqxqpqni.supabase.co/storage/v1/object/public/app/brand/stu/hero-poster.webp'))}" alt=""></div><div class="slgrain"></div>
+      <div class="box"><img class="slmark" src="${esc((window.nfMediaUrl || (x => x))(c.logo || 'https://rekmppawmxerlqxqpqni.supabase.co/storage/v1/object/public/app/brand/stu/wordmark-white.png'))}" alt="NINETY">
         <div class="av">${ph ? `<img src="${esc(ph)}" alt="">` : (window.nfSil ? nfSil() : '')}</div><h1 class="notr">${esc(S.session.name || '')}</h1><p class="why">${why}</p>
         <form id="stulockform" class="slform"><div class="slf"><input type="password" name="pw" id="lk-pw" class="ltr" autocomplete="current-password" required placeholder="${L('كلمة السر', 'Password')}" autofocus></div><p id="lk-err" class="slerr"></p><button type="submit" class="slbtn">${LK.why === 'break' ? L('رجعت من البريك', 'Back from the break') : L('افتح', 'Unlock')}</button></form>
-        <button type="button" class="lkalt" data-action="stuLockNotMe">${L('مش أنا؟ ادخل بحساب تاني', 'Not you? Sign in as someone else')}</button></div>`;
+        <div class="lkalts"><button type="button" class="lkalt" data-action="stuLockForgot">${L('نسيت كلمة السر؟', 'Forgot password?')}</button><button type="button" class="lkalt" data-action="stuLockNotMe">${L('مش أنا؟ ادخل بحساب تاني', 'Not you? Sign in as someone else')}</button></div></div>`;
     document.body.appendChild(el); const fm = el.querySelector('#stulockform'); fm.querySelector('.slbtn').addEventListener('click', ev => { ev.preventDefault(); fm.requestSubmit ? fm.requestSubmit() : fm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true })); }); setTimeout(() => { const i = el.querySelector('#lk-pw'); if (i) i.focus(); }, 80);
   }
   document.addEventListener('submit', async ev => {
     if (ev.target.id !== 'stulockform') return; ev.preventDefault(); if (LK.busy) return; LK.busy = true; const f = ev.target; const b = f.querySelector('button'); b.disabled = true; const err = f.querySelector('#lk-err');
-    try { const ok = await verify(f.pw.value); if (!ok) { err.textContent = L('كلمة السر غلط', 'Wrong password'); f.pw.value = ''; f.pw.focus(); return; } const why = LK.why; await unlock(); if (why === 'break') await breakEnd(); toast(L('أهلًا بيك تاني', 'Welcome back')); }
+    try { const ok = await verify(f.pw.value); if (!ok) { LK.fails = (LK.fails || 0) + 1; if (LK.fails >= 5) { LK.fails = 0; toast(L('5 محاولات غلط — ادخل من شاشة الدخول أو اطلب كود من المالك', '5 wrong attempts — sign in again or ask the owner for a reset code'), 'err'); await ACTIONS.stuLockNotMe(); return; } err.textContent = LK.fails >= 2 ? L('كلمة السر غلط — اتأكد إن الأرقام إنجليزي ومفيش مسافة أو حرف كبير بالغلط', 'Wrong password — make sure digits are English and there is no stray space or capital letter') : L('كلمة السر غلط', 'Wrong password'); f.pw.value = ''; f.pw.focus(); return; } LK.fails = 0; const why = LK.why; await unlock(); if (why === 'break') await breakEnd(); toast(L('أهلًا بيك تاني', 'Welcome back')); }
     finally { LK.busy = false; b.disabled = false; }
   });
+  /* v6.36: forgot password from the lock screen → sign out and open the reset form with the person's login already filled */
+  ACTIONS.stuLockForgot = async () => { const w = wrec(); const login = w ? loginIdOf(w) : ((S.session && S.session.username) || ''); await ACTIONS.stuLockNotMe(); S.ui.loginPrefill = login; setTimeout(() => { const u = document.getElementById('lg-user'); if (u && login) u.value = login; if (typeof ACTIONS.forgotPw === 'function') ACTIONS.forgotPw(); }, 350); };
   ACTIONS.stuLockNotMe = async () => { await unlock(); const a = document.querySelector('[data-action="logout"]'); if (a) a.click(); else { lsSet('nf.staff', null); S.session = null; render(true); } };
 
   /* ---------- breaks: a button next to the punch button; start / end on the attendance row ---------- */
@@ -32012,6 +32020,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .stulock .av{width:96px;height:96px;border-radius:50%;overflow:hidden;background:#2b3138;border:3px solid #fff}.stulock .av img,.stulock .av svg{width:100%;height:100%;object-fit:cover;display:block}
 .stulock h1{font-weight:400;font-size:24px;margin:0}.stulock .why{color:#9aa3ad;font-size:13.5px;margin:-6px 0 6px}
 .stulock .slform{width:100%}.stulock .slf input{text-align:center}
+.lkalts{display:flex;gap:18px;justify-content:center;flex-wrap:wrap}
 .lkalt{border:0;background:none;color:#9aa3ad;font:inherit;font-size:12.5px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);padding:0;margin-top:6px}
 body.stu-locked #root{filter:blur(6px);pointer-events:none;user-select:none}`;
   document.head.appendChild(css);
