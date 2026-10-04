@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1513-bdbe8f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1556-fec8a3";</script>
 
 <script>
 'use strict';
@@ -32748,6 +32748,40 @@ if (STU_ON) {
   });
   ACTIONS.mbPing = async () => { const m = document.getElementById('stumsmsg'); if (m) m.textContent = '…'; try { const j = await call({ action: 'ping' }); if (j.ok) { const parts = Object.keys(j.boxes || {}).map(a => `${a}: ${j.boxes[a].ok ? `${j.boxes[a].unread}/${j.boxes[a].total}` : '✗ ' + (j.boxes[a].detail || '')}`); if (m) m.textContent = L('متصل ✓ ', 'Connected ✓ ') + parts.join(' · '); toast(L('متصل', 'Connected')); } else { if (m) m.textContent = (j.step || '') + ' ' + (j.detail || j.error || ''); toast(L('مش متصل', 'Not connected'), 'err'); } } catch (e) { if (m) m.textContent = String(e.message || e); toast(L('مش متصل', 'Not connected'), 'err'); } };
 }
+/* =====================================================================
+   v6.45 — the owner's Ninety screen is fully clickable (Mahmoud, 4 Oct):
+   · every number tile (top strip + inside each company card) and every feature line opens its page directly —
+     in the current system or in the other one (deep link into it)
+   · entering the other system is one click: the switch overlay navigates by itself instead of waiting for a second
+     handler, and clears itself if the browser did not move within a few seconds
+   ===================================================================== */
+(function () {
+  if (typeof ninetyHomeHTML !== 'function') return;
+  const SELF = (typeof STU_ON !== 'undefined' && STU_ON) ? 'studio' : 'factory';
+  const OTHER = SELF === 'studio' ? 'factory' : 'studio';
+  const otherUrl = () => { try { const c = NINETY_COS[OTHER]; return (c && c.url) || (OTHER === 'studio' ? 'studioz/index.html' : '../index.html'); } catch (e) { return ''; } };
+  /* label → page, in the current system */
+  const HERE = { 'اعتماد مستنيك': '#/requests', 'تحويل لمورد': '#/purchases', 'أوامر متأخرة': '#/orders', 'أوامر جارية': '#/orders', 'مهمة مصعَّدة': '#/tasks', 'بصمة مشبوهة': '#/tasks', 'مهام جارية': '#/tasks' };
+  /* feature lines of the other system's card → deep link there */
+  const THERE = { 'فريق المكتب': '#/workers', 'المشاريع ومراحلها': '#/projects', 'المهام والتحديثات': '#/tasks', 'العروض والدفعات': '#/quotes', 'أوامر التشغيل': '#/orders', 'الحضور والرواتب': '#/attendance', 'المخازن والمشتريات': '#/inventory', 'المراقبة': '#/cctv' };
+  const STRIP = SELF === 'studio' ? ['#/requests', '#/tasks', '#/tasks', '#/attendance'] : ['#/requests', '#/tasks', '#/orders', '#/attendance'];
+  ninetyHomeHTML = (base => function () {
+    let h = base.apply(this, arguments); let i = 0;
+    h = h.replace(/<div class="st(| [a-z]+)">/g, m => { const href = STRIP[i++] || '#/dashboard'; return m.replace('">', `" data-action="ninetyOpen" data-arg="${href}" role="button" tabindex="0">`); });
+    h = h.replace(/<div class="it(| [a-z]+| )"><b>(\d+)<\/b><span>([^<]+)<small>/g, (m, cls, n, label) => { const href = HERE[label.trim()]; return href ? m.replace(/^<div class="it(| [a-z]+| )">/, `<div class="it$1" data-action="ninetyOpen" data-arg="${href}" role="button" tabindex="0">`) : m; });
+    h = h.replace(/<div class="plan">([\s\S]*?)<\/div><\/div><\/div>/g, (m, inner) => m.replace(inner, inner.replace(/<div><b>([^<]+)<\/b>/g, (mm, label) => { const href = THERE[label.trim()]; return href ? `<div data-action="nfHubOpen" data-arg="${OTHER}|${href}" role="button" tabindex="0" style="cursor:pointer"><b>${label}</b>` : mm; })));
+    return h;
+  })(ninetyHomeHTML);
+  if (typeof ACTIONS.nfHubOpen !== 'function') ACTIONS.nfHubOpen = arg => { const [co, href] = String(arg || '').split('|'); if (co === SELF || !co) { ACTIONS.ninetyOpen(href || '#/dashboard'); return; } location.href = otherUrl() + (href || ''); };
+  document.head.insertAdjacentHTML('beforeend', '<style>#nhome .strip .st[data-action],#nhome .blk .it[data-action],#nhome .plan [data-action]{cursor:pointer;transition:transform .12s,background .12s}#nhome .strip .st[data-action]:hover,#nhome .blk .it[data-action]:hover,#nhome .plan [data-action]:hover{transform:translateY(-1px);background:color-mix(in srgb,var(--surface,#1b2026) 70%,var(--accent,#1d5fd1) 12%)}</style>');
+  /* one click to enter the other system: navigate right away and never leave a dead overlay behind */
+  document.addEventListener('click', ev => {
+    const el = ev.target.closest && ev.target.closest('[data-action="ninetyGo"]'); if (!el || el.dataset.arg !== OTHER) return;
+    const u = otherUrl(); if (!u) return;
+    setTimeout(() => { try { location.href = u; } catch (e) { /* ignore */ } }, 30);
+    setTimeout(() => { const o = document.getElementById('nfswitch'); if (o && document.visibilityState === 'visible') { o.remove(); if (typeof _nfSwitching !== 'undefined') { try { _nfSwitching = false; } catch (e) { /* const */ } } } }, 6000);
+  }, true);
+})();
 </script>
 
 <!-- QR attendance + split breaks (Studioz add-on, loaded after the app) - keep this line on rebuilds -->
