@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1556-fec8a3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1623-4b114e";</script>
 
 <script>
 'use strict';
@@ -32782,6 +32782,84 @@ if (STU_ON) {
     setTimeout(() => { const o = document.getElementById('nfswitch'); if (o && document.visibilityState === 'visible') { o.remove(); if (typeof _nfSwitching !== 'undefined') { try { _nfSwitching = false; } catch (e) { /* const */ } } } }, 6000);
   }, true);
 })();
+/* =====================================================================
+   Ninety Fabrication v6.46 — overtime approval (PIN approved 4 Oct, owner said ok on the before/after):
+   · who approves: the owner + the factory manager only. HR and the department head still enter the hours
+     (and meal / travel), but the «approved assignment» box is theirs to see, not to tick — a save from them never
+     changes an existing approval.
+   · one tap approve on the awaiting-approval badge (phone + desktop), an approve-all button above the table.
+   · end of day (after 17:00) the owner + the factory manager get a note with the hours still waiting.
+   · payroll page: a warning on top when the month still has unapproved overtime (it is not paid until approved).
+   Factory only.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) {
+  const canOtOk = () => isAdmin() || role() === 'manager';
+  const needsOk = () => !(S.settings.policy && S.settings.policy.otNeedsApproval === false);
+  const pendingOn = date => { const att = attendanceFor(date); return list('workers').filter(w => w.status !== 'inactive').map(w => ({ w, r: att[w.id] || {} })).filter(x => +x.r.ot > 0 && !x.r.otOk); };
+  const fmtH = h => (Math.round(h * 100) / 100).toString();
+
+  /* 1) the approval flag is the owner's / factory manager's — anyone else saving a day keeps whatever it was */
+  if (typeof setAtt === 'function') setAtt = (base => async function (date, w, patch) {
+    if (patch && typeof patch === 'object' && !canOtOk() && w) { const cur = (attendanceFor(date) || {})[w.id] || {}; if (!!patch.otOk !== !!cur.otOk) patch = Object.assign({}, patch, { otOk: !!cur.otOk }); }
+    return base.call(this, date, w, patch);
+  })(setAtt);
+  if (typeof ACTIONS.attFlags === 'function') ACTIONS.attFlags = (base => function (arg) {
+    const r = base.apply(this, arguments);
+    if (!canOtOk()) setTimeout(() => { const c = document.getElementById('f-otOk'); if (!c) return; c.disabled = true; const lab = c.closest('label'); if (lab) { lab.style.opacity = '.6'; lab.insertAdjacentHTML('afterend', '<div class="tiny muted full">اعتماد الإضافي للمالك ومدير المصنع بس — سجّل الساعات وهتوصلهم للاعتماد.</div>'); } }, 0);
+    return r;
+  })(ACTIONS.attFlags);
+
+  /* 2) one-tap approve */
+  async function approve(date, wid, quiet) {
+    if (!canOtOk()) { toast('اعتماد الإضافي للمالك ومدير المصنع بس', 'err'); return false; }
+    const w = byId('workers', wid); if (!w) return false; const r = (attendanceFor(date) || {})[wid] || {}; if (!(+r.ot > 0) || r.otOk) return false;
+    const row = typeof computeAttRow === 'function' ? computeAttRow(Object.assign({}, r, { otOk: true, otOkBy: S.session && S.session.name || '', otOkAt: nowISO() }), w) : Object.assign({}, r, { otOk: true });
+    await setAtt(date, w, row); if (!quiet) toast(`اتعتمد إضافي ${w.name} — ${fmtH(+r.ot)} ساعة`); return true;
+  }
+  ACTIONS.otApprove = async arg => { const [date, wid] = String(arg || '').split(':'); if (await approve(date, wid)) render(false); };
+  ACTIONS.otApproveAll = async date => {
+    if (!canOtOk()) return; const p = pendingOn(date); if (!p.length) { toast('مفيش إضافي مستني اعتماد'); return; }
+    if (!(await confirmDlg(`اعتماد الإضافي لـ ${p.length} موظف (${fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0))} ساعة) ليوم ${fmtDate(date)}؟`, 'اعتمد الكل'))) return;
+    let n = 0; for (const x of p) { if (await approve(date, x.w.id, true)) n++; } toast(`اتعتمد ${n} إضافي`); render(false);
+  };
+  /* the badge gets its button; the toolbar gets «approve all» */
+  function decorate() {
+    if (!S.route || S.route.view !== 'attendance' || !canOtOk() || !needsOk()) return; const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('.badge.warn').forEach(b => {
+      if (b.dataset.otb || !/إضافي بانتظار اعتماد/.test(b.textContent)) return; b.dataset.otb = '1';
+      const tr = b.closest('tr') || b.closest('.item') || b.parentElement; const ref = tr && (tr.querySelector('[data-action="attFlags"]') || tr.querySelector('[data-ot]')); const arg = ref && (ref.dataset.arg || ref.dataset.ot); if (!arg) return;
+      b.insertAdjacentHTML('afterend', ` <button type="button" class="btn xs p" data-action="otApprove" data-arg="${esc(arg)}" title="اعتماد الإضافي">${icon('check')}اعتمد</button>`);
+    });
+    const f = S.ui.filter.att || {}; const date = f.date || todayISO(); const p = pendingOn(date);
+    let bar = v.querySelector('#otallbar');
+    if (!p.length) { if (bar) bar.remove(); return; }
+    const html = `<div class="banner warn" id="otallbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><span>${p.length} موظف عندهم إضافي مستني اعتمادك يوم ${fmtDate(date)} — ${fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0))} ساعة (مش هتتصرف قبل الاعتماد)</span><div class="grow"></div><button type="button" class="btn sm p" data-action="otApproveAll" data-arg="${date}">${icon('check')}اعتمد كل الإضافي</button></div>`;
+    if (bar) bar.outerHTML = html; else { const tb = v.querySelector('.toolbar'); if (tb) tb.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html); }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(decorate);
+
+  /* 3) end-of-day note to the owner + the factory manager (once per day per device) */
+  let _otNoteDay = '';
+  async function eodNote() {
+    if (!S.session || !writable() || !needsOk() || !canOtOk()) return; const d = todayISO(); if (_otNoteDay === d || new Date().getHours() < 17) return; _otNoteDay = d;
+    const p = pendingOn(d); if (!p.length) return; const id = `otpend_${d}`; if (byId('tasks', id)) return;
+    const hours = fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0)); const names = p.slice(0, 4).map(x => x.w.name).join('، ') + (p.length > 4 ? ` و${p.length - 4} غيرهم` : '');
+    try { await notifyRole('admin', `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${p.length} موظف · ${hours} ساعة: ${names}. مش هتتصرف قبل الاعتماد.`, { id, kind: 'notice', fields: { link: '/#/attendance' } }); await notifyRole('manager', `إضافي مستني اعتماد — ${fmtDate(d)}`, `${p.length} موظف · ${hours} ساعة: ${names}.`, { id: id + '_m', kind: 'notice', fields: { link: '/#/attendance' } }); } catch (e) { /* ignore */ }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(eodNote, 2500); });
+
+  /* 4) payroll: unapproved overtime this month */
+  if (typeof vPayroll === 'function') vPayroll = (base => function () {
+    const html = base.apply(this, arguments); if (!needsOk()) return html;
+    try {
+      const ym = (S.ui.filter.payroll && S.ui.filter.payroll.ym) || monthOf(todayISO()); let hours = 0; const people = new Set();
+      list('workers').filter(w => w.status !== 'inactive').forEach(w => { const rows = typeof attMonthRows === 'function' ? attMonthRows(w, ym) : {}; Object.keys(rows || {}).forEach(d => { const r = rows[d]; if (r && +r.ot > 0 && !r.otOk) { hours += +r.ot; people.add(w.id); } }); });
+      if (!hours) return html;
+      const warn = `<div class="banner warn" style="margin-bottom:12px">⚠ فيه ${fmtH(hours)} ساعة إضافية لـ ${people.size} موظف في ${fmtMonth(ym)} لسه ما اتعتمدتش — مش داخلة في المرتبات. ${canOtOk() ? '<a href="#/attendance">اعتمدها من الحضور</a>' : 'الاعتماد للمالك ومدير المصنع.'}</div>`;
+      return warn + html;
+    } catch (e) { return html; }
+  })(vPayroll);
+}
 </script>
 
 </body>
