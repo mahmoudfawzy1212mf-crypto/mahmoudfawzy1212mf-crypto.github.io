@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1100-9e971a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261004-1134-40d3f2";</script>
 
 <script>
 'use strict';
@@ -11102,9 +11102,9 @@ Store.update = async function (col, id, patch, opts = {}) {
    ملاحظة: المنع الفعلي للقطة الشاشة يحتاج تطبيقًا أصليًا (FLAG_SECURE) — الويب لا يستطيعه
    ===================================================================== */
 (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
-#nfwm{position:fixed;inset:0;pointer-events:none;z-index:9998;overflow:hidden;opacity:.07;user-select:none}
-#nfwm .wmrow{white-space:nowrap;font-weight:700;font-size:15px;letter-spacing:1px;line-height:64px;transform:rotate(-18deg);transform-origin:0 0;color:var(--ink)}
-:root[data-theme="dark"] #nfwm{opacity:.09}
+#nfwm{position:fixed;inset:0;pointer-events:none;z-index:9998;overflow:hidden;opacity:.06;user-select:none}
+#nfwm .wmrow{white-space:nowrap;font-weight:600;font-size:14px;letter-spacing:1px;line-height:110px;transform:rotate(-18deg);transform-origin:0 0;color:var(--ink)}
+:root[data-theme="dark"] #nfwm{opacity:.075}
 body.nfblur #root{filter:blur(14px);transition:filter .15s}
 #nfblurmsg{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bg) 70%,transparent);font-weight:700;font-size:18px}
 body.nfblur #nfblurmsg{display:flex}
@@ -11114,13 +11114,14 @@ body.nfnocopy input,body.nfnocopy textarea,body.nfnocopy [contenteditable]{-webk
 </style>`);
 const privacyCfg = () => Object.assign({ watermark: true, blur: true, nocopy: true }, (S.settings && S.settings.privacy) || {});
 const privacyExempt = () => !S.session || isAdmin() || (typeof isViewing === 'function' && isViewing());
-function wmText() { const s = S.session || {}; const w = s.workerId ? byId('workers', s.workerId) : null; const ph = (w && (w.phone || w.workPhone)) || ''; return `${s.name || ''} ${ph ? '· ' + ph : ''} · ${new Date().toLocaleString('ar-EG', { hour12: false }).replace(/[‏]/g, '')}`; }
+/* v6.37: name + date/time only (no phone number — Mahmoud), and a lighter grid: rows 110px apart, wide gaps */
+function wmText() { const s = S.session || {}; const d = new Date(); const pad = n => String(n).padStart(2, '0'); return `${s.name || ''} · ${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function wmRender() {
   let el = document.getElementById('nfwm'); const c = privacyCfg();
   if (!c.watermark || privacyExempt()) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'nfwm'; document.body.appendChild(el); }
   const t = wmText(); if (el.dataset.t === t) return; el.dataset.t = t;
-  const rows = Math.ceil(window.innerHeight / 64) + 4; let h = ''; for (let i = 0; i < rows; i++) h += `<div class="wmrow" style="margin-inline-start:${(i % 2) * 160 - 80}px">${(t + '       ').repeat(6)}</div>`; el.innerHTML = h;
+  const rows = Math.ceil(window.innerHeight / 110) + 4; const per = Math.max(2, Math.ceil(window.innerWidth / 520) + 1); let h = ''; for (let i = 0; i < rows; i++) h += `<div class="wmrow" style="margin-inline-start:${(i % 2) * 260 - 130}px">${(t + '\u00a0'.repeat(28)).repeat(per)}</div>`; el.innerHTML = h;
 }
 RENDER_HOOKS.push(wmRender); setInterval(wmRender, 60000); window.addEventListener('resize', wmRender);
 (() => {
@@ -11137,7 +11138,7 @@ RENDER_HOOKS.push(wmRender); setInterval(wmRender, 60000); window.addEventListen
   document.addEventListener('keyup', e => { if (privacyExempt()) return; if (e.key === 'PrintScreen') { try { navigator.clipboard.writeText('لقطات الشاشة غير مسموحة — سيستم Ninety Fabrication'); } catch (x) { /* ignore */ } toast('لقطة الشاشة مسجّلة باسمك — غير مسموحة', 'err'); logChange && logChange('privacy', S.session?.id || '', 'screenshot', ['PrintScreen'], { at: nowISO(), view: location.hash }); } });
 })();
 EXTRA_SETTINGS.privacy = { label: 'سرّية الشاشة', render: () => { const c = privacyCfg(); return `<form class="card" id="privform"><h3>سرّية الشاشة</h3><p class="small ink2" style="margin:6px 0 12px">تنطبق على كل المستخدمين ما عدا المالك. الويب والموبايل لا يستطيعان منع لقطة الشاشة فعليًا — لذلك تُطبع علامة مائية باسم الموظف ورقمه على كل شاشة، ويُعتَّم المحتوى عند مغادرة التطبيق، ويُمنع النسخ والطباعة.</p><div class="form">
-  <label class="check full"><input type="checkbox" name="watermark" ${c.watermark ? 'checked' : ''}> علامة مائية باسم المستخدم ورقمه والوقت على كل الشاشات</label>
+  <label class="check full"><input type="checkbox" name="watermark" ${c.watermark ? 'checked' : ''}> علامة مائية باسم المستخدم والوقت على كل الشاشات</label>
   <label class="check full"><input type="checkbox" name="blur" ${c.blur ? 'checked' : ''}> تعتيم المحتوى عند الخروج من التطبيق أو تبديل النافذة</label>
   <label class="check full"><input type="checkbox" name="nocopy" ${c.nocopy ? 'checked' : ''}> منع النسخ والطباعة وحفظ الصفحة وسحب الصور + تسجيل ضغطة Print Screen في سجل التغييرات</label></div>
   <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ</button></div></form>`; } };
