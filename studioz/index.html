@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-0615-a1aeb9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-0744-3ecbb3";</script>
 
 <script>
 'use strict';
@@ -33412,6 +33412,43 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     if (btns) h = /(<div class="end"><div class="row"[^>]*>)/.test(h) ? h.replace(/(<div class="end"><div class="row"[^>]*>)/, `$1${btns}`) : h + `<div class="row" style="gap:6px;margin-top:6px">${btns}</div>`;
     return h;
   })(taskItem);
+})();
+/* =====================================================================
+   v6.55 — one login screen for every Ninety system (Mahmoud, 5 Oct): Mohamed Sabek (studio only) typed his phone and
+   password on the factory login and got «wrong password». Now, when the login fails here, the same phone + password is
+   tried on the other Ninety system(s) (NF_CONFIG.peers); if it works there, the session is saved for that system (same
+   site, its own storage key) and the person is taken straight into it. Nothing changes for someone who belongs here.
+   ===================================================================== */
+(function () {
+  if (typeof authenticateSb !== 'function') return;
+  const peers = () => (typeof NF_PEERS === 'function' ? NF_PEERS() : []);
+  const isStudioPeer = p => /stud/i.test(String(p.name || '')) || /rekmppawmxerlqxqpqni/.test(String(p.url || ''));
+  const domainOf = p => isStudioPeer(p) ? 'ninetystudioz.com' : 'nf.local';
+  const urlOf = p => { const here = typeof STU_ON !== 'undefined' && STU_ON; if (isStudioPeer(p)) return here ? './' : 'studioz/'; return here ? '../' : './'; };
+  const nameOf = p => isStudioPeer(p) ? 'Ninety Studioz' : 'Ninety Fabrication';
+  let busy = false;
+  authenticateSb = (base => async function (identifier, password) {
+    const r = await base.apply(this, arguments);
+    if (r && r.ok) return r;
+    if (busy || typeof sbOn !== 'function' || !sbOn() || !window.supabase || !password || !sbLoginId(identifier) || navigator.onLine === false) return r;
+    busy = true;
+    try {
+      for (const p of peers()) {
+        if (p.url === (typeof nfConfig === 'function' ? nfConfig().supabaseUrl : '')) continue;
+        try {
+          const c = window.supabase.createClient(p.url, p.anon, { auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false } });
+          const { data, error } = await c.auth.signInWithPassword({ email: `${sbLoginId(identifier)}@${domainOf(p)}`, password });
+          if (!error && data && data.session) {
+            const msg = (typeof I18N !== 'undefined' && I18N.lang === 'en') ? `Your account is on ${nameOf(p)} — opening it…` : `حسابك على ${nameOf(p)} — بيفتحه دلوقتي…`;
+            try { toast(msg); } catch (e) { /* ignore */ }
+            setTimeout(() => { location.href = urlOf(p) + '#/dashboard'; }, 700);
+            return { ok: false, msg };
+          }
+        } catch (e) { /* try the next one */ }
+      }
+    } finally { busy = false; }
+    return r;
+  })(authenticateSb);
 })();
 </script>
 
