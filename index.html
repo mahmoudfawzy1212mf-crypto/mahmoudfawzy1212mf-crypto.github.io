@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1627-32a5f4";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-2055-wa660a";</script>
 
 <script>
 'use strict';
@@ -10440,7 +10440,7 @@ async function smsStatus() { if (!smsAvailable()) return { configured: false }; 
 /* ---------- the code modal (HR side) ---------- */
 function codeModal({ title, name, login, code, reset, phone }) {
   const text = smsCodeText(login, code, reset); const ph = normPhone(phone || login);
-  openModal({ title, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<div style="text-align:center">
+  openModal({ title, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: `<style>#smsstate svg{width:16px!important;height:16px!important;vertical-align:-3px;display:inline-block}</style><div style="text-align:center">
     <div class="muted small">${reset ? 'يكتبه صاحب الحساب في «نسيت كلمة السر» مع كلمة سره الجديدة' : 'يستخدمه الموظف من شاشة الدخول: «أول مرة؟ فعّل حسابك»'} — أو يضغط الرابط في الرسالة فيُملأ وحده (صالح 48 ساعة، يُستخدم مرة واحدة)</div>
     <div class="num" style="font-size:40px;font-weight:700;letter-spacing:8px;direction:ltr;margin:14px 0">${code}</div>
     <div class="tiny muted">يدخل بـ: <span class="ltr">${esc(login || '—')}</span></div>
@@ -10451,12 +10451,19 @@ function codeModal({ title, name, login, code, reset, phone }) {
       ${smsAvailable() && ph ? `<button type="button" class="btn sm p" data-action="smsResend">${icon('send')}إرسال SMS من السيستم</button>` : ''}
     </div>
     <textarea id="smstext" class="small" style="width:100%;margin-top:10px;min-height:96px;direction:rtl">${esc(text)}</textarea></div>` });
-  S._smsCtx = { to: ph, text };
+  S._smsCtx = { to: ph, text, code, reset: !!reset, link: activateLink(login, code, reset) };
   if (smsAvailable() && ph && smsCfg().auto !== false) ACTIONS.smsResend();
 }
 ACTIONS.smsCopy = async () => { const t = document.getElementById('smstext'); if (!t) return; try { await navigator.clipboard.writeText(t.value); toast('تم نسخ الرسالة'); } catch (e) { t.select(); document.execCommand('copy'); toast('تم النسخ'); } };
 ACTIONS.smsResend = async () => {
   const c = S._smsCtx; const box = document.getElementById('smsstate'); if (!c || !box) return;
+  /* v6.60: the code goes first to the employee's WhatsApp from the system number (Edge "wa", Cloud API template); SMS / manual buttons stay as fallback */
+  if (c.code && smsAvailable() && !c.waTried) {
+    c.waTried = true; box.innerHTML = `<span class="muted">جارٍ إرسال الكود واتساب إلى <span class="ltr">${esc(c.to)}</span>…</span>`;
+    let w = null; try { const r = await S.sb.functions.invoke('wa', { body: { action: 'send-code', to: c.to, code: c.code, link: c.link, reset: c.reset } }); w = r && r.data; } catch (e) { w = null; }
+    if (w && w.ok) { box.innerHTML = `<span style="color:var(--good-ink)">${icon('check')} اتبعت الكود على واتساب إلى <span class="ltr">${esc(c.to)}</span> من رقم السيستم</span>`; toast('تم إرسال الكود على واتساب'); return; }
+    c.waErr = (w && (w.error === 'bad_number' ? 'رقم الموبايل غير صالح' : w.error === 'no_wa' ? 'واتساب السيستم غير مضبوط' : (w.detail && w.detail.message) || w.error)) || 'تعذّر الاتصال';
+  }
   box.innerHTML = `<span class="muted">جارٍ إرسال الرسالة إلى <span class="ltr">${esc(c.to)}</span>…</span>`;
   const r = await smsSend(c.to, c.text);
   if (r && r.ok) { box.innerHTML = `<span class="good-ink" style="color:var(--good-ink)">${icon('check')} أُرسلت الرسالة إلى <span class="ltr">${esc(c.to)}</span> (${esc(r.provider || 'SMS')})</span>`; toast('تم إرسال الكود في رسالة'); return; }
