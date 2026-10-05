@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1359-e84a5d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1416-2e68a8";</script>
 
 <script>
 'use strict';
@@ -32119,7 +32119,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function homeHTML(oldDash) {
     const h = new Date().getHours(); const greet = h < 12 ? L('صباح الخير', 'Good morning') : L('مساء الخير', 'Good evening'); const first = String((S.session && S.session.name) || '').trim().split(/\s+/)[0];
-    return `<div class="stuhome">
+    /* v6.60: the entrance animation plays once per app open — re-renders (live data, door card) no longer fade the page again */
+    const _anim = !window.__stuHomeAnimated; window.__stuHomeAnimated = true;
+    return `<div class="stuhome${_anim ? ' anim' : ''}">
       <div class="shgreet"><div><small>${esc(new Date().toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { weekday: 'long', day: 'numeric', month: 'long' }))}</small><h1>${greet}، <b class="notr">${esc(first)}</b></h1></div>${typeof stuAvatar === 'function' ? stuAvatar(me(), 44) : ''}</div>
       ${heroHTML()}
       <div class="shsec"><h3>${L('يومك النهارده', 'Your day')}</h3></div>${todayHTML()}
@@ -32168,7 +32170,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   Object.assign(VIEW_TITLES, { dashboard: 'الرئيسية' }); { const n = NAV.find(x => x.id === 'dashboard'); if (n) { n.label = 'الرئيسية'; n.short = 'الرئيسية'; } }
   const css = document.createElement('style'); css.textContent = `
 .stuhome{display:flex;flex-direction:column;gap:16px}
-.stuhome>*{animation:shin .5s ease both}.stuhome>*:nth-child(2){animation-delay:.05s}.stuhome>*:nth-child(3){animation-delay:.12s}.stuhome>*:nth-child(4){animation-delay:.18s}.stuhome>*:nth-child(5){animation-delay:.26s}
+.stuhome.anim>*{animation:shin .5s ease both}.stuhome.anim>*:nth-child(2){animation-delay:.05s}.stuhome.anim>*:nth-child(3){animation-delay:.12s}.stuhome.anim>*:nth-child(4){animation-delay:.18s}.stuhome.anim>*:nth-child(5){animation-delay:.26s}
 @keyframes shin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .shgreet{display:flex;align-items:center;justify-content:space-between;gap:12px}.shgreet small{color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}.shgreet h1{margin:2px 0 0;font-weight:300;font-size:26px}.shgreet h1 b{font-weight:600}
 .shhero{position:relative;height:min(62vh,520px);min-height:300px;border-radius:22px;overflow:hidden;background:#0b0d10;color:#fff;box-shadow:var(--shadow)}
@@ -33160,7 +33162,10 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     error: ['حصل خطأ — جرب تاني', 'Something went wrong — try again']
   };
   const why = k => { const m = REASON[k] || REASON.error; return L(m[0], m[1]); };
-  async function loadState(force) { if (!sbOn() || !S.session || (DOOR.state && !force)) return DOOR.state; try { DOOR.state = await call({ action: 'state' }); } catch (e) { DOOR.state = { ok: false }; } return DOOR.state; }
+  /* v6.60: the last answer is kept on the device, so the door card is in the very first render (no late jump of the home page) */
+  const cacheKey = () => 'nf.door.state.' + ((S.session && (S.session.workerId || S.session.id)) || '');
+  try { const c = JSON.parse(localStorage.getItem('nf.door.state.last') || 'null'); if (c && c.key) DOOR.cached = c; } catch (e) { /* ignore */ }
+  async function loadState(force) { if (!sbOn() || !S.session || (DOOR.state && !force)) return DOOR.state; const before = JSON.stringify(DOOR.state && { a: DOOR.state.allowed }); try { DOOR.state = await call({ action: 'state' }); } catch (e) { DOOR.state = { ok: false }; } try { localStorage.setItem('nf.door.state.last', JSON.stringify({ key: cacheKey(), allowed: !!(DOOR.state && DOOR.state.allowed) })); } catch (e) { /* ignore */ } DOOR._changed = before !== JSON.stringify({ a: DOOR.state.allowed }); return DOOR.state; }
   const getPos = () => new Promise(res => { if (!navigator.geolocation) return res(null); navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy || 0) }), () => res(null), { enableHighAccuracy: true, timeout: 7000, maximumAge: 20000 }); });
   async function openDoor(via) {
     if (DOOR.busy || !sbOn()) return; DOOR.busy = true; DOOR.last = { phase: 'work', via }; rerender();
@@ -33198,8 +33203,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   /* ---------- dashboard button ---------- */
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
     if (!S.session || !S.route || S.route.view !== 'dashboard' || !sbOn()) return; const v = document.getElementById('view'); if (!v || v.querySelector('#doorcard')) return;
-    if (!DOOR.state) { loadState().then(s => { if (s && s.allowed) rerender(); }); return; }
-    if (!DOOR.state.allowed) return;
+    if (!DOOR.state) {
+      const c = DOOR.cached && DOOR.cached.key === cacheKey() ? DOOR.cached : null;
+      if (!DOOR._p) DOOR._p = loadState().then(s => { DOOR._p = null; if (s && !!s.allowed !== !!(c && c.allowed)) rerender(); });
+      if (!(c && c.allowed)) return;
+    } else if (!DOOR.state.allowed) return;
     const l = DOOR.last; const msg = !l ? '' : l.phase === 'work' ? L('بيفتح…', 'Opening…') : l.phase === 'ok' ? L('الباب اتفتح ✓', 'Door open ✓') : why(l.reason);
     v.insertAdjacentHTML('afterbegin', `<div class="card" id="doorcard"><div class="grow"><b>${L('باب المكتب', 'Office door')}</b>${msg ? `<div class="small ${l && l.phase === 'no' ? 'doorno' : 'muted'}">${esc(msg)}</div>` : ''}</div><button type="button" class="btn p" data-action="doorOpen" ${DOOR.busy ? 'disabled' : ''}>${icon('door')}${L('افتح الباب', 'Open the door')}</button></div>`);
   });
@@ -33509,6 +33517,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const deptsOf = w => [w.deptId].concat(Array.isArray(w.deptIds) ? w.deptIds : []).filter(Boolean);
   const headsOf = d => list('workers').filter(w => active(w) && w.role === 'head' && deptsOf(w).includes(d));
   const today = () => todayISO();
+  /* the two-step overtime approval started on 4 Oct 2026 (v6.46): older unapproved overtime is not counted as the manager's delay */
+  const OT_SINCE = '2026-10-04';
   const managers = () => list('workers').filter(w => active(w) && w.role === 'manager');
   /* one late item → { title, hours, href } ; grouped per responsible person (key = worker id, or dept:<id> when the dept has no lead) */
   function groups() {
@@ -33539,7 +33549,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     // 3) overtime of past days still waiting for the factory manager (step 1 of the overtime approval)
     if (typeof attendanceFor === 'function' && managers().length) {
       for (let i = 1; i <= 10; i++) {
-        const d = addDays(today(), -i); let rows = {}; try { rows = attendanceFor(d) || {}; } catch (e) { rows = {}; }
+        const d = addDays(today(), -i); if (d < OT_SINCE) break; let rows = {}; try { rows = attendanceFor(d) || {}; } catch (e) { rows = {}; }
         const n = Object.values(rows).filter(r => r && +r.ot > 0 && !r.otOk && !r.otMgrOk).length;
         if (n) toMgr({ title: (en() ? `Overtime ${fmtDate(d)} — ${n} people waiting` : `إضافي ${fmtDate(d)} — ${n} موظف مستني الاعتماد`), hours: dayHours(d), href: 'attendance' });
       }
@@ -33600,13 +33610,14 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   document.head.insertAdjacentHTML('beforeend', `<style>
     #lateheads{margin:14px 0}
     .lhgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
-    .lhcard{border:1px solid var(--line,#e3e6e8);border-inline-start:4px solid var(--acc,#3b82f6);border-radius:12px;padding:12px;cursor:pointer;background:var(--card,#fff)}
+    .lhcard{border:1px solid var(--line);border-inline-start:4px solid #3b82f6;border-radius:12px;padding:12px;cursor:pointer;background:var(--bg);color:var(--ink)}
+    .lhcard .muted,.lhcard .lhnum .small{color:var(--muted)}.lhcard:hover{background:var(--surface-2)}
     .lhcard.warn{border-inline-start-color:#f59e0b}.lhcard.bad{border-inline-start-color:#dc2626}
     .lhtop{display:flex;align-items:center;gap:10px}
     .lhnum{display:flex;flex-direction:column;align-items:center;line-height:1}.lhnum b{font-size:24px}
     .lhcard.bad .lhnum b{color:#dc2626}.lhcard.warn .lhnum b{color:#d97706}
     .lhmax{margin:8px 0 6px}
-    .lhrow{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px dashed var(--line,#e3e6e8);font-size:13px}
+    .lhrow{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px dashed var(--line-2);font-size:13px;color:var(--ink-2)}
     .lhrow .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   </style>`);
 })();
