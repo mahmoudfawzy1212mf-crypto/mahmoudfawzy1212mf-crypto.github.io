@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1416-2e68a8";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1606-9b58f9";</script>
 
 <script>
 'use strict';
@@ -33551,7 +33551,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       for (let i = 1; i <= 10; i++) {
         const d = addDays(today(), -i); if (d < OT_SINCE) break; let rows = {}; try { rows = attendanceFor(d) || {}; } catch (e) { rows = {}; }
         const n = Object.values(rows).filter(r => r && +r.ot > 0 && !r.otOk && !r.otMgrOk).length;
-        if (n) toMgr({ title: (en() ? `Overtime ${fmtDate(d)} — ${n} people waiting` : `إضافي ${fmtDate(d)} — ${n} موظف مستني الاعتماد`), hours: dayHours(d), href: 'attendance' });
+        if (n) toMgr({ title: (en() ? `Overtime ${fmtDate(d)} — ${n} people waiting` : `إضافي ${fmtDate(d)} — ${n} موظف مستني الاعتماد`), hours: dayHours(d), href: 'attendance', act: 'attOtOnly', arg: d + ':mgr' });
       }
     }
     // 4) late work orders: the department of the stage in progress; an order not routed to any department → the manager
@@ -33587,7 +33587,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       <div class="lhtop">${av}<div class="grow"><b>${esc(name)}</b><div class="small muted">${esc(x.dept ? deptName(x.dept) : '')}</div></div>
         <div class="lhnum"><b>${x.items.length}</b><span class="small">${L('متأخرة', 'late')}</span></div></div>
       <div class="lhmax small">${L('أقدم تأخير', 'Oldest')}: <b>${ageTxt(x.max)}</b></div>
-      <div class="lhlist">${x.items.slice(0, 3).map(t => `<div class="lhrow" data-action="go" data-arg="${esc(t.href)}"><span class="grow">${esc(t.title)}</span><span class="badge ${t.hours >= 7 * 24 ? 'bad' : 'warn'}">${ageShort(t.hours)}</span></div>`).join('')}
+      <div class="lhlist">${x.items.slice(0, 3).map(t => `<div class="lhrow" data-action="${t.act || 'go'}" data-arg="${esc(t.act ? t.arg : t.href)}"><span class="grow">${esc(t.title)}</span><span class="badge ${t.hours >= 7 * 24 ? 'bad' : 'warn'}">${ageShort(t.hours)}</span></div>`).join('')}
         ${x.items.length > 3 ? `<div class="small muted">+${x.items.length - 3} ${L('كمان', 'more')}</div>` : ''}</div></div>`;
   }
   RENDER_HOOKS.push(() => {
@@ -33620,6 +33620,54 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     .lhrow{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px dashed var(--line-2);font-size:13px;color:var(--ink-2)}
     .lhrow .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   </style>`);
+})();
+/* =====================================================================
+   v6.61 — attendance «pending overtime only» filter (Mahmoud, 5 Oct: «when I tap the 11 waiting for overtime approval,
+   bring me those 11 only, not everyone»).
+   · Tapping an overtime row in «late work by team lead» opens the attendance page on that day showing only the people
+     whose overtime waits at that step (mgr = with the factory manager).
+   · The approve-all bar on the attendance page gets a «show them only» button.
+   · A chip above the table says the filter is on, with «show everyone» to clear it. Leaving the page clears it.
+   Both systems (the overtime bar exists in the factory only).
+   ===================================================================== */
+(function () {
+  if (typeof visibleWorkers !== 'function' || typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const pend = (r, st) => r && +r.ot > 0 && !r.otOk && (st !== 'mgr' || !r.otMgrOk) && (st !== 'hr' || !!r.otMgrOk);
+  visibleWorkers = (base => function (deptFilter) {
+    const arr = base.apply(this, arguments);
+    const f = S.ui && S.ui.filter && S.ui.filter.att;
+    if (!f || !f.otOnly || !S.route || S.route.view !== 'attendance') return arr;
+    const att = attendanceFor(f.date || todayISO()) || {};
+    return arr.filter(w => pend(att[w.id], f.otOnly));
+  })(visibleWorkers);
+  ACTIONS.attOtOnly = arg => {
+    const [date, st] = String(arg || '').split(':');
+    const f = S.ui.filter.att || (S.ui.filter.att = { date: todayISO(), dept: '' });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date || '')) f.date = date;
+    if (role() !== 'head') f.dept = '';
+    f.otOnly = st || 'all';
+    if (S.route && S.route.view === 'attendance') render(false); else location.hash = '#/attendance';
+  };
+  ACTIONS.attOtAll = () => { const f = S.ui.filter.att; if (f) delete f.otOnly; render(false); };
+  RENDER_HOOKS.push(() => {
+    const f = S.ui && S.ui.filter && S.ui.filter.att;
+    if (!S.route || S.route.view !== 'attendance') { if (f && f.otOnly) delete f.otOnly; return; }
+    const v = document.getElementById('view'); if (!v) return;
+    const old = v.querySelector('#otonlychip'); if (old) old.remove();
+    const bar = v.querySelector('#otallbar');
+    if (bar && !bar.querySelector('[data-action="attOtOnly"]') && !(f && f.otOnly)) {
+      const btn = bar.querySelector('[data-action="otApproveAll"]'); const st = role() === 'manager' ? 'mgr' : role() === 'hr' ? 'hr' : 'all';
+      if (btn) btn.insertAdjacentHTML('beforebegin', `<button type="button" class="btn sm" data-action="attOtOnly" data-arg="${esc((f && f.date) || todayISO())}:${st}">${L('اعرضهم بس', 'Show them only')}</button>`);
+    }
+    if (!f || !f.otOnly) return;
+    const n = visibleWorkers(f.dept).filter(w => w.status !== 'inactive').length;
+    const txt = f.otOnly === 'mgr' ? L('إضافي مستني مدير المصنع', 'Overtime waiting for the factory manager') : f.otOnly === 'hr' ? L('إضافي مستني مدير الحسابات', 'Overtime waiting for the accounts manager') : L('إضافي مستني الاعتماد', 'Overtime waiting for approval');
+    const html = `<div class="banner" id="otonlychip" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><span>${icon('check')} ${L('معروض بس', 'Showing only')}: <b>${txt}</b> — ${n} ${L('موظف', 'people')}</span><div class="grow"></div><button type="button" class="btn sm" data-action="attOtAll">${L('اعرض الكل', 'Show everyone')}</button></div>`;
+    const anchor = v.querySelector('#otallbar') || v.querySelector('.toolbar');
+    if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
+  });
 })();
 </script>
 
