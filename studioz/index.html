@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1341-95e3d9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1359-e84a5d";</script>
 
 <script>
 'use strict';
@@ -33491,9 +33491,12 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
 })();
 /* =====================================================================
    v6.58 — «Late work by team lead» on the dashboard (Mahmoud, 5 Oct; PIN verified). Both systems.
-   One card per responsible person who has overdue tasks: every team lead (role head) for the tasks of his department
-   (tasks on the department, on him, or on anyone in his team) and the manager for tasks assigned to him.
-   Overdue = open/doing task (kind task) whose due date is before today. No amounts anywhere.
+   One card per responsible person who has late work: every team lead (role head) for his department, and the manager.
+   Late work (v6.58b, Mahmoud: «the factory manager has nothing late — approvals?»): tasks past their due date (on the
+   department, on the lead, or on anyone in his team), requests waiting at the lead / manager step past the grace period
+   (same rule as the escalation), overtime of past days not yet approved by the manager (step 1), and late work orders
+   (the department of the stage in progress; not routed at all → the manager). Unassigned late tasks → the manager.
+   No amounts anywhere.
    Who sees what: owner → all cards · manager / vice → all cards of this system (his own included) · team lead → his own card
    only (on his home pages: boards / me / tasks, since leads have no dashboard) · everyone else → nothing. A card disappears as soon as its overdue list is empty; the whole block hides when no one
    is late. Rebuilt on every render, so it follows live data.
@@ -33505,25 +33508,55 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const active = w => w && !['inactive', 'stopped'].includes(w.status);
   const deptsOf = w => [w.deptId].concat(Array.isArray(w.deptIds) ? w.deptIds : []).filter(Boolean);
   const headsOf = d => list('workers').filter(w => active(w) && w.role === 'head' && deptsOf(w).includes(d));
-  const daysLate = t => Math.max(1, daysBetween(t.dueDate, todayISO()));
-  function lateTasks() {
-    const today = todayISO();
-    return list('tasks').filter(t => (t.kind || 'task') === 'task' && ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today);
-  }
-  /* key → { who (worker), dept, tasks[] } */
+  const today = () => todayISO();
+  const managers = () => list('workers').filter(w => active(w) && w.role === 'manager');
+  /* one late item → { title, hours, href } ; grouped per responsible person (key = worker id, or dept:<id> when the dept has no lead) */
   function groups() {
-    const g = new Map();
-    const add = (key, who, dept, t) => { if (!g.has(key)) g.set(key, { key, who, dept, tasks: [] }); g.get(key).tasks.push(t); };
-    lateTasks().forEach(t => {
+    const g = new Map(); const now = Date.now();
+    const add = (key, who, dept, it) => { if (!g.has(key)) g.set(key, { key, who, dept, items: [] }); const x = g.get(key); if (!x.dept && dept) x.dept = dept; x.items.push(it); };
+    const toDept = (d, it) => { const hs = d ? headsOf(d) : []; if (hs.length) hs.forEach(h => add(h.id, h, d, it)); else if (d) add('dept:' + d, null, d, it); else toMgr(it); };
+    const toMgr = it => managers().forEach(m => add(m.id, m, m.deptId, it));
+    const dayHours = d => Math.max(24, daysBetween(d, today()) * 24);
+    // 1) tasks past their due date
+    list('tasks').filter(t => (t.kind || 'task') === 'task' && ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today()).forEach(t => {
+      const it = { title: t.title || '', hours: dayHours(t.dueDate), href: 'tasks/' + t.id };
       const a = t.assigneeId ? byId('workers', t.assigneeId) : null;
-      if (a && active(a) && (a.role === 'head' || a.role === 'manager' || a.role === 'vice')) { add(a.id, a, a.deptId || t.deptId, t); return; }
-      const d = t.deptId || (a && a.deptId) || '';
-      const hs = d ? headsOf(d) : [];
-      if (hs.length) hs.forEach(h => add(h.id, h, d, t));
-      else if (d) add('dept:' + d, null, d, t);
+      if (a && active(a) && ['head', 'manager', 'vice'].includes(a.role)) add(a.id, a, a.deptId || t.deptId, it);
+      else toDept(t.deptId || (a && a.deptId) || '', Object.assign(it, { title: (t.deptId || a) ? it.title : L('غير موزّعة: ', 'Unassigned: ') + it.title }));
     });
-    return Array.from(g.values()).map(x => { x.tasks.sort((p, q) => String(p.dueDate).localeCompare(String(q.dueDate))); x.max = daysLate(x.tasks[0]); return x; })
-      .sort((p, q) => q.max - p.max || q.tasks.length - p.tasks.length);
+    // 2) requests sitting with a lead / the manager past the grace period (same rule as the escalation)
+    if (typeof reqStage === 'function') {
+      const H = typeof escalateHours === 'function' ? escalateHours() : 24;
+      list('requests').filter(r => r.status === 'pending').forEach(r => {
+        let st; try { st = reqStage(r); } catch (e) { return; }
+        const steps = st.escalated.map(e => e.from); if (st.hours >= H) steps.push(st.role);
+        const w = r.workerId ? byId('workers', r.workerId) : null;
+        const hrs = Math.floor((now - new Date(r.createdAt || r.stepAt || nowISO()).getTime()) / 36e5);
+        const it = { title: L('طلب ', 'Request: ') + ((typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type) + (w ? ' — ' + w.name : ''), hours: hrs, href: 'requests' };
+        Array.from(new Set(steps)).forEach(step => { if (step === 'head') toDept(r.deptId || (w && w.deptId) || '', Object.assign({}, it)); else if (step === 'manager') toMgr(Object.assign({}, it)); });
+      });
+    }
+    // 3) overtime of past days still waiting for the factory manager (step 1 of the overtime approval)
+    if (typeof attendanceFor === 'function' && managers().length) {
+      for (let i = 1; i <= 10; i++) {
+        const d = addDays(today(), -i); let rows = {}; try { rows = attendanceFor(d) || {}; } catch (e) { rows = {}; }
+        const n = Object.values(rows).filter(r => r && +r.ot > 0 && !r.otOk && !r.otMgrOk).length;
+        if (n) toMgr({ title: (en() ? `Overtime ${fmtDate(d)} — ${n} people waiting` : `إضافي ${fmtDate(d)} — ${n} موظف مستني الاعتماد`), hours: dayHours(d), href: 'attendance' });
+      }
+    }
+    // 4) late work orders: the department of the stage in progress; an order not routed to any department → the manager
+    if (typeof isLate === 'function') {
+      list('orders').filter(o => { try { return isLate(o); } catch (e) { return false; } }).forEach(o => {
+        const it = { title: (o.code || '') + ' — ' + (o.title || ''), hours: dayHours(o.dueDate), href: 'orders/' + o.id };
+        let sts = []; try { sts = typeof orderStages === 'function' ? orderStages(o) : Object.entries(o.stages || {}).map(([deptId, v]) => Object.assign({ deptId }, v)); } catch (e) { sts = []; }
+        const open = sts.filter(x => x && x.deptId && !['done', 'skipped'].includes(x.status));
+        if (!sts.length) { toMgr(Object.assign(it, { title: L('أمر متأخر ومتوزّعش على أقسام: ', 'Late order, not routed: ') + it.title })); return; }
+        const act = open.filter(x => x.status === 'active'); const now2 = act.length ? act : open.slice(0, 1);
+        now2.forEach(x => toDept(x.deptId, Object.assign({}, it)));
+      });
+    }
+    return Array.from(g.values()).map(x => { x.items.sort((p, q) => q.hours - p.hours); x.max = x.items[0].hours; return x; })
+      .sort((p, q) => q.max - p.max || q.items.length - p.items.length);
   }
   function visibleGroups() {
     if (!S.session) return [];
@@ -33534,16 +33567,18 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     return all.filter(x => me && x.key === me);
   }
   const dayTxt = n => (en() ? `${n} day${n === 1 ? '' : 's'} late` : n === 1 ? 'متأخر يوم' : n === 2 ? 'متأخر يومين' : n <= 10 ? `متأخر ${n} أيام` : `متأخر ${n} يوم`);
+  const ageTxt = h => (h < 24 ? (en() ? `${h} h late` : `متأخر ${h} ساعة`) : dayTxt(Math.floor(h / 24)));
+  const ageShort = h => (h < 24 ? h + L('س', 'h') : Math.floor(h / 24) + L('ي', 'd'));
   function cardHTML(x) {
     const name = x.who ? x.who.name : L('بدون رئيس قسم', 'No team lead');
     const av = x.who && typeof avatarHTML === 'function' ? avatarHTML(x.who, 40) : `<div class="avatar" style="width:40px;height:40px">!</div>`;
-    const sev = x.max >= 7 ? 'bad' : x.max >= 3 ? 'warn' : 'acc';
+    const sev = x.max >= 7 * 24 ? 'bad' : x.max >= 3 * 24 ? 'warn' : 'acc';
     return `<div class="lhcard ${sev}" data-action="lateHeadOpen" data-arg="${esc(x.dept || '')}">
       <div class="lhtop">${av}<div class="grow"><b>${esc(name)}</b><div class="small muted">${esc(x.dept ? deptName(x.dept) : '')}</div></div>
-        <div class="lhnum"><b>${x.tasks.length}</b><span class="small">${L('متأخرة', 'late')}</span></div></div>
-      <div class="lhmax small">${L('أقدم تأخير', 'Oldest')}: <b>${dayTxt(x.max)}</b></div>
-      <div class="lhlist">${x.tasks.slice(0, 3).map(t => `<div class="lhrow" data-action="go" data-arg="tasks/${esc(t.id)}"><span class="grow">${esc(t.title || '')}</span><span class="badge ${daysLate(t) >= 7 ? 'bad' : 'warn'}">${daysLate(t)}${L('ي', 'd')}</span></div>`).join('')}
-        ${x.tasks.length > 3 ? `<div class="small muted">+${x.tasks.length - 3} ${L('كمان', 'more')}</div>` : ''}</div></div>`;
+        <div class="lhnum"><b>${x.items.length}</b><span class="small">${L('متأخرة', 'late')}</span></div></div>
+      <div class="lhmax small">${L('أقدم تأخير', 'Oldest')}: <b>${ageTxt(x.max)}</b></div>
+      <div class="lhlist">${x.items.slice(0, 3).map(t => `<div class="lhrow" data-action="go" data-arg="${esc(t.href)}"><span class="grow">${esc(t.title)}</span><span class="badge ${t.hours >= 7 * 24 ? 'bad' : 'warn'}">${ageShort(t.hours)}</span></div>`).join('')}
+        ${x.items.length > 3 ? `<div class="small muted">+${x.items.length - 3} ${L('كمان', 'more')}</div>` : ''}</div></div>`;
   }
   RENDER_HOOKS.push(() => {
     const v = document.getElementById('view'); if (!v) return;
@@ -33553,7 +33588,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     /* leads have no dashboard (factory: «لوحات الأقسام»): their card shows on their home pages instead */
     if (boss ? S.route.view !== 'dashboard' : !['dashboard', 'boards', 'me', 'tasks'].includes(S.route.view) || S.route.id) return;
     const gs = visibleGroups(); if (!gs.length) return;
-    const html = `<div class="card" id="lateheads"><div class="cardhead"><h3>${L('متأخرات رؤساء الأقسام', 'Late work by team lead')}</h3><span class="muted small">${gs.reduce((s, x) => s + x.tasks.length, 0)} ${L('مهمة متأخرة', 'late tasks')}</span></div><div class="lhgrid">${gs.map(cardHTML).join('')}</div></div>`;
+    const html = `<div class="card" id="lateheads"><div class="cardhead"><h3>${L('متأخرات رؤساء الأقسام', 'Late work by team lead')}</h3><span class="muted small">${gs.reduce((s, x) => s + x.items.length, 0)} ${L('حاجة متأخرة', 'late items')}</span></div><div class="lhgrid">${gs.map(cardHTML).join('')}</div></div>`;
     const anchor = v.querySelector('.kpis');
     if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
   });
