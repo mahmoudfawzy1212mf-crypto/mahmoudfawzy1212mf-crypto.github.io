@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261004-1828-dabad1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-0249-879b6b";</script>
 
 <script>
 'use strict';
@@ -32809,79 +32809,131 @@ if (STU_ON) {
   }, true);
 })();
 /* =====================================================================
-   Ninety Fabrication v6.46 — overtime approval (PIN approved 4 Oct, owner said ok on the before/after):
-   · who approves: the owner + the factory manager only. HR and the department head still enter the hours
-     (and meal / travel), but the «approved assignment» box is theirs to see, not to tick — a save from them never
-     changes an existing approval.
-   · one tap approve on the awaiting-approval badge (phone + desktop), an approve-all button above the table.
-   · end of day (after 17:00) the owner + the factory manager get a note with the hours still waiting.
-   · payroll page: a warning on top when the month still has unapproved overtime (it is not paid until approved).
+   Ninety Fabrication v6.52 — overtime approval in two steps (PIN approved 5 Oct; v6.46 had owner + factory manager):
+   · step 1: the factory manager approves (otMgrOk) · step 2: HR (Saeed) approves (otOk) — only then it counts in payroll.
+     The owner can still approve at any step (it completes both) but is not asked to.
+   · HR and the department head still enter the hours; the «approved» box in the day form is no longer ticked by hand —
+     approvals are the buttons, so nobody can skip a step.
+   · each pending overtime shows where it waits (with the factory manager / with Saeed) and the button for whoever's turn it is;
+     an approve-all bar above the table for the current step.
+   · the owner gets an information-only note after 17:00 (hours recorded today, where they stand) — nothing to approve —
+     and a delay note if a step sat more than a day.
+   · payroll page: warning while the month still has unapproved overtime.
    Factory only.
    ===================================================================== */
 if (typeof STU_ON === 'undefined' || !STU_ON) {
-  const canOtOk = () => isAdmin() || role() === 'manager';
+  const isMgr = () => role() === 'manager';
+  const isHr = () => role() === 'hr';
+  const canOtAny = () => isAdmin() || isMgr() || isHr();
   const needsOk = () => !(S.settings.policy && S.settings.policy.otNeedsApproval === false);
-  const pendingOn = date => { const att = attendanceFor(date); return list('workers').filter(w => w.status !== 'inactive').map(w => ({ w, r: att[w.id] || {} })).filter(x => +x.r.ot > 0 && !x.r.otOk); };
+  const stageOf = r => !r || !(+r.ot > 0) ? null : r.otOk ? 'ok' : r.otMgrOk ? 'hr' : 'mgr';
+  const myTurn = st => (st === 'mgr' || st === 'hr') && (isAdmin() || (st === 'mgr' && isMgr()) || (st === 'hr' && isHr()));
+  const STAGE_TXT = { mgr: 'عند مدير المصنع', hr: 'عند مدير الحسابات', ok: 'معتمد' };
+  const rowsOn = date => { const att = attendanceFor(date) || {}; return list('workers').filter(w => w.status !== 'inactive').map(w => ({ w, r: att[w.id] || {} })).filter(x => +x.r.ot > 0); };
+  const pendingOn = (date, st) => rowsOn(date).filter(x => st ? stageOf(x.r) === st : !x.r.otOk);
   const fmtH = h => (Math.round(h * 100) / 100).toString();
+  const hrsOf = arr => fmtH(arr.reduce((a, x) => a + (+x.r.ot || 0), 0));
 
-  /* 1) the approval flag is the owner's / factory manager's — anyone else saving a day keeps whatever it was */
+  /* 1) a day save never changes an approval step it is not allowed to make */
   if (typeof setAtt === 'function') setAtt = (base => async function (date, w, patch) {
-    if (patch && typeof patch === 'object' && !canOtOk() && w) { const cur = (attendanceFor(date) || {})[w.id] || {}; if (!!patch.otOk !== !!cur.otOk) patch = Object.assign({}, patch, { otOk: !!cur.otOk }); }
+    if (patch && typeof patch === 'object' && w && !isAdmin()) {
+      const cur = (attendanceFor(date) || {})[w.id] || {}; const p = Object.assign({}, patch);
+      if (!!p.otMgrOk !== !!cur.otMgrOk && !isMgr()) { p.otMgrOk = !!cur.otMgrOk; p.otMgrBy = cur.otMgrBy || null; p.otMgrAt = cur.otMgrAt || null; }
+      if (!!p.otOk !== !!cur.otOk && !(isHr() && (cur.otMgrOk || p.otMgrOk))) { p.otOk = !!cur.otOk; p.otOkBy = cur.otOkBy || null; p.otOkAt = cur.otOkAt || null; }
+      patch = p;
+    }
     return base.call(this, date, w, patch);
   })(setAtt);
   if (typeof ACTIONS.attFlags === 'function') ACTIONS.attFlags = (base => function (arg) {
     const r = base.apply(this, arguments);
-    if (!canOtOk()) setTimeout(() => { const c = document.getElementById('f-otOk'); if (!c) return; c.disabled = true; const lab = c.closest('label'); if (lab) { lab.style.opacity = '.6'; lab.insertAdjacentHTML('afterend', '<div class="tiny muted full">اعتماد الإضافي للمالك ومدير المصنع بس — سجّل الساعات وهتوصلهم للاعتماد.</div>'); } }, 0);
+    if (!isAdmin()) setTimeout(() => { const c = document.getElementById('f-otOk'); if (!c) return; c.disabled = true; const lab = c.closest('label'); if (lab) { lab.style.opacity = '.6'; lab.insertAdjacentHTML('afterend', '<div class="tiny muted full">الاعتماد بزرار «اعتمد» في جدول الحضور: مدير المصنع الأول، وبعده مدير الحسابات.</div>'); } }, 0);
     return r;
   })(ACTIONS.attFlags);
 
-  /* 2) one-tap approve */
+  /* 2) approve one step */
   async function approve(date, wid, quiet) {
-    if (!canOtOk()) { toast('اعتماد الإضافي للمالك ومدير المصنع بس', 'err'); return false; }
-    const w = byId('workers', wid); if (!w) return false; const r = (attendanceFor(date) || {})[wid] || {}; if (!(+r.ot > 0) || r.otOk) return false;
-    const row = typeof computeAttRow === 'function' ? computeAttRow(Object.assign({}, r, { otOk: true, otOkBy: S.session && S.session.name || '', otOkAt: nowISO() }), w) : Object.assign({}, r, { otOk: true });
-    await setAtt(date, w, row); if (!quiet) toast(`اتعتمد إضافي ${w.name} — ${fmtH(+r.ot)} ساعة`); return true;
+    const w = byId('workers', wid); if (!w) return false; const r = (attendanceFor(date) || {})[wid] || {}; const st = stageOf(r);
+    if (!st || st === 'ok') return false;
+    if (!myTurn(st)) { if (!quiet) toast(st === 'mgr' ? 'الإضافي ده لسه عند مدير المصنع' : 'الإضافي ده عند مدير الحسابات', 'err'); return false; }
+    const me = (S.session && S.session.name) || ''; const now = nowISO(); const patch = {};
+    if (isAdmin()) Object.assign(patch, r.otMgrOk ? {} : { otMgrOk: true, otMgrBy: me, otMgrAt: now }, { otOk: true, otOkBy: me, otOkAt: now });
+    else if (st === 'mgr') Object.assign(patch, { otMgrOk: true, otMgrBy: me, otMgrAt: now });
+    else Object.assign(patch, { otOk: true, otOkBy: me, otOkAt: now });
+    const merged = Object.assign({}, r, patch); const row = typeof computeAttRow === 'function' ? Object.assign(computeAttRow(merged, w), patch) : merged;
+    await setAtt(date, w, row);
+    if (!quiet) toast(patch.otOk ? `اتعتمد إضافي ${w.name} — ${fmtH(+r.ot)} ساعة` : `اتعتمد من مدير المصنع — راح لمدير الحسابات`);
+    return true;
   }
   ACTIONS.otApprove = async arg => { const [date, wid] = String(arg || '').split(':'); if (await approve(date, wid)) render(false); };
   ACTIONS.otApproveAll = async date => {
-    if (!canOtOk()) return; const p = pendingOn(date); if (!p.length) { toast('مفيش إضافي مستني اعتماد'); return; }
-    if (!(await confirmDlg(`اعتماد الإضافي لـ ${p.length} موظف (${fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0))} ساعة) ليوم ${fmtDate(date)}؟`, 'اعتمد الكل'))) return;
+    const p = rowsOn(date).filter(x => myTurn(stageOf(x.r))); if (!p.length) { toast('مفيش إضافي مستني اعتمادك'); return; }
+    if (!(await confirmDlg(`اعتماد الإضافي لـ ${p.length} موظف (${hrsOf(p)} ساعة) ليوم ${fmtDate(date)}؟`, 'اعتمد الكل'))) return;
     let n = 0; for (const x of p) { if (await approve(date, x.w.id, true)) n++; } toast(`اتعتمد ${n} إضافي`); render(false);
   };
-  /* the badge gets its button; the toolbar gets «approve all» */
+
+  /* 3) badges: where it waits + the button for whoever's turn it is; approve-all bar */
   function decorate() {
-    if (!S.route || S.route.view !== 'attendance' || !canOtOk() || !needsOk()) return; const v = document.getElementById('view'); if (!v) return;
+    if (!S.route || S.route.view !== 'attendance' || !canOtAny() || !needsOk()) return; const v = document.getElementById('view'); if (!v) return;
+    const f = S.ui.filter.att || {}; const date = f.date || todayISO(); const att = attendanceFor(date) || {};
     v.querySelectorAll('.badge.warn').forEach(b => {
       if (b.dataset.otb || !/إضافي بانتظار اعتماد/.test(b.textContent)) return; b.dataset.otb = '1';
-      const tr = b.closest('tr') || b.closest('.item') || b.parentElement; const ref = tr && (tr.querySelector('[data-action="attFlags"]') || tr.querySelector('[data-ot]')); const arg = ref && (ref.dataset.arg || ref.dataset.ot); if (!arg) return;
-      b.insertAdjacentHTML('afterend', ` <button type="button" class="btn xs p" data-action="otApprove" data-arg="${esc(arg)}" title="اعتماد الإضافي">${icon('check')}اعتمد</button>`);
+      const tr = b.closest('tr') || b.closest('.item') || b.parentElement; const ref = tr && (tr.querySelector('[data-action="attFlags"]') || tr.querySelector('[data-ot]')); const oi = tr && tr.querySelector('input.ot[id^="ot-"]'); const arg = (ref && (ref.dataset.arg || ref.dataset.ot)) || (oi ? `${date}:${oi.id.slice(3)}` : ''); if (!arg) return;
+      const wid = String(arg).split(':')[1]; const st = stageOf(att[wid]); if (!st || st === 'ok') return;
+      b.textContent = `إضافي ${STAGE_TXT[st]}`;
+      if (myTurn(st)) b.insertAdjacentHTML('afterend', ` <button type="button" class="btn xs p" data-action="otApprove" data-arg="${esc(arg)}" title="اعتماد الإضافي">${icon('check')}اعتمد</button>`);
     });
-    const f = S.ui.filter.att || {}; const date = f.date || todayISO(); const p = pendingOn(date);
-    let bar = v.querySelector('#otallbar');
-    if (!p.length) { if (bar) bar.remove(); return; }
-    const html = `<div class="banner warn" id="otallbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><span>${p.length} موظف عندهم إضافي مستني اعتمادك يوم ${fmtDate(date)} — ${fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0))} ساعة (مش هتتصرف قبل الاعتماد)</span><div class="grow"></div><button type="button" class="btn sm p" data-action="otApproveAll" data-arg="${date}">${icon('check')}اعتمد كل الإضافي</button></div>`;
+    const mine = rowsOn(date).filter(x => myTurn(stageOf(x.r))); let bar = v.querySelector('#otallbar');
+    if (!mine.length) { if (bar) bar.remove(); return; }
+    const html = `<div class="banner warn" id="otallbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><span>${mine.length} موظف عندهم إضافي مستني اعتمادك يوم ${fmtDate(date)} — ${hrsOf(mine)} ساعة${isMgr() ? ' (بعدك بيروح لمدير الحسابات)' : ' (مش هيتصرف قبل الاعتماد)'}</span><div class="grow"></div><button type="button" class="btn sm p" data-action="otApproveAll" data-arg="${date}">${icon('check')}اعتمد كل الإضافي</button></div>`;
     if (bar) bar.outerHTML = html; else { const tb = v.querySelector('.toolbar'); if (tb) tb.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html); }
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(decorate);
 
-  /* 3) end-of-day note to the owner + the factory manager (once per day per device) */
-  let _otNoteDay = '';
-  async function eodNote() {
-    if (!S.session || !writable() || !needsOk() || !canOtOk()) return; const d = todayISO(); if (_otNoteDay === d || new Date().getHours() < 17) return; _otNoteDay = d;
-    const p = pendingOn(d); if (!p.length) return; const id = `otpend_${d}`; if (byId('tasks', id)) return;
-    const hours = fmtH(p.reduce((a, x) => a + (+x.r.ot || 0), 0)); const names = p.slice(0, 4).map(x => x.w.name).join('، ') + (p.length > 4 ? ` و${p.length - 4} غيرهم` : '');
-    try { await notifyRole('admin', `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${p.length} موظف · ${hours} ساعة: ${names}. مش هتتصرف قبل الاعتماد.`, { id, kind: 'notice', fields: { link: '/#/attendance' } }); await notifyRole('manager', `إضافي مستني اعتماد — ${fmtDate(d)}`, `${p.length} موظف · ${hours} ساعة: ${names}.`, { id: id + '_m', kind: 'notice', fields: { link: '/#/attendance' } }); } catch (e) { /* ignore */ }
+  /* 4) notes: owner = information only; manager / HR = their own queue; owner = delay > 1 day */
+  async function upsertNote(toRole, id, title, desc, extra) {
+    const cur = byId('tasks', id);
+    if (cur && ['open', 'doing'].includes(cur.status)) { if (cur.title !== title || cur.desc !== desc) { try { await Store.update('tasks', id, { title, desc, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } return; }
+    if (cur) return; try { await notifyRole(toRole, title, desc, Object.assign({ id, kind: 'notice', fields: { link: '/#/attendance' } }, extra || {})); } catch (e) { /* ignore */ }
   }
-  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(eodNote, 2500); });
+  async function closeNote(id, why) { const t = byId('tasks', id); if (t && ['open', 'doing'].includes(t.status)) { try { await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: why }, { silent: true }); } catch (e) { /* ignore */ } } }
+  const names = arr => arr.slice(0, 4).map(x => x.w.name).join('، ') + (arr.length > 4 ? ` و${arr.length - 4} غيرهم` : '');
+  let _otNoteAt = 0;
+  async function otNotes() {
+    if (!S.session || !writable() || !needsOk() || !canOtAny() || Date.now() - _otNoteAt < 10 * 60000) return; _otNoteAt = Date.now();
+    const d = todayISO(); const late = new Date().getHours() >= 17;
+    /* old v6.46 «waiting for your approval» notes to the owner are no longer his to act on */
+    for (const t of list('tasks')) { if (/^otpend_\d{4}-\d{2}-\d{2}$/.test(String(t.id || '')) && ['open', 'doing'].includes(t.status)) await closeNote(t.id, 'الاعتماد بقى عند مدير المصنع ومدير الحسابات'); }
+    if (late) {
+      const all = rowsOn(d);
+      if (all.length) {
+        const m = all.filter(x => stageOf(x.r) === 'mgr'), h = all.filter(x => stageOf(x.r) === 'hr'), ok = all.filter(x => x.r.otOk);
+        await upsertNote('admin', `otday_${d}`, `اتسجّل إضافي النهارده — ${fmtDate(d)}`, `${all.length} موظف · ${hrsOf(all)} ساعة: ${names(all)}. ${[m.length ? `عند مدير المصنع ${m.length}` : '', h.length ? `عند مدير الحسابات ${h.length}` : '', ok.length ? `معتمد ${ok.length}` : ''].filter(Boolean).join(' · ')}. للعلم بس — مش محتاج منك حاجة.`);
+        if (m.length) await upsertNote('manager', `otpend_${d}_m`, `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${m.length} موظف · ${hrsOf(m)} ساعة: ${names(m)}. بعد اعتمادك بيروح لمدير الحسابات.`); else await closeNote(`otpend_${d}_m`, 'اتعتمد');
+        if (h.length) await upsertNote('hr', `otpend_${d}_h`, `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${h.length} موظف · ${hrsOf(h)} ساعة: ${names(h)} — اعتمده مدير المصنع.`); else await closeNote(`otpend_${d}_h`, 'اتعتمد');
+      }
+    }
+    /* delay: a step that sat more than a day (last 7 days) */
+    const old = { mgr: [], hr: [] };
+    for (let i = 1; i <= 7; i++) { const day = addDays(d, -i); rowsOn(day).forEach(x => { const st = stageOf(x.r); if (st === 'mgr' || st === 'hr') old[st].push(x); }); }
+    for (const st of ['mgr', 'hr']) {
+      const id = `late_ot_${st}_${d}`; const arr = old[st];
+      for (const t of list('tasks')) { if (String(t.id || '').startsWith(`late_ot_${st}_`) && t.id !== id) await closeNote(t.id, 'يوم جديد'); }
+      if (!arr.length) { await closeNote(id, 'اتعتمد'); continue; }
+      const who = st === 'mgr' ? (list('workers').find(x => x.role === 'manager' && x.status !== 'inactive') || {}).name || 'مدير المصنع' : (list('workers').find(x => x.role === 'hr' && x.status !== 'inactive') || {}).name || 'مدير الحسابات';
+      await upsertNote('admin', id, `${who} ما اعتمدش إضافي ${arr.length} ${arr.length === 1 ? 'موظف' : 'موظفين'} من أكتر من يوم`, `${hrsOf(arr)} ساعة: ${names(arr)}`, { priority: 'high' });
+    }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(otNotes, 2500); });
+  window.nfOtNotes = () => { _otNoteAt = 0; return otNotes(); };
 
-  /* 4) payroll: unapproved overtime this month */
+  /* 5) payroll: unapproved overtime this month */
   if (typeof vPayroll === 'function') vPayroll = (base => function () {
     const html = base.apply(this, arguments); if (!needsOk()) return html;
     try {
       const ym = (S.ui.filter.payroll && S.ui.filter.payroll.ym) || monthOf(todayISO()); let hours = 0; const people = new Set();
       list('workers').filter(w => w.status !== 'inactive').forEach(w => { const rows = typeof attMonthRows === 'function' ? attMonthRows(w, ym) : {}; Object.keys(rows || {}).forEach(d => { const r = rows[d]; if (r && +r.ot > 0 && !r.otOk) { hours += +r.ot; people.add(w.id); } }); });
       if (!hours) return html;
-      const warn = `<div class="banner warn" style="margin-bottom:12px">⚠ فيه ${fmtH(hours)} ساعة إضافية لـ ${people.size} موظف في ${fmtMonth(ym)} لسه ما اتعتمدتش — مش داخلة في المرتبات. ${canOtOk() ? '<a href="#/attendance">اعتمدها من الحضور</a>' : 'الاعتماد للمالك ومدير المصنع.'}</div>`;
+      const warn = `<div class="banner warn" style="margin-bottom:12px">⚠ فيه ${fmtH(hours)} ساعة إضافية لـ ${people.size} موظف في ${fmtMonth(ym)} لسه ما اتعتمدتش — مش داخلة في المرتبات. ${canOtAny() ? '<a href="#/attendance">اعتمدها من الحضور</a>' : ''} (الاعتماد: مدير المصنع ثم مدير الحسابات)</div>`;
       return warn + html;
     } catch (e) { return html; }
   })(vPayroll);
