@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-2055-wa660a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1814-6bf0d6";</script>
 
 <script>
 'use strict';
@@ -33535,7 +33535,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const toMgr = it => managers().forEach(m => add(m.id, m, m.deptId, it));
     const dayHours = d => Math.max(24, daysBetween(d, today()) * 24);
     // 1) tasks past their due date
-    list('tasks').filter(t => (t.kind || 'task') === 'task' && ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today()).forEach(t => {
+    list('tasks').filter(t => (t.kind || 'task') === 'task' && !t.ot && ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today()).forEach(t => {
       const it = { title: t.title || '', hours: dayHours(t.dueDate), href: 'tasks/' + t.id };
       const a = t.assigneeId ? byId('workers', t.assigneeId) : null;
       if (a && active(a) && ['head', 'manager', 'vice'].includes(a.role)) add(a.id, a, a.deptId || t.deptId, it);
@@ -33557,10 +33557,20 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     if (typeof attendanceFor === 'function' && managers().length) {
       for (let i = 1; i <= 10; i++) {
         const d = addDays(today(), -i); if (d < OT_SINCE) break; let rows = {}; try { rows = attendanceFor(d) || {}; } catch (e) { rows = {}; }
-        const n = Object.values(rows).filter(r => r && +r.ot > 0 && !r.otOk && !r.otMgrOk).length;
+        /* v6.63: overtime with no overtime task is the department head's delay; with a task it waits for the manager */
+        const tf = typeof window.nfOtTaskFor === 'function' ? window.nfOtTaskFor : null;
+        const pend = Object.entries(rows).filter(([wid, r]) => r && +r.ot > 0 && !r.otOk);
+        const n = pend.filter(([wid, r]) => !r.otMgrOk && (!tf || tf(d, wid))).length;
         if (n) toMgr({ title: (en() ? `Overtime ${fmtDate(d)} — ${n} people waiting` : `إضافي ${fmtDate(d)} — ${n} موظف مستني الاعتماد`), hours: dayHours(d), href: 'attendance', act: 'attOtOnly', arg: d + ':mgr' });
+        if (tf) { const byDept = {}; pend.filter(([wid]) => !tf(d, wid)).forEach(([wid]) => { const w = byId('workers', wid); const k = (w && w.deptId) || ''; byDept[k] = (byDept[k] || 0) + 1; });
+          Object.entries(byDept).forEach(([dep, m]) => toDept(dep, { title: en() ? `Overtime ${fmtDate(d)} without an overtime task — ${m} people` : `إضافي ${fmtDate(d)} من غير مهمة إضافي — ${m} موظف`, hours: dayHours(d), href: 'attendance', act: 'attOtOnly', arg: d + ':notask' })); }
       }
     }
+    // 3b) old-project overtime tasks waiting for the factory manager's OK
+    list('tasks').filter(t => t && t.ot && t.ot.status === 'pending' && t.status !== 'cancelled').forEach(t => {
+      const hrs = Math.floor((now - new Date(t.ot.at || t.createdAt || nowISO()).getTime()) / 36e5); if (hrs < 12) return;
+      toMgr({ title: (en() ? 'Old-project overtime task: ' : 'مهمة إضافي مشروع قديم: ') + (t.ot.oldProject || ''), hours: hrs, href: 'attendance', act: 'attOtOnly', arg: t.ot.date + ':all' });
+    });
     // 4) late work orders: the department of the stage in progress; an order not routed to any department → the manager
     if (typeof isLate === 'function') {
       list('orders').filter(o => { try { return isLate(o); } catch (e) { return false; } }).forEach(o => {
@@ -33641,13 +33651,15 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   if (typeof visibleWorkers !== 'function' || typeof RENDER_HOOKS === 'undefined') return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const pend = (r, st) => r && +r.ot > 0 && !r.otOk && (st !== 'mgr' || !r.otMgrOk) && (st !== 'hr' || !!r.otMgrOk);
+  const pend = (r, st, wid, date) => r && +r.ot > 0 && !r.otOk && (st !== 'mgr' || !r.otMgrOk) && (st !== 'hr' || !!r.otMgrOk)
+    && (st !== 'notask' || !(typeof window.nfOtTaskFor === 'function' && window.nfOtTaskFor(date, wid)))
+    && (!['mgr', 'hr'].includes(st) || typeof window.nfOtTaskFor !== 'function' || !!window.nfOtTaskFor(date, wid));
   visibleWorkers = (base => function (deptFilter) {
     const arr = base.apply(this, arguments);
     const f = S.ui && S.ui.filter && S.ui.filter.att;
     if (!f || !f.otOnly || !S.route || S.route.view !== 'attendance') return arr;
     const att = attendanceFor(f.date || todayISO()) || {};
-    return arr.filter(w => pend(att[w.id], f.otOnly));
+    return arr.filter(w => pend(att[w.id], f.otOnly, w.id, f.date || todayISO()));
   })(visibleWorkers);
   ACTIONS.attOtOnly = arg => {
     const [date, st] = String(arg || '').split(':');
@@ -33670,7 +33682,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     }
     if (!f || !f.otOnly) return;
     const n = visibleWorkers(f.dept).filter(w => w.status !== 'inactive').length;
-    const txt = f.otOnly === 'mgr' ? L('إضافي مستني مدير المصنع', 'Overtime waiting for the factory manager') : f.otOnly === 'hr' ? L('إضافي مستني مدير الحسابات', 'Overtime waiting for the accounts manager') : L('إضافي مستني الاعتماد', 'Overtime waiting for approval');
+    const txt = f.otOnly === 'mgr' ? L('إضافي مستني مدير المصنع', 'Overtime waiting for the factory manager') : f.otOnly === 'notask' ? L('إضافي من غير مهمة إضافي', 'Overtime without an overtime task') : f.otOnly === 'hr' ? L('إضافي مستني مدير الحسابات', 'Overtime waiting for the accounts manager') : L('إضافي مستني الاعتماد', 'Overtime waiting for approval');
     const html = `<div class="banner" id="otonlychip" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><span>${icon('check')} ${L('معروض بس', 'Showing only')}: <b>${txt}</b> — ${n} ${L('موظف', 'people')}</span><div class="grow"></div><button type="button" class="btn sm" data-action="attOtAll">${L('اعرض الكل', 'Show everyone')}</button></div>`;
     const anchor = v.querySelector('#otallbar') || v.querySelector('.toolbar');
     if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
@@ -33816,6 +33828,175 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     .pfbody{padding:0 12px 12px}.pfbody h4{margin:14px 0 6px;font-size:13px;color:var(--muted)}
     .pfkv{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px 14px;font-size:13px}.pfkv>div{display:flex;flex-direction:column}
     .pftable{font-size:12.5px}.pfempty{padding:4px 0}.pfnote{font-size:13px;line-height:1.7;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+  </style>`);
+})();
+/* =====================================================================
+   v6.63 — overtime only on a project, with an «overtime task» (Mahmoud, 5 Oct; PIN verified).
+   · An overtime row (attendance, ot > 0) can be approved by the factory manager / HR only when an active overtime task
+     covers that worker on that day: the project (open work order, or an old pre-system project by name) + the exact work.
+   · Who creates the task: the department head for his own team, from today on · HR (Saeed) for any worker, past days only
+     (retroactive — the overtime already waiting) · the owner any time.
+   · Old project (pre-system): the task waits for the factory manager's OK before it counts.
+   · The owner can still approve any overtime (unchanged).
+   · After the final approval (otOk) the overtime hours are allocated to that work order (labour cost); old projects: name only.
+   · Late work by team lead: overtime without a task → the department head; old-project tasks waiting → the factory manager.
+   · Overtime tasks are ordinary tasks (kind task + ot{}), visible to the team; they close by themselves once that day's
+     overtime of all their workers is settled.
+   · No amounts anywhere. Factory only.
+   ===================================================================== */
+if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
+  if (typeof RENDER_HOOKS === 'undefined' || typeof setAtt !== 'function') return;
+  const OT_PFX = 'إضافي: ';
+  const isMgr = () => role() === 'manager'; const isHr = () => role() === 'hr'; const isHead = () => role() === 'head';
+  const needsOk = () => !(S.settings.policy && S.settings.policy.otNeedsApproval === false);
+  const otTasks = () => list('tasks').filter(t => t && t.ot && t.ot.date && t.status !== 'cancelled' && t.ot.status !== 'rejected');
+  const taskFor = (date, wid) => otTasks().find(t => t.ot.date === date && (t.ot.workerIds || []).includes(wid) && t.ot.status === 'ok') || null;
+  const anyTaskFor = (date, wid) => otTasks().find(t => t.ot.date === date && (t.ot.workerIds || []).includes(wid)) || null;
+  window.nfOtTaskFor = taskFor; window.nfOtAnyTaskFor = anyTaskFor;
+  const projName = t => { const o = t.orderId ? byId('orders', t.orderId) : null; return o ? `${o.code} — ${o.title || ''}` : (t.ot.oldProject ? `مشروع قديم: ${t.ot.oldProject}` : ''); };
+  const canCreateFor = date => !!S.session && writable() && (isAdmin() || (isHead() && date >= todayISO()) || (isHr() && date < todayISO()));
+
+  /* 1) gate: a save may not set an approval step on overtime without an active task (owner exempt) + allocate on final approval */
+  let _warnAt = 0;
+  setAtt = (base => async function (date, w, patch) {
+    if (patch && typeof patch === 'object' && w && needsOk()) {
+      const cur = (attendanceFor(date) || {})[w.id] || {}; const p = Object.assign({}, patch); const ot = +(p.ot != null ? p.ot : cur.ot) || 0;
+      const t = taskFor(date, w.id);
+      const stepping = (p.otMgrOk && !cur.otMgrOk) || (p.otOk && !cur.otOk);
+      if (stepping && ot > 0 && !t && !isAdmin()) {
+        p.otMgrOk = !!cur.otMgrOk; p.otMgrBy = cur.otMgrBy || null; p.otMgrAt = cur.otMgrAt || null; p.otOk = !!cur.otOk; p.otOkBy = cur.otOkBy || null; p.otOkAt = cur.otOkAt || null;
+        if (Date.now() - _warnAt > 1500) { _warnAt = Date.now(); toast(`إضافي ${w.name} من غير مهمة إضافي — لازم مهمة الأول`, 'err'); }
+      }
+      if (p.otOk && !cur.otOk && ot > 0 && t && t.orderId) {
+        const al = (p.alloc || cur.alloc || []).filter(a => !a.ot); al.push({ orderId: t.orderId, h: ot, ot: true, taskId: t.id }); p.alloc = al;
+      }
+      patch = p;
+    }
+    return base.call(this, date, w, patch);
+  })(setAtt);
+  /* regular-hours auto allocation keeps the overtime allocation aside */
+  if (typeof autoAllocRow === 'function') autoAllocRow = (base => function (row) {
+    const keep = (row && row.alloc || []).filter(a => a.ot); const rest = Object.assign({}, row, { alloc: (row && row.alloc || []).filter(a => !a.ot) });
+    const r = base.apply(this, [rest].concat(Array.prototype.slice.call(arguments, 1))); return keep.length ? Object.assign({}, r, { alloc: (r.alloc || []).concat(keep) }) : r;
+  })(autoAllocRow);
+
+  /* 2) approve buttons: one row + approve-all (only rows with a task) */
+  const stageOf = r => !r || !(+r.ot > 0) ? null : r.otOk ? 'ok' : r.otMgrOk ? 'hr' : 'mgr';
+  const myTurn = st => (st === 'mgr' || st === 'hr') && (isAdmin() || (st === 'mgr' && isMgr()) || (st === 'hr' && isHr()));
+  if (typeof ACTIONS.otApprove === 'function') ACTIONS.otApprove = (base => async function (arg) {
+    const [date, wid] = String(arg || '').split(':');
+    if (!isAdmin() && needsOk() && !taskFor(date, wid)) { const w = byId('workers', wid); toast(`إضافي ${w ? w.name : ''} من غير مهمة إضافي — مستني رئيس القسم`, 'err'); return; }
+    return base.apply(this, arguments);
+  })(ACTIONS.otApprove);
+  ACTIONS.otApproveAll = async date => {
+    const att = attendanceFor(date) || {};
+    const rows = list('workers').filter(w => w.status !== 'inactive').map(w => ({ w, r: att[w.id] || {} })).filter(x => +x.r.ot > 0 && myTurn(stageOf(x.r)));
+    const ok = rows.filter(x => isAdmin() || taskFor(date, x.w.id)); const miss = rows.length - ok.length;
+    if (!ok.length) { toast(miss ? `${miss} موظف إضافيهم من غير مهمة إضافي — مستنيين رئيس القسم` : 'مفيش إضافي مستني اعتمادك', miss ? 'err' : undefined); return; }
+    const hrs = Math.round(ok.reduce((a, x) => a + (+x.r.ot || 0), 0) * 100) / 100;
+    if (!(await confirmDlg(`اعتماد الإضافي لـ ${ok.length} موظف (${hrs} ساعة) ليوم ${fmtDate(date)}؟${miss ? ` — ${miss} من غير مهمة هيستنّوا` : ''}`, 'اعتمد الكل'))) return;
+    const me = (S.session && S.session.name) || ''; const now = nowISO(); let n = 0;
+    for (const x of ok) {
+      const st = stageOf(x.r); const patch = {};
+      if (isAdmin()) Object.assign(patch, x.r.otMgrOk ? {} : { otMgrOk: true, otMgrBy: me, otMgrAt: now }, { otOk: true, otOkBy: me, otOkAt: now });
+      else if (st === 'mgr') Object.assign(patch, { otMgrOk: true, otMgrBy: me, otMgrAt: now }); else Object.assign(patch, { otOk: true, otOkBy: me, otOkAt: now });
+      const merged = Object.assign({}, x.r, patch); const row = typeof computeAttRow === 'function' ? Object.assign(computeAttRow(merged, x.w), patch) : merged;
+      await setAtt(date, x.w, row); n++;
+    }
+    toast(`اتعتمد ${n} إضافي${miss ? ` · ${miss} من غير مهمة` : ''}`); render(false);
+  };
+
+  /* 3) the task form */
+  function form(date, wids) {
+    const mine = isHead() ? myDepts() : null;
+    const ws = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.role !== 'admin' && (!mine || mine.includes(w.deptId))), w => (w.deptId || '') + w.name);
+    const att = attendanceFor(date) || {};
+    const dep = mine ? mine : null;
+    const orders = sortBy(list('orders').filter(o => isOpen(o) && (!dep || dep.some(d => (o.route || []).includes(d)) || !(o.route || []).length)), o => o.code);
+    return `<div class="form">
+      ${field('اليوم', inp('date', date, `type="date" ${isAdmin() ? '' : isHead() ? `min="${todayISO()}"` : `max="${addDays(todayISO(), -1)}"`}`))}
+      ${field('الساعات المتوقعة لكل واحد', inp('hours', '', 'type="number" step="0.5" min="0.5" max="12"'))}
+      <div class="full"><div class="tiny muted" style="margin-bottom:4px">العمال</div><div class="otws">${ws.map(w => `<label class="chk"><input type="checkbox" name="otw" value="${esc(w.id)}" ${(wids || []).includes(w.id) ? 'checked' : ''}> ${esc(w.name)} <span class="tiny muted">${esc(deptName(w.deptId))}${+((att[w.id] || {}).ot) > 0 ? ` · إضافي ${fmtNum(att[w.id].ot)} س` : ''}</span></label>`).join('')}</div></div>
+      ${field('المشروع', `<select name="proj" id="f-otproj"><option value="">— اختار —</option>${orders.map(o => `<option value="o:${esc(o.id)}">${esc(o.code)} — ${esc(o.title || '')}</option>`).join('')}<option value="old">مشروع قديم (قبل السيستم)…</option></select>`, 'full')}
+      <div class="full" id="otoldwrap" style="display:none">${field('اسم المشروع القديم', inp('oldProject', ''), 'full')}<div class="tiny muted">مهمة المشروع القديم بتستنى موافقة مدير المصنع قبل ما الإضافي يتحسب.</div></div>
+      ${field('الشغل المطلوب بالظبط', `<textarea name="work" id="f-otwork" required placeholder="مثال: لحام هيكل 4 كراسي + تجليخ"></textarea>`, 'full')}</div>`;
+  }
+  ACTIONS.otTaskNew = arg => {
+    const [d, wid] = String(arg || '').split(':'); const date = /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : todayISO();
+    if (!canCreateFor(date) && !(isHead() || isHr() || isAdmin())) return;
+    openModal({ title: 'مهمة إضافي', wide: true, body: form(date, wid ? [wid] : []), submitLabel: 'حفظ المهمة', onSubmit: save });
+    setTimeout(() => { const s = document.getElementById('f-otproj'); if (s) s.addEventListener('change', () => { const o = document.getElementById('otoldwrap'); if (o) o.style.display = s.value === 'old' ? '' : 'none'; }); }, 0);
+  };
+  async function save(f) {
+    const d = formData(f); const date = d.date || todayISO(); const wids = Array.from(f.querySelectorAll('input[name="otw"]:checked')).map(x => x.value);
+    if (!canCreateFor(date)) { toast(isHead() ? 'رئيس القسم يعمل مهمة الإضافي من النهارده ورايح — الأيام اللي فاتت بيدخّلها مدير الحسابات' : isHr() ? 'مدير الحسابات بيدخّل مهام الإضافي للأيام اللي فاتت بس' : 'مش مسموح', 'err'); return false; }
+    if (!wids.length) { toast('اختار العمال', 'err'); return false; }
+    if (!d.proj) { toast('اختار المشروع', 'err'); return false; }
+    const old = d.proj === 'old'; const oldName = (d.oldProject || '').trim(); if (old && !oldName) { toast('اكتب اسم المشروع القديم', 'err'); return false; }
+    const work = (d.work || '').trim(); if (work.length < 4) { toast('اكتب الشغل المطلوب بالظبط', 'err'); return false; }
+    const orderId = old ? null : d.proj.slice(2); const ws = wids.map(id => byId('workers', id)).filter(Boolean);
+    const depts = Array.from(new Set(ws.map(w => w.deptId).filter(Boolean)));
+    const approved = !old || isAdmin() || isMgr();
+    const doc = { id: 'ot_' + uid(), kind: 'task', source: 'ot', title: OT_PFX + work.slice(0, 80), desc: `${work}\nالعمال: ${ws.map(w => w.name).join('، ')}${old ? `\nمشروع قديم: ${oldName}` : ''}`, deptId: depts[0] || null, assigneeId: ws.length === 1 ? ws[0].id : null, orderId, dueDate: date, priority: 'normal', status: 'open',
+      ot: { date, workerIds: wids, hours: +d.hours || null, oldProject: old ? oldName : '', status: approved ? 'ok' : 'pending', retro: date < todayISO(), by: S.session.id || null, byName: S.session.name || '', at: nowISO(), okBy: approved ? (S.session.name || '') : null, okAt: approved ? nowISO() : null },
+      createdBy: S.session.id || null, createdByName: S.session.name || '', createdAt: nowISO(), updatedAt: nowISO() };
+    await Store.save('tasks', doc);
+    if (!approved) { try { await notifyRole('manager', `مهمة إضافي على مشروع قديم مستنية موافقتك — ${fmtDate(date)}`, `${oldName}: ${work} — ${ws.length} موظف (${S.session.name || ''})`, { id: 'otok_' + doc.id, fields: { link: '/#/attendance' } }); } catch (e) { /* ignore */ } }
+    toast(approved ? `اتعملت مهمة الإضافي — ${ws.length} موظف` : 'اتعملت المهمة — مستنية موافقة مدير المصنع'); render(false);
+  }
+  ACTIONS.otTaskOk = async id => {
+    const t = byId('tasks', id); if (!t || !t.ot || !(isMgr() || isAdmin()) || !writable()) return;
+    await Store.update('tasks', id, { ot: Object.assign({}, t.ot, { status: 'ok', okBy: S.session.name || '', okAt: nowISO() }), updatedAt: nowISO() });
+    const n = byId('tasks', 'otok_' + id); if (n && ['open', 'doing'].includes(n.status)) await Store.update('tasks', n.id, { status: 'done', doneAt: nowISO(), doneByName: S.session.name || '', autoClosed: true }, { silent: true });
+    toast('اتوافق على مهمة المشروع القديم'); render(false);
+  };
+  ACTIONS.otTaskNo = async id => {
+    const t = byId('tasks', id); if (!t || !t.ot || !(isMgr() || isAdmin()) || !writable()) return;
+    if (!(await confirmDlg('رفض مهمة الإضافي دي؟ الإضافي اللي عليها مش هيتعتمد.', 'رفض'))) return;
+    await Store.update('tasks', id, { status: 'cancelled', ot: Object.assign({}, t.ot, { status: 'rejected', okBy: S.session.name || '', okAt: nowISO() }), updatedAt: nowISO() });
+    const n = byId('tasks', 'otok_' + id); if (n && ['open', 'doing'].includes(n.status)) await Store.update('tasks', n.id, { status: 'done', doneAt: nowISO(), autoClosed: true }, { silent: true });
+    toast('اترفضت المهمة'); render(false);
+  };
+
+  /* 4) attendance table: project + work under each overtime, or «no task» + create button */
+  RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'attendance' || !needsOk()) return; const v = document.getElementById('view'); if (!v) return;
+    const f = S.ui.filter.att || {}; const date = f.date || todayISO(); const att = attendanceFor(date) || {};
+    v.querySelectorAll('.ottinfo').forEach(x => x.remove());
+    v.querySelectorAll('table.att tbody tr').forEach(tr => {
+      const inp1 = tr.querySelector('input[id^="tm-in-"]'); if (!inp1) return; const wid = inp1.id.slice(6); const r = att[wid] || {};
+      if (!(+r.ot > 0)) return;
+      const cell = (tr.querySelector('.badge[data-otb]') || {}).parentElement || tr.children[2]; if (!cell) return;
+      const t = anyTaskFor(date, wid); let html = '';
+      if (t && t.ot.status === 'ok') html = `<div class="ottinfo tiny" title="${esc(t.desc || '')}">📋 ${esc(projName(t))} — ${esc(String(t.title || '').startsWith(OT_PFX) ? String(t.title).slice(OT_PFX.length) : (t.title || ''))}</div>`;
+      else if (t) html = `<div class="ottinfo tiny"><span class="badge warn">مهمة مشروع قديم مستنية مدير المصنع</span> ${esc(t.ot.oldProject || '')}${(isMgr() || isAdmin()) && writable() ? ` <button type="button" class="btn xs p" data-action="otTaskOk" data-arg="${esc(t.id)}">وافق</button><button type="button" class="btn xs" data-action="otTaskNo" data-arg="${esc(t.id)}">ارفض</button>` : ''}</div>`;
+      else if (!r.otOk) html = `<div class="ottinfo tiny"><span class="badge bad">مفيش مهمة إضافي</span>${canCreateFor(date) ? ` <button type="button" class="btn xs" data-action="otTaskNew" data-arg="${esc(date)}:${esc(wid)}">${icon('plus')}مهمة إضافي</button>` : ` <span class="muted">${isHead() && date < todayISO() ? 'الأيام اللي فاتت بيدخّلها مدير الحسابات' : 'مستني رئيس القسم'}</span>`}</div>`;
+      if (!html) return;
+      if (!(t && t.ot.status === 'ok') && !isAdmin()) tr.querySelectorAll('[data-action="otApprove"]').forEach(b => b.remove());
+      cell.insertAdjacentHTML('beforeend', html);
+    });
+    const bar = v.querySelector('#otallbar span');
+    if (bar && !isAdmin()) { const miss = Object.entries(att).filter(([wid, r]) => +r.ot > 0 && myTurn(stageOf(r)) && !taskFor(date, wid)).length; if (miss && !bar.dataset.ott) { bar.dataset.ott = '1'; bar.insertAdjacentHTML('beforeend', ` · <b>${miss} من غير مهمة إضافي</b> (مش هيتعتمدوا)`); } }
+    const tb = v.querySelector('.toolbar'); if (tb && !tb.querySelector('[data-action="otTaskNew"]') && canCreateFor(date)) tb.insertAdjacentHTML('beforeend', `<button type="button" class="btn sm" data-action="otTaskNew" data-arg="${esc(date)}">${icon('plus')}مهمة إضافي</button>`);
+  });
+
+  /* 5) close overtime tasks whose day is settled */
+  let _closeAt = 0;
+  RENDER_HOOKS.push(() => {
+    if (!S.session || !writable() || !(isAdmin() || isMgr() || isHr()) || Date.now() - _closeAt < 5 * 60000) return; _closeAt = Date.now();
+    setTimeout(async () => {
+      for (const t of otTasks()) {
+        if (!['open', 'doing'].includes(t.status) || t.ot.status !== 'ok' || t.ot.date >= todayISO()) continue;
+        const att = attendanceFor(t.ot.date) || {};
+        if ((t.ot.workerIds || []).every(id => { const r = att[id] || {}; return !(+r.ot > 0) || r.otOk; })) { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: 'الإضافي اتعتمد' }, { silent: true }); } catch (e) { /* ignore */ } }
+      }
+    }, 3000);
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .otws{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px}
+    .otws .chk{display:flex;gap:6px;align-items:center;font-size:13px}
+    .ottinfo{margin-top:4px;line-height:1.5}
   </style>`);
 })();
 </script>
