@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1209-0b2eb6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1341-95e3d9";</script>
 
 <script>
 'use strict';
@@ -33488,6 +33488,92 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     } catch (e) { /* ignore */ }
     return r;
   })(authenticateSb);
+})();
+/* =====================================================================
+   v6.58 — «Late work by team lead» on the dashboard (Mahmoud, 5 Oct; PIN verified). Both systems.
+   One card per responsible person who has overdue tasks: every team lead (role head) for the tasks of his department
+   (tasks on the department, on him, or on anyone in his team) and the manager for tasks assigned to him.
+   Overdue = open/doing task (kind task) whose due date is before today. No amounts anywhere.
+   Who sees what: owner → all cards · manager / vice → all cards of this system (his own included) · team lead → his own card
+   only (on his home pages: boards / me / tasks, since leads have no dashboard) · everyone else → nothing. A card disappears as soon as its overdue list is empty; the whole block hides when no one
+   is late. Rebuilt on every render, so it follows live data.
+   ===================================================================== */
+(function () {
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const active = w => w && !['inactive', 'stopped'].includes(w.status);
+  const deptsOf = w => [w.deptId].concat(Array.isArray(w.deptIds) ? w.deptIds : []).filter(Boolean);
+  const headsOf = d => list('workers').filter(w => active(w) && w.role === 'head' && deptsOf(w).includes(d));
+  const daysLate = t => Math.max(1, daysBetween(t.dueDate, todayISO()));
+  function lateTasks() {
+    const today = todayISO();
+    return list('tasks').filter(t => (t.kind || 'task') === 'task' && ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today);
+  }
+  /* key → { who (worker), dept, tasks[] } */
+  function groups() {
+    const g = new Map();
+    const add = (key, who, dept, t) => { if (!g.has(key)) g.set(key, { key, who, dept, tasks: [] }); g.get(key).tasks.push(t); };
+    lateTasks().forEach(t => {
+      const a = t.assigneeId ? byId('workers', t.assigneeId) : null;
+      if (a && active(a) && (a.role === 'head' || a.role === 'manager' || a.role === 'vice')) { add(a.id, a, a.deptId || t.deptId, t); return; }
+      const d = t.deptId || (a && a.deptId) || '';
+      const hs = d ? headsOf(d) : [];
+      if (hs.length) hs.forEach(h => add(h.id, h, d, t));
+      else if (d) add('dept:' + d, null, d, t);
+    });
+    return Array.from(g.values()).map(x => { x.tasks.sort((p, q) => String(p.dueDate).localeCompare(String(q.dueDate))); x.max = daysLate(x.tasks[0]); return x; })
+      .sort((p, q) => q.max - p.max || q.tasks.length - p.tasks.length);
+  }
+  function visibleGroups() {
+    if (!S.session) return [];
+    const rl = role(); const me = S.session.workerId || '';
+    const all = groups();
+    if (isAdmin() || rl === 'manager' || rl === 'vice') return all;
+    if (rl === 'head') return all.filter(x => x.key === me);
+    return all.filter(x => me && x.key === me);
+  }
+  const dayTxt = n => (en() ? `${n} day${n === 1 ? '' : 's'} late` : n === 1 ? 'متأخر يوم' : n === 2 ? 'متأخر يومين' : n <= 10 ? `متأخر ${n} أيام` : `متأخر ${n} يوم`);
+  function cardHTML(x) {
+    const name = x.who ? x.who.name : L('بدون رئيس قسم', 'No team lead');
+    const av = x.who && typeof avatarHTML === 'function' ? avatarHTML(x.who, 40) : `<div class="avatar" style="width:40px;height:40px">!</div>`;
+    const sev = x.max >= 7 ? 'bad' : x.max >= 3 ? 'warn' : 'acc';
+    return `<div class="lhcard ${sev}" data-action="lateHeadOpen" data-arg="${esc(x.dept || '')}">
+      <div class="lhtop">${av}<div class="grow"><b>${esc(name)}</b><div class="small muted">${esc(x.dept ? deptName(x.dept) : '')}</div></div>
+        <div class="lhnum"><b>${x.tasks.length}</b><span class="small">${L('متأخرة', 'late')}</span></div></div>
+      <div class="lhmax small">${L('أقدم تأخير', 'Oldest')}: <b>${dayTxt(x.max)}</b></div>
+      <div class="lhlist">${x.tasks.slice(0, 3).map(t => `<div class="lhrow" data-action="go" data-arg="tasks/${esc(t.id)}"><span class="grow">${esc(t.title || '')}</span><span class="badge ${daysLate(t) >= 7 ? 'bad' : 'warn'}">${daysLate(t)}${L('ي', 'd')}</span></div>`).join('')}
+        ${x.tasks.length > 3 ? `<div class="small muted">+${x.tasks.length - 3} ${L('كمان', 'more')}</div>` : ''}</div></div>`;
+  }
+  RENDER_HOOKS.push(() => {
+    const v = document.getElementById('view'); if (!v) return;
+    const old = v.querySelector('#lateheads'); if (old) old.remove();
+    if (!S.session || !S.route) return;
+    const boss = isAdmin() || ['manager', 'vice'].includes(role());
+    /* leads have no dashboard (factory: «لوحات الأقسام»): their card shows on their home pages instead */
+    if (boss ? S.route.view !== 'dashboard' : !['dashboard', 'boards', 'me', 'tasks'].includes(S.route.view) || S.route.id) return;
+    const gs = visibleGroups(); if (!gs.length) return;
+    const html = `<div class="card" id="lateheads"><div class="cardhead"><h3>${L('متأخرات رؤساء الأقسام', 'Late work by team lead')}</h3><span class="muted small">${gs.reduce((s, x) => s + x.tasks.length, 0)} ${L('مهمة متأخرة', 'late tasks')}</span></div><div class="lhgrid">${gs.map(cardHTML).join('')}</div></div>`;
+    const anchor = v.querySelector('.kpis');
+    if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
+  });
+  ACTIONS.lateHeadOpen = (arg, el, ev) => {
+    if (ev && ev.target && ev.target.closest && ev.target.closest('.lhrow')) return;
+    S.ui.filter.tasks = Object.assign({}, S.ui.filter.tasks || {}, { status: 'open', dept: arg || '', mine: false });
+    location.hash = '#/tasks';
+  };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    #lateheads{margin:14px 0}
+    .lhgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+    .lhcard{border:1px solid var(--line,#e3e6e8);border-inline-start:4px solid var(--acc,#3b82f6);border-radius:12px;padding:12px;cursor:pointer;background:var(--card,#fff)}
+    .lhcard.warn{border-inline-start-color:#f59e0b}.lhcard.bad{border-inline-start-color:#dc2626}
+    .lhtop{display:flex;align-items:center;gap:10px}
+    .lhnum{display:flex;flex-direction:column;align-items:center;line-height:1}.lhnum b{font-size:24px}
+    .lhcard.bad .lhnum b{color:#dc2626}.lhcard.warn .lhnum b{color:#d97706}
+    .lhmax{margin:8px 0 6px}
+    .lhrow{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px dashed var(--line,#e3e6e8);font-size:13px}
+    .lhrow .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  </style>`);
 })();
 </script>
 
