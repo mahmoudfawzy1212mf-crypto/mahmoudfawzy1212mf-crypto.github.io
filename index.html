@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-0744-3ecbb3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1200-7ace49";</script>
 
 <script>
 'use strict';
@@ -33439,6 +33439,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
           const c = window.supabase.createClient(p.url, p.anon, { auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false } });
           const { data, error } = await c.auth.signInWithPassword({ email: `${sbLoginId(identifier)}@${domainOf(p)}`, password });
           if (!error && data && data.session) {
+            try { if (typeof window.nfPwSync === 'function') { const h = nfConfig(); window.nfPwSync({ url: p.url, anon: p.anon, token: data.session.access_token }, password, [{ url: h.supabaseUrl, anon: h.supabaseAnonKey }]); } } catch (e) { /* ignore */ }
             const msg = (typeof I18N !== 'undefined' && I18N.lang === 'en') ? `Your account is on ${nameOf(p)} — opening it…` : `حسابك على ${nameOf(p)} — بيفتحه دلوقتي…`;
             try { toast(msg); } catch (e) { /* ignore */ }
             setTimeout(() => { location.href = urlOf(p) + '#/dashboard'; }, 700);
@@ -33447,6 +33448,42 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
         } catch (e) { /* try the next one */ }
       }
     } finally { busy = false; }
+    return r;
+  })(authenticateSb);
+})();
+/* =====================================================================
+   v6.56 — one password on every Ninety system (Mahmoud, 5 Oct): Saeed has an account on the factory and on the studio, each with
+   its own password. After every successful password sign-in here, the same password is written on the other Ninety system(s)
+   for the same login (Edge `sso` action setpw, proven by a one-time ticket from this system). No account there → nothing happens.
+   Also runs after the v6.55 peer sign-in (the system that accepted the password pushes it back to this one).
+   ===================================================================== */
+(function () {
+  if (typeof authenticateSb !== 'function') return;
+  const peers = () => (typeof NF_PEERS === 'function' ? NF_PEERS() : []);
+  const here = () => (typeof nfConfig === 'function' ? nfConfig() : {});
+  async function ticket(fromUrl, fromAnon, token) {
+    const r = await fetch(fromUrl + '/functions/v1/sso', { method: 'POST', headers: { 'content-type': 'application/json', apikey: fromAnon || '', Authorization: 'Bearer ' + token }, body: JSON.stringify({ action: 'ticket' }) });
+    const j = await r.json().catch(() => ({})); return j.code || '';
+  }
+  /* from = { url, anon, token } (the system that accepted the password); targets = [{ url, anon }] */
+  async function sync(from, password, targets) {
+    for (const t of targets) {
+      if (!t || !t.url || t.url === from.url) continue;
+      try {
+        const code = await ticket(from.url, from.anon, from.token); if (!code) continue;
+        await fetch(t.url + '/functions/v1/sso', { method: 'POST', headers: { 'content-type': 'application/json', apikey: t.anon || '' }, body: JSON.stringify({ action: 'setpw', code, from: from.url, password }) });
+      } catch (e) { /* offline or peer down: next sign-in tries again */ }
+    }
+  }
+  window.nfPwSync = sync;
+  authenticateSb = (base => async function (identifier, password) {
+    const r = await base.apply(this, arguments);
+    try {
+      if (r && r.ok && password && typeof sbOn === 'function' && sbOn() && S.sb && peers().length) {
+        const { data } = await S.sb.auth.getSession(); const tok = data && data.session && data.session.access_token;
+        if (tok) { const c = here(); setTimeout(() => { sync({ url: c.supabaseUrl, anon: c.supabaseAnonKey, token: tok }, password, peers()); }, 50); }
+      }
+    } catch (e) { /* ignore */ }
     return r;
   })(authenticateSb);
 })();
