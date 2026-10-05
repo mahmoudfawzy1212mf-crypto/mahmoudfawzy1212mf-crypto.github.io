@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1606-9b58f9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1627-32a5f4";</script>
 
 <script>
 'use strict';
@@ -33668,6 +33668,148 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const anchor = v.querySelector('#otallbar') || v.querySelector('.toolbar');
     if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
   });
+})();
+/* =====================================================================
+   v6.62 — «Project file», owner only (Mahmoud, 5 Oct: «when I open a project bring me everything about it — contracts,
+   accounts, admin and production — and only I see it»).
+   · «Project file» button on the work-order page and the project board (orders/<id>, projects/<id>) — isAdmin() only.
+   · One window: summary (value · collected · balance · cost to date · margin · progress · late items) + five sections:
+     contract · accounts · cost · production · admin (requests + dated activity log).
+   · Read only — nothing is edited here. Nobody but the owner sees the button or can open the window.
+   · Old projects: only what was recorded shows; an empty section says it is empty.
+   ===================================================================== */
+(function () {
+  if (typeof RENDER_HOOKS === 'undefined' || typeof ACTIONS === 'undefined') return;
+  const owner = () => !!S.session && isAdmin();
+  const money = n => (typeof fmtMoney === 'function' ? fmtMoney(+n || 0) : String(Math.round(+n || 0))) + ' ' + (typeof CUR === 'function' ? CUR() : '');
+  const dt = d => (d ? fmtDate(String(d).slice(0, 10)) : '—');
+  const nm = id => { const w = id ? byId('workers', id) : null; return w ? w.name : ''; };
+  const safe = (f, fb) => { try { return f(); } catch (e) { console.warn('pfile', e); return fb; } };
+  const empty = t => `<div class="muted small pfempty">${t}</div>`;
+  const table = (head, rows) => rows.length ? `<div class="tablewrap"><table class="pftable"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+  const kv = pairs => `<div class="pfkv">${pairs.filter(p => p && p[1] !== undefined && p[1] !== null && p[1] !== '').map(([k, v]) => `<div><span class="muted">${k}</span><b>${v}</b></div>`).join('')}</div>`;
+  const sec = (id, title, body, n) => `<details class="pfsec" open id="pf-${id}"><summary><b>${title}</b>${n != null ? `<span class="badge">${n}</span>` : ''}</summary><div class="pfbody">${body}</div></details>`;
+  const CHQ = { received: 'مستلَم — لم يُودَع', deposited: 'تم الإيداع — بانتظار التحصيل', cleared: 'تحصّل', bounced: 'مرتجع' };
+  const CONTRACT_KINDS = { contract: 'عقد', po: 'أمر توريد (PO)', award: 'خطاب ترسية', verbal: 'تعاقد شفهي — بدون مستند' };
+  const st = (map, k) => (map && map[k] ? map[k][0] : k || '—');
+
+  function related(o) {
+    const tasks = list('tasks').filter(t => t.orderId === o.id && (t.kind || 'task') === 'task');
+    const pos = list('purchases').filter(p => p.orderId === o.id);
+    const exts = list('extorders').filter(x => x.orderId === o.id);
+    const files = list('files').filter(f => f.orderId === o.id || (f.ownerKind === 'order' && f.ownerId === o.id));
+    const invs = list('invoices').filter(x => x.orderId === o.id || (o.code && String(x.subject || '').includes(o.code)));
+    const reqs = list('requests').filter(r => r.orderId === o.id);
+    const exps = list('expenses').filter(e => e.orderId === o.id);
+    return { tasks, pos, exts, files, invs, reqs, exps };
+  }
+
+  function summary(o, c, R) {
+    const today = todayISO(); const lateTasks = R.tasks.filter(t => ['open', 'doing'].includes(t.status) && t.dueDate && t.dueDate < today).length;
+    const late = safe(() => isLate(o), false);
+    const tile = (k, v, cls) => `<div class="pftile ${cls || ''}"><div class="muted small">${k}</div><b>${v}</b></div>`;
+    return `<div class="pftiles">
+      ${tile('قيمة التعاقد', money(c.value))}${tile('المحصّل', money(c.paid), 'good')}${tile('المتبقي على العميل', money(c.balance), c.balance > 0 ? 'warn' : '')}
+      ${tile('التكلفة لحد النهارده', money(c.total))}${tile('الهامش', c.margin == null ? '—' : c.margin + '%', c.margin != null && c.margin < 0 ? 'bad' : '')}
+      ${tile('الإنجاز', safe(() => orderProgress(o), 0) + '%')}${tile('متأخرات', (late ? 'الأمر متأخر · ' : '') + lateTasks + ' مهمة', late || lateTasks ? 'bad' : '')}</div>`;
+  }
+
+  function contractSec(o) {
+    const cl = o.clientId ? byId('clients', o.clientId) : null; const q = o.quotationId ? byId('quotations', o.quotationId) : null; const ct = o.contract || null; const oc = o.outCheque || null;
+    const head = kv([['العميل', esc(cl ? cl.name : (typeof clientName === 'function' ? clientName(o.clientId) : ''))], ['موبايل العميل', esc(cl && (cl.phone || cl.mobile) || '')], ['البراند', esc(((S.settings.brands || []).find(b => b.id === o.brandId) || {}).name || o.brandId || '')], ['الحالة', esc(st(ORDER_STATUS, o.status))], ['تاريخ الأمر', dt(o.orderDate || o.createdAt)], ['ميعاد التسليم', dt(o.dueDate)], ['الكمية', o.qty ? `${fmtNum(o.qty)} ${esc(o.unit || '')}` : '']]);
+    const quote = q ? kv([['عرض السعر', esc(q.number || q.code || '')], ['تاريخه', dt(q.date || q.createdAt)], ['إجمالي العرض', money(safe(() => quoteTotal(q), 0))], ['الموضوع', esc(q.subject || '')]]) : empty('مفيش عرض سعر مربوط بالأمر');
+    const doc = ct ? kv([['مستند التعاقد', esc(CONTRACT_KINDS[ct.kind] || ct.kind || '')], ['اترفع', dt(ct.at)], ['بواسطة', esc(ct.byName || '')], ['رقم / مرجع', esc(ct.ref || ct.number || '')], ['ملاحظة', esc(ct.note || '')]]) : empty('مستند التعاقد لسه ما اترفعش');
+    const och = oc ? kv([['شيك صحة التوقيع (شيك المصنع)', esc(({ ready: 'جاهز للتسليم', delivered: 'اتسلّم للعميل', returned: 'مسترد' })[oc.stage || oc.status] || oc.stage || oc.status || '')], ['رقم الشيك', esc(oc.number || oc.no || '')]]) : '';
+    const notes = o.notes ? `<div class="pfnote">${esc(o.notes).replace(/\n/g, '<br>')}</div>` : '';
+    return head + `<h4>عرض السعر</h4>` + quote + `<h4>التعاقد</h4>` + doc + och + (notes ? `<h4>بنود وملاحظات الأمر</h4>${notes}` : '');
+  }
+
+  function moneySec(o, c, R) {
+    const pays = sortBy((o.payments || []).filter(p => p && !p._ph), p => p.date || p.receivedAt || '', true);
+    const payRows = pays.map(p => [dt(p.date || p.receivedAt), p.kind === 'cheque' ? `شيك ${esc(p.number || p.no || '')}${p.bank ? ' — ' + esc(p.bank) : ''}` : esc(p.method || ''), p.kind === 'cheque' ? esc(CHQ[p.stage] || p.stage || '') + (p.due || p.dueDate ? ` · استحقاق ${dt(p.due || p.dueDate)}` : '') : esc(p.ref || ''), `<b>${money(p.amount)}</b>`]);
+    const invRows = R.invs.map(x => { const t = safe(() => invTotals(x), { total: 0, paid: 0, due: 0 }); return [esc(x.number || ''), dt(x.date), esc(x.status || ''), money(t.total), money(t.paid), money(t.due)]; });
+    return kv([['قيمة التعاقد', money(c.value)], ['المحصّل', money(c.paid)], ['المتبقي', money(c.balance)]]) +
+      `<h4>الدفعات والشيكات</h4>` + (table(['التاريخ', 'الطريقة', 'المرجع / حالة الشيك', 'المبلغ'], payRows) || empty('مفيش دفعات متسجلة')) +
+      `<h4>الفواتير</h4>` + (table(['الرقم', 'التاريخ', 'الحالة', 'الإجمالي', 'المدفوع', 'المستحق'], invRows) || empty('مفيش فواتير مربوطة بالأمر'));
+  }
+
+  function costSec(o, c, R) {
+    const lines = kv([['خامات منصرفة من المخزن', money(c.materials)], ['عمالة', `${money(c.labor)} · ${fmtNum(c.laborHours || 0)} ساعة`], ['مصروفات', money(c.expenses)], ['نقل', money(c.transport || 0)], ['تشغيل خارجي', money(c.external || 0)], ['مصاريف عمومية', money(c.overhead)], ['إجمالي التكلفة', money(c.total)], ['الربح', money(c.profit)], ['الهامش', c.margin == null ? '—' : c.margin + '%']]);
+    const labor = Object.values(c.laborBy || {}).sort((a, b) => b.h - a.h).map(b => [esc(b.w ? b.w.name : '—'), esc(b.w ? deptName(b.w.deptId) : ''), fmtNum(b.h), String(b.days || ''), money(b.cost)]);
+    const poRows = R.pos.map(p => [esc(p.number || ''), esc(p.supplier || ((p.supplierId && byId('suppliers', p.supplierId)) || {}).name || ''), esc(st(PO_STATUS, p.status)), dt(p.date || p.createdAt), money(safe(() => poTotal(p), 0)), money(+p.paid || 0)]);
+    const extRows = R.exts.map(x => [esc(x.number || ''), esc(x.title || ''), esc(((typeof EXT_STATUS !== 'undefined' && EXT_STATUS[x.status]) || [x.status])[0]), money(x.offer && x.offer.price || 0)]);
+    const expRows = (c.expenseRows || R.exps).map(e => [dt(e.date), esc(e.desc || e.note || e.cat || ''), money(e.amount)]);
+    const trRows = (c.transportRows || []).map(r => [dt(r.t.date), esc(r.t.title || r.t.dest || r.t.to || ''), money(r.total)]);
+    return lines + `<h4>العمالة على المشروع</h4>` + (table(['الموظف', 'القسم', 'الساعات', 'أيام', 'التكلفة'], labor) || empty('مفيش ساعات متوزعة على الأمر')) +
+      `<h4>المشتريات</h4>` + (table(['الرقم', 'المورد', 'الحالة', 'التاريخ', 'الإجمالي', 'المدفوع'], poRows) || empty('مفيش مشتريات مربوطة')) +
+      `<h4>التشغيل الخارجي</h4>` + (table(['الرقم', 'البيان', 'الحالة', 'السعر'], extRows) || empty('مفيش تشغيل خارجي')) +
+      `<h4>المصروفات</h4>` + (table(['التاريخ', 'البيان', 'المبلغ'], expRows) || empty('مفيش مصروفات على الأمر')) +
+      (trRows.length ? `<h4>النقل</h4>` + table(['التاريخ', 'المشوار', 'التكلفة'], trRows) : '');
+  }
+
+  function prodSec(o, R) {
+    const today = todayISO(); const ST = { done: 'خلصت', active: 'شغالة', pending: 'لسه', skipped: 'متشالة' };
+    const stages = safe(() => orderStages(o), []).map(s => [esc(deptName(s.deptId)), esc(ST[s.status] || s.status || 'لسه'), (+s.progress || (s.status === 'done' ? 100 : 0)) + '%', esc((s.team || []).map(nm).filter(Boolean).join('، ')), s.plannedStart || s.startedAt ? `${dt(s.plannedStart || s.startedAt)} ← ${dt(s.plannedEnd || s.doneAt)}` : '—']);
+    const open = R.tasks.filter(t => ['open', 'doing'].includes(t.status)); const late = open.filter(t => t.dueDate && t.dueDate < today); const done = R.tasks.filter(t => t.status === 'done');
+    const tRows = sortBy(open, t => t.dueDate || '9').map(t => [`<a href="#/tasks/${esc(t.id)}" data-action="closemodal">${esc(t.title || '')}</a>`, esc(nm(t.assigneeId) || deptName(t.deptId) || ''), t.dueDate ? (t.dueDate < today ? `<span class="badge bad">${dt(t.dueDate)}</span>` : dt(t.dueDate)) : '—']);
+    const fRows = R.files.map(f => [esc(f.name || f.title || f.fileName || 'ملف'), esc(f.kind || f.type || ''), dt(f.createdAt || f.at)]);
+    return `<h4>المراحل</h4>` + (table(['القسم', 'الحالة', 'الإنجاز', 'الفريق', 'المواعيد'], stages) || empty('الأمر مش متوزع على أقسام')) +
+      `<h4>المهام</h4>` + kv([['مفتوحة', String(open.length)], ['متأخرة', String(late.length)], ['خلصت', String(done.length)]]) + (table(['المهمة', 'المسؤول', 'الميعاد'], tRows) || '') +
+      `<h4>الملفات والرسومات</h4>` + (table(['الملف', 'النوع', 'التاريخ'], fRows) || empty('مفيش ملفات مرفوعة'));
+  }
+
+  function adminSec(o, R) {
+    const reqRows = R.reqs.map(r => [esc(((typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type || '')), esc(nm(r.workerId) || r.byName || ''), esc(r.status || ''), dt(r.createdAt)]);
+    const ids = new Set([o.id].concat(R.tasks.map(t => t.id), R.pos.map(p => p.id), R.exts.map(x => x.id), R.invs.map(x => x.id)));
+    const COLN = { orders: 'الأمر', tasks: 'مهمة', purchases: 'مشتريات', extorders: 'تشغيل خارجي', invoices: 'فاتورة' };
+    const KIND = { create: 'إضافة', update: 'تعديل', delete: 'حذف' };
+    const ch = sortBy(list('changes').filter(x => ids.has(x.docId)), x => x.at || '', true).slice(0, 60);
+    const chRows = ch.map(x => [`${dt(x.at)} <span class="muted tiny">${String(x.at || '').slice(11, 16)}</span>`, esc(x.byName || ''), esc((COLN[x.col] || x.col) + ' · ' + (KIND[x.kind] || x.kind || '')), esc(x.label || '')]);
+    return `<h4>الطلبات والموافقات</h4>` + (table(['الطلب', 'مين', 'الحالة', 'التاريخ'], reqRows) || empty('مفيش طلبات مربوطة بالأمر')) +
+      `<h4>سجل اللي حصل</h4>` + (table(['إمتى', 'مين', 'إيه', 'على'], chRows) || empty('مفيش تعديلات متسجلة لسه'));
+  }
+
+  function body(o) {
+    const R = related(o); const c = safe(() => (typeof orderCosts === 'function' ? orderCosts(o) : orderCostsBase(o)), { value: +o.value || 0, paid: 0, balance: +o.value || 0, total: 0, margin: null, profit: 0, materials: 0, labor: 0, expenses: 0, overhead: 0 });
+    return summary(o, c, R) +
+      `<div class="pfnav">${[['contract', 'التعاقد'], ['money', 'الحسابات'], ['cost', 'التكلفة'], ['prod', 'الإنتاج'], ['admin', 'الإدارة']].map(([k, t]) => `<button type="button" class="btn sm ghost" data-action="pfJump" data-arg="${k}">${t}</button>`).join('')}</div>` +
+      sec('contract', 'التعاقد', safe(() => contractSec(o), empty('—'))) +
+      sec('money', 'الحسابات', safe(() => moneySec(o, c, R), empty('—')), (o.payments || []).length) +
+      sec('cost', 'التكلفة', safe(() => costSec(o, c, R), empty('—'))) +
+      sec('prod', 'الإنتاج', safe(() => prodSec(o, R), empty('—')), R.tasks.length) +
+      sec('admin', 'الإدارة', safe(() => adminSec(o, R), empty('—')));
+  }
+
+  ACTIONS.pfOpen = id => {
+    if (!owner()) return; const o = byId('orders', id); if (!o) return;
+    openModal({ title: `ملف المشروع — ${o.code || ''} ${o.title || ''}`, wide: true, cls: 'pfile', body: body(o), footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>` });
+  };
+  ACTIONS.pfJump = k => { const el = document.getElementById('pf-' + k); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+  window.nfProjectFile = id => { const o = byId('orders', id); return o && owner() ? body(o) : ''; };
+
+  RENDER_HOOKS.push(() => {
+    const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('#pfbtn,#pfbtnbar').forEach(x => x.remove());
+    if (!owner() || !S.route || !['orders', 'projects'].includes(S.route.view) || !S.route.id) return;
+    const o = byId('orders', S.route.id); if (!o) return;
+    const btn = `<button type="button" class="btn sm p" id="pfbtn" data-action="pfOpen" data-arg="${esc(o.id)}">${icon('orders')}ملف المشروع</button>`;
+    const anchor = v.querySelector('[data-action="routePlan"]');
+    if (anchor) anchor.insertAdjacentHTML('beforebegin', btn);
+    else v.insertAdjacentHTML('afterbegin', `<div class="toolbar" id="pfbtnbar" style="justify-content:flex-end">${btn}</div>`); 
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .modal.pfile{max-width:1100px;width:96vw}
+    .pftiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:10px}
+    .pftile{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--bg)}.pftile b{font-size:16px;display:block;margin-top:2px}
+    .pftile.good b{color:var(--good-ink)}.pftile.warn b{color:var(--serious-ink)}.pftile.bad b{color:var(--crit-ink)}
+    .pfnav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+    .pfsec{border:1px solid var(--line);border-radius:12px;margin:10px 0;background:var(--bg)}
+    .pfsec>summary{cursor:pointer;padding:10px 12px;display:flex;gap:8px;align-items:center;font-size:15px}
+    .pfbody{padding:0 12px 12px}.pfbody h4{margin:14px 0 6px;font-size:13px;color:var(--muted)}
+    .pfkv{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px 14px;font-size:13px}.pfkv>div{display:flex;flex-direction:column}
+    .pftable{font-size:12.5px}.pfempty{padding:4px 0}.pfnote{font-size:13px;line-height:1.7;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+  </style>`);
 })();
 </script>
 
