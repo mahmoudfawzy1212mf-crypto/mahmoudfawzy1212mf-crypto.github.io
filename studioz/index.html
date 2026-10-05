@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-0249-879b6b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-0518-4a2a8f";</script>
 
 <script>
 'use strict';
@@ -33125,6 +33125,177 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
     return base.apply(this, arguments);
   })(punchGeoBase);
 })();
+/* =====================================================================
+   Ninety Studioz v6.53 — open the office door from the app (Mahmoud, 5 Oct — go-ahead):
+   · an NFC sticker beside the Hikvision door station (DS-KV6113) carries the link #/door — tapping the phone opens the
+     app on that page and the door opens; the same from the «Open the door» button (dashboard + menu).
+   · the server (Edge `door`) checks the person (active employee, role allowed, not blocked, inside the hours, inside the
+     office zone when set) and hands the command to the bridge on the office server, which opens the door on the LAN —
+     no port is opened on the router. Every attempt is logged (col `doorlog`).
+   · Settings → Door tab (owner): door station IP / user / password (kept on the server only), who may open and when,
+     the office location, test, the bridge program download (token inside), writing the sticker (Android) and the
+     MIFARE card numbers per employee + sync to the door station.
+   Studio only.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  if (typeof ICONS === 'object' && !ICONS.door) ICONS.door = '<path d="M6 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17"/><path d="M3 21h18"/><circle cx="14" cy="12" r="1"/>';
+  const DOOR = { state: null, busy: false, last: null, autoAt: 0, log: null };
+  const call = async body => { const r = await S.sb.functions.invoke('door', { body }); const j = (r && r.data) || {}; if (r.error && !j.result && !j.error) throw new Error(String(r.error.message || r.error)); return j; };
+  const REASON = {
+    disabled: ['فتح الباب من التطبيق متوقف دلوقتي', 'Opening from the app is switched off'],
+    no_employee: ['حسابك مش مربوط بملف موظف شغال', 'Your account is not linked to an active employee'],
+    role: ['مش مسموحلك تفتح الباب من التطبيق', 'You are not allowed to open the door from the app'],
+    denied: ['فتح الباب متوقف ليك — كلّم الإدارة', 'Door opening is blocked for you — talk to the office'],
+    hours: ['برا مواعيد فتح الباب', 'Outside the door hours'],
+    no_location: ['محتاجين موقعك — اسمح للتطبيق بالموقع وجرب تاني', 'We need your location — allow it and try again'],
+    far: ['إنت مش جنب المكتب', 'You are not at the office'],
+    offline: ['برنامج الباب على سيرفر المكتب مش شغال — كلّم الـIT', 'The door program on the office server is not running — call IT'],
+    timeout: ['الانتركم ما ردّش — جرب تاني', 'The door station did not answer — try again'],
+    failed: ['الانتركم رفض الأمر — كلّم الـIT', 'The door station refused the command — call IT'],
+    busy: ['استنى ثانية وجرب تاني', 'Wait a second and try again'],
+    error: ['حصل خطأ — جرب تاني', 'Something went wrong — try again']
+  };
+  const why = k => { const m = REASON[k] || REASON.error; return L(m[0], m[1]); };
+  async function loadState(force) { if (!sbOn() || !S.session || (DOOR.state && !force)) return DOOR.state; try { DOOR.state = await call({ action: 'state' }); } catch (e) { DOOR.state = { ok: false }; } return DOOR.state; }
+  const getPos = () => new Promise(res => { if (!navigator.geolocation) return res(null); navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy || 0) }), () => res(null), { enableHighAccuracy: true, timeout: 7000, maximumAge: 20000 }); });
+  async function openDoor(via) {
+    if (DOOR.busy || !sbOn()) return; DOOR.busy = true; DOOR.last = { phase: 'work', via }; rerender();
+    try {
+      const st = await loadState(true); let pos = null;
+      if (st && st.allowed === false) { DOOR.last = { phase: 'no', reason: st.reason }; return; }
+      if (st && st.geo) pos = await getPos();
+      const j = await call(Object.assign({ action: 'open', via }, pos || {}));
+      DOOR.last = j.ok ? { phase: 'ok' } : { phase: 'no', reason: j.reason || j.result || 'error', dist: j.dist };
+      if (j.ok && navigator.vibrate) navigator.vibrate(80);
+    } catch (e) { DOOR.last = { phase: 'no', reason: 'error' }; }
+    finally { DOOR.busy = false; rerender(); }
+  }
+  ACTIONS.doorOpen = () => openDoor(S.route && S.route.view === 'door' ? 'sticker' : 'button');
+
+  /* ---------- the page the sticker opens ---------- */
+  const resultHTML = () => {
+    const l = DOOR.last;
+    if (!l || l.phase === 'work') return `<div class="doorbig doorwork">${icon('door')}<b>${L('بيفتح الباب…', 'Opening the door…')}</b></div>`;
+    if (l.phase === 'ok') return `<div class="doorbig doorok">${icon('check')}<b>${L('الباب اتفتح', 'The door is open')}</b></div>`;
+    return `<div class="doorbig doorno">${icon('alert')}<b>${why(l.reason)}</b>${l.reason === 'far' && l.dist ? `<span class="small muted">${L('المسافة', 'Distance')} ≈ ${l.dist} m</span>` : ''}</div>`;
+  };
+  function page() {
+    if (!DOOR.busy && Date.now() - DOOR.autoAt > 15000) { DOOR.autoAt = Date.now(); setTimeout(() => openDoor('sticker'), 50); }
+    return `<div class="card doorpage">${resultHTML()}<button type="button" class="btn p" data-action="doorOpen" ${DOOR.busy ? 'disabled' : ''} style="font-size:17px;padding:12px 28px">${icon('door')}${L('افتح الباب', 'Open the door')}</button>
+      <p class="tiny muted" style="margin-top:12px">${L('كل فتحة بتتسجّل باسمك ووقتها.', 'Every opening is logged with your name and time.')}</p></div>`;
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style>.doorpage{display:flex;flex-direction:column;align-items:center;text-align:center;padding:34px 18px;gap:16px}.doorbig{display:flex;flex-direction:column;align-items:center;gap:10px}.doorbig svg{width:64px;height:64px}.doorbig b{font-size:19px}.doorok{color:var(--good-ink,#16a34a)}.doorno{color:var(--serious-ink,#dc2626)}.doorwork svg{animation:doorp 1s ease-in-out infinite}@keyframes doorp{50%{opacity:.35}}#doorcard{display:flex;align-items:center;gap:12px;flex-wrap:wrap}#doorcard .grow{flex:1}</style>`);
+  Object.assign(VIEW_TITLES, { door: 'الباب' });
+  EXTRA_VIEWS.door = () => page();
+  EXTRA_TITLES.door = () => ({ title: L('الباب', 'Door'), sub: L('فتح باب المكتب', 'Open the office door') });
+  Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('door')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['door']); });
+  { const at = NAV.findIndex(n => n.id === 'dashboard'); NAV.splice(at >= 0 ? at + 1 : 1, 0, { id: 'door', label: 'افتح الباب', short: 'الباب', icon: 'door' }); }
+
+  /* ---------- dashboard button ---------- */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!S.session || !S.route || S.route.view !== 'dashboard' || !sbOn()) return; const v = document.getElementById('view'); if (!v || v.querySelector('#doorcard')) return;
+    if (!DOOR.state) { loadState().then(s => { if (s && s.allowed) rerender(); }); return; }
+    if (!DOOR.state.allowed) return;
+    const l = DOOR.last; const msg = !l ? '' : l.phase === 'work' ? L('بيفتح…', 'Opening…') : l.phase === 'ok' ? L('الباب اتفتح ✓', 'Door open ✓') : why(l.reason);
+    v.insertAdjacentHTML('afterbegin', `<div class="card" id="doorcard"><div class="grow"><b>${L('باب المكتب', 'Office door')}</b>${msg ? `<div class="small ${l && l.phase === 'no' ? 'doorno' : 'muted'}">${esc(msg)}</div>` : ''}</div><button type="button" class="btn p" data-action="doorOpen" ${DOOR.busy ? 'disabled' : ''}>${icon('door')}${L('افتح الباب', 'Open the door')}</button></div>`);
+  });
+  document.addEventListener('nf:login', () => { DOOR.state = null; setTimeout(() => loadState(true).then(() => rerender()), 2500); });
+
+  /* ---------- Settings → «الباب» (owner) ---------- */
+  const ROLES = [['manager', 'الآرت دايركتور', 'Art director'], ['hr', 'الحسابات والموارد البشرية', 'Accounts & HR'], ['head', 'رئيس قسم', 'Team lead'], ['office', 'مهندس', 'Engineer'], ['acc', 'مسؤول الحسابات', 'Accountant'], ['employee', 'موظف', 'Staff']];
+  const dcfg = () => { const st = S.ui.stuSecret || {}; try { return JSON.parse(st.door_cfg || '{}') || {}; } catch (e) { return {}; } };
+  const RES_TXT = { opened: ['اتفتح', 'opened'], refused: ['مرفوض', 'refused'], offline: ['البرنامج مش شغال', 'program offline'], timeout: ['ما ردّش', 'no answer'], failed: ['فشل', 'failed'] };
+  const VIA_TXT = { sticker: ['ستيكر', 'sticker'], button: ['زرار', 'button'], test: ['تجربة', 'test'] };
+  async function loadLog() { try { const { data } = await S.sb.from('docs').select('data').eq('col', 'doorlog').order('updated_at', { ascending: false }).limit(30); DOOR.log = (data || []).map(r => r.data).sort((a, b) => String(b.at).localeCompare(String(a.at))); } catch (e) { DOOR.log = []; } rerender(); }
+  EXTRA_SETTINGS.studoor = { label: 'الباب', render: () => {
+    if (!isAdmin()) return `<div class="card"><p class="small muted">${L('للمالك فقط', 'Owner only')}</p></div>`;
+    const st = S.ui.stuSecret || {};
+    if (!S.ui.stuSecretAsked && sbOn()) { S.ui.stuSecretAsked = true; Promise.resolve().then(() => S.sb.rpc('nf_secret_status')).then(r => { S.ui.stuSecret = (r && r.data) || {}; rerender(); }, () => { S.ui.stuSecret = {}; }); }
+    if (DOOR.log === null && sbOn()) { DOOR.log = []; loadLog(); }
+    const c = dcfg(); const roles = Array.isArray(c.roles) && c.roles.length ? c.roles : ROLES.map(r => r[0]); const g = c.geo || {};
+    const seen = st.door_seen ? new Date(st.door_seen) : null; const online = seen && Date.now() - seen.getTime() < 90000;
+    const ws = sortBy(list('workers').filter(w => w.status !== 'inactive'), w => w.name);
+    const f = (k, l, v, extra) => `<div class="field"><label>${l}</label><input name="${k}" class="ltr notr" value="${esc(v == null ? '' : v)}" ${extra || ''}></div>`;
+    const deny = new Set(c.deny || []);
+    return `<form class="card" id="studoorform"><h3>${icon('door')} ${L('فتح باب المكتب من التطبيق', 'Opening the office door from the app')}</h3>
+      <p class="small muted">${L('الانتركم: Hikvision DS-KIS603-P (وحدة الباب DS-KV6113). البرنامج اللي على سيرفر المكتب هو اللي بيفتح الباب على الشبكة الداخلية — مفيش بورت مفتوح على الراوتر. الباسورد بيتحفظ على السيرفر بس ومش بيتعرض تاني.', 'Door station: Hikvision DS-KIS603-P (DS-KV6113). The program on the office server opens the door on the local network — no port is opened on the router. The password is kept on the server only and never shown again.')}</p>
+      <p class="small"><b>${L('الحالة:', 'Status:')}</b> ${st.door ? `<span class="doorok">${L('بيانات الانتركم مسجّلة ✓', 'Door station details saved ✓')}</span>` : `<span class="doorno">${L('بيانات الانتركم لسه ما اتسجلتش', 'Door station details not saved yet')}</span>`} · ${online ? `<span class="doorok">${L('برنامج السيرفر شغال ✓', 'Server program running ✓')}</span>` : `<span class="doorno">${st.door_bridge ? L('برنامج السيرفر مش متصل', 'Server program not connected') : L('برنامج السيرفر لسه ما اتسطّبش', 'Server program not installed yet')}</span>`}${seen ? ` <span class="tiny muted">(${L('آخر اتصال', 'last seen')} ${seen.toLocaleString()})</span>` : ''}</p>
+      <div class="form">
+        ${f('door_ip', L('IP وحدة الباب على شبكة المكتب', 'Door station IP on the office network'), st.door_ip || '', 'placeholder="192.168.1.64"')}
+        ${f('door_user', L('اسم المستخدم', 'User name'), st.door_user || 'admin')}
+        ${f('door_pass', L('باسورد الأدمن', 'Admin password') + (st.door ? ' — ' + L('مسجّل ✓', 'saved ✓') : ''), '', `type="password" autocomplete="new-password" placeholder="${st.door ? L('اتركه فارغًا للإبقاء على الحالي', 'Leave empty to keep the current one') : '••••••••'}"`)}
+      </div>
+      <h4 style="margin:14px 0 6px">${L('مين يفتح وإمتى', 'Who may open and when')}</h4>
+      <label class="check"><input type="checkbox" name="enabled" ${c.enabled !== false ? 'checked' : ''}> ${L('فتح الباب من التطبيق شغال', 'Opening from the app is on')}</label>
+      <div class="row" style="gap:12px;flex-wrap:wrap;margin:6px 0">${ROLES.map(([k, a, b]) => `<label class="check"><input type="checkbox" name="role_${k}" ${roles.includes(k) ? 'checked' : ''}> ${L(a, b)}</label>`).join('')}</div>
+      <div class="form">${f('from', L('من الساعة', 'From'), c.from || '07:00', 'type="time"')}${f('to', L('لحد الساعة', 'To'), c.to || '22:00', 'type="time"')}</div>
+      <p class="tiny muted">${L('المالك بيفتح في أي وقت ومن أي مكان.', 'The owner can open any time, from anywhere.')}</p>
+      <h4 style="margin:14px 0 6px">${L('موقع المكتب (عشان الباب ما يتفتحش من برا)', 'Office location (so the door is not opened from elsewhere)')}</h4>
+      <label class="check"><input type="checkbox" name="geoCheck" ${c.geoCheck !== false ? 'checked' : ''}> ${L('اتأكد إن الموظف جنب المكتب', 'Check the employee is at the office')}</label>
+      <div class="form">${f('lat', 'Latitude', g.lat || '')}${f('lng', 'Longitude', g.lng || '')}${f('radius', L('نصف القطر (متر)', 'Radius (m)'), g.radius || 80, 'type="number" min="30" max="500"')}</div>
+      <button type="button" class="btn sm" data-action="doorHere">${icon('map')}${L('استخدم موقعي دلوقتي (وإنت في المكتب)', 'Use my current location (while at the office)')}</button>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button><button type="button" class="btn" data-action="doorTest">${icon('door')}${L('تجربة فتح', 'Test opening')}</button><span class="small" id="doormsg"></span></div>
+    </form>
+    <div class="card" style="margin-top:14px"><h3>${L('برنامج سيرفر المكتب', 'Office server program')}</h3>
+      <p class="small muted">${L('دوس «تنزيل البرنامج» — هينزل ملفين: door-bridge.js (فيه مفتاح خاص بالمكتب) وinstall-windows.bat. الـIT يحطهم في فولدر واحد على سيرفر المكتب ويشغّل install-windows.bat كـAdministrator (محتاج Node.js 18 أو أحدث). البرنامج بيشتغل لوحده مع تشغيل السيرفر. أي تنزيل جديد بيلغي المفتاح القديم.', 'Press «Download the program» — two files: door-bridge.js (with the office key inside) and install-windows.bat. IT puts them in one folder on the office server and runs install-windows.bat as Administrator (needs Node.js 18+). It starts with the server. A new download cancels the old key.')}</p>
+      <button type="button" class="btn p" data-action="doorBridge">${L('تنزيل البرنامج', 'Download the program')}</button></div>
+    <div class="card" style="margin-top:14px"><h3>${L('ستيكر الـNFC', 'NFC sticker')}</h3>
+      <p class="small muted">${L('ستيكر NTAG215 جنب الانتركم. اكتب عليه الرابط ده:', 'An NTAG215 sticker beside the door station. Write this link on it:')}</p>
+      <div class="ltr notr" style="font-family:monospace;padding:8px;border:1px dashed var(--line,#ccc);border-radius:8px;word-break:break-all">${esc(doorUrl())}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn" data-action="doorSticker">${L('اكتب الستيكر من الموبايل ده (أندرويد)', 'Write the sticker from this phone (Android)')}</button><button type="button" class="btn" data-action="doorCopy">${icon('copy')}${L('نسخ الرابط', 'Copy the link')}</button></div>
+      <p class="tiny muted">${L('على الآيفون: برنامج NFC Tools المجاني ← Write ← Add a record ← URL ← الصق الرابط ← Write وقرّب الستيكر.', 'On iPhone: the free NFC Tools app → Write → Add a record → URL → paste the link → Write and hold the sticker.')}</p></div>
+    <form class="card" id="studoorcards" style="margin-top:14px"><h3>${L('كروت الانتركم (MIFARE)', 'Door cards (MIFARE)')}</h3>
+      <p class="small muted">${L('رقم الكارت لكل موظف — «مزامنة» بتنزّلهم على الانتركم، والموظف اللي اتوقف كارته بيتشال. «منع» = ما يفتحش من التطبيق.', 'Card number per employee — «Sync» loads them onto the door station; a stopped employee\'s card is removed. «Block» = cannot open from the app.')}</p>
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الموظف', 'Employee')}</th><th>${L('رقم الكارت', 'Card number')}</th><th>${L('منع', 'Block')}</th></tr></thead><tbody>${ws.map(w => `<tr><td>${esc(w.name)}</td><td><input name="card_${w.id}" class="ltr notr" inputmode="numeric" value="${esc(w.doorCard || '')}" style="max-width:180px"></td><td><input type="checkbox" name="deny_${w.id}" ${deny.has(w.id) ? 'checked' : ''}></td></tr>`).join('')}</tbody></table></div>
+      <div class="row" style="gap:8px;margin-top:10px;align-items:center"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button><button type="button" class="btn" data-action="doorCards">${L('مزامنة مع الانتركم', 'Sync with the door station')}</button><span class="small" id="doorcardmsg"></span></div></form>
+    <div class="card" style="margin-top:14px"><div class="cardhead"><h3>${L('سجل الباب', 'Door log')}</h3><div class="grow"></div><button type="button" class="btn xs" data-action="doorLog">${L('تحديث', 'Refresh')}</button></div>
+      ${(DOOR.log || []).length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الوقت', 'Time')}</th><th>${L('الاسم', 'Name')}</th><th>${L('من', 'Via')}</th><th>${L('النتيجة', 'Result')}</th></tr></thead><tbody>${DOOR.log.map(x => `<tr><td class="small">${esc(new Date(x.at).toLocaleString())}</td><td>${esc(x.name || '')}</td><td class="small">${esc(L(...(VIA_TXT[x.via] || [x.via || '', x.via || ''])))}</td><td class="small ${x.result === 'opened' ? 'doorok' : 'doorno'}">${esc(L(...(RES_TXT[x.result] || [x.result || '', x.result || ''])))}${x.reason ? ' — ' + esc(why(x.reason)) : ''}${x.dist != null && x.reason === 'far' ? ` (${x.dist} m)` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="small muted">${L('لسه مفيش فتحات.', 'No openings yet.')}</p>`}</div>`;
+  } };
+  function doorUrl() { const base = location.origin + location.pathname.replace(/[^/]*$/, ''); return base + '#/door'; }
+  async function saveCfg(patch) { const c = Object.assign(dcfg(), patch); const { error } = await S.sb.rpc('nf_set_secret', { p_key: 'door_cfg', p_value: JSON.stringify(c) }); if (error) throw error; S.ui.stuSecret = Object.assign({}, S.ui.stuSecret, { door_cfg: JSON.stringify(c) }); }
+  document.addEventListener('submit', async ev => {
+    const t = ev.target; if (!t || (t.id !== 'studoorform' && t.id !== 'studoorcards')) return; ev.preventDefault(); if (!isAdmin() || !sbOn()) return;
+    const d = formData(t);
+    try {
+      if (t.id === 'studoorform') {
+        for (const k of ['door_ip', 'door_user', 'door_pass']) { const v = String(d[k] || '').trim(); if (!v) continue; const { error } = await S.sb.rpc('nf_set_secret', { p_key: k, p_value: v }); if (error) throw error; }
+        const lat = parseFloat(d.lat), lng = parseFloat(d.lng);
+        await saveCfg({ enabled: !!t.querySelector('[name="enabled"]').checked, roles: ROLES.map(r => r[0]).filter(k => t.querySelector(`[name="role_${k}"]`).checked), from: d.from || '07:00', to: d.to || '22:00', geoCheck: !!t.querySelector('[name="geoCheck"]').checked, geo: lat && lng ? { lat, lng, radius: Math.max(30, Math.min(500, parseInt(d.radius, 10) || 80)) } : null });
+        t.querySelectorAll('input[type=password]').forEach(i => { i.value = ''; });
+      } else {
+        const deny = []; for (const w of list('workers')) { const inp = t.querySelector(`[name="card_${w.id}"]`); if (!inp) continue; const v = String(inp.value || '').replace(/\D/g, ''); if (v !== String(w.doorCard || '')) await Store.update('workers', w.id, v ? { doorCard: v } : { doorCard: null, doorCardWas: w.doorCard || null }); const dn = t.querySelector(`[name="deny_${w.id}"]`); if (dn && dn.checked) deny.push(w.id); }
+        await saveCfg({ deny });
+      }
+      S.ui.stuSecretAsked = false; DOOR.state = null; toast(L('اتحفظت', 'Saved')); rerender();
+    } catch (e) { toast(L('فشل الحفظ: ', 'Save failed: ') + (e.message || e), 'err'); }
+  });
+  ACTIONS.doorHere = async () => { const p = await getPos(); if (!p) { toast(L('مقدرتش أجيب الموقع — اسمح بالموقع', 'Could not get the location — allow it'), 'err'); return; } const f = document.getElementById('studoorform'); if (!f) return; f.querySelector('[name="lat"]').value = p.lat.toFixed(6); f.querySelector('[name="lng"]').value = p.lng.toFixed(6); toast(L(`اتحدد (دقة ${p.acc} م) — دوس حفظ`, `Set (accuracy ${p.acc} m) — press Save`)); };
+  ACTIONS.doorTest = async () => { const m = document.getElementById('doormsg'); if (m) m.textContent = '…'; try { const j = await call({ action: 'test' }); if (m) { m.textContent = j.ok ? L('الباب اتفتح ✓', 'Door opened ✓') : why(j.reason || j.result) + (j.detail ? ' — ' + j.detail : ''); m.className = 'small ' + (j.ok ? 'doorok' : 'doorno'); } loadLog(); } catch (e) { if (m) m.textContent = String(e.message || e); } };
+  ACTIONS.doorLog = () => loadLog();
+  ACTIONS.doorCopy = async () => { try { await navigator.clipboard.writeText(doorUrl()); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(doorUrl()); } };
+  ACTIONS.doorSticker = async () => {
+    if (!('NDEFReader' in window)) { toast(L('الموبايل ده ما بيكتبش NFC من المتصفح — استخدم أندرويد بكروم أو NFC Tools على الآيفون', 'This phone cannot write NFC from the browser — use Chrome on Android or NFC Tools on iPhone'), 'err'); return; }
+    try { toast(L('قرّب الستيكر من ضهر الموبايل…', 'Hold the sticker to the back of the phone…')); const nd = new window.NDEFReader(); await nd.write({ records: [{ recordType: 'url', data: doorUrl() }] }); toast(L('اتكتب الستيكر ✓', 'Sticker written ✓')); } catch (e) { toast(L('ما اتكتبش: ', 'Not written: ') + (e.message || e), 'err'); }
+  };
+  ACTIONS.doorCards = async () => { const m = document.getElementById('doorcardmsg'); if (m) m.textContent = '…'; try { const j = await call({ action: 'cards' }); if (m) { m.textContent = j.ok ? L(`اتزامن ✓ (${j.set} كارت، اتشال ${j.del})`, `Synced ✓ (${j.set} cards, ${j.del} removed)`) : L('ما اتزامنش: ', 'Not synced: ') + (j.detail || j.error || ''); m.className = 'small ' + (j.ok ? 'doorok' : 'doorno'); } } catch (e) { if (m) m.textContent = String(e.message || e); } };
+  ACTIONS.doorBridge = async () => {
+    if (!isAdmin() || !sbOn()) return;
+    if (!(await confirmDlg(L('تنزيل البرنامج بيعمل مفتاح جديد ويلغي القديم — لو فيه نسخة متسطّبة لازم تتبدّل. نكمّل؟', 'Downloading makes a new key and cancels the old one — an installed copy must be replaced. Continue?'), L('نزّل', 'Download')))) return;
+    try {
+      const j = await call({ action: 'token' }); if (!j.token) throw new Error('token');
+      const src = await (await fetch('./door-bridge.js', { cache: 'no-store' })).text(); if (!/__DOOR_TOKEN__/.test(src)) throw new Error('bridge file');
+      const base = String((typeof nfConfig === 'function' && nfConfig().supabaseUrl) || S.sb.supabaseUrl || '').replace(/\/$/, ''); if (!/^https?:\/\//.test(base)) throw new Error('url'); const fnUrl = base + '/functions/v1/door';
+      const body = src.replace('__DOOR_TOKEN__', j.token).replace('__DOOR_URL__', fnUrl);
+      const dl = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); };
+      dl('door-bridge.js', body, 'text/javascript');
+      setTimeout(() => dl('install-windows.bat', BAT, 'application/octet-stream'), 700);
+      S.ui.stuSecretAsked = false; toast(L('اتنزل — ابعت الملفين للـIT', 'Downloaded — send both files to IT'));
+    } catch (e) { toast(L('ما اتنزلش: ', 'Not downloaded: ') + (e.message || e), 'err'); }
+  };
+  const BAT = ['@echo off', 'REM Ninety Studioz - door bridge installer (run as Administrator)', 'cd /d "%~dp0"', 'where node >nul 2>nul || (echo Node.js 18+ is required: https://nodejs.org & pause & exit /b 1)', 'if not exist "C:\\NinetyDoor" mkdir "C:\\NinetyDoor"', 'copy /Y "door-bridge.js" "C:\\NinetyDoor\\door-bridge.js" >nul', 'for /f "delims=" %%i in (\'where node\') do (set "NODE=%%i" & goto :found)', ':found', 'schtasks /Create /TN "NinetyDoorBridge" /TR "\\"%NODE%\\" C:\\NinetyDoor\\door-bridge.js" /SC ONSTART /RU SYSTEM /RL HIGHEST /F', 'schtasks /Run /TN "NinetyDoorBridge"', 'echo.', 'echo Installed. The door program now starts with the server. Log: C:\\NinetyDoor\\door-bridge.log', 'pause', ''].join('\r\n');
+}
 </script>
 
 <!-- QR attendance + split breaks (Studioz add-on, loaded after the app) - keep this line on rebuilds -->
