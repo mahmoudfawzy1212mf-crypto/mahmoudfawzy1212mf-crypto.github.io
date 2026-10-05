@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261005-1200-7ace49";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261005-1209-0b2eb6";</script>
 
 <script>
 'use strict';
@@ -31922,7 +31922,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const cfg = () => Object.assign({ minutes: 10, exempt: true, on: true }, (S.settings && S.settings.stuLock) || {});
   const LK = { on: false, why: '', last: Date.now(), busy: false };
   const wrec = () => (S.session && S.session.workerId ? byId('workers', S.session.workerId) : null);
-  const exempt = () => { const c = cfg(); return !c.on || (c.exempt && (isAdmin() || role() === 'manager')); };
+  /* v6.57: the owner can also exempt specific people (stuLock.exemptIds — Saeed, 5 Oct) */
+  const exempt = () => { const c = cfg(); const wid = S.session && S.session.workerId; return !c.on || (c.exempt && (isAdmin() || role() === 'manager')) || (wid && Array.isArray(c.exemptIds) && c.exemptIds.includes(wid)); };
   const lsKey = () => 'nf.lock.' + ((S.session && (S.session.workerId || S.session.id)) || '');
   const savedLock = () => { try { return JSON.parse(localStorage.getItem(lsKey()) || 'null'); } catch (e) { return null; } };
 
@@ -32020,8 +32021,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     <label class="check full"><input type="checkbox" name="on" ${c.on ? 'checked' : ''}> ${L('تفعيل القفل', 'Lock enabled')}</label>
     ${field(L('يتقفل بعد (دقايق من غير استخدام)', 'Lock after (minutes without use)'), inp('minutes', c.minutes, 'type="number" min="1" max="120" class="ltr"'))}
     <label class="check full"><input type="checkbox" name="exempt" ${c.exempt ? 'checked' : ''}> ${L('المالك والمدير الفني معفيين', 'Owner and art director exempt')}</label>
+    ${field(L('موظفين معفيين من القفل', 'People exempt from the lock'), `<select name="exemptIds" multiple size="6">${list('workers').filter(w => w.status !== 'stopped').sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')).map(w => `<option value="${esc(w.id)}" ${(c.exemptIds || []).includes(w.id) ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>`)}
     </div><div class="row" style="justify-content:flex-end;margin-top:12px"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button></div></form>`; } };
-  document.addEventListener('submit', async ev => { if (ev.target.id !== 'stulockcfg') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); try { await Store.saveSettings(Object.assign({}, S.settings, { stuLock: { on: !!d.on, minutes: Math.max(1, +d.minutes || 10), exempt: !!d.exempt } })); toast(L('اتحفظت', 'Saved')); } catch (e) { toast(L('ماتحفظتش', 'Not saved'), 'err'); } });
+  document.addEventListener('submit', async ev => { if (ev.target.id !== 'stulockcfg') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); try { await Store.saveSettings(Object.assign({}, S.settings, { stuLock: { on: !!d.on, minutes: Math.max(1, +d.minutes || 10), exempt: !!d.exempt, exemptIds: Array.from(ev.target.querySelectorAll('[name=exemptIds] option:checked')).map(o => o.value) } })); toast(L('اتحفظت', 'Saved')); } catch (e) { toast(L('ماتحفظتش', 'Not saved'), 'err'); } });
 
   const css = document.createElement('style'); css.textContent = `
 .stulock{position:fixed;inset:0;z-index:200;background:#0b0d10;color:#eceff3;display:flex;align-items:center;justify-content:center;padding:24px 16px;font-family:var(--font);font-weight:300;overflow:auto}
