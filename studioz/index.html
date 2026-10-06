@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1937-4ac5f3";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-2335-36dd33";</script>
 
 <script>
 'use strict';
@@ -34591,6 +34591,186 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(mark, 30));
   window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(fitKpis, 120); });
   let t = 0; try { new MutationObserver(() => { clearTimeout(t); t = setTimeout(mark, 80); }).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* ignore */ }
+})();
+/* =====================================================================
+   v6.73 — Google Maps traffic for the drivers (Mahmoud, 7 Oct: «link Google Maps so it tells and shows the drivers if the
+   road is crowded or not» → go-ahead).
+   · Trip page: «Traffic now» — expected time with live traffic vs. the normal time, green / orange / red, distance, and a
+     faster alternative route when Google has one (driver, fleet manager, managers).
+   · Server (Edge "traffic", every 10 min): a trip on the road with a traffic delay of 15+ min → notification to the driver and
+     the fleet manager; a trip of today, about an hour before its time → «leave earlier» advice when traffic adds 10+ min.
+   · Fleet → «Traffic & map» tab: Google map with the live traffic layer + the trucks on the road (driver phone / GPS)
+     and today's trips with their traffic.
+   · Settings → «Google Maps» (owner): the Google keys are typed here once and saved on the server only — never shown again;
+     a daily cap keeps the usage inside Google's free monthly quota.
+   Factory only (the studio has no fleet). The «open the road in Google Maps» button stays as it is.
+   ===================================================================== */
+(function () {
+  if (typeof EXTRA_VIEWS === 'undefined' || !EXTRA_VIEWS.fleet || (typeof isStudioz === 'function' && isStudioz())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const R = () => (typeof role === 'function' ? role() : '');
+  const fleetUser = () => !!S.session && (isAdmin() || ['vice', 'manager', 'fleet', 'driver'].includes(R()) || (typeof canDo === 'function' && canDo('fleet')));
+  const TR = { st: null, stAt: 0, res: {}, busy: {}, mapKey: null };
+  async function call(body) { const r = await S.sb.functions.invoke('traffic', { body }); if (r.error && !r.data) throw r.error; return r.data || {}; }
+  async function status(force) {
+    if (!hosted() || !fleetUser()) return null;
+    if (!force && TR.st && Date.now() - TR.stAt < 10 * 60000) return TR.st;
+    try { TR.st = await call({ action: 'status' }); TR.stAt = Date.now(); } catch (e) { TR.st = TR.st || null; }
+    return TR.st;
+  }
+  const LV = { green: ['good', L('الطريق فاضي', 'Clear road')], orange: ['warn', L('زحمة متوسطة', 'Moderate traffic')], red: ['crit', L('زحمة جامدة', 'Heavy traffic')] };
+  const ERR = { no_key: L('مفتاح جوجل ماب مش متسجل — من الإعدادات ← جوجل ماب', 'Google Maps key not set — Settings → Google Maps'), cap: L('وصلنا للحد اليومي لطلبات جوجل — بكرة يرجع', 'Daily Google limit reached — back tomorrow'), no_dest: L('مفيش لوكيشن محفوظ للوجهة', 'No saved location for the destination'), no_origin: L('مفيش لوكيشن للانطلاق (لوكيشن المصنع من الإعدادات)', 'No start location (factory location in Settings)'), no_route: L('جوجل مالقاش طريق', 'Google found no route') };
+  const errTxt = r => ERR[r && r.error] || (r && r.error === 'google' ? L('جوجل رفض الطلب', 'Google refused the request') + (r.msg ? ` (${esc(r.msg)})` : '') : L('تعذّر جلب الزحمة', 'Could not get traffic'));
+  const isActive = t => t && ['planned', 'approved', 'started'].includes(t.status) && !t.notTaken;
+  const mayTrip = t => isAdmin() || (typeof canFleet === 'function' && canFleet()) || ['vice', 'manager', 'fleet'].includes(R()) || (t.driverId && t.driverId === (S.session && S.session.workerId));
+  function badge(r, small) {
+    if (!r) return `<span class="muted small">${L('جارٍ الحساب…', 'Calculating…')}</span>`;
+    if (!r.ok) return `<span class="muted small">${errTxt(r)}</span>`;
+    const lv = LV[r.level] || LV.green;
+    return `<span class="badge ${lv[0]}">${lv[1]}</span> <b class="num">${r.min}</b> ${L('دقيقة', 'min')}${r.delay ? ` <span class="small ${r.level === 'green' ? 'muted' : ''}">(${L('بدل', 'instead of')} ${r.base} — +${r.delay})</span>` : ''}${small ? '' : ` · <span class="num">${fmtNum(r.km)}</span> ${L('كم', 'km')}`}`;
+  }
+  async function route(t, force) {
+    const id = t.id; const c = TR.res[id];
+    if (!force && c && Date.now() - c.t < 5 * 60000) return c.r;
+    if (TR.busy[id]) return c ? c.r : null; TR.busy[id] = 1;
+    try { const r = await call({ action: 'route', tripId: id, force: !!force }); TR.res[id] = { r, t: Date.now() }; return r; }
+    catch (e) { const r = { error: 'net' }; TR.res[id] = { r, t: Date.now() - 4 * 60000 }; return r; }
+    finally { delete TR.busy[id]; }
+  }
+  function cardBody(t, r) {
+    if (!r) return `<div class="muted small">${L('جارٍ حساب الزحمة من جوجل…', 'Getting traffic from Google…')}</div>`;
+    if (!r.ok) return `<div class="muted small">${errTxt(r)}</div>`;
+    const lv = LV[r.level] || LV.green;
+    return `<div class="trf-row"><span class="trf-dot ${r.level}"></span><div class="grow"><div class="bold">${lv[1]}</div><div class="small ink2">${r.back ? L('الرجوع للمصنع', 'Back to the factory') : L('للوجهة', 'To the destination')}${r.to ? `: ${esc(r.to)}` : ''}${r.src === 'phone' ? ` · ${L('من مكان السواق دلوقتي', 'from the driver\'s current position')}` : ''}</div></div></div>
+      <div class="grid g3" style="gap:8px;font-size:13px;margin-top:10px"><div><div class="tiny muted">${L('الوقت المتوقع بالزحمة', 'Expected time with traffic')}</div><b class="num">${r.min}</b> ${L('دقيقة', 'min')}</div><div><div class="tiny muted">${L('الوقت العادي', 'Normal time')}</div><b class="num">${r.base}</b> ${L('دقيقة', 'min')}${r.delay ? ` <span class="badge ${lv[0]}">+${r.delay}</span>` : ''}</div><div><div class="tiny muted">${L('المسافة', 'Distance')}</div><b class="num">${fmtNum(r.km)}</b> ${L('كم', 'km')}${r.via ? `<div class="tiny muted">${L('عن طريق', 'via')} ${esc(r.via)}</div>` : ''}</div></div>
+      ${r.alt ? `<div class="banner good" style="margin-top:10px">${icon('map')}<span>${L('في طريق أسرع', 'A faster road')}${r.alt.via ? ` ${L('عن طريق', 'via')} <b>${esc(r.alt.via)}</b>` : ''}: <b class="num">${r.alt.min}</b> ${L('دقيقة', 'min')} (${L('يوفر', 'saves')} ${r.alt.save}) — ${L('جوجل ماب هيقترحه لما تفتح الطريق', 'Google Maps offers it when you open the road')}</span></div>` : ''}
+      ${r.depart ? `<div class="tiny muted" style="margin-top:6px">${L('محسوب على ميعاد التحرك', 'Calculated for the departure time')} ${esc(t.time || '')}${r.delay >= 10 ? ` — ${L('يُفضّل تتحرك بدري', 'better leave earlier by')} ~${r.delay} ${L('دقيقة', 'min')}` : ''}</div>` : ''}
+      <div class="tiny muted" style="margin-top:6px">${L('آخر تحديث', 'Updated')} ${typeof agoTxt === 'function' ? agoTxt(r.at) : esc(String(r.at || '').slice(11, 16))}</div>`;
+  }
+  async function fillCard(id, force) {
+    const t = byId('trips', id); const box = document.getElementById('trf-' + id); if (!t || !box) return;
+    if (force) box.innerHTML = cardBody(t, null);
+    const r = await route(t, force); const b2 = document.getElementById('trf-' + id); if (b2) b2.innerHTML = cardBody(t, r);
+  }
+  ACTIONS.trafficRefresh = id => fillCard(id, true);
+
+  /* ---------- 1) trip page: «Traffic now» ---------- */
+  vTripDetail = (base => id => {
+    const html = base(id); const t = byId('trips', id);
+    if (!t || !isActive(t) || !hosted() || !fleetUser() || !mayTrip(t)) return html;
+    if (TR.st && !TR.st.hasKey) return html;
+    const c = TR.res[id];
+    const card = `<div class="card trf-card"><div class="cardhead"><h3>${icon('map')}${L('الزحمة دلوقتي', 'Traffic now')}</h3><div class="grow"></div><button type="button" class="btn xs ghost" data-action="trafficRefresh" data-arg="${esc(id)}">${L('تحديث', 'Refresh')}</button></div><div id="trf-${esc(id)}">${cardBody(t, c && c.r)}</div></div>`;
+    setTimeout(() => { if (!c || Date.now() - c.t > 5 * 60000) fillCard(id); }, 20);
+    const i = html.indexOf('<div class="card">'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+  })(vTripDetail);
+  document.addEventListener('nf:ready', () => setTimeout(() => status(), 2500));
+
+  /* ---------- 2) Fleet → «Traffic & map» ---------- */
+  const fleetBase = vFleet;
+  vFleet = function () {
+    let html = fleetBase.apply(this, arguments);
+    if (isDriver() || !hosted() || !fleetUser()) return html;
+    const f = S.ui.filter.fleet || {};
+    html = html.replace(/(<div class="tabs">[\s\S]*?)(<\/div>)/, (m, a, b) => a + `<button class="${f.tab === 'traffic' ? 'on' : ''}" data-action="fleetTab" data-arg="traffic">${L('الزحمة والخريطة', 'Traffic & map')}</button>` + b);
+    if (f.tab !== 'traffic') return html;
+    const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
+    return html.slice(0, cut) + trafficTab();
+  };
+  function todays() { const d = todayISO(); return sortBy(list('trips').filter(t => isActive(t) && (t.status === 'started' || t.date === d)), t => (t.status === 'started' ? '0' : '1') + (t.time || '')); }
+  function trafficTab() {
+    setTimeout(loadTab, 30);
+    const ts = todays();
+    return `<div class="card"><div class="cardhead"><h3>${L('خريطة الزحمة', 'Traffic map')}</h3><span class="tiny muted">${L('أخضر = فاضي · برتقالي = متوسط · أحمر = زحمة', 'green = clear · orange = moderate · red = heavy')}</span></div><div id="trf-map" class="trf-map"><div class="muted small" style="padding:14px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div></div>
+      <div class="card"><div class="cardhead"><h3>${L('مشاوير النهارده', 'Today\'s trips')}</h3><span class="muted small">${ts.length}</span></div>${ts.length ? `<div class="list">${ts.map(t => `<div class="item" data-action="go" data-arg="fleet/${esc(t.id)}"><div class="main"><div class="title"><span class="code">${esc(t.number || '')}</span><span>${esc(t.purpose || '')}</span></div><div class="meta"><span>${esc(t.time || '')}</span><span>${esc(typeof assigneeName === 'function' ? assigneeName(t.driverId) : '')}</span><span>${esc((TRIP_STATUS[t.status] || [''])[0])}</span></div></div><div class="end" id="trfb-${esc(t.id)}">${badge(TR.res[t.id] && TR.res[t.id].r, true)}</div></div>`).join('')}</div>` : `<div class="muted small">${L('مفيش مشاوير النهارده', 'No trips today')}</div>`}</div>`;
+  }
+  async function loadTab() {
+    const st = await status(); const box = document.getElementById('trf-map'); if (!box) return;
+    if (!st || !st.hasKey) { box.innerHTML = `<div class="banner warn">${icon('alert')}<span>${isAdmin() ? L('اربط جوجل ماب الأول من الإعدادات ← «جوجل ماب».', 'Connect Google Maps first from Settings → «Google Maps».') : L('جوجل ماب لسه مش مربوط — صاحب الشركة يربطه من الإعدادات.', 'Google Maps is not connected yet — the owner connects it from Settings.')}</span></div>`; return; }
+    for (const t of todays()) { route(t).then(r => { const b = document.getElementById('trfb-' + t.id); if (b) b.innerHTML = badge(r, true); }); }
+    if (!st.hasMapKey) { box.innerHTML = noMap(); return; }
+    try { if (TR.mapKey == null) { const r = await call({ action: 'mapkey' }); TR.mapKey = (r && r.key) || ''; } } catch (e) { TR.mapKey = ''; }
+    if (!TR.mapKey) { box.innerHTML = noMap(); return; }
+    try { await loadGmaps(TR.mapKey); drawMap(); } catch (e) { box.innerHTML = noMap(L('الخريطة ما اتحملتش — اتأكد إن مفتاح الخريطة مسموح لموقع السيستم.', 'The map did not load — check that the map key allows the system website.')); }
+  }
+  const trafficUrl = () => { const fz = typeof factoryZone === 'function' ? factoryZone() : null; return `https://www.google.com/maps/@${fz ? fz.lat : 30.03},${fz ? fz.lng : 31.45},12z/data=!5m1!1e1`; };
+  const noMap = msg => `<div class="stack" style="gap:8px;padding:6px 2px">${msg ? `<div class="banner warn">${icon('alert')}<span>${msg}</span></div>` : `<div class="small ink2">${L('الخريطة جوه السيستم محتاجة «مفتاح الخريطة» من الإعدادات. لحد ما يتحط، افتح خريطة الزحمة في جوجل ماب:', 'The map inside the system needs the «map key» in Settings. Until then, open the traffic map in Google Maps:')}</div>`}<a class="btn p" href="${trafficUrl()}" target="_blank" rel="noopener">${icon('map')}${L('خريطة الزحمة في جوجل ماب', 'Traffic map in Google Maps')}</a></div>`;
+  let gmP = null;
+  function loadGmaps(key) {
+    if (window.google && window.google.maps && window.google.maps.Map) return Promise.resolve();
+    if (gmP) return gmP;
+    gmP = new Promise((res, rej) => {
+      window.__nfGm = () => res(); window.gm_authFailure = () => { gmP = null; rej(new Error('auth')); const b = document.getElementById('trf-map'); if (b) b.innerHTML = noMap(L('جوجل رفض مفتاح الخريطة — راجع قيود المفتاح.', 'Google refused the map key — check its restrictions.')); };
+      const s = document.createElement('script'); s.async = true; s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__nfGm&language=${en() ? 'en' : 'ar'}&region=EG&loading=async`;
+      s.onerror = () => { gmP = null; rej(new Error('load')); }; document.head.appendChild(s);
+      setTimeout(() => rej(new Error('timeout')), 20000);
+    });
+    return gmP;
+  }
+  function trucks() {
+    const out = []; const seen = new Set();
+    list('trips').filter(t => t.status === 'started').forEach(t => {
+      const p = (t.track || []).slice(-1)[0] || t.startPos; if (!p || p.lat == null) return;
+      seen.add(t.vehicleId); out.push({ lat: +p.lat, lng: +p.lng, title: `${t.number || ''} — ${typeof assigneeName === 'function' ? assigneeName(t.driverId) : ''}`, sub: `${typeof vehicleName === 'function' ? vehicleName(t.vehicleId) : ''} · ${L('موبايل السواق', 'driver phone')}${p.at && typeof agoTxt === 'function' ? ' · ' + agoTxt(p.at) : ''}`, id: t.id, live: true });
+    });
+    if (typeof gpsState !== 'undefined' && gpsState.positions) list('vehicles').forEach(v => { const p = v.gpsId && gpsState.positions[v.gpsId]; if (!p || p.lat == null || seen.has(v.id)) return; out.push({ lat: +p.lat, lng: +p.lng, title: v.name, sub: `GPS${p.speed != null ? ` · ${p.speed} ${L('كم/س', 'km/h')}` : ''}`, live: false }); });
+    return out;
+  }
+  function drawMap() {
+    const box = document.getElementById('trf-map'); if (!box || !window.google) return;
+    const g = window.google.maps; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
+    box.innerHTML = '<div id="trf-gm" style="width:100%;height:100%"></div>';
+    const map = new g.Map(document.getElementById('trf-gm'), { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: 11, mapTypeControl: false, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy' });
+    new g.TrafficLayer().setMap(map);
+    const bounds = new g.LatLngBounds(); let n = 0; const info = new g.InfoWindow();
+    if (fz) { new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), label: { text: '🏭', fontSize: '18px' } }); bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
+    trucks().forEach(x => {
+      const m = new g.Marker({ map, position: { lat: x.lat, lng: x.lng }, title: x.title, label: { text: '🚚', fontSize: '20px' } }); bounds.extend({ lat: x.lat, lng: x.lng }); n++;
+      m.addListener('click', () => { info.setContent(`<div style="font:13px system-ui;direction:${en() ? 'ltr' : 'rtl'}"><b>${esc(x.title)}</b><div>${esc(x.sub)}</div>${x.id ? `<a href="#/fleet/${esc(x.id)}">${L('افتح المشوار', 'Open the trip')}</a>` : ''}</div>`); info.open({ map, anchor: m }); });
+    });
+    if (n > 1) map.fitBounds(bounds, 60);
+  }
+
+  /* ---------- 3) Settings → «Google Maps» (owner) ---------- */
+  if (typeof EXTRA_SETTINGS !== 'undefined') EXTRA_SETTINGS.gmaps = { label: 'جوجل ماب', render: () => {
+    setTimeout(loadSettings, 30);
+    return `<form class="card" id="gmapsform" autocomplete="off"><h3>${L('جوجل ماب — الزحمة للسواقين', 'Google Maps — traffic for the drivers')}</h3>
+      <p class="small ink2" style="margin:6px 0 10px">${L('المفاتيح بتتحفظ على السيرفر بس ومش بتظهر تاني لحد. سيب الخانة فاضية لو مش عايز تغيّرها.', 'The keys are saved on the server only and are never shown again. Leave a field empty to keep it.')}</p>
+      <div id="gmaps-st" class="small" style="margin-bottom:10px">${hosted() ? L('جارٍ التحميل…', 'Loading…') : `<span class="badge">${L('النسخة المستضافة فقط', 'Hosted version only')}</span>`}</div>
+      <div class="form">${field(L('مفتاح السيرفر (Routes API)', 'Server key (Routes API)'), `<input name="gkey" type="password" autocomplete="new-password" spellcheck="false" placeholder="AIza…" class="ltr">`)}${field(L('مفتاح الخريطة (Maps JavaScript API) — اختياري', 'Map key (Maps JavaScript API) — optional'), `<input name="mapKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="AIza…" class="ltr">`)}${field(L('أقصى عدد طلبات في اليوم', 'Max requests per day'), `<input name="cap" type="number" min="10" max="2000" step="10" placeholder="150">`)}</div>
+      <div class="tiny muted" style="margin:8px 0">${L('150 طلب في اليوم بيفضل جوه الحد المجاني بتاع جوجل كل شهر.', '150 requests a day stays inside Google\'s free monthly quota.')}</div>
+      <div class="row" style="gap:8px"><button type="submit" class="btn p">${L('احفظ وجرّب', 'Save and test')}</button></div></form>`;
+  } };
+  async function loadSettings() {
+    const box = document.getElementById('gmaps-st'); if (!box || !hosted() || !isAdmin()) return;
+    const st = await status(true); if (!document.getElementById('gmaps-st')) return;
+    if (!st) { box.innerHTML = `<span class="badge warn">${L('تعذّر التحميل', 'Could not load')}</span>`; return; }
+    box.innerHTML = `${st.hasKey ? `<span class="badge good">${L('مفتاح السيرفر متسجل', 'Server key saved')}</span>` : `<span class="badge warn">${L('مفتاح السيرفر مش متسجل', 'Server key not set')}</span>`} ${st.hasMapKey ? `<span class="badge good">${L('مفتاح الخريطة متسجل', 'Map key saved')}</span>` : `<span class="badge">${L('مفيش مفتاح خريطة', 'No map key')}</span>`} <span class="muted">${L('النهارده', 'Today')}: <b class="num">${st.used}</b> / <span class="num">${st.cap}</span></span>`;
+    const cap = document.querySelector('#gmapsform input[name="cap"]'); if (cap && !cap.value) cap.placeholder = String(st.cap);
+  }
+  document.addEventListener('submit', async ev => {
+    if (!ev.target || ev.target.id !== 'gmapsform') return; ev.preventDefault(); if (!isAdmin() || !hosted()) return;
+    const f = ev.target; const gkey = f.gkey.value.trim(), mapKey = f.mapKey.value.trim(), cap = +f.cap.value || 0;
+    if (!gkey && !mapKey && !cap) { toast(L('اكتب مفتاح أو الحد اليومي', 'Type a key or the daily limit'), 'err'); return; }
+    const btn = f.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    try {
+      const r = await call({ action: 'save', gkey, mapKey, cap });
+      if (r.ok) { f.gkey.value = ''; f.mapKey.value = ''; TR.mapKey = null; TR.res = {}; toast(r.tested ? L('اتحفظ — المفتاح شغال مع جوجل ✓', 'Saved — the key works with Google ✓') : L('اتحفظ', 'Saved')); }
+      else toast(r.error === 'key_test' ? L('جوجل رفض المفتاح', 'Google refused the key') + (r.detail ? ` (${r.detail})` : '') + L(' — اتأكد إن Routes API متفعّل والفوترة شغالة', ' — check that the Routes API is enabled and billing is on') : r.error === 'bad_key' ? L('شكل المفتاح مش صح', 'The key does not look right') : L('تعذّر الحفظ', 'Could not save'), 'err');
+    } catch (e) { toast(L('تعذّر الحفظ', 'Could not save'), 'err'); }
+    if (btn) btn.disabled = false; loadSettings();
+  });
+
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>html body .trf-row{display:flex;gap:10px;align-items:center}
+html body .trf-dot{width:14px;height:14px;border-radius:50%;flex:0 0 14px;background:#1b7f4b;box-shadow:0 0 0 4px rgba(27,127,75,.15)}
+html body .trf-dot.orange{background:#d98a00;box-shadow:0 0 0 4px rgba(217,138,0,.18)}
+html body .trf-dot.red{background:#c62828;box-shadow:0 0 0 4px rgba(198,40,40,.16)}
+html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:var(--bg2,#f3f3f3)}
+@media (max-width:760px){html body .trf-map{height:340px}}
+</style>`);
+  Object.assign(window, { nfTraffic: TR });
 })();
 </script>
 
