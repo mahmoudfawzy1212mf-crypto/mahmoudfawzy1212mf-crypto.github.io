@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1417-e96bba";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1552-9c4c5e";</script>
 
 <script>
 'use strict';
@@ -34011,6 +34011,67 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
     .otws .chk{display:flex;gap:6px;align-items:center;font-size:13px}
     .ottinfo{margin-top:4px;line-height:1.5}
   </style>`);
+})();
+/* =====================================================================
+   v6.66 — task chat read receipts (Mahmoud, 6 Oct: «when the other person sees it the two ticks turn blue»).
+   · Uses the existing tasks.threadSeen {personId: ISO of the last message they saw} — set by taskMarkSeen when a
+     person opens the task, and by taskPost for the sender.
+   · My message: grey ✓✓ = sent, nobody else saw it yet / not everyone; blue ✓✓ = every other party saw it.
+   · Tap the ticks → «message info»: who saw it (with time) and who did not yet.
+   · Only the task's parties count (creator, assignee, direct manager, dept heads, added people) — someone opening the
+     chat as a viewer does not turn it blue.
+   Both systems.
+   ===================================================================== */
+(function () {
+  if (typeof chatHTML !== 'function' || typeof taskParties !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const when = iso => iso ? `${fmtDate(String(iso).slice(0, 10))} ${String(iso).slice(11, 16)}` : '';
+  /* the other parties of a message + whether each saw it */
+  function seenList(t, m) {
+    const seen = t.threadSeen || {}; const by = new Set([m.by].concat(myIds().includes(m.by) ? myIds() : []));
+    return taskParties(t).filter(p => p.id && !by.has(p.id)).map(p => {
+      const ids = [p.id]; const st = byId('staff', p.id); if (st && st.workerId) ids.push(st.workerId);
+      list('staff').forEach(x => { if (x.workerId === p.id) ids.push(x.id); });
+      let at = ''; ids.forEach(i => { if ((seen[i] || '') > at) at = seen[i]; });
+      return { id: p.id, name: p.name, why: p.why, at: at && at >= (m.at || '') ? at : '' };
+    });
+  }
+  window.nfChatSeen = seenList;
+  chatHTML = (base => t => {
+    let h = base(t); if (!t || !h) return h;
+    const th = taskThread(t);
+    th.forEach((m, mi) => {
+      if (m.sys || !msgMine(m)) return;
+      const mid = m.id || ('i' + mi); const k = h.indexOf(`data-mid="${esc(mid)}"`); if (k < 0) return;
+      const j = h.indexOf(' ✓✓</span>', k); if (j < 0) return;
+      const nxt = h.indexOf('data-mid="', k + 10); if (nxt > 0 && j > nxt) return;
+      const sl = seenList(t, m); const all = sl.length > 0 && sl.every(x => x.at);
+      const tick = ` <span class="tk${all ? ' rd' : ''}" data-action="chatSeenInfo" data-arg="${esc(t.id)}:${esc(mid)}" title="${all ? L('شافها الكل', 'Seen by everyone') : L('معلومات الرسالة', 'Message info')}">✓✓</span></span>`;
+      h = h.slice(0, j) + tick + h.slice(j + ' ✓✓</span>'.length);
+    });
+    return h;
+  })(chatHTML);
+  ACTIONS.chatSeenInfo = arg => {
+    const [tid, mid] = String(arg || '').split(':'); const t = byId('tasks', tid); if (!t) return;
+    const th = taskThread(t); const m = th.find(x => x.id === mid) || (/^i\d+$/.test(mid) ? th[+mid.slice(1)] : null); if (!m) return;
+    const sl = seenList(t, m); const yes = sl.filter(x => x.at), no = sl.filter(x => !x.at);
+    const row = x => `<div class="csrow"><b>${esc(x.name || '')}</b><span class="muted small">${esc(x.why || '')}</span><div class="grow"></div><span class="small">${x.at ? esc(when(x.at)) : ''}</span></div>`;
+    const txt = m.text ? esc(String(m.text).slice(0, 140)) : (m.audioFileId ? L('🎤 رسالة صوتية', '🎤 Voice message') : m.videoFileId ? L('🎬 فيديو', '🎬 Video') : L('📷 صورة', '📷 Photo'));
+    const body = `<div class="csinfo"><div class="csmsg">${txt}<div class="muted small">${esc(when(m.at))}</div></div>
+      <h4><span class="tk rd">✓✓</span> ${L('شافها', 'Seen by')} (${yes.length})</h4>${yes.map(row).join('') || `<div class="muted small">${L('لسه محدش شافها', 'Nobody has seen it yet')}</div>`}
+      <h4><span class="tk">✓✓</span> ${L('لسه ماشافهاش', 'Not seen yet')} (${no.length})</h4>${no.map(row).join('') || `<div class="muted small">${L('الكل شافها', 'Everyone has seen it')}</div>`}</div>`;
+    openModal({ title: L('معلومات الرسالة', 'Message info'), body, footer: `<button type="button" class="btn" data-action="closemodal">${L('إغلاق', 'Close')}</button>` });
+  };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.wa .tm .tk{cursor:pointer;font-size:13px;font-weight:700;letter-spacing:-4px;padding:0 6px 0 2px;color:#8696a0;vertical-align:-1px}
+.wa .bb.me .tx{padding-left:60px}
+.wa .tm .tk.rd,html[data-theme] .wa .tm .tk.rd,.csinfo .tk.rd{color:#53bdeb}
+.csinfo .tk{font-weight:700;letter-spacing:-4px;padding-left:4px;color:#8696a0;margin-inline-end:4px}
+.csinfo .csmsg{background:var(--bg2,#f4f5f7);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+.csinfo h4{margin:14px 0 6px;font-size:14px;display:flex;align-items:center}
+.csinfo .csrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+</style>`);
 })();
 </script>
 
