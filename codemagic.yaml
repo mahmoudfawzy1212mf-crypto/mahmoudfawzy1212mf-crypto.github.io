@@ -1,0 +1,47 @@
+# Ninety — iOS app build (Capacitor shell around the live web app) → TestFlight / App Store.
+# The iOS project is generated on the build Mac from package.json + capacitor.config.json + scripts/ (nothing secret in this repo).
+# Needs in Codemagic (UI): App Store Connect integration named "ninety-ci" + an iOS distribution certificate and an
+# App Store provisioning profile for app.ninety.fabrication under "Code signing identities".
+workflows:
+  ios-testflight:
+    name: Ninety iOS → TestFlight
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    working_directory: ios-app
+    integrations:
+      app_store_connect: ninety-ci
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.ninety.fabrication
+      node: 22
+      xcode: latest
+    triggering:
+      events: []
+    scripts:
+      - name: Install
+        script: npm install --no-audit --no-fund
+      - name: Generate the iOS project
+        script: |
+          rm -rf ios
+          npx cap add ios
+          python3 -m pip install --quiet --break-system-packages pillow || python3 -m pip install --quiet pillow
+          python3 scripts/make-assets.py
+          python3 scripts/configure-ios.py
+          npx capacitor-assets generate --ios --iconBackgroundColor '#171b1f' --splashBackgroundColor '#171b1f'
+          npx cap sync ios
+      - name: Signing
+        script: xcode-project use-profiles
+      - name: Build number
+        script: |
+          cd ios/App
+          agvtool new-version -all $((BUILD_NUMBER + 100))
+      - name: Build the app (.ipa)
+        script: xcode-project build-ipa --project "ios/App/App.xcodeproj" --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
