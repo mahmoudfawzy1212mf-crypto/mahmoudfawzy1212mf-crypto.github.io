@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1552-9c4c5e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1711-49dec6";</script>
 
 <script>
 'use strict';
@@ -11344,7 +11344,7 @@ async function pushSubscribe(silent) {
   } catch (e) { console.warn('push', e); if (!silent) toast('تعذّر تفعيل الإشعارات: ' + (e.message || e), 'err'); return false; }
 }
 ACTIONS.pushEnable = async () => { const p = document.getElementById('bellpop'); if (p) p.remove(); await pushSubscribe(false); };
-async function pushSend(to, title, body, url, tag) { if (!pushAvailable() || !to || !to.length) return; try { await S.sb.functions.invoke('push', { body: { action: 'send', to, title, body, url: url || '/', tag: tag || 'nf' } }); } catch (e) { /* ignore */ } }
+async function pushSend(to, title, body, url, tag) { if (!(typeof sbOn === 'function' && sbOn()) || !to || !to.length) return;   /* v6.67: sending needs only the server (the iOS app has no service worker) */ try { await S.sb.functions.invoke('push', { body: { action: 'send', to, title, body, url: url || '/', tag: tag || 'nf' } }); } catch (e) { /* ignore */ } }
 /* re-subscribe silently when permission was already granted (endpoint may rotate) */
 document.addEventListener('nf:login', () => setTimeout(() => { if (pushAvailable() && Notification.permission === 'granted') pushSubscribe(true); }, 2500));
 navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.nfOpen) { const u = String(e.data.nfOpen); const i = u.indexOf('#'); if (i >= 0) location.hash = u.slice(i); } });
@@ -26436,6 +26436,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   let state = { checked: 0, ok: null };
   async function check() {
     if (!S.session || !hosted() || S.viewOrig || S.demoOrig || isAdmin()) { state.ok = true; return; }
+    if (window.nfNativePush && window.nfNativePush.isNative()) { const st = await window.nfNativePush.state(); state.ok = st.ok; state.why = st.why || ''; return; }   // v6.67: iOS app
     if (isIOS() && !standalone()) { state.ok = false; state.why = 'ios'; return; }
     if (!supported()) { state.ok = true; return; }   // very old browser: nothing we can do
     if (Notification.permission === 'denied') { state.ok = false; state.why = 'denied'; return; }
@@ -26447,10 +26448,12 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const andBtns = () => `<a class="btn sm p" href="${intentTo('android.settings.APP_NOTIFICATION_SETTINGS', 'app.ninety.fabrication')}">إعدادات إشعارات التطبيق</a><a class="btn sm" href="${intentTo('android.settings.APP_NOTIFICATION_SETTINGS', 'com.android.chrome')}">إعدادات إشعارات Chrome</a>`;
   function bar() {
     const why = state.why; const android = /Android/.test(navigator.userAgent);
-    const help = why === 'ios' ? 'على الآيفون الإشعارات مابتشتغلش غير لما التطبيق يتضاف للشاشة الرئيسية: من Safari اضغط زرار المشاركة ⬆️ ← «Add to Home Screen» ← وافتح السيستم من الأيقونة الجديدة.'
+    const help = why === 'ndenied' ? 'الإشعارات مقفولة للأبلكيشن: افتح «الإعدادات» في الأيفون ← Ninety ← الإشعارات ← «Allow Notifications» ← وارجع هنا.'
+      : why === 'ndefault' ? 'دوس «فعّل الإشعارات» ووافق على رسالة الأيفون علشان توصلك المهام وأوامر التشغيل أول بأول.'
+      : why === 'ios' ? 'على الآيفون الإشعارات مابتشتغلش غير لما التطبيق يتضاف للشاشة الرئيسية: من Safari اضغط زرار المشاركة ⬆️ ← «Add to Home Screen» ← وافتح السيستم من الأيقونة الجديدة.'
       : why === 'denied' ? (android ? (standalone() ? 'الموبايل قافل الإشعارات للتطبيق: افتح «الإعدادات» في الموبايل ← التطبيقات ← Ninety (أو Chrome) ← الإشعارات ← «سماح» ← وارجع دوس «حدّثت — راجع تاني».' : 'الموبايل قافل الإشعارات: (1) اضغط علامة القفل 🔒 جنب العنوان فوق ← «الأذونات» ← الإشعارات ← «سماح». (2) لو لسه مقفولة: «الإعدادات» في الموبايل ← التطبيقات ← Chrome ← الإشعارات ← «سماح». وبعدين دوس «حدّثت — راجع تاني».') : 'المتصفح قافل الإشعارات: من إعدادات المتصفح ← إعدادات الموقع ← الإشعارات ← «سماح» للسيستم، وبعدين حدّث الصفحة.')
       : 'لازم تفعّل الإشعارات علشان توصلك المهام وأوامر التشغيل أول بأول.';
-    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:30;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? (android ? andBtns() : '') + `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
+    return `<div id="pushreq" class="banner crit" style="position:sticky;top:0;z-index:30;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${icon('bell')}<span style="flex:1 1 240px"><b>الإشعارات مش شغالة عندك.</b> ${help}</span>${why === 'default' || why === 'nosub' || why === 'ndefault' ? `<button class="btn sm p" data-pushreq>فعّل الإشعارات</button>` : why === 'denied' ? (android ? andBtns() : '') + `<button class="btn sm" data-pushreload>حدّثت — راجع تاني</button>` : ''}</div>`;
   }
   async function paint() {
     if (Date.now() - state.checked > 30000 || state.ok === null) { state.checked = Date.now(); await check(); }
@@ -34072,6 +34075,102 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
 .csinfo h4{margin:14px 0 6px;font-size:14px;display:flex;align-items:center}
 .csinfo .csrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line,#e5e7eb)}
 </style>`);
+})();
+/* =====================================================================
+   v6.67 — iOS app «Ninety» (Capacitor): Apple push notifications (Mahmoud, 6 Oct: go-ahead on the native-features brief).
+   · Inside the app (window.Capacitor native) the web push (service worker) does not exist — the app asks for notification
+     permission once after login, registers with Apple and sends its device token to Edge "push" (action apns-register).
+     Edge "push" then delivers every notification to that phone through APNs (alongside the browser devices).
+   · The «notifications are off» bar (99zzZi) uses the app's permission inside the app (not «add to home screen»).
+   · Tapping a notification opens its page in the app.
+   · Settings → iPhone app tab (owner): upload the APNs .p8 key once (kept on the server, never shown again) + a test.
+   Both systems.
+   ===================================================================== */
+(function () {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const Cap = () => window.Capacitor;
+  const isNative = () => { try { const c = Cap(); return !!(c && typeof c.isNativePlatform === 'function' && c.isNativePlatform()); } catch (e) { return false; } };
+  window.nfIsNative = isNative;
+  const PN = () => { const c = Cap(); return c && c.Plugins && c.Plugins.PushNotifications; };
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb;
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  let token = '', listening = false;
+  async function sendToken(force) {
+    if (!token || !S.session || !hosted()) return false;
+    const key = 'nf.apns.' + (S.session.id || ''); const v = token.slice(-12) + ':' + todayISO();   // refreshed once a day
+    if (!force && lsGet(key) === v) return true;
+    try {
+      const r = await S.sb.functions.invoke('push', { body: { action: 'apns-register', token, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar' } });
+      if (r.error || !(r.data && r.data.ok)) throw (r.error || new Error((r.data && r.data.error) || 'apns'));
+      lsSet(key, v); return true;
+    } catch (e) { console.warn('apns-register', e); return false; }
+  }
+  function listen() {
+    const pn = PN(); if (listening || !pn) return; listening = true;
+    pn.addListener('registration', t => { token = (t && t.value) || ''; sendToken(false); });
+    pn.addListener('registrationError', e => console.warn('apns registration', e));
+    pn.addListener('pushNotificationActionPerformed', a => { const d = (a && a.notification && a.notification.data) || {}; const u = String(d.url || ''); const i = u.indexOf('#'); if (i >= 0) location.hash = u.slice(i); });
+  }
+  async function perm() { try { return ((await PN().checkPermissions()) || {}).receive || 'prompt'; } catch (e) { return 'unknown'; } }
+  async function enable(ask) {
+    if (!isNative() || !PN()) return false; listen();
+    let p = await perm();
+    if (p !== 'granted' && p !== 'denied' && ask) { try { p = ((await PN().requestPermissions()) || {}).receive || p; } catch (e) { /* ignore */ } }
+    if (p !== 'granted') return false;
+    try { await PN().register(); } catch (e) { console.warn('apns register', e); return false; }
+    return true;
+  }
+  window.nfNativePush = { isNative, enable, async state() { const p = await perm(); return p === 'granted' ? { ok: true } : { ok: false, why: p === 'denied' ? 'ndenied' : 'ndefault' }; } };
+  if (isNative()) {
+    try { document.documentElement.classList.add('nf-native'); } catch (e) { /* ignore */ }
+    let booted = '';
+    RENDER_HOOKS.push(() => { const sid = S.session && S.session.id; if (!sid || !hosted() || booted === sid) return; booted = sid; setTimeout(() => enable(true), 1500); });
+    if (typeof ACTIONS.pushEnable === 'function') ACTIONS.pushEnable = (base => async (...a) => {
+      if (!isNative()) return base(...a);
+      const ok = await enable(true);
+      toast(ok ? L('تم تفعيل الإشعارات على الأبلكيشن ✓', 'Notifications are on in the app ✓') : L('الإشعارات مقفولة للأبلكيشن — افتح الإعدادات ← Ninety ← الإشعارات ← سماح', 'Notifications are off for the app — open Settings → Ninety → Notifications → Allow'), ok ? '' : 'err');
+      return ok;
+    })(ACTIONS.pushEnable);
+  }
+  /* ---------- Settings → iPhone app (owner) ---------- */
+  if (typeof EXTRA_SETTINGS === 'undefined') return;
+  EXTRA_SETTINGS.apns = { label: 'أبلكيشن الأيفون', render: () => {
+    setTimeout(async () => {
+      const box = document.getElementById('apnsst'); if (!box || !hosted()) return;
+      try { const r = await S.sb.functions.invoke('push', { body: { action: 'apns-info' } }); const d = r.data || {};
+        box.innerHTML = d.configured ? `<span class="badge good">${L('المفتاح مرفوع', 'Key uploaded')} — Key ID ${esc(d.keyId)} · Team ${esc(d.teamId)}${d.at ? ' · ' + esc(fmtDate(String(d.at).slice(0, 10))) : ''}</span>` : `<span class="badge warn">${L('لسه مفيش مفتاح — إشعارات الأبلكيشن مش هتوصل', 'No key yet — app notifications will not be delivered')}</span>`;
+      } catch (e) { box.innerHTML = `<span class="badge warn">${L('تعذّر الفحص', 'Could not check')}</span>`; }
+    }, 50);
+    return `<form class="card" id="apnsform"><h3>${L('إشعارات أبلكيشن الأيفون (Apple Push)', 'iPhone app notifications (Apple Push)')}</h3>
+      <p class="small ink2" style="margin:6px 0 10px">${L('ارفع ملف مفتاح «Ninety Push» اللي نزّلته من Apple (اسمه AuthKey_….p8) مرة واحدة. بيتحفظ على السيرفر بس ومحدش يقدر يشوفه تاني — ولا حتى من هنا.', 'Upload the «Ninety Push» key file you downloaded from Apple (AuthKey_….p8) once. It is kept on the server only and can never be viewed again — not even here.')}</p>
+      <div id="apnsst" style="margin-bottom:10px">${hosted() ? `<span class="muted small">${L('جارٍ الفحص…', 'Checking…')}</span>` : `<span class="badge">${L('النسخة المستضافة فقط', 'Hosted version only')}</span>`}</div>
+      <div class="form">${field(L('ملف المفتاح (.p8)', 'Key file (.p8)'), '<input type="file" id="f-apnsp8" accept=".p8,text/plain">', 'full')}
+      ${field('Key ID', inp('keyId', 'F6RVF9SKMD', 'class="ltr" maxlength="10"'))}${field('Team ID', inp('teamId', 'UF4QLJ9AY9', 'class="ltr" maxlength="10"'))}</div>
+      <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap"><button type="submit" class="btn p">${L('حفظ على السيرفر', 'Save on the server')}</button><button type="button" class="btn" data-action="apnsTest">${icon('bell')}${L('إشعار تجريبي لأجهزتي', 'Test notification to my devices')}</button></div></form>`;
+  } };
+  document.addEventListener('submit', async ev => {
+    if (!ev.target || ev.target.id !== 'apnsform') return; ev.preventDefault();
+    if (!isAdmin() || !hosted()) return;
+    const f = ev.target; const file = f.querySelector('#f-apnsp8').files[0];
+    if (!file) { toast(L('اختار ملف المفتاح (.p8) الأول', 'Choose the key file (.p8) first'), 'err'); return; }
+    const p8 = await file.text(); const d = formData(f);
+    const btn = f.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    try {
+      const r = await S.sb.functions.invoke('push', { body: { action: 'apns-key', p8, keyId: d.keyId, teamId: d.teamId } });
+      const x = r.data || {};
+      if (r.error || !x.ok) toast(x.error === 'bad_p8' ? L('الملف ده مش مفتاح Apple صحيح', 'This file is not a valid Apple key') : x.error === 'bad_ids' ? L('Key ID وTeam ID لازم يكونوا 10 حروف/أرقام', 'Key ID and Team ID must be 10 letters/digits') : L('تعذّر الحفظ', 'Could not save'), 'err');
+      else { toast(L('المفتاح اتحفظ على السيرفر ✓', 'Key saved on the server ✓')); f.querySelector('#f-apnsp8').value = ''; render(false); }
+    } catch (e) { toast(L('تعذّر الحفظ', 'Could not save'), 'err'); }
+    finally { if (btn) btn.disabled = false; }
+  });
+  ACTIONS.apnsTest = async () => {
+    if (!hosted()) return;
+    try { const r = await S.sb.functions.invoke('push', { body: { action: 'test' } }); const res = (r.data && r.data.results) || []; const ok = res.filter(x => x.ok).length;
+      toast(res.length ? L(`اتبعت لـ ${ok} من ${res.length} جهاز`, `Sent to ${ok} of ${res.length} devices`) : L('مفيش أجهزة متسجلة باسمك', 'No devices registered for you'), ok ? '' : 'err');
+    } catch (e) { toast(L('تعذّر الإرسال', 'Could not send'), 'err'); }
+  };
 })();
 </script>
 
