@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1720-20faf7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1825-bd95d0";</script>
 
 <script>
 'use strict';
@@ -34171,6 +34171,236 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
       toast(res.length ? L(`اتبعت لـ ${ok} من ${res.length} جهاز`, `Sent to ${ok} of ${res.length} devices`) : L('مفيش أجهزة متسجلة باسمك', 'No devices registered for you'), ok ? '' : 'err');
     } catch (e) { toast(L('تعذّر الإرسال', 'Could not send'), 'err'); }
   };
+})();
+/* =====================================================================
+   v6.69 — document scanner (Mahmoud, 6 Oct: «any upload → scan the paper like a scanner app»).
+   · Every document upload in the system offers a «scan document» option:
+       – visible file fields get a «scan document» button next to them;
+       – upload buttons that open the file picker get a small choice first: scan document / photo or file.
+     Skipped: selfie / profile / vehicle photos, video-only pickers, and anything marked data-noscan.
+   · iOS app (Capacitor): Apple's own document camera (plugin NinetyScanner — edge detection, auto capture,
+     perspective fix, its own color / grayscale / B&W filters, many pages).
+   · Browser: camera or photo → automatic paper detection (corners can be dragged) → straightened →
+     Color / Gray / Black & white → more pages.
+   · Result goes into the same field as a normal upload: 1 page = JPEG, several pages = one PDF
+     (or several images when the field accepts images only).
+   Both systems.
+   ===================================================================== */
+(function () {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const native = () => { try { const c = window.Capacitor; return !!(c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.NinetyScanner); } catch (e) { return false; } };
+  const SKIP = '#photo-file, [id*="avatar"], [id*="vehphoto"], .nfc-me input, [data-noscan], .nfscan *';
+  const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; };
+  /* which file inputs get the scanner */
+  function wants(inp) {
+    if (!inp || inp.type !== 'file' || inp.disabled) return false;
+    try { if (inp.matches(SKIP)) return false; } catch (e) { /* ignore */ }
+    if ((inp.getAttribute('capture') || '') === 'user') return false;
+    const a = (inp.getAttribute('accept') || '').toLowerCase();
+    if (!a) return true;
+    if (/video|audio/.test(a)) return false;
+    return /image|pdf|\*\/\*|application/.test(a);
+  }
+  const pdfOk = inp => { const a = (inp.getAttribute('accept') || '').toLowerCase(); return !a || /pdf|\*\/\*|application/.test(a); };
+  function deliver(inp, files) {
+    if (!files || !files.length) return;
+    try { const dt = new DataTransfer(); files.forEach(f => dt.items.add(f)); inp.files = dt.files; }
+    catch (e) { toast(L('المتصفح ده مش بيدعم المسح — استخدم رفع ملف', 'This browser cannot attach the scan — use file upload'), 'err'); return; }
+    inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  /* ---------- tiny PDF writer (JPEG pages) ---------- */
+  function b64ToBytes(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function makePdf(pages) {   // pages: [{ bytes: Uint8Array(jpeg), w, h }]
+    const enc = new TextEncoder(); const parts = []; const offs = []; let len = 0;
+    const push = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+    push('%PDF-1.4\n'); push(new Uint8Array([37, 226, 227, 207, 211, 10]));
+    const n = pages.length; const kids = [];
+    const obj = (id, body) => { offs[id] = len; push(`${id} 0 obj\n`); if (body instanceof Array) body.forEach(push); else push(body); push('\nendobj\n'); };
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    for (let i = 0; i < n; i++) kids.push(`${3 + i * 3} 0 R`);
+    obj(2, `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${n} >>`);
+    pages.forEach((p, i) => {
+      const pid = 3 + i * 3, iid = pid + 1, cid = pid + 2;
+      const W = 595, H = Math.round(595 * p.h / p.w);
+      obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im${i} ${iid} 0 R >> >> /Contents ${cid} 0 R >>`);
+      obj(iid, [`<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.bytes.length} >>\nstream\n`, p.bytes, '\nendstream']);
+      const cs = `q ${W} 0 0 ${H} 0 0 cm /Im${i} Do Q`;
+      obj(cid, `<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`);
+    });
+    const xref = len; const total = 3 + n * 3;
+    let x = `xref\n0 ${total}\n0000000000 65535 f \n`; for (let id = 1; id < total; id++) x += String(offs[id]).padStart(10, '0') + ' 00000 n \n';
+    push(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    const out = new Uint8Array(len); let o = 0; parts.forEach(b => { out.set(b, o); o += b.length; });
+    return out;
+  }
+  window.nfMakePdf = makePdf;
+  const imgSize = src => new Promise(res => { const im = new Image(); im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight }); im.onerror = () => res({ w: 1000, h: 1414 }); im.src = src; });
+  async function filesFromJpegs(b64s, inp) {   // b64s: base64 JPEG strings
+    if (!b64s.length) return [];
+    const base = 'scan-' + stamp();
+    if (b64s.length === 1 || !pdfOk(inp)) {
+      const list = (b64s.length > 1 && !inp.multiple) ? b64s.slice(0, 1) : b64s;
+      return list.map((b, i) => new File([b64ToBytes(b)], `${base}${list.length > 1 ? '-' + (i + 1) : ''}.jpg`, { type: 'image/jpeg' }));
+    }
+    const pages = []; for (const b of b64s) { const s = await imgSize('data:image/jpeg;base64,' + b); pages.push({ bytes: b64ToBytes(b), w: s.w, h: s.h }); }
+    return [new File([makePdf(pages)], base + '.pdf', { type: 'application/pdf' })];
+  }
+  /* ---------- iOS app: Apple document camera ---------- */
+  async function scanNative(inp) {
+    try {
+      const r = await window.Capacitor.Plugins.NinetyScanner.scan({ quality: 0.75, maxSide: 2200 });
+      if (!r || r.status !== 'ok' || !(r.pages || []).length) return;
+      deliver(inp, await filesFromJpegs(r.pages, inp));
+    } catch (e) { console.warn('scan', e); toast(L('تعذّر فتح الماسح', 'Could not open the scanner'), 'err'); }
+  }
+  /* ---------- browser scanner: detect → straighten → filter ---------- */
+  const loadImg = file => new Promise((res, rej) => { const u = URL.createObjectURL(file); const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = u; });
+  function toCanvas(im, maxSide) { const r = Math.min(1, maxSide / Math.max(im.naturalWidth || im.width, im.naturalHeight || im.height)); const c = document.createElement('canvas'); c.width = Math.round((im.naturalWidth || im.width) * r); c.height = Math.round((im.naturalHeight || im.height) * r); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c; }
+  /* paper = the largest bright region (Otsu threshold) → its 4 extreme corners */
+  function detect(src) {
+    const S = 360, r = S / Math.max(src.width, src.height), w = Math.max(8, Math.round(src.width * r)), h = Math.max(8, Math.round(src.height * r));
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(src, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data; const g = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
+    const bl = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let xx = 0; xx < w; xx++) { let s = 0, k = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, x2 = xx + dx; if (yy >= 0 && yy < h && x2 >= 0 && x2 < w) { s += g[yy * w + x2]; k++; } } bl[y * w + xx] = s / k; }
+    const hist = new Array(256).fill(0); bl.forEach(v => hist[Math.min(255, v | 0)]++);
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i]; let sB = 0, wB = 0, best = 0, t = 128; const N = w * h;
+    for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = N - wB; if (!wF) break; sB += i * hist[i]; const mB = sB / wB, mF = (sum - sB) / wF; const v = wB * wF * (mB - mF) * (mB - mF); if (v > best) { best = v; t = i; } }
+    const lab = new Int32Array(N).fill(-1); let bestId = -1, bestN = 0; const q = new Int32Array(N);
+    for (let i = 0; i < N; i++) { if (bl[i] <= t || lab[i] !== -1) continue; let qh = 0, qt = 0, n = 0; q[qt++] = i; lab[i] = i; while (qh < qt) { const p = q[qh++]; n++; const px = p % w, py = (p / w) | 0; const nb = [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, py > 0 ? p - w : -1, py < h - 1 ? p + w : -1]; for (const nn of nb) if (nn >= 0 && lab[nn] === -1 && bl[nn] > t) { lab[nn] = i; q[qt++] = nn; } } if (n > bestN) { bestN = n; bestId = i; } }
+    const inset = () => { const m = 0.04; return [[src.width * m, src.height * m], [src.width * (1 - m), src.height * m], [src.width * (1 - m), src.height * (1 - m)], [src.width * m, src.height * (1 - m)]]; };
+    if (bestId < 0 || bestN < N * 0.12 || bestN > N * 0.985) return inset();
+    let tl = null, tr = null, br = null, blc = null, a = Infinity, b = -Infinity, cc = -Infinity, dd = Infinity;
+    for (let i = 0; i < N; i++) { if (lab[i] !== bestId) continue; const px = i % w, py = (i / w) | 0; const s1 = px + py, s2 = px - py; if (s1 < a) { a = s1; tl = [px, py]; } if (s1 > b) { b = s1; br = [px, py]; } if (s2 > cc) { cc = s2; tr = [px, py]; } if (s2 < dd) { dd = s2; blc = [px, py]; } }
+    return [tl, tr, br, blc].map(p => [(p[0] + 0.5) / r, (p[1] + 0.5) / r]);
+  }
+  window.nfScanDetect = detect;
+  /* homography: dest rectangle → source quad */
+  function homography(srcPts, W, H) {
+    const dst = [[0, 0], [W, 0], [W, H], [0, H]]; const A = [], B = [];
+    for (let i = 0; i < 4; i++) { const [x, y] = dst[i], [u, v] = srcPts[i]; A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.push(u); A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); B.push(v); }
+    for (let i = 0; i < 8; i++) { let m = i; for (let r = i + 1; r < 8; r++) if (Math.abs(A[r][i]) > Math.abs(A[m][i])) m = r; [A[i], A[m]] = [A[m], A[i]]; [B[i], B[m]] = [B[m], B[i]]; const p = A[i][i] || 1e-9; for (let r = 0; r < 8; r++) { if (r === i) continue; const f = A[r][i] / p; if (!f) continue; for (let cI = i; cI < 8; cI++) A[r][cI] -= f * A[i][cI]; B[r] -= f * B[i]; } }
+    return B.map((v, i) => v / A[i][i]);
+  }
+  function warp(src, quad, maxSide) {
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+    let W = Math.max(dist(quad[0], quad[1]), dist(quad[3], quad[2])), H = Math.max(dist(quad[0], quad[3]), dist(quad[1], quad[2]));
+    const r = Math.min(1, maxSide / Math.max(W, H)); W = Math.max(50, Math.round(W * r)); H = Math.max(50, Math.round(H * r));
+    const hm = homography(quad, W, H); const sd = src.getContext('2d').getImageData(0, 0, src.width, src.height); const s = sd.data, sw = src.width, sh = src.height;
+    const out = document.createElement('canvas'); out.width = W; out.height = H; const od = out.getContext('2d').createImageData(W, H); const o = od.data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const den = hm[6] * x + hm[7] * y + 1; let u = (hm[0] * x + hm[1] * y + hm[2]) / den, v = (hm[3] * x + hm[4] * y + hm[5]) / den;
+      u = Math.min(sw - 1.001, Math.max(0, u)); v = Math.min(sh - 1.001, Math.max(0, v)); const x0 = u | 0, y0 = v | 0, fx = u - x0, fy = v - y0; const i00 = (y0 * sw + x0) * 4, i10 = i00 + 4, i01 = i00 + sw * 4, i11 = i01 + 4; const k = (y * W + x) * 4;
+      for (let ch = 0; ch < 3; ch++) o[k + ch] = (s[i00 + ch] * (1 - fx) + s[i10 + ch] * fx) * (1 - fy) + (s[i01 + ch] * (1 - fx) + s[i11 + ch] * fx) * fy;
+      o[k + 3] = 255;
+    }
+    out.getContext('2d').putImageData(od, 0, 0); return out;
+  }
+  function filter(c, mode) {
+    const out = document.createElement('canvas'); out.width = c.width; out.height = c.height; const x = out.getContext('2d'); x.drawImage(c, 0, 0);
+    const id = x.getImageData(0, 0, c.width, c.height), d = id.data, n = c.width * c.height, W = c.width, H = c.height;
+    const lum = new Float32Array(n); for (let i = 0; i < n; i++) lum[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
+    const sorted = Array.from(lum.filter((_, i) => i % 7 === 0)).sort((a, b) => a - b); const lo = sorted[Math.floor(sorted.length * 0.02)] || 0, hi = sorted[Math.floor(sorted.length * 0.98)] || 255; const sc = 255 / Math.max(30, hi - lo);
+    if (mode === 'bw') {
+      const I = new Float64Array((W + 1) * (H + 1)); for (let y = 0; y < H; y++) { let row = 0; for (let xx = 0; xx < W; xx++) { row += lum[y * W + xx]; I[(y + 1) * (W + 1) + xx + 1] = I[y * (W + 1) + xx + 1] + row; } }
+      const s2 = Math.max(8, Math.round(W / 16)), T = 0.12;
+      for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) { const x1 = Math.max(0, xx - s2), x2 = Math.min(W - 1, xx + s2), y1 = Math.max(0, y - s2), y2 = Math.min(H - 1, y + s2); const cnt = (x2 - x1 + 1) * (y2 - y1 + 1); const sm = I[(y2 + 1) * (W + 1) + x2 + 1] - I[y1 * (W + 1) + x2 + 1] - I[(y2 + 1) * (W + 1) + x1] + I[y1 * (W + 1) + x1]; const v = lum[y * W + xx] * cnt <= sm * (1 - T) ? 0 : 255; const k = (y * W + xx) * 4; d[k] = d[k + 1] = d[k + 2] = v; }
+    } else for (let i = 0; i < n; i++) {
+      const k = i * 4;
+      if (mode === 'gray') { const v = Math.max(0, Math.min(255, (lum[i] - lo) * sc)); d[k] = d[k + 1] = d[k + 2] = v; }
+      else for (let ch = 0; ch < 3; ch++) d[k + ch] = Math.max(0, Math.min(255, (d[k + ch] - lo) * sc));
+    }
+    x.putImageData(id, 0, 0); return out;
+  }
+  window.nfScanFilter = filter; window.nfScanWarp = warp;
+  /* the overlay UI */
+  function scanWeb(inp) {
+    const multi = pdfOk(inp) || inp.multiple; const pages = []; let src = null, quad = null, flat = null, mode = 'color', drag = -1;
+    const ov = document.createElement('div'); ov.className = 'nfscan'; document.body.appendChild(ov);
+    const close = () => ov.remove();
+    const pick = cam => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.dataset.noscan = '1'; if (cam) i.setAttribute('capture', 'environment'); i.onchange = async () => { const f = i.files && i.files[0]; if (!f) return; try { src = toCanvas(await loadImg(f), 2400); quad = detect(src); crop(); } catch (e) { toast(L('تعذّر قراءة الصورة', 'Could not read the photo'), 'err'); } }; i.__nfBypass = true; i.click(); };
+    const head = t => `<div class="nfs-h"><b>${t}</b><div class="grow"></div><button type="button" class="nfs-x" data-s="x">✕</button></div>`;
+    function shoot() {
+      ov.innerHTML = `<div class="nfs-card">${head(L('مسح مستند', 'Scan document'))}<div class="nfs-body nfs-start"><div class="nfs-ic">📄</div><p>${L('حط الورقة على حاجة غامقة وصوّرها من فوق في نور كويس.', 'Put the paper on a dark surface and shoot from above in good light.')}</p>
+        <button type="button" class="btn p" data-s="cam">📷 ${L('صوّر الورقة', 'Take a photo')}</button><button type="button" class="btn" data-s="lib">🖼️ ${L('من الصور', 'From photos')}</button>${pages.length ? `<p class="muted small">${L('الصفحات', 'Pages')}: ${pages.length}</p><button type="button" class="btn" data-s="save">${L('حفظ', 'Save')} (${pages.length})</button>` : ''}</div></div>`;
+    }
+    function crop() {
+      ov.innerHTML = `<div class="nfs-card">${head(L('ظبّط الأركان', 'Adjust the corners'))}<div class="nfs-body"><p class="muted small" style="margin:0 0 8px">${L('اسحب النقط الأربعة على أركان الورقة.', 'Drag the four dots onto the paper corners.')}</p><div class="nfs-cv"><canvas id="nfs-c"></canvas></div>
+        <div class="nfs-row"><button type="button" class="btn" data-s="again">${L('صوّر تاني', 'Retake')}</button><div class="grow"></div><button type="button" class="btn p" data-s="ok">${L('تمام', 'Done')}</button></div></div></div>`;
+      const cv = ov.querySelector('#nfs-c'); const box = ov.querySelector('.nfs-cv'); const maxW = Math.min(box.clientWidth || 340, 560), maxH = Math.max(260, window.innerHeight - 230); const k = Math.min(maxW / src.width, maxH / src.height); cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
+      const g = cv.getContext('2d');
+      const draw = () => { g.drawImage(src, 0, 0, cv.width, cv.height); g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.rect(0, 0, cv.width, cv.height); g.moveTo(quad[0][0] * k, quad[0][1] * k); for (let i = 3; i >= 0; i--) g.lineTo(quad[i][0] * k, quad[i][1] * k); g.closePath(); g.fill('evenodd'); g.strokeStyle = '#3b82f6'; g.lineWidth = 2; g.beginPath(); quad.forEach((p, i) => (i ? g.lineTo : g.moveTo).call(g, p[0] * k, p[1] * k)); g.closePath(); g.stroke(); quad.forEach(p => { g.fillStyle = '#fff'; g.beginPath(); g.arc(p[0] * k, p[1] * k, 11, 0, 7); g.fill(); g.strokeStyle = '#3b82f6'; g.lineWidth = 3; g.stroke(); }); };
+      const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width / k, (e.clientY - r.top) * cv.height / r.height / k]; };
+      cv.onpointerdown = e => { const p = pos(e); let m = -1, md = Infinity; quad.forEach((q, i) => { const dd = Math.hypot(q[0] - p[0], q[1] - p[1]); if (dd < md) { md = dd; m = i; } }); if (md * k < 44) { drag = m; cv.setPointerCapture(e.pointerId); e.preventDefault(); } };
+      cv.onpointermove = e => { if (drag < 0) return; const p = pos(e); quad[drag] = [Math.max(0, Math.min(src.width, p[0])), Math.max(0, Math.min(src.height, p[1]))]; draw(); e.preventDefault(); };
+      cv.onpointerup = cv.onpointercancel = () => { drag = -1; };
+      draw();
+    }
+    function look() {
+      const out = filter(flat, mode);
+      ov.innerHTML = `<div class="nfs-card">${head(L('شكل الصفحة', 'Page look'))}<div class="nfs-body"><div class="nfs-chips">${[['color', L('ألوان', 'Color')], ['gray', L('رمادي', 'Gray')], ['bw', L('أبيض وأسود', 'Black & white')]].map(([m, t]) => `<button type="button" class="${m === mode ? 'on' : ''}" data-m="${m}">${t}</button>`).join('')}</div><div class="nfs-cv nfs-prev"></div>
+        <div class="nfs-row">${multi ? `<button type="button" class="btn" data-s="more">➕ ${L('صفحة كمان', 'Another page')}</button>` : ''}<div class="grow"></div><button type="button" class="btn p" data-s="save">${L('حفظ', 'Save')}${pages.length ? ` (${pages.length + 1})` : ''}</button></div></div></div>`;
+      out.style.maxWidth = '100%'; out.style.maxHeight = (window.innerHeight - 250) + 'px'; ov.querySelector('.nfs-prev').appendChild(out); ov._cur = out;
+    }
+    const cur64 = () => (ov._cur ? ov._cur.toDataURL('image/jpeg', 0.82).split(',')[1] : null);
+    async function save() { const c = cur64(); if (c && flat) pages.push(c); if (!pages.length) { close(); return; } const files = await filesFromJpegs(pages, inp); close(); deliver(inp, files); }
+    ov.addEventListener('click', async e => {
+      const s = e.target.closest('[data-s]'), m = e.target.closest('[data-m]');
+      if (m) { mode = m.dataset.m; look(); return; }
+      if (!s) { if (e.target === ov) close(); return; }
+      const a = s.dataset.s;
+      if (a === 'x') close(); else if (a === 'cam') pick(true); else if (a === 'lib') pick(false); else if (a === 'again') shoot();
+      else if (a === 'ok') { s.disabled = true; s.textContent = '…'; setTimeout(() => { flat = warp(src, quad, 1800); look(); }, 30); }
+      else if (a === 'more') { const c = cur64(); if (c) pages.push(c); flat = null; ov._cur = null; shoot(); }
+      else if (a === 'save') { s.disabled = true; if (!flat) ov._cur = null; await save(); }
+    });
+    shoot();
+  }
+  window.nfScanTo = inp => (native() ? scanNative(inp) : scanWeb(inp));
+  /* ---------- 1) upload buttons that open the picker → choice first ---------- */
+  const origClick = HTMLInputElement.prototype.click;
+  HTMLInputElement.prototype.click = function () {
+    if (this.type !== 'file' || this.__nfBypass || !wants(this)) return origClick.apply(this, arguments);
+    const inp = this; const sh = document.createElement('div'); sh.className = 'nfscan nfscan-sheet';
+    sh.innerHTML = `<div class="nfs-sheet"><button type="button" data-c="scan">📄 ${L('مسح مستند', 'Scan document')}<small>${L('زي السكانر — بيقص الورقة ويعدّلها', 'Like a scanner — crops and straightens the paper')}</small></button><button type="button" data-c="file">🖼️ ${L('صورة أو ملف', 'Photo or file')}</button><button type="button" data-c="x" class="nfs-cancel">${L('إلغاء', 'Cancel')}</button></div>`;
+    document.body.appendChild(sh);
+    sh.addEventListener('click', e => { const c = e.target.closest('[data-c]'); if (!c && e.target !== sh) return; sh.remove(); if (!c) return; if (c.dataset.c === 'scan') window.nfScanTo(inp); else if (c.dataset.c === 'file') { inp.__nfBypass = true; origClick.call(inp); setTimeout(() => { inp.__nfBypass = false; }, 500); } });
+  };
+  /* ---------- 2) visible file fields → «مسح مستند» button next to them ---------- */
+  function decorate(root) {
+    (root || document).querySelectorAll('input[type=file]').forEach(inp => {
+      if (inp.__nfScanBtn || inp.hidden || inp.style.display === 'none' || !wants(inp)) return;
+      try { if (getComputedStyle(inp).display === 'none' || getComputedStyle(inp).visibility === 'hidden') return; } catch (e) { /* ignore */ }
+      if (inp.offsetParent === null && !inp.closest('.modal')) return;
+      inp.__nfScanBtn = true;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'btn sm nfs-btn'; b.textContent = '📄 ' + L('مسح مستند', 'Scan document');
+      b.addEventListener('click', e => { e.preventDefault(); window.nfScanTo(inp); });
+      inp.insertAdjacentElement('afterend', b);
+    });
+  }
+  window.nfScanDecorate = decorate;
+  RENDER_HOOKS.push(() => setTimeout(() => decorate(document), 60));
+  try { new MutationObserver(ms => { if (ms.some(m => [...m.addedNodes].some(n => n.nodeType === 1 && (n.matches && (n.matches('input[type=file]') || n.querySelector && n.querySelector('input[type=file]')))))) setTimeout(() => decorate(document), 30); }).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* ignore */ }
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.nfscan{position:fixed;inset:0;z-index:10050;background:rgba(10,12,14,.72);display:flex;align-items:center;justify-content:center;padding:12px}
+.nfscan .nfs-card{background:var(--surface,#fff);color:var(--ink,#16191b);border-radius:16px;width:min(620px,100%);max-height:calc(100vh - 24px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.nfscan .nfs-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line,#dde1de)}
+.nfscan .nfs-x{border:0;background:none;font-size:20px;cursor:pointer;color:inherit}
+.nfscan .nfs-body{padding:14px}.nfscan .nfs-start{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.nfscan .nfs-start .btn{min-width:220px}.nfscan .nfs-ic{font-size:44px}
+.nfscan .nfs-cv{display:flex;justify-content:center}.nfscan canvas{touch-action:none;max-width:100%;border-radius:8px}
+.nfscan .nfs-row{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.nfscan .nfs-chips{display:flex;gap:6px;margin-bottom:10px;justify-content:center}
+.nfscan .nfs-chips button{border:1px solid var(--line,#dde1de);background:var(--surface-2,#edefec);color:inherit;border-radius:999px;padding:6px 14px;cursor:pointer}
+.nfscan .nfs-chips button.on{background:#2563eb;border-color:#2563eb;color:#fff}
+.nfscan-sheet{align-items:flex-end}
+.nfscan .nfs-sheet{background:var(--surface,#fff);color:var(--ink,#16191b);border-radius:16px;width:min(460px,100%);padding:8px;display:flex;flex-direction:column;gap:6px;margin-bottom:max(8px,env(safe-area-inset-bottom))}
+.nfscan .nfs-sheet button{border:0;background:var(--surface-2,#edefec);color:inherit;border-radius:12px;padding:14px;font:inherit;font-weight:600;text-align:start;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.nfscan .nfs-sheet button small{font-weight:400;opacity:.7}.nfscan .nfs-sheet .nfs-cancel{text-align:center;background:none}
+.nfs-btn{margin-inline-start:6px;margin-top:4px}
+</style>`);
 })();
 </script>
 
