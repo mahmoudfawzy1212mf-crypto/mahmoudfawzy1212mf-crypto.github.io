@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1825-bd95d0";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1851-258200";</script>
 
 <script>
 'use strict';
@@ -34400,6 +34400,127 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
 .nfscan .nfs-sheet button{border:0;background:var(--surface-2,#edefec);color:inherit;border-radius:12px;padding:14px;font:inherit;font-weight:600;text-align:start;cursor:pointer;display:flex;flex-direction:column;gap:2px}
 .nfscan .nfs-sheet button small{font-weight:400;opacity:.7}.nfscan .nfs-sheet .nfs-cancel{text-align:center;background:none}
 .nfs-btn{margin-inline-start:6px;margin-top:4px}
+</style>`);
+})();
+/* =====================================================================
+   v6.70 — App Store readiness (Mahmoud, 6 Oct: «I want to put the app on the App Store» → go-ahead).
+   1) «Delete my account» (Apple guideline 5.1.1(v)): every signed-in person except the owner can delete his account
+      from the account menu or the bottom of «My page». Sign-in is blocked at once, his notification devices are removed and
+      he is signed out; the owner is notified and sees the request in Settings → «Account deletion» where he can restore it
+      (a mistake) or delete it for good now. After 30 days it is deleted for good automatically. Work records the company
+      must keep by law stay with the company. Server: Edge "push" account-delete / account-admin (both systems).
+   2) Face ID inside the iOS app: «device biometrics» at punch / login uses Apple Face ID / Touch ID through the app
+      (plugin BiometricAuthNative) instead of the browser passkey, which does not work inside an app.
+   Both systems.
+   ===================================================================== */
+(function () {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb;
+  const native = () => !!(window.nfIsNative && window.nfIsNative());
+  const isOwner = () => !!(S.session && (S.session.owner || (typeof role === 'function' && role() === 'admin')));
+  const canDelete = () => !!(S.session && !isOwner() && hosted());
+
+  /* ---------- 1) delete my account ---------- */
+  const navBase = navAccountHTML;
+  navAccountHTML = function () {
+    const h = navBase.apply(this, arguments);
+    if (!h || !canDelete()) return h;
+    return h.replace(/<\/div>$/, `<a href="#" class="acctdel" data-action="deleteMyAccount">${icon('trash')}${L('مسح حسابي', 'Delete my account')}</a></div>`);
+  };
+  RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'me' || !canDelete()) return;
+    const v = document.querySelector('.mainarea .view') || document.querySelector('.view'); if (!v || v.querySelector('.acctdel-me')) return;
+    v.insertAdjacentHTML('beforeend', `<div class="acctdel-me"><button type="button" class="btn sm ghost" data-action="deleteMyAccount">${icon('trash')}${L('مسح حسابي', 'Delete my account')}</button></div>`);
+  });
+  ACTIONS.deleteMyAccount = () => {
+    if (!canDelete()) { toast(isOwner() ? L('حساب المالك مايتمسحش من هنا', 'The owner account cannot be deleted here') : L('متاح في النسخة المستضافة بس', 'Available in the hosted version only'), 'err'); return; }
+    const word = L('امسح', 'DELETE');
+    openModal({ title: L('مسح حسابي', 'Delete my account'), submitLabel: L('امسح حسابي نهائيًا', 'Delete my account'), body: `<div class="form">
+      <div class="banner warn full" style="margin:0">${icon('alert')}<span>${L('لما تمسح حسابك:', 'When you delete your account:')}</span></div>
+      <ul class="small full" style="margin:4px 0 0;padding-inline-start:18px;line-height:1.9">
+        <li>${L('مش هتقدر تدخل السيستم تاني بالحساب ده، وهتخرج دلوقتي.', 'You can no longer sign in with this account, and you are signed out now.')}</li>
+        <li>${L('إشعاراتك وأجهزتك المتسجلة بتتمسح فورًا.', 'Your notifications and registered devices are removed at once.')}</li>
+        <li>${L('الحساب بيتمسح نهائيًا خلال 30 يوم (أو قبلها لو الإدارة مسحته).', 'The account is deleted for good within 30 days (or earlier if management deletes it).')}</li>
+        <li>${L('سجلات الشغل اللي الشركة لازم تحتفظ بيها قانونيًا (الحضور والمرتبات والمهام) بتفضل عند الشركة بس.', 'Work records the company must keep by law (attendance, payroll, tasks) stay with the company only.')}</li>
+      </ul>
+      ${field(L('السبب (اختياري)', 'Reason (optional)'), '<textarea name="reason" rows="2" maxlength="300"></textarea>', 'full')}
+      ${field(L(`اكتب «${word}» للتأكيد`, `Type «${word}» to confirm`), `<input name="confirm" autocomplete="off" required placeholder="${word}">`, 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f);
+        if (String(d.confirm || '').trim().toUpperCase() !== word.toUpperCase()) { toast(L(`اكتب «${word}» بالظبط`, `Type «${word}» exactly`), 'err'); return false; }
+        try {
+          const r = await S.sb.functions.invoke('push', { body: { action: 'account-delete', confirm: 'DELETE', reason: d.reason || '', name: S.session.name || '' } });
+          const x = r.data || {};
+          if (r.error || !x.ok) { toast(x.error === 'owner' ? L('حساب المالك مايتمسحش من هنا', 'The owner account cannot be deleted here') : L('تعذّر مسح الحساب — جرّب تاني', 'Could not delete the account — try again'), 'err'); return false; }
+        } catch (e) { toast(L('تعذّر مسح الحساب — جرّب تاني', 'Could not delete the account — try again'), 'err'); return false; }
+        try { ['nf.staff', 'nf.local.v1'].forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
+        setTimeout(() => {
+          toast(L('حسابك اتمسح وخرجت من السيستم', 'Your account was deleted and you are signed out'));
+          const a = document.querySelector('[data-action="logout"]'); if (a) a.click(); else { S.session = null; render(true); }
+        }, 50);
+      } });
+  };
+
+  /* owner: Settings → account deletion requests */
+  if (typeof EXTRA_SETTINGS !== 'undefined') EXTRA_SETTINGS.acctdel = { label: 'طلبات مسح الحساب', render: () => {
+    setTimeout(loadReqs, 30);
+    return `<div class="card"><h3>${L('طلبات مسح الحساب', 'Account deletion requests')}</h3>
+      <p class="small ink2" style="margin:6px 0 10px">${L('أي موظف يقدر يمسح حسابه من الأبلكيشن (شرط من Apple). الدخول بيتقفل فورًا، وتقدر ترجّعه لو كان غلط، أو تمسحه نهائيًا دلوقتي. بعد 30 يوم بيتمسح نهائيًا لوحده.', 'Any employee can delete his account from the app (an Apple requirement). Sign-in is blocked at once; you can restore it if it was a mistake, or delete it for good now. After 30 days it is deleted for good automatically.')}</p>
+      <div id="acctdel-list">${hosted() ? `<span class="muted small">${L('جارٍ التحميل…', 'Loading…')}</span>` : `<span class="badge">${L('النسخة المستضافة فقط', 'Hosted version only')}</span>`}</div></div>`;
+  } };
+  const ST = s => s === 'pending' ? `<span class="badge warn">${L('مقفول — مستني', 'Blocked — pending')}</span>` : s === 'restored' ? `<span class="badge good">${L('اترجّع', 'Restored')}</span>` : `<span class="badge">${L('اتمسح نهائيًا', 'Deleted for good')}</span>`;
+  async function loadReqs() {
+    const box = document.getElementById('acctdel-list'); if (!box || !hosted() || !isOwner()) return;
+    try {
+      const r = await S.sb.functions.invoke('push', { body: { action: 'account-admin', op: 'list' } }); const rows = (r.data && r.data.rows) || [];
+      box.innerHTML = rows.length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الاسم', 'Name')}</th><th>${L('التاريخ', 'Date')}</th><th>${L('السبب', 'Reason')}</th><th>${L('الحالة', 'Status')}</th><th></th></tr></thead><tbody>${rows.map(x => `<tr><td>${esc(x.name || x.login || '—')}</td><td class="num">${esc(fmtDate(String(x.at || '').slice(0, 10)))}</td><td class="small">${esc(x.reason || '—')}</td><td>${ST(x.status)}</td><td style="white-space:nowrap">${x.status === 'pending' ? `<button type="button" class="btn sm" data-action="acctdelDo" data-arg="restore:${esc(x.uid)}">${L('رجّعه', 'Restore')}</button> <button type="button" class="btn sm danger" data-action="acctdelDo" data-arg="purge:${esc(x.uid)}">${L('امسح نهائيًا', 'Delete for good')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<span class="muted small">${L('مفيش طلبات', 'No requests')}</span>`;
+    } catch (e) { box.innerHTML = `<span class="badge warn">${L('تعذّر التحميل', 'Could not load')}</span>`; }
+  }
+  ACTIONS.acctdelDo = async arg => {
+    const [op, uidv] = String(arg || '').split(':'); if (!isOwner() || !hosted()) return;
+    if (op === 'purge' && !(await confirmDlg(L('مسح الحساب نهائيًا؟ مش هينفع يرجع بعد كده.', 'Delete this account for good? It cannot be restored afterwards.')))) return;
+    try {
+      const r = await S.sb.functions.invoke('push', { body: { action: 'account-admin', op, uid: uidv } }); const x = r.data || {};
+      toast(x.ok ? (op === 'restore' ? L('الحساب رجع — يقدر يدخل تاني', 'Account restored — he can sign in again') : L('الحساب اتمسح نهائيًا', 'Account deleted for good')) : L('تعذّر التنفيذ', 'Could not do it'), x.ok ? '' : 'err');
+    } catch (e) { toast(L('تعذّر التنفيذ', 'Could not do it'), 'err'); }
+    loadReqs();
+  };
+
+  /* ---------- 2) Face ID inside the iOS app ---------- */
+  const Bio = () => { try { const c = window.Capacitor; return c && c.Plugins && c.Plugins.BiometricAuthNative; } catch (e) { return null; } };
+  const nativeBio = () => native() && !!Bio();
+  async function bioCheck() { try { const r = await Bio().checkBiometry(); return r || {}; } catch (e) { return {}; } }
+  async function bioAuth(reason) {
+    try { await Bio().internalAuthenticate({ reason, cancelTitle: L('إلغاء', 'Cancel'), iosFallbackTitle: L('استخدم الباسكود', 'Use passcode'), allowDeviceCredential: true }); return true; }
+    catch (e) { console.warn('faceid', e); return false; }
+  }
+  window.nfNativeBio = { available: nativeBio, check: bioCheck, auth: bioAuth };
+  /* the app's web view may hide the browser passkey API — «device biometrics» is offered through Face ID instead */
+  if (nativeBio()) { try { if (!window.PublicKeyCredential) window.PublicKeyCredential = function () { }; if (!navigator.credentials) Object.defineProperty(navigator, 'credentials', { value: {}, configurable: true }); } catch (e) { /* ignore */ } }
+  if (typeof deviceVerify === 'function') {
+    const dvBase = deviceVerify;
+    deviceVerify = async function (w) {
+      if (!nativeBio()) return dvBase.apply(this, arguments);
+      if (!w || !w.deviceCred) return false;
+      return bioAuth(L('أكّد إنك إنت قبل البصمة', 'Confirm it is you'));
+    };
+  }
+  if (typeof ACTIONS.deviceEnroll === 'function') ACTIONS.deviceEnroll = (base => async function (wid) {
+    if (!nativeBio()) return base.apply(this, arguments);
+    const w = byId('workers', wid); if (!w) return;
+    const c = await bioCheck();
+    if (!c.isAvailable && !c.deviceIsSecure) { toast(L('فعّل Face ID أو باسكود للأيفون من الإعدادات الأول', 'Turn on Face ID or a passcode in the iPhone settings first'), 'err'); return; }
+    if (!(await bioAuth(L('فعّل Face ID للبصمة في Ninety', 'Turn on Face ID for punching in Ninety')))) { toast(L('لم يكتمل التفعيل — جرّب تاني', 'Not completed — try again'), 'err'); return; }
+    const cred = { id: 'ios-' + Math.random().toString(36).slice(2, 12), native: 'ios', at: nowISO(), ua: 'Ninety iOS app' };
+    try { await Store.update('workers', w.id, { deviceCred: cred }); toast(L('تم تفعيل Face ID — هيتطلب عند كل بصمة من الأبلكيشن', 'Face ID is on — it is asked at every punch from the app')); }
+    catch (e) { console.warn(e); toast(L('ماتحفظش على السيستم — تأكد من النت وجرّب تاني', 'Not saved on the system — check the internet and try again'), 'err'); }
+  })(ACTIONS.deviceEnroll);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.acct .acctdel{opacity:.75}
+.acctdel-me{display:flex;justify-content:center;margin:26px 0 8px}
+.acctdel-me .btn{color:var(--bad,#b42318)}
 </style>`);
 })();
 </script>
