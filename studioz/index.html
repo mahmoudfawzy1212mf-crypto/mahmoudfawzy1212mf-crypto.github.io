@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-1910-bf12b6";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1937-4ac5f3";</script>
 
 <script>
 'use strict';
@@ -34524,6 +34524,73 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
 .acctdel-me{display:flex;justify-content:center;margin:26px 0 8px}
 .acctdel-me .btn{color:var(--bad,#b42318)}
 </style>`);
+})();
+/* =====================================================================
+   v6.72 — layout sweep (Mahmoud, 6 Oct: «review everything that overlaps on mobile and web»).
+   Found by the automatic audit test/p_layout.js over every page and settings tab (phone 390 + desktop 1366,
+   factory + studio, Arabic + English):
+   · banners squeezed their text into a narrow column next to the buttons → they wrap now (text full width, buttons below);
+   · list cards squeezed the title when the right side (badges / progress) was wide → the right side drops under the
+     title when there is no room;
+   · KPI tiles in 3–6 columns on a phone became ~55px wide → 2 columns on phones;
+   · tables broke every word onto its own line (phones, and wide tables on desktop) → long text cells keep a readable
+     width and phone headers stay on one line (the table scrolls sideways, as before);
+   · KPI numbers broke onto two lines in narrow tiles → they shrink to fit;
+   · narrow cards on desktop (e.g. «my tasks» on the dashboard) squeezed the title next to many buttons → same wrap rule
+     as phones (the buttons drop under the title when there is no room);
+   · report headers on phones (title next to the company block) → wrap;
+   · the floating buttons (+ / assistant / notes) covered the last rows / the footer → extra space at the bottom of every page.
+   Both systems.
+   ===================================================================== */
+(document.body || document.head).insertAdjacentHTML('beforeend', `<style>html body .banner>span{min-width:0}
+html body .pwwrap input{padding-left:44px!important;padding-right:44px!important}
+html body .oxb span{text-overflow:ellipsis}
+html body .item{flex-wrap:wrap}
+html body .item>.main{flex:1 1 170px;min-width:min(170px,100%)}
+html body .item>.end{max-width:100%}
+html body .kpi .v{white-space:nowrap}
+html body .mainarea .view{padding-bottom:90px}
+html body .tablewrap td.nf-w1,html body .tablewrap th.nf-w1{min-width:9.5em}
+html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
+@media (max-width:760px){
+  html body .banner{flex-wrap:wrap;align-items:flex-start}
+  html body .banner>span{flex:1 1 210px}
+  html body .banner>.btn,html body .banner>button,html body .banner>a.btn{flex:0 0 auto}
+  html body .item{flex-wrap:wrap!important}
+  html body .item>.main{flex:1 1 170px!important;min-width:min(170px,100%)!important}
+  html body .item>.end{max-width:100%;flex:0 1 auto!important}
+  html body .kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  html body .tablewrap th{white-space:nowrap!important}
+  html body .oxb span{font-size:9px}
+  html body .tablewrap td{min-width:6.5em}
+  html body .tablewrap td.nf-w1,html body .tablewrap th.nf-w1{min-width:9.5em!important}
+  html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em!important}
+  html body .report .rh{flex-wrap:wrap!important}
+  html body .report .rh>.grow{flex:1 1 220px!important;min-width:0}
+  html body .report .rh>.rlogowrap{max-width:60%}
+  html body .tablewrap td.num,html body .tablewrap td:has(> input[type=checkbox]),html body .tablewrap td:has(> .btn:only-child),html body .tablewrap td:empty{min-width:0}
+  html body .mainarea .view{padding-bottom:110px}
+}
+</style>`);
+/* long text cells in phone tables get a wider minimum (marked once per render) */
+(function () {
+  /* KPI numbers shrink to fit their tile instead of breaking onto two lines */
+  function fitKpis() {
+    document.querySelectorAll('.kpi .v').forEach(v => {
+      if (!v.clientWidth) return; v.style.fontSize = ''; let fs = parseFloat(getComputedStyle(v).fontSize) || 28; let n = 0;
+      while (v.scrollWidth > v.clientWidth + 1 && fs > 15 && n++ < 14) { fs -= 1.5; v.style.fontSize = fs + 'px'; }
+    });
+  }
+  function mark() {
+    fitKpis();
+    document.querySelectorAll('.tablewrap td:not([data-nfw]), .tablewrap th:not([data-nfw])').forEach(c => {
+      c.setAttribute('data-nfw', '1'); const n = (c.innerText || '').trim().length;
+      if (n > 40) c.classList.add('nf-w2'); else if (n > 16) c.classList.add('nf-w1');
+    });
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(mark, 30));
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(fitKpis, 120); });
+  let t = 0; try { new MutationObserver(() => { clearTimeout(t); t = setTimeout(mark, 80); }).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* ignore */ }
 })();
 </script>
 
