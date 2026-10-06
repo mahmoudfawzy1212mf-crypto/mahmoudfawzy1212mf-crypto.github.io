@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261006-0920-att7aw";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261006-1000-urg8dd";</script>
 
 <script>
 'use strict';
@@ -12919,7 +12919,7 @@ function ninetyFactoryStats() {
     S0.late = list('orders').filter(o => isOpen(o) && o.dueDate && o.dueDate < today);
     S0.open = list('orders').filter(isOpen).length;
     S0.esc = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.escalation && t.escalation.level >= 3);
-    S0.suspect = list('tasks').filter(t => t.kind === 'suspect' && t.status !== 'done');
+    S0.suspect = (() => { const seen = new Set(); return list('tasks').filter(t => t.kind === 'suspect' && t.status !== 'done').filter(t => { const k = String(t.id || '').replace(/^sush?_/, ''); if (seen.has(k)) return false; seen.add(k); return true; }); })();
     S0.outfix = list('requests').filter(r => r.type === 'outfix' && r.status === 'pending');
     const att = attendanceFor(today); S0.present = Object.values(att).filter(r => r && r.in).length; S0.total = list('workers').filter(w => w.status !== 'inactive').length;
     S0.mine = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update' && t.toRole === 'admin' && ['urgent', 'high'].includes(t.priority));
@@ -12975,11 +12975,22 @@ function ninetyHomeHTML() {
   </aside><main class="nmain">
     <div class="mhead">${logoImg(22)}${ninetyAvatar()}</div>
     <div class="hhead"><div><h1>${greet()} يا ${esc(firstName())}</h1><p>${day} · ${f.count ? `${f.count} حاجة مستنياك النهارده في المصنع` : 'مفيش حاجة مستنياك النهارده ✓'}</p></div></div>
-    <div class="strip"><div class="st ${f.appr.length ? 'wn' : ''}"><b>${f.appr.length}</b><span>اعتمادات<br>مستنياك</span></div><div class="st ${f.urgent ? 'bad' : ''}"><b>${f.urgent}</b><span>تحتاج تدخّلك<br>فورًا</span></div><div class="st"><b>${f.open}</b><span>أوامر تشغيل<br>جارية</span></div><div class="st ok"><b>${f.present}<span style="font-size:13px">/${f.total}</span></b><span>حضور اليوم<br>في المصنع</span></div></div>
+    <div class="strip"><div class="st ${f.appr.length ? 'wn' : ''}" style="cursor:pointer" data-action="ninetyOpen" data-arg="#/requests"><b>${f.appr.length}</b><span>اعتمادات<br>مستنياك</span></div><div class="st ${f.urgent ? 'bad' : ''}" style="cursor:pointer" data-action="ninetyUrgent"><b>${f.urgent}</b><span>تحتاج تدخّلك<br>فورًا</span></div><div class="st" style="cursor:pointer" data-action="ninetyOpen" data-arg="#/orders"><b>${f.open}</b><span>أوامر تشغيل<br>جارية</span></div><div class="st ok"><b>${f.present}<span style="font-size:13px">/${f.total}</span></b><span>حضور اليوم<br>في المصنع</span></div></div>
     ${main}</main></div>`;
 }
 /* ---------- render: the owner sees the Ninety home until he picks a company ---------- */
 const NINETY_VER = '4.17';
+/* v6.62: «تحتاج تدخّلك فورًا» على شاشة Ninety بقت بتفتح قايمة بالحاجات نفسها (بصمات مشبوهة · مهام مصعّدة · تحويل لمورد) */
+ACTIONS.ninetyUrgent = () => {
+  const f = ninetyFactoryStats();
+  const row = (href, title, sub) => `<button type="button" class="nfback" style="margin:0 0 6px" data-action="ninetyUrgentGo" data-arg="${esc(href)}"><b style="display:block;color:var(--ink)">${esc(title)}</b><span>${esc(sub || '')}</span></button>`;
+  const items = [].concat(
+    f.suspect.map(t => row('#/tasks/' + t.id, t.title || 'بصمة مشتبه بها', 'بصمة مشبوهة تحتاج مراجعة · ' + String(t.createdAt || '').slice(0, 10))),
+    f.esc.map(t => row('#/tasks/' + t.id, t.title || 'مهمة', 'مهمة مصعَّدة لم يشاهدها المكلَّف')),
+    f.transfer.map(p => row('#/purchases', p.code || p.title || 'أمر شراء', 'تحويل لمورد بانتظارك')));
+  openModal({ title: `تحتاج تدخّلك فورًا (${items.length})`, footer: `<button type="button" class="btn p" data-action="closemodal">تم</button>`, body: items.length ? items.join('') : '<div class="muted" style="text-align:center">مفيش حاجة عاجلة ✓</div>' });
+};
+ACTIONS.ninetyUrgentGo = href => { closeModal(); ACTIONS.ninetyOpen(href); };
 const ninetyHomeDue = () => { if (!isNinetyOwner() || S.mode === 'boot') return false; if (ninetyCo()) return false; const h = (location.hash || '').replace(/^#\/?/, ''); if (h && h !== 'dashboard' && h !== 'ninety') { ninetySet('factory'); return false; } return true; };
 render = (base => function (full) {
   if (ninetyHomeDue()) { const root = $('#root'); if (root) { const h = (location.hash || '').replace(/^#\/?/, ''); if (h !== 'ninety') { try { history.replaceState(null, '', '#/ninety'); } catch (e) { /* ignore */ } } root.innerHTML = ninetyHomeHTML(); document.documentElement.setAttribute('dir', 'rtl'); document.title = 'Ninety'; } return; }
