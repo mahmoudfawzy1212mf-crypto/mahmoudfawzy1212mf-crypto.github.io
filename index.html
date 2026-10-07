@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1228-6152c1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1316-fbc7e2";</script>
 
 <script>
 'use strict';
@@ -34744,16 +34744,32 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
     new g.TrafficLayer().setMap(map);
     const bounds = new g.LatLngBounds(); let n = 0; const info = new g.InfoWindow();
     if (fz) { new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), label: { text: '🏭', fontSize: '18px' } }); bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
-    trucks().forEach(x => {
-      const m = new g.Marker({ map, position: { lat: x.lat, lng: x.lng }, title: x.title, label: { text: '🚚', fontSize: '20px' } }); bounds.extend({ lat: x.lat, lng: x.lng }); n++;
-      m.addListener('click', () => { info.setContent(`<div style="font:13px system-ui;direction:${en() ? 'ltr' : 'rtl'}"><b>${esc(x.title)}</b><div>${esc(x.sub)}</div>${x.id ? `<a href="#/fleet/${esc(x.id)}">${L('افتح المشوار', 'Open the trip')}</a>` : ''}</div>`); info.open({ map, anchor: m }); });
-    });
-    /* v6.78: the route line of every trip on the road, refreshed every 30 s while the map is open */
+    /* v6.80: markers are kept by trip/vehicle and moved in place every 10 s (they used to stay where they were when the map opened) */
+    const marks = new Map();
+    const keyOf = x => x.id || ('v:' + x.title);
+    const placeTrucks = first => {
+      const now = trucks(); const keep = new Set();
+      now.forEach(x => {
+        const k = keyOf(x); keep.add(k); let e = marks.get(k);
+        if (!e) {
+          const m = new g.Marker({ map, position: { lat: x.lat, lng: x.lng }, title: x.title, label: { text: '🚚', fontSize: '20px' } }); e = { m, x }; marks.set(k, e);
+          m.addListener('click', () => { const y = e.x; info.setContent(`<div style="font:13px system-ui;direction:${en() ? 'ltr' : 'rtl'}"><b>${esc(y.title)}</b><div>${esc(y.sub)}</div>${y.id ? `<a href="#/fleet/${esc(y.id)}">${L('افتح المشوار', 'Open the trip')}</a>` : ''}</div>`); info.open({ map, anchor: m }); });
+        } else { e.x = x; e.m.setPosition({ lat: x.lat, lng: x.lng }); e.m.setTitle(x.title); }
+        if (first) { bounds.extend({ lat: x.lat, lng: x.lng }); n++; }
+      });
+      marks.forEach((e, k) => { if (!keep.has(k)) { e.m.setMap(null); marks.delete(k); } });
+    };
+    placeTrucks(true);
+    /* v6.78: the route line of every trip on the road (v6.80: refreshed every 10 s with the trucks while the map is open) */
     const lines = [];
     const drawLines = () => { lines.forEach(l => l.setMap(null)); lines.length = 0; list('trips').filter(t => t.status === 'started' && (t.track || []).length > 1).forEach(t => { lines.push(new g.Polyline({ map, path: t.track.filter(p => p && p.lat != null).map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4 })); }); };
     drawLines();
     if (n > 1) map.fitBounds(bounds, 60);
-    const iv = setInterval(() => { if (!document.getElementById('trf-gm')) { clearInterval(iv); return; } drawLines(); }, 30000);
+    const iv = setInterval(() => {
+      if (!document.getElementById('trf-gm')) { clearInterval(iv); return; }
+      if (typeof gpsOn === 'function' && gpsOn() && typeof gpsRefresh === 'function') gpsRefresh(true);   /* vehicle GPS (eTrack) when it is connected */
+      placeTrucks(false); drawLines();
+    }, 10000);
   }
 
   /* ---------- 3) Settings → «Google Maps» (owner) ---------- */
@@ -34912,7 +34928,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    set up, I want it for iPhone and Android» → go-ahead).
    · In the app (native) the driver's phone records the route every ~25 m while HIS trip is on the road — also with the
      screen locked (iPhone: background location; Android: a visible «recording your trip» notification). It starts when the
-     trip starts and stops by itself when the trip ends. Points are saved every 30 s (trip.track + trip.live).
+     trip starts and stops by itself when the trip ends. The route is saved every 30 s (trip.track) and the current position every 10 s (trip.live, v6.80).
      The old 2-minute browser timer stays for drivers who use the website.
    · Fleet → «Traffic & map»: each truck on the road with its route line, updated live; finished trips show the route
      snapped to the real roads (Roads API, server) and the exact km on the trip page.
@@ -34930,7 +34946,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
 
   /* ---------- 1) the driver's phone (app only) ---------- */
   if (!studio() && typeof EXTRA_VIEWS !== 'undefined' && EXTRA_VIEWS.fleet) {
-    let watcher = null, tripId = null, buf = [], lastFlush = 0, starting = false, flushing = false;
+    let watcher = null, tripId = null, buf = [], lastFlush = 0, lastLive = 0, starting = false, flushing = false;
     const myTrip = () => (S.session && typeof myDriverId === 'function') ? list('trips').find(t => t.status === 'started' && t.driverId && t.driverId === myDriverId()) : null;
     async function start(t) {
       if (watcher || starting || !native()) return; starting = true; tripId = t.id;
@@ -34940,13 +34956,13 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
             if (err) { if (err.code === 'NOT_AUTHORIZED') toast(L('اسمح للأبلكيشن بالموقع عشان المشوار يتسجل — الإعدادات ← Ninety ← الموقع', 'Allow location for the app so the trip is recorded — Settings → Ninety → Location'), 'err'); return; }
             if (!loc || loc.latitude == null) return;
             buf.push({ lat: +(+loc.latitude).toFixed(6), lng: +(+loc.longitude).toFixed(6), acc: Math.round(loc.accuracy || 0), at: new Date(loc.time || Date.now()).toISOString(), ...(loc.speed != null ? { kmh: Math.round(loc.speed * 3.6) } : {}) });
-            if (Date.now() - lastFlush > 30000) flush();
+            if (Date.now() - lastFlush > 30000) flush(); else if (Date.now() - lastLive > 10000) pushLive();
           });
       } catch (e) { console.warn('trip watcher', e); watcher = null; }
       starting = false;
     }
     async function flush() {
-      if (flushing || !buf.length || !tripId) return; flushing = true; lastFlush = Date.now();
+      if (flushing || !buf.length || !tripId) return; flushing = true; lastFlush = Date.now(); lastLive = lastFlush;
       const t = byId('trips', tripId); const pts = buf.splice(0);
       try {
         if (!t || t.status !== 'started') { await stop(); return; }
@@ -34955,12 +34971,19 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
         await Store.update('trips', t.id, { track: track.slice(-2500), live: Object.assign({}, pts[pts.length - 1], { via: 'app' }) }, { silent: true });
       } catch (e) { buf.unshift(...pts); } finally { flushing = false; }
     }
+    /* v6.80 (Mahmoud: «refresh every 10 seconds»): between the 30-second track saves, only the current position is sent
+       every 10 s — a tiny update, so the fleet map moves almost live without rewriting the whole route each time */
+    async function pushLive() {
+      if (flushing || !buf.length || !tripId) return; lastLive = Date.now();
+      const t = byId('trips', tripId); if (!t || t.status !== 'started') return;
+      try { await Store.update('trips', t.id, { live: Object.assign({}, buf[buf.length - 1], { via: 'app' }) }, { silent: true }); } catch (e) { /* the next save retries */ }
+    }
     async function stop() { const w = watcher; watcher = null; tripId = null; buf = []; if (w) { try { await BG().removeWatcher({ id: w }); } catch (e) { /* ignore */ } } }
     if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
       if (!native()) return; const t = myTrip();
       if (t && !watcher) start(t); else if (watcher && (!t || t.id !== tripId)) { flush().finally(stop); }
     });
-    setInterval(() => { if (watcher) flush(); }, 30000);
+    setInterval(() => { if (!watcher) return; if (Date.now() - lastFlush >= 30000) flush(); else if (Date.now() - lastLive >= 10000) pushLive(); }, 10000);
     /* in the app the native watcher replaces the 2-minute browser timer */
     if (typeof startTracking === 'function') { const base = startTracking; startTracking = function () { if (native()) return; return base.apply(this, arguments); }; }
     window.nfTripLive = { state: () => ({ watcher: !!watcher, tripId, buffered: buf.length }) };
