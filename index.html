@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1001-dcb18c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1011-ac0b98";</script>
 
 <script>
 'use strict';
@@ -34835,6 +34835,63 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const baseTap = pushNeedTap;
     pushNeedTap = function (on) { let off = false; try { off = sessionStorage.getItem('nf.pushfix.off') === '1'; } catch (e) { /* ignore */ } if (on && off) return; return baseTap.apply(this, arguments); };
   }
+})();
+/* =====================================================================
+   v6.76 — Mahmoud (7 Oct, approved with his PIN): Bahaa (purchasing) also sends the activation codes to the employees.
+   Named people only (server list admin_config.actcode_senders — not a role), checked on the server (RPC nf_set_act_code):
+   · a card «Activate employee accounts» on his dashboard: employees who have no account yet (name, role, mobile);
+   · «Activation code» makes a one-time code (48 h) and opens the usual window with the WhatsApp / SMS buttons;
+   · first activation only — a reset code for an account that is already active stays with the owner and HR;
+     owner and HR accounts are never in the list. No wages or other employee data.
+   Factory only.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  let sender = null, checkedFor = '';
+  async function amSender() {
+    if (!hosted() || !S.session || !S.session.workerId) return false;
+    if (checkedFor === S.session.id && sender != null) return sender;
+    checkedFor = S.session.id; sender = false;
+    try { const { data, error } = await S.sb.rpc('nf_actcode_sender'); sender = !error && data === true; } catch (e) { sender = false; }
+    return sender;
+  }
+  const roleL = r => (typeof ROLES !== 'undefined' && ROLES[r]) || r || '';
+  /* the list comes from the server (RPC nf_actcode_pending): a sender cannot read the employee files themselves */
+  let rows = null, rowsAt = 0;
+  async function loadRows(force) {
+    if (!force && rows && Date.now() - rowsAt < 60000) return rows;
+    try { const { data, error } = await S.sb.rpc('nf_actcode_pending'); if (!error && Array.isArray(data)) { rows = data.map(x => ({ id: x.id, name: x.name, role: x.role, phone: x.phone || '', username: x.username || '', actCodeExp: x.code_exp || '' })); rowsAt = Date.now(); } } catch (e) { /* offline */ }
+    return rows || [];
+  }
+  const pending = () => rows || [];
+  function card() {
+    const ws = pending();
+    return `<div class="card" id="actsend-card"><div class="cardhead"><h3>${icon('user')}${L('تفعيل حسابات الموظفين', 'Activate employee accounts')}</h3><span class="muted small">${ws.length}</span></div>
+      <div class="tiny muted" style="margin-bottom:8px">${L('دول الموظفين اللي لسه ما فعّلوش حسابهم. دوس «كود تفعيل» وابعته للموظف واتساب — الكود صالح 48 ساعة.', 'Employees who have not activated their account yet. Press «Activation code» and send it to the employee on WhatsApp — the code is valid for 48 hours.')}</div>
+      ${ws.length ? `<div class="list">${ws.map(w => { const ok = !!(w.actCodeExp && w.actCodeExp > nowISO()); return `<div class="item"><div class="main"><div class="title"><span>${esc(w.name || '')}</span></div><div class="meta"><span>${esc(roleL(w.role))}</span>${loginIdOf(w) ? `<span class="ltr">${esc(loginIdOf(w))}</span>` : `<span class="badge warn">${L('مفيش رقم موبايل', 'No mobile number')}</span>`}${ok ? `<span class="badge">${L('فيه كود صالح', 'Code still valid')}</span>` : ''}</div></div><div class="end">${loginIdOf(w) ? `<button type="button" class="btn sm p" data-action="actSend" data-arg="${esc(w.id)}">${L('كود تفعيل', 'Activation code')}</button>` : ''}</div></div>`; }).join('')}</div>` : `<div class="muted small">${L('كل الموظفين فعّلوا حساباتهم ✓', 'Everyone has activated ✓')}</div>`}</div>`;
+  }
+  async function place() {
+    if (!S.session || S.route.view !== 'dashboard' || !(await amSender())) return;
+    const v = document.getElementById('view'); if (!v) return;
+    await loadRows(false); if (!document.getElementById('view')) return;
+    const html = card(); const old = document.getElementById('actsend-card');
+    if (old) { if (old.outerHTML !== html) old.outerHTML = html; return; }
+    v.insertAdjacentHTML('afterbegin', html);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(place, 40));
+  ACTIONS.actSend = async wid => {
+    const w = pending().find(x => x.id === wid); if (!w || !(await amSender())) return;
+    const code = String(Math.floor(100000 + Math.random() * 900000)); const exp = new Date(Date.now() + 48 * 3600 * 1000).toISOString();
+    let r = 'net';
+    try { const { data, error } = await S.sb.rpc('nf_set_act_code', { p_wid: w.id, p_hash: await hashPin(w.id, code), p_exp: exp }); r = error ? 'net' : data; } catch (e) { r = 'net'; }
+    if (r !== 'ok') { if (r === 'activated') loadRows(true).then(place); toast(r === 'activated' ? L('الموظف ده فعّل حسابه خلاص — كود إعادة الضبط من صاحب الشركة أو HR', 'This employee is already active — a reset code comes from the owner or HR') : r === 'forbidden' || r === 'not_allowed' ? L('مش مسموح لك تعمل كود للحساب ده', 'You may not make a code for this account') : L('تعذّر عمل الكود — جرّب تاني', 'Could not make the code — try again'), 'err'); return; }
+    w.actCodeExp = exp;
+    codeModal({ title: `${L('كود تفعيل الحساب', 'Account activation code')} — ${w.name}`, name: w.name, login: loginIdOf(w), code, reset: false, phone: w.phone || '' });
+    setTimeout(place, 50);
+  };
+  document.addEventListener('nf:login', () => { sender = null; checkedFor = ''; rows = null; });
 })();
 </script>
 
