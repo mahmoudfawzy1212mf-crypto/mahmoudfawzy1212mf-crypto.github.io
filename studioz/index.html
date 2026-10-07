@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-0940-0d355b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1001-dcb18c";</script>
 
 <script>
 'use strict';
@@ -34781,6 +34781,60 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
 @media (max-width:760px){html body .trf-map{height:340px}}
 </style>`);
   Object.assign(window, { nfTraffic: TR });
+})();
+/* =====================================================================
+   v6.75 — Mahmoud's screenshot (desktop): tapping the orange «notifications stopped» bar several times stacked a dozen red
+   «Registration failed - push service error» messages over the page.
+   · the same message is never shown twice at once (any toast);
+   · the bar ignores taps while it is already trying;
+   · «push service error» means the browser could not reach its push service: we clear the old subscription and try once
+     more; if it still fails we explain what to do on this browser (one window, not a pile of red messages) and hide the bar
+     for this session.
+   ===================================================================== */
+(function () {
+  if (typeof toast === 'function') {
+    const base = toast;
+    toast = function (msg, type) {
+      const box = document.getElementById('toasts');
+      if (box) { const same = Array.from(box.children).find(el => el.textContent === String(msg)); if (same) return; }
+      return base.apply(this, arguments);
+    };
+  }
+  if (typeof pushSubscribe !== 'function') return;
+  const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
+  const baseSub = pushSubscribe;
+  let busy = false;
+  function helpModal() {
+    const ua = navigator.userAgent; const brave = !!navigator.brave; const edge = /Edg\//.test(ua); const opera = /OPR\//.test(ua);
+    const steps = brave
+      ? [L('افتح <b class="ltr">brave://settings/privacy</b>', 'Open <b class="ltr">brave://settings/privacy</b>'), L('شغّل «Use Google services for push messaging»', 'Turn on «Use Google services for push messaging»'), L('اقفل المتصفح وافتحه تاني، وبعدين دوس الشريط مرة واحدة', 'Restart the browser, then tap the bar once')]
+      : [L('دوس على القفل 🔒 جنب عنوان الموقع فوق', 'Click the lock 🔒 next to the address at the top'), L('اختار «Reset permissions» (إعادة ضبط الأذونات)', 'Choose «Reset permissions»'), L('اعمل تحديث للصفحة ودوس «سماح» لما يسأل عن الإشعارات', 'Reload the page and press «Allow» when it asks about notifications'), L('لو فيه VPN أو برنامج حماية/مانع إعلانات اقفله وجرّب تاني', 'If a VPN, security program or ad blocker is on, turn it off and try again')];
+    openModal({ title: L('الإشعارات مش راضية تشتغل على المتصفح ده', 'Notifications will not start on this browser'), footer: `<button type="button" class="btn p" data-action="closemodal">${L('تمام', 'OK')}</button>`,
+      body: `<div class="stack" style="gap:10px"><div class="small ink2">${L('المتصفح مش قادر يوصل لخدمة الإشعارات بتاعته' + (edge ? ' (Edge)' : opera ? ' (Opera)' : brave ? ' (Brave)' : '') + ' — دي مشكلة في المتصفح أو الشبكة مش في السيستم.', 'The browser cannot reach its push service' + (edge ? ' (Edge)' : opera ? ' (Opera)' : brave ? ' (Brave)' : '') + ' — this is a browser or network issue, not the system.')}</div>
+        <ol class="small" style="margin:0;padding-inline-start:20px;line-height:1.9">${steps.map(s => `<li>${s}</li>`).join('')}</ol>
+        <div class="tiny muted">${L('الإشعارات على الموبايل وأبلكيشن الأيفون شغالة عادي — ده بيخص الجهاز ده بس.', 'Notifications on your phone and the iPhone app keep working — this only affects this device.')}</div></div>` });
+  }
+  pushSubscribe = async function (silent) {
+    if (silent || typeof Notification === 'undefined' || Notification.permission !== 'granted') return baseSub.apply(this, arguments);
+    if (busy) return false; busy = true;
+    try {
+      let ok = await baseSub(true);
+      if (!ok) {
+        try { const reg = await navigator.serviceWorker.ready; const s = await reg.pushManager.getSubscription(); if (s) await s.unsubscribe(); } catch (e) { /* ignore */ }
+        await new Promise(r => setTimeout(r, 600));
+        ok = await baseSub(true);
+      }
+      if (ok) { toast(L('تم تفعيل الإشعارات على هذا الجهاز ✓', 'Notifications are on for this device ✓')); return true; }
+      try { sessionStorage.setItem('nf.pushfix.off', '1'); } catch (e) { /* ignore */ }
+      const bar = document.getElementById('nf-pushfix'); if (bar) bar.remove();
+      helpModal(); return false;
+    } finally { busy = false; }
+  };
+  /* the bar stays hidden for the rest of this session after a failed try */
+  if (typeof pushNeedTap === 'function') {
+    const baseTap = pushNeedTap;
+    pushNeedTap = function (on) { let off = false; try { off = sessionStorage.getItem('nf.pushfix.off') === '1'; } catch (e) { /* ignore */ } if (on && off) return; return baseTap.apply(this, arguments); };
+  }
 })();
 </script>
 
