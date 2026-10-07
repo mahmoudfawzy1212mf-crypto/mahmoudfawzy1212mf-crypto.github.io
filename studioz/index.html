@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1849-69f66e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1932-1e2272";</script>
 
 <script>
 'use strict';
@@ -35272,6 +35272,248 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
   tripGpsActions = function (t) { const v = byId('vehicles', t.vehicleId); if (!v || !v.gpsId || !gpsOn() || !['started', 'done'].includes(t.status)) return ''; return `<button type="button" class="btn sm" data-action="gpsPullTrip" data-arg="${esc(t.id)}">${icon('map')}${t.gpsTrack && t.gpsTrack.length ? L('تحديث مسار العربية من GPS', 'Refresh the vehicle route from GPS') : L('سحب مسار العربية من GPS', 'Pull the vehicle route from GPS')}</button>`; };
   /* the live card: the first refresh when the fleet page opens is immediate (part 37 waits for the 2-minute tick) */
   let first = true; if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!first || !S.session || !gpsOn() || S.route.view !== 'fleet' || !fleetOk()) return; first = false; setTimeout(() => gpsRefresh(true), 50); });
+})();
+/* =====================================================================
+   v6.83 — «خريطة الأسطول» (Mahmoud, 8 Oct — go-ahead; factory only; the owner and the factory manager):
+   · a full page «Fleet map» (#/fleetmap): Google map with the factory, one marker per vehicle coloured by its state
+     (green moving · amber stopped with the engine on · grey offline), an arrow turned the way it drives, the name above it.
+   · the right rail: a card per vehicle (name + plate, state, speed, driver, the task/trip it is out on, «updated 5 s ago»),
+     filters all/moving/stopped/offline + search, four counters, click = focus + follow.
+   · the detail of the selected vehicle: speed, engine, km today, driver, task, «open the trip», its route today drawn on
+     the map (from the tracker's history) and a replay slider over the day.
+   · two sources, the newest wins: the tracker on Traccar (gps-bridge) and the driver's phone when he is out on a task.
+   · live: positions every 5 s on the page (10 s on the dashboard) and the map element survives re-renders (no reload).
+   · the dashboard card «Fleet now» (owner + factory manager): a small live map + a line per vehicle → opens the page.
+   · phone: the map on top, the list as a sheet under it; light + dark.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const mayView = () => !!S.session && (isAdmin() || R() === 'manager');
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const FM = { key: null, sel: null, follow: false, filter: 'all', q: '', route: null, routeFor: null, routeAt: 0, replay: null, maps: {} };
+  const ST = { mv: ['#1b7f4b', L('ماشية', 'Moving')], id: ['#d98a00', L('واقفة', 'Stopped')], of: ['#8a8f98', L('غير متصلة', 'Offline')] };
+  const ago = iso => { if (!iso) return '—'; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return s < 60 ? L(`منذ ${s} ث`, `${s} s ago`) : s < 3600 ? L(`منذ ${Math.round(s / 60)} د`, `${Math.round(s / 60)} min ago`) : s < 86400 ? L(`منذ ${Math.round(s / 3600)} س`, `${Math.round(s / 3600)} h ago`) : L(`منذ ${Math.round(s / 86400)} يوم`, `${Math.round(s / 86400)} d ago`); };
+
+  /* ---------- 1) where every vehicle is now (tracker vs. driver phone — the newest point wins) ---------- */
+  function fleetNow() {
+    const now = Date.now();
+    return sortBy(list('vehicles'), v => v.name).map(v => {
+      const g = v.gpsId && typeof gpsState !== 'undefined' ? gpsState.positions[v.gpsId] : null;
+      const trip = list('trips').find(t => t.status === 'started' && t.vehicleId === v.id);
+      const tl = trip ? ((trip.track || []).slice(-1)[0] || null) : null; const lv = trip && trip.live && trip.live.lat != null ? trip.live : null;
+      const ph = lv && (!tl || String(lv.at || '') >= String(tl.at || '')) ? lv : tl;
+      let p = null, src = '';
+      if (g && g.lat != null && (!ph || String(g.at || '') >= String(ph.at || ''))) { p = g; src = 'gps'; } else if (ph && ph.lat != null) { p = ph; src = 'phone'; }
+      const age = p && p.at ? (now - new Date(p.at).getTime()) / 1000 : Infinity;
+      const speed = p ? (p.speed != null ? +p.speed : (p.kmh != null ? +p.kmh : null)) : null;
+      const moving = p && ((speed != null && speed >= 3) || p.motion === true) && age < 600;
+      const st = !p || age > 900 || (g && g.status === 'offline' && age > 600 && src === 'gps') ? 'of' : moving ? 'mv' : 'id';
+      const task = trip && trip.taskId ? byId('tasks', trip.taskId) : null;
+      const driverId = (trip && trip.driverId) || v.driverId || null;
+      return { v, id: v.id, name: v.name, plate: v.plate || '', lat: p ? +p.lat : null, lng: p ? +p.lng : null, speed, course: p && p.course != null ? +p.course : null, at: p ? p.at : null, ign: p && p.acc != null ? !!(+p.acc) : null, st, src, trip, task, driverId };
+    });
+  }
+  const counts = rows => ({ all: rows.length, mv: rows.filter(r => r.st === 'mv').length, id: rows.filter(r => r.st === 'id').length, of: rows.filter(r => r.st === 'of').length });
+  const shown = rows => rows.filter(r => (FM.filter === 'all' || r.st === FM.filter) && (!FM.q || (r.name + ' ' + r.plate).toLowerCase().includes(FM.q.toLowerCase())));
+
+  /* ---------- 2) the page ---------- */
+  function vFleetMap() {
+    if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع', 'This page is for the owner and the factory manager')}</b></div></div>`;
+    const rows = fleetNow(); const c = counts(rows); const sel = rows.find(r => r.id === FM.sel) || null;
+    setTimeout(() => { ensureMap('fm-map', true); pollStart(5000); }, 30);
+    const tile = (k, n, lbl, col) => `<button type="button" class="fm-tile ${FM.filter === k ? 'on' : ''}" data-action="fmFilter" data-arg="${k}"><b style="${col ? `color:${col}` : ''}">${n}</b><span>${lbl}</span></button>`;
+    return `<div class="fm-wrap">
+      <div class="fm-tiles">${tile('all', c.all, L('الإجمالي', 'Total'))}${tile('mv', c.mv, ST.mv[1], ST.mv[0])}${tile('id', c.id, ST.id[1], ST.id[0])}${tile('of', c.of, ST.of[1], ST.of[0])}</div>
+      <div class="fm-body">
+        <div class="fm-mapbox"><div id="fm-map" class="fm-map"><div class="muted small" style="padding:14px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
+          ${sel ? detailPanel(sel) : ''}
+        </div>
+        <aside class="fm-rail">
+          <div class="fm-search"><input id="fm-q" type="search" value="${esc(FM.q)}" placeholder="${L('ابحث باسم العربية أو اللوحة', 'Search by vehicle name or plate')}" data-fm-q="1"></div>
+          <div class="fm-list">${shown(rows).map(r => card(r)).join('') || `<div class="empty"><b>${L('مفيش عربيات بالحالة دي', 'No vehicles in this state')}</b></div>`}</div>
+          <div class="tiny muted" style="padding:8px 4px">${L('المصدر: جهاز التتبع في العربية، ولو السواق خارج بتاسك بموبايله بياخد الأحدث · تحديث كل 5 ث', 'Source: the tracker in the vehicle, and the driver phone when he is out on a task — the newest wins · refreshed every 5 s')}</div>
+        </aside>
+      </div></div>`;
+  }
+  function card(r) {
+    const col = ST[r.st][0];
+    return `<div class="fm-card ${FM.sel === r.id ? 'on' : ''}" data-action="fmSelect" data-arg="${esc(r.id)}">
+      <span class="fm-dot" style="background:${col}"></span>
+      <div class="main"><div class="title">${esc(r.name)}${r.plate ? ` <span class="code">${esc(r.plate)}</span>` : ''}</div>
+      <div class="meta"><span style="color:${col};font-weight:700">${ST[r.st][1]}</span>${r.st !== 'of' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.driverId ? `<span>${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : (r.trip ? `<span class="fm-task">${esc(r.trip.purpose || r.trip.number || '')}</span>` : '')}</div></div>
+      <div class="end tiny muted">${ago(r.at)}</div></div>`;
+  }
+  function detailPanel(r) {
+    const col = ST[r.st][0]; const rt = FM.routeFor === r.id ? FM.route : null; const km = rt && rt.length > 1 && typeof trackKm === 'function' ? trackKm(rt) : null;
+    const rp = FM.replay && FM.replay.id === r.id ? FM.replay : null; const rpPt = rp && rt ? rt[Math.min(rt.length - 1, rp.i)] : null;
+    return `<div class="fm-detail">
+      <div class="fm-dh"><span class="fm-dot" style="background:${col}"></span><b>${esc(r.name)}</b>${r.plate ? `<span class="code">${esc(r.plate)}</span>` : ''}<div class="grow"></div><button type="button" class="btn xs ${FM.follow ? 'p' : ''}" data-action="fmFollow">${L('تتبُّع', 'Follow')}</button><button type="button" class="iconbtn" data-action="fmSelect" data-arg="">${icon('x')}</button></div>
+      <div class="fm-grid">
+        <div><div class="tiny muted">${L('الحالة', 'State')}</div><b style="color:${col}">${ST[r.st][1]}</b></div>
+        <div><div class="tiny muted">${L('السرعة', 'Speed')}</div><b>${r.speed != null ? fmtNum(Math.round(r.speed)) + ' ' + L('كم/س', 'km/h') : '—'}</b></div>
+        <div><div class="tiny muted">${L('الموتور', 'Engine')}</div><b>${r.ign == null ? '—' : r.ign ? L('شغّال', 'On') : L('مطفي', 'Off')}</b></div>
+        <div><div class="tiny muted">${L('مسافة النهارده', 'Km today')}</div><b>${km != null ? fmtNum(Math.round(km * 10) / 10) + ' ' + L('كم', 'km') : (rt ? '0' : '…')}</b></div>
+        <div><div class="tiny muted">${L('السواق', 'Driver')}</div><b>${r.driverId ? esc(assigneeName(r.driverId)) : '—'}</b></div>
+        <div><div class="tiny muted">${L('آخر تحديث', 'Last update')}</div><b>${ago(r.at)}</b> <span class="tiny muted">${r.src === 'phone' ? L('(موبايل السواق)', '(driver phone)') : r.src === 'gps' ? L('(جهاز العربية)', '(vehicle tracker)') : ''}</span></div>
+      </div>
+      ${r.task ? `<div class="small" style="margin-top:6px">${L('التاسك', 'Task')}: <a href="#/tasks/${esc(r.task.id)}">${esc(r.task.title || '')}</a></div>` : ''}
+      ${r.trip ? `<div class="small" style="margin-top:4px"><a class="btn xs" href="#/fleet/${esc(r.trip.id)}">${icon('map')}${L('افتح المشوار', 'Open the trip')} ${esc(r.trip.number || '')}</a></div>` : ''}
+      ${rt && rt.length > 1 ? `<div class="fm-replay"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted">${L('إعادة تشغيل اليوم', 'Replay today')}</span><input type="range" min="0" max="${rt.length - 1}" value="${rp ? rp.i : rt.length - 1}" data-fm-replay="${esc(r.id)}" style="flex:1"><button type="button" class="btn xs ${rp && rp.on ? 'p' : ''}" data-action="fmPlay" data-arg="${esc(r.id)}">${rp && rp.on ? L('إيقاف', 'Pause') : L('تشغيل', 'Play')}</button></div>${rpPt ? `<div class="tiny muted">${esc(String(rpPt.at || '').replace('T', ' ').slice(0, 16))}${rpPt.speed != null ? ` · ${fmtNum(Math.round(rpPt.speed))} ${L('كم/س', 'km/h')}` : ''}</div>` : ''}</div>` : (r.v.gpsId && hosted() ? `<div class="tiny muted" style="margin-top:6px">${rt ? L('مفيش مسار مسجّل النهارده', 'No route recorded today') : L('جارٍ تحميل مسار النهارده…', 'Loading today\'s route…')}</div>` : '')}
+    </div>`;
+  }
+  EXTRA_VIEWS.fleetmap = () => vFleetMap();
+  EXTRA_TITLES.fleetmap = () => ({ title: L('خريطة الأسطول', 'Fleet map'), sub: L('كل العربيات الآن — لحظي', 'Every vehicle right now — live'), actions: `<a class="btn ghost" href="#/fleet">${icon('back')}<span>${L('حركة النقل', 'Fleet')}</span></a>` });
+  (() => { const i = NAV.findIndex(n => n.id === 'fleet'); const entry = { id: 'fleetmap', label: 'خريطة الأسطول', icon: 'map' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.fleetmap = 'خريطة الأسطول';
+  canSee = (base => view => (view === 'fleetmap' ? mayView() : base(view)))(canSee);
+
+  /* ---------- 3) actions ---------- */
+  ACTIONS.fmFilter = k => { FM.filter = k || 'all'; render(false); };
+  ACTIONS.fmSelect = id => { FM.sel = id || null; FM.follow = false; FM.replay = null; if (id) loadRoute(id); render(false); const m = FM.maps['fm-map']; if (m && id) focus(m, id); };
+  ACTIONS.fmFollow = () => { FM.follow = !FM.follow; render(false); const m = FM.maps['fm-map']; if (m && FM.sel) focus(m, FM.sel); };
+  ACTIONS.fmPlay = id => { const rt = FM.routeFor === id ? FM.route : null; if (!rt || rt.length < 2) return; const rp = FM.replay && FM.replay.id === id ? FM.replay : (FM.replay = { id, i: 0, on: false }); rp.on = !rp.on; if (rp.on && rp.i >= rt.length - 1) rp.i = 0; render(false); tickReplay(); };
+  document.addEventListener('input', e => {
+    const t = e.target; if (!t) return;
+    if (t.matches && t.matches('[data-fm-q]')) { FM.q = t.value || ''; const box = document.querySelector('.fm-list'); if (box) box.innerHTML = shown(fleetNow()).map(r => card(r)).join('') || `<div class="empty"><b>${L('مفيش عربيات بالحالة دي', 'No vehicles in this state')}</b></div>`; }
+    if (t.matches && t.matches('[data-fm-replay]')) { const id = t.getAttribute('data-fm-replay'); FM.replay = Object.assign(FM.replay && FM.replay.id === id ? FM.replay : { id, on: false }, { i: +t.value || 0 }); drawReplay(); }
+  });
+  let rpTimer = null;
+  function tickReplay() { if (rpTimer) clearInterval(rpTimer); rpTimer = setInterval(() => { const rp = FM.replay; const rt = rp && FM.routeFor === rp.id ? FM.route : null; if (!rp || !rp.on || !rt) { clearInterval(rpTimer); rpTimer = null; return; } rp.i++; if (rp.i >= rt.length) { rp.i = rt.length - 1; rp.on = false; clearInterval(rpTimer); rpTimer = null; render(false); return; } const s = document.querySelector('[data-fm-replay]'); if (s) s.value = rp.i; drawReplay(); }, 120); }
+
+  /* today's route of the selected vehicle (tracker history through the bridge) */
+  async function loadRoute(id) {
+    const v = byId('vehicles', id); if (!v || !v.gpsId || !hosted() || typeof gpsCall !== 'function' || !gpsOn()) { FM.route = null; FM.routeFor = id; return; }
+    if (FM.routeFor === id && FM.route && Date.now() - FM.routeAt < 60000) return;
+    FM.routeFor = id; FM.route = null; FM.routeAt = Date.now();
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    try { const r = await gpsCall('playback', { imei: v.gpsId, from: d.toISOString(), to: new Date().toISOString() }); if (FM.routeFor !== id) return; FM.route = (r.track || []).filter(p => p.lat != null && p.lng != null); }
+    catch (e) { FM.route = []; }
+    render(false); drawRoute();
+  }
+
+  /* ---------- 4) the map (Google; kept alive across re-renders) ---------- */
+  let keyP = null;
+  async function mapKey() { if (FM.key != null) return FM.key; if (!hosted()) { FM.key = ''; return ''; } if (keyP) return keyP; keyP = (async () => { try { const r = await S.sb.functions.invoke('traffic', { body: { action: 'mapkey' } }); FM.key = (r.data && r.data.key) || ''; } catch (e) { FM.key = ''; } return FM.key; })(); return keyP; }
+  let gmP = null;
+  function loadGmaps(key) {
+    if (window.google && window.google.maps && window.google.maps.Map) return Promise.resolve();
+    if (gmP) return gmP;
+    gmP = new Promise((res, rej) => {
+      const prev = window.__nfGm; window.__nfGm = () => { res(); if (prev) try { prev(); } catch (e) { /* ignore */ } };
+      window.gm_authFailure = () => { gmP = null; rej(new Error('auth')); };
+      const s = document.createElement('script'); s.async = true; s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__nfGm&language=${en() ? 'en' : 'ar'}&region=EG&loading=async`;
+      s.onerror = () => { gmP = null; rej(new Error('load')); }; document.head.appendChild(s); setTimeout(() => rej(new Error('timeout')), 20000);
+    });
+    return gmP;
+  }
+  const noMap = () => `<div class="banner warn" style="margin:10px">${icon('alert')}<span>${isAdmin() ? L('الخريطة محتاجة «مفتاح الخريطة» من الإعدادات ← جوجل ماب.', 'The map needs the «map key» from Settings → Google Maps.') : L('الخريطة لسه مش مضبوطة — صاحب الشركة يضيف مفتاح الخريطة.', 'The map is not set up yet — the owner adds the map key.')}</span></div>`;
+  async function ensureMap(elId, big) {
+    const box = document.getElementById(elId); if (!box) return;
+    if (box._gm) { box._gm.tick(); return; }
+    const key = await mapKey(); const b2 = document.getElementById(elId); if (!b2 || b2._gm) return;
+    if (!key) { b2.innerHTML = noMap(); return; }
+    try { await loadGmaps(key); } catch (e) { const b3 = document.getElementById(elId); if (b3) b3.innerHTML = noMap(); return; }
+    const b3 = document.getElementById(elId); if (!b3 || b3._gm || !window.google) return;
+    const g = window.google.maps; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
+    b3.innerHTML = '';
+    const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: big, gestureHandling: big ? 'greedy' : 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
+    if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), label: { text: '🏭', fontSize: big ? '20px' : '16px' }, zIndex: 1 });
+    const marks = new Map(); let line = null, ghost = null, fitted = false;
+    const iconFor = r => { const col = ST[r.st][0]; return r.st === 'mv' && r.course != null && g.SymbolPath ? { path: g.SymbolPath.FORWARD_CLOSED_ARROW, scale: big ? 6 : 4.5, rotation: r.course, fillColor: col, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 } : { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: big ? 9 : 7, fillColor: col, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }; };
+    const tick = () => {
+      const rows = fleetNow().filter(r => r.lat != null); const keep = new Set(); const bounds = new g.LatLngBounds(); let n = 0;
+      if (fz) { bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
+      rows.forEach(r => {
+        keep.add(r.id); let e = marks.get(r.id); const pos = { lat: r.lat, lng: r.lng }; const lbl = { text: r.name.split('—')[0].trim(), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' };
+        if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: iconFor(r), label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
+        else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(iconFor(r)); if (e.m.setLabel) e.m.setLabel(lbl); }
+        bounds.extend(pos); n++;
+      });
+      marks.forEach((e, k) => { if (!keep.has(k)) { e.m.setMap(null); marks.delete(k); } });
+      if (!fitted && n > 1) { fitted = true; map.fitBounds(bounds, big ? 70 : 30); } else if (!fitted && n === 1 && fz) { fitted = true; map.setCenter && map.setCenter({ lat: fz.lat, lng: fz.lng }); }
+      if (big && FM.follow && FM.sel) { const r = rows.find(x => x.id === FM.sel); if (r && map.panTo) map.panTo({ lat: r.lat, lng: r.lng }); }
+      if (big) drawRouteOn();
+    };
+    const drawRouteOn = () => {
+      const rt = FM.sel && FM.routeFor === FM.sel ? FM.route : null;
+      if (line) { line.setMap(null); line = null; }
+      if (rt && rt.length > 1) line = new g.Polyline({ map, path: rt.map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4, zIndex: 2 });
+      const rp = FM.replay && FM.sel && FM.replay.id === FM.sel ? FM.replay : null; const pt = rp && rt ? rt[Math.min(rt.length - 1, rp.i)] : null;
+      if (ghost && !pt) { ghost.setMap(null); ghost = null; }
+      if (pt) { const pos = { lat: +pt.lat, lng: +pt.lng }; if (!ghost) ghost = new g.Marker({ map, position: pos, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#2a78d6', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 9 }); else if (ghost.setPosition) ghost.setPosition(pos); }
+    };
+    b3._gm = { map, tick, drawRouteOn, focus: id => { const r = fleetNow().find(x => x.id === id); if (r && r.lat != null && map.panTo) { map.panTo({ lat: r.lat, lng: r.lng }); if (map.getZoom && map.getZoom() < 14 && map.setZoom) map.setZoom(14); } } };
+    FM.maps[elId] = b3._gm; tick();
+  }
+  const focus = (m, id) => m.focus(id);
+  function drawRoute() { const m = FM.maps['fm-map']; if (m && document.getElementById('fm-map')) m.drawRouteOn(); }
+  function drawReplay() { drawRoute(); const d = document.querySelector('.fm-replay .tiny'); const rp = FM.replay; const rt = rp && FM.routeFor === rp.id ? FM.route : null; const pt = rt ? rt[Math.min(rt.length - 1, rp.i)] : null; if (d && pt) d.textContent = `${String(pt.at || '').replace('T', ' ').slice(0, 16)}${pt.speed != null ? ` · ${fmtNum(Math.round(pt.speed))} ${L('كم/س', 'km/h')}` : ''}`; }
+  /* the map elements are lifted out before a re-render and put back — same idea as the traffic map (v6.81) */
+  if (typeof renderBase === 'function') renderBase = (base => function (full) {
+    const keep = full ? [] : ['fm-map', 'fmd-map'].map(id => document.getElementById(id)).filter(el => el && el._gm);
+    keep.forEach(el => el.parentNode && el.parentNode.removeChild(el));
+    const r = base.apply(this, arguments);
+    keep.forEach(el => { const nw = document.getElementById(el.id); if (nw && nw !== el) { nw.replaceWith(el); setTimeout(() => { try { if (window.google && window.google.maps && window.google.maps.event) window.google.maps.event.trigger(el._gm.map, 'resize'); } catch (e) { /* ignore */ } el._gm.tick(); }, 0); } else if (!nw) { delete FM.maps[el.id]; } });
+    return r;
+  })(renderBase);
+
+  /* ---------- 5) polling the tracker while a map is on screen ---------- */
+  let pollT = null, pollMs = 0, lastPoll = 0;
+  function pollStart(ms) {
+    /* first positions right away (part 37 only refreshes on the fleet page), then every ms */
+    if (typeof gpsOn === 'function' && gpsOn() && typeof gpsRefresh === 'function' && Date.now() - lastPoll > 4000) { lastPoll = Date.now(); setTimeout(() => gpsRefresh(true), 10); }
+    if (pollT && pollMs === ms) return; if (pollT) clearInterval(pollT); pollMs = ms;
+    pollT = setInterval(() => {
+      const on = document.getElementById('fm-map') || document.getElementById('fmd-map');
+      if (!on || !S.session) { clearInterval(pollT); pollT = null; pollMs = 0; return; }
+      if (typeof gpsOn === 'function' && gpsOn() && typeof gpsRefresh === 'function') { lastPoll = Date.now(); gpsRefresh(true); } else Object.values(FM.maps).forEach(m => { try { m.tick(); } catch (e) { /* ignore */ } });
+    }, ms);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { Object.keys(FM.maps).forEach(id => { if (!document.getElementById(id)) delete FM.maps[id]; }); });
+
+  /* ---------- 6) the dashboard card ---------- */
+  function dashCard() {
+    const rows = fleetNow(); const c = counts(rows); if (!rows.length) return '';
+    setTimeout(() => { ensureMap('fmd-map', false); pollStart(document.getElementById('fm-map') ? 5000 : 10000); }, 40);
+    return `<div class="card fmd-card" id="fmd-card"><div class="cardhead"><h3>${icon('map')}${L('الأسطول الآن', 'Fleet now')}</h3><span class="tiny"><b style="color:${ST.mv[0]}">${c.mv}</b> ${ST.mv[1]} · <b style="color:${ST.id[0]}">${c.id}</b> ${ST.id[1]} · <b style="color:${ST.of[0]}">${c.of}</b> ${ST.of[1]}</span><div class="grow"></div><a class="btn xs" href="#/fleetmap">${icon('map')}${L('الخريطة الكاملة', 'Full map')}</a></div>
+      <div id="fmd-map" class="fmd-map" data-action="go" data-arg="fleetmap"><div class="muted small" style="padding:12px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
+      <div class="fmd-list">${rows.map(r => `<a class="fmd-row" href="#/fleetmap" data-fmd="${esc(r.id)}"><span class="fm-dot" style="background:${ST[r.st][0]}"></span><b>${esc(r.name.split('—')[0].trim())}</b><span style="color:${ST[r.st][0]}">${ST[r.st][1]}</span>${r.st !== 'of' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.driverId ? `<span class="muted">${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : ''}<span class="tiny muted" style="margin-inline-start:auto">${ago(r.at)}</span></a>`).join('')}</div></div>`;
+  }
+  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-fmd]'); if (a) FM.sel = a.getAttribute('data-fmd'); });
+  if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!mayView()) return html; return dashCard() + html; })(vDashboard);
+
+  (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+html body .fm-wrap{display:flex;flex-direction:column;gap:10px}
+html body .fm-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+html body .fm-tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius,12px);padding:10px 12px;text-align:center;cursor:pointer;color:var(--ink);font:inherit}
+html body .fm-tile b{display:block;font-size:22px;line-height:1.1}html body .fm-tile span{font-size:12px;color:var(--muted)}
+html body .fm-tile.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+html body .fm-body{display:grid;grid-template-columns:1fr 330px;gap:10px;min-height:0}
+html body .fm-mapbox{position:relative;min-height:0}
+html body .fm-map{height:calc(100vh - 230px);min-height:420px;border-radius:14px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line)}
+html body .fm-rail{display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 230px);min-height:420px}
+html body .fm-search input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
+html body .fm-list{overflow:auto;display:flex;flex-direction:column;gap:6px;flex:1;min-height:0}
+html body .fm-card{display:flex;gap:10px;align-items:center;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;cursor:pointer}
+html body .fm-card:hover{border-color:var(--accent)}html body .fm-card.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+html body .fm-card .main{flex:1;min-width:0}html body .fm-card .meta{display:flex;flex-wrap:wrap;gap:6px 10px;font-size:12px;color:var(--ink-2)}
+html body .fm-dot{width:12px;height:12px;border-radius:50%;flex:0 0 12px;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
+html body .fm-task{color:var(--accent-ink,var(--accent))}
+html body .fm-detail{position:absolute;inset-inline-start:12px;bottom:12px;width:min(380px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:var(--shadow-lg);z-index:5}
+html body .fm-dh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+html body .fm-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 10px;font-size:13px}
+html body .fm-replay{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+html body .fm-lbl{color:var(--ink);text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;transform:translateY(-16px)}
+html body .fmd-map{height:220px;border-radius:12px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);cursor:pointer}
+html body .fmd-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+html body .fmd-row{display:flex;gap:10px;align-items:center;font-size:13px;padding:6px 8px;border-radius:8px;color:inherit;text-decoration:none}
+html body .fmd-row:hover{background:var(--surface-2)}
+@media (max-width:900px){html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:180px}}
+</style>`);
+  Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM } });
 })();
 </script>
 
