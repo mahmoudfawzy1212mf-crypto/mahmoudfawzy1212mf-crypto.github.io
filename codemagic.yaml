@@ -1,4 +1,5 @@
-# Ninety — iOS app build (Capacitor shell around the live web app) → TestFlight / App Store.
+# Ninety — iOS app build (Capacitor shell around the live web app) → TestFlight / App Store,
+# and (v6.78) the Android app → signed APK + AAB, copied to the website by the factory Edge function "app-build".
 # The iOS project is generated on the build Mac from package.json + capacitor.config.json + scripts/ (nothing secret in this repo).
 # Needs in Codemagic (UI): App Store Connect integration named "ninety-ci" + an iOS distribution certificate and an
 # App Store provisioning profile for app.ninety.fabrication under "Code signing identities".
@@ -57,3 +58,54 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  android-apk:
+    name: Ninety Android → APK + AAB
+    max_build_duration: 40
+    instance_type: linux_x2
+    working_directory: ios-app
+    environment:
+      node: 22
+      java: 21
+    # Same trigger as the iOS app: builds by itself when the app files change. The signing key is NOT in Codemagic or the
+    # repo: the build asks the factory server for it (Edge "app-build", action signing), which checks with the Codemagic API
+    # that this exact build of this app is running before answering, once.
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+      cancel_previous_builds: true
+    when:
+      changeset:
+        includes:
+          - 'ios-app/'
+          - 'codemagic.yaml'
+    scripts:
+      - name: Install
+        script: npm install --no-audit --no-fund
+      - name: Generate the Android project
+        script: |
+          rm -rf android
+          npx cap add android
+          python3 -m pip install --quiet --break-system-packages pillow || python3 -m pip install --quiet pillow
+          python3 scripts/make-assets.py
+          npx capacitor-assets generate --android --iconBackgroundColor '#171b1f' --splashBackgroundColor '#171b1f'
+      - name: Signing key from the Ninety server
+        script: |
+          set +x
+          curl -sS -X POST "https://erhcnkjyaumdoixkksbz.supabase.co/functions/v1/app-build" -H "content-type: application/json" -d "{\"action\":\"signing\",\"build\":\"$CM_BUILD_ID\"}" -o /tmp/signing.json
+          python3 scripts/configure-android.py
+          rm -f /tmp/signing.json
+      - name: Sync
+        script: npx cap sync android
+      - name: Build the app (.apk + .aab)
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease bundleRelease
+          rm -f app/ninety.jks keystore.properties
+    artifacts:
+      - android/app/build/outputs/apk/release/*.apk
+      - android/app/build/outputs/bundle/release/*.aab
