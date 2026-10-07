@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1720-8228c9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1849-69f66e";</script>
 
 <script>
 'use strict';
@@ -35173,6 +35173,105 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     }
     return base(arg);
   })(ACTIONS.taskStatus);
+})();
+/* =====================================================================
+   v6.82 — vehicle GPS through Traccar (Mahmoud, 8 Oct — go-ahead; factory only).
+   The GT06N trackers now report to Mahmoud's Traccar account (the Suzuki was the first). The bridge on the server
+   (gps-bridge v6) reads Traccar's official REST API with a token the OWNER types once in Fleet → «Vehicle GPS» →
+   «Connect Traccar» (server + token; both are saved on the server only and never shown again). Everything the app
+   already did with eTrack (devices, live positions, trip playback, vehicle↔device mapping, the traffic map) now works
+   on Traccar through the same actions — this part only replaces the eTrack wording and adds the setup, the status and
+   the «link for my app» (a read-only key for Mahmoud's own fleet app) — shown once, owner only.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof gpsCall !== 'function' || typeof gpsSettingsCard !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const fleetOk = () => owner() || (typeof canFleet === 'function' && canFleet());
+  const ST = { st: null, at: 0 };   /* bridge status: provider, traccar.server, hasToken */
+  const provider = () => (ST.st && ST.st.provider) || 'etrack';
+  const pName = () => (provider() === 'traccar' ? 'Traccar' : 'eTrack');
+  GPS_BRIDGE_DEFAULT.platform = 'Traccar';
+
+  /* POST to the bridge with the signed-in user's token (the setup carries the Traccar token in the body, never in the URL) */
+  async function gpsPost(action, data) {
+    const c = gpsCfg(); if (!c.url) throw new Error(L('رابط الجسر مش مضبوط', 'Bridge URL not set'));
+    const u = new URL(c.url); u.searchParams.set('action', action);
+    const headers = { 'Content-Type': 'application/json' };
+    if (typeof gpsAuthed === 'function' && gpsAuthed()) { try { const { data: s } = await S.sb.auth.getSession(); if (s && s.session) { headers.Authorization = 'Bearer ' + s.session.access_token; if (window.NF_CONFIG && window.NF_CONFIG.supabaseAnonKey) headers.apikey = window.NF_CONFIG.supabaseAnonKey; } } catch (e) { /* key below */ } }
+    if (!headers.Authorization) u.searchParams.set('key', c.key);
+    const r = await fetch(u.toString(), { method: 'POST', headers, body: JSON.stringify(data || {}) }); const j = await r.json();
+    if (!j.ok) throw new Error(j.error || L('خطأ من الجسر', 'Bridge error')); return j;
+  }
+  async function loadStatus(force) {
+    if (!gpsOn()) return null; if (!force && ST.st && Date.now() - ST.at < 60000) return ST.st;
+    try { ST.st = await gpsCall('status'); ST.at = Date.now(); } catch (e) { ST.st = { provider: 'none', error: gpsErrAr(e.message || e) }; ST.at = Date.now(); }
+    return ST.st;
+  }
+
+  /* ---------- the «Vehicle GPS» tab ---------- */
+  gpsSettingsCard = function () {
+    const vs = list('vehicles'); const st = ST.st; const tc = st && st.traccar; const on = gpsOn();
+    if (on && !st) setTimeout(() => loadStatus(false).then(() => rerender()), 20);
+    const linked = tc && tc.hasToken;
+    const badge = !on ? `<span class="badge">${L('غير مفعّل', 'Off')}</span>` : !st ? `<span class="badge">${L('جارٍ الفحص…', 'Checking…')}</span>` : linked ? `<span class="badge ${gpsState.lastError ? 'warn' : 'good'}">${gpsState.lastError ? L('Traccar بيرفض — راجع التوكن', 'Traccar refuses — check the token') : L('متصل بـ Traccar', 'Connected to Traccar') + (gpsState.at ? ' · ' + agoTxt(gpsState.at) : '')}</span>` : `<span class="badge warn">${L('Traccar مش مربوط لسه', 'Traccar not connected yet')}</span>`;
+    return `<div class="card"><div class="cardhead"><h3>${L('GPS العربيات', 'Vehicle GPS')}</h3>${badge}</div>
+      <p class="small ink2">${L('أجهزة التتبع اللي في العربيات بتبعت مكانها لحساب Traccar بتاعك، والسيستم بيقرا منه مباشرة: مكان كل عربية الآن، سرعتها، والمسار الفعلي لكل مشوار. التوكن بيتحفظ على السيرفر بس ومش بيظهر تاني.', 'The trackers in the vehicles report to your Traccar account and the system reads it directly: where every vehicle is now, its speed and the real route of every trip. The token is kept on the server only and never shown again.')}</p>
+      <div class="grid g3" style="gap:10px;font-size:13px"><div><div class="tiny muted">${L('المزوّد', 'Provider')}</div><b>${linked ? 'Traccar' : (st && st.provider === 'etrack' ? 'eTrack' : '—')}</b></div><div><div class="tiny muted">${L('السيرفر', 'Server')}</div><span class="ltr">${esc((tc && tc.server) || '—')}</span></div><div><div class="tiny muted">${L('العربيات المربوطة بجهاز', 'Vehicles linked to a device')}</div>${vs.filter(v => v.gpsId).length} ${L('من', 'of')} ${vs.length}</div></div>
+      ${gpsState.lastError ? `<div class="banner warn" style="margin-top:10px">${icon('alert')}<span>${esc(gpsState.lastError)}</span></div>` : ''}
+      ${fleetOk() ? `<div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px">${owner() ? `<button type="button" class="btn sm p" data-action="gpsTraccarSetup">${icon('settings')}${linked ? L('تعديل ربط Traccar', 'Edit Traccar link') : L('ربط Traccar', 'Connect Traccar')}</button>` : ''}${linked ? `<button type="button" class="btn sm" data-action="gpsTest">${icon('play')}${L('اختبار الاتصال', 'Test the connection')}</button><button type="button" class="btn sm" data-action="gpsMap">${icon('map')}${L('ربط العربيات بالأجهزة', 'Link vehicles to devices')}</button>${owner() ? `<button type="button" class="btn sm ghost" data-action="gpsAppLink">${icon('link')}${L('رابط للأبليكيشن بتاعي', 'Link for my app')}</button>` : ''}` : ''}</div>` : ''}
+      ${!linked && owner() ? `<div class="banner info" style="margin-top:12px">${icon('info')}<span>${L('خطوة واحدة: في Traccar → Settings → Account → Token → اعمل توكن وانسخه، وبعدين «ربط Traccar» هنا والزقه فيها.', 'One step: in Traccar → Settings → Account → Token → create a token and copy it, then «Connect Traccar» here and paste it.')}</span></div>` : ''}
+      <div class="sep"></div>${gpsLiveCard()}</div>`;
+  };
+
+  /* ---------- the owner links Traccar (server + token, saved on the server only) ---------- */
+  ACTIONS.gpsTraccarSetup = () => {
+    if (!owner()) return; const tc = (ST.st && ST.st.traccar) || {};
+    openModal({ title: L('ربط Traccar', 'Connect Traccar'), submitLabel: L('حفظ واختبار', 'Save and test'),
+      body: `<div class="form">${field(L('سيرفر Traccar', 'Traccar server'), inp('server', tc.server ? 'https://' + tc.server : 'https://server.traccar.org', 'class="ltr" required autocomplete="off"'), 'full')}${field(L('التوكن (من Traccar → Settings → Account → Token)', 'Token (Traccar → Settings → Account → Token)'), `<input id="f-token" name="token" type="text" class="ltr" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellcheck="false" style="-webkit-text-security:disc" placeholder="${tc.hasToken ? L('سيبه فاضي لو مش هتغيّره', 'Leave empty to keep the current one') : ''}">`, 'full')}<div class="banner info full" style="margin:0">${icon('info')}<span>${L('التوكن بيتحفظ على السيرفر بس ومش بيظهر تاني لحد. متبعتوش في الشات ولا لأي حد.', 'The token is saved on the server only and never shown again. Never send it in a chat or to anyone.')}</span></div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (!d.server) return false; if (!d.token && !tc.hasToken) { toast(L('اكتب التوكن', 'Enter the token'), 'err'); return false; }
+        toast(L('جارٍ الحفظ والاختبار…', 'Saving and testing…'));
+        try { const r = await gpsPost('setup', { server: d.server, token: d.token || '' }); ST.st = null; gpsState.devices = null; gpsState.lastError = null; await loadStatus(true); toast(L(`تم — متصل بحساب ${r.account || ''}`, `Done — connected as ${r.account || ''}`)); gpsRefresh(true); return true; }
+        catch (e) { const m = String(e.message || e); ST.st = null; await loadStatus(true); toast(m.includes('refused') ? L('اتحفظ بس Traccar رفض التوكن — اتأكد إنك عامله من نفس الحساب', 'Saved, but Traccar refused the token — make sure it was created on the same account') : gpsErrAr(m), 'err'); return false; }
+      } });
+  };
+
+  /* ---------- the read-only link Mahmoud's own fleet app uses (shown once) ---------- */
+  ACTIONS.gpsAppLink = async () => {
+    if (!owner()) return;
+    const go = async rotate => { try { const r = await gpsCall('appkey', rotate ? { rotate: 1 } : {}); const url = `${r.url}?action=track&key=${r.key}`; openModal({ title: L('رابط للأبليكيشن بتاعي', 'Link for my app'), footer: `<button type="button" class="btn" data-action="closemodal">${L('إغلاق', 'Close')}</button>`, body: `<p class="small">${L('الأبليكيشن بتاعك يقرا مواقع العربيات من الرابط ده (قراءة فقط). خلّيه عندك إنت بس — لو اتسرّب اعمل «مفتاح جديد» والقديم يبطّل.', 'Your app reads the vehicle positions from this link (read-only). Keep it to yourself — if it leaks, make a «new key» and the old one stops working.')}</p><div class="field full"><label>${L('آخر موقع لكل عربية', 'Latest position of every vehicle')}</label><textarea class="ltr" readonly style="width:100%;min-height:70px;font-size:12px">${esc(url)}</textarea></div><div class="field full"><label>${L('مسار عربية في فترة', 'A vehicle route over a period')}</label><textarea class="ltr" readonly style="width:100%;min-height:60px;font-size:12px">${esc(`${r.url}?action=playback&imei=<IMEI>&from=<ISO>&to=<ISO>&key=${r.key}`)}</textarea></div><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn sm p" data-action="copyText" data-arg="${esc(url)}">${icon('copy')}${L('نسخ الرابط', 'Copy the link')}</button><button type="button" class="btn sm ghost" data-action="gpsAppLinkRotate">${L('مفتاح جديد', 'New key')}</button></div>` }); } catch (e) { toast(gpsErrAr(e.message || e), 'err'); } };
+    ACTIONS.gpsAppLinkRotate = async () => { if (!(await confirmDlg(L('مفتاح جديد؟ الرابط القديم هيبطّل يشتغل.', 'New key? The old link stops working.'), L('مفتاح جديد', 'New key')))) return; go(true); };
+    go(false);
+  };
+  if (!ACTIONS.copyText) ACTIONS.copyText = async t => { try { await navigator.clipboard.writeText(String(t || '')); toast(L('تم النسخ', 'Copied')); } catch (e) { toast(L('انسخه يدويًا', 'Copy it manually'), 'err'); } };
+
+  /* ---------- provider-neutral wording for what part 37 already does ---------- */
+  gpsRefresh = async function (silent) {
+    if (!gpsOn() || gpsState.busy) return; gpsState.busy = true;
+    try {
+      if (!gpsState.devices) { const d = await gpsCall('devices'); gpsState.devices = d.devices || []; }
+      const imeis = list('vehicles').map(v => (v.gpsId || '').trim()).filter(Boolean);
+      if (imeis.length) { const t = await gpsCall('track', { imeis: imeis.join(',') }); (t.positions || []).forEach(p => { if (p.imei) gpsState.positions[p.imei] = p; }); }
+      gpsState.at = nowISO(); gpsState.lastError = null;
+      if (!silent) toast(L(`تم تحديث مواقع العربيات من ${pName()}`, `Vehicle positions updated from ${pName()}`));
+    } catch (e) { gpsState.lastError = gpsErrAr(e.message || e); if (!silent) toast(gpsState.lastError, 'err'); }
+    finally { gpsState.busy = false; rerender(); }
+  };
+  ACTIONS.gpsTest = async () => { if (!gpsOn()) { toast(L('الربط مش مفعّل', 'Not connected'), 'err'); return; } toast(L('جارٍ الاتصال…', 'Connecting…')); try { const r = await gpsCall('test'); toast(L(`الاتصال ناجح — حساب ${r.account || ''}`, `Connected — account ${r.account || ''}`)); gpsState.lastError = null; gpsState.devices = null; await gpsRefresh(true); } catch (e) { gpsState.lastError = gpsErrAr(e.message || e); rerender(); toast(gpsState.lastError, 'err'); } };
+  /* vehicle ↔ device: same dialog, provider-neutral text, and the device whose name/IMEI matches the vehicle is pre-selected */
+  ACTIONS.gpsMap = async () => {
+    if (!fleetOk()) return; try { if (!gpsState.devices) { toast(L('جارٍ قراءة الأجهزة…', 'Reading the devices…')); const d = await gpsCall('devices'); gpsState.devices = d.devices || []; } } catch (e) { toast(gpsErrAr(e.message || e), 'err'); return; }
+    const devs = gpsState.devices || []; const vs = sortBy(list('vehicles'), v => v.name);
+    const guess = v => { if (v.gpsId) return v.gpsId; const n = (v.name || '').trim(); const hit = devs.find(d => n && d.name && (d.name.includes(n) || n.includes(d.name))); return hit ? hit.imei : ''; };
+    openModal({ title: L('ربط كل عربية بجهاز GPS', 'Link every vehicle to its GPS device'), body: `<p class="small">${devs.length} ${L(`جهاز على حساب ${pName()}. اختار لكل عربية جهازها (IMEI) — بعدها يظهر مكانها الحالي ويتسحب مسارها لكل مشوار.`, `devices on the ${pName()} account. Pick each vehicle's device (IMEI) — then its live position shows and its route is pulled for every trip.`)}</p><div class="form">${vs.map(v => field(v.name, `<select name="veh-${v.id}"><option value="">${L('— بدون —', '— none —')}</option>${devs.map(d => `<option value="${esc(d.imei)}" ${guess(v) === d.imei ? 'selected' : ''}>${esc(d.name || d.imei)} — <span class="ltr">${esc(d.imei)}</span>${d.status ? ` (${esc(d.status)})` : ''}</option>`).join('')}</select>`)).join('')}</div>`,
+      onSubmit: async f => { const d = formData(f); for (const v of vs) { const imei = d[`veh-${v.id}`] || ''; if ((v.gpsId || '') !== imei) await Store.update('vehicles', v.id, { gpsId: imei }); } toast(L('تم ربط العربيات', 'Vehicles linked')); gpsRefresh(true); } });
+  };
+  tripGpsActions = function (t) { const v = byId('vehicles', t.vehicleId); if (!v || !v.gpsId || !gpsOn() || !['started', 'done'].includes(t.status)) return ''; return `<button type="button" class="btn sm" data-action="gpsPullTrip" data-arg="${esc(t.id)}">${icon('map')}${t.gpsTrack && t.gpsTrack.length ? L('تحديث مسار العربية من GPS', 'Refresh the vehicle route from GPS') : L('سحب مسار العربية من GPS', 'Pull the vehicle route from GPS')}</button>`; };
+  /* the live card: the first refresh when the fleet page opens is immediate (part 37 waits for the 2-minute tick) */
+  let first = true; if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!first || !S.session || !gpsOn() || S.route.view !== 'fleet' || !fleetOk()) return; first = false; setTimeout(() => gpsRefresh(true), 50); });
 })();
 </script>
 
