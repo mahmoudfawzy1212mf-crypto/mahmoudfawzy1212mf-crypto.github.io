@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1932-1e2272";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1949-1bb160";</script>
 
 <script>
 'use strict';
@@ -35282,6 +35282,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    · the detail of the selected vehicle: speed, engine, km today, driver, task, «open the trip», its route today drawn on
      the map (from the tracker's history) and a replay slider over the day.
    · two sources, the newest wins: the tracker on Traccar (gps-bridge) and the driver's phone when he is out on a task.
+   · v6.84: top-view vehicle drawings (van / pickup / car) coloured by state and turned the way they drive; vehicles parked on
+     the same spot are fanned out; the name sits in a small white tag under the drawing.
    · live: positions every 5 s on the page (10 s on the dashboard) and the map element survives re-renders (no reload).
    · the dashboard card «Fleet now» (owner + factory manager): a small live map + a line per vehicle → opens the page.
    · phone: the map on top, the list as a sheet under it; light + dark.
@@ -35409,6 +35411,20 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     });
     return gmP;
   }
+  /* top-view vehicle drawings (data URIs) — type from the vehicle's type/name: van, pickup (TFR / Chevrolet / dababa / naql), else car; the Arabic words are unicode-escaped so the i18n guard skips them */
+  const vKind = v => { const t = ((v.type || '') + ' ' + (v.name || '') + ' ' + (v.model || '')).toLowerCase(); if (/\u0641\u0627\u0646|\u0645\u064a\u0643\u0631\u0648\u0628\u0627\u0635|\u0628\u0627\u0635|van|bus|hiace/.test(t)) return 'van'; if (/tfr|\u0634\u064a\u0641\u0631\u0648\u0644\u064a\u0647|\u062f\u0628\u0627\u0628\u0629|\u062f\u0628\u0627\u0628\u0647|\u0646\u0642\u0644|\u0631\u0628\u0639|pickup|truck|\u062c\u0627\u0645\u0628\u0648/.test(t)) return 'pickup'; return 'car'; };
+  const svgCache = {};
+  function vehSvg(r) {
+    const col = ST[r.st][0]; const kind = vKind(r.v); const rot = r.st === 'mv' && r.course != null ? Math.round(r.course) : 0; const key = kind + col + rot;
+    if (svgCache[key]) return svgCache[key];
+    const body = kind === 'van' ? '<rect x="14" y="6" width="20" height="36" rx="5"/><rect x="16" y="10" width="16" height="7" rx="2" fill="#dff0ff" opacity=".95"/><rect x="16" y="30" width="16" height="3" rx="1" fill="#000" opacity=".2"/>'
+      : kind === 'pickup' ? '<rect x="14" y="8" width="20" height="34" rx="4"/><rect x="16" y="11" width="16" height="7" rx="2" fill="#dff0ff" opacity=".95"/><rect x="16" y="22" width="16" height="17" rx="2" fill="#000" opacity=".25"/>'
+      : '<rect x="15" y="8" width="18" height="32" rx="7"/><rect x="17" y="13" width="14" height="6" rx="2" fill="#dff0ff" opacity=".95"/><rect x="17" y="30" width="14" height="5" rx="2" fill="#dff0ff" opacity=".7"/>';
+    const wheels = '<rect x="11" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="11" y="31" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="31" width="4" height="7" rx="1.5" fill="#222"/>';
+    const halo = r.st === 'mv' ? `<circle cx="24" cy="24" r="22" fill="${col}" opacity=".18"/>` : '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">${halo}<g transform="rotate(${rot} 24 24)" fill="${col}" stroke="#fff" stroke-width="1.5">${wheels}${body}</g></svg>`;
+    return (svgCache[key] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+  }
   const noMap = () => `<div class="banner warn" style="margin:10px">${icon('alert')}<span>${isAdmin() ? L('الخريطة محتاجة «مفتاح الخريطة» من الإعدادات ← جوجل ماب.', 'The map needs the «map key» from Settings → Google Maps.') : L('الخريطة لسه مش مضبوطة — صاحب الشركة يضيف مفتاح الخريطة.', 'The map is not set up yet — the owner adds the map key.')}</span></div>`;
   async function ensureMap(elId, big) {
     const box = document.getElementById(elId); if (!box) return;
@@ -35422,12 +35438,15 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: big, gestureHandling: big ? 'greedy' : 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
     if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), label: { text: '🏭', fontSize: big ? '20px' : '16px' }, zIndex: 1 });
     const marks = new Map(); let line = null, ghost = null, fitted = false;
-    const iconFor = r => { const col = ST[r.st][0]; return r.st === 'mv' && r.course != null && g.SymbolPath ? { path: g.SymbolPath.FORWARD_CLOSED_ARROW, scale: big ? 6 : 4.5, rotation: r.course, fillColor: col, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1.5 } : { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: big ? 9 : 7, fillColor: col, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }; };
+    /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
+    const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
     const tick = () => {
       const rows = fleetNow().filter(r => r.lat != null); const keep = new Set(); const bounds = new g.LatLngBounds(); let n = 0;
       if (fz) { bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
+      /* vehicles parked on the same spot are fanned out a few metres so every one stays visible and clickable */
+      const taken = []; const spread = r => { let k = 0; for (const t of taken) if (Math.abs(t.lat - r.lat) < 0.00015 && Math.abs(t.lng - r.lng) < 0.00015) k++; taken.push({ lat: r.lat, lng: r.lng }); if (!k) return { lat: r.lat, lng: r.lng }; const a = k * 1.7; return { lat: r.lat + 0.00016 * Math.sin(a), lng: r.lng + 0.00020 * Math.cos(a) }; };
       rows.forEach(r => {
-        keep.add(r.id); let e = marks.get(r.id); const pos = { lat: r.lat, lng: r.lng }; const lbl = { text: r.name.split('—')[0].trim(), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' };
+        keep.add(r.id); let e = marks.get(r.id); const pos = spread(r); const lbl = { text: r.name.split('—')[0].trim(), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' };
         if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: iconFor(r), label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
         else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(iconFor(r)); if (e.m.setLabel) e.m.setLabel(lbl); }
         bounds.extend(pos); n++;
@@ -35506,7 +35525,7 @@ html body .fm-detail{position:absolute;inset-inline-start:12px;bottom:12px;width
 html body .fm-dh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 html body .fm-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 10px;font-size:13px}
 html body .fm-replay{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
-html body .fm-lbl{color:var(--ink);text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;transform:translateY(-16px)}
+html body .fm-lbl{color:#1b2430;background:rgba(255,255,255,.92);border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:1px 6px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.15)}
 html body .fmd-map{height:220px;border-radius:12px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);cursor:pointer}
 html body .fmd-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
 html body .fmd-row{display:flex;gap:10px;align-items:center;font-size:13px;padding:6px 8px;border-radius:8px;color:inherit;text-decoration:none}
