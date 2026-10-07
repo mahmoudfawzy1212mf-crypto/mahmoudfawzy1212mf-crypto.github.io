@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1316-fbc7e2";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1720-8228c9";</script>
 
 <script>
 'use strict';
@@ -34731,13 +34731,14 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
     const out = []; const seen = new Set();
     list('trips').filter(t => t.status === 'started').forEach(t => {
       const tl = (t.track || []).slice(-1)[0]; const p = (t.live && (!tl || String(t.live.at || '') >= String(tl.at || ''))) ? t.live : (tl || t.startPos); if (!p || p.lat == null) return;   /* v6.78: live position from the app */
-      seen.add(t.vehicleId); out.push({ lat: +p.lat, lng: +p.lng, title: `${t.number || ''} — ${typeof assigneeName === 'function' ? assigneeName(t.driverId) : ''}`, sub: `${typeof vehicleName === 'function' ? vehicleName(t.vehicleId) : ''} · ${L('موبايل السواق', 'driver phone')}${p.at && typeof agoTxt === 'function' ? ' · ' + agoTxt(p.at) : ''}`, id: t.id, live: true });
+      seen.add(t.vehicleId); out.push({ lat: +p.lat, lng: +p.lng, title: `${t.number || ''} — ${typeof assigneeName === 'function' ? assigneeName(t.driverId) : ''}`, sub: `${typeof vehicleName === 'function' ? vehicleName(t.vehicleId) : ''} · ${L('موبايل السواق', 'driver phone')}${p.at && typeof agoTxt === 'function' ? ' · ' + agoTxt(p.at) : ''}${t.purpose ? ' · ' + t.purpose : ''}`, id: t.id, live: true });   /* v6.81: the task / purpose next to the truck */
     });
     if (typeof gpsState !== 'undefined' && gpsState.positions) list('vehicles').forEach(v => { const p = v.gpsId && gpsState.positions[v.gpsId]; if (!p || p.lat == null || seen.has(v.id)) return; out.push({ lat: +p.lat, lng: +p.lng, title: v.name, sub: `GPS${p.speed != null ? ` · ${p.speed} ${L('كم/س', 'km/h')}` : ''}`, live: false }); });
     return out;
   }
   function drawMap() {
     const box = document.getElementById('trf-map'); if (!box || !window.google) return;
+    if (box._gm) { box._gm.tick(); return; }   /* v6.81: the map survived the re-render — just move the trucks */
     const g = window.google.maps; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
     box.innerHTML = '<div id="trf-gm" style="width:100%;height:100%"></div>';
     const map = new g.Map(document.getElementById('trf-gm'), { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: 11, mapTypeControl: false, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy' });
@@ -34765,12 +34766,25 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
     const drawLines = () => { lines.forEach(l => l.setMap(null)); lines.length = 0; list('trips').filter(t => t.status === 'started' && (t.track || []).length > 1).forEach(t => { lines.push(new g.Polyline({ map, path: t.track.filter(p => p && p.lat != null).map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4 })); }); };
     drawLines();
     if (n > 1) map.fitBounds(bounds, 60);
+    /* v6.81: instant — the map box is carried over re-renders (renderBase wrapper below) and every data change moves the trucks at once */
+    box._gm = { map, tick: () => { try { placeTrucks(false); drawLines(); } catch (e) { /* ignore */ } } };
+    window.nfTrafficTick = box._gm.tick;
     const iv = setInterval(() => {
-      if (!document.getElementById('trf-gm')) { clearInterval(iv); return; }
+      if (!document.getElementById('trf-gm')) { clearInterval(iv); if (window.nfTrafficTick === box._gm.tick) window.nfTrafficTick = null; box._gm = null; return; }
       if (typeof gpsOn === 'function' && gpsOn() && typeof gpsRefresh === 'function') gpsRefresh(true);   /* vehicle GPS (eTrack) when it is connected */
       placeTrucks(false); drawLines();
     }, 10000);
   }
+
+  /* v6.81: a re-render (any data change, incl. the live position every 3 s) used to rebuild the map and re-fit it; now the
+     map element is lifted out before the re-render and put back into the new traffic tab, then the trucks are moved */
+  if (typeof renderBase === 'function') renderBase = (base => function (full) {
+    const old = document.getElementById('trf-map'); const keep = (!full && old && old._gm) ? old : null;
+    if (keep && keep.parentNode) keep.parentNode.removeChild(keep);
+    const r = base.apply(this, arguments);
+    if (keep) { const nw = document.getElementById('trf-map'); if (nw && nw !== keep) { nw.replaceWith(keep); setTimeout(() => { try { if (window.google && window.google.maps && window.google.maps.event) window.google.maps.event.trigger(keep._gm.map, 'resize'); } catch (e) { /* ignore */ } keep._gm.tick(); }, 0); } }
+    return r;
+  })(renderBase);
 
   /* ---------- 3) Settings → «Google Maps» (owner) ---------- */
   /* v6.77: the key fields are masked text fields, not password fields — the browser was filling a saved password into them */
@@ -34928,7 +34942,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    set up, I want it for iPhone and Android» → go-ahead).
    · In the app (native) the driver's phone records the route every ~25 m while HIS trip is on the road — also with the
      screen locked (iPhone: background location; Android: a visible «recording your trip» notification). It starts when the
-     trip starts and stops by itself when the trip ends. The route is saved every 30 s (trip.track) and the current position every 10 s (trip.live, v6.80).
+     trip starts and stops by itself when the trip ends. The route is saved every 30 s (trip.track) and the current position every 3 s (trip.live, v6.80 → v6.81).
      The old 2-minute browser timer stays for drivers who use the website.
    · Fleet → «Traffic & map»: each truck on the road with its route line, updated live; finished trips show the route
      snapped to the real roads (Roads API, server) and the exact km on the trip page.
@@ -34956,7 +34970,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
             if (err) { if (err.code === 'NOT_AUTHORIZED') toast(L('اسمح للأبلكيشن بالموقع عشان المشوار يتسجل — الإعدادات ← Ninety ← الموقع', 'Allow location for the app so the trip is recorded — Settings → Ninety → Location'), 'err'); return; }
             if (!loc || loc.latitude == null) return;
             buf.push({ lat: +(+loc.latitude).toFixed(6), lng: +(+loc.longitude).toFixed(6), acc: Math.round(loc.accuracy || 0), at: new Date(loc.time || Date.now()).toISOString(), ...(loc.speed != null ? { kmh: Math.round(loc.speed * 3.6) } : {}) });
-            if (Date.now() - lastFlush > 30000) flush(); else if (Date.now() - lastLive > 10000) pushLive();
+            if (Date.now() - lastFlush > 30000) flush(); else if (Date.now() - lastLive > 3000) pushLive();   /* v6.81: every 3 s */
           });
       } catch (e) { console.warn('trip watcher', e); watcher = null; }
       starting = false;
@@ -34983,7 +34997,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       if (!native()) return; const t = myTrip();
       if (t && !watcher) start(t); else if (watcher && (!t || t.id !== tripId)) { flush().finally(stop); }
     });
-    setInterval(() => { if (!watcher) return; if (Date.now() - lastFlush >= 30000) flush(); else if (Date.now() - lastLive >= 10000) pushLive(); }, 10000);
+    setInterval(() => { if (!watcher) return; if (Date.now() - lastFlush >= 30000) flush(); else if (Date.now() - lastLive >= 3000) pushLive(); }, 3000);   /* v6.81: 3 s (was 10) */
     /* in the app the native watcher replaces the 2-minute browser timer */
     if (typeof startTracking === 'function') { const base = startTracking; startTracking = function () { if (native()) return; return base.apply(this, arguments); }; }
     window.nfTripLive = { state: () => ({ watcher: !!watcher, tripId, buffered: buf.length }) };
@@ -35065,6 +35079,100 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     try { const r = await S.sb.functions.invoke('app-build', { body: { action: 'build' } }); const d = r.data || {}; toast(d.ok ? L('البناء بدأ — هيوصلك إشعار لما يخلص (حوالي 10–15 دقيقة)', 'The build started — you will get a notification when it is done (about 10–15 minutes)') : d.error === 'no_token' ? L('سجّل توكن Codemagic الأول', 'Save the Codemagic token first') : L('Codemagic رفض البناء', 'Codemagic refused the build'), d.ok ? '' : 'err'); } catch (e) { toast(L('تعذّر البدء', 'Could not start'), 'err'); }
     loadAndroid();
   };
+})();
+/* =====================================================================
+   v6.81 — «خارج بعربية» on the task + instant fleet map (Mahmoud, 7 Oct — go-ahead; factory only):
+   · a DRIVER (role «driver») opening a task given to him sees «Out with a vehicle»: he picks the vehicle → a trip opens
+     by itself in his name on that vehicle (purpose = the task title, linked both ways: task.tripId / trip.taskId) and
+     his phone records the route from that moment (the v6.78/v6.80 app tracking, iPhone + Android) until he presses
+     «I am back» on the task — or marks the task done, which closes the trip too. The crew named on the task is NOT
+     tracked — only the vehicle (Mahmoud).
+   · a vehicle already on the road with another driver is refused («this vehicle is with … now»).
+   · the task page shows the vehicle, the driver, out/back times, the route and the km; the trip page links back to
+     the task; the fleet map shows the task title next to the truck.
+   · an errand task closed by a driver who never picked a vehicle → a light notice to the owner (no amounts).
+   · instant: the driver phone sends its position every 3 s while moving (was 10), and the fleet map is kept alive
+     across re-renders (see 99zzZzZF) so the truck moves the moment the point lands instead of every 10 s.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const drv = () => typeof isDriver === 'function' && isDriver();
+  const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const mineTask = t => !!(t && ((t.assigneeId && typeof myIds === 'function' && myIds().includes(t.assigneeId)) || (meId() && (t.participants || []).includes(meId()))));
+  const tripOf = t => (t && t.tripId ? byId('trips', t.tripId) : null);
+  const busy = vid => list('trips').find(x => x.status === 'started' && x.vehicleId === vid);
+  const hhmm = iso => { if (!iso) return '—'; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const posNow2 = async () => { try { const g = await getGeo(8000); return g ? { lat: g.lat, lng: g.lng, acc: g.acc, at: nowISO() } : null; } catch (e) { return null; } };
+  const open = t => t && !['done', 'cancelled'].includes(t.status);
+
+  /* ---------- 1) the card on the task page ---------- */
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    const html = base.apply(this, arguments); if (!t) return html;
+    const tr = tripOf(t); let card = '';
+    if (tr) {
+      const done = tr.status !== 'started';
+      card = `<div class="card" id="tv-card"><div class="cardhead"><h3>${icon('map')}${L('العربية في المشوار ده', 'The vehicle on this errand')}</h3><span class="badge ${done ? 'good' : 'acc'}">${done ? L('رجع', 'Back') : L('في الطريق', 'On the road')}</span></div>
+        <div class="meta"><span>${esc(vehicleName(tr.vehicleId))}</span><span>${esc(assigneeName(tr.driverId))}</span><span>${L('خرج', 'Out')} ${hhmm(tr.startedAt)}</span>${done ? `<span>${L('رجع', 'Back')} ${hhmm(tr.endedAt)}</span><span>${fmtNum(tr.km || 0)} ${L('كم', 'km')}</span>` : `<span>${(tr.track || []).length} ${L('نقطة', 'points')}</span>`}</div>
+        ${typeof trackSvg === 'function' && trackSvg(tr) ? trackSvg(tr) : `<div class="muted small">${L('المسار بيتسجل من موبايل السواق…', 'The route is being recorded from the driver phone…')}</div>`}
+        <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><a class="btn sm" href="#/fleet/${esc(tr.id)}">${icon('map')}${L('افتح المشوار', 'Open the trip')}</a>${!done && drv() && tr.driverId === meId() ? `<button type="button" class="btn sm p" data-action="taskVehBack" data-arg="${esc(t.id)}">${icon('check')}${L('رجعت', 'I am back')}</button>` : ''}</div></div>`;
+    } else if (drv() && mineTask(t) && open(t)) {
+      card = `<div class="card" id="tv-card"><div class="cardhead"><h3>${icon('map')}${L('خارج بعربية؟', 'Going out with a vehicle?')}</h3></div><div class="small ink2">${L('اختار العربية اللي خارج بيها — مسارها هيتسجل لوحده من موبايلك لحد ما ترجع.', 'Pick the vehicle you are taking — its route is recorded by itself from your phone until you are back.')}</div><div style="margin-top:8px"><button type="button" class="btn p" data-action="taskVehOut" data-arg="${esc(t.id)}">${icon('play')}${L('خارج بعربية', 'Out with a vehicle')}</button></div></div>`;
+    }
+    return card + html;
+  })(vTaskDetail);
+
+  /* the trip page links back to its task */
+  if (typeof vTripDetail === 'function') vTripDetail = (base => id => {
+    const html = base(id); const t = byId('trips', id); const tk = t && t.taskId ? byId('tasks', t.taskId) : null; if (!tk) return html;
+    return `<div class="banner info" style="margin-bottom:12px">${icon('info')}<span>${L('مشوار تاسك', 'Task errand')}: <b>${esc(tk.title || '')}</b> — <a href="#/tasks/${esc(tk.id)}">${L('افتح التاسك', 'Open the task')}</a></span></div>` + html;
+  })(vTripDetail);
+
+  /* ---------- 2) out with a vehicle ---------- */
+  ACTIONS.taskVehOut = id => {
+    const t = byId('tasks', id); if (!t || !drv() || !mineTask(t) || !open(t)) return;
+    const cur = list('trips').find(x => x.status === 'started' && x.driverId === meId());
+    if (cur) { toast(L(`عندك مشوار شغّال (${cur.number}) — خلّصه الأول`, `You have a trip running (${cur.number}) — finish it first`), 'err'); return; }
+    const vs = list('vehicles').filter(v => (v.status || 'active') !== 'out');
+    if (!vs.length) { toast(L('مفيش عربيات متسجلة', 'No vehicles registered'), 'err'); return; }
+    const opts = vs.map(v => { const b = busy(v.id); return `<option value="${esc(v.id)}" ${b ? 'disabled' : ''}>${esc(v.name)}${v.plate ? ` (${esc(v.plate)})` : ''}${b ? ` — ${L('مع', 'with')} ${esc(assigneeName(b.driverId))}` : ''}</option>`; }).join('');
+    openModal({ title: L('خارج بأنهي عربية؟', 'Which vehicle are you taking?'), submitLabel: L('اطلع', 'Go'),
+      body: `<div class="form">${field(L('العربية', 'Vehicle'), `<select name="vid" required>${opts}</select>`)}<div class="small ink2">${L('هيتفتح مشوار باسمك على العربية دي ومسارها يتسجل من موبايلك لحد ما تدوس «رجعت».', 'A trip opens in your name on this vehicle and its route is recorded from your phone until you press «I am back».')}</div></div>`,
+      onSubmit: async f => {
+        const vid = formData(f).vid; if (!vid) return false;
+        const b = busy(vid); if (b) { toast(L(`العربية دي مع ${assigneeName(b.driverId)} دلوقتي`, `This vehicle is with ${assigneeName(b.driverId)} now`), 'err'); return false; }
+        toast(L('جارٍ تحديد موقعك…', 'Getting your location…')); const p = await posNow2();
+        const trip = { id: uid(), number: nextTripNo(), date: todayISO(), time: hhmm(nowISO()), kind: 'task', taskId: t.id, purpose: t.title || '', driverId: meId(), vehicleId: vid, status: 'started', startedAt: nowISO(), startPos: p, track: p ? [p] : [], approvedBy: 'task', to: (t.site && t.site.name) || t.place || '' };
+        await Store.save('trips', trip);
+        await Store.update('tasks', t.id, Object.assign({ tripId: trip.id, vehicleId: vid }, t.status === 'open' ? { status: 'doing' } : {}));
+        if (typeof startTracking === 'function') startTracking(trip.id);
+        toast(L('اتفتح المشوار — مسارك بيتسجل', 'Trip opened — your route is being recorded'));
+        return true;
+      } });
+  };
+
+  /* ---------- 3) back ---------- */
+  async function endTrip(tr, note) {
+    const p = await posNow2(); const track = (tr.track || []).concat(p ? [p] : []); const km = r2(trackKm(track));
+    await Store.update('trips', tr.id, { status: 'done', endedAt: nowISO(), endPos: p, track, km, proof: { note, at: nowISO(), byName: (S.session && S.session.name) || '', status: 'ok' } });
+  }
+  const mayEnd = tr => (drv() && tr.driverId === meId()) || isAdmin() || (typeof canFleet === 'function' && canFleet());
+  ACTIONS.taskVehBack = async id => {
+    const t = byId('tasks', id); const tr = tripOf(t); if (!t || !tr || tr.status !== 'started' || !mayEnd(tr)) return;
+    if (!(await confirmDlg(L('رجعت بالعربية وخلّصت المشوار؟', 'Back with the vehicle — end the trip?'), L('رجعت', 'I am back'), false))) return;
+    await endTrip(tr, L('رجع من مشوار التاسك', 'Back from the task errand'));
+    toast(L('تم — المسار اتسجل', 'Done — the route is saved'));
+  };
+  /* marking the task done closes the trip too; an errand closed by a driver with no vehicle → a light notice to the owner */
+  if (ACTIONS.taskStatus) ACTIONS.taskStatus = (base => async arg => {
+    const [id, st] = String(arg || '').split(':'); const t = byId('tasks', id);
+    if (t && st === 'done') {
+      const tr = tripOf(t); if (tr && tr.status === 'started' && mayEnd(tr)) { try { await endTrip(tr, L('خلّص التاسك', 'Task finished')); } catch (e) { /* the trip stays open for the fleet page */ } }
+      else if (!tr && t.errand && drv() && mineTask(t) && typeof notifyOwner === 'function') { try { await notifyOwner(L(`${S.session.name || ''} خلّص مأمورية من غير عربية`, `${S.session.name || ''} finished an errand without a vehicle`), t.title || '', { id: `tv_noveh_${t.id}` }); } catch (e) { /* ignore */ } }
+    }
+    return base(arg);
+  })(ACTIONS.taskStatus);
 })();
 </script>
 
