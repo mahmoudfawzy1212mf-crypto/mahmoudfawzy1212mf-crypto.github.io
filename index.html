@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1029-17f3c8";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261007-1112-26b4d6";</script>
 
 <script>
 'use strict';
@@ -34094,6 +34094,12 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
   const Cap = () => window.Capacitor;
   const isNative = () => { try { const c = Cap(); return !!(c && typeof c.isNativePlatform === 'function' && c.isNativePlatform()); } catch (e) { return false; } };
   window.nfIsNative = isNative;
+  /* v6.78: the same app on Android — notifications through Firebase (FCM) instead of Apple Push */
+  const platform = () => { try { return (Cap() && Cap().getPlatform && Cap().getPlatform()) || 'web'; } catch (e) { return 'web'; } };
+  const isAndroid = () => platform() === 'android';
+  window.nfPlatform = platform;
+  let fcmOn = null;
+  async function fcmReady() { if (!isAndroid()) return true; if (fcmOn !== null) return fcmOn; try { const r = await S.sb.functions.invoke('push', { body: { action: 'fcm-on' } }); fcmOn = !!(r.data && r.data.on); } catch (e) { fcmOn = false; } return fcmOn; }
   const PN = () => { const c = Cap(); return c && c.Plugins && c.Plugins.PushNotifications; };
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb;
   const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
@@ -34104,7 +34110,7 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
     const key = 'nf.apns.' + (S.session.id || ''); const v = token.slice(-12) + ':' + todayISO();   // refreshed once a day
     if (!force && lsGet(key) === v) return true;
     try {
-      const r = await S.sb.functions.invoke('push', { body: { action: 'apns-register', token, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar' } });
+      const r = await S.sb.functions.invoke('push', { body: { action: isAndroid() ? 'fcm-register' : 'apns-register', token, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar' } });
       if (r.error || !(r.data && r.data.ok)) throw (r.error || new Error((r.data && r.data.error) || 'apns'));
       lsSet(key, v); return true;
     } catch (e) { console.warn('apns-register', e); return false; }
@@ -34121,6 +34127,7 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
     let p = await perm();
     if (p !== 'granted' && p !== 'denied' && ask) { try { p = ((await PN().requestPermissions()) || {}).receive || p; } catch (e) { /* ignore */ } }
     if (p !== 'granted') return false;
+    if (!(await fcmReady())) return false;   /* Android: registering without Firebase set up would crash the app */
     try { await PN().register(); } catch (e) { console.warn('apns register', e); return false; }
     return true;
   }
@@ -34722,7 +34729,7 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
   function trucks() {
     const out = []; const seen = new Set();
     list('trips').filter(t => t.status === 'started').forEach(t => {
-      const p = (t.track || []).slice(-1)[0] || t.startPos; if (!p || p.lat == null) return;
+      const tl = (t.track || []).slice(-1)[0]; const p = (t.live && (!tl || String(t.live.at || '') >= String(tl.at || ''))) ? t.live : (tl || t.startPos); if (!p || p.lat == null) return;   /* v6.78: live position from the app */
       seen.add(t.vehicleId); out.push({ lat: +p.lat, lng: +p.lng, title: `${t.number || ''} — ${typeof assigneeName === 'function' ? assigneeName(t.driverId) : ''}`, sub: `${typeof vehicleName === 'function' ? vehicleName(t.vehicleId) : ''} · ${L('موبايل السواق', 'driver phone')}${p.at && typeof agoTxt === 'function' ? ' · ' + agoTxt(p.at) : ''}`, id: t.id, live: true });
     });
     if (typeof gpsState !== 'undefined' && gpsState.positions) list('vehicles').forEach(v => { const p = v.gpsId && gpsState.positions[v.gpsId]; if (!p || p.lat == null || seen.has(v.id)) return; out.push({ lat: +p.lat, lng: +p.lng, title: v.name, sub: `GPS${p.speed != null ? ` · ${p.speed} ${L('كم/س', 'km/h')}` : ''}`, live: false }); });
@@ -34740,7 +34747,12 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
       const m = new g.Marker({ map, position: { lat: x.lat, lng: x.lng }, title: x.title, label: { text: '🚚', fontSize: '20px' } }); bounds.extend({ lat: x.lat, lng: x.lng }); n++;
       m.addListener('click', () => { info.setContent(`<div style="font:13px system-ui;direction:${en() ? 'ltr' : 'rtl'}"><b>${esc(x.title)}</b><div>${esc(x.sub)}</div>${x.id ? `<a href="#/fleet/${esc(x.id)}">${L('افتح المشوار', 'Open the trip')}</a>` : ''}</div>`); info.open({ map, anchor: m }); });
     });
+    /* v6.78: the route line of every trip on the road, refreshed every 30 s while the map is open */
+    const lines = [];
+    const drawLines = () => { lines.forEach(l => l.setMap(null)); lines.length = 0; list('trips').filter(t => t.status === 'started' && (t.track || []).length > 1).forEach(t => { lines.push(new g.Polyline({ map, path: t.track.filter(p => p && p.lat != null).map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4 })); }); };
+    drawLines();
     if (n > 1) map.fitBounds(bounds, 60);
+    const iv = setInterval(() => { if (!document.getElementById('trf-gm')) { clearInterval(iv); return; } drawLines(); }, 30000);
   }
 
   /* ---------- 3) Settings → «Google Maps» (owner) ---------- */
@@ -34893,6 +34905,142 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     setTimeout(place, 50);
   };
   document.addEventListener('nf:login', () => { sender = null; checkedFor = ''; rows = null; });
+})();
+/* =====================================================================
+   v6.78 — live trip tracking in the Ninety app (iPhone + Android) and the Android app itself (Mahmoud, 7 Oct: «anything we
+   set up, I want it for iPhone and Android» → go-ahead).
+   · In the app (native) the driver's phone records the route every ~25 m while HIS trip is on the road — also with the
+     screen locked (iPhone: background location; Android: a visible «recording your trip» notification). It starts when the
+     trip starts and stops by itself when the trip ends. Points are saved every 30 s (trip.track + trip.live).
+     The old 2-minute browser timer stays for drivers who use the website.
+   · Fleet → «Traffic & map»: each truck on the road with its route line, updated live; finished trips show the route
+     snapped to the real roads (Roads API, server) and the exact km on the trip page.
+   · Settings → «Android app» (owner): Codemagic token + Firebase files (kept on the server only), build status, the APK link
+     to send to the staff. Studio: only the Firebase key (Android notifications).
+   ===================================================================== */
+(function () {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const studio = () => typeof isStudioz === 'function' && isStudioz();
+  const BG = () => { try { const c = window.Capacitor; return c && c.Plugins && c.Plugins.BackgroundGeolocation; } catch (e) { return null; } };
+  const native = () => !!(window.nfIsNative && window.nfIsNative()) && !!BG();
+  const dist = (a, b) => (typeof haversine === 'function' ? haversine(a, b) : 0);
+
+  /* ---------- 1) the driver's phone (app only) ---------- */
+  if (!studio() && typeof EXTRA_VIEWS !== 'undefined' && EXTRA_VIEWS.fleet) {
+    let watcher = null, tripId = null, buf = [], lastFlush = 0, starting = false, flushing = false;
+    const myTrip = () => (S.session && typeof myDriverId === 'function') ? list('trips').find(t => t.status === 'started' && t.driverId && t.driverId === myDriverId()) : null;
+    async function start(t) {
+      if (watcher || starting || !native()) return; starting = true; tripId = t.id;
+      try {
+        watcher = await BG().addWatcher({ backgroundTitle: `Ninety · ${t.number || L('مشوار', 'Trip')}`, backgroundMessage: L('بيسجل مكانك أثناء المشوار — بيقف لوحده أول ما تخلّص', 'Recording your trip — stops by itself when you finish'), requestPermissions: true, stale: false, distanceFilter: 25 },
+          (loc, err) => {
+            if (err) { if (err.code === 'NOT_AUTHORIZED') toast(L('اسمح للأبلكيشن بالموقع عشان المشوار يتسجل — الإعدادات ← Ninety ← الموقع', 'Allow location for the app so the trip is recorded — Settings → Ninety → Location'), 'err'); return; }
+            if (!loc || loc.latitude == null) return;
+            buf.push({ lat: +(+loc.latitude).toFixed(6), lng: +(+loc.longitude).toFixed(6), acc: Math.round(loc.accuracy || 0), at: new Date(loc.time || Date.now()).toISOString(), ...(loc.speed != null ? { kmh: Math.round(loc.speed * 3.6) } : {}) });
+            if (Date.now() - lastFlush > 30000) flush();
+          });
+      } catch (e) { console.warn('trip watcher', e); watcher = null; }
+      starting = false;
+    }
+    async function flush() {
+      if (flushing || !buf.length || !tripId) return; flushing = true; lastFlush = Date.now();
+      const t = byId('trips', tripId); const pts = buf.splice(0);
+      try {
+        if (!t || t.status !== 'started') { await stop(); return; }
+        const track = (t.track || []).slice(); let last = track[track.length - 1];
+        pts.forEach(p => { if (!last || dist(last, p) >= 20 || p.acc < (last.acc || 999) - 20) { track.push(p); last = p; } });
+        await Store.update('trips', t.id, { track: track.slice(-2500), live: Object.assign({}, pts[pts.length - 1], { via: 'app' }) }, { silent: true });
+      } catch (e) { buf.unshift(...pts); } finally { flushing = false; }
+    }
+    async function stop() { const w = watcher; watcher = null; tripId = null; buf = []; if (w) { try { await BG().removeWatcher({ id: w }); } catch (e) { /* ignore */ } } }
+    if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+      if (!native()) return; const t = myTrip();
+      if (t && !watcher) start(t); else if (watcher && (!t || t.id !== tripId)) { flush().finally(stop); }
+    });
+    setInterval(() => { if (watcher) flush(); }, 30000);
+    /* in the app the native watcher replaces the 2-minute browser timer */
+    if (typeof startTracking === 'function') { const base = startTracking; startTracking = function () { if (native()) return; return base.apply(this, arguments); }; }
+    window.nfTripLive = { state: () => ({ watcher: !!watcher, tripId, buffered: buf.length }) };
+
+    /* ---------- 2) the route on the trip page: snapped to the roads ---------- */
+    vTripDetail = (base => id => {
+      const html = base(id); const t = byId('trips', id); if (!t) return html;
+      if (t.snap && t.snap.km != null) {
+        const card = `<div class="card"><div class="cardhead"><h3>${icon('map')}${L('المسار على الطريق', 'Route on the roads')}</h3><span class="badge good">Google Roads</span></div><div class="small">${L('المسافة الفعلية على الطريق', 'Actual distance on the road')}: <b class="num">${fmtNum(t.snap.km)}</b> ${L('كم', 'km')} <span class="muted tiny">(${fmtNum(t.snap.n || 0)} ${L('نقطة من موبايل السواق', 'points from the driver phone')})</span></div></div>`;
+        const i = html.indexOf('<div class="card">'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+      }
+      if (t.status === 'done' && (t.track || []).length > 4 && hosted() && (isAdmin() || (typeof canFleet === 'function' && canFleet()))) setTimeout(() => snapOnce(t.id), 50);
+      return html;
+    })(vTripDetail);
+    const snapAsked = {};
+    async function snapOnce(id) { if (snapAsked[id]) return; snapAsked[id] = 1; try { await S.sb.functions.invoke('traffic', { body: { action: 'snap', tripId: id } }); } catch (e) { /* ignore */ } }
+  }
+
+  /* ---------- 3) Settings → «Android app» (owner) ---------- */
+  if (typeof EXTRA_SETTINGS === 'undefined') return;
+  const APK = 'https://mahmoudfawzy1212mf-crypto.github.io/Ninety.apk';
+  EXTRA_SETTINGS.android = { label: 'أبلكيشن الأندرويد', render: () => {
+    setTimeout(loadAndroid, 40);
+    const factory = !studio();
+    return `<form class="card" id="andform" autocomplete="off"><h3>${L('أبلكيشن الأندرويد', 'Android app')}</h3>
+      <p class="small ink2" style="margin:6px 0 10px">${L('الملفات والتوكن بيتحفظوا على السيرفر بس ومش بيظهروا تاني. سيب أي خانة فاضية لو مش عايز تغيّرها.', 'The files and the token are saved on the server only and are never shown again. Leave a field empty to keep it.')}</p>
+      <div id="andst" class="small" style="margin-bottom:10px">${hosted() ? L('جارٍ التحميل…', 'Loading…') : `<span class="badge">${L('النسخة المستضافة فقط', 'Hosted version only')}</span>`}</div>
+      <div class="form">
+        ${factory ? field(L('Codemagic API token', 'Codemagic API token'), '<input name="cmToken" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore="true" spellcheck="false" style="-webkit-text-security:disc" class="ltr" placeholder="Codemagic → Settings → Integrations → Codemagic API">') : ''}
+        ${factory ? field(L('ملف google-services.json (من Firebase)', 'google-services.json file (from Firebase)'), '<input type="file" id="f-gservices" accept=".json,application/json">') : ''}
+        ${field(L('ملف مفتاح Firebase (Service account JSON) — للإشعارات', 'Firebase key file (service account JSON) — for notifications'), '<input type="file" id="f-fcmsa" accept=".json,application/json">')}
+      </div>
+      <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap"><button type="submit" class="btn p">${L('احفظ', 'Save')}</button>${factory ? `<button type="button" class="btn" data-action="androidBuild">${L('ابني نسخة جديدة دلوقتي', 'Build a new version now')}</button>` : ''}</div>
+      <div class="tiny muted" style="margin-top:10px">${L('لينك تحميل الأبلكيشن للموظفين:', 'App download link for the staff:')} <a class="ltr" href="${APK}" target="_blank" rel="noopener">${APK}</a></div></form>`;
+  } };
+  async function loadAndroid() {
+    const box = document.getElementById('andst'); if (!box || !hosted() || !isAdmin()) return;
+    const parts = [];
+    try { const f = await S.sb.functions.invoke('push', { body: { action: 'fcm-info' } }); const d = f.data || {}; parts.push(d.configured ? `<span class="badge good">${L('إشعارات الأندرويد شغالة', 'Android notifications on')}</span>` : `<span class="badge warn">${L('مفتاح Firebase مش مرفوع', 'Firebase key not uploaded')}</span>`); } catch (e) { /* ignore */ }
+    if (!studio()) {
+      try {
+        const r = await S.sb.functions.invoke('app-build', { body: { action: 'status' } }); const d = r.data || {};
+        parts.push(d.hasToken ? `<span class="badge good">${L('Codemagic متوصّل', 'Codemagic connected')}</span>` : `<span class="badge warn">${L('توكن Codemagic مش متسجل', 'Codemagic token not set')}</span>`);
+        parts.push(d.hasGservices ? `<span class="badge good">google-services.json ✓</span>` : `<span class="badge">${L('مفيش google-services.json', 'No google-services.json')}</span>`);
+        const last = d.last || {};
+        if (d.pending) parts.push(`<span class="badge">${L('بيتبني دلوقتي…', 'Building now…')}</span>`);
+        else if (last.state === 'ready') parts.push(`<span class="badge good">${L('آخر نسخة جاهزة', 'Latest version ready')} ${esc(fmtDate(String(last.at || '').slice(0, 10)))}</span>`);
+        else if (last.state === 'failed') parts.push(`<span class="badge crit">${L('آخر بناء ما كملش', 'Last build failed')}</span>`);
+        else if (last.state === 'building') parts.push(`<span class="badge">${L('البناء اتطلب', 'Build requested')}</span>`);
+      } catch (e) { /* ignore */ }
+    }
+    if (document.getElementById('andst')) box.innerHTML = parts.join(' ') || `<span class="badge warn">${L('تعذّر التحميل', 'Could not load')}</span>`;
+  }
+  const ERRS = { bad_token: L('شكل التوكن مش صح', 'The token does not look right'), token_refused: L('Codemagic رفض التوكن', 'Codemagic refused the token'), app_not_found: L('التوكن مش بتاع حساب Codemagic اللي فيه أبلكيشن Ninety', 'The token is not from the Codemagic account that has the Ninety app'), bad_gservices: L('ملف google-services.json مش سليم', 'The google-services.json file is not valid'), bad_gservices_pkg: L('google-services.json مش لأبلكيشن app.ninety.fabrication', 'google-services.json is not for app.ninety.fabrication'), bad_json: L('ملف مفتاح Firebase مش سليم — لازم يكون Service account JSON', 'The Firebase key file is not valid — it must be a service account JSON'), oauth: L('جوجل رفض مفتاح Firebase', 'Google refused the Firebase key') };
+  document.addEventListener('submit', async ev => {
+    if (!ev.target || ev.target.id !== 'andform') return; ev.preventDefault(); if (!isAdmin() || !hosted()) return;
+    const f = ev.target; const btn = f.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    const done = []; const fail = [];
+    try {
+      const tok = f.cmToken ? f.cmToken.value.trim() : ''; const gsFile = f.querySelector('#f-gservices') && f.querySelector('#f-gservices').files[0];
+      if (tok || gsFile) {
+        const r = await S.sb.functions.invoke('app-build', { body: { action: 'save', cmToken: tok, gservices: gsFile ? await gsFile.text() : '' } }); const d = r.data || {};
+        if (d.ok) { done.push(...(d.saved || [])); if (f.cmToken) f.cmToken.value = ''; } else fail.push(ERRS[d.error] || d.error || 'error');
+      }
+      const saFile = f.querySelector('#f-fcmsa').files[0];
+      if (saFile) {
+        const r = await S.sb.functions.invoke('push', { body: { action: 'fcm-key', sa: await saFile.text() } }); const d = r.data || {};
+        if (d.ok) done.push('fcm'); else fail.push((ERRS[d.error] || d.error || 'error') + (d.detail ? ` (${d.detail})` : ''));
+      }
+      if (!done.length && !fail.length) toast(L('اختار ملف أو اكتب التوكن', 'Choose a file or type the token'), 'err');
+      else if (fail.length) toast(fail.join(' · '), 'err');
+      else toast(L('اتحفظ على السيرفر ✓', 'Saved on the server ✓'));
+      f.querySelectorAll('input[type=file]').forEach(i => { i.value = ''; });
+    } catch (e) { toast(L('تعذّر الحفظ', 'Could not save'), 'err'); }
+    if (btn) btn.disabled = false; loadAndroid();
+  });
+  ACTIONS.androidBuild = async () => {
+    if (!isAdmin() || !hosted()) return;
+    try { const r = await S.sb.functions.invoke('app-build', { body: { action: 'build' } }); const d = r.data || {}; toast(d.ok ? L('البناء بدأ — هيوصلك إشعار لما يخلص (حوالي 10–15 دقيقة)', 'The build started — you will get a notification when it is done (about 10–15 minutes)') : d.error === 'no_token' ? L('سجّل توكن Codemagic الأول', 'Save the Codemagic token first') : L('Codemagic رفض البناء', 'Codemagic refused the build'), d.ok ? '' : 'err'); } catch (e) { toast(L('تعذّر البدء', 'Could not start'), 'err'); }
+    loadAndroid();
+  };
 })();
 </script>
 
