@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-1518-ed8633";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-1828-b32a9e";</script>
 
 <script>
 'use strict';
@@ -1984,6 +1984,14 @@ const lockup = (txt = BRAND_TAGLINE, cls = '') => `<span class="lockup ${cls}" a
 const logoImg = (h = 22, cls = '') => `<img class="wordmark ${cls}" src="${LOGO_SRC}" alt="NINETY" style="height:${h}px">`;
 const brandBlock = (h = 22) => `<div class="brandstack">${logoImg(h)}${lockup(BRAND_TAGLINE, h >= 30 ? 'lg' : '')}</div>`;
 const reportLogo = () => `<div class="rlogowrap"><img class="rlogo" src="${LOGO_SRC}" alt="NINETY">${lockup(BRAND_TAGLINE, 'rep')}</div>`;
+/* =====================================================================
+   v7.0 — company switch (8 Oct 2026): which Ninety company this build is.
+   window.NF_CONFIG.company (from config.js) = '' factory · 'studioz' · 'construction'.
+   isConstruction() is defined here, early, so any part can guard with it at load time
+   (the studio keeps its own isStudioz() in 99z-studioz.js).
+   ===================================================================== */
+const NF_COMPANY = (() => { try { return String((window.NF_CONFIG && window.NF_CONFIG.company) || window.NF_CO || ''); } catch (e) { return ''; } })();
+const isConstruction = () => NF_COMPANY === 'construction';
 /* =====================================================================
    Views A: login · dispatcher · dashboard · orders · boards
    ===================================================================== */
@@ -17006,6 +17014,643 @@ if (typeof NINETY_COS !== 'undefined') {
   }
 }
 /* =====================================================================
+   Ninety Construction — company variant, core (v7.0, 8 Oct 2026 — brief claude/construction-brief.md, «ابدأ» by Mahmoud).
+   Active only when the build config says company:'construction' (see 02c-company.js). Same code base as the
+   factory and the studio; different: branding · modules (no production / stores / fleet / CRM) · roles (project
+   manager, site engineer, QS) · navigation · the Ninety hub links · the construction collections.
+   Phase 1 modules: projects + BOQ + rate breakdown (99z1b-cx-boq.js) · stages, checklists, snags, daily report (99z1c-cx-site.js).
+   Money rule (same as the factory): client rates → owner / HR / accounts / QS; cost breakdowns → owner / HR only;
+   the site (engineer, PM) sees quantities and progress, never money — enforced by the server too (boqrate / boqcost / cfin / ratelib).
+   ===================================================================== */
+const CX_ON = typeof isConstruction === 'function' && isConstruction();
+/* ---------- collections of the contracting system (registered in every build; empty elsewhere) ---------- */
+['cprojects', 'clocs', 'boq', 'boqrate', 'boqcost', 'cstages', 'checks', 'snags', 'dailyreports', 'subcons', 'ratelib', 'cfin', 'measures'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); if (!S.data[c]) S.data[c] = new Map(); });
+/* ---------- defaults: a contracting company (shift, departments, terms) ---------- */
+const CX_DEFAULTS = {
+  company: 'Ninety Construction',
+  departments: [
+    { id: 'mgmt', name: 'الإدارة', admin: true }, { id: 'site', name: 'الموقع', admin: true }, { id: 'qs', name: 'حصر الكميات والعقود', admin: true },
+    { id: 'acc', name: 'الحسابات', admin: true }, { id: 'purch', name: 'المشتريات', admin: true },
+  ],
+  construction: { advancePct: 30, retentionPct: 5, vatPct: 14, overheadPct: 8, profitPct: 12, targetMarginPct: 12, currency: 'EGP' },
+};
+/* the work stages a fit-out / finishing contract goes through — the seed of «قوالب المراحل» (editable in Settings) */
+const CX_STAGE_SEED = [
+  { id: 'demol', trade: 'هدم وإزالة', name: 'الهدم والإزالة', order: 1, checklist: ['إزالة كل المخلفات من الموقع', 'حماية الأعمال المجاورة', 'لا أضرار في الإنشاءات القائمة', 'صور قبل وبعد'] },
+  { id: 'mason', trade: 'مباني', name: 'المباني', order: 2, checklist: ['الاستقامة والرأسية بالميزان', 'سمك اللحامات وتعبئتها', 'الأعتاب فوق الفتحات', 'المقاسات مطابقة للرسومات'] },
+  { id: 'mep1', trade: 'كهرباء وسباكة', name: 'التأسيسات الكهربائية والصحية', order: 3, checklist: ['مسارات المواسير مطابقة للرسومات', 'مناسيب العلب والمخارج', 'اختبار ضغط مواسير المياه', 'اختبار الصرف بالماء', 'اختبار العزل الكهربائي'] },
+  { id: 'plast', trade: 'بياض', name: 'البياض', order: 4, checklist: ['الطرطشة قبل البطانة', 'الاستواء بالقدة في الاتجاهين', 'زوايا 90 بالزاوية', 'لا تشققات بعد الجفاف'] },
+  { id: 'wproof', trade: 'عزل', name: 'العزل', order: 5, checklist: ['تنظيف السطح قبل العزل', 'عدد الطبقات حسب المواصفة', 'اختبار الغمر 24 ساعة', 'رفع العزل على الحوائط 20 سم'] },
+  { id: 'floor', trade: 'أرضيات', name: 'الأرضيات', order: 6, checklist: ['المنسوب والميول', 'التفريغ بالطرق — لا بلاط مفرّغ', 'استقامة الفواصل', 'التسقية (السيراميك) بعد 24 ساعة'] },
+  { id: 'wall', trade: 'حوائط', name: 'تكسيات الحوائط', order: 7, checklist: ['الرأسية والاستواء', 'استقامة الفواصل', 'الزوايا والنهايات', 'لا بلاط مفرّغ'] },
+  { id: 'gyp', trade: 'جبس بورد', name: 'الأسقف والجبس بورد', order: 8, checklist: ['الهيكل المعدني والتعليق', 'الفواصل بالشبك والمعجون', 'فتحات الإضاءة والتكييف في أماكنها', 'المناسيب حسب الرسومات'] },
+  { id: 'paint', trade: 'دهانات', name: 'الدهانات', order: 9, checklist: ['المعجون والصنفرة', 'وجه الأساس', 'وجهان نهائي', 'لا فروق لون أو لطشات'] },
+  { id: 'mep2', trade: 'كهرباء وسباكة', name: 'التشطيبات الكهربائية والصحية', order: 10, checklist: ['الأفياش والمفاتيح مركّبة وتعمل', 'الإنارة تعمل', 'الأطقم الصحية مركّبة بدون تسريب', 'لوحة التوزيع مرقّمة'] },
+  { id: 'join', trade: 'نجارة', name: 'النجارة والأبواب (elmen)', order: 11, checklist: ['الأبواب تفتح وتقفل بسلاسة', 'الحلوق رأسية', 'الإكسسوارات كاملة', 'لا خدوش في التشطيب'] },
+  { id: 'alu', trade: 'ألومنيوم', name: 'الألومنيوم (Ninety Aluminum)', order: 12, checklist: ['الزجاج والسيليكون', 'الفتح والقفل', 'العزل حول الحلوق', 'المقاسات مطابقة'] },
+  { id: 'hand', trade: 'تسليم', name: 'التنظيف والتسليم', order: 13, checklist: ['تنظيف نهائي', 'قائمة الملاحظات صفر', 'محضر تسليم موقّع', 'صور التسليم'] },
+];
+const cxSettings = () => Object.assign({}, CX_DEFAULTS.construction, (S.settings && S.settings.construction) || {});
+/* ---------- roles & visibility ---------- */
+const CX_HIDE_SET = new Set(['orders', 'boards', 'products', 'external', 'fleet', 'inventory', 'suppliers', 'crm', 'cctv', 'invoices', 'catalog', 'brands', 'lof', 'elm', 'quotes', 'projects', 'fg', 'installs', 'finish', 'piecejobs', 'equip', 'fleetmap', 'fleetalerts', 'fleethistory', 'fleetreport', 'driverprofile', 'saleskit', 'cimport', 'gptin', 'memo', 'calls', 'opex', 'advpay', 'money']);
+const CX_HIDE = { has: id => CX_HIDE_SET.has(id) || /^crm[-_]/.test(String(id || '')) };
+const cxRole = () => (typeof role === 'function' ? role() : '');
+const cxOwner = () => typeof isAdmin === 'function' && isAdmin();
+const cxSeesMoney = () => cxOwner() || ['hr', 'acc', 'office'].includes(cxRole());   /* client rates / contract value */
+const cxSeesCost = () => cxOwner() || cxRole() === 'hr';                               /* breakdowns, subcontractor rates, margins */
+const cxCanManage = () => cxOwner() || ['manager', 'office', 'hr'].includes(cxRole());  /* projects, BOQ, stages, locations */
+const cxOnSite = () => cxOwner() || ['manager', 'head', 'office', 'hr'].includes(cxRole()); /* checklists, snags, daily reports */
+/* ---------- helpers shared by the construction parts ---------- */
+const cxProjects = () => list('cprojects').filter(p => !p.deleted);
+const cxProject = id => byId('cprojects', id);
+const cxProjectOf = doc => doc && doc.projectId ? cxProject(doc.projectId) : null;
+const cxLocs = pid => list('clocs').filter(l => l.projectId === pid).sort((a, b) => (a.sort || 0) - (b.sort || 0) || String(a.name).localeCompare(String(b.name), 'ar'));
+const cxLocName = id => { const l = byId('clocs', id); if (!l) return ''; const p = l.parentId ? byId('clocs', l.parentId) : null; return (p ? cxLocName(p.id) + ' › ' : '') + l.name; };
+const cxBoq = pid => list('boq').filter(b => b.projectId === pid).sort((a, b) => (a.sort || 0) - (b.sort || 0) || String(a.code || '').localeCompare(String(b.code || ''), 'en', { numeric: true }));
+const cxRate = boqId => { const r = byId('boqrate', boqId); return r ? +r.rate || 0 : 0; };
+const cxStages = () => { const s = list('cstages'); return (s.length ? s : CX_STAGE_SEED).slice().sort((a, b) => (a.order || 0) - (b.order || 0)); };
+const cxStage = id => cxStages().find(s => s.id === id) || null;
+const cxStatus = { planning: ['تحت الإعداد', 'muted'], active: ['جارٍ', 'good'], hold: ['متوقف', 'warn'], done: ['تم التسليم', 'acc'], closed: ['مقفول', 'muted'] };
+const cxMoney = n => (cxSeesMoney() ? money(n) : '<span class="muted">—</span>');
+/* progress of a project = executed quantities × client rate ÷ contract (weight by value when rates are visible, else by quantity) */
+function cxProgress(pid) {
+  const items = cxBoq(pid); if (!items.length) return 0;
+  let num = 0, den = 0;
+  items.forEach(b => { const w = cxSeesMoney() ? (+b.qty || 0) * cxRate(b.id) : 1; den += w; num += w * Math.min(1, (+b.done || 0) / Math.max(1e-9, +b.qty || 0)); });
+  return den ? Math.round(num / den * 100) : 0;
+}
+/* ---------- the build switch ---------- */
+if (CX_ON) {
+  APP.name = 'Ninety Construction';
+  Object.assign(DEFAULT_SETTINGS, clone(CX_DEFAULTS));
+  mergeSettings = (base => saved => { const s = base(saved ? clone(saved) : saved); const keep = new Set(CX_DEFAULTS.departments.map(d => d.id).concat(((saved || {}).departments || []).map(d => d.id))); s.departments = (s.departments || []).filter(d => keep.has(d.id)); s.construction = Object.assign({}, CX_DEFAULTS.construction, s.construction || {}); return s; })(mergeSettings);
+  if (!(S.loaded && S.loaded.settings)) S.settings = mergeSettings(null);
+  ['vice', 'store', 'tech', 'fleet', 'driver', 'bdd'].forEach(k => { delete ROLES[k]; });
+  Object.assign(ROLES, { admin: 'المالك', manager: 'مدير المشروع', head: 'مهندس الموقع', office: 'حصر الكميات والعقود (QS)', hr: 'مدير الحسابات والموارد البشرية', acc: 'مسؤول الحسابات', purch: 'المشتريات', employee: 'موظف — بوابة الموبايل', viewer: 'مشاهد', kiosk: 'كشك الحضور' });
+  Object.assign(ROLE_VIEWS, {
+    manager: ['dashboard', 'cprojects', 'csite', 'csubs', 'tasks', 'workers', 'attendance', 'requests', 'penalties', 'sites', 'reports', 'org', 'clients', 'ai', 'purchases'],
+    head: ['dashboard', 'cprojects', 'csite', 'tasks', 'attendance', 'requests', 'workers'],
+    office: ['dashboard', 'cprojects', 'csite', 'csubs', 'tasks', 'clients', 'requests', 'purchases', 'reports'],
+    hr: ['dashboard', 'cprojects', 'csite', 'csubs', 'cratelib', 'workers', 'attendance', 'requests', 'penalties', 'kpi', 'payroll', 'sites', 'reports', 'accounts', 'expenses', 'projectcosts', 'tasks', 'ai', 'clients', 'org', 'purchases'],
+    acc: ['dashboard', 'cprojects', 'csubs', 'accounts', 'expenses', 'requests', 'tasks', 'reports', 'purchases'],
+    purch: ['dashboard', 'cprojects', 'csubs', 'purchases', 'tasks', 'requests'],
+    employee: ['tasks'], viewer: ['dashboard', 'cprojects'],
+  });
+  Object.assign(DEFAULT_CHAINS, { leave: ['head', 'hr'], leaveThuSat: ['head', 'manager'], permission: ['head', 'hr'], advance: ['head', 'manager', 'hr'], punch: ['head', 'manager', 'hr'], penalty_cancel: ['head', 'hr', 'admin'] });
+  /* navigation */
+  for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (n.id && CX_HIDE.has(n.id)) NAV.splice(i, 1); }
+  const dashAt = NAV.findIndex(n => n.id === 'dashboard');
+  NAV.splice(dashAt + 1, 0,
+    { id: 'cprojects', label: 'المشاريع والمقايسات', icon: 'layers', count: () => { try { return cxProjects().filter(p => p.status === 'active').length; } catch (e) { return 0; } } },
+    { id: 'csite', label: 'الموقع — تشيك ليست وملاحظات', icon: 'check', count: () => { try { return list('checks').filter(c => c.status === 'submitted').length + list('snags').filter(s => ['open', 'fixed'].includes(s.status)).length; } catch (e) { return 0; } }, countCls: 'warn' },
+    { id: 'csubs', label: 'مقاولو الباطن', icon: 'workers' },
+    { id: 'cratelib', label: 'مكتبة تحليل الأسعار', icon: 'report' });
+  const grpFix = { 'التشغيل': 'المشاريع', 'المخازن': 'المشتريات' };
+  for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (!n.grp) continue; if (grpFix[n.grp] === null || !NAV[i + 1] || NAV[i + 1].grp) NAV.splice(i, 1); else if (grpFix[n.grp]) n.grp = grpFix[n.grp]; }
+  const relabel = { clients: 'العملاء (أصحاب المشاريع)', workers: 'فريق الشركة', sites: 'مواقع البصمة (المكتب والمشاريع)', projectcosts: 'تكلفة المشاريع والهامش' };
+  NAV.forEach(n => { if (n.id && relabel[n.id]) n.label = relabel[n.id]; });
+  Object.assign(VIEW_TITLES, { cprojects: 'المشاريع والمقايسات', csite: 'الموقع', csubs: 'مقاولو الباطن', cratelib: 'مكتبة تحليل الأسعار', workers: 'فريق الشركة', sites: 'مواقع البصمة', projectcosts: 'تكلفة المشاريع والهامش', clients: 'العملاء' });
+  if (typeof TABBAR_PRIORITY !== 'undefined') { TABBAR_PRIORITY.length = 0; TABBAR_PRIORITY.push('me', 'dashboard', 'cprojects', 'csite', 'tasks', 'requests'); }
+  canSee = (base => view => CX_HIDE.has(view) ? false : (view === 'cratelib' ? cxSeesCost() : base(view)))(canSee);
+  homeView = (base => () => (cxRole() === 'head' ? 'csite' : base()))(homeView);
+  if (typeof WAGE_KEYS !== 'undefined') WAGE_KEYS.costShare = 'نسبة التحميل على شركة المقاولات %';
+  workerForm = (base => w => base(w).replace('نسبة تحميل المرتب على المصنع % (موظف مشترك مع شركة أخرى — 100 = كامل المرتب)', 'نسبة تحميل المرتب على شركة المقاولات % (موظف مشترك مع المصنع أو المكتب — 100 = كامل المرتب)'))(workerForm);
+  vPayroll = (base => () => base().replace(/على المصنع/g, 'على الشركة'))(vPayroll);
+  if (typeof aiInstructionsBase === 'function') aiInstructionsBase = (base => () => base().replace(/مساعد إدارة مصنع "[^"]*" في القاهرة \(براندات:[^)]*\)/, `مساعد إدارة شركة المقاولات "${S.settings.company || 'Ninety Construction'}" في القاهرة (تشطيبات وفت-أوت بمقاولي باطن وتوريد من براندات المصنع)`))(aiInstructionsBase);
+  document.addEventListener('DOMContentLoaded', () => { document.title = 'Ninety Construction'; });
+  document.head.insertAdjacentHTML('beforeend', '<style>#regpdf{display:none}</style>');
+  /* settings: contract defaults */
+  EXTRA_SETTINGS.construction = { label: 'المقاولات — شروط التعاقد', render: () => { const c = cxSettings(); if (!cxOwner()) return `<div class="card"><div class="small muted">للمالك فقط.</div></div>`; return `<div class="card"><div class="cardhead"><h3>الشروط الافتراضية لكل عقد جديد</h3><span class="muted small">تتغير داخل كل مشروع على حدة</span></div><form id="cx-cfg" class="form">
+    ${field('دفعة مقدمة %', inp('advancePct', c.advancePct, 'type="number" min="0" max="100" step="0.5"'))}${field('ضمان أعمال (محتجز) %', inp('retentionPct', c.retentionPct, 'type="number" min="0" max="100" step="0.5"'))}${field('ضريبة القيمة المضافة %', inp('vatPct', c.vatPct, 'type="number" min="0" max="100" step="0.5"'))}
+    ${field('مصاريف عمومية % (تحليل الأسعار)', inp('overheadPct', c.overheadPct, 'type="number" min="0" max="100" step="0.5"'))}${field('ربح % (تحليل الأسعار)', inp('profitPct', c.profitPct, 'type="number" min="0" max="100" step="0.5"'))}${field('هامش مستهدف % (أخضر فوقه)', inp('targetMarginPct', c.targetMarginPct, 'type="number" min="0" max="100" step="0.5"'))}
+    <div class="row full"><button type="submit" class="btn p">حفظ</button></div></form></div>`; } };
+  document.addEventListener('submit', async ev => { const f = ev.target; if (!f || f.id !== 'cx-cfg') return; ev.preventDefault(); if (!cxOwner()) return; const d = formData(f); const c = {}; ['advancePct', 'retentionPct', 'vatPct', 'overheadPct', 'profitPct', 'targetMarginPct'].forEach(k => { c[k] = +d[k] || 0; }); await Store.saveSettings(Object.assign({}, S.settings, { construction: Object.assign({}, cxSettings(), c) })); toast('تم الحفظ'); });
+}
+/* other builds: the construction views exist (registered by the parts below) but are never shown */
+if (!CX_ON) canSee = (base => view => ['cprojects', 'csite', 'csubs', 'cratelib'].includes(view) ? false : base(view))(canSee);
+/* ---------- the Ninety hub: links between the three apps (runs in every build) ---------- */
+if (typeof NINETY_COS !== 'undefined' && NINETY_COS.construction) {
+  const cxPlan = [['المشاريع والمقايسات', 'BOQ من Excel + تحليل سعر كل بند'], ['الموقع', 'مراحل وتشيك ليست وملاحظات وتقرير يومي'], ['المستخلصات', 'عميل · مقاول باطن · مورد (المرحلة 2)'], ['مقاولو الباطن', 'عقود بالبنود واستلامات']];
+  const cxBlock = () => { const c = NINETY_COS.construction; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="construction"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال (المرحلة 1)</span><div class="plan">${cxPlan.map(([a, b]) => `<div><b>${esc(a)}</b>${esc(b)}</div>`).join('')}</div></div></div>`; };
+  const cxSide = () => { const c = NINETY_COS.construction; return `<button type="button" class="co" style="--c:${c.color}" data-action="ninetyGo" data-arg="construction"><div class="top"><i></i><span class="nm">${esc(c.name)}<small>${esc(c.sub)} · فتح السيستم</small></span></div></button>`; };
+  if (CX_ON) {
+    NINETY_COS.factory.url = '../index.html'; NINETY_COS.studio.url = '../studioz/index.html';
+    ACTIONS.ninetyGo = (base => co => { if (co === 'factory' || co === 'studio') { location.href = NINETY_COS[co].url; return; } if (co === 'construction') return base('factory'); return base(co); })(ACTIONS.ninetyGo);
+    ninetyFactoryBlock = f => { const it = (n, l, sub, cls) => `<div class="it ${n ? cls : ''}"><b>${n}</b><span>${l} <small>${sub}</small></span></div>`; const openTasks = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update').length; const act = cxProjects().filter(p => p.status === 'active').length; const todo = ninetyTodo(f).filter(r => !/#\/orders|#\/purchases/.test(r.h)); return `<div class="blk" style="--c:${NINETY_COS.construction.color}" data-action="ninetyGo" data-arg="construction"><div class="hd"><span class="dot"></span><b>Ninety Construction</b><small>· المقاولات · حضور ${f.present}/${f.total}</small><span class="open">فتح السيستم ←</span></div>
+    <div class="bd"><div class="r">${it(act, 'مشروع جارٍ', 'بمقايسة ومراحل', '')}${it(f.appr.length, 'اعتماد مستنيك', 'إجازات · أذونات · سلف', 'wn')}${it(openTasks, 'مهام جارية', 'على الفريق', '')}${it(list('snags').filter(s => s.status === 'open').length, 'ملاحظة مفتوحة', 'في المواقع', 'bad')}</div>
+    <ul class="todo"><div class="h">مطلوب منك</div>${todo.length ? todo.map(r => `<li data-action="ninetyOpen" data-arg="${esc(r.h)}" data-stop="1"><i style="background:${r.c}"></i>${esc(r.t)}<span class="ar">←</span></li>`).join('') : '<li><i style="background:#4f8a6d"></i>مفيش حاجة مستنياك دلوقتي ✓</li>'}</ul></div></div>`; };
+    ninetyFactoryStats = (base => () => { const f = base(); f.open = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update').length; f.late = []; f.transfer = []; return f; })(ninetyFactoryStats);
+    const stuLink = () => { const c = NINETY_COS.studio; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="studio"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال</span></div></div>`; };
+    const facLink = () => { const c = NINETY_COS.factory; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="factory"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال</span></div></div>`; };
+    ninetySoonBlock = (base => co => co === 'construction' ? facLink() : co === 'studio' ? stuLink() : base(co))(ninetySoonBlock);
+    ninetySideCo = (base => (co, f) => co === 'factory' ? base('factory', f).replace(/Ninety Fabrication/g, 'Ninety Construction').replace(/في المصنع/g, 'في الشركة').replace('data-arg="factory"', 'data-arg="construction"').replace(/--c:[^"]*"/, `--c:${NINETY_COS.construction.color}"`) : co === 'construction' ? `<button type="button" class="co" style="--c:${NINETY_COS.factory.color}" data-action="ninetyGo" data-arg="factory"><div class="top"><i></i><span class="nm">${esc(NINETY_COS.factory.name)}<small>${esc(NINETY_COS.factory.sub)} · فتح السيستم</small></span></div></button>` : base(co, f))(ninetySideCo);
+    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في الشركة').replace('Owner · Ninety · 3 companies', 'Owner · Ninety Construction').replace(/أوامر تشغيل<br>جارية/, 'مشاريع<br>جارية'))(ninetyHomeHTML);
+  } else {
+    NINETY_COS.construction.url = (typeof isStudioz === 'function' && isStudioz()) ? '../construction/index.html' : 'construction/index.html';
+    ACTIONS.ninetyGo = (base => co => { if (co === 'construction') { location.href = NINETY_COS.construction.url; return; } return base(co); })(ACTIONS.ninetyGo);
+    ninetySoonBlock = (base => co => co === 'construction' ? cxBlock() : base(co))(ninetySoonBlock);
+    ninetySideCo = (base => (co, f) => co === 'construction' ? cxSide() : base(co, f))(ninetySideCo);
+  }
+}
+/* =====================================================================
+   Ninety Construction — projects, locations, stage templates, subcontractors (v7.0).
+   #/cprojects — the list · #/cprojects/<id>/<tab> — one project; tabs come from CX_TABS (registered here and by
+   99z1b-cx-boq.js / 99z1c-cx-site.js): { id, label, when(p) → bool, render(p) → html, count(p) → n }.
+   Data: cprojects {code, name, clientId, clientName, address, status, pmId, engIds[], start, end, terms{advancePct, retentionPct, vatPct}}
+         cfin {id = project id, contractValue, notes}  (owner / HR / accounts only)
+         clocs {projectId, parentId, kind building|floor|unit|room|zone, name, sort}
+         cstages {id, trade, name, order, checklist[]}  (templates; seeded from CX_STAGE_SEED on first edit)
+         subcons {name, trade, phone, contact, notes, contracts[{projectId, items[{boqId, rate}], advancePct, retentionPct}]}
+   ===================================================================== */
+const CX_TABS = [];
+const cxTabs = p => CX_TABS.filter(t => !t.when || t.when(p));
+const cxLocKinds = { building: 'مبنى', floor: 'دور', unit: 'وحدة', room: 'غرفة / فراغ', zone: 'منطقة' };
+const cxPeople = () => list('workers').filter(w => (w.status || 'active') !== 'inactive');
+const cxName = id => { const w = byId('workers', id); return w ? w.name : (byId('staff', id) || {}).name || ''; };
+function cxFin(pid) { return byId('cfin', pid) || { id: pid, contractValue: 0 }; }
+function cxBoqTotal(pid) { return cxBoq(pid).reduce((s, b) => s + (+b.qty || 0) * cxRate(b.id), 0); }
+/* ---------- list ---------- */
+function vCxProjects() {
+  const ps = cxProjects().sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  if (!ps.length) return `<div class="empty"><b>لا توجد مشاريع بعد</b>${cxCanManage() ? 'ابدأ بـ«+ مشروع»: الاسم والعميل والشروط، ثم ارفع المقايسة من Excel' : 'لما يتضاف مشروع هيظهر هنا'}</div>`;
+  const stats = { active: ps.filter(p => p.status === 'active').length, snags: list('snags').filter(s => s.status === 'open').length, checks: list('checks').filter(c => c.status === 'submitted').length };
+  return `<div class="kpis"><div class="kpi"><b>${stats.active}</b><span>مشروع جارٍ</span></div><div class="kpi ${stats.checks ? 'warn' : ''}"><b>${stats.checks}</b><span>تشيك ليست مستنية اعتماد</span></div><div class="kpi ${stats.snags ? 'crit' : ''}"><b>${stats.snags}</b><span>ملاحظة مفتوحة</span></div>${cxSeesMoney() ? `<div class="kpi"><b>${fmtMoney(ps.filter(p => p.status === 'active').reduce((s, p) => s + (+cxFin(p.id).contractValue || cxBoqTotal(p.id)), 0))}</b><span>قيمة المشاريع الجارية (ج.م)</span></div>` : ''}</div>
+  <div class="grid cards">${ps.map(p => { const st = cxStatus[p.status] || cxStatus.planning; const pr = cxProgress(p.id); const open = list('snags').filter(s => s.projectId === p.id && s.status === 'open').length; const n = cxBoq(p.id).length;
+    return `<a class="card link" href="#/cprojects/${esc(p.id)}"><div class="cardhead"><h3>${esc(p.name)}</h3><span class="badge ${st[1]}">${st[0]}</span></div><div class="small muted">${esc(p.code || '')} · ${esc(p.clientName || clientName(p.clientId))}${p.address ? ' · ' + esc(p.address) : ''}</div>
+    <div class="bar" style="margin:10px 0 6px"><i style="width:${pr}%"></i></div><div class="row small" style="justify-content:space-between"><span>${pr}% إنجاز</span><span>${n} بند</span>${open ? `<span style="color:var(--crit-ink)">${open} ملاحظة مفتوحة</span>` : ''}${cxSeesMoney() ? `<span>${fmtMoney(+cxFin(p.id).contractValue || cxBoqTotal(p.id))} ج.م</span>` : ''}</div>
+    ${p.pmId || (p.engIds || []).length ? `<div class="tiny muted" style="margin-top:6px">${p.pmId ? 'مدير المشروع: ' + esc(cxName(p.pmId)) : ''}${(p.engIds || []).length ? ' · الموقع: ' + (p.engIds || []).map(cxName).map(esc).join('، ') : ''}</div>` : ''}</a>`; }).join('')}</div>`;
+}
+/* ---------- one project ---------- */
+function vCxProject(r) {
+  const p = cxProject(r.id); if (!p) return '<div class="empty"><b>المشروع غير موجود</b></div>';
+  const tabs = cxTabs(p); const cur = tabs.find(t => t.id === (r.sub || S.ui.cxtab)) || tabs[0]; if (cur) S.ui.cxtab = cur.id;
+  const tabbar = `<div class="tabs" id="cx-tabs">${tabs.map(t => { const n = t.count ? t.count(p) : 0; return `<a href="#/cprojects/${esc(p.id)}/${t.id}" class="${cur && cur.id === t.id ? 'on' : ''}">${esc(t.label)}${n ? ` <b class="num">${n}</b>` : ''}</a>`; }).join('')}</div>`;
+  return tabbar + (cur ? cur.render(p) : '');
+}
+function cxSummary(p) {
+  const st = cxStatus[p.status] || cxStatus.planning; const fin = cxFin(p.id); const t = p.terms || cxSettings(); const items = cxBoq(p.id); const pr = cxProgress(p.id);
+  const stagesDone = cxStages().filter(s => items.length && items.filter(b => b.stageId === s.id).length && items.filter(b => b.stageId === s.id).every(b => (+b.done || 0) >= (+b.qty || 0))).length;
+  const checks = list('checks').filter(c => c.projectId === p.id); const snags = list('snags').filter(s => s.projectId === p.id); const reps = list('dailyreports').filter(d => d.projectId === p.id);
+  return `<div class="grid two">
+    <div class="card"><div class="cardhead"><h3>بيانات المشروع</h3><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div>${cxCanManage() ? `<button class="btn sm" data-action="cxProjectEdit" data-arg="${esc(p.id)}">${icon('edit')}تعديل</button>` : ''}</div>
+      <div class="kv"><div><span>الكود</span><b>${esc(p.code || '—')}</b></div><div><span>العميل</span><b>${esc(p.clientName || clientName(p.clientId))}</b></div><div><span>العنوان</span><b>${esc(p.address || '—')}</b></div><div><span>البداية</span><b>${p.start ? fmtDate(p.start) : '—'}</b></div><div><span>التسليم المتوقع</span><b>${p.end ? fmtDate(p.end) : '—'}</b></div><div><span>مدير المشروع</span><b>${esc(cxName(p.pmId) || '—')}</b></div><div><span>مهندسو الموقع</span><b>${(p.engIds || []).map(cxName).map(esc).join('، ') || '—'}</b></div></div>
+      ${cxSeesMoney() ? `<div class="sep"></div><div class="kv"><div><span>قيمة العقد</span><b>${fmtMoney(+fin.contractValue || cxBoqTotal(p.id))} ج.م ${!+fin.contractValue ? '<small class="muted">(من المقايسة)</small>' : ''}</b></div><div><span>دفعة مقدمة</span><b>${+t.advancePct || 0}%</b></div><div><span>ضمان أعمال</span><b>${+t.retentionPct || 0}%</b></div><div><span>ضريبة</span><b>${+t.vatPct || 0}%</b></div></div>` : ''}
+      ${p.notes ? `<div class="sep"></div><div class="small">${esc(p.notes)}</div>` : ''}</div>
+    <div class="card"><div class="cardhead"><h3>الحالة</h3></div>
+      <div class="bar big" style="margin:4px 0 10px"><i style="width:${pr}%"></i></div><div class="row small" style="justify-content:space-between"><span>${pr}% إنجاز بالكميات المعتمدة</span><span>${items.length} بند · ${stagesDone}/${cxStages().filter(s => items.some(b => b.stageId === s.id)).length} مرحلة مكتملة</span></div>
+      <div class="kpis" style="margin-top:12px"><a class="kpi ${checks.filter(c => c.status === 'submitted').length ? 'warn' : ''}" href="#/cprojects/${esc(p.id)}/checks"><b>${checks.filter(c => c.status === 'submitted').length}</b><span>تشيك ليست مستنية اعتماد</span></a><a class="kpi ${snags.filter(s => s.status === 'open').length ? 'crit' : ''}" href="#/cprojects/${esc(p.id)}/snags"><b>${snags.filter(s => s.status === 'open').length}</b><span>ملاحظات مفتوحة</span></a><a class="kpi" href="#/cprojects/${esc(p.id)}/daily"><b>${reps.length}</b><span>تقرير يومي</span></a><a class="kpi" href="#/cprojects/${esc(p.id)}/locs"><b>${cxLocs(p.id).length}</b><span>موقع / فراغ</span></a></div>
+      ${reps.length ? `<div class="sep"></div><div class="small"><b>آخر تقرير يومي:</b> ${fmtDate(reps.sort((a, b) => String(b.date).localeCompare(String(a.date)))[0].date)} — ${esc((reps[0].work || '').slice(0, 140))}</div>` : ''}</div>
+  </div>`;
+}
+CX_TABS.push({ id: 'summary', label: 'الملخص', render: cxSummary });
+/* ---------- locations (building › floor › unit › room) ---------- */
+function cxLocsTab(p) {
+  const locs = cxLocs(p.id); const kids = id => locs.filter(l => (l.parentId || null) === id);
+  const node = (l, depth) => `<div class="item" style="cursor:default;padding-inline-start:${12 + depth * 22}px"><div class="main"><div class="title">${esc(l.name)} <span class="badge">${cxLocKinds[l.kind] || l.kind || ''}</span></div><div class="meta"><span>${cxBoq(p.id).filter(b => b.locId === l.id).length} بند</span><span>${list('snags').filter(s => s.projectId === p.id && s.locId === l.id && s.status === 'open').length} ملاحظة مفتوحة</span></div></div>${cxCanManage() ? `<div class="end"><div class="row" style="gap:4px"><button class="btn xs" data-action="cxLocNew" data-arg="${esc(p.id)}:${esc(l.id)}">${icon('plus')}تحت</button><button class="btn xs" data-action="cxLocEdit" data-arg="${esc(l.id)}">${icon('edit')}</button><button class="btn xs ghost" style="color:var(--crit-ink)" data-action="cxLocDel" data-arg="${esc(l.id)}">${icon('trash')}</button></div></div>` : ''}</div>` + kids(l.id).map(k => node(k, depth + 1)).join('');
+  return `<div class="card"><div class="cardhead"><h3>المواقع والفراغات</h3><span class="muted small">مبنى › دور › وحدة › غرفة — كل بند في المقايسة وكل ملاحظة بتتربط بمكان</span><div class="grow"></div>${cxCanManage() ? `<button class="btn sm p" data-action="cxLocNew" data-arg="${esc(p.id)}:">${icon('plus')}موقع</button><button class="btn sm" data-action="cxLocQuick" data-arg="${esc(p.id)}">${icon('layers')}إنشاء سريع</button>` : ''}</div>
+    ${locs.length ? `<div class="list">${kids(null).map(l => node(l, 0)).join('')}</div>` : `<div class="empty"><b>لا توجد مواقع بعد</b>«إنشاء سريع»: اكتب عدد الأدوار والوحدات في كل دور فيتعمل الهيكل كله</div>`}</div>`;
+}
+CX_TABS.push({ id: 'locs', label: 'المواقع', render: cxLocsTab });
+ACTIONS.cxLocNew = arg => { if (!cxCanManage()) return; const [pid, parentId] = String(arg).split(':'); cxLocForm(pid, null, parentId || null); };
+ACTIONS.cxLocEdit = id => { const l = byId('clocs', id); if (!l || !cxCanManage()) return; cxLocForm(l.projectId, l, l.parentId || null); };
+ACTIONS.cxLocDel = async id => { const l = byId('clocs', id); if (!l || !cxCanManage()) return; const kids = list('clocs').filter(x => x.parentId === id).length; if (!(await confirmDlg(kids ? `حذف «${l.name}» وما تحته (${kids})؟` : `حذف «${l.name}»؟`, 'حذف'))) return; const del = async x => { for (const k of list('clocs').filter(y => y.parentId === x.id)) await del(k); await Store.remove('clocs', x.id); }; await del(l); };
+function cxLocForm(pid, l, parentId) {
+  l = l || {}; const parent = parentId ? byId('clocs', parentId) : null; const kindDefault = l.kind || (parent ? ({ building: 'floor', floor: 'unit', unit: 'room', room: 'room', zone: 'room' })[parent.kind] || 'room' : 'building');
+  openModal({ title: l.id ? 'تعديل موقع' : (parent ? `موقع جديد تحت «${parent.name}»` : 'موقع جديد'), body: `<div class="form">${field('الاسم', inp('name', l.name || '', 'required placeholder="مثال: الدور الثاني / شقة 5 / غرفة النوم الرئيسية"'), 'full')}${field('النوع', `<select name="kind">${Object.entries(cxLocKinds).map(([k, v]) => `<option value="${k}" ${k === kindDefault ? 'selected' : ''}>${v}</option>`).join('')}</select>`)}${field('الترتيب', inp('sort', l.sort || '', 'type="number"'))}</div>`,
+    onSubmit: async f => { const d = formData(f); if (!d.name) return false; await Store.save('clocs', Object.assign({}, l, { id: l.id || uid(), projectId: pid, parentId: parentId || null, name: d.name, kind: d.kind, sort: +d.sort || 0 })); } });
+}
+ACTIONS.cxLocQuick = pid => { if (!cxCanManage()) return; openModal({ title: 'إنشاء سريع للمواقع', body: `<div class="form"><div class="banner info full" style="margin:0">${icon('info')}<span>مثال: 1 مبنى × 5 أدوار × 4 وحدات = 20 وحدة جاهزة بأسمائها. تقدر تعدّل الأسماء بعدها.</span></div>${field('اسم المبنى', inp('b', 'المبنى', ''))}${field('عدد الأدوار', inp('f', 1, 'type="number" min="0" max="60"'))}${field('أول دور (0 = أرضي)', inp('f0', 0, 'type="number" min="-3" max="60"'))}${field('وحدات في كل دور', inp('u', 1, 'type="number" min="0" max="40"'))}${field('غرف قياسية في كل وحدة (مفصولة بفاصلة)', inp('r', 'ريسبشن، مطبخ، حمام، غرفة نوم', ''), 'full')}</div>`,
+  onSubmit: async f => { const d = formData(f); const sort = { n: 0 }; const mk = async (name, kind, parentId) => { sort.n++; const doc = { id: uid(), projectId: pid, parentId, name, kind, sort: sort.n }; await Store.save('clocs', doc, { silent: true }); return doc; };
+    const b = await mk(d.b || 'المبنى', 'building', null); const rooms = String(d.r || '').split(/[،,]/).map(s => s.trim()).filter(Boolean);
+    for (let i = 0; i < (+d.f || 0); i++) { const fl = await mk(i + (+d.f0 || 0) === 0 ? 'الدور الأرضي' : `الدور ${i + (+d.f0 || 0)}`, 'floor', b.id); for (let j = 1; j <= (+d.u || 0); j++) { const u = await mk(`وحدة ${i + (+d.f0 || 0)}${String(j).padStart(2, '0')}`, 'unit', fl.id); for (const rn of rooms) await mk(rn, 'room', u.id); } }
+    toast(`اتعمل ${sort.n} موقع`); rerender(); } }); };
+/* ---------- team & people ---------- */
+function cxTeamTab(p) {
+  return `<div class="card"><div class="cardhead"><h3>فريق المشروع</h3><div class="grow"></div>${cxCanManage() ? `<button class="btn sm" data-action="cxProjectEdit" data-arg="${esc(p.id)}">${icon('edit')}تعديل</button>` : ''}</div><div class="kv"><div><span>مدير المشروع</span><b>${esc(cxName(p.pmId) || '— (المالك يتابع مباشرة)')}</b></div><div><span>مهندسو الموقع</span><b>${(p.engIds || []).map(cxName).map(esc).join('، ') || '—'}</b></div><div><span>حصر الكميات</span><b>${esc(cxName(p.qsId) || '—')}</b></div></div>
+  <div class="sep"></div><h4>مقاولو الباطن على المشروع</h4>${(() => { const subs = list('subcons').filter(s => (s.contracts || []).some(c => c.projectId === p.id)); return subs.length ? `<div class="list">${subs.map(s => { const c = (s.contracts || []).find(x => x.projectId === p.id); return `<a class="item" href="#/csubs/${esc(s.id)}"><div class="main"><div class="title">${esc(s.name)}</div><div class="meta"><span>${esc(s.trade || '')}</span><span>${(c.items || []).length} بند</span>${cxSeesCost() ? `<span>${fmtMoney((c.items || []).reduce((t, it) => { const b = byId('boq', it.boqId); return t + (b ? (+b.qty || 0) * (+it.rate || 0) : 0); }, 0))} ج.م</span>` : ''}</div></div></a>`; }).join('')}</div>` : '<div class="small muted">لا يوجد مقاولو باطن متعاقدون على المشروع بعد — من صفحة «مقاولو الباطن» ← عقد جديد</div>'; })()}</div>`;
+}
+CX_TABS.push({ id: 'team', label: 'الفريق والمقاولون', render: cxTeamTab });
+/* ---------- project form ---------- */
+function cxProjectForm(p) {
+  p = p || {}; const t = p.terms || cxSettings(); const fin = p.id ? cxFin(p.id) : {}; const people = cxPeople(); const opt = (sel, filter) => `<option value="">—</option>` + people.filter(filter || (() => true)).map(w => `<option value="${esc(w.id)}" ${sel === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('');
+  const clients = list('clients');
+  openModal({ title: p.id ? 'تعديل المشروع' : 'مشروع جديد', wide: true, body: `<div class="form">
+    ${field('اسم المشروع', inp('name', p.name || '', 'required placeholder="مثال: تشطيب فيلا — التجمع الخامس"'), 'full')}${field('الكود', inp('code', p.code || `NC-${new Date().getFullYear().toString().slice(2)}-${String(cxProjects().length + 1).padStart(3, '0')}`, ''))}${field('الحالة', `<select name="status">${Object.entries(cxStatus).map(([k, v]) => `<option value="${k}" ${(p.status || 'planning') === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>`)}
+    ${field('العميل', `<select name="clientId"><option value="">— اكتب الاسم تحت —</option>${clients.map(c => `<option value="${esc(c.id)}" ${p.clientId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`)}${field('اسم العميل (لو مش في القائمة)', inp('clientName', p.clientName || '', ''))}
+    ${field('العنوان', inp('address', p.address || '', ''), 'full')}${field('بداية الأعمال', inp('start', p.start || '', 'type="date"'))}${field('التسليم المتوقع', inp('end', p.end || '', 'type="date"'))}
+    ${field('مدير المشروع', `<select name="pmId">${opt(p.pmId, w => ['manager', 'admin'].includes(w.role) || true)}</select>`)}${field('مهندس الموقع', `<select name="eng1">${opt((p.engIds || [])[0])}</select>`)}${field('مهندس موقع ثانٍ', `<select name="eng2">${opt((p.engIds || [])[1])}</select>`)}${field('حصر الكميات', `<select name="qsId">${opt(p.qsId)}</select>`)}
+    ${cxSeesMoney() ? `<div class="sep full"></div><h4 class="full">شروط التعاقد</h4>${field('قيمة العقد (ج.م) — فارغ = مجموع المقايسة', inp('contractValue', fin.contractValue || '', 'type="number" min="0" step="0.01" class="ltr"'))}${field('دفعة مقدمة %', inp('advancePct', t.advancePct, 'type="number" min="0" max="100" step="0.5"'))}${field('ضمان أعمال %', inp('retentionPct', t.retentionPct, 'type="number" min="0" max="100" step="0.5"'))}${field('ضريبة %', inp('vatPct', t.vatPct, 'type="number" min="0" max="100" step="0.5"'))}` : ''}
+    ${field('ملاحظات', `<textarea name="notes">${esc(p.notes || '')}</textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); if (!d.name) return false; const doc = Object.assign({}, p, { id: p.id || uid(), name: d.name, code: d.code, status: d.status, clientId: d.clientId || null, clientName: d.clientName || (d.clientId ? clientName(d.clientId) : ''), address: d.address, start: d.start, end: d.end, pmId: d.pmId || null, engIds: [d.eng1, d.eng2].filter(Boolean), qsId: d.qsId || null, notes: d.notes });
+      if (cxSeesMoney()) { doc.terms = { advancePct: +d.advancePct || 0, retentionPct: +d.retentionPct || 0, vatPct: +d.vatPct || 0 }; }
+      await Store.save('cprojects', doc, { silent: true });
+      if (cxSeesMoney()) await Store.save('cfin', Object.assign({}, fin, { id: doc.id, contractValue: +d.contractValue || 0 }), { silent: true });
+      rerender(); if (!p.id) go('cprojects/' + doc.id); } });
+}
+ACTIONS.cxProjectNew = () => { if (cxCanManage()) cxProjectForm(null); };
+ACTIONS.cxProjectEdit = id => { if (cxCanManage()) cxProjectForm(cxProject(id)); };
+/* ---------- stage templates (Settings) ---------- */
+function cxStagesSettings() {
+  const st = cxStages();
+  return `<div class="card"><div class="cardhead"><h3>مراحل الشغل وتشيك ليست كل مرحلة</h3><span class="muted small">كل بند في المقايسة بيتربط بمرحلة؛ الكمية ما تدخلش أي مستخلص قبل ما تشيك ليست مرحلتها تتعتمد</span><div class="grow"></div>${cxCanManage() ? `<button class="btn sm p" data-action="cxStageEdit" data-arg="">${icon('plus')}مرحلة</button>` : ''}</div>
+    <div class="list">${st.map(s => `<div class="item" style="cursor:default"><div class="main"><div class="title">${s.order}. ${esc(s.name)} <span class="badge">${esc(s.trade || '')}</span></div><div class="meta"><span>${(s.checklist || []).length} بند فحص</span><span class="muted">${(s.checklist || []).slice(0, 3).map(esc).join(' · ')}${(s.checklist || []).length > 3 ? ' …' : ''}</span></div></div>${cxCanManage() ? `<div class="end"><button class="btn xs" data-action="cxStageEdit" data-arg="${esc(s.id)}">${icon('edit')}</button></div>` : ''}</div>`).join('')}</div></div>`;
+}
+if (CX_ON) EXTRA_SETTINGS.cxstages = { label: 'المقاولات — المراحل والتشيك ليست', render: cxStagesSettings };
+ACTIONS.cxStageEdit = id => { if (!cxCanManage()) return; const s = id ? cxStage(id) : { id: '', name: '', trade: '', order: cxStages().length + 1, checklist: [] }; if (!s) return;
+  openModal({ title: s.id ? 'تعديل مرحلة' : 'مرحلة جديدة', wide: true, body: `<div class="form">${field('اسم المرحلة', inp('name', s.name, 'required'))}${field('الحرفة / التخصص', inp('trade', s.trade || '', ''))}${field('الترتيب', inp('order', s.order || 1, 'type="number" min="1"'))}${field('بنود الفحص — كل بند في سطر', `<textarea name="checklist" rows="8">${esc((s.checklist || []).join('\n'))}</textarea>`, 'full')}</div>`,
+    onSubmit: async f => { const d = formData(f); if (!d.name) return false; const seeded = list('cstages').length ? [] : CX_STAGE_SEED.filter(x => x.id !== s.id); for (const x of seeded) await Store.save('cstages', clone(x), { silent: true }); await Store.save('cstages', { id: s.id || uid(), name: d.name, trade: d.trade, order: +d.order || 1, checklist: String(d.checklist || '').split('\n').map(x => x.trim()).filter(Boolean) }); } }); };
+/* ---------- subcontractors ---------- */
+function vCxSubs(r) {
+  if (r.id) return vCxSub(r.id);
+  const subs = list('subcons').sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+  return subs.length ? `<div class="list">${subs.map(s => `<a class="item" href="#/csubs/${esc(s.id)}"><div class="main"><div class="title">${esc(s.name)}</div><div class="meta"><span>${esc(s.trade || '')}</span><span class="ltr">${esc(s.phone || '')}</span><span>${(s.contracts || []).length} عقد</span></div></div></a>`).join('')}</div>` : `<div class="empty"><b>لا يوجد مقاولو باطن بعد</b>كل مقاول: الحرفة والتليفون، وعقده على كل مشروع = بنود من المقايسة بسعره هو</div>`;
+}
+function vCxSub(id) {
+  const s = byId('subcons', id); if (!s) return '<div class="empty"><b>غير موجود</b></div>';
+  return `<div class="grid two"><div class="card"><div class="cardhead"><h3>${esc(s.name)}</h3><span class="badge">${esc(s.trade || '')}</span><div class="grow"></div>${cxCanManage() || cxRole() === 'purch' ? `<button class="btn sm" data-action="cxSubEdit" data-arg="${esc(s.id)}">${icon('edit')}تعديل</button>` : ''}</div><div class="kv"><div><span>التليفون</span><b class="ltr">${esc(s.phone || '—')}</b></div><div><span>المسؤول</span><b>${esc(s.contact || '—')}</b></div></div>${s.notes ? `<div class="small" style="margin-top:8px">${esc(s.notes)}</div>` : ''}</div>
+  <div class="card"><div class="cardhead"><h3>العقود</h3><div class="grow"></div>${cxSeesCost() ? `<button class="btn sm p" data-action="cxSubContract" data-arg="${esc(s.id)}:">${icon('plus')}عقد على مشروع</button>` : ''}</div>${(s.contracts || []).length ? (s.contracts || []).map(c => { const p = cxProject(c.projectId); const val = (c.items || []).reduce((t, it) => { const b = byId('boq', it.boqId); return t + (b ? (+b.qty || 0) * (+it.rate || 0) : 0); }, 0); return `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(p ? p.name : c.projectId)}</div><div class="meta"><span>${(c.items || []).length} بند</span>${cxSeesCost() ? `<span>${fmtMoney(val)} ج.م</span><span>مقدم ${+c.advancePct || 0}% · ضمان ${+c.retentionPct || 0}%</span>` : ''}</div></div>${cxSeesCost() ? `<div class="end"><button class="btn xs" data-action="cxSubContract" data-arg="${esc(s.id)}:${esc(c.projectId)}">${icon('edit')}</button></div>` : ''}</div>`; }).join('') : '<div class="small muted">لا توجد عقود بعد</div>'}</div></div>`;
+}
+ACTIONS.cxSubNew = () => cxSubForm(null); ACTIONS.cxSubEdit = id => cxSubForm(byId('subcons', id));
+function cxSubForm(s) { if (!(cxCanManage() || cxRole() === 'purch')) return; s = s || {}; openModal({ title: s.id ? 'تعديل مقاول' : 'مقاول باطن جديد', body: `<div class="form">${field('الاسم', inp('name', s.name || '', 'required'), 'full')}${field('الحرفة', inp('trade', s.trade || '', 'placeholder="كهرباء / سباكة / بياض / جبس بورد…"'))}${field('التليفون', inp('phone', s.phone || '', 'class="ltr" type="tel"'))}${field('المسؤول', inp('contact', s.contact || '', ''))}${field('ملاحظات', `<textarea name="notes">${esc(s.notes || '')}</textarea>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.name) return false; const doc = Object.assign({}, s, { id: s.id || uid(), name: d.name, trade: d.trade, phone: d.phone, contact: d.contact, notes: d.notes, contracts: s.contracts || [] }); await Store.save('subcons', doc); if (!s.id) go('csubs/' + doc.id); } }); }
+ACTIONS.cxSubContract = arg => { if (!cxSeesCost()) return; const [sid, pid0] = String(arg).split(':'); const s = byId('subcons', sid); if (!s) return; const c = (s.contracts || []).find(x => x.projectId === pid0) || { projectId: pid0 || '', items: [], advancePct: 0, retentionPct: cxSettings().retentionPct };
+  const render = pid => { const items = cxBoq(pid); const mine = new Map((c.items || []).map(it => [it.boqId, it])); return items.length ? `<div class="tablewrap"><table><thead><tr><th></th><th>البند</th><th>الوحدة</th><th>الكمية</th><th>سعر المقاول</th></tr></thead><tbody>${items.map(b => `<tr><td><label class="check ${mine.has(b.id) ? 'on' : ''}"><input type="checkbox" name="it-${esc(b.id)}" ${mine.has(b.id) ? 'checked' : ''}></label></td><td>${esc(b.code || '')} ${esc(b.desc || '')}</td><td>${esc(b.unit || '')}</td><td class="num">${fmtNum(b.qty)}</td><td><input name="rate-${esc(b.id)}" type="number" step="0.01" min="0" class="ltr" value="${mine.has(b.id) ? mine.get(b.id).rate : ''}" style="width:110px"></td></tr>`).join('')}</tbody></table></div>` : '<div class="small muted">المشروع ده مفيهوش مقايسة بعد</div>'; };
+  openModal({ title: `عقد ${s.name}`, wide: true, body: `<div class="form">${field('المشروع', `<select name="projectId" id="cxc-p">${cxProjects().map(p => `<option value="${esc(p.id)}" ${p.id === c.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`)}${field('دفعة مقدمة %', inp('advancePct', c.advancePct || 0, 'type="number" min="0" max="100" step="0.5"'))}${field('ضمان أعمال %', inp('retentionPct', c.retentionPct || 0, 'type="number" min="0" max="100" step="0.5"'))}${field('غرامة تأخير / يوم (ج.م)', inp('penaltyPerDay', c.penaltyPerDay || 0, 'type="number" min="0" step="1"'))}<div class="full" id="cxc-items">${render(c.projectId || (cxProjects()[0] || {}).id)}</div></div>`,
+    onOpen: f => { wireChecks(f); $('#cxc-p', f).addEventListener('change', e => { $('#cxc-items', f).innerHTML = render(e.target.value); wireChecks(f); }); },
+    onSubmit: async f => { const d = formData(f); const pid = d.projectId; if (!pid) return false; const items = cxBoq(pid).filter(b => d['it-' + b.id]).map(b => ({ boqId: b.id, rate: +d['rate-' + b.id] || 0 })); const contracts = (s.contracts || []).filter(x => x.projectId !== pid).concat([{ projectId: pid, items, advancePct: +d.advancePct || 0, retentionPct: +d.retentionPct || 0, penaltyPerDay: +d.penaltyPerDay || 0, at: nowISO() }]); await Store.save('subcons', Object.assign({}, s, { contracts })); } }); };
+/* ---------- registration ---------- */
+EXTRA_VIEWS.cprojects = r => r.id ? vCxProject(r) : vCxProjects();
+EXTRA_TITLES.cprojects = (r, addBtn) => r.id ? { title: (cxProject(r.id) || {}).name || 'مشروع', sub: (cxProject(r.id) || {}).code || '', actions: `<a class="btn ghost" href="#/cprojects">${icon('back')}<span>كل المشاريع</span></a>` } : { sub: 'كل مشروع: المقايسة من Excel، تحليل سعر كل بند، المواقع، المراحل والتشيك ليست، الملاحظات، والتقرير اليومي', actions: cxCanManage() ? addBtn('مشروع', 'cxProjectNew') : '' };
+EXTRA_VIEWS.csubs = r => vCxSubs(r);
+EXTRA_TITLES.csubs = (r, addBtn) => r.id ? { title: (byId('subcons', r.id) || {}).name || 'مقاول', actions: `<a class="btn ghost" href="#/csubs">${icon('back')}<span>كل المقاولين</span></a>` } : { sub: 'مقاولو الباطن وعقودهم على المشاريع (بنود من المقايسة بسعر المقاول)', actions: (cxCanManage() || cxRole() === 'purch') ? addBtn('مقاول', 'cxSubNew') : '' };
+VIEW_TITLES.cprojects = VIEW_TITLES.cprojects || 'المشاريع والمقايسات'; VIEW_TITLES.csubs = VIEW_TITLES.csubs || 'مقاولو الباطن';
+/* dashboard card (construction build only) */
+if (CX_ON && typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!canSee('cprojects')) return html; const act = cxProjects().filter(p => p.status === 'active'); const card = `<div class="card"><div class="cardhead"><h3>المشاريع الجارية</h3><a class="btn xs" href="#/cprojects">الكل</a></div>${act.length ? `<div class="list">${act.slice(0, 6).map(p => `<a class="item" href="#/cprojects/${esc(p.id)}"><div class="main"><div class="title">${esc(p.name)}</div><div class="meta"><span>${cxProgress(p.id)}%</span><span>${list('snags').filter(s => s.projectId === p.id && s.status === 'open').length} ملاحظة</span><span>${list('checks').filter(c => c.projectId === p.id && c.status === 'submitted').length} تشيك ليست مستنية</span></div></div></a>`).join('')}</div>` : '<div class="small muted">لا توجد مشاريع جارية</div>'}</div>`; return card + html; })(vDashboard);
+/* =====================================================================
+   Ninety Construction — BOQ + rate breakdown + rate library (v7.0).
+   Project tab «المقايسة» (#/cprojects/<id>/boq): boq items grouped by section, Excel import, client rates (boqrate — money roles),
+   per-item cost breakdown (boqcost — owner / HR only) with the green / amber / red comparison against the client rate.
+   #/cratelib — the template library (ratelib) seeded from the Rate-Analysis workbook (CX_RATELIB_SEED_RAW, compact arrays).
+   Exports: cxBoqItem(id) · cxItemCost(boqId) → {direct, withOverhead, price, status, clientRate, gap} · cxBoqSummary(pid) · cxRatelibSeed()
+   ===================================================================== */
+document.head.insertAdjacentHTML('beforeend', `<style>
+.cxdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--line);vertical-align:middle}.cxdot.green{background:#3f9d5a}.cxdot.amber{background:#e0a100}.cxdot.red{background:#c0392b}
+.cxbar{display:inline-block;width:64px;height:6px;border-radius:3px;background:var(--surface-2,#eee);overflow:hidden;vertical-align:middle;margin-inline-start:6px}.cxbar i{display:block;height:100%;background:#3f9d5a}
+.cxsec td{background:var(--surface-2,#f3f3f3);font-weight:700}.cxmats input{width:100%;min-width:60px}.cxmats td{padding:3px}.cxlive{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}.cxlive div{padding:8px 10px;border:1px solid var(--line);border-radius:10px}.cxlive b{display:block;font-size:16px}.cxlive span{font-size:11px;color:var(--muted)}
+.cxlive .st.green{border-color:#3f9d5a}.cxlive .st.amber{border-color:#e0a100}.cxlive .st.red{border-color:#c0392b}.cximp table{font-size:12px}.cximp select{width:100%}
+</style>`);
+const CX_RATELIB_SEED_RAW = [
+["DM-01","هدم حوائط طوب حتى 25 سم شامل التشوين","م²","هدم وإزالة","02 41 19",[],60,0,45],
+["DM-02","تكسير بلاط وبؤج أرضيات شامل التشوين","م²","هدم وإزالة","02 41 19",[],70,0,24.5],
+["DM-03","تحميل ونقل مخلفات للمقلب العمومي","م³","هدم وإزالة","02 41 19",[],120,0,356],
+["DM-04","فك أبواب وشبابيك قائمة","عدد","هدم وإزالة","02 41 19",[],150,0,7.5],
+["BW-01","مباني طوب أحمر مفرغ 12 سم بمونة 1:3","م²","مباني","04 21 13",[["طوب أحمر مفرغ 25×12×6","1000 طوبة",0.055,5,2800],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.15,5,205],["رمل مورّد الموقع","م³",0.025,10,200],["مياه وخلط","م³ مونة",0.025,0,15]],90,0,4.5],
+["BW-02","مباني طوب أحمر مفرغ 25 سم بمونة 1:3","م²","مباني","04 21 13",[["طوب أحمر مفرغ 25×12×6","1000 طوبة",0.11,5,2800],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.36,5,205],["رمل مورّد الموقع","م³",0.06,10,200],["مياه وخلط","م³ مونة",0.06,0,15]],140,0,7],
+["BW-03","مباني طوب أسمنتي مصمت 12 سم","م²","مباني","04 22 00",[["طوب أسمنتي مصمت 25×12×6","1000 طوبة",0.055,5,3200],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.15,5,205],["رمل مورّد الموقع","م³",0.025,10,200],["مياه وخلط","م³ مونة",0.025,0,15]],90,0,4.5],
+["CN-01","خرسانة عادية للأرضيات (250 كجم أسمنت/م³)","م³","خرسانة","03 30 00",[["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",5,3,205],["رمل مورّد الموقع","م³",0.4,10,200],["زلط / سن","م³",0.8,5,300],["مياه وخلط","م³ مونة",1,0,15]],450,0,172.5],
+["PL-01","بياض داخلي (طرطشة + بؤج وأوتار + ملو) سمك 2–2.5 سم","م²","بياض","09 24 00",[["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.22,5,205],["رمل مورّد الموقع","م³",0.03,10,200],["مياه وخلط","م³ مونة",0.03,0,15]],110,0,5.5],
+["PL-02","بياض خارجي سمك 3 سم","م²","بياض","09 24 00",[["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.27,5,205],["رمل مورّد الموقع","م³",0.035,10,200],["مياه وخلط","م³ مونة",0.035,0,15]],150,0,32.5],
+["PL-03","سملة / لياسة أرضيات سمك 5 سم","م²","بياض","03 54 00",[["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.3,5,205],["رمل مورّد الموقع","م³",0.05,10,200],["مياه وخلط","م³ مونة",0.05,0,15]],60,0,3],
+["WP-01","عزل حمامات ومطابخ أسمنتي مرن وجهين (3 كجم/م²) شامل الرجوع 30 سم","م²","عزل","07 14 00",[["عزل أسمنتي مرن (سيكا 107 أو مماثل)","كجم",3,5,55]],60,0,3],
+["WP-02","عزل أسطح لفائف بيتومينية 4 مم طبقة واحدة على برايمر","م²","عزل","07 52 00",[["برايمر بيتوميني","لتر",0.3,5,60],["لفائف عزل بيتوميني 4 مم","م²",1.15,3,120]],72,0,3.6],
+["FL-01","سيراميك أرضيات درجة أولى بمادة لاصقة شامل الترويب","م²","أرضيات","09 30 13",[["سيراميك أرضيات درجة أولى","م²",1,7,300],["مادة لصق سيراميك (شيكارة 25 كجم)","شيكارة",0.2,5,200],["ترويبة (روبة) لحامات","كجم",0.3,5,30]],120,0,6],
+["FL-02","بورسلين 60×60 درجة أولى بلاصق محسّن شامل الترويب","م²","أرضيات","09 30 13",[["بورسلين 60×60 درجة أولى","م²",1,7,350],["مادة لصق بورسلين محسّنة (شيكارة 25 كجم)","شيكارة",0.24,5,320],["ترويبة (روبة) لحامات","كجم",0.3,5,30]],150,0,7.5],
+["FL-03","بورسلين 120×60 درجة أولى بلاصق محسّن شامل الترويب","م²","أرضيات","09 30 13",[["بورسلين 120×60 درجة أولى","م²",1,8,650],["مادة لصق بورسلين محسّنة (شيكارة 25 كجم)","شيكارة",0.28,5,320],["ترويبة (روبة) لحامات","كجم",0.25,5,30]],220,0,11],
+["FL-04","رخام مصري 2 سم على مونة شامل الجلي والتلميع","م²","أرضيات","09 63 40",[["رخام مصري (جلالة/سني) 2 سم","م²",1,10,850],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.25,5,205],["رمل مورّد الموقع","م³",0.04,10,200]],320,0,16],
+["FL-05","وزرة رخام 10 سم","م.ط","أرضيات","09 63 40",[["وزرة رخام 10 سم","م.ط",1,5,120],["مادة لصق سيراميك (شيكارة 25 كجم)","شيكارة",0.03,5,200]],40,0,2],
+["FL-06","أرضيات HDF 8 مم على فوم","م²","أرضيات","09 64 00",[["أرضيات HDF 8 مم","م²",1,6,350],["فوم تحت HDF","م²",1,5,25]],65,0,3.25],
+["FL-07","أرضيات SPC فينيل 5 مم","م²","أرضيات","09 65 00",[["أرضيات SPC فينيل 5 مم","م²",1,5,550]],65,0,3.25],
+["FL-08","وزرة HDF / PVC","م.ط","أرضيات","09 64 00",[["وزرة HDF / PVC","م.ط",1,5,70]],40,0,2],
+["WL-01","سيراميك حوائط حمامات ومطابخ بمادة لاصقة شامل الترويب","م²","حوائط","09 30 13",[["سيراميك حوائط درجة أولى","م²",1,8,280],["مادة لصق سيراميك (شيكارة 25 كجم)","شيكارة",0.2,5,200],["ترويبة (روبة) لحامات","كجم",0.3,5,30]],140,0,7],
+["WL-02","ورق حائط شامل التجهيز","م²","حوائط","09 72 00",[["ورق حائط (رول 0.53×10 م)","رول",0.189,15,900],["غراء ورق حائط","م²",1,0,8]],60,0,3],
+["GB-01","سقف جبس بورد مستوي لوح 12.5 مم على بروفيلات","م²","جبس بورد","09 21 16",[["لوح جبس بورد عادي 12.5 مم (1.2×2.4)","لوح",0.347,10,300],["بروفيل سقف (رئيسي + ثانوي)","م.ط",4,5,30],["مستلزمات جبس (معلقات، مسامير، شريط، معجون وصلات)","م²",1,0,25]],110,0,5.5],
+["GB-02","سقف جبس بورد بفرق منسوب / فتحة إضاءة مخفية","م²","جبس بورد","09 21 16",[["لوح جبس بورد عادي 12.5 مم (1.2×2.4)","لوح",0.469,10,300],["بروفيل سقف (رئيسي + ثانوي)","م.ط",5.5,5,30],["مستلزمات جبس (معلقات، مسامير، شريط، معجون وصلات)","م²",1.3,0,25]],160,0,8],
+["GB-03","سقف جبس بورد مقاوم للرطوبة (حمامات ومطابخ)","م²","جبس بورد","09 21 16",[["لوح جبس بورد مقاوم للرطوبة 12.5 مم","لوح",0.347,10,430],["بروفيل سقف (رئيسي + ثانوي)","م.ط",4,5,30],["مستلزمات جبس (معلقات، مسامير، شريط، معجون وصلات)","م²",1,0,25]],110,0,5.5],
+["GB-04","قاطع جبس بورد 75 مم وجهين لوح واحد","م²","جبس بورد","09 21 16",[["لوح جبس بورد عادي 12.5 مم (1.2×2.4)","لوح",0.694,10,300],["قطاع ستاد 75 مم","م.ط",2,5,45],["قطاع تراك 75 مم","م.ط",0.7,5,40],["مستلزمات جبس (معلقات، مسامير، شريط، معجون وصلات)","م²",1.5,0,25]],130,0,6.5],
+["GB-05","قاطع جبس بورد 75 مم وجهين بعزل صوف صخري","م²","جبس بورد","09 21 16",[["لوح جبس بورد عادي 12.5 مم (1.2×2.4)","لوح",0.694,10,300],["قطاع ستاد 75 مم","م.ط",2,5,45],["قطاع تراك 75 مم","م.ط",0.7,5,40],["مستلزمات جبس (معلقات، مسامير، شريط، معجون وصلات)","م²",1.5,0,25],["صوف صخري 50 مم عزل صوت","م²",1,5,90]],143,0,7.15],
+["GB-06","كرانيش جبس","م.ط","جبس بورد","09 29 00",[["كرانيش جبس","م.ط",1,10,60]],50,0,2.5],
+["PT-01","دهان بلاستيك مط داخلي: سيلر + معجون 3 سكينة + وشين","م²","دهانات","09 91 23",[["سيلر مائي","لتر",0.12,5,40],["معجون جاهز (شيكارة 15 كجم)","كجم",1.3,5,12],["بلاستيك مط اقتصادي","لتر",0.2,5,57],["صنفرة وشريط ومستهلكات دهان","م²",1,0,3]],70,0,3.5],
+["PT-02","دهان بلاستيك نصف لامع قابل للغسيل: سيلر + معجون 3 سكينة + وشين","م²","دهانات","09 91 23",[["سيلر مائي","لتر",0.12,5,40],["معجون جاهز (شيكارة 15 كجم)","كجم",1.3,5,12],["بلاستيك نصف لامع قابل للغسيل","لتر",0.2,5,130],["صنفرة وشريط ومستهلكات دهان","م²",1,0,3]],70,0,3.5],
+["PT-03","دهان جوتن فينوماستيك: سيلر + معجون 3 سكينة + وشين","م²","دهانات","09 91 23",[["سيلر مائي","لتر",0.12,5,40],["معجون جاهز (شيكارة 15 كجم)","كجم",1.3,5,12],["جوتن فينوماستيك","لتر",0.18,5,185],["صنفرة وشريط ومستهلكات دهان","م²",1,0,3]],73.5,0,3.675],
+["PT-04","دهان أسقف جبس بورد: معجون سكينتين + سيلر + وشين","م²","دهانات","09 91 23",[["معجون جاهز (شيكارة 15 كجم)","كجم",0.8,5,12],["سيلر مائي","لتر",0.12,5,40],["بلاستيك مط اقتصادي","لتر",0.2,5,57],["صنفرة وشريط ومستهلكات دهان","م²",1,0,3]],60,0,3],
+["PT-05","دهان خارجي جوتاشيلد: سيلر خارجي + وشين","م²","دهانات","09 91 13",[["سيلر خارجي","لتر",0.15,5,50],["جوتاشيلد خارجي","لتر",0.3,5,145]],90,0,29.5],
+["EL-01","تأسيس نقطة إنارة (ماسورة 16 + سلك 1.5 + علبة)","نقطة","كهرباء","26 05 33",[["ماسورة كهرباء 16 مم","م.ط",8,5,6],["سلك نحاس 1.5 مم (السويدي)","م.ط",18,5,17.5],["علبة كهرباء 3×3","عدد",1,0,5]],180,0,9],
+["EL-02","تأسيس نقطة بريزة 16A (ماسورة 16 + سلك 2 مم ×3 + علبة)","نقطة","كهرباء","26 05 33",[["ماسورة كهرباء 16 مم","م.ط",8,5,6],["سلك نحاس 2 مم (السويدي)","م.ط",24,5,22.5],["علبة كهرباء 3×3","عدد",1,0,5]],180,0,9],
+["EL-03","تأسيس نقطة تكييف / سخان 20A (ماسورة 20 + سلك 3 مم ×3)","نقطة","كهرباء","26 05 33",[["ماسورة كهرباء 20 مم","م.ط",12,5,8],["سلك نحاس 3 مم (السويدي)","م.ط",36,5,33.5],["علبة كهرباء 3×3","عدد",1,0,5]],250,0,12.5],
+["EL-04","تأسيس نقطة داتا Cat6","نقطة","كهرباء","27 15 00",[["ماسورة كهرباء 16 مم","م.ط",10,5,6],["كابل داتا Cat6","م.ط",12,5,25],["علبة كهرباء 3×3","عدد",1,0,5]],150,0,7.5],
+["EL-05","تأسيس نقطة TV / دش","نقطة","كهرباء","27 15 00",[["ماسورة كهرباء 16 مم","م.ط",10,5,6],["كابل دش / TV","م.ط",12,5,15],["علبة كهرباء 3×3","عدد",1,0,5]],150,0,7.5],
+["EL-06","لوحة توزيع 12 خط كاملة (10 قواطع + قاطع تسريب)","عدد","كهرباء","26 24 16",[["لوحة توزيع 12 خط","عدد",1,0,900],["قاطع 1 فاز 10–32 أمبير","عدد",10,0,170],["قاطع تسريب أرضي 2P 40A","عدد",1,0,1500]],800,0,40],
+["EL-07","خط تغذية رئيسي 3×6 مم في ماسورة 25","م.ط","كهرباء","26 05 19",[["سلك نحاس 6 مم (السويدي)","م.ط",3,5,67],["ماسورة كهرباء 25 مم","م.ط",1,5,12]],30,0,1.5],
+["EL-08","توريد وتركيب مفتاح / بريزة","عدد","كهرباء","26 27 26",[["مفتاح / بريزة (فئة متوسطة)","عدد",1,0,120]],40,0,2],
+["EL-09","توريد وتركيب سبوت ليد 7 وات","عدد","كهرباء","26 51 00",[["سبوت ليد 7 وات","عدد",1,2,120],["سلك نحاس 1.5 مم (السويدي)","م.ط",1,5,17.5]],50,0,2.5],
+["PB-01","تأسيس نقطة تغذية مياه PPR 20 مم (بارد أو ساخن)","نقطة","سباكة","22 11 16",[["ماسورة PPR 20 مم","م.ط",6,5,45],["وصلات PPR (كوع/تيه/جلبة)","عدد",4,5,12]],250,0,12.5],
+["PB-02","تأسيس نقطة صرف UPVC 2 بوصة","نقطة","سباكة","22 13 16",[["ماسورة صرف UPVC 2 بوصة","م.ط",3,5,55],["وصلات صرف 2 بوصة","عدد",3,0,35]],250,0,12.5],
+["PB-03","توريد وتركيب بيبة أرضية","عدد","سباكة","22 13 16",[["بيبة أرضية (صفاية)","عدد",1,0,120],["ماسورة صرف UPVC 2 بوصة","م.ط",1,5,55]],150,0,7.5],
+["PB-04","تركيب مرحاض (الجهاز توريد العميل)","عدد","سباكة","22 40 00",[["محبس زاوية","عدد",1,0,120],["خرطوم مرن","عدد",1,0,60],["مستلزمات تركيب أدوات صحية","مجموعة",1,0,150]],600,0,30],
+["PB-05","تركيب حوض وخلاط (الأجهزة توريد العميل)","عدد","سباكة","22 40 00",[["محبس زاوية","عدد",2,0,120],["خرطوم مرن","عدد",2,0,60],["سيفون حوض","عدد",1,0,150]],500,0,25],
+["PB-06","تركيب سخان كهربائي (الجهاز توريد العميل)","عدد","سباكة","22 33 00",[["محبس زاوية","عدد",2,0,120],["خرطوم مرن","عدد",2,0,60],["مستلزمات تركيب أدوات صحية","مجموعة",1,0,150]],400,0,20],
+["AC-01","تأسيس نقطة تكييف سبليت حتى 5 م (نحاس معزول + صرف)","نقطة","تكييف","23 23 00",[["مواسير نحاس تكييف ¼+½ معزولة","م.ط",5,5,450],["ماسورة صرف تكييف","م.ط",5,5,25],["مستلزمات تكييف (جلبة حائط، شريط، صاج)","مجموعة",1,0,150]],600,0,30],
+["AC-02","تركيب تكييف سبليت حتى 2.25 حصان (الجهاز توريد العميل)","عدد","تكييف","23 81 26",[["حامل وحدة خارجية","عدد",1,0,450],["مستلزمات تكييف (جلبة حائط، شريط، صاج)","مجموعة",1,0,150]],1500,0,75],
+["AC-03","تركيب تكييف سبليت 3 حصان فأكثر (الجهاز توريد العميل)","عدد","تكييف","23 81 26",[["حامل وحدة خارجية","عدد",1.1,0,450],["مستلزمات تكييف (جلبة حائط، شريط، صاج)","مجموعة",1.3,0,150]],2500,0,125],
+["CP-01","باب داخلي خشب مصفح كامل بالحلق والكالون (elmen)","عدد","نجارة","08 14 16",[["باب داخلي خشب مصفح كامل بالحلق (elmen)","عدد",1,0,9000],["طقم كالون ومفصلات وأكرة","طقم",1,0,900]],600,0,30],
+["CP-02","باب حمام خشب مقاوم للرطوبة كامل (elmen)","عدد","نجارة","08 14 16",[["باب حمام خشب مقاوم للرطوبة (elmen)","عدد",1,0,8500],["طقم كالون ومفصلات وأكرة","طقم",1,0,900]],600,0,30],
+["CP-03","مطبخ سفلي وعلوي (elmen) — بدون السطح","م.ط","نجارة","12 35 30",[["مطبخ (سفلي + علوي) (elmen)","م.ط",1,0,12000]],800,0,40],
+["CP-04","دولاب حائط (elmen) — بالمتر المسطح للواجهة","م²","نجارة","06 41 00",[["دولاب حائط — واجهة (elmen)","م²",1,0,6000]],400,0,20],
+["CP-05","كسوة حوائط خشب (elmen)","م²","نجارة","06 42 00",[["كسوة حوائط خشب (elmen)","م²",1,0,3500]],300,0,15],
+["MR-01","سطح مطبخ كوارتز 2 سم","م.ط","رخام وأسطح","12 36 00",[["سطح كوارتز 2 سم (عمق 60 سم)","م.ط",1,5,6000]],400,0,20],
+["MR-02","مراتب سلم رخام (نائمة 30 + قائمة 15 سم)","م.ط","رخام وأسطح","09 63 40",[["رخام مصري (جلالة/سني) 2 سم","م²",0.45,10,850],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.1,5,205],["رمل مورّد الموقع","م³",0.012,10,200]],180,0,9],
+["MR-03","عتبة رخام عرض 20 سم","م.ط","رخام وأسطح","09 63 40",[["رخام مصري (جلالة/سني) 2 سم","م²",0.2,10,850],["أسمنت بورتلاندي (شيكارة 50 كجم)","شيكارة",0.03,5,205]],80,0,4],
+["AL-01","شباك ألومنيوم سحاب بالزجاج 6 مم (Ninety Aluminum)","م²","ألومنيوم","08 51 13",[["شباك ألومنيوم سحاب بالزجاج 6 مم","م²",1,0,4500],["سيليكون وفوم تركيب","م²",1,0,80]],250,0,12.5],
+["AL-02","باب ألومنيوم مفصلي بالزجاج (Ninety Aluminum)","م²","ألومنيوم","08 11 16",[["باب ألومنيوم مفصلي بالزجاج","م²",1,0,6500],["سيليكون وفوم تركيب","م²",1,0,80]],300,0,15],
+["AL-03","واجهة كيرتن وول (Ninety Aluminum)","م²","ألومنيوم","08 44 13",[["واجهة كيرتن وول","م²",1,0,8500],["سيليكون وفوم تركيب","م²",1,0,80]],600,0,180],
+["AL-04","درابزين ألومنيوم وزجاج (Ninety Aluminum)","م.ط","ألومنيوم","05 73 00",[["درابزين ألومنيوم وزجاج","م.ط",1,0,3000]],350,0,17.5],
+["MS-01","نظافة نهائية وتسليم","م²","متنوعة","01 74 23",[],20,0,6]
+];
+/* ---------- seed → templates ---------- */
+function cxRatelibSeed() { return CX_RATELIB_SEED_RAW.map(r => ({ code: r[0], desc: r[1], unit: r[2], trade: r[3], csi: r[4], materials: (r[5] || []).map(m => ({ name: m[0], unit: m[1], qtyPerUnit: m[2], wastePct: m[3], price: m[4] })), subRate: r[6] || 0, ownLabour: r[7] || 0, equip: r[8] || 0, note: '' })); }
+/* ---------- helpers (exported) ---------- */
+const cxBoqItem = id => byId('boq', id);
+const cxNum = v => { if (typeof v === 'number') return v; let s = String(v == null ? '' : v); const AR = '٠١٢٣٤٥٦٧٨٩'; s = s.split('').map(ch => { const i = AR.indexOf(ch); return i >= 0 ? String(i) : ch; }).join('').replace(/,/g, '').replace(/[^\d.\-]/g, ''); const n = parseFloat(s); return isFinite(n) ? n : 0; };
+const cxMatLine = m => (+m.qtyPerUnit || 0) * (1 + (+m.wastePct || 0) / 100) * (+m.price || 0);
+/* cost of one breakdown doc (boqcost or ratelib) with the settings' defaults */
+function cxCostOf(c) {
+  const st = cxSettings(); c = c || {};
+  const mats = (c.materials || []).reduce((s, m) => s + cxMatLine(m), 0);
+  const direct = mats + (+c.subRate || 0) + (+c.ownLabour || 0) + (+c.equip || 0);
+  const oh = c.overheadPct != null && c.overheadPct !== '' ? +c.overheadPct : +st.overheadPct || 0; const pf = c.profitPct != null && c.profitPct !== '' ? +c.profitPct : +st.profitPct || 0;
+  const withOverhead = direct * (1 + oh / 100); return { mats, direct, withOverhead, price: withOverhead * (1 + pf / 100), oh, pf };
+}
+const cxStatusOf = (withOverhead, clientRate) => !clientRate || !withOverhead ? 'none' : clientRate >= withOverhead * (1 + (+cxSettings().targetMarginPct || 0) / 100) ? 'green' : clientRate >= withOverhead ? 'amber' : 'red';
+function cxItemCost(boqId) {
+  const c = byId('boqcost', boqId); const clientRate = cxRate(boqId);
+  if (!c) return { direct: 0, withOverhead: 0, price: 0, status: 'none', clientRate, gap: 0 };
+  const k = cxCostOf(c); return { direct: k.direct, withOverhead: k.withOverhead, price: k.price, status: cxStatusOf(k.withOverhead, clientRate), clientRate, gap: clientRate - k.withOverhead };
+}
+function cxBoqSummary(pid) {
+  const items = cxBoq(pid); const r = { items: items.length, red: 0, amber: 0, green: 0, none: 0, cost: 0, contract: 0, marginPct: 0, losers: [] };
+  items.forEach(b => { const c = cxItemCost(b.id); r[c.status]++; const q = +b.qty || 0; r.contract += q * c.clientRate; r.cost += q * c.withOverhead; if (c.status === 'red') r.losers.push({ item: b, gap: c.gap, cost: c.withOverhead, rate: c.clientRate }); });
+  r.marginPct = r.contract ? Math.round((r.contract - r.cost) / r.contract * 1000) / 10 : 0; r.losers.sort((a, b) => a.gap - b.gap); return r;
+}
+const cxStatusLabel = { green: ['مغطي التكلفة والربح', 'good'], amber: ['مغطي التكلفة — الربح أقل من المستهدف', 'warn'], red: ['خسران — السعر أقل من التكلفة', 'crit'], none: ['بدون مقارنة', ''] };
+/* ---------- the BOQ tab ---------- */
+function cxBoqTab(p) {
+  const items = cxBoq(p.id); const money = cxSeesMoney(); const cost = cxSeesCost(); const mg = cxCanManage();
+  const head = `<div class="cardhead"><h3>المقايسة</h3><span class="muted small">${items.length} بند — الكميات المنفَّذة من التشيك ليست المعتمدة فقط</span><div class="grow"></div>${mg ? `<button class="btn sm p" data-action="cxBoqNew" data-arg="${esc(p.id)}">${icon('plus')}بند</button><button class="btn sm" data-action="cxBoqImport" data-arg="${esc(p.id)}">${icon('up')}استيراد من Excel</button>` : ''}</div>`;
+  if (!items.length) return `<div class="card">${head}<div class="empty"><b>لا توجد بنود بعد</b>${mg ? 'ارفع مقايسة العميل من Excel أو أضف البنود يدويًا' : 'لما تتضاف المقايسة هتظهر هنا'}</div></div>`;
+  let sum = { qty: 0, total: 0 }; const cols = 7 + (money ? 2 : 0) + (cost ? 1 : 0) + (mg || cost ? 1 : 0); let lastSec = null; const rows = [];
+  items.forEach(b => { const sec = b.section || 'بنود عامة'; if (sec !== lastSec) { rows.push(`<tr class="cxsec"><td colspan="${cols}">${esc(sec)}</td></tr>`); lastSec = sec; }
+    const q = +b.qty || 0, d = +b.done || 0, rate = money ? cxRate(b.id) : 0, tot = q * rate; sum.total += tot; const c = cost ? cxItemCost(b.id) : null;
+    rows.push(`<tr><td class="ltr">${esc(b.code || '')}</td><td>${esc(b.desc || '')}</td><td>${esc(b.unit || '')}</td><td class="num">${fmtNum(q)}</td><td class="small">${esc((cxStage(b.stageId) || {}).name || '—')}</td><td class="small">${esc(cxLocName(b.locId) || '—')}</td><td class="num"><span>${fmtNum(d)}</span><span class="cxbar"><i style="width:${q ? Math.min(100, Math.round(d / q * 100)) : 0}%"></i></span></td>
+      ${money ? `<td class="num">${rate ? fmtMoney(rate) : '<span class="muted">—</span>'}</td><td class="num">${tot ? fmtMoney(tot) : '<span class="muted">—</span>'}</td>` : ''}${cost ? `<td><span class="cxdot ${c.status}" title="${esc(cxStatusLabel[c.status][0])}"></span>${c.status !== 'none' ? `<span class="tiny muted"> ${fmtMoney(c.withOverhead)}</span>` : ''}</td>` : ''}
+      ${mg || cost ? `<td><div class="row" style="gap:4px;flex-wrap:nowrap">${cost ? `<button class="btn xs" data-action="cxBoqCost" data-arg="${esc(b.id)}">تحليل</button>` : ''}${mg ? `<button class="btn xs" data-action="cxBoqEdit" data-arg="${esc(b.id)}">${icon('edit')}</button><button class="btn xs ghost" style="color:var(--crit-ink)" data-action="cxBoqDel" data-arg="${esc(b.id)}">${icon('trash')}</button>` : ''}</div></td>` : ''}</tr>`); });
+  const table = `<div class="tablewrap"><table><thead><tr><th>الكود</th><th>البند</th><th>الوحدة</th><th>الكمية</th><th>المرحلة</th><th>المكان</th><th>المنفَّذ</th>${money ? '<th>سعر الوحدة</th><th>الإجمالي</th>' : ''}${cost ? '<th>التكلفة</th>' : ''}${mg || cost ? '<th></th>' : ''}</tr></thead><tbody>${rows.join('')}</tbody>
+    <tfoot><tr><td colspan="3"><b>${items.length} بند</b></td><td colspan="4"></td>${money ? `<td class="num"><b>الإجمالي</b></td><td class="num"><b>${fmtMoney(sum.total)}</b></td>` : ''}${cost ? '<td></td>' : ''}${mg || cost ? '<td></td>' : ''}</tr></tfoot></table></div>`;
+  return (cost ? cxBoqSummaryCard(p) : '') + `<div class="card">${head}${table}</div>`;
+}
+function cxBoqSummaryCard(p) {
+  const s = cxBoqSummary(p.id); if (!s.items) return '';
+  return `<div class="card"><div class="cardhead"><h3>التكلفة مقابل العقد</h3><span class="muted small">تحليل سعر كل بند — للمالك والحسابات فقط</span></div>
+    <div class="kpis"><div class="kpi ${s.red ? 'crit' : ''}"><b>${s.red}</b><span>بند خسران</span></div><div class="kpi ${s.amber ? 'warn' : ''}"><b>${s.amber}</b><span>بند تحت الهامش المستهدف</span></div><div class="kpi good"><b>${s.green}</b><span>بند مغطي الهامش</span></div><div class="kpi"><b>${s.none}</b><span>بند بدون تحليل</span></div>
+    <div class="kpi"><b>${fmtMoney(s.cost)}</b><span>إجمالي التكلفة (ج.م)</span></div><div class="kpi"><b>${fmtMoney(s.contract)}</b><span>إجمالي العقد (ج.م)</span></div><div class="kpi ${s.marginPct < 0 ? 'crit' : s.marginPct < (+cxSettings().targetMarginPct || 0) ? 'warn' : 'good'}"><b>${s.marginPct}%</b><span>الهامش الإجمالي</span></div></div>
+    ${s.losers.length ? `<div class="sep"></div><h4>البنود الخسرانة</h4><div class="list">${s.losers.map(l => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(l.item.code || '')} ${esc(l.item.desc || '')}</div><div class="meta"><span>سعر العميل ${fmtMoney(l.rate)}</span><span>التكلفة ${fmtMoney(l.cost)}</span><span style="color:var(--crit-ink)">الفرق ${fmtMoney(l.gap)} / ${esc(l.item.unit || 'وحدة')}</span></div></div><div class="end"><button class="btn xs" data-action="cxBoqCost" data-arg="${esc(l.item.id)}">تحليل</button></div></div>`).join('')}</div>` : ''}</div>`;
+}
+CX_TABS.push({ id: 'boq', label: 'المقايسة', render: cxBoqTab, count: p => cxBoq(p.id).length });
+/* ---------- item form ---------- */
+function cxBoqForm(pid, b) {
+  b = b || {}; const money = cxSeesMoney(); const rate = b.id ? cxRate(b.id) : 0; const secs = [...new Set(cxBoq(pid).map(x => x.section).filter(Boolean))];
+  openModal({ title: b.id ? 'تعديل بند' : 'بند جديد', wide: true, body: `<div class="form">${field('الكود', inp('code', b.code || '', 'class="ltr"'))}${field('القسم', inp('section', b.section || '', `list="cx-secs" placeholder="مثال: أعمال البياض"`) + `<datalist id="cx-secs">${secs.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`)}
+    ${field('وصف البند', `<textarea name="desc" required rows="2">${esc(b.desc || '')}</textarea>`, 'full')}${field('الوحدة', inp('unit', b.unit || '', 'placeholder="م² / م.ط / عدد"'))}${field('الكمية', inp('qty', b.qty || '', 'type="number" min="0" step="any" class="ltr"'))}
+    ${field('المرحلة', `<select name="stageId"><option value="">—</option>${cxStages().map(s => `<option value="${esc(s.id)}" ${b.stageId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`)}${field('المكان', `<select name="locId"><option value="">—</option>${cxLocs(pid).map(l => `<option value="${esc(l.id)}" ${b.locId === l.id ? 'selected' : ''}>${esc(cxLocName(l.id))}</option>`).join('')}</select>`)}
+    ${money ? field('سعر العميل للوحدة (ج.م)', inp('rate', rate || '', 'type="number" min="0" step="0.01" class="ltr"')) : ''}${field('الترتيب', inp('sort', b.sort || cxBoq(pid).length + 1, 'type="number"'))}</div>`,
+    onSubmit: async f => { if (!cxCanManage()) return; const d = formData(f); if (!d.desc) return false; const doc = Object.assign({}, b, { id: b.id || uid(), projectId: pid, code: d.code, desc: d.desc, unit: d.unit, qty: cxNum(d.qty), done: +b.done || 0, stageId: d.stageId || null, locId: d.locId || null, section: d.section, sort: +d.sort || 0 });
+      await Store.save('boq', doc, { silent: true }); if (money) await Store.save('boqrate', { id: doc.id, projectId: pid, rate: cxNum(d.rate) }, { silent: true }); rerender(); } });
+}
+ACTIONS.cxBoqNew = pid => { if (cxCanManage()) cxBoqForm(pid, null); };
+ACTIONS.cxBoqEdit = id => { const b = cxBoqItem(id); if (b && cxCanManage()) cxBoqForm(b.projectId, b); };
+ACTIONS.cxBoqDel = async id => { const b = cxBoqItem(id); if (!b || !cxCanManage()) return; if (!(await confirmDlg(`حذف البند «${b.desc}»؟`, 'حذف'))) return; await Store.remove('boq', id); if (byId('boqrate', id)) await Store.remove('boqrate', id); if (byId('boqcost', id)) await Store.remove('boqcost', id); };
+/* ---------- Excel import ---------- */
+const CX_IMP_KEYS = { code: ['كود', 'code', 'item no', 'item', 'رقم'], desc: ['وصف', 'description', 'بند', 'desc', 'البيان', 'بيان'], unit: ['وحدة', 'unit', 'الوحده'], qty: ['كمية', 'qty', 'quantity', 'الكميه'], rate: ['سعر', 'rate', 'price', 'فئة', 'فئه'], section: ['قسم', 'section', 'باب', 'trade'] };
+const CX_IMP_LABELS = { code: 'الكود', desc: 'وصف البند', unit: 'الوحدة', qty: 'الكمية', rate: 'سعر الوحدة', section: 'القسم' };
+const CX_IMP_CODE_EXACT = ['م', '#', 'no', 'no.', 'sn', 'sr', 'ser', 'مسلسل', 'بند رقم'];
+const cxImpMatch = (h, key) => { const s = String(h || '').toLowerCase().trim(); if (!s) return false; if (key === 'rate' && (s.includes('total') || s.includes('إجمالي') || s.includes('اجمالي'))) return false; if (key === 'code' && CX_IMP_CODE_EXACT.includes(s)) return true; return CX_IMP_KEYS[key].some(k => s.includes(k)); };
+function cxImpGuess(hdr) { const m = {}; const used = new Set(); Object.keys(CX_IMP_KEYS).forEach(k => { const i = hdr.findIndex((h, j) => !used.has(j) && cxImpMatch(h, k)); if (i >= 0) { m[k] = i; used.add(i); } }); return m; }
+async function cxReadSheet(file) {
+  const ok = typeof loadXLSX === 'function' ? await loadXLSX() : false; if (!ok || !window.XLSX) throw new Error('xlsx');
+  const cellText = c => { if (!c) return ''; if (c.v instanceof Date) return c.v; if (c.w != null && c.t !== 'n') return String(c.w).trim(); return c.v == null ? '' : (typeof c.v === 'string' ? c.v.trim() : c.v); };
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); const ws = wb.Sheets[wb.SheetNames[0]]; const rows = []; if (!ws || !ws['!ref']) return rows;
+  const R = XLSX.utils.decode_range(ws['!ref']); for (let r = R.s.r; r <= R.e.r; r++) { const vals = []; let any = false; for (let c = R.s.c; c <= R.e.c; c++) { const v = cellText(ws[XLSX.utils.encode_cell({ r, c })]); vals.push(v); if (v !== '' && v != null) any = true; } if (any) rows.push(vals); }
+  return rows;
+}
+ACTIONS.cxBoqImport = pid => { if (!cxCanManage()) return; const money = cxSeesMoney(); let rows = null, hdrIdx = -1;
+  const mapUI = f => { const hdr = rows[hdrIdx]; const m = cxImpGuess(hdr); const keys = Object.keys(CX_IMP_KEYS).filter(k => k !== 'rate' || money);
+    const sel = k => `<select name="map-${k}"><option value="">—</option>${hdr.map((h, i) => `<option value="${i}" ${m[k] === i ? 'selected' : ''}>${esc(String(h || ('عمود ' + (i + 1))).slice(0, 30))}</option>`).join('')}</select>`;
+    $('#cx-imp', f).innerHTML = `<div class="banner info full" style="margin:0 0 8px">${icon('info')}<span>لقينا العناوين في الصف ${hdrIdx + 1} — ${rows.length - hdrIdx - 1} صف بعده. راجع ربط الأعمدة ثم اضغط «استيراد».</span></div><div class="form">${keys.map(k => field(CX_IMP_LABELS[k], sel(k))).join('')}</div>
+      <div class="tablewrap" style="margin-top:8px"><table><thead><tr>${hdr.map(h => `<th>${esc(String(h || ''))}</th>`).join('')}</tr></thead><tbody>${rows.slice(hdrIdx + 1, hdrIdx + 9).map(r => `<tr>${hdr.map((_, i) => `<td>${esc(String(r[i] == null ? '' : r[i]).slice(0, 40))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`; };
+  openModal({ title: 'استيراد المقايسة من Excel', wide: true, cls: 'cximp', submitLabel: 'استيراد', body: `<div class="form">${field('ملف المقايسة (.xlsx / .xls / .csv)', `<input type="file" name="file" id="cx-imp-file" accept=".xlsx,.xls,.csv">`, 'full')}<div class="full small muted">أول شيت في الملف. الصفوف اللي فيها وصف بدون كمية ولا وحدة بتتعامل كعناوين أقسام.</div><div class="full" id="cx-imp"></div></div>`,
+    onOpen: f => { $('#cx-imp-file', f).addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; try { rows = await cxReadSheet(file); } catch (err) { toast('تعذّر قراءة الملف — جرّب تاني أو احفظه كـ xlsx', 'err'); return; }
+      hdrIdx = rows.findIndex(r => ['code', 'desc', 'unit', 'qty', 'rate'].filter(k => r.some(h => cxImpMatch(h, k))).length >= 3); if (hdrIdx < 0) { $('#cx-imp', f).innerHTML = '<div class="banner crit">مش لاقيين صف العناوين (كود / وصف / وحدة / كمية / سعر) — تأكد إن أول شيت فيه جدول المقايسة.</div>'; return; } mapUI(f); }); },
+    onSubmit: async f => { if (!rows || hdrIdx < 0) { toast('اختار الملف الأول', 'err'); return false; } const d = formData(f); const col = k => d['map-' + k] === '' || d['map-' + k] == null ? -1 : +d['map-' + k]; const at = (r, k) => { const i = col(k); return i < 0 ? '' : r[i]; };
+      if (col('desc') < 0) { toast('حدّد عمود الوصف', 'err'); return false; } let sort = cxBoq(pid).length, n = 0, section = ''; const secCol = col('section') >= 0;
+      for (const r of rows.slice(hdrIdx + 1)) { const desc = String(at(r, 'desc') || '').trim(); if (!desc) continue; const qty = cxNum(at(r, 'qty')), unit = String(at(r, 'unit') || '').trim(); if (!secCol && !qty && !unit) { section = desc; continue; } if (secCol) section = String(at(r, 'section') || section).trim();
+        const doc = { id: uid(), projectId: pid, code: String(at(r, 'code') || '').trim(), desc, unit, qty, done: 0, stageId: null, locId: null, section, sort: ++sort }; await Store.save('boq', doc, { silent: true }); n++;
+        if (money && col('rate') >= 0) { const rate = cxNum(at(r, 'rate')); if (rate) await Store.save('boqrate', { id: doc.id, projectId: pid, rate }, { silent: true }); } }
+      toast(`اتضاف ${n} بند`); rerender(); } }); };
+/* ---------- breakdown editor (shared by boqcost and ratelib) ---------- */
+function cxMatRow(m) { m = m || {}; return `<tr><td><input name="mn" value="${esc(m.name || '')}" placeholder="الخامة"></td><td><input name="mu" value="${esc(m.unit || '')}" style="min-width:50px"></td><td><input name="mq" type="number" step="any" min="0" class="ltr" value="${m.qtyPerUnit != null ? m.qtyPerUnit : ''}"></td><td><input name="mw" type="number" step="any" min="0" class="ltr" value="${m.wastePct != null ? m.wastePct : 0}"></td><td><input name="mp" type="number" step="any" min="0" class="ltr" value="${m.price != null ? m.price : ''}"></td><td class="num cx-ml">${fmtMoney(cxMatLine(m))}</td><td><button type="button" class="btn xs ghost" data-cx="delmat">${icon('x')}</button></td></tr>`; }
+function cxCostBody(c, o) { const st = cxSettings(); c = c || {};
+  return `<div class="full"><div class="cardhead" style="padding:0 0 6px"><h4>الخامات للوحدة الواحدة</h4><div class="grow"></div>${o.lib ? '' : `<select name="tpl" style="max-width:240px"><option value="">من المكتبة…</option>${list('ratelib').sort((a, b) => String(a.code).localeCompare(String(b.code), 'en', { numeric: true })).map(t => `<option value="${esc(t.id)}">${esc(t.code)} — ${esc(String(t.desc).slice(0, 40))}</option>`).join('')}</select>`}<button type="button" class="btn xs" data-cx="addmat">${icon('plus')}خامة</button></div>
+    <div class="tablewrap"><table class="cxmats" id="cx-mats"><thead><tr><th>الخامة</th><th>الوحدة</th><th>الكمية / وحدة</th><th>هالك %</th><th>السعر</th><th>التكلفة</th><th></th></tr></thead><tbody>${(c.materials || []).map(cxMatRow).join('')}</tbody></table></div></div>
+    ${field('مقاول باطن / مصنعية للوحدة', inp('subRate', c.subRate || 0, 'type="number" step="any" min="0" class="ltr"'))}${field('عمالة ذاتية للوحدة', inp('ownLabour', c.ownLabour || 0, 'type="number" step="any" min="0" class="ltr"'))}${field('معدات ونقل للوحدة', inp('equip', c.equip || 0, 'type="number" step="any" min="0" class="ltr"'))}
+    ${field('مصاريف عمومية %', inp('overheadPct', c.overheadPct != null ? c.overheadPct : st.overheadPct, 'type="number" step="0.5" min="0" class="ltr"'))}${field('ربح %', inp('profitPct', c.profitPct != null ? c.profitPct : st.profitPct, 'type="number" step="0.5" min="0" class="ltr"'))}${field('ملاحظة', inp('note', c.note || '', ''), 'full')}<div class="full cxlive" id="cx-live"></div>`; }
+function cxCostRead(f) { const d = formData(f); const materials = [...f.querySelectorAll('#cx-mats tbody tr')].map(tr => { const g = n => tr.querySelector(`[name=${n}]`).value; return { name: g('mn').trim(), unit: g('mu').trim(), qtyPerUnit: cxNum(g('mq')), wastePct: cxNum(g('mw')), price: cxNum(g('mp')) }; }).filter(m => m.name);
+  return { materials, subRate: cxNum(d.subRate), ownLabour: cxNum(d.ownLabour), equip: cxNum(d.equip), overheadPct: cxNum(d.overheadPct), profitPct: cxNum(d.profitPct), note: d.note || '' }; }
+function cxCostWire(f, o) { const live = () => { const c = cxCostRead(f); const k = cxCostOf(c); f.querySelectorAll('#cx-mats tbody tr').forEach(tr => { const g = n => tr.querySelector(`[name=${n}]`).value; tr.querySelector('.cx-ml').textContent = fmtMoney(cxMatLine({ qtyPerUnit: cxNum(g('mq')), wastePct: cxNum(g('mw')), price: cxNum(g('mp')) })); });
+    const st = o.lib ? 'none' : cxStatusOf(k.withOverhead, o.clientRate); const lb = cxStatusLabel[st];
+    $('#cx-live', f).innerHTML = `<div><b>${fmtMoney(k.mats)}</b><span>خامات / وحدة</span></div><div><b>${fmtMoney(k.direct)}</b><span>تكلفة مباشرة / وحدة</span></div><div><b>${fmtMoney(k.withOverhead)}</b><span>التكلفة شاملة المصاريف</span></div><div><b>${fmtMoney(k.price)}</b><span>سعر البيع المقترح</span></div>${o.lib ? '' : `<div class="st ${st}"><b>${o.clientRate ? fmtMoney(o.clientRate) : '—'}</b><span>سعر العميل · ${esc(lb[0])}${o.clientRate && k.withOverhead ? ` (${fmtMoney(o.clientRate - k.withOverhead)})` : ''}</span></div>`}`; };
+  f.addEventListener('input', live); f.addEventListener('click', e => { const b = e.target.closest('[data-cx]'); if (!b) return; if (b.dataset.cx === 'addmat') $('#cx-mats tbody', f).insertAdjacentHTML('beforeend', cxMatRow()); if (b.dataset.cx === 'delmat') b.closest('tr').remove(); live(); });
+  const tpl = f.querySelector('[name=tpl]'); if (tpl) tpl.addEventListener('change', e => { const t = byId('ratelib', e.target.value); if (!t) return; $('#cx-mats tbody', f).innerHTML = (t.materials || []).map(cxMatRow).join(''); ['subRate', 'ownLabour', 'equip'].forEach(k => { f.querySelector(`[name=${k}]`).value = +t[k] || 0; }); live(); }); live(); }
+ACTIONS.cxBoqCost = id => { const b = cxBoqItem(id); if (!b || !cxSeesCost()) return; const c = byId('boqcost', id) || {}; const clientRate = cxRate(id);
+  openModal({ title: `تحليل سعر البند — ${b.code || ''} ${String(b.desc || '').slice(0, 50)}`, wide: true, body: `<div class="form"><div class="full small muted">الوحدة: ${esc(b.unit || '—')} · الكمية ${fmtNum(b.qty)} · سعر العميل ${clientRate ? fmtMoney(clientRate) : '— (مش متسجل)'}</div>${cxCostBody(c, { clientRate })}</div>`,
+    onOpen: f => cxCostWire(f, { clientRate }), onSubmit: async f => { if (!cxSeesCost()) return; const d = cxCostRead(f); d.templateId = (f.querySelector('[name=tpl]') || {}).value || c.templateId || null; await Store.save('boqcost', Object.assign({}, c, d, { id, projectId: b.projectId })); toast('اتحفظ التحليل'); } }); };
+/* ---------- rate library page ---------- */
+function vCxRatelib() {
+  if (!cxSeesCost()) return '<div class="empty"><b>للمالك والحسابات فقط</b></div>';
+  const q = String(S.ui.cxrlq || '').trim().toLowerCase(); const all = list('ratelib'); const items = all.filter(t => !q || [t.code, t.desc, t.trade, t.csi].some(x => String(x || '').toLowerCase().includes(q))).sort((a, b) => String(a.trade || '').localeCompare(String(b.trade || ''), 'ar') || String(a.code || '').localeCompare(String(b.code || ''), 'en', { numeric: true }));
+  const search = `<div class="card"><div class="row"><input id="cx-rlq" placeholder="ابحث بالكود أو الوصف أو الحرفة…" value="${esc(S.ui.cxrlq || '')}" style="flex:1"><span class="muted small">${items.length} / ${all.length} قالب</span></div></div>`;
+  if (!all.length) return search + `<div class="empty"><b>المكتبة فاضية</b>«استيراد المكتبة الجاهزة» بيجيب ${CX_RATELIB_SEED_RAW.length} بند تشطيبات بأسعار أكتوبر 2026 — تقدر تعدّل أي قالب بعدها</div>`;
+  const groups = []; items.forEach(t => { const g = groups.find(x => x.trade === (t.trade || 'متنوعة')); if (g) g.items.push(t); else groups.push({ trade: t.trade || 'متنوعة', items: [t] }); });
+  return search + groups.map(g => `<div class="card"><div class="cardhead"><h3>${esc(g.trade)}</h3><span class="muted small">${g.items.length} قالب</span></div><div class="list">${g.items.map(t => { const k = cxCostOf(t); return `<div class="item" data-action="cxRlEdit" data-arg="${esc(t.id)}"><div class="main"><div class="title"><span class="ltr">${esc(t.code || '')}</span> ${esc(t.desc || '')}</div><div class="meta"><span>${esc(t.unit || '')}</span>${t.csi ? `<span class="ltr">CSI ${esc(t.csi)}</span>` : ''}<span>${(t.materials || []).length} خامة</span><span>تكلفة ${fmtMoney(k.withOverhead)}</span><span>بيع ${fmtMoney(k.price)}</span></div></div><div class="end"><button class="btn xs ghost" style="color:var(--crit-ink)" data-action="cxRlDel" data-arg="${esc(t.id)}" data-stop="1">${icon('trash')}</button></div></div>`; }).join('')}</div></div>`).join('');
+}
+document.addEventListener('input', e => { if (e.target && e.target.id === 'cx-rlq') { S.ui.cxrlq = e.target.value; clearTimeout(S.ui._cxrlT); S.ui._cxrlT = setTimeout(() => { rerender(); setTimeout(() => { const i = $('#cx-rlq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 50); }, 250); } });
+function cxRlForm(t) { t = t || {}; if (!cxSeesCost()) return;
+  openModal({ title: t.id ? 'تعديل قالب' : 'قالب تحليل سعر جديد', wide: true, body: `<div class="form">${field('الكود', inp('code', t.code || '', 'class="ltr" required'))}${field('الحرفة / القسم', inp('trade', t.trade || '', 'placeholder="بياض / أرضيات / كهرباء…"'))}${field('الوصف', inp('desc', t.desc || '', 'required'), 'full')}${field('الوحدة', inp('unit', t.unit || '', ''))}${field('كود CSI', inp('csi', t.csi || '', 'class="ltr"'))}${cxCostBody(t, { lib: true })}</div>`,
+    onOpen: f => cxCostWire(f, { lib: true }), onSubmit: async f => { const d = formData(f); if (!d.code || !d.desc) return false; await Store.save('ratelib', Object.assign({}, t, cxCostRead(f), { id: t.id || uid(), code: d.code, desc: d.desc, unit: d.unit, trade: d.trade, csi: d.csi })); } }); }
+ACTIONS.cxRlNew = () => cxRlForm(null); ACTIONS.cxRlEdit = id => cxRlForm(byId('ratelib', id));
+ACTIONS.cxRlDel = async id => { const t = byId('ratelib', id); if (!t || !cxSeesCost()) return; if (!(await confirmDlg(`حذف القالب «${t.code}»؟`, 'حذف'))) return; await Store.remove('ratelib', id); };
+ACTIONS.cxRlSeed = async () => { if (!cxSeesCost()) return; const have = new Set(list('ratelib').map(t => t.code)); let n = 0; for (const t of cxRatelibSeed()) { if (have.has(t.code)) continue; await Store.save('ratelib', Object.assign({ id: uid() }, t), { silent: true }); n++; } toast(n ? `اتضاف ${n} قالب` : 'المكتبة فيها كل القوالب الجاهزة'); rerender(); };
+EXTRA_VIEWS.cratelib = () => vCxRatelib();
+EXTRA_TITLES.cratelib = (r, addBtn) => ({ sub: 'قوالب تحليل الأسعار: خامات ومصنعية ومعدات لكل وحدة — بتتطبق على أي بند في أي مقايسة', actions: cxSeesCost() ? addBtn('قالب', 'cxRlNew') + `<button class="btn" data-action="cxRlSeed">${icon('layers')}<span>استيراد المكتبة الجاهزة</span></button>` : '' });
+VIEW_TITLES.cratelib = 'مكتبة تحليل الأسعار';
+/* =====================================================================
+   Ninety Construction — the site module (v7.0): stage checklists, snags, daily reports, the engineer's home.
+   Project tabs: «checks» (#/cprojects/<id>/checks) · «snags» · «daily»;  one checklist page: #/ccheck/<id>;  #/csite — the engineer's home.
+   Rule: boq.done is written ONLY here, on approval of a check = sum of the approved checks' qtys per item (capped at qty).
+   Exports: cxRecomputeDone(pid, boqIds) · cxMyProjects() · cxCheckStatus · cxSnagStatus · cxThumbs(fileIds)
+   ===================================================================== */
+document.head.insertAdjacentHTML('beforeend', `<style>
+.cxchk .ci{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:var(--surface)}.cxchk .ci .q{font-weight:700;margin-bottom:4px}
+.cxchk .tg{display:flex;gap:6px;margin:8px 0}.cxchk .tg button{flex:1;padding:12px 0;font-size:20px;line-height:1;border-radius:10px;border:1px solid var(--line);background:var(--surface-2,#f3f3f3);cursor:pointer}
+.cxchk .tg button.ok.on{background:#3f9d5a;color:#fff;border-color:#3f9d5a}.cxchk .tg button.no.on{background:#c0392b;color:#fff;border-color:#c0392b}.cxchk .tg button.na.on{background:#6b7280;color:#fff;border-color:#6b7280}
+.cxchk .ci input{width:100%}.cxchk .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.cxchk .acts .btn{flex:1;padding:12px 8px;font-weight:700}
+.cxthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.cxthumbs img{width:56px;height:56px;object-fit:cover;border-radius:8px;cursor:pointer;border:1px solid var(--line)}
+.cxbig{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}.cxbig button{padding:14px 6px;font-weight:700;border-radius:12px;font-size:14px}
+.cxprio{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-inline-end:4px}.cxmp td{padding:3px}.cxmp input{width:100%;min-width:60px}
+.cxsnag .item img.th{width:48px;height:48px;object-fit:cover;border-radius:8px}.cxlate{color:var(--crit-ink,#c0392b);font-weight:700}
+</style>`);
+const cxCheckStatus = { draft: ['مسودة', 'muted'], submitted: ['مستنية الاعتماد', 'warn'], approved: ['معتمدة', 'good'], rejected: ['مرفوضة', 'crit'] };
+const cxSnagStatus = { open: ['مفتوحة', 'crit'], fixed: ['اتصلحت', 'warn'], verified: ['اتأكدت', 'acc'], closed: ['مقفولة', 'muted'] };
+const cxPrio = { low: ['عادية', '#6b7280'], normal: ['متوسطة', '#e0a100'], high: ['عاجلة', '#c0392b'] };
+const cxWeather = ['مشمس', 'غائم', 'ممطر', 'حار جدًا', 'عاصف'];
+const cxMe = () => (S.session && S.session.id) || null;
+const cxMeName = () => (S.session && S.session.name) || '';
+const cxFileIdThumbs = ids => (ids || []).map(id => byId('files', id)).filter(f => f && f.thumb);
+const cxThumbs = ids => { const fs = cxFileIdThumbs(ids); return fs.length ? `<div class="cxthumbs">${fs.map(f => `<img src="${esc(f.thumb)}" alt="" data-action="fileOpen" data-arg="${esc(f.id)}:att">`).join('')}</div>` : ''; };
+const cxLocOpts = (pid, sel) => `<option value="">—</option>` + cxLocs(pid).map(l => `<option value="${esc(l.id)}" ${sel === l.id ? 'selected' : ''}>${esc(cxLocName(l.id))}</option>`).join('');
+const cxBack = pid => `<a class="btn ghost" href="#/cprojects/${esc(pid)}/checks">${icon('back')}<span>المشروع</span></a>`;
+/* the projects the current user works on: management roles see every active project; the site engineer sees his own (fallback: all active) */
+function cxMyProjects() {
+  const act = cxProjects().filter(p => p.status === 'active'); if (cxRole() !== 'head') return act;
+  const me = S.session && S.session.workerId; const mine = me ? act.filter(p => p.pmId === me || (p.engIds || []).includes(me)) : [];
+  return mine.length ? mine : act;
+}
+/* ---------- boq.done — only from approved checks ---------- */
+async function cxRecomputeDone(pid, boqIds) {
+  const approved = list('checks').filter(c => c.projectId === pid && c.status === 'approved');
+  for (const id of boqIds || []) { const b = byId('boq', id); if (!b) continue; const sum = approved.reduce((s, c) => s + (+((c.qtys || {})[id]) || 0), 0); const done = Math.min(+b.qty || 0, sum); if (done !== (+b.done || 0)) await Store.update('boq', id, { done }); }
+}
+/* ---------- tasks for the PM (no money in the texts) ---------- */
+async function cxTaskOpen(id, pid, title, link) {
+  const p = cxProject(pid); const pmId = p && p.pmId ? p.pmId : null;
+  await Store.save('tasks', { id, title, desc: p ? p.name : '', kind: 'update', source: 'system', status: 'open', priority: 'high', assigneeId: pmId, toRole: pmId ? null : 'admin', deptId: null, cxProjectId: pid, link, createdBy: cxMe(), createdByName: cxMeName(), createdAt: nowISO(), updatedAt: nowISO() }, { silent: true });
+}
+async function cxTaskClose(id) { const t = byId('tasks', id); if (t && t.status !== 'done') await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: cxMeName() }); }
+/* =================== 1. checklists =================== */
+const cxChecks = pid => list('checks').filter(c => c.projectId === pid).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+const cxCheckTitle = c => `${(cxStage(c.stageId) || {}).name || 'مرحلة'} · ${cxLocName(c.locId) || 'بدون مكان'}`;
+function cxCheckRow(c, withProject) { const st = cxCheckStatus[c.status] || cxCheckStatus.draft; const p = withProject ? cxProject(c.projectId) : null; const q = Object.values(c.qtys || {}).reduce((s, v) => s + (+v || 0), 0);
+  return `<a class="item" href="#/ccheck/${esc(c.id)}"><div class="main"><div class="title">${esc(cxCheckTitle(c))} <span class="badge ${st[1]}">${st[0]}</span></div><div class="meta">${p ? `<span>${esc(p.name)}</span>` : ''}<span>${esc(c.byName || '')}</span><span>${fmtDate(String(c.at || '').slice(0, 10))}</span><span>${(c.items || []).length} بند فحص</span>${q ? `<span>كمية ${fmtNum(q)}</span>` : ''}</div></div></a>`; }
+function cxChecksTab(p) { const cs = cxChecks(p.id);
+  return `<div class="card"><div class="cardhead"><h3>التشيك ليست</h3><span class="muted small">فحص كل مرحلة في كل مكان — الكمية ما تتحسبش منفَّذة قبل الاعتماد</span><div class="grow"></div>${cxOnSite() ? `<button class="btn sm p" data-action="cxCheckNew" data-arg="${esc(p.id)}">${icon('plus')}فحص مرحلة</button>` : ''}</div>
+  ${cs.length ? `<div class="list">${cs.map(c => cxCheckRow(c)).join('')}</div>` : '<div class="empty"><b>لا توجد تشيك ليست بعد</b>«+ فحص مرحلة»: اختار المكان والمرحلة وبنود المقايسة اللي اتنفذت</div>'}</div>`; }
+CX_TABS.push({ id: 'checks', label: 'التشيك ليست', when: () => cxOnSite(), render: cxChecksTab, count: p => cxChecks(p.id).filter(c => c.status === 'submitted').length });
+ACTIONS.cxCheckNew = pid => { if (!cxOnSite() || !cxProject(pid)) return; const stages = cxStages();
+  const itemsHtml = (stageId, locId) => { const items = cxBoq(pid).filter(b => b.stageId === stageId && (!locId || !b.locId || b.locId === locId)); if (!items.length) return '<div class="small muted">مفيش بنود في المقايسة على المرحلة دي — ينفع تعمل الفحص من غير كميات</div>';
+    return `<div class="tablewrap"><table><thead><tr><th></th><th>البند</th><th>الوحدة</th><th>المتبقي</th><th>الكمية المنفَّذة</th></tr></thead><tbody>${items.map(b => { const rem = Math.max(0, (+b.qty || 0) - (+b.done || 0)); return `<tr><td><label class="check"><input type="checkbox" name="it-${esc(b.id)}"></label></td><td>${esc(b.code || '')} ${esc(b.desc || '')}</td><td>${esc(b.unit || '')}</td><td class="num">${fmtNum(rem)}</td><td><input name="q-${esc(b.id)}" type="number" min="0" step="any" class="ltr" placeholder="${fmtNum(rem)}" style="width:100px"></td></tr>`; }).join('')}</tbody></table></div>`; };
+  openModal({ title: 'فحص مرحلة جديد', wide: true, submitLabel: 'ابدأ الفحص', body: `<div class="form">${field('المكان', `<select name="locId" id="cxk-loc">${cxLocOpts(pid, null)}</select>`)}${field('المرحلة', `<select name="stageId" id="cxk-stage">${stages.map(s => `<option value="${esc(s.id)}">${s.order}. ${esc(s.name)}</option>`).join('')}</select>`)}<div class="full"><label class="small muted">بنود المقايسة اللي اتنفذت في المكان ده (اختياري)</label><div id="cxk-items">${itemsHtml(stages[0] && stages[0].id, '')}</div></div></div>`,
+    onOpen: f => { wireChecks(f); const re = () => { $('#cxk-items', f).innerHTML = itemsHtml($('#cxk-stage', f).value, $('#cxk-loc', f).value); }; $('#cxk-stage', f).addEventListener('change', re); $('#cxk-loc', f).addEventListener('change', re); },
+    onSubmit: async f => { const d = formData(f); const stage = cxStage(d.stageId); if (!stage) { toast('اختار المرحلة', 'err'); return false; }
+      const boqIds = cxBoq(pid).filter(b => d['it-' + b.id]).map(b => b.id); const qtys = {}; boqIds.forEach(id => { const q = +d['q-' + id]; if (q > 0) qtys[id] = q; });
+      const doc = { id: uid(), projectId: pid, locId: d.locId || null, stageId: stage.id, boqIds, qtys, items: (stage.checklist || []).map(t => ({ text: t, ok: null, note: '', fileIds: [] })), status: 'draft', by: cxMe(), byName: cxMeName(), at: nowISO() };
+      await Store.save('checks', doc, { silent: true }); go('ccheck/' + doc.id); } }); };
+/* one checklist — the page */
+const cxCheckEditable = c => c.status === 'draft' && cxOnSite() && (c.by === cxMe() || cxCanManage());
+function vCxCheck(id) { const c = byId('checks', id); if (!c) return '<div class="empty"><b>التشيك ليست غير موجودة</b></div>'; const p = cxProject(c.projectId) || {}; const st = cxCheckStatus[c.status] || cxCheckStatus.draft; const ed = cxCheckEditable(c); const items = cxBoq(c.projectId).filter(b => (c.boqIds || []).includes(b.id));
+  const head = `<div class="card"><div class="cardhead"><h3>${esc(cxCheckTitle(c))}</h3><span class="badge ${st[1]}">${st[0]}</span></div><div class="kv"><div><span>المشروع</span><b>${esc(p.name || '')}</b></div><div><span>بواسطة</span><b>${esc(c.byName || '')} · ${fmtDate(String(c.at || '').slice(0, 10))}</b></div>${c.submittedAt ? `<div><span>اتبعتت</span><b>${fmtDate(c.submittedAt.slice(0, 10))}</b></div>` : ''}${c.decidedAt ? `<div><span>${c.status === 'approved' ? 'اعتمدها' : 'رفضها'}</span><b>${esc(c.decidedByName || '')} · ${fmtDate(c.decidedAt.slice(0, 10))}</b></div>` : ''}</div>
+    ${c.note ? `<div class="banner ${c.status === 'rejected' ? 'crit' : 'info'}" style="margin-top:8px">${icon('info')}<span>${esc(c.note)}</span></div>` : ''}
+    ${items.length ? `<div class="sep"></div><div class="small"><b>الكميات المنفَّذة:</b> ${items.map(b => `${esc(b.code || '')} ${esc(String(b.desc || '').slice(0, 30))} — ${fmtNum((c.qtys || {})[b.id] || 0)} ${esc(b.unit || '')}`).join(' · ')}</div>` : ''}</div>`;
+  const ci = (it, i) => `<div class="ci"><div class="q">${i + 1}. ${esc(it.text)}</div><div class="tg">${[['ok', '✓', true], ['no', '✗', false], ['na', '—', null]].map(([k, l, v]) => `<button type="button" class="${k} ${it.ok === v ? 'on' : ''}" ${ed ? `data-action="cxChkAns" data-arg="${esc(c.id)}:${i}:${k}"` : 'disabled'}>${l}</button>`).join('')}</div>
+    ${ed ? `<input id="cxn-${i}" data-i="${i}" value="${esc(it.note || '')}" placeholder="ملاحظة (لازمة لو ✗)">` : (it.note ? `<div class="small">${esc(it.note)}</div>` : '')}${cxThumbs(it.fileIds)}${ed ? `<div style="margin-top:6px"><button type="button" class="btn xs" data-action="cxChkPhoto" data-arg="${esc(c.id)}:${i}">${icon('camera')}صورة</button></div>` : ''}</div>`;
+  const acts = ed ? `<div class="acts"><button class="btn" data-action="cxChkSave" data-arg="${esc(c.id)}">حفظ</button><button class="btn p" data-action="cxChkSubmit" data-arg="${esc(c.id)}">إرسال للاعتماد</button></div>` : (c.status === 'submitted' && cxCanManage() ? `<div class="acts"><button class="btn p" data-action="cxChkApprove" data-arg="${esc(c.id)}">${icon('check')}اعتماد</button><button class="btn d" data-action="cxChkReject" data-arg="${esc(c.id)}">${icon('x')}رفض</button></div>` : '');
+  return head + `<div class="card cxchk" id="cxchk-${esc(c.id)}">${(c.items || []).map(ci).join('')}${acts}</div>`;
+}
+/* read the note inputs from the page into the doc (in memory) */
+function cxChkCollect(id) { const c = byId('checks', id); if (!c) return null; const items = (c.items || []).map((it, i) => { const el = document.getElementById('cxn-' + i); return el ? Object.assign({}, it, { note: el.value.trim() }) : it; }); return Object.assign({}, c, { items }); }
+ACTIONS.cxChkAns = async arg => { const [id, i, k] = String(arg).split(':'); const c = cxChkCollect(id); if (!c || !cxCheckEditable(c)) return; c.items[+i].ok = k === 'ok' ? true : k === 'no' ? false : null; await Store.save('checks', c); };
+ACTIONS.cxChkPhoto = async arg => { const [id, i] = String(arg).split(':'); const c = cxChkCollect(id); if (!c || !cxCheckEditable(c)) return; Store.local('checks', c);
+  const pr = await proofDialog({ title: `صورة — ${c.items[+i].text}`, requireFile: true, multiple: true, kind: 'proof', ownerKind: 'check', ownerId: id, noteLabel: 'ملاحظة (اختياري)' }); if (!pr) { rerender(); return; }
+  c.items[+i].fileIds = (c.items[+i].fileIds || []).concat(pr.fileIds); if (pr.note && !c.items[+i].note) c.items[+i].note = pr.note; await Store.save('checks', c); };
+ACTIONS.cxChkSave = async id => { const c = cxChkCollect(id); if (!c || !cxCheckEditable(c)) return; await Store.save('checks', c); toast('اتحفظت'); };
+ACTIONS.cxChkSubmit = async id => { const c = cxChkCollect(id); if (!c || !cxCheckEditable(c)) return;
+  if (c.items.some(it => it.ok === null)) { Store.local('checks', c); toast('جاوب على كل بنود الفحص الأول (✓ أو ✗ أو —)', 'err'); return; }
+  if (c.items.some(it => it.ok === false && !it.note)) { Store.local('checks', c); toast('كل بند ✗ لازم له ملاحظة', 'err'); return; }
+  c.status = 'submitted'; c.submittedAt = nowISO(); await Store.save('checks', c, { silent: true });
+  await cxTaskOpen('cxchk_' + c.id, c.projectId, 'تشيك ليست مستنية اعتمادك — ' + cxCheckTitle(c), '#/ccheck/' + c.id); toast('اتبعتت للاعتماد'); rerender(); };
+ACTIONS.cxChkApprove = async id => { const c = byId('checks', id); if (!c || c.status !== 'submitted' || !cxCanManage()) return;
+  await Store.save('checks', Object.assign({}, c, { status: 'approved', decidedBy: cxMe(), decidedByName: cxMeName(), decidedAt: nowISO() }), { silent: true });
+  await cxRecomputeDone(c.projectId, Object.keys(c.qtys || {})); await cxTaskClose('cxchk_' + id); toast('اتعتمدت — الكميات اتحسبت منفَّذة'); rerender(); };
+ACTIONS.cxChkReject = id => { const c = byId('checks', id); if (!c || c.status !== 'submitted' || !cxCanManage()) return;
+  openModal({ title: 'رفض التشيك ليست', submitLabel: 'رفض', body: `<div class="form">${field('سبب الرفض', `<textarea name="note" required rows="3"></textarea>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.note) return false;
+    await Store.save('checks', Object.assign({}, c, { status: 'rejected', note: d.note, decidedBy: cxMe(), decidedByName: cxMeName(), decidedAt: nowISO() }), { silent: true }); await cxTaskClose('cxchk_' + id); toast('اترفضت'); rerender(); } }); };
+/* =================== 2. snags =================== */
+const cxSnags = pid => list('snags').filter(s => s.projectId === pid).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+const cxSnagLate = s => s.due && ['open', 'fixed'].includes(s.status) && s.due < todayISO();
+function cxSnagItem(s, withProject) { const st = cxSnagStatus[s.status] || cxSnagStatus.open; const pr = cxPrio[s.priority] || cxPrio.normal; const sub = s.subId ? byId('subcons', s.subId) : null; const p = withProject ? cxProject(s.projectId) : null; const thumb = s.thumb || (cxFileIdThumbs(s.fileIds)[0] || {}).thumb;
+  const btns = [];
+  if (cxOnSite()) { if (s.status === 'open') btns.push(`<button class="btn xs p" data-action="cxSnagFixed" data-arg="${esc(s.id)}">اتصلحت</button>`); if (s.status === 'fixed') btns.push(`<button class="btn xs p" data-action="cxSnagVerify" data-arg="${esc(s.id)}">اتأكدت ✓</button><button class="btn xs" data-action="cxSnagBack" data-arg="${esc(s.id)}">لسه</button>`); }
+  if (cxCanManage() && ['fixed', 'verified'].includes(s.status)) btns.push(`<button class="btn xs" data-action="cxSnagClose" data-arg="${esc(s.id)}">إقفال</button>`);
+  return `<div class="item" data-action="cxSnagOpen" data-arg="${esc(s.id)}">${thumb ? `<img class="th" src="${esc(thumb)}" alt="">` : ''}<div class="main"><div class="title"><span class="cxprio" style="background:${pr[1]}" title="${esc(pr[0])}"></span>${esc(s.text)} <span class="badge ${st[1]}">${st[0]}</span></div><div class="meta">${p ? `<span>${esc(p.name)}</span>` : ''}${s.locId ? `<span>${esc(cxLocName(s.locId))}</span>` : ''}${s.trade || sub ? `<span>${esc(s.trade || '')}${sub ? (s.trade ? ' — ' : '') + esc(sub.name) : ''}</span>` : ''}${s.due ? `<span class="${cxSnagLate(s) ? 'cxlate' : ''}">${cxSnagLate(s) ? 'متأخرة · ' : ''}${fmtDate(s.due)}</span>` : ''}</div></div>${btns.length ? `<div class="end"><div class="row" style="gap:4px" data-stop="1">${btns.join('')}</div></div>` : ''}</div>`; }
+function cxSnagsTab(p) { const f = S.ui.cxsnagF || 'all'; const all = cxSnags(p.id); const show = all.filter(s => f === 'all' || (f === 'open' ? s.status === 'open' : f === 'fixed' ? ['fixed', 'verified'].includes(s.status) : s.status === 'closed'));
+  const seg = [['all', 'الكل', all.length], ['open', 'مفتوحة', all.filter(s => s.status === 'open').length], ['fixed', 'اتصلحت', all.filter(s => ['fixed', 'verified'].includes(s.status)).length], ['closed', 'مقفولة', all.filter(s => s.status === 'closed').length]];
+  return `<div class="card cxsnag"><div class="cardhead"><h3>الملاحظات</h3><div class="seg">${seg.map(([k, l, n]) => `<button type="button" class="${f === k ? 'on' : ''}" data-action="cxSnagFilter" data-arg="${k}">${l}${n ? ` (${n})` : ''}</button>`).join('')}</div><div class="grow"></div>${cxOnSite() ? `<button class="btn sm p" data-action="cxSnagNew" data-arg="${esc(p.id)}">${icon('plus')}ملاحظة</button>` : ''}</div>
+  ${show.length ? `<div class="list">${show.map(s => cxSnagItem(s)).join('')}</div>` : '<div class="empty"><b>مفيش ملاحظات</b>كل عيب في الموقع: صورة ومكان ومقاول وتاريخ — وتتابع لحد ما تتقفل</div>'}</div>`; }
+CX_TABS.push({ id: 'snags', label: 'الملاحظات', when: () => cxOnSite(), render: cxSnagsTab, count: p => cxSnags(p.id).filter(s => s.status === 'open').length });
+ACTIONS.cxSnagFilter = k => { S.ui.cxsnagF = k; rerender(); };
+ACTIONS.cxSnagNew = pid => { if (!cxOnSite() || !cxProject(pid)) return; const subs = list('subcons').sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+  openModal({ title: 'ملاحظة جديدة', wide: true, body: `<div class="form">${field('الملاحظة', `<textarea name="text" required rows="2" placeholder="مثال: شرخ في بياض حائط الريسبشن جنب الباب"></textarea>`, 'full')}${field('المكان', `<select name="locId">${cxLocOpts(pid, null)}</select>`)}${field('الأولوية', `<select name="priority">${Object.entries(cxPrio).map(([k, v]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>`)}
+    ${field('الحرفة', inp('trade', '', 'placeholder="بياض / كهرباء / سباكة…"'))}${field('مقاول الباطن', `<select name="subId"><option value="">—</option>${subs.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.trade ? ' — ' + esc(s.trade) : ''}</option>`).join('')}</select>`)}${field('آخر موعد للإصلاح', inp('due', '', 'type="date"'))}${field('صورة', `<input type="file" name="photo" id="cxs-photo" accept="image/*" capture="environment" multiple>`)}</div>`,
+    onSubmit: async f => { const d = formData(f); if (!d.text) return false; const sub = d.subId ? byId('subcons', d.subId) : null; const id = uid(); const fileIds = []; let thumb = null;
+      for (const file of Array.from($('#cxs-photo', f).files || [])) { const doc = await proofAttach(file, { kind: 'proof', ownerKind: 'snag', ownerId: id, note: d.text }); if (doc) { fileIds.push(doc.id); if (!thumb && doc.thumb) thumb = doc.thumb; } }
+      const now = nowISO(); const s = { id, projectId: pid, locId: d.locId || null, text: d.text, trade: d.trade || (sub ? sub.trade : '') || '', subId: d.subId || null, priority: d.priority || 'normal', due: d.due || null, status: 'open', fileIds, thumb, history: [{ at: now, by: cxMe(), byName: cxMeName(), status: 'open', note: '', fileIds }], by: cxMe(), byName: cxMeName(), at: now };
+      await Store.save('snags', s, { silent: true });
+      if (s.priority === 'high' && s.subId) await cxTaskOpen('cxsnag_' + id, pid, 'ملاحظة عاجلة على ' + (sub ? sub.name : 'مقاول باطن') + ' — ' + String(s.text).slice(0, 60), '#/cprojects/' + pid + '/snags');
+      toast('اتسجلت الملاحظة'); rerender(); } }); };
+async function cxSnagSet(s, status, note, fileIds) { const h = (s.history || []).concat([{ at: nowISO(), by: cxMe(), byName: cxMeName(), status, note: note || '', fileIds: fileIds || [] }]); const patch = { status, history: h, fileIds: (s.fileIds || []).concat(fileIds || []) }; if (!s.thumb && fileIds && fileIds.length) { const f = byId('files', fileIds[0]); if (f && f.thumb) patch.thumb = f.thumb; } if (status === 'closed') await cxTaskClose('cxsnag_' + s.id); await Store.save('snags', Object.assign({}, s, patch)); }
+ACTIONS.cxSnagFixed = async id => { const s = byId('snags', id); if (!s || s.status !== 'open' || !cxOnSite()) return; const pr = await proofDialog({ title: 'الملاحظة اتصلحت — صورة بعد الإصلاح', requireFile: true, multiple: true, kind: 'proof', ownerKind: 'snag', ownerId: id, noteLabel: 'ملاحظة (اختياري)' }); if (!pr) return; await cxSnagSet(s, 'fixed', pr.note, pr.fileIds); toast('اتسجل الإصلاح — مستني تأكيد المهندس'); };
+ACTIONS.cxSnagVerify = async id => { const s = byId('snags', id); if (!s || s.status !== 'fixed' || !cxOnSite()) return; await cxSnagSet(s, 'verified', '', []); toast('اتأكدت'); };
+ACTIONS.cxSnagBack = id => { const s = byId('snags', id); if (!s || s.status !== 'fixed' || !cxOnSite()) return; openModal({ title: 'لسه مش متصلحة', submitLabel: 'رجّعها مفتوحة', body: `<div class="form">${field('إيه اللي ناقص؟', `<textarea name="note" required rows="3"></textarea>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.note) return false; await cxSnagSet(s, 'open', d.note, []); } }); };
+ACTIONS.cxSnagClose = async id => { const s = byId('snags', id); if (!s || !['fixed', 'verified'].includes(s.status) || !cxCanManage()) return; await cxSnagSet(s, 'closed', '', []); toast('اتقفلت'); };
+ACTIONS.cxSnagOpen = (id, el, ev) => { if (ev && ev.target.closest('[data-stop]')) return; const s = byId('snags', id); if (!s) return; const sub = s.subId ? byId('subcons', s.subId) : null; const pr = cxPrio[s.priority] || cxPrio.normal;
+  openModal({ title: 'ملاحظة', footer: null, body: `<div class="form"><div class="full"><b>${esc(s.text)}</b></div><div class="kv full"><div><span>الحالة</span><b>${(cxSnagStatus[s.status] || [''])[0]}</b></div><div><span>الأولوية</span><b>${pr[0]}</b></div><div><span>المكان</span><b>${esc(cxLocName(s.locId) || '—')}</b></div><div><span>الحرفة / المقاول</span><b>${esc(s.trade || '')}${sub ? ' — ' + esc(sub.name) : ''}</b></div><div><span>آخر موعد</span><b class="${cxSnagLate(s) ? 'cxlate' : ''}">${s.due ? fmtDate(s.due) : '—'}</b></div><div><span>سجّلها</span><b>${esc(s.byName || '')} · ${fmtDate(String(s.at || '').slice(0, 10))}</b></div></div>
+    <div class="full">${cxThumbs(s.fileIds)}</div><div class="full"><h4>السجل</h4><div class="hlog">${(s.history || []).map(h => `<div class="hrow"><div class="grow"><div class="small bold"><span class="badge ${(cxSnagStatus[h.status] || ['', ''])[1]}">${(cxSnagStatus[h.status] || [''])[0]}</span> ${esc(h.byName || '')}</div>${h.note ? `<div class="small">${esc(h.note)}</div>` : ''}<div class="tiny muted">${fmtDate(String(h.at || '').slice(0, 10))} ${String(h.at || '').slice(11, 16)}</div></div></div>`).join('')}</div></div></div>` }); };
+/* =================== 3. daily reports =================== */
+const cxReports = pid => list('dailyreports').filter(d => d.projectId === pid).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.at || '').localeCompare(String(a.at || '')));
+const cxManpower = r => (r.manpower || []).reduce((s, m) => s + (+m.count || 0), 0);
+const cxTodayReport = pid => cxReports(pid).find(r => r.date === todayISO() && r.by === cxMe());
+function cxDailyTab(p) { const rs = cxReports(p.id);
+  return `<div class="card"><div class="cardhead"><h3>التقرير اليومي</h3><span class="muted small">عمالة · شغل · خامات · مشاكل · صور</span><div class="grow"></div>${cxOnSite() ? `<button class="btn sm p" data-action="cxDailyNew" data-arg="${esc(p.id)}">${icon('plus')}${cxTodayReport(p.id) ? 'تعديل تقرير النهارده' : 'تقرير النهارده'}</button>` : ''}</div>
+  ${rs.length ? `<div class="list">${rs.map(r => `<div class="item" data-action="cxDailyView" data-arg="${esc(r.id)}"><div class="main"><div class="title">${fmtDate(r.date)} ${r.weather ? `<span class="badge">${esc(r.weather)}</span>` : ''}</div><div class="meta"><span>${cxManpower(r)} عامل</span><span>${(r.fileIds || []).length} صورة</span><span>${esc(r.byName || '')}</span></div><div class="small muted">${esc(String(r.work || '').slice(0, 120))}</div></div></div>`).join('')}</div>` : '<div class="empty"><b>مفيش تقارير بعد</b>كل يوم شغل: مين كان موجود وإيه اللي اتعمل — بصور</div>'}</div>`; }
+CX_TABS.push({ id: 'daily', label: 'التقرير اليومي', when: () => cxOnSite(), render: cxDailyTab, count: p => cxReports(p.id).length });
+const cxMpRow = m => { m = m || {}; return `<tr><td><input name="mpn" value="${esc(m.name || '')}" placeholder="النجار / مقاول البياض / عمالة الشركة"></td><td><input name="mpc" type="number" min="0" step="1" class="ltr" value="${m.count != null && m.count !== '' ? m.count : ''}" style="width:80px"></td><td><button type="button" class="btn xs ghost" data-cx="delrow">${icon('x')}</button></td></tr>`; };
+ACTIONS.cxDailyNew = pid => { if (!cxOnSite() || !cxProject(pid)) return; const ex = cxTodayReport(pid) || {}; const subs = list('subcons').filter(s => (s.contracts || []).some(c => c.projectId === pid)); const rows = ex.manpower && ex.manpower.length ? ex.manpower : (subs.length ? subs.map(s => ({ name: s.name, count: '' })) : [{}]);
+  openModal({ title: ex.id ? 'تعديل تقرير النهارده' : 'تقرير النهارده', wide: true, body: `<div class="form">${field('التاريخ', inp('date', ex.date || todayISO(), 'type="date" required'))}${field('الجو', `<select name="weather">${cxWeather.map(w => `<option ${ex.weather === w ? 'selected' : ''}>${w}</option>`).join('')}</select>`)}
+    <div class="full"><div class="cardhead" style="padding:0 0 6px"><h4>العمالة</h4><div class="grow"></div><button type="button" class="btn xs" data-cx="addrow">${icon('plus')}صف</button></div><div class="tablewrap"><table class="cxmp" id="cx-mp"><thead><tr><th>الجهة / الحرفة</th><th>العدد</th><th></th></tr></thead><tbody>${rows.map(cxMpRow).join('')}</tbody></table></div></div>
+    ${field('الشغل اللي اتعمل', `<textarea name="work" rows="3" required>${esc(ex.work || '')}</textarea>`, 'full')}${field('خامات وصلت', `<textarea name="materials" rows="2">${esc(ex.materials || '')}</textarea>`, 'full')}${field('مشاكل / معوقات', `<textarea name="problems" rows="2">${esc(ex.problems || '')}</textarea>`, 'full')}${field('خطة بكرة', `<textarea name="tomorrow" rows="2">${esc(ex.tomorrow || '')}</textarea>`, 'full')}
+    ${field('صور', `<input type="file" name="photos" id="cxd-photos" accept="image/*" capture="environment" multiple>`, 'full')}${ex.id ? `<div class="full">${cxThumbs(ex.fileIds)}</div>` : ''}</div>`,
+    onOpen: f => { f.addEventListener('click', e => { const b = e.target.closest('[data-cx]'); if (!b) return; if (b.dataset.cx === 'addrow') $('#cx-mp tbody', f).insertAdjacentHTML('beforeend', cxMpRow()); if (b.dataset.cx === 'delrow') b.closest('tr').remove(); }); },
+    onSubmit: async f => { const d = formData(f); if (!d.date || !d.work) { toast('اكتب الشغل اللي اتعمل', 'err'); return false; } const manpower = [...f.querySelectorAll('#cx-mp tbody tr')].map(tr => ({ name: tr.querySelector('[name=mpn]').value.trim(), count: +tr.querySelector('[name=mpc]').value || 0 })).filter(m => m.name);
+      const prev = cxReports(pid).find(r => r.date === d.date && r.by === cxMe()) || ex; const id = prev.id || uid(); const fileIds = (prev.fileIds || []).slice(); const thumbs = (prev.thumbs || []).slice();
+      for (const file of Array.from($('#cxd-photos', f).files || [])) { const doc = await proofAttach(file, { kind: 'proof', ownerKind: 'daily', ownerId: id, note: d.date }); if (doc) { fileIds.push(doc.id); if (doc.thumb) thumbs.push(doc.thumb); } }
+      await Store.save('dailyreports', Object.assign({}, prev, { id, projectId: pid, date: d.date, manpower, work: d.work, materials: d.materials || '', problems: d.problems || '', tomorrow: d.tomorrow || '', weather: d.weather || '', fileIds, thumbs, by: prev.by || cxMe(), byName: prev.byName || cxMeName(), at: prev.at || nowISO() })); toast(prev.id ? 'اتعدّل التقرير' : 'اتسجل التقرير'); } }); };
+ACTIONS.cxDailyView = id => { const r = byId('dailyreports', id); if (!r) return; const p = cxProject(r.projectId) || {}; const sec = (l, v) => v ? `<div class="full"><b>${l}</b><div class="small" style="white-space:pre-wrap">${esc(v)}</div></div>` : '';
+  openModal({ title: `تقرير ${fmtDate(r.date)} — ${p.name || ''}`, wide: true, footer: null, body: `<div class="form"><div class="kv full"><div><span>الجو</span><b>${esc(r.weather || '—')}</b></div><div><span>العمالة</span><b>${cxManpower(r)} عامل</b></div><div><span>كتبه</span><b>${esc(r.byName || '')}</b></div></div>
+    ${(r.manpower || []).length ? `<div class="full"><table><tbody>${r.manpower.map(m => `<tr><td>${esc(m.name)}</td><td class="num">${m.count}</td></tr>`).join('')}</tbody></table></div>` : ''}${sec('الشغل اللي اتعمل', r.work)}${sec('خامات وصلت', r.materials)}${sec('مشاكل / معوقات', r.problems)}${sec('خطة بكرة', r.tomorrow)}<div class="full">${cxThumbs(r.fileIds)}</div></div>` }); };
+/* =================== 4. #/csite — the engineer's home =================== */
+function vCxSite() { if (!cxOnSite()) return '<div class="empty"><b>الصفحة دي لفريق الموقع</b></div>'; const ps = cxMyProjects();
+  const pend = cxCanManage() ? list('checks').filter(c => c.status === 'submitted').sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || ''))) : [];
+  const pendCard = cxCanManage() ? `<div class="card"><div class="cardhead"><h3>مستني اعتمادك</h3><span class="badge ${pend.length ? 'warn' : ''}">${pend.length}</span></div>${pend.length ? `<div class="list">${pend.map(c => `<div class="item" style="cursor:default"><div class="main"><div class="title"><a href="#/ccheck/${esc(c.id)}">${esc(cxCheckTitle(c))}</a></div><div class="meta"><span>${esc((cxProject(c.projectId) || {}).name || '')}</span><span>${esc(c.byName || '')}</span><span>${fmtDate(String(c.submittedAt || '').slice(0, 10))}</span><span>${(c.items || []).filter(i => i.ok === false).length} ✗</span></div></div><div class="end"><div class="row" style="gap:4px"><button class="btn xs p" data-action="cxChkApprove" data-arg="${esc(c.id)}">اعتماد</button><button class="btn xs d" data-action="cxChkReject" data-arg="${esc(c.id)}">رفض</button></div></div></div>`).join('')}</div>` : '<div class="small muted">مفيش تشيك ليست مستنية اعتماد ✓</div>'}</div>` : '';
+  if (!ps.length) return pendCard + '<div class="empty"><b>مفيش مشاريع جارية عليك</b>لما تتضاف لمشروع هتلاقيه هنا</div>';
+  return pendCard + `<div class="grid cards">${ps.map(p => { const sub = cxChecks(p.id).filter(c => c.status === 'submitted').length; const open = cxSnags(p.id).filter(s => s.status === 'open'); const today = cxReports(p.id).some(r => r.date === todayISO());
+    return `<div class="card"><div class="cardhead"><h3><a href="#/cprojects/${esc(p.id)}">${esc(p.name)}</a></h3><span class="muted small">${cxProgress(p.id)}%</span></div><div class="cxbig"><button class="btn" data-action="cxCheckNew" data-arg="${esc(p.id)}">${icon('check')}<br>فحص مرحلة</button><button class="btn" data-action="cxSnagNew" data-arg="${esc(p.id)}">${icon('alert')}<br>ملاحظة</button><button class="btn ${today ? '' : 'p'}" data-action="cxDailyNew" data-arg="${esc(p.id)}">${icon('calendar')}<br>تقرير النهارده</button></div>
+      <div class="kpis"><a class="kpi ${sub ? 'warn' : ''}" href="#/cprojects/${esc(p.id)}/checks"><b>${sub}</b><span>تشيك ليست مستنية</span></a><a class="kpi ${open.length ? 'crit' : ''}" href="#/cprojects/${esc(p.id)}/snags"><b>${open.length}</b><span>ملاحظة مفتوحة</span></a><a class="kpi ${today ? 'good' : 'warn'}" href="#/cprojects/${esc(p.id)}/daily"><b>${today ? '✓' : '—'}</b><span>${today ? 'تقرير النهارده اتكتب' : 'تقرير النهارده لسه'}</span></a></div>
+      ${open.length ? `<div class="list cxsnag" style="margin-top:8px">${open.slice(0, 3).map(s => cxSnagItem(s)).join('')}</div>` : ''}</div>`; }).join('')}</div>`; }
+/* ---------- registration ---------- */
+EXTRA_VIEWS.csite = () => vCxSite();
+EXTRA_TITLES.csite = () => ({ sub: 'شغل الموقع من الموبايل: فحص المراحل، الملاحظات، وتقرير كل يوم' });
+VIEW_TITLES.csite = 'الموقع';
+EXTRA_VIEWS.ccheck = r => vCxCheck(r.id);
+EXTRA_TITLES.ccheck = r => { const c = byId('checks', r.id); return { title: 'تشيك ليست', sub: c ? esc(cxCheckTitle(c)) : '', actions: c ? cxBack(c.projectId) : `<a class="btn ghost" href="#/csite">${icon('back')}<span>الموقع</span></a>` }; };
+VIEW_TITLES.ccheck = 'تشيك ليست';
+canSee = (base => view => view === 'ccheck' ? base('csite') : base(view))(canSee);
+/* =====================================================================
    Ninety Studioz v4.18 — studio core: dark identity theme · data collections
    (projects / boards / bitems) · office projects (Concept → DD → 3D → Drawings)
    Only active in the studioz build (STU_ON). The boards themselves live in
@@ -25214,7 +25859,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
    ===================================================================== */
 (function () {
   if (window.__NF_EQUIP__) return; window.__NF_EQUIP__ = 1;
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   ['equip', 'equipfin', 'emaint', 'etrips'].forEach(c => { if (!COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
   const CLS = { factory: ['معدات المصنع', ''], install: ['معدات تركيبات', 'acc'] };
   const KIND = { machine: 'ماكينة', power: 'عدة كهربائية', hand: 'عدة يدوية' };
@@ -25644,7 +26289,7 @@ ${isAdmin() ? '- history {"col": اختياري, "id": اختياري, "who": ا
   }
   const mdLiteSafe = t => (typeof mdLite === 'function' ? mdLite(t) : esc(t).replace(/\n/g, '<br>'));
   /* v5.16 voice: server Whisper (if the owner set the key) → else browser recognition; hold-to-talk or tap; auto-stop after 1.5 s of silence */
-  let sttReady = null; const sttCheck = async () => { if (sttReady !== null) return sttReady; try { if (!S.sb || !S.sb.rpc || (typeof isStudioz === 'function' && isStudioz())) return (sttReady = false); const { data, error } = await S.sb.rpc('nf_stt_ready'); sttReady = !error && data === true; } catch (e) { sttReady = false; } return sttReady; };
+  let sttReady = null; const sttCheck = async () => { if (sttReady !== null) return sttReady; try { if (!S.sb || !S.sb.rpc || (typeof isStudioz === 'function' && isStudioz() || isConstruction())) return (sttReady = false); const { data, error } = await S.sb.rpc('nf_stt_ready'); sttReady = !error && data === true; } catch (e) { sttReady = false; } return sttReady; };
   window.nfSttReset = () => { sttReady = null; };
   const hintNames = () => [].concat(list('orders').slice(0, 40).map(o => `${o.title || ''} ${clientOf(o)}`), list('suppliers').slice(0, 30).map(x => x.name), list('workers').filter(w => !w.left).slice(0, 30).map(w => w.name)).filter(Boolean).join('، ');
   const status = t => { const st = panel() && panel().querySelector('#aistat'); if (st) { st.textContent = t || ''; st.hidden = !t; } };
@@ -25878,7 +26523,7 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
    · الاعتماد: نسخة جديدة على منتج موجود أو منتج جديد بكود، الملفات تتربط بالمنتج، المشروع، ومهمة للمكتب الفني بالبنود المفتوحة
    ===================================================================== */
 (() => {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   document.head.insertAdjacentHTML('beforeend', `<style>
 .gpt-row{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--surface);text-decoration:none;color:inherit}
 .gpt-row .t{font-weight:600}.gpt-row .m{font-size:12px;color:var(--ink-2)}
@@ -26126,7 +26771,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · ما بيتبعتش لو مدير المصنع هو اللي عملها أو هو المكلَّف، ولا للتنبيهات/التصعيد اللي السيستم بيعملها
    ===================================================================== */
 (() => {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const sent = new Set();
   const isMgrId = id => { if (!id) return false; const w = byId('workers', id); if (w) return w.role === 'manager'; const s = byId('staff', id); return !!(s && s.role === 'manager'); };
   const SKIP_SRC = ['system', 'money', 'order', 'cctv', 'reminder'];
@@ -26158,7 +26803,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · نفس المسار القديم: مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل (requests type opex)
    ===================================================================== */
 (() => {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   if (typeof OPEX_CATS === 'undefined' || typeof MONEY_CATS === 'undefined') return;
   const oxSee = () => !!S.session && (isAdmin() || ['hr', 'acc'].includes(role()));
   const oxRec = () => writable() && oxSee();
@@ -26395,7 +27040,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · الرابط فيه مفتاح سري (nfmcp_…) — بيظهر مرة واحدة؛ «رابط جديد» يوقف القديم فورًا (RPC nf_mcp_key_* للمالك بس)
    ===================================================================== */
 (() => {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   if (typeof EXTRA_SETTINGS === 'undefined' || !EXTRA_SETTINGS.gptlink) return;
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.rpc;
   const BASE = () => ((window.NF_CONFIG && window.NF_CONFIG.supabaseUrl) || (S.sb && S.sb.supabaseUrl) || '').replace(/\/$/, '') + '/functions/v1/gpt-mcp/';
@@ -26583,7 +27228,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة · v5.62 (30 سبتمبر — طلب محمود): المدير التجاري (bdd) ومهندس المكتب الفني (tech) مالهمش مكالمات خالص — لا صفحة ولا زرار ولا يظهروا لحد (السيرفر كمان: nf_calls_allowed / nf_call_visible)
    ===================================================================== */
 (() => {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from && S.sbUser;
   const me = () => (S.sbUser && S.sbUser.id) || ''; const noCalls = () => typeof role === 'function' && ['bdd', 'tech'].includes(role()); /* v5.62: المدير التجاري ومهندس المكتب الفني — من غير مكالمات خالص */
   const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
@@ -27399,7 +28044,7 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
    ===================================================================== */
 (function () {
   if (window.__NF_MEMO__) return; window.__NF_MEMO__ = 1;
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const own = () => !!S.session && isAdmin() && !(typeof isStuSys === 'function' && isStuSys());
   if (!COLS.includes('memos')) COLS.push('memos'); S.data.memos = S.data.memos || new Map();
   const memos = () => list('memos').filter(m => m && m.id && !m.deleted);
@@ -34653,7 +35298,7 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
    Factory only (the studio has no fleet). The «open the road in Google Maps» button stays as it is.
    ===================================================================== */
 (function () {
-  if (typeof EXTRA_VIEWS === 'undefined' || !EXTRA_VIEWS.fleet || (typeof isStudioz === 'function' && isStudioz())) return;
+  if (typeof EXTRA_VIEWS === 'undefined' || !EXTRA_VIEWS.fleet || (typeof isStudioz === 'function' && isStudioz() || isConstruction())) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
@@ -34919,7 +35564,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    Factory only.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
   let sender = null, checkedFor = '';
@@ -35124,7 +35769,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
      across re-renders (see 99zzZzZF) so the truck moves the moment the point lands instead of every 10 s.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const drv = () => typeof isDriver === 'function' && isDriver();
@@ -35213,7 +35858,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    the «link for my app» (a read-only key for Mahmoud's own fleet app) — shown once, owner only.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   if (typeof gpsCall !== 'function' || typeof gpsSettingsCard !== 'function') return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
@@ -35322,7 +35967,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
    · phone: the map on top, the list as a sheet under it; light + dark.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
@@ -35670,7 +36315,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
      home-screen web app sends only while open. Android app: background too.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
@@ -35726,7 +36371,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     return best ? best.v.id : null;
   }
   async function tick() {
-    if (!hosted() || !drv() || !meId() || typeof isStudioz === 'function' && isStudioz()) return;
+    if (!hosted() || !drv() || !meId() || typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
     const on = punchedIn(meId());
     if (!on) { if (DA.watcher || DA.webWatch) await stopWatch(); return; }
     if (!DA.watcher && !DA.webWatch) await startWatch();
@@ -35816,7 +36461,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
      on-off on the vehicle form, a «back? close the trip» banner for the driver, and the auto-closed note on a trip.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
@@ -35968,7 +36613,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
      position and compensated, so the times shown are Cairo times.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
@@ -36154,7 +36799,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
      page (drivers), the vehicle report and the fleet trips.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
@@ -36369,7 +37014,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
      driver's position, trip and vehicle to the owner, the fleet manager and the managers, and logs it as a 'sos' alert.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
@@ -36485,7 +37130,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
    · Fuel tab: a status line (connected · last sync · bills added · unknown plates) instead of the paste-import hint.
    ===================================================================== */
 (function () {
-  if (typeof isStudioz === 'function' && isStudioz()) return;
+  if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const R = () => (typeof role === 'function' ? role() : '');
