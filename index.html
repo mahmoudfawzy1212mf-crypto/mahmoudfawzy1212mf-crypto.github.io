@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-0840-c77c57";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-0900-e53176";</script>
 
 <script>
 'use strict';
@@ -35380,8 +35380,10 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       const off = !p || (age > 900 && tcSt !== 'online');
       const st = off ? 'of' : moving ? 'mv' : 'id';
       const task = trip && trip.taskId ? byId('tasks', trip.taskId) : null;
-      const driverId = (trip && trip.driverId) || v.driverId || null;
-      const r = { v, id: v.id, name: v.name, plate: v.plate || '', lat: p ? +p.lat : null, lng: p ? +p.lng : null, speed, course: p && p.course != null ? +p.course : null, at: p ? p.at : null, ign: p && p.acc != null ? !!(+p.acc) : null, st, src, trip, task, driverId,
+      /* v6.91: no trip → the driver whose phone was matched to this vehicle (docs 'driverpos', written by the driver app) */
+      const auto = !trip ? (S.data.driverpos ? Array.from(S.data.driverpos.values()).find(x => x.vehicleId === v.id && !x.tripId && x.at && (now - new Date(x.at).getTime()) < 300000) : null) : null;
+      const driverId = (trip && trip.driverId) || (auto && auto.workerId) || v.driverId || null;
+      const r = { v, id: v.id, name: v.name, plate: v.plate || '', lat: p ? +p.lat : null, lng: p ? +p.lng : null, speed, course: p && p.course != null ? +p.course : null, at: p ? p.at : null, ign: p && p.acc != null ? !!(+p.acc) : null, st, src, trip, task, driverId, autoDriver: !!(auto && auto.workerId),
         gpsLost, delayed, battery: g && g.battery != null ? +g.battery : null, power: g && g.power != null ? g.power : null, charge: g && g.charge != null ? !!g.charge : null, alarm: g && g.alarm ? String(g.alarm) : '', lastUpdate: g && g.lastUpdate ? g.lastUpdate : null, stopSince: null, ignOffSince: null };
       if (st !== 'mv') { r.stopSince = sinceStopped(r, g); const sx = g && FM.state[v.gpsId]; if (sx && sx.ignOffSince && (!sx.ignOnSince || sx.ignOffSince > sx.ignOnSince)) r.ignOffSince = sx.ignOffSince; else if (r.ign === false && r.stopSince) r.ignOffSince = r.stopSince; }
       else delete FM.seen[v.id];
@@ -35431,7 +35433,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     return `<div class="fm-card ${FM.sel === r.id ? 'on' : ''}" data-action="fmSelect" data-arg="${esc(r.id)}">
       <span class="fm-dot" style="background:${col}"></span>
       <div class="main"><div class="title">${esc(r.name)}${r.plate ? ` <span class="code">${esc(r.plate)}</span>` : ''}</div>
-      <div class="meta"><span style="color:${col};font-weight:700">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠ ${esc(r.alarm)}</span>` : ''}${r.gpsLost ? `<span style="color:var(--crit-ink)">${L('إشارة GPS مفقودة — آخر مكان معروف', 'GPS lost — last known place')}</span>` : ''}${r.delayed ? `<span style="color:var(--crit-ink)">⏱ ${L('بيانات متأخرة', 'data delayed')} ${r.delayed} ${L('د', 'min')}</span>` : ''}${r.driverId ? `<span>${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : (r.trip ? `<span class="fm-task">${esc(r.trip.purpose || r.trip.number || '')}</span>` : '')}</div></div>
+      <div class="meta"><span style="color:${col};font-weight:700">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠ ${esc(r.alarm)}</span>` : ''}${r.gpsLost ? `<span style="color:var(--crit-ink)">${L('إشارة GPS مفقودة — آخر مكان معروف', 'GPS lost — last known place')}</span>` : ''}${r.delayed ? `<span style="color:var(--crit-ink)">⏱ ${L('بيانات متأخرة', 'data delayed')} ${r.delayed} ${L('د', 'min')}</span>` : ''}${r.driverId ? `<span>${esc(assigneeName(r.driverId))}${r.autoDriver ? ` <span class="badge warn" style="font-size:10px">${L('تلقائي من موبايله', 'auto · phone')}</span>` : ''}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : (r.trip ? `<span class="fm-task">${esc(r.trip.purpose || r.trip.number || '')}</span>` : '')}</div></div>
       <div class="end tiny muted">${ago(r.at)}</div></div>`;
   }
   function detailPanel(r) {
@@ -35445,7 +35447,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
         <div><div class="tiny muted">${L('الموتور', 'Engine')}</div><b>${r.ign == null ? '—' : r.ign ? L('شغّال', 'On') : L('مطفي', 'Off')}</b>${r.ign === false && r.ignOffSince ? `<div class="tiny muted">${L('منذ', 'for')} ${dur(r.ignOffSince)}</div>` : ''}</div>
         <div><div class="tiny muted">${L('البطارية / الكهرباء', 'Battery / power')}</div><b>${r.battery != null ? fmtNum(Math.round(r.battery)) + '%' : '—'}</b> <span class="tiny muted">${r.power == null ? '' : typeof r.power === 'number' ? (r.power > 0 ? `· ${L('كهرباء العربية', 'vehicle power')} ${Math.round(r.power * 10) / 10}V` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`) : (r.power ? `· ${L('كهرباء العربية موصّلة', 'vehicle power on')}` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`)}${r.charge ? ` · ${L('بيشحن', 'charging')}` : ''}</span></div>
         <div><div class="tiny muted">${L('مسافة النهارده', 'Km today')}</div><b>${km != null ? fmtNum(Math.round(km * 10) / 10) + ' ' + L('كم', 'km') : (rt ? '0' : '…')}</b></div>
-        <div><div class="tiny muted">${L('السواق', 'Driver')}</div><b>${r.driverId ? esc(assigneeName(r.driverId)) : '—'}</b></div>
+        <div><div class="tiny muted">${L('السواق', 'Driver')}</div><b>${r.driverId ? esc(assigneeName(r.driverId)) : '—'}</b>${r.autoDriver ? `<div class="tiny" style="color:#d98a00">${L('اتعرف عليه تلقائيًا من موبايله — ما سجّلش خروج', 'detected from his phone — he did not record a trip')}</div>` : ''}</div>
         <div><div class="tiny muted">${L('آخر تحديث', 'Last update')}</div><b>${ago(r.at)}</b> <span class="tiny muted">${r.src === 'phone' ? L('(موبايل السواق)', '(driver phone)') : r.src === 'gps' ? L('(جهاز العربية)', '(vehicle tracker)') : ''}</span></div>
       </div>
       ${r.alarm ? `<div class="small" style="margin-top:6px;color:var(--crit-ink)">⚠ ${L('تنبيه من الجهاز', 'Device alarm')}: ${esc(r.alarm)}</div>` : ''}
@@ -35608,7 +35610,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     setTimeout(() => { ensureMap('fmd-map', false); pollStart(document.getElementById('fm-map') ? 5000 : 10000); }, 40);
     return `<div class="card fmd-card" id="fmd-card"><div class="cardhead"><h3>${icon('map')}${L('الأسطول الآن', 'Fleet now')}${c.warn ? `<span class="fm-warn" style="position:static;margin-inline-start:6px">${c.warn}</span>` : ''}</h3><span class="tiny"><b style="color:${ST.mv[0]}">${c.mv}</b> ${ST.mv[1]} · <b style="color:${ST.id[0]}">${c.id}</b> ${ST.id[1]} · <b style="color:${ST.of[0]}">${c.of}</b> ${ST.of[1]}</span><div class="grow"></div><button type="button" class="btn xs" data-action="fmLocate" data-arg="fmd-map" title="${L('حدّد مكان كل العربيات', 'Locate every vehicle')}">${icon('map')}${L('حدّد المكان', 'Locate')}</button><a class="btn xs" href="#/fleetmap">${L('الخريطة الكاملة', 'Full map')}</a></div>
       <div id="fmd-map" class="fmd-map" data-action="go" data-arg="fleetmap"><div class="muted small" style="padding:12px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
-      <div class="fmd-list">${rows.map(r => `<a class="fmd-row" href="#/fleetmap" data-fmd="${esc(r.id)}"><span class="fm-dot" style="background:${ST[r.st][0]}"></span><b>${esc(r.name.split('—')[0].trim())}</b><span style="color:${ST[r.st][0]}">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠</span>` : ''}${r.driverId ? `<span class="muted">${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : ''}<span class="tiny muted" style="margin-inline-start:auto">${ago(r.at)}</span></a>`).join('')}</div></div>`;
+      <div class="fmd-list">${rows.map(r => `<a class="fmd-row" href="#/fleetmap" data-fmd="${esc(r.id)}"><span class="fm-dot" style="background:${ST[r.st][0]}"></span><b>${esc(r.name.split('—')[0].trim())}</b><span style="color:${ST[r.st][0]}">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠</span>` : ''}${r.driverId ? `<span class="muted">${esc(assigneeName(r.driverId))}${r.autoDriver ? ' ·' + L('تلقائي', 'auto') : ''}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : ''}<span class="tiny muted" style="margin-inline-start:auto">${ago(r.at)}</span></a>`).join('')}</div></div>`;
   }
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-fmd]'); if (a) FM.sel = a.getAttribute('data-fmd'); });
   if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!mayView()) return html; return dashCard() + html; })(vDashboard);
@@ -35645,6 +35647,156 @@ html body .fmd-row:hover{background:var(--surface-2)}
 @media (max-width:900px){html body .fm-tiles{grid-template-columns:repeat(4,1fr)}html body .fm-tile.fm-locate{grid-column:1 / -1;padding:8px}html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:180px}}
 </style>`);
   Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM } });
+})();
+/* =====================================================================
+   v6.91 — "the driver took a vehicle without recording it" (Mahmoud, 8 Oct — go-ahead; factory only):
+   · the driver's phone sends its place every 30 s ONLY while he is punched in and not yet punched out (attendance row of
+     today has `in` and no `out`) — docs col 'driverpos', one row per driver (id = workerId). Nothing outside working hours,
+     no route kept, only the last place.
+   · the phone itself matches its place against the vehicle trackers (bridge action=track, driver role allowed): within
+     ~60 m (+ GPS accuracy) of a vehicle that is fresh and moving, two samples in a row → «riding <vehicle> (auto)», kept
+     until three misses in a row. The match is written on the same row (vehicleId, since).
+   · the driver sees a banner "are you driving the Suzuki? record it": one tap opens a trip on that vehicle (with the task
+     when he has one open) — the same trip the "out with a vehicle" button makes; "not me" hides it for 30 min.
+   · the fleet map / dashboard (owner + factory manager): the auto-detected driver shows under the vehicle with the tag
+     "auto, from his phone"; the dashboard card lists "vehicles out without a trip" (moving, no open trip) with the detected
+     driver or "unknown driver"; the Fleet → drivers tab gets a "where the drivers are" card (sending / stale / location off).
+   · iPhone: the app keeps sending in the background through the same BackgroundGeolocation watcher the trips use; a
+     home-screen web app sends only while open. Android app: background too.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const BG = () => { try { const c = window.Capacitor; return c && c.Plugins && c.Plugins.BackgroundGeolocation; } catch (e) { return null; } };
+  const native = () => !!(window.nfIsNative && window.nfIsNative()) && !!BG();
+  const dist = (a, b) => (typeof haversine === 'function' ? haversine(a, b) : 1e9);
+  const drv = () => typeof isDriver === 'function' && isDriver();
+  const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const ago = iso => { if (!iso) return '—'; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return s < 60 ? L(`منذ ${s} ث`, `${s} s ago`) : s < 3600 ? L(`منذ ${Math.round(s / 60)} د`, `${Math.round(s / 60)} min ago`) : L(`منذ ${Math.round(s / 3600)} س`, `${Math.round(s / 3600)} h ago`); };
+  if (typeof COLS !== 'undefined' && !COLS.includes('driverpos')) COLS.push('driverpos');
+  S.data.driverpos = S.data.driverpos || new Map();
+  const NEAR_M = 60, FRESH_S = 180, SEND_MS = 30000;
+
+  /* punched in today and not yet out */
+  function punchedIn(wid) { try { const r = (typeof attendanceFor === 'function' ? attendanceFor(todayISO()) : {})[wid]; return !!(r && r.in && !r.out); } catch (e) { return false; } }
+  const myTrip = () => (meId() ? list('trips').find(t => t.status === 'started' && t.driverId === meId()) : null);
+
+  /* ---------- 1) the driver's phone ---------- */
+  const DA = { pos: null, cand: null, hits: 0, misses: 0, auto: null, lastSend: 0, watcher: null, webWatch: null, denied: false, lastTrack: 0, vehPos: [] };
+  function take(lat, lng, acc, kmh, at) { DA.pos = { lat: +(+lat).toFixed(6), lng: +(+lng).toFixed(6), acc: Math.round(acc || 0), kmh: kmh == null ? null : Math.round(kmh), at: at || nowISO() }; }
+  async function startWatch() {
+    if (DA.watcher || DA.webWatch) return;
+    if (native()) {
+      try { DA.watcher = await BG().addWatcher({ backgroundTitle: L('Ninety · في الشغل', 'Ninety · at work'), backgroundMessage: L('بيحدّد مكانك أثناء الدوام — بيقف لوحده مع الانصراف', 'Locating you during the shift — stops by itself at punch-out'), requestPermissions: true, stale: false, distanceFilter: 15 }, (loc, err) => { if (err) { if (err.code === 'NOT_AUTHORIZED') DA.denied = true; return; } if (!loc || loc.latitude == null) return; DA.denied = false; take(loc.latitude, loc.longitude, loc.accuracy, loc.speed != null ? loc.speed * 3.6 : null, new Date(loc.time || Date.now()).toISOString()); }); }
+      catch (e) { console.warn('driverpos watcher', e); DA.watcher = null; }
+      return;
+    }
+    if (!navigator.geolocation) return;
+    try { DA.webWatch = navigator.geolocation.watchPosition(p => { DA.denied = false; take(p.coords.latitude, p.coords.longitude, p.coords.accuracy, p.coords.speed != null ? p.coords.speed * 3.6 : null); }, e => { if (e && e.code === 1) DA.denied = true; }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }); } catch (e) { DA.webWatch = null; }
+  }
+  async function stopWatch() {
+    const w = DA.watcher; DA.watcher = null; if (w) { try { await BG().removeWatcher({ id: w }); } catch (e) { /* ignore */ } }
+    if (DA.webWatch != null) { try { navigator.geolocation.clearWatch(DA.webWatch); } catch (e) { /* ignore */ } DA.webWatch = null; }
+    DA.pos = null; DA.cand = null; DA.hits = 0; DA.misses = 0; DA.auto = null;
+  }
+  /* where the vehicles are (the bridge lets drivers read positions) */
+  async function vehicles() {
+    if (Date.now() - DA.lastTrack < 25000) return DA.vehPos;
+    DA.lastTrack = Date.now();
+    try {
+      if (typeof gpsCall !== 'function' || typeof gpsOn !== 'function' || !gpsOn()) return DA.vehPos;
+      const imeis = list('vehicles').map(v => v.gpsId).filter(Boolean); if (!imeis.length) return (DA.vehPos = []);
+      const r = await gpsCall('track', { imeis: imeis.join(',') }); const now = Date.now();
+      DA.vehPos = (r.positions || []).map(p => { const v = list('vehicles').find(x => x.gpsId === p.imei); if (!v || p.lat == null) return null; const at = p.sysAt && p.at && new Date(p.at) > new Date(p.sysAt).getTime() + 60000 ? p.sysAt : (p.at || p.sysAt); const age = at ? (now - new Date(at).getTime()) / 1000 : 1e9; return { v, lat: +p.lat, lng: +p.lng, speed: p.speed != null ? +p.speed : null, moving: (p.speed != null && p.speed >= 3) || p.motion === true, fresh: age < FRESH_S && p.outdated !== true && p.valid !== false }; }).filter(Boolean);
+    } catch (e) { /* keep the last list */ }
+    return DA.vehPos;
+  }
+  function match(vs) {
+    const me = DA.pos; if (!me) return null;
+    const near = vs.filter(x => x.fresh && dist(me, x) <= NEAR_M + Math.min(60, (me.acc || 0) / 2)).sort((a, b) => dist(me, a) - dist(me, b));
+    const best = near.find(x => x.moving || (me.kmh != null && me.kmh >= 3)) || null;
+    return best ? best.v.id : null;
+  }
+  async function tick() {
+    if (!hosted() || !drv() || !meId() || typeof isStudioz === 'function' && isStudioz()) return;
+    const on = punchedIn(meId());
+    if (!on) { if (DA.watcher || DA.webWatch) await stopWatch(); return; }
+    if (!DA.watcher && !DA.webWatch) await startWatch();
+    if (Date.now() - DA.lastSend < SEND_MS) return;
+    DA.lastSend = Date.now();
+    const trip = myTrip();
+    /* the official trip already carries the live position; the auto match is only needed when there is no trip */
+    if (!trip && DA.pos) {
+      const vid = match(await vehicles());
+      if (vid && vid === DA.cand) DA.hits++; else { DA.cand = vid; DA.hits = vid ? 1 : 0; }
+      if (vid && DA.hits >= 2) { if (!DA.auto || DA.auto.vehicleId !== vid) DA.auto = { vehicleId: vid, since: nowISO() }; DA.misses = 0; }
+      else if (DA.auto) { DA.misses++; if (DA.misses >= 3) DA.auto = null; }
+    } else if (trip) { DA.auto = null; DA.cand = null; DA.hits = 0; }
+    const row = { id: meId(), workerId: meId(), at: nowISO(), denied: !!DA.denied, src: native() ? 'app' : 'web', tripId: trip ? trip.id : null, vehicleId: DA.auto ? DA.auto.vehicleId : null, since: DA.auto ? DA.auto.since : null };
+    if (DA.pos) Object.assign(row, { lat: DA.pos.lat, lng: DA.pos.lng, acc: DA.pos.acc, kmh: DA.pos.kmh, posAt: DA.pos.at });
+    try { await Store.save('driverpos', row, { silent: true }); } catch (e) { /* next tick retries */ }
+    if (!trip) renderBanner();
+  }
+  setInterval(() => { tick().catch(() => { }); }, 5000);
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (drv()) renderBanner(); });
+
+  /* the banner on the driver's pages */
+  const snooze = () => { try { return +localStorage.getItem('nf.autoveh.snooze') || 0; } catch (e) { return 0; } };
+  function renderBanner() {
+    const old = document.getElementById('da-banner'); const a = DA.auto; const v = a ? byId('vehicles', a.vehicleId) : null;
+    if (!drv() || !v || myTrip() || Date.now() < snooze()) { if (old) old.remove(); return; }
+    const html = `<div class="banner warn" id="da-banner" style="margin:10px 12px 0;align-items:center;gap:8px;flex-wrap:wrap">${icon('map')}<span><b>${L(`انت ماشي بـ ${esc(v.name)}؟`, `Are you driving ${esc(v.name)}?`)}</b> ${L('سجّل خروجك عشان المشوار يتحسب ومسارك يتسجل.', 'Record it so the trip counts and your route is kept.')}</span><div class="grow"></div><button type="button" class="btn sm p" data-action="daGo" data-arg="${esc(v.id)}">${L('سجّل خروجي', 'Record my trip')}</button><button type="button" class="btn sm ghost" data-action="daNo">${L('مش أنا', 'Not me')}</button></div>`;
+    if (old) { old.outerHTML = html; return; }
+    const main = document.getElementById('view') || document.querySelector('main') || document.body; if (main) main.insertAdjacentHTML('afterbegin', html);
+  }
+  ACTIONS.daNo = () => { try { localStorage.setItem('nf.autoveh.snooze', String(Date.now() + 30 * 60000)); } catch (e) { /* ignore */ } renderBanner(); };
+  ACTIONS.daGo = vid => {
+    const v = byId('vehicles', vid); if (!v || !drv() || myTrip()) return;
+    const mine = list('tasks').filter(t => !['done', 'cancelled'].includes(t.status) && (t.assigneeId === meId() || (t.participants || []).includes(meId())));
+    const opts = mine.map(t => `<option value="${esc(t.id)}">${esc(t.title || '')}</option>`).join('');
+    openModal({ title: L(`خروج بـ ${v.name}`, `Out with ${v.name}`), submitLabel: L('سجّل', 'Record'),
+      body: `<div class="form">${mine.length ? field(L('التاسك (اختياري)', 'Task (optional)'), `<select name="tid"><option value="">${L('من غير تاسك', 'No task')}</option>${opts}</select>`, 'full') : ''}${field(L('رايح فين / ليه؟', 'Where to / why?'), `<input name="purpose" placeholder="${L('مثال: توصيل طلبية، استلام خامة…', 'e.g. delivery, pick-up…')}">`, 'full')}<div class="full tiny muted">${L('هيتفتح مشوار باسمك على العربية دي من اللحظة دي، وهيتقفل لما تدوس «رجعت» من صفحة التاسك أو المشوار.', 'A trip opens in your name on this vehicle from now; close it with «back» on the task or trip page.')}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const t = d.tid ? byId('tasks', d.tid) : null;
+        const busy = list('trips').find(x => x.status === 'started' && x.vehicleId === vid); if (busy) { toast(L(`العربية دي مع ${assigneeName(busy.driverId)} دلوقتي`, `This vehicle is with ${assigneeName(busy.driverId)} now`), 'err'); return false; }
+        const p = DA.pos ? { lat: DA.pos.lat, lng: DA.pos.lng, acc: DA.pos.acc, at: nowISO() } : null;
+        const trip = { id: uid(), number: nextTripNo(), date: todayISO(), time: hhmm(nowISO()), kind: t ? 'task' : 'auto', taskId: t ? t.id : null, purpose: (d.purpose || '').trim() || (t ? t.title : L('خروج بعربية (اتسجّل من الموبايل)', 'Out with a vehicle (recorded from the phone)')), driverId: meId(), vehicleId: vid, status: 'started', startedAt: nowISO(), startPos: p, track: p ? [p] : [], approvedBy: 'auto', autoDetected: true, createdAt: nowISO() };
+        await Store.save('trips', trip);
+        if (t) await Store.update('tasks', t.id, Object.assign({ tripId: trip.id, vehicleId: vid }, t.status === 'open' ? { status: 'doing' } : {}));
+        if (typeof startTracking === 'function') startTracking(trip.id);
+        DA.auto = null; toast(L('اتفتح المشوار — مسارك بيتسجل', 'Trip opened — your route is being recorded')); renderBanner(); return true;
+      } });
+  };
+
+  /* ---------- 2) what the owner / factory manager sees ---------- */
+  const fresh = r => r && r.at && (Date.now() - new Date(r.at).getTime()) / 1000 < 300;
+  /* the fleet map itself reads 'driverpos' (fleetNow → autoDriver) — here only the dashboard list and the drivers tab */
+
+  /* dashboard: vehicles out without a trip */
+  if (typeof vDashboard === 'function') vDashboard = (base => function () {
+    const html = base.apply(this, arguments);
+    if (!S.session || !(isAdmin() || (typeof role === 'function' && role() === 'manager')) || !window.nfFleetMap) return html;
+    let rows = []; try { rows = window.nfFleetMap.now().filter(r => r.st === 'mv' && !r.trip); } catch (e) { return html; }
+    if (!rows.length) return html;
+    const card = `<div class="card" id="da-card"><div class="cardhead"><h3>${icon('alert')}${L('عربيات خرجت من غير تسجيل', 'Vehicles out without a trip')}</h3><span class="muted small">${rows.length}</span></div><div class="list">${rows.map(r => `<a class="item" href="#/fleetmap"><div class="main"><div class="title">${esc(r.name.split('—')[0].trim())}</div><div class="meta">${r.driverId ? `<span>${esc(assigneeName(r.driverId))}${r.autoDriver ? ` <span class="badge warn">${L('تلقائي من موبايله', 'auto · from his phone')}</span>` : ''}</span>` : `<span style="color:var(--crit-ink)">${L('سواق غير معروف', 'unknown driver')}</span>`}${r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}</div></div></a>`).join('')}</div></div>`;
+    const i = html.indexOf('<div class="card'); return i < 0 ? card + html : html.slice(0, i) + card + html.slice(i);
+  })(vDashboard);
+
+  /* Fleet → drivers: where every driver's phone is */
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {};
+    if (f.tab !== 'drivers' || !S.session || !(isAdmin() || (typeof role === 'function' && role() === 'manager') || (typeof canFleet === 'function' && canFleet()))) return html;
+    const ds = typeof drivers === 'function' ? drivers() : [];
+    const rows = ds.map(w => { const r = byId('driverpos', w.id); const on = punchedIn(w.id); let st, col; if (!on) { st = L('مش في الشغل', 'Off shift'); col = 'var(--muted)'; } else if (r && r.denied) { st = L('الموقع متقفل على موبايله', 'Location is off on his phone'); col = 'var(--crit-ink)'; } else if (r && fresh(r)) { st = L('بيبعت مكانه ✓', 'Sending ✓'); col = 'var(--good-ink, #1b7f4b)'; } else if (r && r.at && (Date.now() - new Date(r.at).getTime()) < 3600000) { st = L('الأبليكيشن مقفول من', 'App closed since') + ' ' + ago(r.at); col = '#d98a00'; } else { st = L('مفيش مكان النهارده — الأبليكيشن مش مفتوح أو الموقع متقفل', 'No place today — the app is not open or location is off'); col = 'var(--crit-ink)'; } const v = r && r.vehicleId && fresh(r) ? byId('vehicles', r.vehicleId) : null; return { w, r, st, col, v }; });
+    const card = `<div class="card" style="margin-bottom:12px"><div class="cardhead"><h3>${icon('map')}${L('موقع السواقين', 'Where the drivers are')}</h3><span class="tiny muted">${L('من موبايل كل سواق أثناء دوامه بس', 'from each driver phone, during his shift only')}</span></div><div class="list">${rows.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.w.name)}</div><div class="meta"><span style="color:${x.col};font-weight:700">${x.st}</span>${x.v ? `<span class="badge warn">${L('راكب', 'riding')} ${esc(x.v.name.split('—')[0].trim())} · ${L('تلقائي', 'auto')}</span>` : ''}${x.r && x.r.tripId ? `<span class="badge acc">${L('في مشوار', 'on a trip')}</span>` : ''}${x.r && x.r.posAt ? `<span class="tiny muted">${ago(x.r.posAt)}</span>` : ''}</div></div>${x.r && x.r.lat != null && fresh(x.r) ? `<div class="end"><a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${x.r.lat},${x.r.lng}">${icon('map')}${L('الخريطة', 'Map')}</a></div>` : ''}</div>`).join('') || `<div class="muted small">${L('مفيش سواقين', 'No drivers')}</div>`}</div></div>`;
+    const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
+    return cut > 5 ? html.slice(0, cut) + card + html.slice(cut) : html + card;
+  })(vFleet);
+
+  window.nfDriverAuto = { state: () => Object.assign({}, DA), tick, match, punchedIn };
 })();
 </script>
 
