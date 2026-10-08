@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-0827-a56a14";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-0840-c77c57";</script>
 
 <script>
 'use strict';
@@ -35362,7 +35362,15 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       if (g && g.lat != null && (!ph || String(gAt || '') >= String(ph.at || ''))) { p = Object.assign({}, g, { at: gAt }); src = 'gps'; } else if (ph && ph.lat != null) { p = ph; src = 'phone'; }
       const age = p && p.at ? (now - new Date(p.at).getTime()) / 1000 : Infinity;
       const speed = p ? (p.speed != null ? +p.speed : (p.kmh != null ? +p.kmh : null)) : null;
-      const moving = p && ((speed != null && speed >= 3) || p.motion === true) && age < 600;
+      /* v6.90 (Mahmoud: «ماشية 65 كم/س وواقفة في مكانها»): no GPS fix → Traccar repeats the last known point (same speed!) with a fresh time;
+         that is not movement — the vehicle is shown stopped at its last known place with a «GPS lost» note */
+      const gpsLost = src === 'gps' && !!g && (g.outdated === true || g.valid === false);
+      /* v6.90: a tracker that lost the network uploads its backlog later — every point then carries an OLD fix time while Traccar's receive
+         time is fresh, so the map lags behind the real vehicle. The tracker's clock may also sit on a whole-hour offset (GMT+8), so the
+         lag is read modulo one hour: minutes past the hour = how old the point really is (good for lags under ~50 min) */
+      const lagMin = src === 'gps' && g && g.at && g.sysAt ? (((Math.round((new Date(g.sysAt).getTime() - new Date(g.at).getTime()) / 60000) % 60) + 60) % 60) : 0;
+      const delayed = lagMin >= 8 && lagMin <= 52 ? lagMin : 0;
+      const moving = p && !gpsLost && ((speed != null && speed >= 3) || p.motion === true) && age < 600;
       /* v6.87 (Mahmoud: «ليه جايب غير متصلة؟»): a parked GT06N sleeps and sends no new fix for hours while it still talks to Traccar —
          so «offline» follows Traccar's own device status (heartbeats), not the age of the last fix; the fix age decides only when no status is known */
       const tcSt = src === 'gps' && g && g.status ? String(g.status) : '';
@@ -35374,13 +35382,13 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       const task = trip && trip.taskId ? byId('tasks', trip.taskId) : null;
       const driverId = (trip && trip.driverId) || v.driverId || null;
       const r = { v, id: v.id, name: v.name, plate: v.plate || '', lat: p ? +p.lat : null, lng: p ? +p.lng : null, speed, course: p && p.course != null ? +p.course : null, at: p ? p.at : null, ign: p && p.acc != null ? !!(+p.acc) : null, st, src, trip, task, driverId,
-        battery: g && g.battery != null ? +g.battery : null, power: g && g.power != null ? g.power : null, charge: g && g.charge != null ? !!g.charge : null, alarm: g && g.alarm ? String(g.alarm) : '', lastUpdate: g && g.lastUpdate ? g.lastUpdate : null, stopSince: null, ignOffSince: null };
+        gpsLost, delayed, battery: g && g.battery != null ? +g.battery : null, power: g && g.power != null ? g.power : null, charge: g && g.charge != null ? !!g.charge : null, alarm: g && g.alarm ? String(g.alarm) : '', lastUpdate: g && g.lastUpdate ? g.lastUpdate : null, stopSince: null, ignOffSince: null };
       if (st !== 'mv') { r.stopSince = sinceStopped(r, g); const sx = g && FM.state[v.gpsId]; if (sx && sx.ignOffSince && (!sx.ignOnSince || sx.ignOffSince > sx.ignOnSince)) r.ignOffSince = sx.ignOffSince; else if (r.ign === false && r.stopSince) r.ignOffSince = r.stopSince; }
       else delete FM.seen[v.id];
       return r;
     });
   }
-  const counts = rows => ({ all: rows.length, mv: rows.filter(r => r.st === 'mv').length, id: rows.filter(r => r.st === 'id').length, of: rows.filter(r => r.st === 'of').length, warn: rows.filter(r => r.st === 'of' || r.alarm).length });
+  const counts = rows => ({ all: rows.length, mv: rows.filter(r => r.st === 'mv').length, id: rows.filter(r => r.st === 'id').length, of: rows.filter(r => r.st === 'of').length, warn: rows.filter(r => r.st === 'of' || r.alarm || r.gpsLost || r.delayed).length });
   /* v6.87: stops / ignition state from the bridge, once a minute while a map is on screen */
   let stateP = null;
   function loadState() {
@@ -35423,7 +35431,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     return `<div class="fm-card ${FM.sel === r.id ? 'on' : ''}" data-action="fmSelect" data-arg="${esc(r.id)}">
       <span class="fm-dot" style="background:${col}"></span>
       <div class="main"><div class="title">${esc(r.name)}${r.plate ? ` <span class="code">${esc(r.plate)}</span>` : ''}</div>
-      <div class="meta"><span style="color:${col};font-weight:700">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠ ${esc(r.alarm)}</span>` : ''}${r.driverId ? `<span>${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : (r.trip ? `<span class="fm-task">${esc(r.trip.purpose || r.trip.number || '')}</span>` : '')}</div></div>
+      <div class="meta"><span style="color:${col};font-weight:700">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠ ${esc(r.alarm)}</span>` : ''}${r.gpsLost ? `<span style="color:var(--crit-ink)">${L('إشارة GPS مفقودة — آخر مكان معروف', 'GPS lost — last known place')}</span>` : ''}${r.delayed ? `<span style="color:var(--crit-ink)">⏱ ${L('بيانات متأخرة', 'data delayed')} ${r.delayed} ${L('د', 'min')}</span>` : ''}${r.driverId ? `<span>${esc(assigneeName(r.driverId))}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : (r.trip ? `<span class="fm-task">${esc(r.trip.purpose || r.trip.number || '')}</span>` : '')}</div></div>
       <div class="end tiny muted">${ago(r.at)}</div></div>`;
   }
   function detailPanel(r) {
@@ -35433,7 +35441,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       <div class="fm-dh"><span class="fm-dot" style="background:${col}"></span><b>${esc(r.name)}</b>${r.plate ? `<span class="code">${esc(r.plate)}</span>` : ''}<div class="grow"></div><button type="button" class="btn xs ${FM.follow ? 'p' : ''}" data-action="fmFollow">${L('تتبُّع', 'Follow')}</button><button type="button" class="iconbtn" data-action="fmSelect" data-arg="">${icon('x')}</button></div>
       <div class="fm-grid">
         <div><div class="tiny muted">${L('الحالة', 'State')}</div><b style="color:${col}">${ST[r.st][1]}</b>${r.st !== 'mv' && r.stopSince ? `<div class="tiny muted">${L('واقفة منذ', 'stopped for')} ${dur(r.stopSince)}</div>` : ''}</div>
-        <div><div class="tiny muted">${L('السرعة', 'Speed')}</div><b>${r.speed != null ? fmtNum(Math.round(r.speed)) + ' ' + L('كم/س', 'km/h') : '—'}</b></div>
+        <div><div class="tiny muted">${L('السرعة', 'Speed')}</div><b>${r.speed != null && !r.gpsLost ? fmtNum(Math.round(r.speed)) + ' ' + L('كم/س', 'km/h') : '—'}</b></div>
         <div><div class="tiny muted">${L('الموتور', 'Engine')}</div><b>${r.ign == null ? '—' : r.ign ? L('شغّال', 'On') : L('مطفي', 'Off')}</b>${r.ign === false && r.ignOffSince ? `<div class="tiny muted">${L('منذ', 'for')} ${dur(r.ignOffSince)}</div>` : ''}</div>
         <div><div class="tiny muted">${L('البطارية / الكهرباء', 'Battery / power')}</div><b>${r.battery != null ? fmtNum(Math.round(r.battery)) + '%' : '—'}</b> <span class="tiny muted">${r.power == null ? '' : typeof r.power === 'number' ? (r.power > 0 ? `· ${L('كهرباء العربية', 'vehicle power')} ${Math.round(r.power * 10) / 10}V` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`) : (r.power ? `· ${L('كهرباء العربية موصّلة', 'vehicle power on')}` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`)}${r.charge ? ` · ${L('بيشحن', 'charging')}` : ''}</span></div>
         <div><div class="tiny muted">${L('مسافة النهارده', 'Km today')}</div><b>${km != null ? fmtNum(Math.round(km * 10) / 10) + ' ' + L('كم', 'km') : (rt ? '0' : '…')}</b></div>
@@ -35441,6 +35449,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
         <div><div class="tiny muted">${L('آخر تحديث', 'Last update')}</div><b>${ago(r.at)}</b> <span class="tiny muted">${r.src === 'phone' ? L('(موبايل السواق)', '(driver phone)') : r.src === 'gps' ? L('(جهاز العربية)', '(vehicle tracker)') : ''}</span></div>
       </div>
       ${r.alarm ? `<div class="small" style="margin-top:6px;color:var(--crit-ink)">⚠ ${L('تنبيه من الجهاز', 'Device alarm')}: ${esc(r.alarm)}</div>` : ''}
+      ${r.delayed ? `<div class="small" style="margin-top:6px;color:var(--crit-ink)">⏱ ${L(`المكان ده قديم بـ ${r.delayed} دقيقة — الجهاز كان فاقد الشبكة وبيرفع النقط المتأخرة دلوقتي؛ العربية فعليًا أبعد من كده`, `This place is ${r.delayed} min old — the tracker lost its network and is uploading its backlog now; the vehicle is really further ahead`)}</div>` : ''}
+      ${r.gpsLost ? `<div class="small" style="margin-top:6px;color:var(--crit-ink)">⚠ ${L('الجهاز متصل لكن مفيش إشارة GPS (جراج/نفق/مكان مغطّى) — ده آخر مكان معروف', 'The tracker is connected but has no GPS fix (garage / tunnel / covered spot) — this is the last known place')}</div>` : ''}
       ${r.lat != null ? `<div class="small muted fm-addr" style="margin-top:6px" data-fm-addr="${r.lat.toFixed(4)},${r.lng.toFixed(4)}">${esc(addrOf(r) || `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`)}</div>` : ''}
       ${r.lat != null ? `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><a class="btn xs p" href="${navLink(r)}" target="_blank" rel="noopener">${icon('map')}${L('روح للعربية', 'Navigate')}</a></div>` : ''}
       ${r.task ? `<div class="small" style="margin-top:6px">${L('التاسك', 'Task')}: <a href="#/tasks/${esc(r.task.id)}">${esc(r.task.title || '')}</a></div>` : ''}
@@ -35543,7 +35553,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       /* vehicles parked on the same spot are fanned out a few metres so every one stays visible and clickable */
       const taken = []; const spread = r => { let k = 0; for (const t of taken) if (Math.abs(t.lat - r.lat) < 0.00015 && Math.abs(t.lng - r.lng) < 0.00015) k++; taken.push({ lat: r.lat, lng: r.lng }); if (!k) return { lat: r.lat, lng: r.lng }; const a = k * 1.7; return { lat: r.lat + 0.00016 * Math.sin(a), lng: r.lng + 0.00020 * Math.cos(a) }; };
       rows.forEach(r => {
-        keep.add(r.id); let e = marks.get(r.id); const pos = spread(r); const lbl = { text: r.name.split('—')[0].trim() + (r.st === 'id' && r.stopSince ? ` · ${L('واقفة', 'stopped')} ${dur(r.stopSince)}` : r.st === 'of' ? ` · ${ST.of[1]}` : ''), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
+        keep.add(r.id); let e = marks.get(r.id); const pos = spread(r); const lbl = { text: r.name.split('—')[0].trim() + (r.gpsLost ? ` · ${L('GPS مفقود', 'GPS lost')}` : r.delayed ? ` · ⏱ ${r.delayed} ${L('د', 'min')}` : r.st === 'id' && r.stopSince ? ` · ${L('واقفة', 'stopped')} ${dur(r.stopSince)}` : r.st === 'of' ? ` · ${ST.of[1]}` : ''), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
         if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: iconFor(r), label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
         else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(iconFor(r)); if (e.m.setLabel) e.m.setLabel(lbl); }
         bounds.extend(pos); n++;
