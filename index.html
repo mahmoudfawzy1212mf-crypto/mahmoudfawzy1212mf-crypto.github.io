@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-1140-7f389e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-1234-3e8f7b";</script>
 
 <script>
 'use strict';
@@ -36472,6 +36472,64 @@ html body .fmd-row:hover{background:var(--surface-2)}
   })(EXTRA_VIEWS.fleetmap);
 
   window.nfFleetPlus4 = { sendSos, shareUrl, token };
+})();
+/* =====================================================================
+   v6.96 — PetroApp fuel link (Mahmoud, 8 Oct: «we'll link PetroApp instead of Octane», then the PetroApp API letter; factory only):
+   · Settings → Fleet → GPS tab: a «PetroApp» card for the owner — environment (staging / production), web-service URL, the
+     Integration Token (typed here, sent straight to the server, never shown again), «test», «sync now», the last sync result
+     and the PetroApp vehicles list (to check the plates match ours).
+   · The server (Edge "petroapp") pulls the fuel bills every hour: each PetroApp refuel lands in the vehicle's fuel log by plate,
+     auto-matched with the driver's own entry, the odometer reading kept — the fuel tab, the vehicle page, the consumption and
+     the trip cost all work as before (the entries carry source 'octane' + via 'petroapp' so nothing else changes).
+   · Fuel tab: a status line (connected · last sync · bills added · unknown plates) instead of the paste-import hint.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet', 'acc', 'hr'].includes(R()));
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : iso);
+  const PA = { st: null, at: 0, busy: '', vehs: null };
+  const call = async (action, extra) => { const r = await S.sb.functions.invoke('petroapp', { body: Object.assign({ action }, extra || {}) }); if (r.error && !r.data) throw new Error(r.error.message || 'petroapp'); return r.data || {}; };
+  async function loadStatus() { if (!hosted() || Date.now() - PA.at < 60000) return; PA.at = Date.now(); try { PA.st = await call('status'); } catch (e) { PA.st = { ok: false, error: e.message }; } rerender(); }
+
+  function card() {
+    const st = PA.st; const fl = (S.settings.fleet || {}).petroapp || {};
+    const badge = !st ? `<span class="badge">${L('جارٍ الفحص…', 'Checking…')}</span>` : st.configured ? `<span class="badge ${st.lastSync ? 'good' : 'warn'}">${st.env === 'production' ? L('إنتاج', 'Production') : 'Staging'} · <span class="notr ltr">${esc(st.server || '')}</span>${st.lastSync ? ' · ' + L('آخر مزامنة', 'last sync') + ' ' + ago(st.lastSync) : ''}</span>` : `<span class="badge warn">${L('مش متوصّل لسه', 'Not connected yet')}</span>`;
+    const res = st && st.lastResult;
+    return `<div class="card" id="pa-card"><div class="cardhead"><h3>⛽ PetroApp</h3>${badge}<div class="grow"></div>${mayView() && st && st.configured ? `<button type="button" class="btn sm" data-action="paTest" ${PA.busy ? 'disabled' : ''}>${L('اختبار', 'Test')}</button><button type="button" class="btn sm p" data-action="paSync" ${PA.busy ? 'disabled' : ''}>${icon('play')}${PA.busy === 'sync' ? L('جارٍ المزامنة…', 'Syncing…') : L('مزامنة دلوقتي', 'Sync now')}</button>` : ''}</div>
+      ${res ? `<div class="small" style="margin-bottom:8px">${res.ok ? L(`آخر مزامنة: ${res.bills} فاتورة من PetroApp · اتضاف ${res.added} · اتطابق مع تسجيل السواق ${res.matched} · لوحات مش معروفة ${res.unknownPlate}`, `Last sync: ${res.bills} PetroApp bills · ${res.added} added · ${res.matched} matched with the driver's entry · ${res.unknownPlate} unknown plates`) : `<span style="color:var(--crit-ink)">${esc(res.error || '')}</span>`}</div>` : ''}
+      ${owner() ? `<form id="pa-cfg" class="form">
+        ${field(L('البيئة', 'Environment'), `<select name="env"><option value="staging" ${!st || st.env !== 'production' ? 'selected' : ''}>Staging (${L('تجربة', 'testing')})</option><option value="production" ${st && st.env === 'production' ? 'selected' : ''}>Production (${L('الحقيقي', 'live')})</option></select>`)}
+        ${field(L('رابط الويب سيرفس', 'Web-service URL'), inp('base', st && st.configured && st.server ? 'https://' + st.server + '/webservice/' : 'https://app-public.staging.petroapp.app/webservice/', 'class="ltr" placeholder="https://…/webservice/"'))}
+        ${field(L('توكن الربط (WS-SK)', 'Integration token (WS-SK)'), `<input name="token" type="text" class="ltr" autocomplete="off" data-lpignore="true" style="-webkit-text-security:disc" placeholder="${st && st.configured ? L('محفوظ على السيرفر — اكتب واحد جديد لو اتغيّر', 'Saved on the server — type a new one only to replace it') : L('الصقه من رسالة PetroApp', 'Paste it from the PetroApp letter')}">`, 'full')}
+        <div class="row full" style="gap:8px;align-items:center"><button type="submit" class="btn p" ${PA.busy ? 'disabled' : ''}>${PA.busy === 'setup' ? L('جارٍ الحفظ والاختبار…', 'Saving and testing…') : L('حفظ واختبار', 'Save and test')}</button><span class="tiny muted">${L('التوكن بيتبعت للسيرفر مرة واحدة وما بيتعرضش تاني — السيرفر بيسحب الفواتير كل ساعة.', 'The token goes to the server once and is never shown again — the server pulls the bills every hour.')}</span></div></form>` : ''}
+      ${PA.vehs ? `<div class="sep"></div><div class="small"><b>${L('عربيات PetroApp', 'PetroApp vehicles')}</b> (${PA.vehs.length}) — ${L('اتأكد إن اللوحة هنا نفس اللوحة في ملف العربية عندنا', 'make sure the plate here is the plate on our vehicle')}</div><div class="list">${PA.vehs.map(v => { const ours = (typeof vehicleByPlate === 'function' ? vehicleByPlate(v.plate) || vehicleByPlate(v.arPlate) : null); return `<div class="item" style="cursor:default"><div class="main"><div class="title ltr notr">${esc(v.plate || v.arPlate || '')}</div><div class="meta"><span>${esc(v.arPlate || '')}</span>${v.odometer != null ? `<span>${fmtNum(v.odometer)} ${L('كم', 'km')}</span>` : ''}${ours ? `<span class="badge good">${esc(ours.name)}</span>` : `<span class="badge crit">${L('مش متطابقة مع عربية عندنا', 'no matching vehicle here')}</span>`}</div></div></div>`; }).join('')}</div>` : (st && st.configured && mayView() ? `<div class="row" style="margin-top:8px"><button type="button" class="btn xs" data-action="paVehicles">${L('اعرض عربيات PetroApp', 'Show PetroApp vehicles')}</button></div>` : '')}
+      ${!owner() ? '' : `<div class="tiny muted" style="margin-top:8px">${L('اللي بيتسحب: التاريخ، اللوحة، اللترات، المبلغ، المحطة، اسم السواق، قراءة العداد، وصورة الطلمبة — بيتسجل في وقود العربية ويتطابق لوحده مع تسجيل السواق.', 'Pulled: date, plate, litres, amount, station, driver name, odometer and the pump photo — logged on the vehicle and auto-matched with the driver entry.')}</div>`}</div>`;
+  }
+  if (typeof gpsSettingsCard === 'function') gpsSettingsCard = (base => function () { const h = base.apply(this, arguments); if (!mayView()) return h; setTimeout(loadStatus, 20); return h + card(); })(gpsSettingsCard);
+  document.addEventListener('submit', async ev => {
+    const f = ev.target; if (!f || f.id !== 'pa-cfg') return; ev.preventDefault(); if (!owner() || !hosted()) { toast(L('الربط بيشتغل على السيرفر بس', 'The link works on the hosted system only'), 'err'); return; }
+    const d = formData(f); PA.busy = 'setup'; rerender();
+    try { const r = await call('setup', { env: d.env, base: d.base, token: d.token }); PA.at = 0; PA.st = null; if (r.ok) toast(L(`اتوصل بـ PetroApp (${r.env === 'production' ? 'إنتاج' : 'Staging'}) — التوكن شغّال`, `Connected to PetroApp (${r.env}) — the token works`)); else toast(r.saved ? L('اتحفظ، لكن PetroApp رفض التوكن: ', 'Saved, but PetroApp refused the token: ') + (r.error || (r.tries || []).map(t => `${t.mode}:${t.status || t.error}`).join(' · ')) : (r.error || 'error'), 'err'); }
+    catch (e) { toast(e.message || String(e), 'err'); }
+    PA.busy = ''; loadStatus(); rerender();
+  });
+  ACTIONS.paTest = async () => { if (!mayView() || !hosted()) return; PA.busy = 'test'; rerender(); try { const r = await call('test'); toast(r.ok ? L(`PetroApp بيرد — طريقة التوكن: ${r.mode}`, `PetroApp answers — token style: ${r.mode}`) : L('PetroApp رفض التوكن: ', 'PetroApp refused the token: ') + (r.tries || []).map(t => `${t.mode}:${t.status || t.error}`).join(' · '), r.ok ? '' : 'err'); } catch (e) { toast(e.message, 'err'); } PA.busy = ''; rerender(); };
+  ACTIONS.paSync = async () => { if (!mayView() || !hosted()) return; PA.busy = 'sync'; rerender(); try { const r = await call('sync', { days: PA.st && PA.st.lastSync ? 7 : 30 }); PA.at = 0; if (r.ok) toast(L(`اتسحب ${r.bills} فاتورة · اتضاف ${r.added} · لوحات مش معروفة ${r.unknownPlate}`, `${r.bills} bills pulled · ${r.added} added · ${r.unknownPlate} unknown plates`)); else toast(r.error || 'error', 'err'); if (typeof Store !== 'undefined' && Store.reload) { try { await Store.reload(); } catch (e) { /* ignore */ } } } catch (e) { toast(e.message, 'err'); } PA.busy = ''; loadStatus(); rerender(); };
+  ACTIONS.paVehicles = async () => { if (!mayView() || !hosted()) return; try { const r = await call('vehicles'); if (r.ok) { PA.vehs = r.vehicles || []; rerender(); } else toast(r.error || 'error', 'err'); } catch (e) { toast(e.message, 'err'); } };
+
+  /* the fuel tab: the status line + no more «paste the statement» hint when the link is live */
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    let html = base.apply(this, arguments); const f = S.ui.filter.fleet || {}; if (f.tab !== 'fuel') return html;
+    const pa = (S.settings.fleet || {}).petroapp; if (!pa || !pa.lastSync) return html;
+    const line = `<div class="banner info" style="margin:0 0 10px">${icon('info')}<span>${L(`PetroApp متوصّل (${pa.env === 'production' ? 'إنتاج' : 'Staging'}) — السيرفر بيسحب التفويلات كل ساعة · آخر مزامنة ${ago(pa.lastSync)} · ${pa.bills || 0} فاتورة${pa.unknownPlate ? ` · ${pa.unknownPlate} بلوحة مش معروفة (راجع لوحات العربيات)` : ''}`, `PetroApp connected (${pa.env}) — the server pulls refuels hourly · last sync ${ago(pa.lastSync)} · ${pa.bills || 0} bills${pa.unknownPlate ? ` · ${pa.unknownPlate} with an unknown plate (check the vehicle plates)` : ''}`)}</span></div>`;
+    const i = html.indexOf('<div class="kpis"'); return i < 0 ? line + html : html.slice(0, i) + line + html.slice(i);
+  })(vFleet);
+  window.nfPetroApp = { state: PA, loadStatus };
 })();
 </script>
 
