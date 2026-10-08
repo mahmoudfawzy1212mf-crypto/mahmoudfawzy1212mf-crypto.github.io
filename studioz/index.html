@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-0900-e53176";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-0948-0d7f69";</script>
 
 <script>
 'use strict';
@@ -35369,8 +35369,10 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
          time is fresh, so the map lags behind the real vehicle. The tracker's clock may also sit on a whole-hour offset (GMT+8), so the
          lag is read modulo one hour: minutes past the hour = how old the point really is (good for lags under ~50 min) */
       const lagMin = src === 'gps' && g && g.at && g.sysAt ? (((Math.round((new Date(g.sysAt).getTime() - new Date(g.at).getTime()) / 60000) % 60) + 60) % 60) : 0;
-      const delayed = lagMin >= 8 && lagMin <= 52 ? lagMin : 0;
+      /* v6.92 (Mahmoud: two parked Chevrolets flagged «data 44 / 32 min late»): a PARKED tracker sleeps and keeps repeating its last fix under
+         fresh receive times, so the gap grows for hours while the vehicle has not moved at all — the backlog note applies only while it moves */
       const moving = p && !gpsLost && ((speed != null && speed >= 3) || p.motion === true) && age < 600;
+      const delayed = moving && lagMin >= 8 && lagMin <= 52 ? lagMin : 0;
       /* v6.87 (Mahmoud: «ليه جايب غير متصلة؟»): a parked GT06N sleeps and sends no new fix for hours while it still talks to Traccar —
          so «offline» follows Traccar's own device status (heartbeats), not the age of the last fix; the fix age decides only when no status is known */
       const tcSt = src === 'gps' && g && g.status ? String(g.status) : '';
@@ -35797,6 +35799,154 @@ html body .fmd-row:hover{background:var(--surface-2)}
   })(vFleet);
 
   window.nfDriverAuto = { state: () => Object.assign({}, DA), tick, match, punchedIn };
+})();
+/* =====================================================================
+   v6.92 — fleet alerts (Mahmoud, 8 Oct — «do all of them», phase 1; factory only):
+   · the SERVER (Edge "fleet-alerts", pg_cron every 5 min) watches the vehicle trackers on Traccar even when every phone is
+     closed and raises: movement outside working hours / days off / holidays with no trip recorded, over the speed limit
+     (per vehicle or the fleet default), tracker quiet > N hours, engine running while standing > N minutes, off the
+     factory → destination line during a trip; it asks the DRIVER to close a trip once the vehicle is back inside the
+     factory, and closes a trip by itself after N hours. Every alert is a push (owner · fleet manager · factory managers)
+     and a row in docs col 'fleetalerts'; daily counters per vehicle land in 'fleetday' (reports, phase 3).
+   · here: the alerts page (#/fleetalerts — filters, acknowledge), the «last alerts» card on the tracking tab and the
+     dashboard, the alert settings card in Fleet → «Vehicle GPS» (owner saves; «check now»), the speed limit / alerts
+     on-off on the vehicle form, a «back? close the trip» banner for the driver, and the auto-closed note on a trip.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet'].includes(R()));
+  const mayAck = () => mayView() && typeof writable === 'function' && writable();
+  const drv = () => typeof isDriver === 'function' && isDriver();
+  const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  ['fleetalerts', 'fleetday'].forEach(c => { if (typeof COLS !== 'undefined' && !COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : iso);
+  const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const AT = {
+    afterhours: { ar: 'حركة خارج ساعات الشغل', en: 'Moving outside working hours', ic: 'alert' },
+    overspeed: { ar: 'تجاوز السرعة', en: 'Over the speed limit', ic: 'alert' },
+    offline: { ar: 'الجهاز فاصل', en: 'Tracker offline', ic: 'link' },
+    idle: { ar: 'واقفة والموتور شغّال', en: 'Idling (engine on)', ic: 'info' },
+    deviation: { ar: 'انحراف عن المسار', en: 'Off route', ic: 'map' },
+    return: { ar: 'رجعت ومقفلتش المشوار', en: 'Back, trip still open', ic: 'map' },
+    autoclose: { ar: 'مشوار اتقفل تلقائي', en: 'Trip auto-closed', ic: 'check' },
+  };
+  const tLabel = t => (AT[t] ? L(AT[t].ar, AT[t].en) : t);
+  const LV = { crit: 'var(--crit-ink)', warn: '#d98a00', info: 'var(--acc-ink, #1b5fb4)' };
+  const DEF = { afterHours: true, overspeed: true, offline: true, idle: true, deviation: true, returnPrompt: true, autoClose: true, speedLimit: 100, offlineH: 1, idleMin: 20, autoCloseH: 24, homeRadius: 300, workFrom: '', workTo: '' };
+  const cfg = () => Object.assign({}, DEF, (S.settings.fleet && S.settings.fleet.alerts) || {});
+  const all = () => list('fleetalerts').filter(a => a && a.id && a.at).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const open = () => all().filter(a => !a.ack && a.type !== 'return');
+  const vName = a => (a.vehicleName || (byId('vehicles', a.vehicleId) || {}).name || '').split('—')[0].trim();
+
+  /* ---------- 1) the alerts page ---------- */
+  const F = () => (S.ui.filter.fa ||= { type: '', veh: '', open: '1' });
+  function row(a, compact) {
+    const col = LV[a.level] || LV.info; const v = byId('vehicles', a.vehicleId);
+    return `<div class="item" style="cursor:default;align-items:flex-start${a.ack ? ';opacity:.65' : ''}"><span class="fm-dot" style="background:${col};margin-top:6px;flex:none"></span><div class="main"><div class="title">${esc(a.title || tLabel(a.type))}</div><div class="meta"><span>${esc(a.body || '')}</span></div><div class="meta"><span class="badge" style="color:${col}">${tLabel(a.type)}</span>${v ? `<a href="#/fleet/veh/${esc(v.id)}">${esc(vName(a))}</a>` : ''}${a.driverId ? `<span>${esc(assigneeName(a.driverId))}</span>` : ''}${a.kmh != null ? `<span>${fmtNum(Math.round(a.kmh))} ${L('كم/س', 'km/h')}${a.limit ? ` / ${a.limit}` : ''}</span>` : ''}<span class="tiny muted">${esc((a.at || '').slice(0, 10))} ${hhmm(a.at)} · ${ago(a.at)}</span>${a.ack ? `<span class="tiny muted">✓ ${esc(a.ack.byName || '')}</span>` : ''}</div></div>${compact ? '' : `<div class="end" style="display:flex;gap:6px;flex-wrap:wrap">${a.lat != null ? `<a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${a.lat},${a.lng}">${icon('map')}${L('الخريطة', 'Map')}</a>` : ''}${a.tripId ? `<a class="btn xs" href="#/fleet/${esc(a.tripId)}">${L('المشوار', 'Trip')}</a>` : ''}${!a.ack && mayAck() && a.type !== 'return' ? `<button type="button" class="btn xs p" data-action="faAck" data-arg="${esc(a.id)}">${icon('check')}${L('تم', 'Done')}</button>` : ''}</div>`}</div>`;
+  }
+  function vAlerts() {
+    if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع ومدير الحركة', 'This page is for the owner, the factory manager and the fleet manager')}</b></div></div>`;
+    const f = F(); let rows = all(); const vs = sortBy(list('vehicles'), v => v.name);
+    if (f.type) rows = rows.filter(a => a.type === f.type); if (f.veh) rows = rows.filter(a => a.vehicleId === f.veh); if (f.open === '1') rows = rows.filter(a => !a.ack);
+    const nOpen = open().length;
+    const byDay = {}; rows.slice(0, 300).forEach(a => { const d = (a.at || '').slice(0, 10); (byDay[d] ||= []).push(a); });
+    const days = Object.keys(byDay).sort().reverse();
+    return `<div class="card"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول', 'Fleet alerts')}</h3><span class="badge ${nOpen ? 'warn' : 'good'}">${nOpen ? `${nOpen} ${L('محتاجة نظرة', 'need a look')}` : L('مفيش حاجة مفتوحة', 'nothing open')}</span><div class="grow"></div>${nOpen && mayAck() ? `<button type="button" class="btn sm" data-action="faAckAll">${icon('check')}${L('تم الكل', 'Done, all')}</button>` : ''}<a class="btn sm ghost" href="#/fleetmap">${icon('map')}${L('الخريطة', 'Map')}</a></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select data-fa-f="type" style="max-width:220px"><option value="">${L('كل الأنواع', 'All types')}</option>${Object.keys(AT).map(k => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${tLabel(k)}</option>`).join('')}</select><select data-fa-f="veh" style="max-width:220px"><option value="">${L('كل العربيات', 'All vehicles')}</option>${vs.map(v => `<option value="${esc(v.id)}" ${f.veh === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select><label class="check ${f.open === '1' ? 'on' : ''}" style="margin:0"><input type="checkbox" data-fa-f="open" ${f.open === '1' ? 'checked' : ''}> ${L('المفتوحة بس', 'Open only')}</label></div>
+      ${days.length ? days.map(d => `<div class="tiny muted" style="margin:10px 0 4px;font-weight:700">${esc(fmtDate(d))}</div><div class="list">${byDay[d].map(a => row(a)).join('')}</div>`).join('') : `<div class="empty"><b>${L('مفيش تنبيهات', 'No alerts')}</b>${L('السيرفر بيراقب العربيات كل 5 دقايق — أي حاجة هتظهر هنا وتوصلك إشعار.', 'The server watches the vehicles every 5 minutes — anything found shows here and reaches you as a notification.')}</div>`}
+      <div class="tiny muted" style="margin-top:8px">${L('بيتحفظ آخر 90 يوم.', 'The last 90 days are kept.')}</div></div>`;
+  }
+  EXTRA_VIEWS.fleetalerts = () => vAlerts();
+  EXTRA_TITLES.fleetalerts = () => ({ title: L('تنبيهات الأسطول', 'Fleet alerts'), sub: L('من السيرفر — حتى والتطبيق مقفول', 'From the server — even with the app closed'), actions: `<a class="btn ghost" href="#/fleet">${icon('back')}<span>${L('حركة النقل', 'Fleet')}</span></a>` });
+  (() => { const i = NAV.findIndex(n => n.id === 'fleetmap'); const entry = { id: 'fleetalerts', label: 'تنبيهات الأسطول', icon: 'alert' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.fleetalerts = 'تنبيهات الأسطول';
+  canSee = (base => view => (view === 'fleetalerts' ? mayView() : base(view)))(canSee);
+  document.addEventListener('change', ev => { const k = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-fa-f'); if (!k) return; F()[k] = ev.target.type === 'checkbox' ? (ev.target.checked ? '1' : '') : ev.target.value; render(false); });
+  ACTIONS.faAck = async id => { const a = byId('fleetalerts', id); if (!a || !mayAck()) return; await Store.update('fleetalerts', id, { ack: { by: S.session.id, byName: S.session.name || '', at: nowISO() } }); };
+  ACTIONS.faAckAll = async () => { if (!mayAck()) return; const rows = open(); if (!rows.length) return; if (!(await confirmDlg(L(`تعليم ${rows.length} تنبيه كـ«تم»؟`, `Mark ${rows.length} alerts as done?`), L('تم', 'Done'), false))) return; for (const a of rows) await Store.update('fleetalerts', a.id, { ack: { by: S.session.id, byName: S.session.name || '', at: nowISO() } }); toast(L('تم', 'Done')); };
+
+  /* ---------- 2) the «last alerts» card: tracking tab + dashboard ---------- */
+  function lastCard(id) {
+    const rows = open().filter(a => Date.now() - new Date(a.at).getTime() < 48 * 3600e3).slice(0, 5); if (!rows.length) return '';
+    return `<div class="card" id="${id}"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول', 'Fleet alerts')}</h3><span class="badge warn">${open().length}</span><div class="grow"></div><a class="btn sm ghost" href="#/fleetalerts">${L('الكل', 'All')}</a></div><div class="list">${rows.map(a => row(a, true)).join('')}</div></div>`;
+  }
+  if (typeof vFleet === 'function') vFleet = (base => function () { const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {}; if (f.tab !== 'track' || !mayView()) return html; return html + lastCard('fa-track'); })(vFleet);
+  if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!mayView()) return html; const card = lastCard('fa-dash'); if (!card) return html; const i = html.indexOf('<div class="card'); return i < 0 ? card + html : html.slice(0, i) + card + html.slice(i); })(vDashboard);
+
+  /* ---------- 3) the vehicle form: speed limit + alerts on/off ---------- */
+  if (typeof vehForm === 'function') vehForm = (base => function (v) {
+    const html = base.apply(this, arguments); const c = cfg();
+    const extra = field(L('حد السرعة للعربية دي (كم/س)', 'Speed limit for this vehicle (km/h)'), inp('speedLimit', v.speedLimit || '', `type="number" min="30" max="200" step="5" placeholder="${L('الافتراضي', 'default')} ${c.speedLimit}"`)) + field(L('تنبيهات السيرفر', 'Server alerts'), `<select id="f-alertsOff" name="alertsOff"><option value="">${L('شغّالة (سرعة / بعد الدوام / فصل / تسخين / مسار)', 'On (speed / after hours / offline / idling / route)')}</option><option value="1" ${v.alertsOff === '1' || v.alertsOff === true ? 'selected' : ''}>${L('متوقفة للعربية دي', 'Off for this vehicle')}</option></select>`);
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + extra : html.slice(0, i) + extra + html.slice(i);
+  })(vehForm);
+
+  /* ---------- 4) settings card in Fleet → «Vehicle GPS» ---------- */
+  const FA = { st: null, at: 0, busy: false };
+  async function loadStatus() { if (Date.now() - FA.at < 60000) return; FA.at = Date.now(); try { const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'status' } }); FA.st = r.data && r.data.ok ? r.data : null; } catch (e) { FA.st = null; } rerender(); }
+  const mm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  function settingsCard() {
+    const c = cfg(); const st = FA.st; const ro = !owner(); const d = ro ? 'disabled' : '';
+    if (!st && Date.now() - FA.at >= 60000 && typeof sbOn === 'function' && sbOn() && S.sb) setTimeout(loadStatus, 20);
+    const chk = (k, label) => `<label class="check ${c[k] !== false ? 'on' : ''}"><input type="checkbox" name="${k}" ${c[k] !== false ? 'checked' : ''} ${d}> ${label}</label>`;
+    return `<div class="card" id="fa-cfg-card"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول (من السيرفر)', 'Fleet alerts (from the server)')}</h3>${st ? `<span class="badge ${st.traccar && st.home ? 'good' : 'warn'}">${st.traccar ? (st.home ? L('شغّالة', 'Running') + (st.lastRun ? ' · ' + ago(st.lastRun) : '') : L('حدد مكان المصنع من إعدادات البصمة', 'Set the factory location in the attendance settings')) : L('اربط Traccar الأول', 'Connect Traccar first')}</span>` : ''}<div class="grow"></div><a class="btn sm ghost" href="#/fleetalerts">${L('السجل', 'Log')}</a>${owner() ? `<button type="button" class="btn sm" data-action="faRun" ${FA.busy ? 'disabled' : ''}>${icon('play')}${L('فحص دلوقتي', 'Check now')}</button>` : ''}</div>
+      <p class="small ink2">${L('السيرفر بيفحص العربيات كل 5 دقايق حتى والتطبيق مقفول عند الكل، وبيبعت إشعار ليك ولمدير الحركة ومدير المصنع. ساعات الشغل بتتاخد من الورديات (قبلها بساعة وبعدها بساعتين) إلا لو حددتها هنا، والإجازات الرسمية والجمعة من الإعدادات.', 'The server checks the vehicles every 5 minutes even with the app closed everywhere and notifies you, the fleet manager and the factory manager. Working hours come from the shifts (an hour before, two after) unless set here; holidays and days off from the settings.')}</p>
+      <form id="fa-cfg" class="form">
+        ${chk('afterHours', L('حركة خارج ساعات الشغل / الجمعة / الإجازات من غير مشوار', 'Movement outside working hours / days off / holidays without a trip'))}
+        ${chk('overspeed', L('تجاوز حد السرعة', 'Over the speed limit'))}
+        ${chk('offline', L('الجهاز فاصل', 'Tracker offline'))}
+        ${chk('idle', L('واقفة والموتور شغّال (هدر بنزين)', 'Idling with the engine on (fuel waste)'))}
+        ${chk('deviation', L('انحراف عن مسار المشوار', 'Off the trip route'))}
+        ${chk('returnPrompt', L('تذكير السواق يقفل المشوار لما يرجع المصنع', 'Remind the driver to close the trip when back at the factory'))}
+        ${chk('autoClose', L('إقفال المشوار تلقائي لو فضل مفتوح', 'Auto-close a trip left open'))}
+        ${field(L('حد السرعة الافتراضي (كم/س)', 'Default speed limit (km/h)'), inp('speedLimit', c.speedLimit, `type="number" min="30" max="200" step="5" ${d}`))}
+        ${field(L('الجهاز فاصل بعد (ساعات)', 'Offline after (hours)'), inp('offlineH', c.offlineH, `type="number" min="0.5" max="48" step="0.5" ${d}`))}
+        ${field(L('تسخين أكتر من (دقايق)', 'Idling more than (minutes)'), inp('idleMin', c.idleMin, `type="number" min="5" max="120" step="5" ${d}`))}
+        ${field(L('إقفال تلقائي بعد (ساعات)', 'Auto-close after (hours)'), inp('autoCloseH', c.autoCloseH, `type="number" min="2" max="72" step="1" ${d}`))}
+        ${field(L('نطاق المصنع (متر)', 'Factory radius (m)'), inp('homeRadius', c.homeRadius, `type="number" min="50" max="2000" step="50" ${d}`))}
+        ${field(L('ساعات الشغل من (اختياري)', 'Working hours from (optional)'), inp('workFrom', c.workFrom || '', `type="time" ${d}`))}
+        ${field(L('إلى (اختياري)', 'to (optional)'), inp('workTo', c.workTo || '', `type="time" ${d}`))}
+        ${st ? `<div class="full tiny muted">${L('النافذة الحالية', 'Current window')}: ${mm(st.window[0])} – ${mm(st.window[1])} · ${L('أيام الإجازة', 'Days off')}: ${(st.offDays || []).map(x => ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][x] || x).join('، ') || '—'}</div>` : ''}
+        ${owner() ? `<div class="full row" style="justify-content:flex-end"><button type="submit" class="btn p">${icon('check')}${L('حفظ', 'Save')}</button></div>` : ''}
+      </form></div>`;
+  }
+  if (typeof gpsSettingsCard === 'function') gpsSettingsCard = (base => function () { return base.apply(this, arguments) + (mayView() ? settingsCard() : ''); })(gpsSettingsCard);
+  document.addEventListener('submit', async ev => {
+    if (ev.target.id !== 'fa-cfg') return; ev.preventDefault(); if (!owner()) return;
+    const f = ev.target; const d = formData(f); const c = cfg();
+    ['afterHours', 'overspeed', 'offline', 'idle', 'deviation', 'returnPrompt', 'autoClose'].forEach(k => { c[k] = !!f.querySelector(`[name="${k}"]`).checked; });
+    c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 20; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || '';
+    await Store.saveSettings(Object.assign({}, S.settings, { fleet: Object.assign({}, S.settings.fleet || {}, { alerts: c }) })); FA.st = null; FA.at = 0; toast(L('تم حفظ إعدادات التنبيهات', 'Alert settings saved'));
+  });
+  ACTIONS.faRun = async () => {
+    if (!owner() || FA.busy) return; FA.busy = true; rerender();
+    try { const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'run' } }); const o = r.data || {}; if (o.ok) toast(o.skip === 'no_traccar' ? L('اربط Traccar الأول', 'Connect Traccar first') : L(`تم الفحص: ${o.positions} عربية على الخريطة · ${(o.alerts || []).length} تنبيه جديد`, `Checked: ${o.positions} vehicles on the map · ${(o.alerts || []).length} new alerts`)); else toast(String((r.error && r.error.message) || o.error || 'error'), 'err'); }
+    catch (e) { toast(L('تعذّر الفحص', 'Could not check') + ': ' + (e.message || e), 'err'); }
+    FA.busy = false; FA.st = null; FA.at = 0; rerender();
+  };
+
+  /* ---------- 5) the driver: «back? close the trip» banner + the auto-closed note ---------- */
+  function returnBanner() {
+    const old = document.getElementById('fa-return');
+    if (!drv() || !meId()) { if (old) old.remove(); return; }
+    const t = list('trips').find(x => x.status === 'started' && x.driverId === meId());
+    const a = t ? all().find(x => x.type === 'return' && x.tripId === t.id && Date.now() - new Date(x.at).getTime() < 3 * 3600e3) : null;
+    if (!a) { if (old) old.remove(); return; }
+    const html = `<div class="banner info" id="fa-return" style="margin:10px 12px 0;align-items:center;gap:8px;flex-wrap:wrap">${icon('map')}<span><b>${L(`رجعت المصنع؟`, 'Back at the factory?')}</b> ${L(`المشوار ${esc(t.number || '')} لسه مفتوح — اقفله عشان الوقت والكيلومترات يتحسبوا صح.`, `Trip ${esc(t.number || '')} is still open — close it so the time and km are right.`)}</span><div class="grow"></div><button type="button" class="btn sm p" data-action="tripEnd" data-arg="${esc(t.id)}">${icon('check')}${L('اقفل المشوار', 'Close the trip')}</button></div>`;
+    if (old) { old.outerHTML = html; return; }
+    const main = document.getElementById('view') || document.querySelector('main') || document.body; if (main) main.insertAdjacentHTML('afterbegin', html);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (drv()) returnBanner(); });
+  if (typeof vTripDetail === 'function') vTripDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const t = byId('trips', id); if (!t || !t.autoClosed) return html;
+    const note = `<div class="banner warn" style="margin-bottom:10px">${icon('alert')}<span><b>${L('اتقفل تلقائي', 'Auto-closed')}</b> — ${L(`المشوار فضل مفتوح من غير تسجيل رجوع فالسيستم قفله ${t.autoClosedAt ? fmtDate(t.autoClosedAt.slice(0, 10)) + ' ' + hhmm(t.autoClosedAt) : ''}. راجع السواق ${esc(assigneeName(t.driverId))} وسجّل الملاحظة لو في حاجة.`, `The trip stayed open with no return recorded, so the system closed it ${t.autoClosedAt ? fmtDate(t.autoClosedAt.slice(0, 10)) + ' ' + hhmm(t.autoClosedAt) : ''}. Check with ${esc(assigneeName(t.driverId))}.`)}</span></div>`;
+    return note + html;
+  })(vTripDetail);
+
+  window.nfFleetAlerts = { open, all, cfg, types: AT };
 })();
 </script>
 
