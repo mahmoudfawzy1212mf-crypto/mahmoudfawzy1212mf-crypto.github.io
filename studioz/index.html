@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-0428-32aeca";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-0606-1f2399";</script>
 
 <script>
 'use strict';
@@ -29253,6 +29253,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   const poDone = p => !!(p && p.no && p.date && p.fileId && p.pmName && p.pmPhone && p.site && p.hq);
   const money = n => `${fmtMoney(n)} ${CUR()}`;
   const wOf = id => String(id || '').startsWith('w:') ? String(id).slice(2) : null;
+  const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
 
   document.head.insertAdjacentHTML('beforeend', `<style>
 .qp{margin-bottom:14px}.qp-steps{display:flex;gap:0;overflow-x:auto;padding:14px 8px 10px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
@@ -29314,7 +29315,8 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
       }
       const tbl = `<table class="qp-tbl"><thead><tr><th>النسخة</th><th>التاريخ</th><th>طلب العميل / السبب</th><th>الإجمالي</th><th>عن V1</th><th>الحالة</th><th></th></tr></thead><tbody>${vs.map((v, i) => { const d = i ? Math.round((1 - v.total / (vs[0].total || 1)) * 1000) / 10 : 0; return `<tr class="${v.current ? 'cur' : ''}"><td><b>V${v.v}</b></td><td>${esc(fmtDate(String(v.at || v.date || '').slice(0, 10)))}</td><td>${esc(v.note || (i ? '' : 'العرض الأول'))}</td><td>${money(v.total)}</td><td>${i ? `<span class="${d > 0 ? 'qp-dn' : 'qp-up'}">${d > 0 ? '−' : '+'}${Math.abs(d)}%</span>` : '—'}</td><td>${v.current ? (['approved', 'converted'].includes(q.status) ? '<span class="badge good">معتمدة</span>' : v.sentAt ? '<span class="badge acc">اتبعتت</span>' : '<span class="badge">قيد التعديل</span>') : (v.sentAt ? '<span class="muted tiny">اتبعتت</span>' : '<span class="muted tiny">—</span>')}</td><td>${i ? `<button class="btn xs ghost" data-action="qpCompare" data-arg="${esc(q.id)}:${vs[i - 1].v}:${v.v}">قارن بـ V${vs[i - 1].v}</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`;
       const canNew = canEdit && !['approved', 'converted', 'rejected'].includes(q.status);
-      return `<h4>${icon('chat')}التفاوض والنسخ <span class="muted small">الخصم على المشروع ده بس — البرايس ليست زي ما هي</span></h4>${ban}${tbl}<div class="qp-acts">${canNew ? `<button class="btn sm p" data-action="qpNewVer" data-arg="${esc(q.id)}">${icon('plus')}نسخة جديدة V${rev(q) + 1} (العميل طلب تعديل)</button>` : ''}${canNew && !locked(q) && rev(q) > 1 ? `<button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}عدّل V${rev(q)}</button>` : ''}</div>`;
+      const dl = (q.delLog || []).length ? `<div class="tiny muted" style="margin-top:6px">${(q.delLog || []).map(x => `${L('حُذفت', 'Deleted')} V${x.v} (${money(x.total)}) — ${esc(x.by || '')} ${esc(fmtDate(String(x.at || '').slice(0, 10)))}`).join(' · ')}</div>` : '';
+      return `<h4>${icon('chat')}التفاوض والنسخ <span class="muted small">الخصم على المشروع ده بس — البرايس ليست زي ما هي</span></h4>${ban}${tbl}<div class="qp-acts">${canNew ? `<button class="btn sm p" data-action="qpNewVer" data-arg="${esc(q.id)}">${icon('plus')}نسخة جديدة V${rev(q) + 1} (العميل طلب تعديل)</button>` : ''}${canNew && !locked(q) && rev(q) > 1 ? `<button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}عدّل V${rev(q)}</button>` : ''}${canNew && rev(q) > 1 ? `<button class="btn sm ghost" data-action="qpDelVer" data-arg="${esc(q.id)}" title="${L('احذف النسخة دي وارجع لـ V' + (rev(q) - 1), 'Delete this version and go back to V' + (rev(q) - 1))}">${icon('x')}احذف V${rev(q)}</button>` : ''}</div>${dl}`;
     }
     if (k === 'appr') {
       if (q.status === 'rejected') return `<h4>${icon('x')}العميل رفض العرض</h4><div class="small">${esc(q.lostReason || '')}</div>${canEdit ? `<div class="qp-acts"><button class="btn sm" data-action="qpReopen" data-arg="${esc(q.id)}">رجّع العرض للتفاوض</button></div>` : ''}`;
@@ -29373,6 +29375,32 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         const cur = byId('quotations', id); const vs = (cur.versions || []).concat([snap(cur)]);
         await Store.update('quotations', id, { versions: vs, rev: rev(cur) + 1, status: 'draft', revNote: d.note.trim(), revAt: nowISO(), revBy: me().name || '', discReq: null, discOk: null });
         S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'neg' }); toast(`V${rev(cur) + 1} جاهزة — عدّل الأسعار`); setTimeout(() => { const qq = byId('quotations', id); if (qq && typeof ACTIONS.quoteEdit === 'function') ACTIONS.quoteEdit(id); }, 80); } });
+  };
+  /* v6.88 (Mahmoud, 8 Oct): «delete V2 and go back to the first offer» — the latest version only; V1 is never deleted.
+     The previous snapshot comes back as the current version (items, discount, subject, its sent state), the pending
+     owner-discount request is dropped, and the deletion is logged on the quotation (q.delLog). */
+  ACTIONS.qpDelVer = id => {
+    const q = byId('quotations', id); if (!isLof(q)) return;
+    const canEdit = typeof canDo === 'function' && (canDo('sales') || isAdmin()); if (!canEdit) { toast(L('مش مسموح', 'Not allowed'), 'err'); return; }
+    if (['approved', 'converted'].includes(q.status)) { toast(L(`V${rev(q)} معتمدة — ما ينفعش تتحذف`, `V${rev(q)} is approved — it cannot be deleted`), 'err'); return; }
+    if (rev(q) <= 1) { toast(L('V1 هي العرض الأول — مفيش قبلها', 'V1 is the first offer — nothing to go back to'), 'err'); return; }
+    const vs = q.versions || []; const prev = vs[vs.length - 1]; if (!prev || +prev.v !== rev(q) - 1) { toast(L('مش لاقي النسخة اللي قبلها', 'Previous version not found'), 'err'); return; }
+    const wasSent = q.sentRev === rev(q);
+    const msg = `${L(`هتحذف V${rev(q)} نهائيًا وترجع لـ V${prev.v}`, `V${rev(q)} will be deleted for good and V${prev.v} comes back`)} (${money(prev.total)})${wasSent ? ` — ${L(`⚠ V${rev(q)} كانت اتبعتت للعميل فعلًا`, `⚠ V${rev(q)} was already sent to the client`)}` : ''}. ${L('متأكد؟', 'Sure?')}`;
+    confirmDlg(msg, L('احذف', 'Delete'), true).then(async ok => {
+      if (!ok) return; const cur = byId('quotations', id); if (!cur || rev(cur) !== rev(q)) return;
+      const gone = snap(cur); const rest = (cur.versions || []).slice(0, -1);
+      const patch = { items: JSON.parse(JSON.stringify(prev.items || [])), discount: +prev.discount || 0, vat: !!prev.vat, subject: prev.subject || cur.subject || '', date: prev.date || cur.date, rev: +prev.v, versions: rest,
+        revNote: prev.note || '', revAt: prev.at || null, revBy: prev.by || '', discReq: null, discOk: null,
+        status: 'draft', sentRev: null, sentAt: null, sentVia: '',
+        sendLog: (cur.sendLog || []).filter(x => +x.v !== rev(cur)),
+        delLog: (cur.delLog || []).concat([{ v: rev(cur), total: gone.total, note: gone.note, wasSent, at: nowISO(), by: me().name || '' }]) };
+      await Store.update('quotations', id, patch);
+      /* the previous version had been sent: mark it sent again (the Store wrapper below stamps sentRev = its rev); keep one log line per version */
+      if (prev.sentAt) { await Store.update('quotations', id, { status: 'sent', sentAt: prev.sentAt, sentVia: prev.sentVia || '' }); const q2 = byId('quotations', id); const seen = new Set(); await Store.update('quotations', id, { sendLog: (q2.sendLog || []).filter(x => { const k = String(x.v); if (seen.has(k)) return false; seen.add(k); return true; }) }); }
+      const t = byId('tasks', `qdisc_${id}_v${rev(cur)}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } }
+      S.ui.qpSel = Object.assign({}, S.ui.qpSel, { [id]: 'neg' }); toast(L(`اتحذفت V${rev(cur)} — رجعنا لـ V${prev.v}`, `V${rev(cur)} deleted — back to V${prev.v}`)); render(false);
+    });
   };
   ACTIONS.qpCompare = arg => {
     const [id, a, b] = String(arg || '').split(':'); const q = byId('quotations', id); if (!q) return; const vs = versionsAll(q); const A = vs.find(v => String(v.v) === a), B = vs.find(v => String(v.v) === b); if (!A || !B) return;
