@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-1234-3e8f7b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-1331-108483";</script>
 
 <script>
 'use strict';
@@ -35340,7 +35340,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     /* Traccar closes the running stop at the time of the last fix (a sleeping tracker sends none for hours) — so the last stop is the
        current one as long as no fix came later than its end (10 min slack) */
     const lastFix = g && g.at ? new Date(g.at).getTime() : 0;
-    if (st && st.stopSince && (!st.stopEnd || new Date(st.stopEnd).getTime() >= lastFix - 10 * 60000)) return st.stopSince;
+    /* v6.97: a stop stamped in the future (tracker clock ahead) or older than a day while the tracker still talks is not a real stop time */
+    if (st && st.stopSince && new Date(st.stopSince).getTime() <= Date.now() + 60000 && (!st.stopEnd || new Date(st.stopEnd).getTime() >= lastFix - 10 * 60000)) return st.stopSince;
     const k = r.id; const seen = FM.seen[k];
     if (r.st === 'mv') { delete FM.seen[k]; return null; }
     if (!seen) FM.seen[k] = new Date().toISOString();
@@ -35445,7 +35446,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     return `<div class="fm-detail">
       <div class="fm-dh"><span class="fm-dot" style="background:${col}"></span><b>${esc(r.name)}</b>${r.plate ? `<span class="code">${esc(r.plate)}</span>` : ''}<div class="grow"></div><button type="button" class="btn xs ${FM.follow ? 'p' : ''}" data-action="fmFollow">${L('تتبُّع', 'Follow')}</button><button type="button" class="iconbtn" data-action="fmSelect" data-arg="">${icon('x')}</button></div>
       <div class="fm-grid">
-        <div><div class="tiny muted">${L('الحالة', 'State')}</div><b style="color:${col}">${ST[r.st][1]}</b>${r.st !== 'mv' && r.stopSince ? `<div class="tiny muted">${L('واقفة منذ', 'stopped for')} ${dur(r.stopSince)}</div>` : ''}</div>
+        <div><div class="tiny muted">${L('الحالة', 'State')}</div><b style="color:${col}">${ST[r.st][1]}</b>${r.st !== 'mv' && r.stopSince ? `<div class="tiny muted">${L('واقفة منذ', 'stopped for')} ${dur(r.stopSince)}</div>` : ''}${r.st === 'of' && r.lastUpdate ? `<div class="tiny muted">${L('آخر اتصال من الجهاز', 'last contact from the tracker')} ${dur(r.lastUpdate)} · ${L('بيفصل ويرجع — شيك على شريحة الجهاز وكهربته', 'drops and reconnects — check the tracker SIM and power')}</div>` : ''}</div>
         <div><div class="tiny muted">${L('السرعة', 'Speed')}</div><b>${r.speed != null && !r.gpsLost ? fmtNum(Math.round(r.speed)) + ' ' + L('كم/س', 'km/h') : '—'}</b></div>
         <div><div class="tiny muted">${L('الموتور', 'Engine')}</div><b>${r.ign == null ? '—' : r.ign ? L('شغّال', 'On') : L('مطفي', 'Off')}</b>${r.ign === false && r.ignOffSince ? `<div class="tiny muted">${L('منذ', 'for')} ${dur(r.ignOffSince)}</div>` : ''}</div>
         <div><div class="tiny muted">${L('البطارية / الكهرباء', 'Battery / power')}</div><b>${r.battery != null ? fmtNum(Math.round(r.battery)) + '%' : '—'}</b> <span class="tiny muted">${r.power == null ? '' : typeof r.power === 'number' ? (r.power > 0 ? `· ${L('كهرباء العربية', 'vehicle power')} ${Math.round(r.power * 10) / 10}V` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`) : (r.power ? `· ${L('كهرباء العربية موصّلة', 'vehicle power on')}` : `· ${L('كهرباء العربية مفصولة', 'vehicle power off')}`)}${r.charge ? ` · ${L('بيشحن', 'charging')}` : ''}</span></div>
