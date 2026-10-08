@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261007-1949-1bb160";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-0352-b534cd";</script>
 
 <script>
 'use strict';
@@ -35371,6 +35371,18 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
   (() => { const i = NAV.findIndex(n => n.id === 'fleet'); const entry = { id: 'fleetmap', label: 'خريطة الأسطول', icon: 'map' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.fleetmap = 'خريطة الأسطول';
   canSee = (base => view => (view === 'fleetmap' ? mayView() : base(view)))(canSee);
+
+  /* v6.85 — the fleet page (حركة النقل) opens on «vehicle tracking»: a first tab, default for the owner and the factory manager, carrying the full live map */
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    if (mayView() && !S.ui.filter.fleet) S.ui.filter.fleet = { tab: 'track', status: 'open' };
+    let html = base.apply(this, arguments);
+    if (!mayView() || (typeof isDriver === 'function' && isDriver())) return html;
+    const f = S.ui.filter.fleet || {};
+    html = html.replace('<div class="tabs">', `<div class="tabs"><button class="${f.tab === 'track' ? 'on' : ''}" data-action="fleetTab" data-arg="track">${L('تتبع العربيات', 'Vehicle tracking')}</button>`);
+    if (f.tab !== 'track') return html;
+    const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
+    return html.slice(0, cut) + vFleetMap();
+  })(vFleet);
 
   /* ---------- 3) actions ---------- */
   ACTIONS.fmFilter = k => { FM.filter = k || 'all'; render(false); };
