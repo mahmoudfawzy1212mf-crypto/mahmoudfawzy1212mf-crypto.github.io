@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261008-0352-b534cd';
+const BUILD = '20261008-0409-bf1466';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
@@ -96,5 +96,7 @@ self.addEventListener('push', e => {
 self.addEventListener('message', e => { const d = e.data || {}; if (d.nfBadge != null) { (async () => { try { const c = await caches.open('nf-badge'); await c.put('count', new Response(String(d.nfBadge))); if ('setAppBadge' in navigator) { if (d.nfBadge > 0) await navigator.setAppBadge(d.nfBadge); else await navigator.clearAppBadge(); } } catch (x) { /* ignore */ } })(); } });
 self.addEventListener('notificationclick', e => {
   e.notification.close(); try { caches.open('nf-badge').then(c => c.put('count', new Response('0'))); if ('clearAppBadge' in navigator) navigator.clearAppBadge(); } catch (x) { /* ignore */ } let url = (e.notification.data && e.notification.data.url) || './'; if (e.notification.data && e.notification.data.call && (e.action === 'accept' || e.action === 'decline')) url = './#/calls/' + e.notification.data.call + '/' + e.action;
-  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => { for (const c of cs) { if ('focus' in c) { c.focus(); try { c.navigate(url); } catch (x) { c.postMessage({ nfOpen: url }); } return; } } return self.clients.openWindow(url); }));
+  /* v6.86: iOS rejects WindowClient.navigate() asynchronously (the old try/catch never caught it, so a tapped notification just
+     brought the app forward without opening its page) — the page itself now sets the hash from the message; navigate is not used */
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => { for (const c of cs) { if ('focus' in c) { try { c.postMessage({ nfOpen: url }); } catch (x) { /* ignore */ } return c.focus().catch(() => { }); } } return self.clients.openWindow(url); }));
 });
