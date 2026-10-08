@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-0948-0d7f69";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-1017-ea2748";</script>
 
 <script>
 'use strict';
@@ -35547,7 +35547,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const g = window.google.maps; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
     b3.innerHTML = '';
     const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: big, gestureHandling: big ? 'greedy' : 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
-    if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), label: { text: '🏭', fontSize: big ? '20px' : '16px' }, zIndex: 1 });
+    /* v6.93 (Mahmoud: the big factory emoji hid the vehicles parked there): a small dot with a tiny tag, under everything */
+    if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 5, fillColor: '#1b7f4b', fillOpacity: .9, strokeColor: '#fff', strokeWeight: 1.5, labelOrigin: g.Point ? new g.Point(0, 3) : undefined }, label: { text: L('المصنع', 'Factory'), fontSize: '10px', fontWeight: '700', className: 'fm-lbl' }, zIndex: 0 });
     const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;
     /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
     const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
@@ -35648,7 +35649,7 @@ html body .fmd-row{display:flex;gap:10px;align-items:center;font-size:13px;paddi
 html body .fmd-row:hover{background:var(--surface-2)}
 @media (max-width:900px){html body .fm-tiles{grid-template-columns:repeat(4,1fr)}html body .fm-tile.fm-locate{grid-column:1 / -1;padding:8px}html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:180px}}
 </style>`);
-  Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM } });
+  Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM, mapKey, loadGmaps, vehSvg, noMap } });   /* v6.93: the geofence / history pages reuse the map loader */
 })();
 /* =====================================================================
    v6.91 — "the driver took a vehicle without recording it" (Mahmoud, 8 Oct — go-ahead; factory only):
@@ -35802,7 +35803,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
 })();
 /* =====================================================================
    v6.92 — fleet alerts (Mahmoud, 8 Oct — «do all of them», phase 1; factory only):
-   · the SERVER (Edge "fleet-alerts", pg_cron every 5 min) watches the vehicle trackers on Traccar even when every phone is
+   · the SERVER (Edge "fleet-alerts", pg_cron every minute) watches the vehicle trackers on Traccar even when every phone is
      closed and raises: movement outside working hours / days off / holidays with no trip recorded, over the speed limit
      (per vehicle or the fleet default), tracker quiet > N hours, engine running while standing > N minutes, off the
      factory → destination line during a trip; it asks the DRIVER to close a trip once the vehicle is back inside the
@@ -35833,10 +35834,14 @@ html body .fmd-row:hover{background:var(--surface-2)}
     deviation: { ar: 'انحراف عن المسار', en: 'Off route', ic: 'map' },
     return: { ar: 'رجعت ومقفلتش المشوار', en: 'Back, trip still open', ic: 'map' },
     autoclose: { ar: 'مشوار اتقفل تلقائي', en: 'Trip auto-closed', ic: 'check' },
+    geo_in: { ar: 'وصلت منطقة', en: 'Entered a zone', ic: 'map' },
+    geo_out: { ar: 'خرجت من منطقة', en: 'Left a zone', ic: 'map' },
+    factory_out: { ar: 'خرجت من المصنع من غير مشوار', en: 'Left the factory with no trip', ic: 'alert' },
+    arrived: { ar: 'وصلت وجهة المشوار', en: 'Arrived at the trip destination', ic: 'check' },
   };
   const tLabel = t => (AT[t] ? L(AT[t].ar, AT[t].en) : t);
   const LV = { crit: 'var(--crit-ink)', warn: '#d98a00', info: 'var(--acc-ink, #1b5fb4)' };
-  const DEF = { afterHours: true, overspeed: true, offline: true, idle: true, deviation: true, returnPrompt: true, autoClose: true, speedLimit: 100, offlineH: 1, idleMin: 20, autoCloseH: 24, homeRadius: 300, workFrom: '', workTo: '' };
+  const DEF = { afterHours: true, overspeed: true, offline: true, idle: true, deviation: true, returnPrompt: true, autoClose: true, speedLimit: 100, offlineH: 1, idleMin: 10, autoCloseH: 24, homeRadius: 300, workFrom: '', workTo: '' };
   const cfg = () => Object.assign({}, DEF, (S.settings.fleet && S.settings.fleet.alerts) || {});
   const all = () => list('fleetalerts').filter(a => a && a.id && a.at).sort((a, b) => (a.at < b.at ? 1 : -1));
   const open = () => all().filter(a => !a.ack && a.type !== 'return');
@@ -35857,7 +35862,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     const days = Object.keys(byDay).sort().reverse();
     return `<div class="card"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول', 'Fleet alerts')}</h3><span class="badge ${nOpen ? 'warn' : 'good'}">${nOpen ? `${nOpen} ${L('محتاجة نظرة', 'need a look')}` : L('مفيش حاجة مفتوحة', 'nothing open')}</span><div class="grow"></div>${nOpen && mayAck() ? `<button type="button" class="btn sm" data-action="faAckAll">${icon('check')}${L('تم الكل', 'Done, all')}</button>` : ''}<a class="btn sm ghost" href="#/fleetmap">${icon('map')}${L('الخريطة', 'Map')}</a></div>
       <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select data-fa-f="type" style="max-width:220px"><option value="">${L('كل الأنواع', 'All types')}</option>${Object.keys(AT).map(k => `<option value="${k}" ${f.type === k ? 'selected' : ''}>${tLabel(k)}</option>`).join('')}</select><select data-fa-f="veh" style="max-width:220px"><option value="">${L('كل العربيات', 'All vehicles')}</option>${vs.map(v => `<option value="${esc(v.id)}" ${f.veh === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select><label class="check ${f.open === '1' ? 'on' : ''}" style="margin:0"><input type="checkbox" data-fa-f="open" ${f.open === '1' ? 'checked' : ''}> ${L('المفتوحة بس', 'Open only')}</label></div>
-      ${days.length ? days.map(d => `<div class="tiny muted" style="margin:10px 0 4px;font-weight:700">${esc(fmtDate(d))}</div><div class="list">${byDay[d].map(a => row(a)).join('')}</div>`).join('') : `<div class="empty"><b>${L('مفيش تنبيهات', 'No alerts')}</b>${L('السيرفر بيراقب العربيات كل 5 دقايق — أي حاجة هتظهر هنا وتوصلك إشعار.', 'The server watches the vehicles every 5 minutes — anything found shows here and reaches you as a notification.')}</div>`}
+      ${days.length ? days.map(d => `<div class="tiny muted" style="margin:10px 0 4px;font-weight:700">${esc(fmtDate(d))}</div><div class="list">${byDay[d].map(a => row(a)).join('')}</div>`).join('') : `<div class="empty"><b>${L('مفيش تنبيهات', 'No alerts')}</b>${L('السيرفر بيراقب العربيات كل دقيقة — أي حاجة هتظهر هنا وتوصلك إشعار.', 'The server watches the vehicles every minute — anything found shows here and reaches you as a notification.')}</div>`}
       <div class="tiny muted" style="margin-top:8px">${L('بيتحفظ آخر 90 يوم.', 'The last 90 days are kept.')}</div></div>`;
   }
   EXTRA_VIEWS.fleetalerts = () => vAlerts();
@@ -35893,7 +35898,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (!st && Date.now() - FA.at >= 60000 && typeof sbOn === 'function' && sbOn() && S.sb) setTimeout(loadStatus, 20);
     const chk = (k, label) => `<label class="check ${c[k] !== false ? 'on' : ''}"><input type="checkbox" name="${k}" ${c[k] !== false ? 'checked' : ''} ${d}> ${label}</label>`;
     return `<div class="card" id="fa-cfg-card"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول (من السيرفر)', 'Fleet alerts (from the server)')}</h3>${st ? `<span class="badge ${st.traccar && st.home ? 'good' : 'warn'}">${st.traccar ? (st.home ? L('شغّالة', 'Running') + (st.lastRun ? ' · ' + ago(st.lastRun) : '') : L('حدد مكان المصنع من إعدادات البصمة', 'Set the factory location in the attendance settings')) : L('اربط Traccar الأول', 'Connect Traccar first')}</span>` : ''}<div class="grow"></div><a class="btn sm ghost" href="#/fleetalerts">${L('السجل', 'Log')}</a>${owner() ? `<button type="button" class="btn sm" data-action="faRun" ${FA.busy ? 'disabled' : ''}>${icon('play')}${L('فحص دلوقتي', 'Check now')}</button>` : ''}</div>
-      <p class="small ink2">${L('السيرفر بيفحص العربيات كل 5 دقايق حتى والتطبيق مقفول عند الكل، وبيبعت إشعار ليك ولمدير الحركة ومدير المصنع. ساعات الشغل بتتاخد من الورديات (قبلها بساعة وبعدها بساعتين) إلا لو حددتها هنا، والإجازات الرسمية والجمعة من الإعدادات.', 'The server checks the vehicles every 5 minutes even with the app closed everywhere and notifies you, the fleet manager and the factory manager. Working hours come from the shifts (an hour before, two after) unless set here; holidays and days off from the settings.')}</p>
+      <p class="small ink2">${L('السيرفر بيفحص العربيات كل دقيقة حتى والتطبيق مقفول عند الكل، وبيبعت إشعار ليك ولمدير الحركة ومدير المصنع. ساعات الشغل بتتاخد من الورديات (قبلها بساعة وبعدها بساعتين) إلا لو حددتها هنا، والإجازات الرسمية والجمعة من الإعدادات.', 'The server checks the vehicles every minute even with the app closed everywhere and notifies you, the fleet manager and the factory manager. Working hours come from the shifts (an hour before, two after) unless set here; holidays and days off from the settings.')}</p>
       <form id="fa-cfg" class="form">
         ${chk('afterHours', L('حركة خارج ساعات الشغل / الجمعة / الإجازات من غير مشوار', 'Movement outside working hours / days off / holidays without a trip'))}
         ${chk('overspeed', L('تجاوز حد السرعة', 'Over the speed limit'))}
@@ -35918,7 +35923,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (ev.target.id !== 'fa-cfg') return; ev.preventDefault(); if (!owner()) return;
     const f = ev.target; const d = formData(f); const c = cfg();
     ['afterHours', 'overspeed', 'offline', 'idle', 'deviation', 'returnPrompt', 'autoClose'].forEach(k => { c[k] = !!f.querySelector(`[name="${k}"]`).checked; });
-    c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 20; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || '';
+    c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 10; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || '';
     await Store.saveSettings(Object.assign({}, S.settings, { fleet: Object.assign({}, S.settings.fleet || {}, { alerts: c }) })); FA.st = null; FA.at = 0; toast(L('تم حفظ إعدادات التنبيهات', 'Alert settings saved'));
   });
   ACTIONS.faRun = async () => {
@@ -35947,6 +35952,191 @@ html body .fmd-row:hover{background:var(--surface-2)}
   })(vTripDetail);
 
   window.nfFleetAlerts = { open, all, cfg, types: AT };
+})();
+/* =====================================================================
+   v6.93 — fleet phase 2 (Mahmoud, 8 Oct — «do all of them»; factory only):
+   · GEOFENCES: Fleet → «Zones» tab — the fleet manager / factory manager / owner draw circles (name, centre, radius; from
+     the phone's place, from a project site / supplier / service factory / punch site, or typed) with «notify on enter» /
+     «notify on exit». The server watchdog (fleet-alerts v2) raises geo_in / geo_out, «left the factory with no trip»
+     during working hours, and «arrived at the trip destination» (the trip gets arrivedAt). The circles are drawn on the
+     fleet map, and the factory zone (attendance settings + the alert radius) shows as a read-only row.
+   · ROUTE HISTORY: a page (#/fleethistory[/vehicleId]) — vehicle + day → the day's route drawn on the map, numbered stops
+     (duration, time, address) and moving segments (km, max speed) from Traccar's reports, totals, a replay slider; links
+     from the fleet map detail and the vehicle page. The tracker's clock offset (GT06N on GMT+8) is detected from the live
+     position and compensated, so the times shown are Cairo times.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet'].includes(R()));
+  const mayEdit = () => mayView() && R() !== 'vice' && typeof writable === 'function' && writable();
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const FMX = () => window.nfFleetMap || {};
+  if (typeof COLS !== 'undefined' && !COLS.includes('geofences')) COLS.push('geofences'); S.data.geofences = S.data.geofences || new Map();
+  const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const dur = m => (m == null ? '—' : m < 60 ? L(`${m} د`, `${m}m`) : L(`${Math.floor(m / 60)} س ${m % 60} د`, `${Math.floor(m / 60)}h ${m % 60}m`));
+  const fences = () => sortBy(list('geofences').filter(f => f && f.id), f => f.name || '');
+  const homeZone = () => { const g = typeof geoCfg === 'function' ? geoCfg() : {}; const a = (S.settings.fleet && S.settings.fleet.alerts) || {}; return g.lat != null && g.lat !== '' && g.lng != null && g.lng !== '' ? { lat: +g.lat, lng: +g.lng, radius: +a.homeRadius > 0 ? +a.homeRadius : 300 } : null; };
+
+  /* ---------- 1) the Zones tab ---------- */
+  function placeOptions() {
+    const out = [];
+    list('orders').filter(o => o.site && o.site.lat != null && o.site.lng != null && ['ready', 'production', 'delivered', 'installing', 'done'].includes(o.status || '')).slice(0, 60).forEach(o => out.push({ k: 'o:' + o.id, name: `${o.code || ''} — ${o.site.address || o.title || ''}`, lat: +o.site.lat, lng: +o.site.lng, grp: L('مواقع المشاريع', 'Project sites') }));
+    list('suppliers').filter(s => s.lat != null && s.lng != null && s.lat !== '').forEach(s => out.push({ k: 's:' + s.id, name: s.name, lat: +s.lat, lng: +s.lng, grp: L('الموردين', 'Suppliers') }));
+    list('servfactories').filter(s => s.lat != null && s.lng != null && s.lat !== '').forEach(s => out.push({ k: 'f:' + s.id, name: s.name, lat: +s.lat, lng: +s.lng, grp: L('المصانع الخدمية', 'Service factories') }));
+    list('sites').filter(s => s.lat != null && s.lng != null).forEach(s => out.push({ k: 'p:' + s.id, name: s.name, lat: +s.lat, lng: +s.lng, grp: L('مواقع البصمة', 'Punch sites') }));
+    return out;
+  }
+  function fenceForm(f) {
+    const places = placeOptions(); const groups = {}; places.forEach(p => { (groups[p.grp] ||= []).push(p); });
+    const sel = `<select id="f-pick" name="pick"><option value="">${L('— اختار مكان معروف (اختياري) —', '— pick a known place (optional) —')}</option>${Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(p => `<option value="${esc(p.k)}" data-lat="${p.lat}" data-lng="${p.lng}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+    return `<div class="form">${field(L('اسم المنطقة', 'Zone name'), inp('name', f.name || '', `required placeholder="${L('مثال: كمبوند الأفق — بوابة 2', 'e.g. client site — gate 2')}"`), 'full')}
+      ${field(L('من مكان معروف', 'From a known place'), sel, 'full')}
+      ${field(L('خط العرض (Latitude)', 'Latitude'), inp('lat', f.lat ?? '', 'type="number" step="any" class="ltr" required'))}${field(L('خط الطول (Longitude)', 'Longitude'), inp('lng', f.lng ?? '', 'type="number" step="any" class="ltr" required'))}
+      ${field(L('نصف القطر (متر)', 'Radius (m)'), inp('radius', f.radius || 300, 'type="number" min="50" max="5000" step="50"'))}<div class="field"><label>&nbsp;</label><button type="button" class="btn" data-action="geoUseMine">${icon('map')}${L('استخدام موقعي الحالي', 'Use my current place')}</button></div>
+      ${field(L('تنبيه عند الدخول', 'Notify on enter'), `<select name="onEnter"><option value="1" ${f.onEnter !== false ? 'selected' : ''}>${L('أيوه — «وصلت»', 'Yes — «arrived»')}</option><option value="" ${f.onEnter === false ? 'selected' : ''}>${L('لا', 'No')}</option></select>`)}
+      ${field(L('تنبيه عند الخروج', 'Notify on exit'), `<select name="onExit"><option value="" ${!f.onExit ? 'selected' : ''}>${L('لا', 'No')}</option><option value="1" ${f.onExit ? 'selected' : ''}>${L('أيوه — «خرجت»', 'Yes — «left»')}</option></select>`)}
+      ${field(L('الحالة', 'State'), `<select name="active"><option value="1" ${f.active !== false ? 'selected' : ''}>${L('شغّالة', 'Active')}</option><option value="" ${f.active === false ? 'selected' : ''}>${L('متوقفة', 'Paused')}</option></select>`)}
+      <div class="banner info full" style="margin:0">${icon('info')}<span>${L('السيرفر بيفحص العربيات كل دقيقة: أول ما عربية تدخل المنطقة بيوصلك «وصلت»، ولو فعّلت الخروج بيوصلك «خرجت». المصنع نفسه منطقة جاهزة من إعدادات البصمة.', 'The server checks every minute: when a vehicle enters the zone you get «arrived», and «left» if you enable exits. The factory is a ready-made zone from the attendance settings.')}</span></div></div>`;
+  }
+  const readFence = (f0, d) => Object.assign({}, f0, { name: (d.name || '').trim(), lat: +d.lat, lng: +d.lng, radius: Math.max(50, Math.min(5000, +d.radius || 300)), onEnter: d.onEnter === '1', onExit: d.onExit === '1', active: d.active === '1' });
+  document.addEventListener('change', ev => { const t = ev.target; if (!t || t.id !== 'f-pick') return; const o = t.options[t.selectedIndex]; if (!o || !o.value) return; const la = document.getElementById('f-lat'), ln = document.getElementById('f-lng'), nm = document.getElementById('f-name'); if (la) la.value = o.getAttribute('data-lat'); if (ln) ln.value = o.getAttribute('data-lng'); if (nm && !nm.value) nm.value = o.getAttribute('data-name') || ''; });
+  ACTIONS.gfNew = () => { if (!mayEdit()) return; openModal({ title: L('منطقة جديدة', 'New zone'), body: fenceForm({}), onSubmit: async f => { const d = formData(f); if (!d.name || !isFinite(+d.lat) || !isFinite(+d.lng) || d.lat === '' || d.lng === '') { toast(L('الاسم والإحداثيات مطلوبين', 'Name and coordinates are required'), 'err'); return false; } await Store.save('geofences', readFence({ id: 'gf_' + uid().slice(-8), createdAt: nowISO(), createdBy: S.session.id }, d)); toast(L('اتضافت المنطقة', 'Zone added')); } }); };
+  ACTIONS.gfEdit = id => { const f = byId('geofences', id); if (!f || !mayEdit()) return; openModal({ title: L(`تعديل ${f.name}`, `Edit ${f.name}`), body: fenceForm(f), footer: `<button type="button" class="btn danger" data-action="gfDelete" data-arg="${esc(id)}">${icon('trash')}${L('حذف', 'Delete')}</button><div class="grow"></div><button type="button" class="btn" data-action="closemodal">${L('إلغاء', 'Cancel')}</button><button type="submit" class="btn p">${L('حفظ', 'Save')}</button>`, onSubmit: async fm => { const d = formData(fm); if (!d.name || d.lat === '' || d.lng === '') return false; await Store.save('geofences', readFence(f, d)); toast(L('تم الحفظ', 'Saved')); } }); };
+  ACTIONS.gfDelete = async id => { const f = byId('geofences', id); if (!f || !mayEdit()) return; if (!(await confirmDlg(L(`حذف منطقة «${f.name}»؟`, `Delete zone «${f.name}»?`), L('حذف', 'Delete')))) return; await Store.remove('geofences', id); closeModal(); toast(L('اتحذفت', 'Deleted')); };
+  function zonesTab() {
+    const fs = fences(); const hz = homeZone();
+    const row = f => `<div class="item" data-action="${mayEdit() ? 'gfEdit' : ''}" data-arg="${esc(f.id)}" style="${f.active === false ? 'opacity:.6' : ''}"><span class="fm-dot" style="background:${f.active === false ? '#8a8f98' : '#2a78d6'};flex:none"></span><div class="main"><div class="title">${esc(f.name)}</div><div class="meta"><span>${fmtNum(f.radius || 300)} ${L('م', 'm')}</span><span>${f.onEnter !== false ? '✓ ' + L('دخول', 'enter') : ''}${f.onExit ? ' · ✓ ' + L('خروج', 'exit') : ''}</span>${f.active === false ? `<span class="badge">${L('متوقفة', 'paused')}</span>` : ''}<a class="tiny" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${f.lat},${f.lng}">${L('الخريطة', 'map')}</a></div></div>${mayEdit() ? `<div class="end">${icon('edit')}</div>` : ''}</div>`;
+    return `<div class="card"><div class="cardhead"><h3>${icon('map')}${L('المناطق (السياج الجغرافي)', 'Zones (geofences)')}</h3><span class="muted small">${fs.length}</span><div class="grow"></div>${mayEdit() ? `<button type="button" class="btn sm p" data-action="gfNew">${icon('plus')}${L('منطقة', 'Zone')}</button>` : ''}</div>
+      <div class="list">${hz ? `<div class="item" style="cursor:default"><span class="fm-dot" style="background:#1b7f4b;flex:none"></span><div class="main"><div class="title">🏭 ${L('المصنع', 'Factory')}</div><div class="meta"><span>${fmtNum(hz.radius)} ${L('م', 'm')}</span><span>${L('خروج من غير مشوار في ساعات الشغل ← تنبيه · الرجوع ← تذكير السواق يقفل المشوار', 'leaving with no trip in working hours → alert · back → the driver is reminded to close the trip')}</span></div></div></div>` : `<div class="banner warn">${icon('alert')}<span>${L('حدد مكان المصنع من الإعدادات ← الحضور والبصمة عشان تنبيهات المصنع تشتغل.', 'Set the factory location in Settings → attendance so the factory alerts work.')}</span></div>`}${fs.map(row).join('')}</div>
+      ${!fs.length ? `<div class="empty"><b>${L('مفيش مناطق لسه', 'No zones yet')}</b>${L('ضيف مواقع العملاء والموردين اللي عايز تعرف لما العربية توصلها أو تخرج منها.', 'Add the client and supplier places you want to know about when a vehicle arrives or leaves.')}</div>` : ''}</div>`;
+  }
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    let html = base.apply(this, arguments); if (!mayView() || (typeof isDriver === 'function' && isDriver())) return html;
+    const f = S.ui.filter.fleet || {};
+    html = html.replace(/(<div class="tabs">[\s\S]*?)(<\/div>)/, (m, a, b) => a + `<button class="${f.tab === 'zones' ? 'on' : ''}" data-action="fleetTab" data-arg="zones">${L('المناطق', 'Zones')}</button>` + b);
+    if (f.tab !== 'zones') return html;
+    const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
+    return html.slice(0, cut) + zonesTab();
+  })(vFleet);
+
+  /* the circles on the live fleet map (drawn once the map exists, refreshed when the zones change) */
+  const GC = { drawn: {}, sig: '' };
+  function drawFences() {
+    const fm = FMX().state; const m = fm && fm.maps && fm.maps['fm-map']; const g = window.google && window.google.maps; if (!m || !m.map || !g || !g.Circle) return;
+    const fs = fences().filter(f => f.active !== false); const sig = fs.map(f => `${f.id}:${f.lat}:${f.lng}:${f.radius}`).join('|');
+    if (sig === GC.sig && GC.map === m.map) return; GC.sig = sig; GC.map = m.map;
+    Object.values(GC.drawn).forEach(c => { try { c.setMap(null); } catch (e) { /* ignore */ } }); GC.drawn = {};
+    fs.forEach(f => { GC.drawn[f.id] = new g.Circle({ map: m.map, center: { lat: +f.lat, lng: +f.lng }, radius: +f.radius || 300, strokeColor: '#2a78d6', strokeOpacity: .7, strokeWeight: 1.5, fillColor: '#2a78d6', fillOpacity: .08, clickable: false }); });
+    const hz = homeZone(); if (hz) GC.drawn.__home = new g.Circle({ map: m.map, center: { lat: hz.lat, lng: hz.lng }, radius: hz.radius, strokeColor: '#1b7f4b', strokeOpacity: .7, strokeWeight: 1.5, fillColor: '#1b7f4b', fillOpacity: .06, clickable: false });
+  }
+  setInterval(() => { try { if (document.getElementById('fm-map')) drawFences(); } catch (e) { /* ignore */ } }, 1500);
+
+  /* ---------- 2) the route history page ---------- */
+  const H = { vid: '', date: '', loading: false, data: null, err: '', off: 0, replay: 0, map: null, key: 0 };
+  const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  async function clockOffset(v) {
+    /* the tracker clock: fix time − server receive time of the live position, rounded to hours (GT06N = +8 h until GMT,E,0# is sent) */
+    try { const r = await gpsCall('track', { imeis: v.gpsId }); const p = (r.positions || []).find(x => x.imei === v.gpsId); if (p && p.at && p.sysAt) { const h = Math.round((new Date(p.at) - new Date(p.sysAt)) / 3600000); return Math.abs(h) >= 1 && Math.abs(h) <= 14 ? h : 0; } } catch (e) { /* 0 */ }
+    return 0;
+  }
+  const shift = (iso, off) => (iso ? new Date(new Date(iso).getTime() - off * 3600000).toISOString() : iso);
+  async function loadHistory() {
+    const v = byId('vehicles', H.vid); if (!v || !v.gpsId || !hosted() || typeof gpsCall !== 'function' || !gpsOn()) { H.data = null; H.err = v && !v.gpsId ? L('العربية دي مش مربوطة بجهاز تتبع', 'This vehicle has no tracker') : ''; return; }
+    H.loading = true; H.err = ''; H.data = null; const key = ++H.key; render(false);
+    try {
+      const off = await clockOffset(v); H.off = off;
+      const d0 = new Date(H.date + 'T00:00:00'); const d1 = new Date(d0.getTime() + 86400000);
+      const from = new Date(d0.getTime() + off * 3600000).toISOString(), to = new Date(Math.min(d1.getTime() + off * 3600000, Date.now() + Math.max(0, off) * 3600000 + 60000)).toISOString();
+      const [pb, rp] = await Promise.all([gpsCall('playback', { imei: v.gpsId, from, to }), gpsCall('report', { imei: v.gpsId, from, to }).catch(() => ({ stops: [], trips: [], summary: null }))]);
+      if (key !== H.key) return;
+      const track = (pb.track || []).filter(p => p.lat != null && p.lng != null).map(p => Object.assign({}, p, { at: shift(p.at, off) }));
+      const stops = (rp.stops || []).filter(s => s.lat != null && (s.min == null || s.min >= 2)).map((s, i) => Object.assign({}, s, { n: i + 1, start: shift(s.start, off), end: shift(s.end, off) }));
+      const trips = (rp.trips || []).map(t => Object.assign({}, t, { start: shift(t.start, off), end: shift(t.end, off) }));
+      let km = rp.summary && rp.summary.km != null ? rp.summary.km : (typeof trackKm === 'function' ? Math.round(trackKm(track) * 10) / 10 : null);
+      H.data = { track, stops, trips, summary: Object.assign({ km, maxKmh: null, movingMin: null }, rp.summary || {}, { movingMin: trips.reduce((a, t) => a + (t.min || 0), 0) }) }; H.replay = Math.max(0, track.length - 1);
+    } catch (e) { if (key !== H.key) return; H.err = (typeof gpsErrAr === 'function' ? gpsErrAr(e.message || e) : (e.message || String(e))); }
+    H.loading = false; render(false); setTimeout(ensureHMap, 30);
+  }
+  function vHistory(route) {
+    if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع ومدير الحركة', 'This page is for the owner, the factory manager and the fleet manager')}</b></div></div>`;
+    const vs = sortBy(list('vehicles').filter(v => v.gpsId), v => v.name);
+    if (route && route.id && route.id !== H.vid && byId('vehicles', route.id)) { H.vid = route.id; H.data = null; H.err = ''; }
+    if (!H.vid && vs[0]) H.vid = vs[0].id; if (!H.date) H.date = todayLocal();
+    const v = byId('vehicles', H.vid); const d = H.data; const s = d && d.summary;
+    setTimeout(() => { if (!H.data && !H.loading && !H.err && H.vid) loadHistory(); else ensureHMap(); }, 30);
+    const pt = d && d.track.length ? d.track[Math.min(d.track.length - 1, H.replay)] : null;
+    return `<div class="card" style="padding:10px 12px"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select data-fh="vid" style="max-width:260px">${vs.map(x => `<option value="${esc(x.id)}" ${x.id === H.vid ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><input type="date" data-fh="date" value="${esc(H.date)}" max="${todayLocal()}" class="ltr"><button type="button" class="btn sm" data-action="fhPrev">‹ ${L('اليوم السابق', 'Previous day')}</button><button type="button" class="btn sm" data-action="fhNext">${L('اليوم التالي', 'Next day')} ›</button><div class="grow"></div><button type="button" class="btn sm p" data-action="fhLoad" ${H.loading ? 'disabled' : ''}>${icon('play')}${H.loading ? L('جارٍ التحميل…', 'Loading…') : L('عرض', 'Show')}</button></div>
+      ${H.off ? `<div class="tiny muted" style="margin-top:6px">⏱ ${L(`ساعة الجهاز متقدمة ${H.off} ساعة — الأوقات هنا متصحّحة لتوقيت القاهرة (ابعت GMT,E,0# للجهاز عشان تتظبط نهائي)`, `The tracker clock is ${H.off} h ahead — times here are corrected to Cairo time (send GMT,E,0# to the tracker to fix it for good)`)}</div>` : ''}</div>
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)"><div class="fm-tile"><b>${s && s.km != null ? fmtNum(s.km) : '—'}</b><span>${L('كم', 'km')}</span></div><div class="fm-tile"><b>${s && s.maxKmh != null ? fmtNum(Math.round(s.maxKmh)) : '—'}</b><span>${L('أقصى سرعة', 'max km/h')}</span></div><div class="fm-tile"><b>${s ? dur(s.movingMin) : '—'}</b><span>${L('وقت الحركة', 'moving time')}</span></div><div class="fm-tile"><b>${d ? d.stops.length : '—'}</b><span>${L('وقفات', 'stops')}</span></div></div>
+      <div class="fm-body"><div class="fm-mapbox"><div id="fh-map" class="fm-map"><div class="muted small" style="padding:14px">${H.loading ? L('جارٍ تحميل المسار…', 'Loading the route…') : H.err ? esc(H.err) : d && !d.track.length ? L('مفيش حركة مسجّلة في اليوم ده', 'No movement recorded on this day') : L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
+          ${d && d.track.length > 1 ? `<div class="fm-replay card" style="margin-top:8px;padding:8px 12px"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted" style="min-width:150px">${pt ? `${hhmm(pt.at)}${pt.speed != null ? ` · ${fmtNum(Math.round(pt.speed))} ${L('كم/س', 'km/h')}` : ''}` : ''}</span><input type="range" min="0" max="${d.track.length - 1}" value="${H.replay}" data-fh="replay" style="flex:1"></div></div>` : ''}</div>
+        <aside class="fm-rail"><div class="fm-list">
+          ${H.err ? `<div class="banner warn">${icon('alert')}<span>${esc(H.err)}</span></div>` : ''}
+          ${d && d.stops.length ? `<div class="tiny muted" style="font-weight:700;padding:4px">${L('الوقفات', 'Stops')}</div>${d.stops.map(st => `<div class="fm-card" data-action="fhStop" data-arg="${st.n}"><span class="fm-dot" style="background:#d98a00;color:#fff;width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${st.n}</span><div class="main"><div class="title">${hhmm(st.start)}${st.end ? ' – ' + hhmm(st.end) : ''} <span class="muted">· ${dur(st.min)}</span></div><div class="meta"><span>${esc(st.address || `${(+st.lat).toFixed(4)}, ${(+st.lng).toFixed(4)}`)}</span></div></div></div>`).join('')}` : ''}
+          ${d && d.trips.length ? `<div class="tiny muted" style="font-weight:700;padding:4px">${L('المشاوير (حركة متواصلة)', 'Moves')}</div>${d.trips.map(t => `<div class="fm-card" style="cursor:default"><span class="fm-dot" style="background:#1b7f4b"></span><div class="main"><div class="title">${hhmm(t.start)} → ${hhmm(t.end)} <span class="muted">· ${dur(t.min)}</span></div><div class="meta"><span>${t.km != null ? fmtNum(t.km) + ' ' + L('كم', 'km') : ''}</span><span>${t.maxKmh != null ? L('أقصى', 'max') + ' ' + fmtNum(Math.round(t.maxKmh)) + ' ' + L('كم/س', 'km/h') : ''}</span></div>${t.endAddress ? `<div class="meta"><span class="tiny">${L('إلى', 'to')}: ${esc(t.endAddress)}</span></div>` : ''}</div></div>`).join('')}` : ''}
+          ${d && !d.stops.length && !d.trips.length && !d.track.length && !H.loading ? `<div class="empty"><b>${L('مفيش بيانات لليوم ده', 'Nothing for this day')}</b></div>` : ''}
+          ${v ? `<div class="tiny muted" style="padding:8px 4px">${L('المصدر: جهاز التتبع في العربية (Traccar) · الوقفات أقل من دقيقتين مش معروضة', 'Source: the tracker in the vehicle (Traccar) · stops under 2 minutes are hidden')}</div>` : ''}
+        </div></aside></div>`;
+  }
+  EXTRA_VIEWS.fleethistory = r => vHistory(r);
+  EXTRA_TITLES.fleethistory = () => ({ title: L('تاريخ المسار', 'Route history'), sub: L('عربية + يوم → المسار والوقفات', 'Vehicle + day → the route and the stops'), actions: `<a class="btn ghost" href="#/fleetmap">${icon('map')}<span>${L('الخريطة الحية', 'Live map')}</span></a>` });
+  (() => { const i = NAV.findIndex(n => n.id === 'fleetalerts'); const entry = { id: 'fleethistory', label: 'تاريخ المسار', icon: 'calendar' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.fleethistory = 'تاريخ المسار';
+  canSee = (base => view => (view === 'fleethistory' ? mayView() : base(view)))(canSee);
+  document.addEventListener('change', ev => { const k = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-fh'); if (!k) return; if (k === 'vid') { H.vid = ev.target.value; H.data = null; H.err = ''; loadHistory(); } else if (k === 'date') { H.date = ev.target.value; H.data = null; H.err = ''; loadHistory(); } });
+  document.addEventListener('input', ev => { const k = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-fh'); if (k !== 'replay') return; H.replay = +ev.target.value; drawH(); const lbl = ev.target.parentNode && ev.target.parentNode.querySelector('.tiny'); const pt = H.data && H.data.track[H.replay]; if (lbl && pt) lbl.textContent = `${hhmm(pt.at)}${pt.speed != null ? ` · ${fmtNum(Math.round(pt.speed))} ${L('كم/س', 'km/h')}` : ''}`; });
+  const addDaysLocal = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  ACTIONS.fhLoad = () => { H.data = null; H.err = ''; loadHistory(); };
+  ACTIONS.fhPrev = () => { H.date = addDaysLocal(H.date || todayLocal(), -1); H.data = null; H.err = ''; loadHistory(); };
+  ACTIONS.fhNext = () => { const n = addDaysLocal(H.date || todayLocal(), 1); if (n > todayLocal()) return; H.date = n; H.data = null; H.err = ''; loadHistory(); };
+  ACTIONS.fhStop = n => { const st = H.data && H.data.stops.find(x => x.n === +n); const m = H.map; if (st && m && m.map && m.map.panTo) { m.map.panTo({ lat: +st.lat, lng: +st.lng }); if (m.map.setZoom) m.map.setZoom(16); } };
+  /* the map: Google (same loader as the fleet map), polyline + numbered stop markers + start/end + the replay dot */
+  async function ensureHMap() {
+    const box = document.getElementById('fh-map'); if (!box || !H.data || !H.data.track.length) return;
+    const fx = FMX(); if (!fx.mapKey) return;
+    if (box._hm) { drawH(); return; }
+    const key = await fx.mapKey(); const b2 = document.getElementById('fh-map'); if (!b2 || b2._hm) return;
+    if (!key) { b2.innerHTML = fx.noMap ? fx.noMap() : ''; return; }
+    try { await fx.loadGmaps(key); } catch (e) { const b3 = document.getElementById('fh-map'); if (b3) b3.innerHTML = fx.noMap ? fx.noMap() : ''; return; }
+    const b3 = document.getElementById('fh-map'); if (!b3 || b3._hm || !window.google) return;
+    const g = window.google.maps; b3.innerHTML = '';
+    const map = new g.Map(b3, { center: { lat: 30.03, lng: 31.45 }, zoom: 11, mapTypeControl: false, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
+    b3._hm = { map, items: [], ghost: null, sig: '' }; H.map = b3._hm; drawH();
+  }
+  function drawH() {
+    const m = H.map; const d = H.data; if (!m || !d || !document.getElementById('fh-map')) return; const g = window.google.maps;
+    const sig = H.vid + '|' + H.date + '|' + d.track.length;
+    if (m.sig !== sig) {
+      m.items.forEach(x => x.setMap(null)); m.items = []; m.sig = sig;
+      const path = d.track.map(p => ({ lat: +p.lat, lng: +p.lng })); const bounds = new g.LatLngBounds(); path.forEach(p => bounds.extend(p));
+      if (path.length > 1) m.items.push(new g.Polyline({ map: m.map, path, strokeColor: '#2a78d6', strokeOpacity: .9, strokeWeight: 4, zIndex: 2 }));
+      if (path.length) { m.items.push(new g.Marker({ map: m.map, position: path[0], label: { text: L('بداية', 'Start'), fontSize: '11px', fontWeight: '700' }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#1b7f4b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 4 })); m.items.push(new g.Marker({ map: m.map, position: path[path.length - 1], label: { text: L('نهاية', 'End'), fontSize: '11px', fontWeight: '700' }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#d93025', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 4 })); }
+      d.stops.forEach(st => { const mk = new g.Marker({ map: m.map, position: { lat: +st.lat, lng: +st.lng }, label: { text: String(st.n), color: '#fff', fontSize: '11px', fontWeight: '800' }, title: `${hhmm(st.start)} · ${dur(st.min)}`, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 11, fillColor: '#d98a00', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 5 }); m.items.push(mk); });
+      const hz = homeZone(); if (hz) m.items.push(new g.Marker({ map: m.map, position: { lat: hz.lat, lng: hz.lng }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 5, fillColor: '#1b7f4b', fillOpacity: .9, strokeColor: '#fff', strokeWeight: 1.5, labelOrigin: g.Point ? new g.Point(0, 3) : undefined }, label: { text: L('المصنع', 'Factory'), fontSize: '10px', fontWeight: '700', className: 'fm-lbl' }, zIndex: 0 }));
+      if (path.length > 1) m.map.fitBounds(bounds, 60); else if (path.length) m.map.setCenter(path[0]);
+    }
+    const pt = d.track[Math.min(d.track.length - 1, H.replay)];
+    if (pt) { const pos = { lat: +pt.lat, lng: +pt.lng }; if (!m.ghost) m.ghost = new g.Marker({ map: m.map, position: pos, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 8, fillColor: '#2a78d6', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 9 }); else m.ghost.setPosition(pos); }
+  }
+  if (typeof renderBase === 'function') renderBase = (base => function (full) {
+    const keep = full ? [] : ['fh-map'].map(id => document.getElementById(id)).filter(el => el && el._hm);
+    keep.forEach(el => el.parentNode && el.parentNode.removeChild(el));
+    const r = base.apply(this, arguments);
+    keep.forEach(el => { const nw = document.getElementById(el.id); if (nw && nw !== el) { nw.replaceWith(el); setTimeout(() => { try { window.google.maps.event.trigger(el._hm.map, 'resize'); } catch (e) { /* ignore */ } }, 0); } else if (!nw) { H.map = null; } });
+    return r;
+  })(renderBase);
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!document.getElementById('fh-map')) H.map = null; });
+
+  /* links: the fleet map detail panel + the vehicle page */
+  const histLink = id => `<a class="btn xs" href="#/fleethistory/${esc(id)}">${icon('calendar')}${L('تاريخ المسار', 'Route history')}</a>`;
+  if (typeof EXTRA_VIEWS.fleetmap === 'function') EXTRA_VIEWS.fleetmap = (base => r => { let html = base(r); const fm = FMX().state; if (fm && fm.sel) html = html.replace('<div class="fm-grid">', `<div class="row" style="gap:6px;margin:4px 0 6px">${histLink(fm.sel)}</div><div class="fm-grid">`); return html; })(EXTRA_VIEWS.fleetmap);
+  if (typeof vVehicle === 'function') vVehicle = (base => function (id) { const html = base.apply(this, arguments); const v = byId('vehicles', id); if (!v || !v.gpsId || !mayView()) return html; return html.replace(/(<button class="btn sm" data-action="vehEdit")/, `${histLink(id)} $1`); })(vVehicle);
+
+  window.nfFleetGeo = { fences, homeZone, history: H, loadHistory };
 })();
 </script>
 
