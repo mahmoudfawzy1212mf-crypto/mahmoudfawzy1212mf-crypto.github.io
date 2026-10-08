@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-1017-ea2748";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261008-1045-df4841";</script>
 
 <script>
 'use strict';
@@ -36137,6 +36137,219 @@ html body .fmd-row:hover{background:var(--surface-2)}
   if (typeof vVehicle === 'function') vVehicle = (base => function (id) { const html = base.apply(this, arguments); const v = byId('vehicles', id); if (!v || !v.gpsId || !mayView()) return html; return html.replace(/(<button class="btn sm" data-action="vehEdit")/, `${histLink(id)} $1`); })(vVehicle);
 
   window.nfFleetGeo = { fences, homeZone, history: H, loadHistory };
+})();
+/* =====================================================================
+   v6.94 — fleet phase 3 (Mahmoud, 8 Oct — «do all of them»; factory only):
+   · VEHICLE REPORTS: a page (#/fleetreport[/vehicleId]) — one vehicle or the whole fleet, by day / week (Sat–Fri) / month:
+     km, moving / idling / offline time, max speed, first and last move, system trips, alerts by type, fuel (litres,
+     L/100 km). Per-day rows come from the server counters (docs col 'fleetday', written every minute by fleet-alerts);
+     when the vehicle has a tracker the range totals and the per-day km come from Traccar's own report (the same
+     'report' bridge action as the route history page, clock offset compensated). «Print / PDF» renders a clean report
+     through the app's print host (the phone's share sheet saves it as a PDF).
+   · DRIVER PROFILE: a page (#/driverprofile/<workerId>) — trips, km, hours behind the wheel, alerts attributed to the
+     driver (overspeed / after hours / off route / idling / trips closed by the system) and a simple driving index
+     (100 minus penalties) per week / month, with the vehicles he drove and his last trips. Linked from the worker
+     page (drivers), the vehicle report and the fleet trips.
+   ===================================================================== */
+(function () {
+  if (typeof isStudioz === 'function' && isStudioz()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet', 'acc'].includes(R()));
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const FA = () => window.nfFleetAlerts || { types: {} };
+  const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const dur = m => (m == null || isNaN(m) ? '—' : m < 60 ? L(`${Math.round(m)} د`, `${Math.round(m)}m`) : L(`${Math.floor(m / 60)} س ${Math.round(m % 60)} د`, `${Math.floor(m / 60)}h ${Math.round(m % 60)}m`));
+  const r1 = x => Math.round((+x || 0) * 10) / 10;
+  const dayN = iso => { const d = new Date(iso + 'T00:00:00'); return L(['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][d.getDay()], ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]); };
+  const tLabel = t => { const m = FA().types || {}; return m[t] ? L(m[t].ar, m[t].en) : t; };
+  const vehName = id => { const v = byId('vehicles', id); return v ? v.name : (id || '—'); };
+  const trips = () => list('trips').filter(t => t && ['started', 'done'].includes(t.status || ''));
+
+  /* ---------- ranges: day / week (Saturday → Friday) / month ---------- */
+  function range(period, anchor) {
+    const a = anchor || todayISO();
+    if (period === 'day') return { from: a, to: a, label: `${dayN(a)} ${fmtDate(a)}` };
+    if (period === 'week') { const d = new Date(a + 'T00:00:00'); const back = (d.getDay() + 1) % 7; const from = addDays(a, -back); const to = addDays(from, 6); return { from, to, label: `${fmtDate(from)} – ${fmtDate(to)}` }; }
+    const from = a.slice(0, 7) + '-01'; const d = new Date(from + 'T00:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); const to = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { from, to, label: typeof fmtMonth === 'function' ? fmtMonth(a.slice(0, 7)) : a.slice(0, 7) };
+  }
+  const step = (period, anchor, n) => { if (period === 'day') return addDays(anchor, n); if (period === 'week') return addDays(anchor, 7 * n); const d = new Date(anchor.slice(0, 7) + '-01T00:00:00'); d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
+  const days = rg => { const out = []; let d = rg.from; const stop = rg.to < todayISO() ? rg.to : todayISO(); while (d <= stop && out.length < 62) { out.push(d); d = addDays(d, 1); } return out; };
+  const inRange = (iso, rg) => !!iso && iso.slice(0, 10) >= rg.from && iso.slice(0, 10) <= rg.to;
+
+  /* ---------- the numbers of one vehicle over a range ---------- */
+  function vehStats(v, rg, tc) {
+    const fd = list('fleetday').filter(r => r.vehicleId === v.id && inRange(r.date, rg));
+    const al = list('fleetalerts').filter(a => a.vehicleId === v.id && inRange(a.date || a.at, rg));
+    const tr = trips().filter(t => t.vehicleId === v.id && inRange(t.date || t.startedAt, rg));
+    const fuel = (typeof vehFuel === 'function' ? vehFuel(v) : []).filter(f => inRange(f.date, rg));
+    const byDay = {}; fd.forEach(r => { byDay[r.date] = Object.assign({}, r); });
+    /* Traccar's moves (one row per continuous move) → per-day km / minutes / max speed; the summary → the range totals */
+    const tcDay = {}; if (tc && Array.isArray(tc.trips)) tc.trips.forEach(t => { const d = (t.start || '').slice(0, 10); if (!d) return; const x = tcDay[d] || (tcDay[d] = { km: 0, min: 0, maxKmh: 0, first: null, last: null }); x.km += +t.km || 0; x.min += +t.min || 0; x.maxKmh = Math.max(x.maxKmh, +t.maxKmh || 0); if (!x.first || t.start < x.first) x.first = t.start; if (!x.last || (t.end || '') > x.last) x.last = t.end || t.start; });
+    const rows = days(rg).map(d => { const f = byDay[d] || {}; const t = tcDay[d]; return { date: d, km: t ? r1(t.km) : (f.km != null ? r1(f.km) : null), movingMin: t ? Math.round(t.min) : (f.movingMin != null ? Math.round(f.movingMin) : null), idleMin: f.idleMin != null ? Math.round(f.idleMin) : null, offlineMin: f.offlineMin != null ? Math.round(f.offlineMin) : null, maxKmh: Math.max(t ? t.maxKmh : 0, +f.maxKmh || 0) || null, first: (t && t.first) || f.firstMoveAt || null, last: (t && t.last) || f.lastMoveAt || null, alerts: al.filter(a => (a.date || a.at || '').slice(0, 10) === d).length, trips: tr.filter(x => (x.date || x.startedAt || '').slice(0, 10) === d).length, has: !!t || !!byDay[d] }; });
+    const sum = (arr, k) => arr.reduce((a, r) => a + (+r[k] || 0), 0);
+    const km = tc && tc.summary && tc.summary.km != null ? r1(tc.summary.km) : r1(sum(rows, 'km'));
+    const movingMin = tc && tc.summary && tc.summary.engineMin != null && !tc.trips ? Math.round(tc.summary.engineMin) : Math.round(sum(rows, 'movingMin'));
+    const maxKmh = Math.max(tc && tc.summary ? +tc.summary.maxKmh || 0 : 0, ...rows.map(r => +r.maxKmh || 0)) || null;
+    const byType = {}; al.forEach(a => { byType[a.type] = (byType[a.type] || 0) + 1; });
+    const liters = r1(fuel.reduce((a, f) => a + (+f.liters || 0), 0)); const amount = fuel.reduce((a, f) => a + (+f.amount || 0), 0);
+    const lPer100 = liters > 0 && km >= 20 ? r1(liters / km * 100) : null;
+    const tripKm = r1(tr.reduce((a, t) => a + (+t.km || 0), 0));
+    return { v, rows, km, movingMin, idleMin: Math.round(sum(rows, 'idleMin')), offlineMin: Math.round(sum(rows, 'offlineMin')), maxKmh, alerts: al, byType, trips: sortBy(tr, t => (t.date || '') + (t.time || ''), true), tripKm, liters, amount, lPer100, activeDays: rows.filter(r => (r.km || 0) > 0.5).length, source: tc ? 'traccar' : (fd.length ? 'server' : 'none') };
+  }
+
+  /* ---------- Traccar range reports (summary + moves), clock offset compensated ---------- */
+  const RP = { vid: '', period: 'week', anchor: '', tc: {}, loading: false, err: '', key: 0, off: {} };
+  async function offsets(vs) {
+    const out = {}; try { const r = await gpsCall('track', { imeis: vs.map(v => v.gpsId).join(',') }); (r.positions || []).forEach(p => { if (p.at && p.sysAt) { const h = Math.round((new Date(p.at) - new Date(p.sysAt)) / 3600000); out[p.imei] = Math.abs(h) >= 1 && Math.abs(h) <= 14 ? h : 0; } }); } catch (e) { /* 0 */ }
+    return out;
+  }
+  const shift = (iso, off) => (iso ? new Date(new Date(iso).getTime() - off * 3600000).toISOString() : iso);
+  async function loadTc() {
+    const rg = range(RP.period, RP.anchor); const vs = (RP.vid ? [byId('vehicles', RP.vid)] : list('vehicles')).filter(v => v && v.gpsId);
+    RP.tc = {}; RP.err = ''; RP._key = rg.from + rg.to + RP.vid;
+    if (!vs.length || !hosted() || typeof gpsCall !== 'function' || !gpsOn()) { RP.loading = false; return; }
+    RP.loading = true; const key = ++RP.key; render(false);
+    try {
+      const off = await offsets(vs); RP.off = off;
+      const d0 = new Date(rg.from + 'T00:00:00').getTime(), d1 = new Date(rg.to + 'T00:00:00').getTime() + 86400000;
+      await Promise.all(vs.map(async v => {
+        const o = off[v.gpsId] || 0; const from = new Date(d0 + o * 3600000).toISOString(), to = new Date(Math.min(d1 + o * 3600000, Date.now() + Math.max(0, o) * 3600000 + 60000)).toISOString();
+        try { const r = await gpsCall('report', { imei: v.gpsId, from, to }); if (key !== RP.key) return; RP.tc[v.id] = { summary: r.summary || null, trips: (r.trips || []).map(t => Object.assign({}, t, { start: shift(t.start, o), end: shift(t.end, o) })) }; }
+        catch (e) { if (key === RP.key) RP.err = typeof gpsErrAr === 'function' ? gpsErrAr(e.message || e) : (e.message || String(e)); }
+      }));
+    } catch (e) { RP.err = e.message || String(e); }
+    if (key !== RP.key) return; RP.loading = false; render(false);
+  }
+  const reload = () => { RP.tc = {}; loadTc(); };
+
+  /* ---------- the page ---------- */
+  const tile = (v, l, cls) => `<div class="fm-tile ${cls || ''}"><b>${v}</b><span>${l}</span></div>`;
+  const typeChips = byType => Object.keys(byType).sort((a, b) => byType[b] - byType[a]).map(t => `<span class="badge ${['overspeed', 'afterhours', 'factory_out', 'offline'].includes(t) ? 'crit' : ['deviation', 'idle', 'autoclose', 'geo_out'].includes(t) ? 'warn' : ''}">${esc(tLabel(t))} ${byType[t]}</span>`).join(' ') || `<span class="muted small">${L('مفيش تنبيهات', 'No alerts')}</span>`;
+  function controls(rg) {
+    const vs = sortBy(list('vehicles'), v => v.name);
+    return `<div class="card" style="padding:10px 12px"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><select data-fr="vid" style="max-width:240px"><option value="">${L('كل العربيات', 'All vehicles')}</option>${vs.map(x => `<option value="${esc(x.id)}" ${x.id === RP.vid ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <div class="tabs" style="margin:0">${[['day', L('يوم', 'Day')], ['week', L('أسبوع', 'Week')], ['month', L('شهر', 'Month')]].map(p => `<button class="${RP.period === p[0] ? 'on' : ''}" data-action="frPeriod" data-arg="${p[0]}">${p[1]}</button>`).join('')}</div>
+      <input type="date" data-fr="date" value="${esc(RP.anchor)}" max="${todayISO()}" class="ltr"><button type="button" class="btn sm" data-action="frStep" data-arg="-1">‹</button><button type="button" class="btn sm" data-action="frStep" data-arg="1" ${step(RP.period, RP.anchor, 1) > todayISO() ? 'disabled' : ''}>›</button><b class="small">${rg.label}</b><div class="grow"></div>
+      <button type="button" class="btn sm" data-action="frReload" ${RP.loading ? 'disabled' : ''}>${icon('arrow')}${RP.loading ? L('جارٍ التحميل…', 'Loading…') : L('تحديث', 'Refresh')}</button><button type="button" class="btn sm p" data-action="frPrint">${icon('print')}${L('طباعة / PDF', 'Print / PDF')}</button></div>
+      ${RP.err ? `<div class="banner warn" style="margin-top:8px">${icon('alert')}<span>${esc(RP.err)}</span></div>` : ''}</div>`;
+  }
+  function vehReport(st, rg) {
+    const v = st.v; const hasTc = st.source === 'traccar'; const off = RP.off[v.gpsId];
+    const rowsShown = st.rows.filter(r => r.has || r.alerts || r.trips);
+    return `${controls(rg)}
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)">${tile(fmtNum(st.km), L('كم', 'km'))}${tile(dur(st.movingMin), L('وقت الحركة', 'moving'))}${tile(dur(st.idleMin), L('واقفة والموتور شغّال', 'idling'))}${tile(st.maxKmh != null ? fmtNum(Math.round(st.maxKmh)) : '—', L('أقصى سرعة', 'max km/h'), st.maxKmh > ((v.speedLimit && +v.speedLimit) || (FA().cfg ? +FA().cfg().speedLimit : 100) || 100) ? 'warn' : '')}</div>
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)">${tile(st.trips.length, L('مشاوير في السيستم', 'system trips'))}${tile(st.alerts.length, L('تنبيهات', 'alerts'), st.alerts.length ? 'warn' : '')}${tile(st.liters ? fmtNum(st.liters) : '—', L('لتر وقود', 'litres of fuel'))}${tile(st.lPer100 != null ? st.lPer100 : '—', L('لتر / 100 كم', 'L / 100 km'))}</div>
+      <div class="grid gmain"><div class="stack">
+        <div class="card tight"><div class="cardhead" style="padding:10px 12px 0"><h3>${L('يوم بيوم', 'Day by day')}</h3><span class="muted small">${st.activeDays} ${L('يوم حركة', 'active days')}</span></div><div class="tablewrap"><table><thead><tr><th>${L('اليوم', 'Day')}</th><th class="n">${L('كم', 'km')}</th><th class="n">${L('حركة', 'Moving')}</th><th class="n">${L('موتور واقف', 'Idle')}</th><th class="n">${L('أقصى', 'Max')}</th><th>${L('أول حركة', 'First')}</th><th>${L('آخر حركة', 'Last')}</th><th class="n">${L('مشاوير', 'Trips')}</th><th class="n">${L('تنبيهات', 'Alerts')}</th><th></th></tr></thead><tbody>${rowsShown.length ? rowsShown.map(r => `<tr><td>${dayN(r.date)} <span class="muted">${fmtDate(r.date)}</span></td><td class="n">${r.km != null ? fmtNum(r.km) : '—'}</td><td class="n">${dur(r.movingMin)}</td><td class="n">${r.idleMin ? dur(r.idleMin) : '—'}</td><td class="n">${r.maxKmh ? fmtNum(Math.round(r.maxKmh)) : '—'}</td><td>${r.first ? hhmm(r.first) : '—'}</td><td>${r.last ? hhmm(r.last) : '—'}</td><td class="n">${r.trips || ''}</td><td class="n">${r.alerts ? `<span class="badge warn">${r.alerts}</span>` : ''}</td><td>${v.gpsId ? `<a class="tiny" href="#/fleethistory/${esc(v.id)}" data-action="frHist" data-arg="${esc(v.id)}:${r.date}">${L('المسار', 'route')}</a>` : ''}</td></tr>`).join('') : `<tr><td colspan="10" class="muted small">${L('مفيش بيانات حركة في الفترة دي', 'No movement data for this period')}</td></tr>`}</tbody></table></div>
+          <div class="tiny muted" style="padding:6px 12px 10px">${hasTc ? L('المصدر: تقرير جهاز التتبع (Traccar) + عدّادات السيرفر', 'Source: the tracker report (Traccar) + the server counters') : st.source === 'server' ? L('المصدر: عدّادات السيرفر (كل دقيقة) — العربية من غير تقرير جهاز', 'Source: the server counters (every minute) — no tracker report for this vehicle') : L('العربية دي من غير جهاز تتبع — الأرقام من مشاوير السيستم بس', 'This vehicle has no tracker — numbers from the system trips only')}${off ? ' · ' + L(`ساعة الجهاز متقدمة ${off} س (متصحّحة)`, `tracker clock ${off} h ahead (corrected)`) : ''}</div></div>
+        <div class="card"><div class="cardhead"><h3>${L('المشاوير', 'Trips')}</h3><span class="muted small">${st.trips.length}${st.tripKm ? ` · ${fmtNum(st.tripKm)} ${L('كم بالهاتف', 'km by phone')}` : ''}</span></div>${st.trips.length ? `<div class="list">${st.trips.slice(0, 40).map(t => `<div class="item" data-action="go" data-arg="fleet/${esc(t.id)}"><div class="main"><div class="title">${esc(t.number || '')} — ${esc(t.purpose || t.toName || '')}</div><div class="meta"><span>${fmtDate(t.date || (t.startedAt || '').slice(0, 10))}${t.startedAt ? ' ' + hhmm(t.startedAt) : ''}${t.endedAt ? ' → ' + hhmm(t.endedAt) : ''}</span><span><a href="#/driverprofile/${esc(t.driverId || '')}">${esc(assigneeName(t.driverId))}</a></span>${t.km ? `<span>${fmtNum(t.km)} ${L('كم', 'km')}</span>` : ''}${t.autoClosed ? `<span class="badge warn">${L('اتقفل تلقائي', 'auto-closed')}</span>` : t.status === 'started' ? `<span class="badge">${L('شغّال', 'open')}</span>` : ''}</div></div></div>`).join('')}</div>` : `<div class="muted small">${L('مفيش مشاوير مسجّلة في الفترة دي', 'No trips recorded in this period')}</div>`}</div>
+      </div><div class="stack">
+        <div class="card"><div class="cardhead"><h3>${L('التنبيهات', 'Alerts')}</h3><span class="muted small">${st.alerts.length}</span><div class="grow"></div><a class="btn xs" href="#/fleetalerts">${L('كل التنبيهات', 'All alerts')}</a></div><div class="row" style="gap:6px;flex-wrap:wrap">${typeChips(st.byType)}</div>${st.alerts.length ? `<div class="sep"></div><div class="list">${sortBy(st.alerts, a => a.at || '', true).slice(0, 12).map(a => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(tLabel(a.type))}${a.kmh ? ` · ${fmtNum(Math.round(a.kmh))} ${L('كم/س', 'km/h')}` : ''}${a.mins ? ` · ${dur(a.mins)}` : ''}</div><div class="meta"><span>${fmtDate((a.at || '').slice(0, 10))} ${hhmm(a.at)}</span>${a.driverId ? `<span>${esc(assigneeName(a.driverId))}</span>` : ''}</div></div></div>`).join('')}</div>` : ''}</div>
+        <div class="card"><div class="cardhead"><h3>${L('الوقود', 'Fuel')}</h3></div><div class="grid g3" style="gap:8px;font-size:13px"><div><div class="tiny muted">${L('لتر', 'Litres')}</div><b class="num">${fmtNum(st.liters)}</b></div>${typeof seesFinance === 'function' && seesFinance() ? `<div><div class="tiny muted">${L('المبلغ', 'Amount')}</div><b class="num">${fmtMoney(st.amount)}</b></div>` : ''}<div><div class="tiny muted">${L('لتر/100كم', 'L/100 km')}</div><b class="num">${st.lPer100 != null ? st.lPer100 : '—'}</b></div></div>${st.lPer100 == null && st.liters ? `<div class="tiny muted" style="margin-top:6px">${L('الاستهلاك بيتحسب لما يبقى في مسافة كفاية (≥ 20 كم) في نفس الفترة', 'Consumption needs enough distance (≥ 20 km) in the same period')}</div>` : ''}</div>
+        <div class="card"><div class="cardhead"><h3>${esc(v.name)}</h3></div><div class="small">${esc(v.plate || '')}${v.driverId ? ` · <a href="#/driverprofile/${esc(v.driverId)}">${esc(assigneeName(v.driverId))}</a>` : ''}</div><div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><a class="btn xs" href="#/fleet/veh/${esc(v.id)}">${icon('map')}${L('ملف العربية', 'Vehicle page')}</a>${v.gpsId ? `<a class="btn xs" href="#/fleethistory/${esc(v.id)}">${icon('calendar')}${L('تاريخ المسار', 'Route history')}</a>` : ''}</div></div>
+      </div></div>`;
+  }
+  function fleetReport(rg) {
+    const vs = sortBy(list('vehicles').filter(v => v.status !== 'retired'), v => v.name); const sts = vs.map(v => vehStats(v, rg, RP.tc[v.id]));
+    const tot = k => sts.reduce((a, s) => a + (+s[k] || 0), 0); const alerts = sts.reduce((a, s) => a + s.alerts.length, 0); const byType = {}; sts.forEach(s => Object.keys(s.byType).forEach(t => { byType[t] = (byType[t] || 0) + s.byType[t]; }));
+    const top = sortBy(sts.filter(s => s.alerts.length), s => s.alerts.length, true).slice(0, 3);
+    return `${controls(rg)}
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)">${tile(fmtNum(r1(tot('km'))), L('كم كل الأسطول', 'fleet km'))}${tile(dur(tot('movingMin')), L('وقت الحركة', 'moving'))}${tile(dur(tot('idleMin')), L('واقفة والموتور شغّال', 'idling'))}${tile(alerts, L('تنبيهات', 'alerts'), alerts ? 'warn' : '')}</div>
+      <div class="card tight"><div class="cardhead" style="padding:10px 12px 0"><h3>${L('كل عربية', 'Per vehicle')}</h3><span class="muted small">${vs.length}</span></div><div class="tablewrap"><table><thead><tr><th>${L('العربية', 'Vehicle')}</th><th>${L('السواق', 'Driver')}</th><th class="n">${L('كم', 'km')}</th><th class="n">${L('حركة', 'Moving')}</th><th class="n">${L('موتور واقف', 'Idle')}</th><th class="n">${L('أقصى', 'Max')}</th><th class="n">${L('أيام حركة', 'Active days')}</th><th class="n">${L('مشاوير', 'Trips')}</th><th class="n">${L('لتر', 'Litres')}</th><th class="n">${L('ل/100', 'L/100')}</th><th class="n">${L('تنبيهات', 'Alerts')}</th></tr></thead><tbody>${sts.map(s => `<tr><td><a href="#/fleetreport/${esc(s.v.id)}" data-action="frPick" data-arg="${esc(s.v.id)}">${esc(s.v.name)}</a>${!s.v.gpsId ? `<div class="tiny muted">${L('بدون جهاز', 'no tracker')}</div>` : ''}</td><td class="small">${s.v.driverId ? `<a href="#/driverprofile/${esc(s.v.driverId)}">${esc(assigneeName(s.v.driverId))}</a>` : '—'}</td><td class="n">${fmtNum(s.km)}</td><td class="n">${dur(s.movingMin)}</td><td class="n">${s.idleMin ? dur(s.idleMin) : '—'}</td><td class="n">${s.maxKmh ? fmtNum(Math.round(s.maxKmh)) : '—'}</td><td class="n">${s.activeDays}</td><td class="n">${s.trips.length}</td><td class="n">${s.liters ? fmtNum(s.liters) : '—'}</td><td class="n">${s.lPer100 != null ? s.lPer100 : '—'}</td><td class="n">${s.alerts.length ? `<span class="badge warn">${s.alerts.length}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="grid g2"><div class="card"><div class="cardhead"><h3>${L('التنبيهات حسب النوع', 'Alerts by type')}</h3></div><div class="row" style="gap:6px;flex-wrap:wrap">${typeChips(byType)}</div></div>
+      <div class="card"><div class="cardhead"><h3>${L('أكتر عربيات عليها تنبيهات', 'Most alerted vehicles')}</h3></div>${top.length ? top.map(s => `<div class="mrow"><div class="mn"><b>${esc(s.v.name)}</b><div class="tiny muted">${Object.keys(s.byType).map(t => `${tLabel(t)} ${s.byType[t]}`).join(' · ')}</div></div><span class="badge warn">${s.alerts.length}</span></div>`).join('') : `<div class="muted small">${L('مفيش تنبيهات في الفترة دي', 'No alerts in this period')}</div>`}</div></div>`;
+  }
+  function vReport(route) {
+    if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع ومدير الحركة والحسابات', 'This page is for the owner, the factory manager, the fleet manager and accounts')}</b></div></div>`;
+    if (!RP.anchor) RP.anchor = todayISO();
+    if (route && route.id !== undefined && route.id !== RP.vid && (route.id === '' || byId('vehicles', route.id))) { RP.vid = route.id || ''; RP.tc = {}; }
+    const rg = range(RP.period, RP.anchor);
+    setTimeout(() => { if (!RP.loading && !Object.keys(RP.tc).length && !RP.err && RP._key !== rg.from + rg.to + RP.vid) { RP._key = rg.from + rg.to + RP.vid; loadTc(); } }, 30);
+    const v = RP.vid ? byId('vehicles', RP.vid) : null;
+    return v ? vehReport(vehStats(v, rg, RP.tc[v.id]), rg) : fleetReport(rg);
+  }
+  EXTRA_VIEWS.fleetreport = r => vReport(r);
+  EXTRA_TITLES.fleetreport = () => ({ title: L('تقارير العربيات', 'Vehicle reports'), sub: L('يوم / أسبوع / شهر — كم وحركة وتنبيهات ووقود', 'Day / week / month — km, moving time, alerts and fuel'), actions: `<a class="btn ghost" href="#/fleethistory">${icon('calendar')}<span>${L('تاريخ المسار', 'Route history')}</span></a>` });
+  (() => { const i = NAV.findIndex(n => n.id === 'fleethistory'); const entry = { id: 'fleetreport', label: 'تقارير العربيات', icon: 'report' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.fleetreport = 'تقارير العربيات';
+  document.addEventListener('change', ev => { const k = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-fr'); if (!k) return; if (k === 'vid') { RP.vid = ev.target.value; location.hash = '#/fleetreport' + (RP.vid ? '/' + RP.vid : ''); RP.tc = {}; RP._key = ''; render(false); } else if (k === 'date') { RP.anchor = ev.target.value || todayISO(); RP.tc = {}; RP._key = ''; render(false); } });
+  ACTIONS.frPeriod = p => { RP.period = p; RP.tc = {}; RP._key = ''; render(false); };
+  ACTIONS.frStep = n => { const a = step(RP.period, RP.anchor || todayISO(), +n); if (a > todayISO()) return; RP.anchor = a; RP.tc = {}; RP._key = ''; render(false); };
+  ACTIONS.frReload = () => { RP._key = ''; reload(); };
+  ACTIONS.frPick = id => { RP.vid = id; RP.tc = {}; RP._key = ''; };
+  ACTIONS.frHist = arg => { const [vid, date] = (arg || '').split(':'); const H = window.nfFleetGeo && window.nfFleetGeo.history; if (H) { H.vid = vid; H.date = date; H.data = null; H.err = ''; } };
+
+  /* ---------- print / PDF ---------- */
+  ACTIONS.frPrint = () => {
+    if (!mayView() || typeof printHTML !== 'function') return;
+    const rg = range(RP.period, RP.anchor); const v = RP.vid ? byId('vehicles', RP.vid) : null;
+    const head = (title, sub) => (typeof reportHead === 'function' ? reportHead(title, sub) : `<h2>${esc(title)}</h2><div>${sub}</div>`);
+    const cell = (x, n) => `<td${n ? ' class="n"' : ''}>${x}</td>`;
+    let body;
+    if (v) {
+      const st = vehStats(v, rg, RP.tc[v.id]); const rows = st.rows.filter(r => r.has || r.alerts || r.trips);
+      body = `${head(L(`تقرير عربية — ${v.name}`, `Vehicle report — ${v.name}`), `${rg.label}${v.plate ? ' · ' + esc(v.plate) : ''}${v.driverId ? ' · ' + esc(assigneeName(v.driverId)) : ''}`)}
+        <table><tbody><tr><th>${L('المسافة', 'Distance')}</th><td>${fmtNum(st.km)} ${L('كم', 'km')}</td><th>${L('وقت الحركة', 'Moving time')}</th><td>${dur(st.movingMin)}</td></tr><tr><th>${L('واقفة والموتور شغّال', 'Idling')}</th><td>${dur(st.idleMin)}</td><th>${L('أقصى سرعة', 'Max speed')}</th><td>${st.maxKmh ? fmtNum(Math.round(st.maxKmh)) + ' ' + L('كم/س', 'km/h') : '—'}</td></tr><tr><th>${L('المشاوير', 'Trips')}</th><td>${st.trips.length}</td><th>${L('التنبيهات', 'Alerts')}</th><td>${st.alerts.length}</td></tr><tr><th>${L('الوقود', 'Fuel')}</th><td>${st.liters ? fmtNum(st.liters) + ' ' + L('لتر', 'L') : '—'}${typeof seesFinance === 'function' && seesFinance() && st.amount ? ` · ${fmtMoney(st.amount)}` : ''}</td><th>${L('لتر / 100 كم', 'L / 100 km')}</th><td>${st.lPer100 != null ? st.lPer100 : '—'}</td></tr></tbody></table>
+        <h3>${L('يوم بيوم', 'Day by day')}</h3><table><thead><tr><th>${L('اليوم', 'Day')}</th><th class="n">${L('كم', 'km')}</th><th class="n">${L('حركة', 'Moving')}</th><th class="n">${L('موتور واقف', 'Idle')}</th><th class="n">${L('أقصى', 'Max')}</th><th>${L('أول حركة', 'First')}</th><th>${L('آخر حركة', 'Last')}</th><th class="n">${L('مشاوير', 'Trips')}</th><th class="n">${L('تنبيهات', 'Alerts')}</th></tr></thead><tbody>${rows.map(r => `<tr>${cell(`${dayN(r.date)} ${fmtDate(r.date)}`)}${cell(r.km != null ? fmtNum(r.km) : '—', 1)}${cell(dur(r.movingMin), 1)}${cell(r.idleMin ? dur(r.idleMin) : '—', 1)}${cell(r.maxKmh ? fmtNum(Math.round(r.maxKmh)) : '—', 1)}${cell(r.first ? hhmm(r.first) : '—')}${cell(r.last ? hhmm(r.last) : '—')}${cell(r.trips || '', 1)}${cell(r.alerts || '', 1)}</tr>`).join('') || `<tr><td colspan="9">${L('مفيش بيانات حركة', 'No movement data')}</td></tr>`}</tbody></table>
+        ${st.alerts.length ? `<h3>${L('التنبيهات', 'Alerts')}</h3><table><thead><tr><th>${L('الوقت', 'Time')}</th><th>${L('النوع', 'Type')}</th><th>${L('التفاصيل', 'Details')}</th><th>${L('السواق', 'Driver')}</th></tr></thead><tbody>${sortBy(st.alerts, a => a.at || '', true).slice(0, 60).map(a => `<tr>${cell(`${fmtDate((a.at || '').slice(0, 10))} ${hhmm(a.at)}`)}${cell(esc(tLabel(a.type)))}${cell(`${a.kmh ? fmtNum(Math.round(a.kmh)) + ' ' + L('كم/س', 'km/h') : ''}${a.mins ? ' ' + dur(a.mins) : ''}`)}${cell(esc(assigneeName(a.driverId)) || '—')}</tr>`).join('')}</tbody></table>` : ''}
+        ${st.trips.length ? `<h3>${L('المشاوير', 'Trips')}</h3><table><thead><tr><th>${L('المشوار', 'Trip')}</th><th>${L('التاريخ', 'Date')}</th><th>${L('السواق', 'Driver')}</th><th>${L('الغرض', 'Purpose')}</th><th class="n">${L('كم', 'km')}</th></tr></thead><tbody>${st.trips.slice(0, 60).map(t => `<tr>${cell(esc(t.number || ''))}${cell(`${fmtDate(t.date || (t.startedAt || '').slice(0, 10))}${t.startedAt ? ' ' + hhmm(t.startedAt) : ''}`)}${cell(esc(assigneeName(t.driverId)))}${cell(esc(t.purpose || t.toName || ''))}${cell(t.km ? fmtNum(t.km) : '—', 1)}</tr>`).join('')}</tbody></table>` : ''}`;
+    } else {
+      const vs = sortBy(list('vehicles').filter(x => x.status !== 'retired'), x => x.name); const sts = vs.map(x => vehStats(x, rg, RP.tc[x.id]));
+      body = `${head(L('تقرير الأسطول', 'Fleet report'), rg.label)}
+        <table><thead><tr><th>${L('العربية', 'Vehicle')}</th><th>${L('السواق', 'Driver')}</th><th class="n">${L('كم', 'km')}</th><th class="n">${L('حركة', 'Moving')}</th><th class="n">${L('موتور واقف', 'Idle')}</th><th class="n">${L('أقصى', 'Max')}</th><th class="n">${L('أيام حركة', 'Active days')}</th><th class="n">${L('مشاوير', 'Trips')}</th><th class="n">${L('لتر', 'Litres')}</th><th class="n">${L('ل/100', 'L/100')}</th><th class="n">${L('تنبيهات', 'Alerts')}</th></tr></thead><tbody>${sts.map(s => `<tr>${cell(esc(s.v.name))}${cell(esc(assigneeName(s.v.driverId)) || '—')}${cell(fmtNum(s.km), 1)}${cell(dur(s.movingMin), 1)}${cell(s.idleMin ? dur(s.idleMin) : '—', 1)}${cell(s.maxKmh ? fmtNum(Math.round(s.maxKmh)) : '—', 1)}${cell(s.activeDays, 1)}${cell(s.trips.length, 1)}${cell(s.liters ? fmtNum(s.liters) : '—', 1)}${cell(s.lPer100 != null ? s.lPer100 : '—', 1)}${cell(s.alerts.length || '—', 1)}</tr>`).join('')}<tr><th>${L('الإجمالي', 'Total')}</th><td></td><th class="n">${fmtNum(r1(sts.reduce((a, s) => a + s.km, 0)))}</th><th class="n">${dur(sts.reduce((a, s) => a + s.movingMin, 0))}</th><th class="n">${dur(sts.reduce((a, s) => a + s.idleMin, 0))}</th><td></td><td></td><th class="n">${sts.reduce((a, s) => a + s.trips.length, 0)}</th><th class="n">${fmtNum(r1(sts.reduce((a, s) => a + s.liters, 0)))}</th><td></td><th class="n">${sts.reduce((a, s) => a + s.alerts.length, 0)}</th></tr></tbody></table>`;
+    }
+    printHTML(`<div class="report" id="printarea">${body}<div class="tiny muted" style="margin-top:14px">${L('المصدر: أجهزة التتبع في العربيات (Traccar) + عدّادات السيرفر + مشاوير السيستم', 'Source: the trackers in the vehicles (Traccar) + the server counters + the system trips')}</div></div>`);
+  };
+
+  /* ---------- the driver profile ---------- */
+  const DP = { period: 'month', anchor: '' };
+  const PEN = { overspeed: 5, afterhours: 5, deviation: 3, idle: 1, autoclose: 5, factory_out: 4, return: 1 };
+  function driverStats(w, rg) {
+    const tr = trips().filter(t => t.driverId === w.id && inRange(t.date || t.startedAt, rg));
+    const al = list('fleetalerts').filter(a => a.driverId === w.id && inRange(a.date || a.at, rg) && PEN[a.type] != null);
+    const byType = {}; al.forEach(a => { byType[a.type] = (byType[a.type] || 0) + 1; });
+    const mins = tr.reduce((a, t) => a + (t.startedAt && t.endedAt ? Math.max(0, (new Date(t.endedAt) - new Date(t.startedAt)) / 60000) : 0), 0);
+    const km = r1(tr.reduce((a, t) => a + (+t.km || 0), 0));
+    const pen = al.reduce((a, x) => a + (PEN[x.type] || 0), 0); const score = Math.max(0, 100 - pen);
+    const vehs = {}; tr.forEach(t => { vehs[t.vehicleId] = (vehs[t.vehicleId] || 0) + 1; });
+    const fuel = []; list('vehicles').forEach(v => (typeof vehFuel === 'function' ? vehFuel(v) : []).forEach(f => { if (f.driverId === w.id && inRange(f.date, rg)) fuel.push(f); }));
+    return { trips: sortBy(tr, t => (t.date || '') + (t.time || ''), true), km, mins, alerts: al, byType, score, autoClosed: tr.filter(t => t.autoClosed).length, vehs, liters: r1(fuel.reduce((a, f) => a + (+f.liters || 0), 0)), days: new Set(tr.map(t => (t.date || t.startedAt || '').slice(0, 10))).size };
+  }
+  function vDriver(route) {
+    const w = route && route.id ? byId('workers', route.id) : null;
+    if (!w) return `<div class="card"><div class="empty"><b>${L('السواق مش موجود', 'Driver not found')}</b></div></div>`;
+    const me = typeof myDriverId === 'function' && myDriverId() === w.id;
+    if (!mayView() && !me && !(typeof canEditHr === 'function' && canEditHr())) return `<div class="card"><div class="empty"><b>${L('الصفحة دي لإدارة الحركة', 'This page is for fleet management')}</b></div></div>`;
+    if (!DP.anchor) DP.anchor = todayISO(); const rg = range(DP.period, DP.anchor); const st = driverStats(w, rg);
+    const sc = st.score >= 85 ? 'good' : st.score >= 60 ? 'warn' : 'crit';
+    return `<div class="card" style="padding:10px 12px"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0;font-size:18px"><a href="#/workers/${esc(w.id)}">${esc(w.name)}</a></h2><span class="muted small">${esc(w.phone || '')}</span><div class="grow"></div><div class="tabs" style="margin:0">${[['week', L('أسبوع', 'Week')], ['month', L('شهر', 'Month')]].map(p => `<button class="${DP.period === p[0] ? 'on' : ''}" data-action="dpPeriod" data-arg="${p[0]}">${p[1]}</button>`).join('')}</div><button type="button" class="btn sm" data-action="dpStep" data-arg="-1">‹</button><button type="button" class="btn sm" data-action="dpStep" data-arg="1" ${step(DP.period, DP.anchor, 1) > todayISO() ? 'disabled' : ''}>›</button><b class="small">${rg.label}</b></div></div>
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)">${tile(`<span class="badge ${sc}" style="font-size:18px;padding:4px 12px">${st.score}</span>`, L('مؤشر القيادة من 100', 'driving index / 100'))}${tile(st.trips.length, L('مشاوير', 'trips'))}${tile(fmtNum(st.km), L('كم (بالهاتف)', 'km (by phone)'))}${tile(dur(st.mins), L('ساعات على الطريق', 'hours on the road'))}</div>
+      <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)">${tile(st.byType.overspeed || 0, L('تجاوز سرعة', 'overspeed'), st.byType.overspeed ? 'warn' : '')}${tile((st.byType.afterhours || 0) + (st.byType.factory_out || 0), L('خارج الشغل / بدون مشوار', 'after hours / no trip'), (st.byType.afterhours || st.byType.factory_out) ? 'warn' : '')}${tile(st.byType.deviation || 0, L('انحراف عن المسار', 'off route'), st.byType.deviation ? 'warn' : '')}${tile(st.autoClosed, L('مشاوير قفلها السيستم', 'trips closed by the system'), st.autoClosed ? 'warn' : '')}</div>
+      <div class="grid gmain"><div class="stack">
+        <div class="card"><div class="cardhead"><h3>${L('المشاوير', 'Trips')}</h3><span class="muted small">${st.trips.length} · ${st.days} ${L('يوم', 'days')}</span></div>${st.trips.length ? `<div class="list">${st.trips.slice(0, 40).map(t => `<div class="item" data-action="go" data-arg="fleet/${esc(t.id)}"><div class="main"><div class="title">${esc(t.number || '')} — ${esc(t.purpose || t.toName || '')}</div><div class="meta"><span>${fmtDate(t.date || (t.startedAt || '').slice(0, 10))}${t.startedAt ? ' ' + hhmm(t.startedAt) : ''}${t.endedAt ? ' → ' + hhmm(t.endedAt) : ''}</span><span>${esc(vehName(t.vehicleId))}</span>${t.km ? `<span>${fmtNum(t.km)} ${L('كم', 'km')}</span>` : ''}${t.autoClosed ? `<span class="badge warn">${L('اتقفل تلقائي', 'auto-closed')}</span>` : ''}</div></div></div>`).join('')}</div>` : `<div class="muted small">${L('مفيش مشاوير في الفترة دي', 'No trips in this period')}</div>`}</div>
+      </div><div class="stack">
+        <div class="card"><div class="cardhead"><h3>${L('التنبيهات على السواق', 'Alerts on the driver')}</h3><span class="muted small">${st.alerts.length}</span></div><div class="row" style="gap:6px;flex-wrap:wrap">${typeChips(st.byType)}</div>${st.alerts.length ? `<div class="sep"></div><div class="list">${sortBy(st.alerts, a => a.at || '', true).slice(0, 10).map(a => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(tLabel(a.type))}${a.kmh ? ` · ${fmtNum(Math.round(a.kmh))} ${L('كم/س', 'km/h')}` : ''}</div><div class="meta"><span>${fmtDate((a.at || '').slice(0, 10))} ${hhmm(a.at)}</span><span>${esc(vehName(a.vehicleId))}</span></div></div></div>`).join('')}</div>` : ''}<div class="tiny muted" style="margin-top:8px">${L('المؤشر = 100 ناقص: تجاوز سرعة 5 · خارج ساعات الشغل 5 · مشوار قفله السيستم 5 · خروج بدون مشوار 4 · انحراف 3 · موتور شغّال وواقفة 1', 'Index = 100 minus: overspeed 5 · after hours 5 · trip closed by the system 5 · out with no trip 4 · off route 3 · idling 1')}</div></div>
+        <div class="card"><div class="cardhead"><h3>${L('العربيات اللي ساقها', 'Vehicles driven')}</h3></div>${Object.keys(st.vehs).length ? Object.keys(st.vehs).sort((a, b) => st.vehs[b] - st.vehs[a]).map(id => `<div class="mrow"><div class="mn"><a href="#/fleetreport/${esc(id)}">${esc(vehName(id))}</a></div><span class="muted small">${st.vehs[id]} ${L('مشوار', 'trips')}</span></div>`).join('') : `<div class="muted small">—</div>`}${st.liters ? `<div class="sep"></div><div class="small">${L('وقود سجّله', 'Fuel he logged')}: <b class="num">${fmtNum(st.liters)}</b> ${L('لتر', 'L')}</div>` : ''}</div>
+      </div></div>`;
+  }
+  EXTRA_VIEWS.driverprofile = r => vDriver(r);
+  EXTRA_TITLES.driverprofile = () => ({ title: L('ملف السواق', 'Driver profile'), sub: L('مشاوير وكيلومترات وتنبيهات ومؤشر قيادة', 'Trips, km, alerts and a driving index'), actions: `<a class="btn ghost" href="#/fleetreport">${icon('report')}<span>${L('تقارير العربيات', 'Vehicle reports')}</span></a>` });
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.driverprofile = 'ملف السواق';
+  canSee = (base => view => (view === 'fleetreport' ? mayView() : view === 'driverprofile' ? (mayView() || (typeof isDriver === 'function' && isDriver()) || (typeof canEditHr === 'function' && canEditHr())) : base(view)))(canSee);
+  ACTIONS.dpPeriod = p => { DP.period = p; render(false); };
+  ACTIONS.dpStep = n => { const a = step(DP.period, DP.anchor || todayISO(), +n); if (a > todayISO()) return; DP.anchor = a; render(false); };
+
+  /* links: the worker page (drivers), the vehicle page, the fleet trips tab */
+  const profLink = id => `<a class="btn xs" href="#/driverprofile/${esc(id)}">${icon('report')}${L('ملف السواق', 'Driver profile')}</a>`;
+  if (typeof vWorkerDetail === 'function') vWorkerDetail = (base => function (id) { let html = base.apply(this, arguments); const w = byId('workers', id); if (!w || w.role !== 'driver' || !(mayView() || (typeof canEditHr === 'function' && canEditHr()))) return html; const st = driverStats(w, range('month', todayISO())); const card = `<div class="card"><div class="cardhead"><h3>${L('القيادة الشهر ده', 'Driving this month')}</h3><span class="badge ${st.score >= 85 ? 'good' : st.score >= 60 ? 'warn' : 'crit'}">${st.score}/100</span><div class="grow"></div>${profLink(w.id)}</div><div class="small muted">${st.trips.length} ${L('مشوار', 'trips')} · ${fmtNum(st.km)} ${L('كم', 'km')} · ${st.alerts.length} ${L('تنبيه', 'alerts')}</div></div>`; const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : card + html; })(vWorkerDetail);
+  if (typeof vVehicle === 'function') vVehicle = (base => function (id) { const html = base.apply(this, arguments); const v = byId('vehicles', id); if (!v || !mayView()) return html; return html.replace(/(<button class="btn sm" data-action="vehEdit")/, `<a class="btn xs" href="#/fleetreport/${esc(id)}">${icon('report')}${L('التقرير', 'Report')}</a> $1`); })(vVehicle);
+  if (typeof vFleet === 'function') vFleet = (base => function () { const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {}; if (!mayView() || (typeof isDriver === 'function' && isDriver()) || f.tab !== 'vehicles') return html; return html.replace('<div class="card"><div class="cardhead"><h3>العربيات</h3>', `<div class="card"><div class="cardhead"><h3>العربيات</h3><a class="btn xs" href="#/fleetreport">${icon('report')}${L('التقارير', 'Reports')}</a>`); })(vFleet);
+
+  window.nfFleetReports = { range, vehStats, driverStats, state: RP, driver: DP };
 })();
 </script>
 
