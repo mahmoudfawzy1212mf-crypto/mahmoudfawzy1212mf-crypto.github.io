@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0411-377c76";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0425-d58fe9";</script>
 
 <script>
 'use strict';
@@ -36167,20 +36167,27 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     });
     return gmP;
   }
-  /* top-view vehicle drawings (data URIs) — type from the vehicle's type/name: van, pickup (TFR / Chevrolet / dababa / naql), else car; the Arabic words are unicode-escaped so the i18n guard skips them */
-  const vKind = v => { const t = ((v.type || '') + ' ' + (v.name || '') + ' ' + (v.model || '')).toLowerCase(); if (/\u0641\u0627\u0646|\u0645\u064a\u0643\u0631\u0648\u0628\u0627\u0635|\u0628\u0627\u0635|van|bus|hiace/.test(t)) return 'van'; if (/tfr|\u0634\u064a\u0641\u0631\u0648\u0644\u064a\u0647|\u062f\u0628\u0627\u0628\u0629|\u062f\u0628\u0627\u0628\u0647|\u0646\u0642\u0644|\u0631\u0628\u0639|pickup|truck|\u062c\u0627\u0645\u0628\u0648/.test(t)) return 'pickup'; return 'car'; };
+  /* top-view vehicle drawings (data URIs) — type from the vehicle's type/name: bus (microbus / bus / hiace), van, pickup (TFR / Chevrolet / dababa / naql), else car; the Arabic words are unicode-escaped so the i18n guard skips them */
+  const vKind = v => { const t = ((v.type || '') + ' ' + (v.name || '') + ' ' + (v.model || '')).toLowerCase(); if (/\u0645\u064a\u0643\u0631\u0648\u0628\u0627\u0635|\u0628\u0627\u0635|bus|hiace|coaster/.test(t)) return 'bus'; if (/\u0641\u0627\u0646|van/.test(t)) return 'van'; if (/tfr|\u0634\u064a\u0641\u0631\u0648\u0644\u064a\u0647|\u062f\u0628\u0627\u0628\u0629|\u062f\u0628\u0627\u0628\u0647|\u0646\u0642\u0644|\u0631\u0628\u0639|pickup|truck|\u062c\u0627\u0645\u0628\u0648/.test(t)) return 'pickup'; return 'car'; };
+  /* v7.02 (Mahmoud, 9 Oct: «كل عربية يبقى لها لون مميز وشكل مميز على حسب نوعها»): the colour now identifies the VEHICLE, not its state —
+     the owner can pick it on the vehicle form (vehicle.color), otherwise each vehicle takes the next colour of the palette in name order */
+  const VCOLORS = ['#2a78d6', '#e8792b', '#7b4fd1', '#159a8c', '#d6409f', '#8d5a2b', '#b8960b', '#d93025'];
+  const vehColor = v => { if (v && /^#[0-9a-fA-F]{6}$/.test(String(v.color || ''))) return String(v.color).toLowerCase(); const ids = sortBy(list('vehicles'), x => x.name || '').map(x => x.id); const i = ids.indexOf(v && v.id); return VCOLORS[(i < 0 ? 0 : i) % VCOLORS.length]; };
   const svgCache = {};
   function vehSvg(r) {
-    const col = ST[r.st][0]; const kind = vKind(r.v); const rot = r.st === 'mv' && r.course != null ? Math.round(r.course) : 0; const key = kind + col + rot + r.st;
+    const col = vehColor(r.v); const kind = vKind(r.v); const rot = r.st === 'mv' && r.course != null ? Math.round(r.course) : 0; const key = kind + col + rot + r.st;
     if (svgCache[key]) return svgCache[key];
-    const body = kind === 'van' ? '<rect x="14" y="6" width="20" height="36" rx="5"/><rect x="16" y="10" width="16" height="7" rx="2" fill="#dff0ff" opacity=".95"/><rect x="16" y="30" width="16" height="3" rx="1" fill="#000" opacity=".2"/>'
-      : kind === 'pickup' ? '<rect x="14" y="8" width="20" height="34" rx="4"/><rect x="16" y="11" width="16" height="7" rx="2" fill="#dff0ff" opacity=".95"/><rect x="16" y="22" width="16" height="17" rx="2" fill="#000" opacity=".25"/>'
-      : '<rect x="15" y="8" width="18" height="32" rx="7"/><rect x="17" y="13" width="14" height="6" rx="2" fill="#dff0ff" opacity=".95"/><rect x="17" y="30" width="14" height="5" rx="2" fill="#dff0ff" opacity=".7"/>';
-    const wheels = '<rect x="11" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="11" y="31" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="31" width="4" height="7" rx="1.5" fill="#222"/>';
-    const halo = r.st === 'mv' ? `<circle cx="24" cy="24" r="22" fill="${col}" opacity=".18"/>` : '';
-    /* v6.87: a stopped vehicle is drawn faded; an offline one carries a red no-entry badge (as on the tracker's own app) */
+    const glass = '#dff0ff';
+    const body = kind === 'van' ? `<rect x="14" y="6" width="20" height="36" rx="5"/><rect x="16" y="10" width="16" height="7" rx="2" fill="${glass}" opacity=".95"/><rect x="16" y="30" width="16" height="3" rx="1" fill="#000" opacity=".2"/>`
+      : kind === 'bus' ? `<rect x="13" y="3" width="22" height="42" rx="4"/><rect x="15" y="6" width="18" height="6" rx="2" fill="${glass}" opacity=".95"/><rect x="15" y="15" width="18" height="3" rx="1" fill="${glass}" opacity=".8"/><rect x="15" y="21" width="18" height="3" rx="1" fill="${glass}" opacity=".8"/><rect x="15" y="27" width="18" height="3" rx="1" fill="${glass}" opacity=".8"/><rect x="15" y="33" width="18" height="3" rx="1" fill="${glass}" opacity=".8"/><rect x="15" y="40" width="18" height="3" rx="1" fill="${glass}" opacity=".7"/>`
+      : kind === 'pickup' ? `<rect x="14" y="8" width="20" height="34" rx="4"/><rect x="16" y="11" width="16" height="7" rx="2" fill="${glass}" opacity=".95"/><rect x="16" y="22" width="16" height="17" rx="2" fill="#000" opacity=".3"/><rect x="18" y="24" width="12" height="13" rx="1" fill="none" stroke="#fff" stroke-width="1" opacity=".55"/>`
+      : `<rect x="15" y="8" width="18" height="32" rx="7"/><rect x="17" y="13" width="14" height="6" rx="2" fill="${glass}" opacity=".95"/><rect x="17" y="30" width="14" height="5" rx="2" fill="${glass}" opacity=".7"/>`;
+    const wheels = kind === 'bus' ? '<rect x="10" y="9" width="4" height="7" rx="1.5" fill="#222"/><rect x="34" y="9" width="4" height="7" rx="1.5" fill="#222"/><rect x="10" y="33" width="4" height="7" rx="1.5" fill="#222"/><rect x="34" y="33" width="4" height="7" rx="1.5" fill="#222"/>'
+      : '<rect x="11" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="12" width="4" height="7" rx="1.5" fill="#222"/><rect x="11" y="31" width="4" height="7" rx="1.5" fill="#222"/><rect x="33" y="31" width="4" height="7" rx="1.5" fill="#222"/>';
+    /* state: a moving vehicle gets a halo in its own colour and turns the way it drives; an offline one is faded with the red no-entry badge; a stopped one is simply still */
+    const halo = r.st === 'mv' ? `<circle cx="24" cy="24" r="22" fill="${col}" opacity=".22"/>` : '';
     const badge = r.st === 'of' ? '<g transform="translate(34 6)"><circle r="7" fill="#d93025" stroke="#fff" stroke-width="1.5"/><rect x="-4" y="-1.3" width="8" height="2.6" fill="#fff"/></g>' : '';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">${halo}<g transform="rotate(${rot} 24 24)" fill="${col}" stroke="#fff" stroke-width="1.5" opacity="${r.st === 'id' ? '.6' : '1'}">${wheels}${body}</g>${badge}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">${halo}<g transform="rotate(${rot} 24 24)" fill="${col}" stroke="#fff" stroke-width="1.5" opacity="${r.st === 'of' ? '.55' : '1'}">${wheels}${body}</g>${badge}</svg>`;
     return (svgCache[key] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
   }
   const noMap = () => `<div class="banner warn" style="margin:10px">${icon('alert')}<span>${isAdmin() ? L('الخريطة محتاجة «مفتاح الخريطة» من الإعدادات ← جوجل ماب.', 'The map needs the «map key» from Settings → Google Maps.') : L('الخريطة لسه مش مضبوطة — صاحب الشركة يضيف مفتاح الخريطة.', 'The map is not set up yet — the owner adds the map key.')}</span></div>`;
@@ -36199,35 +36206,32 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;
     /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
     const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
-    /* v7.01 (Mahmoud, 9 Oct: «الكلام داخل في بعضه» — the four vehicles parked at the factory had their tags drawn over each other):
-       vehicles whose icons would overlap ON SCREEN are laid out as one vertical column (icon + tag per row) around their true spot,
-       recomputed at every zoom through the map projection; until the projection exists (first paint, or the test stub) the old
-       few-metres fan-out applies */
+    /* v7.02 (Mahmoud, 9 Oct: «عايز مكان كل عربية الحقيقي») — every icon sits exactly on its vehicle; nothing is moved. The tag is the
+       vehicle's name only, in the vehicle's own colour. When icons would meet ON SCREEN (the four parked at the factory) only the TAGS
+       move: each one takes its own row under the group (one row per vehicle, name order) so no tag is drawn over another — the colour
+       ties each tag to its icon. Rows are computed in pixels through the map projection and redone after every zoom / pan; until the
+       projection exists (first paint, or the test stub) every tag sits in row 0 */
     let ov = null; try { if (g.OverlayView) { ov = new g.OverlayView(); ov.onAdd = () => { }; ov.draw = () => { }; ov.onRemove = () => { }; ov.setMap(map); } } catch (e) { ov = null; }
-    const fanOut = rows => { const out = new Map(); const taken = []; rows.forEach(r => { let k = 0; for (const t of taken) if (Math.abs(t.lat - r.lat) < 0.00015 && Math.abs(t.lng - r.lng) < 0.00015) k++; taken.push({ lat: r.lat, lng: r.lng }); const a = k * 1.7; out.set(r.id, k ? { lat: r.lat + 0.00016 * Math.sin(a), lng: r.lng + 0.00020 * Math.cos(a) } : { lat: r.lat, lng: r.lng }); }); return out; };
-    const layout = rows => {
+    const tagRows = rows => {
+      const out = new Map(); rows.forEach(r => out.set(r.id, 0));
       const pr = ov && ov.getProjection ? ov.getProjection() : null;
-      if (!pr || !pr.fromLatLngToContainerPixel || !pr.fromContainerPixelToLatLng || !g.LatLng || !g.Point) return fanOut(rows);
-      const sz = big ? 44 : 34; const step = sz + (big ? 22 : 20); const near = sz + 16; const out = new Map();
-      let px; try { px = rows.map(r => { const p = pr.fromLatLngToContainerPixel(new g.LatLng(r.lat, r.lng)); return { r, x: p.x, y: p.y }; }); } catch (e) { return fanOut(rows); }
-      /* a vehicle joins the group of any member whose icon or tag would touch its own (tags are wide, so the horizontal reach is larger) */
+      if (!pr || !pr.fromLatLngToContainerPixel || !g.LatLng) return out;
+      const sz = big ? 44 : 34; const near = sz + 16;
+      let px; try { px = rows.map(r => { const p = pr.fromLatLngToContainerPixel(new g.LatLng(r.lat, r.lng)); return { r, x: p.x, y: p.y }; }); } catch (e) { return out; }
       const groups = []; px.forEach(a => { let gi = -1; for (let i = 0; i < groups.length && gi < 0; i++) if (groups[i].some(b => Math.abs(a.x - b.x) < near * 3 && Math.abs(a.y - b.y) < near)) gi = i; if (gi < 0) groups.push([a]); else groups[gi].push(a); });
-      groups.forEach(grp => {
-        if (grp.length === 1) { out.set(grp[0].r.id, { lat: grp[0].r.lat, lng: grp[0].r.lng }); return; }
-        const cx = grp.reduce((s, a) => s + a.x, 0) / grp.length, cy = grp.reduce((s, a) => s + a.y, 0) / grp.length;
-        grp.sort((a, b) => String(a.r.name).localeCompare(String(b.r.name), 'ar'));
-        grp.forEach((a, i) => { const ll = pr.fromContainerPixelToLatLng(new g.Point(cx, cy + (i - (grp.length - 1) / 2) * step)); out.set(a.r.id, ll && typeof ll.lat === 'function' ? { lat: ll.lat(), lng: ll.lng() } : { lat: a.r.lat, lng: a.r.lng }); });
-      });
+      groups.forEach(grp => { if (grp.length < 2) return; grp.sort((a, b) => String(a.r.name).localeCompare(String(b.r.name), 'ar')); grp.forEach((a, i) => out.set(a.r.id, i)); });
       return out;
     };
+    const iconAt = (r, row) => { const ic = iconFor(r); const sz = big ? 44 : 34; if (g.Point) ic.labelOrigin = new g.Point(sz / 2, sz + 8 + row * (big ? 19 : 17)); return ic; };
     const tick = () => {
       const rows = fleetNow().filter(r => r.lat != null); const keep = new Set(); const bounds = new g.LatLngBounds(); let n = 0;
       if (fz) { bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
-      const placed = layout(rows); const spread = r => placed.get(r.id) || { lat: r.lat, lng: r.lng };
+      const slot = tagRows(rows);
       rows.forEach(r => {
-        keep.add(r.id); let e = marks.get(r.id); const pos = spread(r); const lbl = { text: r.name.split('—')[0].trim() + (r.gpsLost ? ` · ${L('GPS مفقود', 'GPS lost')}` : r.delayed ? ` · ⏱ ${r.delayed} ${L('د', 'min')}` : r.st === 'id' && r.stopSince ? ` · ${L('واقفة', 'stopped')} ${dur(r.stopSince)}` : r.st === 'of' ? ` · ${ST.of[1]}` : ''), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
-        if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: iconFor(r), label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
-        else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(iconFor(r)); if (e.m.setLabel) e.m.setLabel(lbl); }
+        keep.add(r.id); let e = marks.get(r.id); const pos = { lat: r.lat, lng: r.lng }; const lbl = { text: r.name.split('—')[0].trim(), color: vehColor(r.v), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
+        const ic = iconAt(r, slot.get(r.id) || 0);
+        if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: ic, label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
+        else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(ic); if (e.m.setLabel) e.m.setLabel(lbl); }
         bounds.extend(pos); n++;
       });
       marks.forEach((e, k) => { if (!keep.has(k)) { e.m.setMap(null); marks.delete(k); } });
@@ -36246,7 +36250,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     };
     b3._gm = { map, tick, drawRouteOn, fitAll: () => { tick(); if (lastBounds) map.fitBounds(lastBounds, big ? 70 : 30); else { const r = fleetNow().find(x => x.lat != null); if (r && map.setCenter) { map.setCenter({ lat: r.lat, lng: r.lng }); if (map.setZoom) map.setZoom(14); } } }, focus: id => { const r = fleetNow().find(x => x.id === id); if (r && r.lat != null && map.panTo) { map.panTo({ lat: r.lat, lng: r.lng }); if (map.getZoom && map.getZoom() < 14 && map.setZoom) map.setZoom(14); } } };
     FM.maps[elId] = b3._gm; tick();
-    /* v7.01: the column layout is in pixels, so it is redone whenever the map settles after a zoom or a pan */
+    /* v7.01: the tag rows are in pixels, so they are redone whenever the map settles after a zoom or a pan */
     if (map.addListener) map.addListener('idle', () => { try { if (document.getElementById(elId)) tick(); } catch (e) { /* keep the last layout */ } });
   }
   const focus = (m, id) => m.focus(id);
@@ -36318,7 +36322,9 @@ html body .fmd-row{display:flex;gap:10px;align-items:center;font-size:13px;paddi
 html body .fmd-row:hover{background:var(--surface-2)}
 @media (max-width:900px){html body .fm-tiles{grid-template-columns:repeat(4,1fr)}html body .fm-tile.fm-locate{grid-column:1 / -1;padding:8px}html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:180px}}
 </style>`);
-  Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM, mapKey, loadGmaps, vehSvg, noMap } });   /* v6.93: the geofence / history pages reuse the map loader */
+  /* v7.02: the vehicle form — pick the colour the vehicle wears on the map (defaults to its palette colour) */
+  if (typeof vehForm === 'function') vehForm = (base => function (v) { v = v || {}; const h = base.apply(this, arguments); const extra = field(L('لون العربية على الخريطة', 'Vehicle colour on the map'), `<input type="color" id="f-color" name="color" value="${esc(vehColor(v))}" style="width:64px;height:36px;padding:2px">`); const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i); })(vehForm);
+  Object.assign(window, { nfFleetMap: { now: fleetNow, state: FM, mapKey, loadGmaps, vehSvg, vehColor, vKind, noMap } });   /* v6.93: the geofence / history pages reuse the map loader */
 })();
 /* =====================================================================
    v6.91 — "the driver took a vehicle without recording it" (Mahmoud, 8 Oct — go-ahead; factory only):
