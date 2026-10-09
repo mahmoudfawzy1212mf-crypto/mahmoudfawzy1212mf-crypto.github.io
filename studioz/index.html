@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1708-32d920";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1829-fa0fb0";</script>
 
 <script>
 'use strict';
@@ -2449,14 +2449,23 @@ ACTIONS.printStatement = id => {
 };
 
 /* ---------------- quotations ---------------- */
+/* v7.18 — one quote card (the list builds from it; tenders group several of them) + the owner's delete from the list
+   (Mahmoud, 9 Oct: «I want to be able to delete the quotation here»). A quote turned into a job order is tied to it: no delete. */
+function quoteCanDel(x) { return !!x && isAdmin() && writable() && x.status !== 'converted' && !x.orderId; }
+function quoteCardHTML(x) {
+  return `<div class="item" data-action="go" data-arg="quotes/${x.id}"><div class="main"><div class="title"><span class="code">${esc(x.number)}</span><span>${esc(x.subject || '')}</span></div><div class="meta">${brandChip(x.brandId)}<span>${esc(clientName(x.clientId))}</span><span>${fmtDate(x.date)}</span>${x.validUntil && ['draft', 'sent'].includes(x.status) && x.validUntil < todayISO() ? `<span class="badge crit">انتهت الصلاحية</span>` : ''}${x.tenderId ? `<span class="badge tnd">مناقصة</span>` : ''}</div></div><div class="end">${badge(QUOTE_STATUS, x.status)}${seesFinance() ? `<span class="num bold">${fmtMoney(quoteTotal(x))} ${CUR()}</span>` : ''}${quoteCanDel(x) ? `<button type="button" class="iconbtn qdel" data-action="quoteDelList" data-arg="${x.id}" title="حذف عرض السعر" aria-label="حذف عرض السعر">${icon('trash')}</button>` : ''}</div></div>`;
+}
+const quoteDelMsg = q => `حذف عرض السعر ${q.number}؟ بنوده هتروح معاه «سلة المحذوفات» 30 يوم وتقدر ترجّعه منها — المنتجات في الكتالوج والبرايس ليست مش هتتلمس.`;
+ACTIONS.quoteDelList = async id => { const q = byId('quotations', id); if (!quoteCanDel(q)) return; if (!(await confirmDlg(quoteDelMsg(q), 'حذف'))) return; await Store.remove('quotations', id); toast('اتمسح — تقدر ترجّعه من سلة المحذوفات'); render(false); };
 function vQuotes() {
   const f = S.ui.filter.quotes || (S.ui.filter.quotes = { status: 'open' }); const q = (S.ui.search.quotes || '').toLowerCase();
   let arr = list('quotations'); if (f.status === 'open') arr = arr.filter(x => ['draft', 'sent'].includes(x.status)); else if (f.status !== 'all') arr = arr.filter(x => x.status === f.status);
-  if (q) arr = arr.filter(x => [x.number, x.subject, clientName(x.clientId)].join(' ').toLowerCase().includes(q));
+  if (q) arr = arr.filter(x => [x.number, x.subject, clientName(x.clientId), x.tenderName || ''].join(' ').toLowerCase().includes(q));
   arr = sortBy(arr, x => x.date || '', true);
-  const segs = [['open', 'المفتوحة'], ['approved', 'موافق عليها'], ['converted', 'محوّلة'], ['rejected', 'مرفوضة'], ['all', 'الكل']];
-  return `<div class="toolbar"><div class="search">${icon('search')}<input id="q-quotes" placeholder="بحث برقم العرض أو العميل" value="${esc(S.ui.search.quotes || '')}" data-search="quotes"></div><div class="seg">${segs.map(s => `<button class="${f.status === s[0] ? 'on' : ''}" data-action="qfilter" data-arg="${s[0]}">${s[1]}</button>`).join('')}</div><span class="muted small">${arr.length} عرض${seesFinance() ? ` · ${fmtMoney(sum(arr, quoteTotal))} ${CUR()}` : ''}</span></div>
-  ${arr.length ? `<div class="list">${arr.map(x => `<div class="item" data-action="go" data-arg="quotes/${x.id}"><div class="main"><div class="title"><span class="code">${esc(x.number)}</span><span>${esc(x.subject || '')}</span></div><div class="meta">${brandChip(x.brandId)}<span>${esc(clientName(x.clientId))}</span><span>${fmtDate(x.date)}</span>${x.validUntil && ['draft', 'sent'].includes(x.status) && x.validUntil < todayISO() ? `<span class="badge crit">انتهت الصلاحية</span>` : ''}</div></div><div class="end">${badge(QUOTE_STATUS, x.status)}${seesFinance() ? `<span class="num bold">${fmtMoney(quoteTotal(x))} ${CUR()}</span>` : ''}</div></div>`).join('')}</div>` : `<div class="empty"><b>لا توجد عروض أسعار</b>${canDo('sales') ? 'أنشئ عرض سعر جديد من الزر أعلى الصفحة' : ''}</div>`}`;
+  const segs = [['open', 'المفتوحة'], ['approved', 'موافق عليها'], ['converted', 'محوّلة'], ['rejected', 'مرفوضة']].concat(f.status === 'lost' || list('quotations').some(x => x.status === 'lost') ? [['lost', 'مارسيتش']] : []).concat([['all', 'الكل']]);
+  const meta = typeof window.nfQuoteMeta === 'function' ? window.nfQuoteMeta(arr) : { n: arr.length, total: sum(arr, quoteTotal) };
+  return `<div class="toolbar"><div class="search">${icon('search')}<input id="q-quotes" placeholder="بحث برقم العرض أو العميل" value="${esc(S.ui.search.quotes || '')}" data-search="quotes"></div><div class="seg">${segs.map(s => `<button class="${f.status === s[0] ? 'on' : ''}" data-action="qfilter" data-arg="${s[0]}">${s[1]}</button>`).join('')}</div><span class="muted small">${meta.n} عرض${seesFinance() ? ` · ${fmtMoney(meta.total)} ${CUR()}` : ''}</span></div>
+  ${arr.length ? `<div class="list">${typeof window.nfQuoteCards === 'function' ? window.nfQuoteCards(arr) : arr.map(quoteCardHTML).join('')}</div>` : `<div class="empty"><b>لا توجد عروض أسعار</b>${canDo('sales') ? 'أنشئ عرض سعر جديد من الزر أعلى الصفحة' : ''}</div>`}`;
 }
 ACTIONS.qfilter = arg => { (S.ui.filter.quotes ||= {}).status = arg; render(false); };
 function lineRowsBase(items) {
@@ -2493,7 +2502,7 @@ async function saveQuote(f, q) {
 ACTIONS.quoteNew = cid => openModal({ title: 'عرض سعر جديد', wide: true, body: quoteForm(cid ? { clientId: cid } : {}), onOpen: wireQuoteForm, onSubmit: f => saveQuote(f, {}) });
 ACTIONS.quoteEdit = id => { const q = byId('quotations', id); if (!q) return; openModal({ title: `تعديل ${q.number}`, wide: true, body: quoteForm(q), onOpen: wireQuoteForm, onSubmit: f => saveQuote(f, q) }); };
 ACTIONS.quoteStatus = async arg => { const [id, st] = arg.split(':'); await Store.update('quotations', id, { status: st }); toast(`الحالة: ${QUOTE_STATUS[st][0]}`); };
-ACTIONS.quoteDelete = async id => { const q = byId('quotations', id); if (!q) return; if (!(await confirmDlg(`حذف عرض السعر ${q.number}؟`, 'حذف'))) return; await Store.remove('quotations', id); go('quotes'); };
+ACTIONS.quoteDelete = async id => { const q = byId('quotations', id); if (!quoteCanDel(q)) return; if (!(await confirmDlg(quoteDelMsg(q), 'حذف'))) return; await Store.remove('quotations', id); toast('اتمسح — تقدر ترجّعه من سلة المحذوفات'); go('quotes'); };
 ACTIONS.quoteConvert = async id => {
   const q = byId('quotations', id); if (!q || q.orderId) return;
   if (!(await confirmDlg(`تحويل ${q.number} إلى أمر تشغيل بقيمة ${fmtMoney(quoteTotal(q))} ${CUR()}؟`, 'تحويل', false))) return;
@@ -2504,7 +2513,7 @@ ACTIONS.quoteConvert = async id => {
 function vQuoteDetailBase(id) {
   const q = byId('quotations', id); if (!q) return `<div class="empty"><b>عرض السعر غير موجود</b></div>`;
   const c = byId('clients', q.clientId); const sub = quoteSub(q); const after = sub - (+q.discount || 0); const vat = q.vat ? after * (+S.settings.vat || 0) / 100 : 0;
-  const acts = []; if (canDo('sales')) { if (q.status === 'draft') acts.push(`<button class="btn sm" data-action="quoteStatus" data-arg="${q.id}:sent">تم الإرسال للعميل</button>`); if (['draft', 'sent'].includes(q.status)) acts.push(`<button class="btn sm a" data-action="quoteStatus" data-arg="${q.id}:approved">${icon('check')}موافقة العميل</button>`, `<button class="btn sm ghost" data-action="quoteStatus" data-arg="${q.id}:rejected">مرفوض</button>`); if (q.status === 'approved' && !q.orderId) acts.push(`<button class="btn sm p" data-action="quoteConvert" data-arg="${q.id}">${icon('orders')}تحويل لأمر تشغيل</button>`); if (q.status !== 'converted') acts.push(`<button class="btn sm" data-action="quoteEdit" data-arg="${q.id}">${icon('edit')}تعديل</button>`); if (isAdmin()) acts.push(`<button class="btn sm ghost" style="color:var(--crit-ink)" data-action="quoteDelete" data-arg="${q.id}">${icon('trash')}</button>`); }
+  const acts = []; if (canDo('sales')) { if (q.status === 'draft') acts.push(`<button class="btn sm" data-action="quoteStatus" data-arg="${q.id}:sent">تم الإرسال للعميل</button>`); if (['draft', 'sent'].includes(q.status)) acts.push(`<button class="btn sm a" data-action="quoteStatus" data-arg="${q.id}:approved">${icon('check')}موافقة العميل</button>`, `<button class="btn sm ghost" data-action="quoteStatus" data-arg="${q.id}:rejected">مرفوض</button>`); if (q.status === 'approved' && !q.orderId) acts.push(`<button class="btn sm p" data-action="quoteConvert" data-arg="${q.id}">${icon('orders')}تحويل لأمر تشغيل</button>`); if (q.status !== 'converted') acts.push(`<button class="btn sm" data-action="quoteEdit" data-arg="${q.id}">${icon('edit')}تعديل</button>`); if (quoteCanDel(q)) acts.push(`<button class="btn sm ghost" style="color:var(--crit-ink)" data-action="quoteDelete" data-arg="${q.id}" title="حذف عرض السعر">${icon('trash')}</button>`); }
   return `<div class="stack" style="max-width:900px">
     <div class="row no-print">${badge(QUOTE_STATUS, q.status)}${q.orderId ? `<a class="badge acc" href="#/orders/${q.orderId}">أمر التشغيل ${esc(byId('orders', q.orderId)?.code || '')}</a>` : ''}<div class="grow"></div>${acts.join('')}<button class="btn sm ghost" data-action="printQuote" data-arg="${q.id}">${icon('print')}طباعة</button></div>
     <div class="report" id="quotearea">${quotePrint(q, c, sub, after, vat)}</div></div>`;
@@ -30060,14 +30069,14 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
 
   /* ---------- المراحل ---------- */
   function steps(q) {
-    const vs = versionsAll(q); const sent = vs.some(v => v.sentAt) || !!q.sentAt; const appr = ['approved', 'converted'].includes(q.status); const lost = q.status === 'rejected';
+    const vs = versionsAll(q); const sent = vs.some(v => v.sentAt) || !!q.sentAt; const appr = ['approved', 'converted'].includes(q.status); const lost = q.status === 'rejected' || q.status === 'lost'; /* v7.18: «lost» = a tender awarded to another company */
     const o = q.orderId ? byId('orders', q.orderId) : null;
     return [
       { k: 'proj', l: 'المشروع والعميل', done: !!(q.clientId && q.subject) },
       { k: 'v1', l: 'المنتجات والتسعير V1', done: (vs[0].items || []).length > 0 },
       { k: 'sent', l: 'اتبعت للعميل', done: sent, s: sent ? fmtDate(String((vs.find(v => v.sentAt) || {}).sentAt || q.sentAt || '').slice(0, 10)) : '' },
       { k: 'neg', l: 'التفاوض', done: appr || q.orderId, s: rev(q) > 1 ? `V${rev(q)}${discPct(q) ? ` · ${discPct(q) > 0 ? '−' : '+'}${Math.abs(discPct(q))}%` : ''}` : (appr ? 'من غير تفاوض' : '') },
-      { k: 'appr', l: lost ? 'اترفض' : 'موافقة العميل', done: appr, lost, s: appr ? `V${q.approvedRev || rev(q)}` : '' },
+      { k: 'appr', l: q.status === 'lost' ? 'مارسيتش' : lost ? 'اترفض' : 'موافقة العميل', done: appr, lost, s: appr ? `V${q.approvedRev || rev(q)}` : '' },
       { k: 'po', l: 'استلام الـPO', done: poDone(q.po), s: q.po && q.po.no ? q.po.no : '' },
       { k: 'acc', l: 'تسليم للحسابات', done: !!o, s: o ? (o.code || '') : '' },
     ];
@@ -30099,11 +30108,12 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         else if (!isAdmin()) ban = `<div class="banner warn" style="margin-bottom:10px">${icon('alert')}<span>خصم V${rev(q)} = ${pct}% عن V1 — أكبر من ${DISC_MAX}%، لازم موافقة المالك قبل الإرسال.</span><div class="grow"></div><button class="btn sm p" data-action="qpDiscAsk" data-arg="${esc(q.id)}">اطلب موافقة المالك</button></div>`;
       }
       const tbl = `<table class="qp-tbl"><thead><tr><th>النسخة</th><th>التاريخ</th><th>طلب العميل / السبب</th><th>الإجمالي</th><th>عن V1</th><th>الحالة</th><th></th></tr></thead><tbody>${vs.map((v, i) => { const d = i ? Math.round((1 - v.total / (vs[0].total || 1)) * 1000) / 10 : 0; return `<tr class="${v.current ? 'cur' : ''}"><td><b>V${v.v}</b></td><td>${esc(fmtDate(String(v.at || v.date || '').slice(0, 10)))}</td><td>${esc(v.note || (i ? '' : 'العرض الأول'))}</td><td>${money(v.total)}</td><td>${i ? `<span class="${d > 0 ? 'qp-dn' : 'qp-up'}">${d > 0 ? '−' : '+'}${Math.abs(d)}%</span>` : '—'}</td><td>${v.current ? (['approved', 'converted'].includes(q.status) ? '<span class="badge good">معتمدة</span>' : v.sentAt ? '<span class="badge acc">اتبعتت</span>' : '<span class="badge">قيد التعديل</span>') : (v.sentAt ? '<span class="muted tiny">اتبعتت</span>' : '<span class="muted tiny">—</span>')}</td><td>${i ? `<button class="btn xs ghost" data-action="qpCompare" data-arg="${esc(q.id)}:${vs[i - 1].v}:${v.v}">قارن بـ V${vs[i - 1].v}</button>` : ''}</td></tr>`; }).join('')}</tbody></table>`;
-      const canNew = canEdit && !['approved', 'converted', 'rejected'].includes(q.status);
+      const canNew = canEdit && !['approved', 'converted', 'rejected', 'lost'].includes(q.status);
       const dl = (q.delLog || []).length ? `<div class="tiny muted" style="margin-top:6px">${(q.delLog || []).map(x => `${L('حُذفت', 'Deleted')} V${x.v} (${money(x.total)}) — ${esc(x.by || '')} ${esc(fmtDate(String(x.at || '').slice(0, 10)))}`).join(' · ')}</div>` : '';
       return `<h4>${icon('chat')}التفاوض والنسخ <span class="muted small">الخصم على المشروع ده بس — البرايس ليست زي ما هي</span></h4>${ban}${tbl}<div class="qp-acts">${canNew ? `<button class="btn sm p" data-action="qpNewVer" data-arg="${esc(q.id)}">${icon('plus')}نسخة جديدة V${rev(q) + 1} (العميل طلب تعديل)</button>` : ''}${canNew && !locked(q) && rev(q) > 1 ? `<button class="btn sm" data-action="quoteEdit" data-arg="${esc(q.id)}">${icon('edit')}عدّل V${rev(q)}</button>` : ''}${canNew && rev(q) > 1 ? `<button class="btn sm ghost" data-action="qpDelVer" data-arg="${esc(q.id)}" title="${L('احذف النسخة دي وارجع لـ V' + (rev(q) - 1), 'Delete this version and go back to V' + (rev(q) - 1))}">${icon('x')}احذف V${rev(q)}</button>` : ''}</div>${dl}`;
     }
     if (k === 'appr') {
+      if (q.status === 'lost') return `<h4>${icon('x')}المناقصة رست على شركة تانية</h4><div class="small">${esc(q.lostReason || '')}</div>`;
       if (q.status === 'rejected') return `<h4>${icon('x')}العميل رفض العرض</h4><div class="small">${esc(q.lostReason || '')}</div>${canEdit ? `<div class="qp-acts"><button class="btn sm" data-action="qpReopen" data-arg="${esc(q.id)}">رجّع العرض للتفاوض</button></div>` : ''}`;
       if (['approved', 'converted'].includes(q.status)) return `<h4>${icon('check')}العميل وافق على V${q.approvedRev || rev(q)}</h4><div class="small">${esc(fmtDate(String(q.approvedAt || '').slice(0, 10)))} ${q.approvedBy ? '· ' + esc(q.approvedBy) : ''} — الإجمالي المعتمد ${money(totalOf(q))}. الخطوة الجاية: استلام الـPO.</div>`;
       return `<h4>${icon('check')}موافقة العميل</h4><div class="small muted">النسخة الحالية V${rev(q)} — ${money(totalOf(q))}${needsDiscOk(q) ? ' · <b style="color:#c0392b">محتاجة موافقة المالك على الخصم الأول</b>' : ''}</div>${canEdit ? `<div class="qp-acts"><button class="btn sm a" data-action="qpApprove" data-arg="${esc(q.id)}">${icon('check')}العميل وافق على V${rev(q)}</button><button class="btn sm ghost" data-action="qpLost" data-arg="${esc(q.id)}">العميل رفض</button></div>` : ''}`;
@@ -30154,7 +30164,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   })(ACTIONS.quoteEdit);
 
   ACTIONS.qpNewVer = id => {
-    const q = byId('quotations', id); if (!isLof(q) || ['approved', 'converted', 'rejected'].includes(q.status)) return;
+    const q = byId('quotations', id); if (!isLof(q) || ['approved', 'converted', 'rejected', 'lost'].includes(q.status)) return;
     openModal({ title: `نسخة جديدة V${rev(q) + 1} — ${q.number}`, body: `<div class="form">${field('العميل طلب إيه؟ / سبب التعديل', `<textarea name="note" required placeholder="مثال: عايز خصم على المقاعد، أو تقليل الكمية"></textarea>`, 'full')}<div class="full tiny muted">V${rev(q)} هتتحفظ زي ما هي، والنسخة الجديدة بتبدأ منها وتعدّل فيها الأسعار أو تعمل خصم. البرايس ليست مش بتتغير.</div></div>`, submitLabel: 'اعمل النسخة',
       onSubmit: async f => { const d = formData(f); if (!String(d.note || '').trim()) { toast('اكتب طلب العميل', 'err'); return false; }
         const cur = byId('quotations', id); const vs = (cur.versions || []).concat([snap(cur)]);
@@ -39298,6 +39308,10 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
    where the menu is a drawer (phone / tablet) it takes half the screen, and a module opens its pages in a small dialog beside
    the drawer (on the page side, level with the module) instead of under it; tapping the same module again, anywhere else, or a
    page closes it. The computer keeps the modules opening under each other.
+   v7.18 (Mahmoud, 9 Oct: «some things here make no sense together» + «the dashboard must stand alone, outside, in every system»):
+   the dashboard (studio: home + open the door) is its own row at the top, and each system's pages are regrouped so a module
+   holds pages that belong together (a «Communication» module for tasks / chats / calls / assistant, cameras and the house rules
+   under Management, …). Pages only move: whoever saw a page still sees exactly that page and nothing more.
    ===================================================================== */
 (function () {
   if (typeof navHTML !== 'function') return;
@@ -39307,6 +39321,52 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
   const FLY = { el: null, k: null, side: null, mo: null, mo2: null };
   const drawer = () => window.matchMedia('(max-width:900px)').matches;
   const FLEET = /^#\/(fleet|fleetmap|fleetalerts|fleethistory|fleetreport)(\/|$)/;
+  /* where each system's pages live (route ids); top = rows of their own above the modules */
+  const LAYOUTS = {
+    factory: {
+      top: ['dashboard'],
+      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'calls', 'ai'], before: 'workers' }],
+      into: [{ near: 'settings', ids: ['reports', 'org', 'cctv', 'audit', 'regulation', 'settings'] }],
+      rename: [{ near: 'orders', ar: 'التشغيل والإنتاج', en: 'Production' }],
+    },
+    studioz: {
+      top: ['dashboard', 'door'],
+      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'ai'], before: 'clients' }],
+      into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos', 'studio'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
+      rename: [],
+    },
+    construction: {
+      top: ['dashboard'],
+      add: [{ key: 'supply', ar: 'التوريد', en: 'Supply', ids: ['purchases', 'csubs'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'ai'], before: 'workers' }],
+      into: [{ near: 'settings', ids: ['reports', 'org', 'audit', 'regulation', 'settings'] }],
+      rename: [{ near: 'clients', ar: 'العملاء', en: 'Clients' }],
+    },
+  };
+  const sysKey = () => { const c = typeof NF_COMPANY !== 'undefined' ? NF_COMPANY : ''; return c === 'studioz' || (typeof I18N_STU !== 'undefined' && I18N_STU) ? 'studioz' : c === 'construction' ? 'construction' : 'factory'; };
+  const linkId = n => (n && n.nodeType === 1 && n.tagName === 'A' ? (n.getAttribute('href') || '').replace(/^#\//, '').split(/[/?]/)[0] : '');
+  function arrange(groups) {
+    const lay = LAYOUTS[sysKey()]; if (!lay) return groups;
+    const where = id => groups.find(g => g.nodes.some(n => linkId(n) === id));
+    const nearOf = {}; [...lay.into, ...lay.rename].forEach(x => { nearOf[x.near] = where(x.near) || null; });
+    const beforeOf = {}; lay.add.forEach(a => { beforeOf[a.before] = where(a.before) || null; });
+    const home = new Map(); /* a pulled link remembers where it was, to go back if its new home does not exist for this person */
+    const pull = id => { const g = where(id); if (!g) return null; const i = g.nodes.findIndex(n => linkId(n) === id); const n = g.nodes[i]; g.nodes.splice(i, 1); home.set(n, { g, i }); return n; };
+    const back = n => { const h = home.get(n); if (h) h.g.nodes.splice(Math.min(h.i, h.g.nodes.length), 0, n); };
+    const top = lay.top.map(id => pull(id)).filter(Boolean).map(n => ({ label: '', key: '_top_' + linkId(n), nodes: [n], top: true }));
+    lay.into.forEach(x => {
+      const g = nearOf[x.near]; const got = x.ids.map(id => (id === x.near && g ? null : pull(id))).filter(Boolean);
+      if (!g) { got.reverse().forEach(back); return; }
+      const keep = g.nodes.slice(); const ordered = [];
+      x.ids.forEach(id => { const n = got.find(m => linkId(m) === id) || keep.find(m => linkId(m) === id); if (n) ordered.push(n); });
+      g.nodes = ordered.concat(keep.filter(n => !ordered.includes(n)));
+    });
+    const added = lay.add.map(a => ({ a, g: { label: L(a.ar, a.en), key: a.key, nodes: a.ids.map(pull).filter(Boolean) } })).filter(x => x.g.nodes.length);
+    lay.rename.forEach(r => { const g = nearOf[r.near]; if (g) { g.label = L(r.ar, r.en); g.key = r.ar; } });
+    let res = groups.slice();
+    added.forEach(({ a, g }) => { const b = beforeOf[a.before]; const i = b ? res.indexOf(b) : -1; const adm = nearOf.settings ? res.indexOf(nearOf.settings) : -1; res.splice(i >= 0 ? i : adm >= 0 ? adm : res.length, 0, g); });
+    res = res.filter(g => g.nodes.some(n => n.nodeType === 1));
+    return top.concat(res);
+  }
   const chev = '<svg class="ngch" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
 
   function modular(html) {
@@ -39318,7 +39378,10 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
       (cur ? cur.nodes : head).push(n);
     });
     if (!groups.length) return html;
-    const out = [];
+    /* links before the first group heading join the arrangement as a group of their own */
+    const headLinks = head.filter(n => n.nodeType === 1 && n.tagName === 'A');
+    if (headLinks.length) { groups.unshift({ label: '', key: '_head', nodes: headLinks }); for (let i = head.length - 1; i >= 0; i--) if (headLinks.includes(head[i])) head.splice(i, 1); }
+    let out = [];
     groups.forEach(g => {
       const fleet = g.nodes.filter(n => n.nodeType === 1 && n.tagName === 'A' && FLEET.test(n.getAttribute('href') || ''));
       if (fleet.length >= 2 && fleet.length < g.nodes.length) {
@@ -39326,6 +39389,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
         out.push({ label: L('العربيات', 'Vehicles'), key: 'fleet', nodes: fleet });
       } else out.push(g);
     });
+    try { out = arrange(out); } catch (e) { console.warn('nav arrange', e); }
     const key = g => g.key || g.label;
     const isOn = n => n.nodeType === 1 && ((n.matches && n.matches('a.on')) || (n.querySelector && n.querySelector('a.on')));
     const active = out.find(g => g.nodes.some(isOn));
@@ -39493,6 +39557,316 @@ html.apple .ngfly .ngfl a.on{background:rgba(255,255,255,.14);color:#fff}
 html.apple .ngfly .cnt{background:rgba(255,255,255,.14)}
 html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
 @media (prefers-reduced-motion: reduce){ .ngfly{animation:none} }
+</style>`);
+})();
+/* =====================================================================
+   v7.18 — one floating «+» instead of four (Mahmoud, 9 Oct, brief in claude/pending-batch.md: «make them the plus sign — a plus,
+   and out of it comes a circle with new task, the assistant, the memo and the calls»).
+   · the four round buttons that stood on top of each other at the edge (memo, call, assistant, +) — and covered the cards —
+     become one «+» in the place of the old «+»;
+   · tapping it turns it into «×», dims the page a little, and the actions come out of it on a quarter circle, each with its name;
+   · every action does exactly what its old button did (the old buttons stay in the page, hidden, and are pressed for you), so
+     who sees which action, and when the buttons hide (menu open, typing, chats, calls page…), stays exactly as before;
+   · missed calls / waiting memos keep their number on their circle, and a small red dot sits on the «+»;
+   · when only one action is left for a person, the «+» does it straight away;
+   · Arabic: the circle opens toward the right; English (the button sits on the right): toward the left.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FABDIAL__) return; window.__NF_FABDIAL__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const PLUS = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+  const TASK = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></svg>';
+  const addLabel = el => { const a = el.dataset.action || ''; return a === 'materialNew' ? L('خامة جديدة', 'New material') : a === 'drvTripNew' ? L('مشوار جديد', 'New trip') : a === 'fabMenu' ? (typeof role === 'function' && role() === 'driver' ? L('مشوار جديد', 'New trip') : L('إضافة', 'Add')) : L('مهمة جديدة', 'New task'); };
+  /* the actions, in Mahmoud's order */
+  const SRC = [
+    { k: 'add', sel: '.fab', label: addLabel, icon: () => TASK, cls: 'add' },
+    { k: 'ai', sel: '.aifab', label: () => L('المساعد', 'Assistant'), cls: 'ai' },
+    { k: 'memo', sel: '.memofab', label: () => L('المذكرة', 'Memo'), cls: 'memo' },
+    { k: 'call', sel: '.callfab', label: () => L('المكالمات', 'Calls'), cls: 'call' },
+  ];
+  const D = { root: null, open: false, sig: '' };
+  const shown = el => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
+  const avail = () => SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el));
+  const badge = el => { const n = el && el.querySelector('.n'); const v = n ? parseInt(n.textContent, 10) : 0; return v > 0 ? v : 0; };
+  const iconOf = x => (x.icon ? x.icon() : ((x.el.querySelector('svg') || {}).outerHTML || PLUS));
+
+  function build() {
+    if (D.root && D.root.isConnected) return D.root;
+    D.root = document.createElement('div'); D.root.id = 'nfdial'; D.root.className = 'nfdial';
+    D.root.innerHTML = `<div class="nfd-bg" data-nfd="close"></div><div class="nfd-items" role="menu"></div><button type="button" class="nfd-main" aria-haspopup="menu" aria-expanded="false" aria-label="${esc(L('إضافة', 'Add'))}">${PLUS}<i class="nfd-dot" hidden></i></button>`;
+    document.body.appendChild(D.root);
+    D.root.addEventListener('click', e => {
+      const it = e.target.closest('[data-nfd]'); if (!it) return; e.preventDefault(); e.stopPropagation();
+      const k = it.dataset.nfd;
+      if (k === 'close') return close();
+      if (k === 'main') { const xs = avail(); if (xs.length === 1) { press(xs[0]); return; } return D.open ? close() : openDial(); }
+      const x = avail().find(y => y.k === k); close(); if (x) setTimeout(() => press(x), 60);
+    });
+    D.root.querySelector('.nfd-main').dataset.nfd = 'main';
+    return D.root;
+  }
+  function press(x) { const el = x.el; if (!el) return; if (el.tagName === 'A' && el.getAttribute('href')) { location.hash = el.getAttribute('href').replace(/^#/, ''); return; } el.click(); }
+  function openDial() {
+    const root = build(); const xs = avail(); if (xs.length < 2) return;
+    const main = root.querySelector('.nfd-main').getBoundingClientRect(); const cx = main.left + main.width / 2; const cy = main.top + main.height / 2;
+    const right = cx < innerWidth / 2; const small = innerWidth <= 900; const r = small ? 138 : 144;
+    const box = root.querySelector('.nfd-items'); box.style.left = cx + 'px'; box.style.top = cy + 'px';
+    const a0 = 90, a1 = 8; const step = xs.length > 1 ? (a0 - a1) / (xs.length - 1) : 0;
+    box.innerHTML = xs.map((x, i) => {
+      const th = (a0 - step * i) * Math.PI / 180; const dx = Math.cos(th) * r * (right ? 1 : -1); const dy = -Math.sin(th) * r; const n = badge(x.el);
+      return `<button type="button" class="nfd-it ${x.cls}" role="menuitem" data-nfd="${x.k}" data-th="${(a0 - step * i).toFixed(2)}" style="--dx:${dx.toFixed(1)}px;--dy:${dy.toFixed(1)}px;--i:${i}"><span class="nfd-c">${iconOf(x)}${n ? `<b class="n">${n}</b>` : ''}</span><span class="nfd-l">${esc(x.label(x.el))}</span></button>`;
+    }).join('');
+    /* each name sits just outside its circle, away from the «+», so the names never overlap */
+    box.querySelectorAll('.nfd-it').forEach(b => {
+      const lb = b.querySelector('.nfd-l'); const th = +b.dataset.th * Math.PI / 180; const w = lb.offsetWidth, h = lb.offsetHeight; const c = b.querySelector('.nfd-c').offsetWidth / 2;
+      const d = c + 9 + Math.abs(Math.cos(th)) * w / 2 + Math.abs(Math.sin(th)) * h / 2;
+      lb.style.left = (c + Math.cos(th) * d * (right ? 1 : -1) - w / 2) + 'px'; lb.style.top = (c - Math.sin(th) * d - h / 2) + 'px';
+    });
+    D.open = true; root.classList.add('open'); root.querySelector('.nfd-main').setAttribute('aria-expanded', 'true');
+    root.querySelector('.nfd-main').setAttribute('aria-label', L('إغلاق', 'Close'));
+  }
+  function close() {
+    if (!D.root) return; D.open = false; D.root.classList.remove('open');
+    const m = D.root.querySelector('.nfd-main'); m.setAttribute('aria-expanded', 'false'); m.setAttribute('aria-label', L('إضافة', 'Add'));
+  }
+  /* keep the «+» in step with the old buttons: which exist, whether they are shown, their numbers */
+  function sync() {
+    SRC.forEach(s => document.querySelectorAll(s.sel).forEach(el => { if (!el.classList.contains('nfd-src')) el.classList.add('nfd-src'); }));
+    if (!S || !S.session) { if (D.root) { close(); D.root.hidden = true; } return; }
+    const root = build(); const xs = avail();
+    root.hidden = !xs.length; if (!xs.length) { close(); return; }
+    const main = root.querySelector('.nfd-main');
+    const one = xs.length === 1 ? xs[0] : null;
+    const sig = (one ? one.k : 'many') + '|' + (one ? one.label(one.el) : '');
+    if (sig !== D.sig) { D.sig = sig; main.innerHTML = (one && one.k !== 'add' ? iconOf(one) : PLUS) + '<i class="nfd-dot" hidden></i>'; main.classList.toggle('solo', !!one && one.k !== 'add'); main.title = one ? one.label(one.el) : L('إضافة', 'Add'); }
+    const hot = xs.some(x => badge(x.el) > 0); const dot = main.querySelector('.nfd-dot'); if (dot) dot.hidden = !hot || !!one;
+    if (D.open && xs.length < 2) close();
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(sync, 0); });
+  /* the old buttons hide / show through body classes (a form open, typing, the menu…) and are re-made by their own hooks */
+  const mo = new MutationObserver(recs => { if (recs.every(r => D.root && D.root.contains(r.target))) return; clearTimeout(D.t); D.t = setTimeout(sync, 60); });
+  const watch = () => { mo.observe(document.body, { attributes: true, attributeFilter: ['class', 'hidden'], childList: true, subtree: true }); sync(); };
+  if (document.body) watch(); else document.addEventListener('DOMContentLoaded', watch);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && D.open) close(); });
+  window.addEventListener('hashchange', () => { if (D.open) close(); });
+  window.addEventListener('resize', () => { if (D.open) close(); });
+  setInterval(sync, 2000);
+  window.nfFabDial = { open: openDial, close, sync, state: D };
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+/* the old buttons stay in the page (their own rules decide when they show) but out of sight and out of reach */
+.nfd-src{opacity:0!important;pointer-events:none!important;transform:translateX(-300vw)!important}
+.nfdial[hidden]{display:none!important}
+.nfdial .nfd-main{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;background:var(--accent);color:#fff;box-shadow:0 10px 24px -8px rgba(0,0,0,.5);z-index:66;display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .22s ease,background .2s}
+.nfdial .nfd-main svg{width:26px;height:26px;transition:transform .22s ease}
+.nfdial .nfd-main.solo{background:var(--surface);color:var(--accent);border:1.5px solid color-mix(in srgb,var(--accent) 45%,var(--line))}
+.nfdial.open .nfd-main svg{transform:rotate(45deg)}
+.nfdial .nfd-main:active{transform:scale(.95)}
+.nfdial .nfd-dot{position:absolute;top:3px;right:3px;width:12px;height:12px;border-radius:50%;background:#e5484d;border:2px solid var(--bg,#000)}
+.nfdial .nfd-dot[hidden]{display:none}
+@media (max-width:900px){.nfdial .nfd-main{left:14px;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:54px;height:54px}}
+.nfdial .nfd-bg{position:fixed;inset:0;background:rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .2s;z-index:64}
+.nfdial.open .nfd-bg{opacity:1;pointer-events:auto}
+.nfdial .nfd-items{position:fixed;width:0;height:0;z-index:65}
+.nfdial .nfd-it{position:absolute;left:-26px;top:-26px;width:52px;height:52px;border:0;padding:0;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transform:translate(0,0) scale(.3);opacity:0;pointer-events:none;transition:transform .26s cubic-bezier(.2,.9,.3,1.25),opacity .18s;transition-delay:calc(var(--i) * 25ms)}
+.nfdial.open .nfd-it{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1;pointer-events:auto}
+.nfdial .nfd-c{position:absolute;left:0;top:0;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:1.5px solid var(--line);box-shadow:0 8px 20px -8px rgba(0,0,0,.55)}
+.nfdial .nfd-c svg{width:24px;height:24px}
+.nfdial .nfd-it.add .nfd-c{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.nfdial .nfd-it.ai .nfd-c{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.nfdial .nfd-it.memo .nfd-c{color:#d08a1e;border-color:color-mix(in srgb,#d08a1e 50%,var(--line))}
+.nfdial .nfd-it.call .nfd-c{color:#2fa36b;border-color:color-mix(in srgb,#2fa36b 45%,var(--line))}
+.nfdial .nfd-c .n{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#e5484d;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;font-style:normal}
+.nfdial .nfd-l{position:absolute;white-space:nowrap;font-size:12.5px;font-weight:700;color:#fff;background:rgba(20,20,22,.86);padding:4px 10px;border-radius:999px;box-shadow:0 4px 12px -4px rgba(0,0,0,.5);pointer-events:none}
+html.apple .nfdial .nfd-main:not(.solo){background:var(--primary,#fff);color:var(--primary-ink,#000);box-shadow:0 12px 26px -10px rgba(0,0,0,.55)}
+html.apple .nfdial .nfd-c{background:var(--surface);border-color:transparent}
+html.apple.apple-blur .nfdial .nfd-bg{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+body.printing .nfdial{display:none!important}
+@media (prefers-reduced-motion: reduce){ .nfdial .nfd-it,.nfdial .nfd-main svg,.nfdial .nfd-bg{transition:none} }
+</style>`);
+})();
+/* =====================================================================
+   v7.18 — tenders: one project, several companies asking us for a quote on it (Mahmoud, 9 Oct: «when there is one project but
+   several companies want the quotation on it because they are still going to hold a tender between them — how is that arranged
+   in the quotations list?»). Brief: claude/pending-batch.md.
+   · inside a quote: «Same project for another company (tender)» copies the quote (same items and prices, the other company's
+     name, its own number, its own prices from then on) and ties the quotes together as one tender named after the project;
+     «Join a tender» ties quotes that were made separately.
+   · the quotations list shows a tender as ONE card: the project, «tender · 3 companies», each company with its state; tapping it
+     opens the tender (every company's quote, open / award / delete). The total above the list counts a tender once (its highest
+     quote), not once per company.
+   · «Awarded to this company»: that quote goes on as usual (approval, PO, job order); the others close by themselves as
+     «Not awarded» (status lost — not «rejected») and stay for reference; «Cancel the award» puts them back.
+   Nothing about who may see quotations or prices changes: the buttons follow the sales permission that edits quotes today.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TENDER__) return; window.__NF_TENDER__ = 1;
+  if (typeof QUOTE_STATUS === 'undefined' || typeof vQuotes !== 'function') return;
+  if (!QUOTE_STATUS.lost) QUOTE_STATUS.lost = ['مارسيتش', ''];
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const canSales = () => typeof canDo === 'function' && canDo('sales') && typeof writable === 'function' && writable();
+  const all = () => (S.data.quotations ? [...S.data.quotations.values()] : list('quotations')).filter(q => q && q.id);
+  const members = tid => sortBy(all().filter(q => q.tenderId === tid), q => q.date || '', true);
+  const nameOf = tid => { const a = members(tid); return ((a.find(q => q.tenderName) || {}).tenderName) || (a[0] && a[0].subject) || ''; };
+  const winnerOf = tid => members(tid).find(q => q.tenderWon);
+  const cname = q => (typeof clientName === 'function' ? clientName(q.clientId) : '') || '—';
+  const total = q => (typeof quoteTotal === 'function' ? quoteTotal(q) : 0);
+  const stBadge = q => (typeof badge === 'function' ? badge(QUOTE_STATUS, q.status) : esc(q.status));
+  const COPY = ['items', 'discount', 'vat', 'terms', 'subject', 'brandId', 'project', 'location', 'drawings', 'source', 'notes', 'paymentTerms', 'delivery', 'warranty', 'scope', 'currency'];
+  const nf = n => (typeof fmtNum === 'function' ? fmtNum(n) : String(n));
+
+  /* ---------- the list: a tender is one card; the total counts it once ---------- */
+  function tenderCard(tid, grp) {
+    const win = grp.find(q => q.tenderWon) || winnerOf(tid); const name = nameOf(tid); const ts = grp.map(total);
+    const money = typeof seesFinance === 'function' && seesFinance() ? `<span class="num bold">${Math.min(...ts) === Math.max(...ts) ? fmtMoney(ts[0]) : `${fmtMoney(Math.min(...ts))} – ${fmtMoney(Math.max(...ts))}`} ${CUR()}</span>` : '';
+    return `<div class="item tndcard" data-action="tenderOpen" data-arg="${esc(tid)}"><div class="main"><div class="title"><span class="badge tnd">${L('مناقصة', 'Tender')}</span><span>${esc(name)}</span></div><div class="meta">${typeof brandChip === 'function' ? brandChip(grp[0].brandId) : ''}<span>${esc(L(`${grp.length} شركات`, `${grp.length} companies`))}</span>${win ? `<span class="badge good">${esc(L('رست على', 'Awarded to'))} ${esc(cname(win))}</span>` : ''}</div><div class="tndchips">${grp.map(q => `<span class="tndchip${q.tenderWon ? ' won' : ''}${q.status === 'lost' ? ' off' : ''}"><b>${esc(cname(q))}</b><i class="tqn">${esc(q.number || '')}</i>${stBadge(q)}</span>`).join('')}</div></div><div class="end">${money}</div></div>`;
+  }
+  const groupsIn = arr => { const m = new Map(); arr.forEach(x => { if (x.tenderId) { if (!m.has(x.tenderId)) m.set(x.tenderId, []); m.get(x.tenderId).push(x); } }); return m; };
+  window.nfQuoteCards = arr => {
+    const g = groupsIn(arr); const done = new Set(); const out = [];
+    arr.forEach(x => {
+      const grp = x.tenderId ? g.get(x.tenderId) : null;
+      if (!grp || grp.length < 2) { out.push(quoteCardHTML(x)); return; }
+      if (done.has(x.tenderId)) return; done.add(x.tenderId); out.push(tenderCard(x.tenderId, grp));
+    });
+    return out.join('');
+  };
+  window.nfQuoteMeta = arr => {
+    const g = groupsIn(arr); let n = 0, sumAll = 0; const done = new Set();
+    arr.forEach(x => {
+      const grp = x.tenderId ? g.get(x.tenderId) : null;
+      if (!grp || grp.length < 2) { n++; sumAll += total(x); return; }
+      if (done.has(x.tenderId)) return; done.add(x.tenderId); n++; sumAll += Math.max(...grp.map(total));
+    });
+    return { n, total: sumAll };
+  };
+
+  /* ---------- the tender (a window over the page) ---------- */
+  ACTIONS.tenderOpen = tid => {
+    const grp = members(tid); if (!grp.length) return; const win = winnerOf(tid); const sales = canSales(); const fin = typeof seesFinance === 'function' && seesFinance();
+    const rows = grp.map(q => {
+      const acts = [`<button type="button" class="btn xs" data-action="tenderGo" data-arg="${esc(q.id)}">${L('افتح', 'Open')}</button>`];
+      if (sales && !win && ['draft', 'sent', 'approved'].includes(q.status)) acts.push(`<button type="button" class="btn xs p" data-action="tenderAward" data-arg="${esc(q.id)}">${icon('check')}${L('رست عليها', 'Awarded')}</button>`);
+      if (typeof quoteCanDel === 'function' && quoteCanDel(q)) acts.push(`<button type="button" class="iconbtn qdel" data-action="tenderDel" data-arg="${esc(q.id)}" title="${esc(L('حذف عرض السعر', 'Delete the quotation'))}">${icon('trash')}</button>`);
+      return `<div class="tndrow${q.tenderWon ? ' won' : ''}${q.status === 'lost' ? ' off' : ''}"><div class="tr1"><b>${esc(cname(q))}</b>${q.tenderWon ? `<span class="badge good">${L('رست عليها', 'Awarded')}</span>` : ''}<span class="grow"></span>${fin ? `<span class="num bold">${fmtMoney(total(q))} ${CUR()}</span>` : ''}</div><div class="tr2"><span class="code">${esc(q.number || '')}</span>${+q.rev > 1 ? `<span class="tiny muted">V${+q.rev}</span>` : ''}${stBadge(q)}<span class="grow"></span>${acts.join('')}</div></div>`;
+    }).join('');
+    const top = [];
+    if (sales) top.push(`<button type="button" class="btn sm" data-action="tenderCopy" data-arg="${esc(grp[0].id)}">${icon('plus')}${L('ضيف شركة تانية', 'Add another company')}</button>`, `<button type="button" class="btn sm ghost" data-action="tenderRename" data-arg="${esc(tid)}">${icon('edit')}${L('اسم المناقصة', 'Tender name')}</button>`);
+    if (sales && win) top.push(`<button type="button" class="btn sm ghost" data-action="tenderUnaward" data-arg="${esc(tid)}">${L('إلغاء الترسية', 'Cancel the award')}</button>`);
+    openModal({ title: `${L('مناقصة', 'Tender')} — ${nameOf(tid)}`, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">${L('إغلاق', 'Close')}</button>`,
+      body: `<div class="tndbox"><div class="small muted" style="margin-bottom:8px">${esc(L(`${grp.length} شركات طالبين عرض على نفس المشروع`, `${grp.length} companies asked for a quotation on the same project`))}${win ? ` · <b>${esc(L('رست على', 'Awarded to'))} ${esc(cname(win))}</b>` : ''}</div>${top.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">${top.join('')}</div>` : ''}<div class="tndrows">${rows}</div></div>` });
+  };
+  ACTIONS.tenderGo = id => { if (typeof closeModal === 'function') closeModal(); go('quotes/' + id); };
+  ACTIONS.tenderDel = async id => { const q = byId('quotations', id); if (!q || typeof quoteCanDel !== 'function' || !quoteCanDel(q)) return; const tid = q.tenderId; if (typeof closeModal === 'function') closeModal(); if (!(await confirmDlg(quoteDelMsg(q), 'حذف'))) return; await Store.remove('quotations', id); toast(L('اتمسح — تقدر ترجّعه من سلة المحذوفات', 'Deleted — you can restore it from the recycle bin')); render(false); if (tid && members(tid).length) setTimeout(() => ACTIONS.tenderOpen(tid), 150); };
+
+  /* ---------- award / cancel the award ---------- */
+  ACTIONS.tenderAward = async id => {
+    const q = byId('quotations', id); if (!q || !q.tenderId || !canSales()) return; const tid = q.tenderId;
+    const others = members(tid).filter(x => x.id !== id && !['converted'].includes(x.status));
+    if (typeof closeModal === 'function') closeModal();
+    if (!(await confirmDlg(L(`المناقصة «${nameOf(tid)}» رست على ${cname(q)}؟ عرضها يكمّل عادي، وباقي الشركات (${others.length}) يتقفلوا «مارسيتش» ويفضلوا للرجوع ليهم.`, `Was the tender «${nameOf(tid)}» awarded to ${cname(q)}? Its quotation goes on as usual; the other companies (${others.length}) close as «Not awarded» and stay for reference.`), L('رست عليها', 'Awarded')))) return;
+    const now = nowISO(); const by = (S.session && S.session.name) || '';
+    await Store.update('quotations', id, { tenderWon: true, tenderAwardedAt: now, tenderAwardedBy: by });
+    for (const x of others) await Store.update('quotations', x.id, { status: 'lost', tenderWon: false, prevStatus: x.status === 'lost' ? (x.prevStatus || 'sent') : x.status, lostReason: L(`المناقصة رست على ${cname(q)}`, `The tender was awarded to ${cname(q)}`), lostAt: now });
+    toast(L(`رست على ${cname(q)}`, `Awarded to ${cname(q)}`)); render(false);
+  };
+  ACTIONS.tenderUnaward = async tid => {
+    if (!canSales()) return; const grp = members(tid); if (typeof closeModal === 'function') closeModal();
+    if (!(await confirmDlg(L('إلغاء الترسية؟ كل الشركات ترجع زي ما كانت قبلها.', 'Cancel the award? Every company goes back to where it was.'), L('إلغاء الترسية', 'Cancel the award')))) return;
+    for (const x of grp) {
+      if (x.tenderWon) await Store.update('quotations', x.id, { tenderWon: false, tenderAwardedAt: null, tenderAwardedBy: '' });
+      else if (x.status === 'lost') await Store.update('quotations', x.id, { status: x.prevStatus && x.prevStatus !== 'lost' ? x.prevStatus : 'sent', prevStatus: null, lostReason: '', lostAt: null });
+    }
+    toast(L('اتلغت الترسية', 'Award cancelled')); render(false);
+  };
+
+  /* ---------- the same project for another company ---------- */
+  ACTIONS.tenderCopy = id => {
+    const src = byId('quotations', id); if (!src || !canSales()) return; if (typeof closeModal === 'function') closeModal();
+    const tname = src.tenderName || src.subject || '';
+    setTimeout(() => openModal({ title: L('نفس المشروع لشركة تانية (مناقصة)', 'Same project for another company (tender)'), submitLabel: L('اعمل العرض', 'Create the quotation'),
+      body: `<p class="small ink2" style="margin:0 0 10px">${esc(L(`نسخة من ${src.number} بنفس البنود والأسعار باسم الشركة التانية — برقم جديد، وتقدر تغيّر أسعارها لوحدها. العرضين بيتربطوا كمناقصة واحدة.`, `A copy of ${src.number} with the same items and prices in the other company's name — a new number, and its prices can change on their own. The quotations are tied as one tender.`))}</p><div class="form">${field(L('الشركة التانية', 'The other company'), clientPicker(''), 'full')}${field(L('اسم المناقصة (المشروع)', 'Tender (project) name'), inp('tname', tname, 'required'), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const clientId = await resolveClient(d.clientName); if (!clientId) { toast(L('اختار الشركة', 'Choose the company'), 'err'); return false; }
+        if (clientId === src.clientId) { toast(L('دي نفس الشركة — اختار شركة تانية', 'That is the same company — choose another one'), 'err'); return false; }
+        const tid = src.tenderId || ('tn_' + uid()); const name = String(d.tname || '').trim() || tname;
+        for (const x of (src.tenderId ? members(tid) : [src])) if (x.tenderId !== tid || x.tenderName !== name) await Store.update('quotations', x.id, { tenderId: tid, tenderName: name });
+        const doc = { id: uid(), number: nextQuoteNo(), clientId, status: 'draft', date: todayISO(), validUntil: src.validUntil && src.validUntil >= todayISO() ? src.validUntil : addDays(todayISO(), 15), createdBy: (S.session && S.session.id) || null, createdAt: nowISO(), tenderId: tid, tenderName: name, copiedFrom: src.id };
+        COPY.forEach(k => { if (src[k] !== undefined) doc[k] = JSON.parse(JSON.stringify(src[k])); });
+        await Store.save('quotations', doc); toast(L(`اتعمل ${doc.number} لـ ${cname(doc)}`, `${doc.number} created for ${cname(doc)}`)); go('quotes/' + doc.id);
+      } }), 120);
+  };
+  /* ---------- tie quotes that were made separately ---------- */
+  ACTIONS.tenderJoin = id => {
+    const q = byId('quotations', id); if (!q || !canSales()) return;
+    const cands = sortBy(all().filter(x => x.id !== id && x.brandId === q.brandId && x.status !== 'converted' && (!q.tenderId || x.tenderId !== q.tenderId)), x => x.date || '', true).slice(0, 80);
+    if (!cands.length) { toast(L('مفيش عروض تانية لنفس البراند', 'No other quotations for this brand'), 'err'); return; }
+    openModal({ title: L('ضم لمناقصة', 'Join a tender'), submitLabel: L('اربطهم', 'Tie them'), wide: true,
+      body: `<p class="small ink2" style="margin:0 0 10px">${esc(L(`اختار عروض الشركات التانية اللي على نفس مشروع ${q.number}.`, `Pick the other companies' quotations on the same project as ${q.number}.`))}</p><div class="form">${field(L('اسم المناقصة (المشروع)', 'Tender (project) name'), inp('tname', q.tenderName || q.subject || '', 'required'), 'full')}</div><div class="tndpick">${cands.map(x => `<label class="check"><input type="checkbox" name="tq" value="${esc(x.id)}"> <span class="code">${esc(x.number || '')}</span> <b>${esc(cname(x))}</b> <span class="muted small">${esc(x.subject || '')}${x.tenderId ? ` · ${esc(L('في مناقصة', 'in a tender'))}: ${esc(nameOf(x.tenderId))}` : ''}</span></label>`).join('')}</div>`,
+      onSubmit: async f => {
+        const ids = [...f.querySelectorAll('input[name=tq]:checked')].map(i => i.value); if (!ids.length) { toast(L('اختار عرض واحد على الأقل', 'Pick at least one quotation'), 'err'); return false; }
+        const picked = ids.map(i => byId('quotations', i)).filter(Boolean); const name = String(formData(f).tname || '').trim() || q.subject || '';
+        const tid = q.tenderId || (picked.find(x => x.tenderId) || {}).tenderId || ('tn_' + uid());
+        const mates = new Set([q.id, ...ids]); picked.forEach(x => { if (x.tenderId && x.tenderId !== tid) members(x.tenderId).forEach(m => mates.add(m.id)); }); members(tid).forEach(m => mates.add(m.id));
+        for (const mid of mates) await Store.update('quotations', mid, { tenderId: tid, tenderName: name });
+        toast(L(`اتربطوا كمناقصة واحدة (${mates.size} شركات)`, `Tied as one tender (${mates.size} companies)`)); render(false);
+      } });
+  };
+  ACTIONS.tenderLeave = async id => {
+    const q = byId('quotations', id); if (!q || !q.tenderId || !canSales()) return;
+    if (!(await confirmDlg(L(`تخرّج ${q.number} من المناقصة؟`, `Take ${q.number} out of the tender?`), L('خرّجه', 'Take it out')))) return;
+    const patch = { tenderId: null, tenderName: '', tenderWon: false }; if (q.status === 'lost') Object.assign(patch, { status: q.prevStatus && q.prevStatus !== 'lost' ? q.prevStatus : 'sent', prevStatus: null, lostReason: '' });
+    await Store.update('quotations', id, patch); toast(L('اتشال من المناقصة', 'Taken out of the tender')); render(false);
+  };
+  ACTIONS.tenderRename = tid => {
+    if (!canSales()) return; if (typeof closeModal === 'function') closeModal();
+    setTimeout(() => openModal({ title: L('اسم المناقصة', 'Tender name'), body: `<div class="form">${field(L('اسم المناقصة (المشروع)', 'Tender (project) name'), inp('tname', nameOf(tid), 'required'), 'full')}</div>`,
+      onSubmit: async f => { const name = String(formData(f).tname || '').trim(); if (!name) return false; for (const x of members(tid)) await Store.update('quotations', x.id, { tenderName: name }); toast(L('اتغيّر الاسم', 'Name changed')); render(false); } }), 120);
+  };
+
+  /* ---------- on the quote page: the tender box ---------- */
+  RENDER_HOOKS.push(() => {
+    const v = document.getElementById('view'); if (!v) return; const old = v.querySelector('#tenderbox'); if (old) old.remove();
+    if (!S.route || S.route.view !== 'quotes' || !S.route.id || !v.querySelector('#quotearea')) return;
+    const q = byId('quotations', S.route.id); if (!q) return; const sales = canSales(); let html = '';
+    if (q.tenderId) {
+      const grp = members(q.tenderId); const win = winnerOf(q.tenderId); const acts = [`<button type="button" class="btn sm" data-action="tenderOpen" data-arg="${esc(q.tenderId)}">${L('افتح المناقصة', 'Open the tender')}</button>`];
+      if (sales) acts.push(`<button type="button" class="btn sm" data-action="tenderCopy" data-arg="${esc(q.id)}">${icon('plus')}${L('ضيف شركة تانية', 'Add another company')}</button>`);
+      if (sales && !win && ['draft', 'sent', 'approved'].includes(q.status)) acts.push(`<button type="button" class="btn sm p" data-action="tenderAward" data-arg="${esc(q.id)}">${icon('check')}${L('رست على الشركة دي', 'Awarded to this company')}</button>`);
+      if (sales && win) acts.push(`<button type="button" class="btn sm ghost" data-action="tenderUnaward" data-arg="${esc(q.tenderId)}">${L('إلغاء الترسية', 'Cancel the award')}</button>`);
+      if (sales) acts.push(`<button type="button" class="btn sm ghost" data-action="tenderLeave" data-arg="${esc(q.id)}">${L('خرّج العرض من المناقصة', 'Take it out of the tender')}</button>`);
+      html = `<div class="card no-print tndcardbox" id="tenderbox"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="badge tnd">${L('مناقصة', 'Tender')}</span><b>${esc(nameOf(q.tenderId))}</b><span class="muted small">${esc(L(`${grp.length} شركات`, `${grp.length} companies`))}</span>${win ? `<span class="badge good">${esc(L('رست على', 'Awarded to'))} ${esc(cname(win))}</span>` : ''}</div><div class="tndchips" style="margin:8px 0">${grp.map(x => `<a class="tndchip${x.id === q.id ? ' me' : ''}${x.tenderWon ? ' won' : ''}${x.status === 'lost' ? ' off' : ''}" href="#/quotes/${esc(x.id)}"><b>${esc(cname(x))}</b><i class="tqn">${esc(x.number || '')}</i>${stBadge(x)}</a>`).join('')}</div><div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div></div>`;
+    } else if (sales && !['converted', 'lost'].includes(q.status)) {
+      html = `<div class="row no-print tndrow" id="tenderbox" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-action="tenderCopy" data-arg="${esc(q.id)}">${icon('copy')}${L('نفس المشروع لشركة تانية (مناقصة)', 'Same project for another company (tender)')}</button><button type="button" class="btn sm ghost" data-action="tenderJoin" data-arg="${esc(q.id)}">${icon('link')}${L('ضم لمناقصة', 'Join a tender')}</button></div>`;
+    }
+    if (!html) return; const head = v.querySelector('.stack > .row.no-print'); if (head) head.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.badge.tnd{background:color-mix(in srgb,#7c5cff 16%,transparent);color:#7c5cff;border-color:color-mix(in srgb,#7c5cff 35%,transparent)}
+html[data-theme="dark"] .badge.tnd,html.dark .badge.tnd{color:#b3a2ff}
+.tndchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.tndchip{display:inline-flex;align-items:center;gap:6px;padding:3px 4px 3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-size:12.5px;color:var(--ink);text-decoration:none;max-width:100%}
+.tndchip b{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.tndchip .tqn{font-style:normal;font-size:11px;color:var(--muted);font-family:var(--mono,ui-monospace,monospace)}
+.tndchip .badge{font-size:11px;padding:1px 7px}
+.tndchip.won{border-color:color-mix(in srgb,var(--good,#2fa36b) 60%,transparent);background:color-mix(in srgb,var(--good,#2fa36b) 12%,transparent)}
+.tndchip.off{opacity:.6}
+.tndchip.me{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.tndrows{display:grid;gap:8px}
+.tndrow{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}
+.tndrow .tr1,.tndrow .tr2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tndrow .tr2{margin-top:6px}
+.tndrow .grow{flex:1}
+.tndrow.won{border-color:color-mix(in srgb,var(--good,#2fa36b) 60%,transparent);background:color-mix(in srgb,var(--good,#2fa36b) 8%,var(--surface))}
+.tndrow.off{opacity:.65}
+.tndpick{display:grid;gap:6px;max-height:46vh;overflow:auto;margin-top:8px}
+.tndpick .check{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.item .qdel,.tndrow .qdel{color:var(--crit-ink,#c0392b);opacity:.75}
+.item .qdel:hover,.tndrow .qdel:hover{opacity:1}
+.item.tndcard .main{min-width:0}
 </style>`);
 })();
 </script>
