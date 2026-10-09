@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1136-85e261";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1232-658189";</script>
 
 <script>
 'use strict';
@@ -2770,10 +2770,14 @@ function rSales() {
 }
 
 /* ---------------- settings ---------------- */
-function vSettings() {
+/* v7.10: settingsTabList() = every settings section [key, label]; vSettings(key) returns that section's body only —
+   the grouped tiles home + group pages live in parts/99zzZzZZb-settings-home.js */
+function settingsTabList() {
+  return [['staff', 'المستخدمون والصلاحيات'], ['brands', 'البراندات ومسارات التصنيع'], ['depts', 'الأقسام'], ['shifts', 'الورديات'], ['policy', 'سياسة الحضور والجزاءات'], ['regulation', 'اللائحة الداخلية'], ['accounting', 'المحاسبة'], ['ai', 'المساعد الذكي'], ['leaves', 'الإجازات والعطلات'], ['geo', 'الموقع وبصمة الوجه'], ['general', 'عام'], ['data', 'البيانات'], ['backend', 'قاعدة البيانات والنسخ الاحتياطي']].concat(Object.keys(EXTRA_SETTINGS).map(k => [k, EXTRA_SETTINGS[k].label]));
+}
+function vSettings(bareTab) {
   if (!isAdmin()) return `<div class="empty"><b>الإعدادات متاحة للمدير فقط</b></div>`;
-  const tab = S.ui.tab.settings || 'staff'; const s = S.settings;
-  const tabs = [['staff', 'المستخدمون والصلاحيات'], ['brands', 'البراندات ومسارات التصنيع'], ['depts', 'الأقسام'], ['shifts', 'الورديات'], ['policy', 'سياسة الحضور والجزاءات'], ['regulation', 'اللائحة الداخلية'], ['accounting', 'المحاسبة'], ['ai', 'المساعد الذكي'], ['leaves', 'الإجازات والعطلات'], ['geo', 'الموقع وبصمة الوجه'], ['general', 'عام'], ['data', 'البيانات'], ['backend', 'قاعدة البيانات والنسخ الاحتياطي']].concat(Object.keys(EXTRA_SETTINGS).map(k => [k, EXTRA_SETTINGS[k].label]));
+  const tab = bareTab || S.ui.tab.settings || 'staff'; const s = S.settings; const tabs = settingsTabList();
   let body = '';
   if (EXTRA_SETTINGS[tab]) body = EXTRA_SETTINGS[tab].render();
   else if (tab === 'geo') body = settingsGeoTab();
@@ -2808,6 +2812,7 @@ function vSettings() {
       <div class="card"><h3>حالة قاعدة البيانات</h3><p class="small ink2">${S.mode === 'db' ? 'متصل بقاعدة بيانات التطبيق المشتركة.' : S.mode === 'local' ? 'نسخة محلية: البيانات محفوظة في متصفح هذا الجهاز فقط (لا تُشارك مع أجهزة أخرى). حساب المدير الافتراضي: admin / admin.' : 'وضع تجريبي بدون قاعدة بيانات — لا يُحفظ شيء.'}</p>${S.mode === 'local' ? `<div class="row" style="margin-top:10px"><button class="btn d" data-action="localReset">${icon('trash')}مسح كل البيانات المحلية والبدء من جديد</button></div>` : ''}<div class="row small muted" style="margin-top:8px;gap:14px">${['orders', 'clients', 'quotations', 'materials', 'purchases', 'workers', 'staff'].map(c => `<span>${esc({ orders: 'أوامر', clients: 'عملاء', quotations: 'عروض', materials: 'خامات', purchases: 'مشتريات', workers: 'عمال', staff: 'مستخدمون' }[c])}: <b class="num">${S.data[c].size}</b></span>`).join('')}<span>سجلات حضور شهرية: <b class="num">${S.data.attendance.size}</b></span><span>سجلات حركة شهرية: <b class="num">${S.data.movements.size}</b></span></div><p class="tiny muted" style="margin-top:8px">السعة القصوى 5,000 سجل. الحضور والحركات تُجمّع في سجل واحد لكل شهر لكل قسم، فالاستهلاك بطيء جدًا.</p></div>
       <div class="card"><h3>نسخة احتياطية</h3><p class="small ink2">تصدير كل البيانات كنص JSON لحفظه خارج التطبيق.</p><div class="row" style="margin-top:12px"><button class="btn" data-action="exportJson">${icon('copy')}إظهار النسخة الاحتياطية</button></div></div></div>`;
   }
+  if (bareTab) return body;
   return `<div class="tabs">${tabs.map(x => `<button class="${tab === x[0] ? 'on' : ''}" data-action="tab" data-arg="settings:${x[0]}">${x[1]}</button>`).join('')}</div>${body}`;
 }
 document.addEventListener('submit', async ev => {
@@ -4763,7 +4768,7 @@ const ACCT_DEFAULTS = {
 };
 const acctCfg = () => { const c = Object.assign({}, ACCT_DEFAULTS, S.settings.accounting || {}); if (!Array.isArray(c.accounts) || !c.accounts.length) c.accounts = clone(ACCT_DEFAULTS.accounts); if (!Array.isArray(c.expenseCats) || !c.expenseCats.length) c.expenseCats = clone(ACCT_DEFAULTS.expenseCats); return c; };
 const catName = id => (acctCfg().expenseCats.find(c => c.id === id) || {}).name || id || '—';
-const acctName = id => (acctCfg().accounts.find(a => a.id === id) || {}).name || id || '—';
+const acctName = id => (acctCfg().accounts.find(a => a.id === id) || {}).name || ({ cash: 'الخزينة', bank: 'البنك' })[id] || id || '—';
 const payAccount = p => p.account || (/نقد|كاش/.test(p.method || '') ? 'cash' : 'bank');
 const canExpense = () => writable() && (isAdmin() || ['hr', 'office', 'acc'].includes(role()));
 const seesAccounts = () => isAdmin() || role() === 'hr';
@@ -7176,6 +7181,7 @@ async function saveTripBase(f, t) {
   else toast('تم الحفظ');
   rerender(); if (!t.id) go('fleet/' + doc.id);
 }
+if (typeof REQ_TYPES === 'object' && !REQ_TYPES.trip) REQ_TYPES.trip = 'تكليف مشوار'; /* v7.10: the trip request showed its raw type («trip») */
 async function createTripRequest(t) {
   const w = byId('workers', t.driverId); const r = { id: uid(), type: 'trip', tripId: t.id, workerId: t.driverId, deptId: (w && w.deptId) || 'fleet', reason: `${TRIP_KINDS[t.kind] || ''} — ${t.purpose}`, status: 'pending', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), chain: chainFor('trip'), step: 0, stepAt: nowISO() };
   r.thread = [{ id: uid(), at: r.createdAt, by: r.createdBy, byName: r.createdByName, role: role(), kind: 'system', text: `تكليف مشوار ${t.number}: ${vehicleName(t.vehicleId)} · ${assigneeName(t.driverId)} · ${fmtDate(t.date)} ${t.time || ''}` }];
@@ -13031,9 +13037,17 @@ function ninetyFactoryStats() {
   S0.urgent = S0.esc.length + S0.suspect.length + S0.transfer.length; S0.count = S0.appr.length + S0.urgent + S0.late.length;
   return S0;
 }
-const greet = () => { const h = new Date().getHours(); return h < 12 ? 'صباح الخير' : h < 18 ? 'مساء الخير' : 'مساء الخير'; };
-const firstName = () => ((S.session && S.session.name) || '').trim().split(/\s+/)[0] || '';
-function ninetyAvatar() { const src = typeof myAvatarSrc === 'function' ? myAvatarSrc() : null; return `<div class="av">${src ? `<img src="${esc(src)}" alt="">` : esc(firstName().slice(0, 1) || 'م')}</div>`; }
+/* v7.10 (Mahmoud: «put my name, no titles» + «English = all English, Arabic = all Arabic»): the greeting and the side chip use
+   his own name in the current language; a generic account name (the default manager label) falls back to the owner card that
+   the other Ninety apps on this device remember (parts/99zzZzZZc-owner-card.js) */
+const nfHubEn = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+const greet = () => { const h = new Date().getHours(); return nfHubEn() ? (h < 12 ? 'Good morning' : 'Good evening') : (h < 12 ? 'صباح الخير' : 'مساء الخير'); };
+const nfHubName = () => { const n = ((S.session && S.session.name) || '').trim(); const c = typeof ownerCard === 'function' ? ownerCard() : null; return (typeof ownerNameGeneric === 'function' && ownerNameGeneric(n) && c && c.name) ? c.name : n; };
+const nfHubNameShown = () => { const n = nfHubName(); if (!nfHubEn()) return n; const e = (S.session && S.session.nameEn) || (typeof i18nTr === 'function' ? i18nTr(n) : '') || ''; return e && !/[\u0600-\u06FF]/.test(e) ? e : n; };
+const firstName = () => nfHubNameShown().split(/\s+/)[0] || '';
+const ninetyCoShort = () => (typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'construction') ? 'المقاولات' : (typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'studioz') ? 'الاستوديو' : 'المصنع';
+const ninetyCoName = () => (typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'construction') ? 'Ninety Construction' : (typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'studioz') ? 'Ninety Studioz' : 'Ninety Fabrication';
+function ninetyAvatar() { const src = (typeof myAvatarSrc === 'function' ? myAvatarSrc() : null) || (typeof ownerCard === 'function' && (ownerCard() || {}).avatar) || null; return `<div class="av">${src ? `<img src="${esc(src)}" alt="">` : esc(firstName().slice(0, 1) || 'م')}</div>`; }
 function ninetyTodo(f) {
   const rows = [];
   f.transfer.slice(0, 2).forEach(p => rows.push({ c: '#9a7a3a', t: `تحويل ${fmtMoney(typeof poPayable === 'function' ? poPayable(p) : (p.total || 0))} ${CUR()} — ${p.supplier || p.number || ''}`, h: `#/purchases/${p.id}` }));
@@ -13063,22 +13077,22 @@ function ninetySideCo(co, f) {
 }
 function ninetyAlerts() {
   let items = []; try { items = typeof notifItems === 'function' ? notifItems().slice(0, 4) : []; } catch (e) { /* ignore */ }
-  if (!items.length) return '<div class="al"><i style="background:#8cc3ad"></i><span>لا توجد تنبيهات الآن<small>المصنع</small></span></div>';
-  return items.map(x => `<a class="al" data-action="ninetyOpen" data-arg="${esc(x.href || '#/dashboard')}"><i style="background:${x.kind === 'notice' || x.kind === 'req' ? '#d9b97a' : '#d98c8c'}"></i><span>${esc(x.title)}<small>${esc(x.sub || 'المصنع')}</small></span></a>`).join('');
+  if (!items.length) return `<div class="al"><i style="background:#8cc3ad"></i><span>لا توجد تنبيهات الآن<small>${ninetyCoShort()}</small></span></div>`;
+  return items.map(x => `<a class="al" data-action="ninetyOpen" data-arg="${esc(x.href || '#/dashboard')}"><i style="background:${x.kind === 'notice' || x.kind === 'req' ? '#d9b97a' : '#d98c8c'}"></i><span>${esc(x.title)}<small>${esc(x.sub || ninetyCoShort())}</small></span></a>`).join('');
 }
 function ninetyHomeHTML() {
   const f = ninetyFactoryStats(); const sel = S.ui.ninetySel || ''; const day = fmtDate(todayISO());
   const main = sel === 'studio' || sel === 'construction' ? ninetySoonBlock(sel) + ninetyFactoryBlock(f) + ninetySoonBlock(sel === 'studio' ? 'construction' : 'studio') : ninetyFactoryBlock(f) + ninetySoonBlock('studio') + ninetySoonBlock('construction');
   return `<div class="nhome" id="nhome"><aside class="nside">
     <div class="nbrand">${logoImg(24)}</div>
-    <div class="uchip">${ninetyAvatar()}<div><b>${esc(S.session.nameEn || 'Mahmoud Fawzy')}</b><small>Owner · Ninety · 3 companies</small></div></div>
+    <div class="uchip">${ninetyAvatar()}<div><b>${esc(nfHubNameShown())}</b><small>${esc(ninetyCoName())}</small></div></div>
     <div class="sec">الشركات</div><div class="cos">${ninetySideCo('factory', f)}${ninetySideCo('studio', f)}${ninetySideCo('construction', f)}</div>
     <div class="sec">إجراءات سريعة</div><div class="qa"><button type="button" data-action="ninetyView">${icon('user')}شوف بعين…</button><button type="button" data-action="ninetyBell">${icon('bell')}الإشعارات</button><button type="button" class="crit" data-action="ninetyFreeze">${icon('alert')}تجميد طارئ</button></div>
     <div class="sec">تنبيهات الآن</div><div class="alerts">${ninetyAlerts()}</div>
     <div class="sfoot"><span>${day}</span><span>Ninety · نسخة ${esc((APP.build || '').slice(0, 13) || NINETY_VER)}</span></div>
   </aside><main class="nmain">
     <div class="mhead">${logoImg(22)}${ninetyAvatar()}</div>
-    <div class="hhead"><div><h1>${greet()} يا ${esc(firstName())}</h1><p>${day} · ${f.count ? `${f.count} حاجة مستنياك النهارده في المصنع` : 'مفيش حاجة مستنياك النهارده ✓'}</p></div></div>
+    <div class="hhead"><div><h1>${nfHubEn() ? `${greet()}, ${esc(firstName())}` : `${greet()} يا ${esc(firstName())}`}</h1><p>${day} · ${f.count ? `${f.count} حاجة مستنياك النهارده في المصنع` : 'مفيش حاجة مستنياك النهارده ✓'}</p></div></div>
     <div class="strip"><div class="st ${f.appr.length ? 'wn' : ''}" style="cursor:pointer" data-action="ninetyOpen" data-arg="#/requests"><b>${f.appr.length}</b><span>اعتمادات<br>مستنياك</span></div><div class="st ${f.urgent ? 'bad' : ''}" style="cursor:pointer" data-action="ninetyUrgent"><b>${f.urgent}</b><span>تحتاج تدخّلك<br>فورًا</span></div><div class="st" style="cursor:pointer" data-action="ninetyOpen" data-arg="#/orders"><b>${f.open}</b><span>أوامر تشغيل<br>جارية</span></div><div class="st ok"><b>${f.present}<span style="font-size:13px">/${f.total}</span></b><span>حضور اليوم<br>في المصنع</span></div></div>
     ${main}</main></div>`;
 }
@@ -15445,6 +15459,9 @@ vRegulation = (base => function (gate) {
 /* the change log table shows the description */
 regParamsTable = (base => function () { let h = base.apply(this, arguments); try { regChanges().forEach(c => { if (c.desc && c.paramId === 'text') h = h.replace(/(<td[^>]*>)text(<\/td>)/, `$1${esc(c.desc)}$2`); }); } catch (e) { /* ignore */ } return h; })(regParamsTable);
 Object.assign(window, { missingPunchDays, regChangesSince });
+/* v7.10: the default regulation text still says {{missingPunchDays}} / {{missingPunchRepeatDays}} — those two parameters were
+   replaced by the tiers above, so a fresh system (construction) showed the raw placeholders; they now read the first / second tier */
+if (typeof regValueText === 'function') regValueText = (base => key => (key === 'missingPunchDays' ? base('missingT1Days') : key === 'missingPunchRepeatDays' ? base('missingT2Days') : base(key)))(regValueText);
 /* =====================================================================
    v4.42 — (1) السواق لما يبدأ المشوار: يطلع له زرار كبير «افتح الطريق في جوجل ماب» للوجهة
            (ولما يدوس «التوجه للمصنع»: الطريق للمصنع). الكيلومترات والوقت بيتحسبوا من العداد (بداية/نهاية)
@@ -17101,7 +17118,7 @@ if (typeof NINETY_COS !== 'undefined') {
     ninetyFactoryStats = (base => () => { const f = base(); f.open = list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.kind !== 'update').length; f.late = []; f.transfer = []; return f; })(ninetyFactoryStats);
     ninetySoonBlock = (base => co => co === 'studio' ? linkBlock('factory') : base(co))(ninetySoonBlock);
     ninetySideCo = (base => (co, f) => co === 'factory' ? stuLabel(base('factory', f)).replace('data-arg="factory"', 'data-arg="studio"').replace(/--c:[^"]*"/, `--c:${NINETY_COS.studio.color}"`) : co === 'studio' ? linkSide('factory') : base(co, f))(ninetySideCo);
-    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في المكتب').replace('Owner · Ninety · 3 companies', 'Owner · Ninety Studioz').replace(/أوامر تشغيل<br>جارية/, 'مهام<br>جارية'))(ninetyHomeHTML);
+    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في المكتب').replace(/أوامر تشغيل<br>جارية/, 'مهام<br>جارية'))(ninetyHomeHTML);
   } else {
     NINETY_COS.studio.url = 'studioz/index.html';
     ACTIONS.ninetyGo = (base => co => { if (co === 'studio') { location.href = NINETY_COS.studio.url; return; } return base(co); })(ACTIONS.ninetyGo);
@@ -17239,8 +17256,8 @@ if (typeof NINETY_COS !== 'undefined' && NINETY_COS.construction) {
     const stuLink = () => { const c = NINETY_COS.studio; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="studio"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال</span></div></div>`; };
     const facLink = () => { const c = NINETY_COS.factory; return `<div class="blk" style="--c:${c.color}" data-action="ninetyGo" data-arg="factory"><div class="hd"><span class="dot"></span><b>${esc(c.name)}</b><small>· ${esc(c.sub)}</small><span class="open">فتح السيستم ←</span></div><div class="soon"><span class="badge good">سيستم مستقل بموظفيه ولائحته — شغّال</span></div></div>`; };
     ninetySoonBlock = (base => co => co === 'construction' ? facLink() : co === 'studio' ? stuLink() : base(co))(ninetySoonBlock);
-    ninetySideCo = (base => (co, f) => co === 'factory' ? base('factory', f).replace(/Ninety Fabrication/g, 'Ninety Construction').replace(/في المصنع/g, 'في الشركة').replace('data-arg="factory"', 'data-arg="construction"').replace(/--c:[^"]*"/, `--c:${NINETY_COS.construction.color}"`) : co === 'construction' ? `<button type="button" class="co" style="--c:${NINETY_COS.factory.color}" data-action="ninetyGo" data-arg="factory"><div class="top"><i></i><span class="nm">${esc(NINETY_COS.factory.name)}<small>${esc(NINETY_COS.factory.sub)} · فتح السيستم</small></span></div></button>` : base(co, f))(ninetySideCo);
-    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في الشركة').replace('Owner · Ninety · 3 companies', 'Owner · Ninety Construction').replace(/أوامر تشغيل<br>جارية/, 'مشاريع<br>جارية'))(ninetyHomeHTML);
+    ninetySideCo = (base => (co, f) => co === 'factory' ? base('factory', f).replace(/Ninety Fabrication/g, 'Ninety Construction').replace('<small>المصنع · ', '<small>المقاولات · ').replace(/في المصنع/g, 'في الشركة').replace('data-arg="factory"', 'data-arg="construction"').replace(/--c:[^"]*"/, `--c:${NINETY_COS.construction.color}"`) : co === 'construction' ? `<button type="button" class="co" style="--c:${NINETY_COS.factory.color}" data-action="ninetyGo" data-arg="factory"><div class="top"><i></i><span class="nm">${esc(NINETY_COS.factory.name)}<small>${esc(NINETY_COS.factory.sub)} · فتح السيستم</small></span></div></button>` : base(co, f))(ninetySideCo);
+    ninetyHomeHTML = (base => () => base().replace(/في المصنع/g, 'في الشركة').replace(/أوامر تشغيل<br>جارية/, 'مشاريع<br>جارية'))(ninetyHomeHTML);
   } else {
     NINETY_COS.construction.url = (typeof isStudioz === 'function' && isStudioz()) ? '../construction/index.html' : 'construction/index.html';
     ACTIONS.ninetyGo = (base => co => { if (co === 'construction') { location.href = NINETY_COS.construction.url; return; } return base(co); })(ACTIONS.ninetyGo);
@@ -29418,7 +29435,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     const cur = TK.includes(rid) ? rid : (!rid ? ((S.ui.filter.crm || {}).tab || 'board') : '');
     const hasSk = typeof canSee === 'function' && canSee('saleskit'); // v6.01: الـSales Kit جوه مجموعة CRM — lōf
     const groups = brands.filter(b => typeof canSee !== 'function' || canSee(CRM_VIEW(b.id))).map(b => { const cv = CRM_VIEW(b.id);
-      return `<div class="grp">CRM — ${esc(brandKit(b.id).name)}</div>` + OWNER_ITEMS.filter(([k]) => k !== 'invoices' || typeof canSee !== 'function' || canSee('invoices')).map(([k, l, ic]) => `<a href="#/${cv}/${k}" class="${v === cv && cur === k ? 'on' : ''}" data-action="navgo" data-crmtab="${k}">${icon(ic)}<span>${l}</span></a>`).join('') + (b.id === 'lof' && hasSk ? `<a href="#/saleskit" class="${v === 'saleskit' ? 'on' : ''}" data-action="navgo">${icon('layers')}<span>Sales Kit</span></a>` : ''); }).join('');
+      return `<div class="grp">CRM — ${esc(brandKit(b.id).name)}</div>` + OWNER_ITEMS.filter(([k]) => k !== 'invoices' || typeof canSee !== 'function' || canSee('invoices')).map(([k, l, ic]) => `<a href="#/${cv}/${k}" class="${v === cv && cur === k ? 'on' : ''}" data-action="navgo" data-crmtab="${k}">${icon(ic)}<span>${l}</span></a>`).join('') + (b.id === 'lof' && hasSk ? `<a href="#/saleskit" class="${v === 'saleskit' ? 'on' : ''}" data-action="navgo">${icon('layers')}<span>ملفات البيع</span></a>` : ''); }).join('');
     const ALL = ['clients', 'quotes', 'invoices', 'cimport'];
     const toks = []; const tail = html.replace(/<div class="grp">([^<]*)<\/div>|<a href="#\/([^"]*)"[\s\S]*?<\/a>/g, (m, g, id) => { toks.push(g !== undefined ? { grp: g.replace(/&amp;/g, '&'), m } : { id, m }); return ''; });
     const allBr = toks.filter(t => t.id && ALL.includes(t.id.split('/')[0])).sort((x, y) => ALL.indexOf(x.id.split('/')[0]) - ALL.indexOf(y.id.split('/')[0])).map(t => t.m).join('');
@@ -29528,11 +29545,11 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     }).join('');
     return head + secs + `<div class="muted tiny" style="margin-top:6px">الصفحة دي ليك وللناس اللي المالك مضيفهم بس — محدش تاني يقدر يفتح الملفات.</div>`;
   }
-  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.saleskit = 'Sales Kit';
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.saleskit = 'ملفات البيع'; /* v7.10: Arabic in the menu / title (English: Sales Kit via en.json) */
   EXTRA_VIEWS.saleskit = () => vSalesKit();
-  EXTRA_TITLES.saleskit = () => (SUBS[S.route.id] ? { title: SUBS[S.route.id].title, sub: 'Sales Kit' } : { title: 'Sales Kit', sub: 'كتالوجات · Company Profile · Samples · Projects' });
+  EXTRA_TITLES.saleskit = () => (SUBS[S.route.id] ? { title: SUBS[S.route.id].title, sub: 'ملفات البيع' } : { title: 'ملفات البيع', sub: 'الكتالوجات · البروفايل · العينات · المشاريع' });
   canSee = (base => view => (view === 'saleskit' ? skSee() : base(view)))(canSee);
-  if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'saleskit')) { const i = NAV.findIndex(n => n.id === 'invoices'); const items = [{ grp: 'Sales Kit' }, { id: 'saleskit', label: 'Sales Kit', icon: 'layers' }]; if (i >= 0) NAV.splice(i + 1, 0, ...items); else NAV.push(...items); }
+  if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'saleskit')) { const i = NAV.findIndex(n => n.id === 'invoices'); const items = [{ grp: 'ملفات البيع' }, { id: 'saleskit', label: 'ملفات البيع', icon: 'layers' }]; if (i >= 0) NAV.splice(i + 1, 0, ...items); else NAV.push(...items); }
 
   /* ---------- رفع ---------- */
   ACTIONS.skUpload = arg => {
@@ -38538,6 +38555,201 @@ body.fv-flash .camwrap{outline:28px solid #fff}
     mb.insertAdjacentHTML('afterbegin', `<div class="card bf-card" style="margin-bottom:10px"><div class="small"><b>${L('البصمة ما اشتغلتش من الموبايل', 'The phone punch did not work')}</b> — ${L('الطلب اتعمل من صفحة البصمة', 'sent from the punch page')} ${esc(fmtDate(String(b.at || '').slice(0, 10)))} ${esc(new Date(b.at).toTimeString().slice(0, 5) || hm)}</div>
       <div class="row" style="gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">${b.frame ? `<img src="${b.frame}" alt="" style="width:96px;border-radius:8px">` : ''}<div class="tiny">${g ? `${L('المكان', 'Place')}: <a href="https://www.google.com/maps?q=${g.lat},${g.lng}" target="_blank" rel="noopener">${esc(g.lat + ', ' + g.lng)}</a>${zone && zone.inside === true ? ` <span class="badge good">${L('جوه النطاق', 'inside the zone')}</span>` : zone && zone.inside === false ? ` <span class="badge warn">${L('بره النطاق', 'outside the zone')} (${fmtNum(zone.dist)} ${L('م', 'm')})</span>` : ''}` : L('المكان مش متاح', 'Place not available')}</div></div></div>`);
   })(ACTIONS.reqOpen);
+})();
+/* =====================================================================
+   v7.10 — Settings as grouped icon tiles (Mahmoud, 9 Oct — claude/pending-batch.md item 1, go-ahead; all three apps).
+   #/settings        = a search box + one tile per group (icon, name, what is inside).
+   #/settings/<key>  = that section inside its group: the top bar shows the group + a back button, the group's sections
+                       sit above as wrapping chips (switching chips replaces the history entry, so «back» returns to the tiles).
+   Same admin-only gate and the same section contents (vSettings(key) in parts/07-views-e.js) — layout only, no permission change.
+   Old deep links still work: S.ui.tab.settings = '<key>' then go('settings') opens that section (consumed once).
+   A section registered later without a group lands in «other», so nothing gets lost.
+   ===================================================================== */
+(function () {
+  if (typeof vSettings !== 'function' || typeof settingsTabList !== 'function') return;
+  const base = vSettings;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const studio = () => typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'studioz';
+  const cons = () => typeof NF_COMPANY !== 'undefined' && NF_COMPANY === 'construction';
+  const SI = {
+    people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2c3 .2 5.5 2.6 5.5 5.8"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>',
+    book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19"/><path d="M9 7.5h6M9 11h4"/>',
+    factory: '<path d="M3 21V10.5l5 3v-3l5 3v-3l5 3V4h3v17z"/><path d="M7 17.5h2M12 17.5h2"/>',
+    building: '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M11 21v-3h2v3"/>',
+    money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 9.5v5M17.5 9.5v5"/>',
+    truck: '<path d="M2.5 6h11.5v10H2.5z"/><path d="M14 9h4l3.5 3.5V16H14"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>',
+    shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    spark: '<path d="M11 3l1.9 4.9L18 9.8l-5.1 1.9L11 16.6l-1.9-4.9L4 9.8l5.1-1.9z"/><path d="M18.5 14.5l.8 2.1 2.2.9-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.9z"/>',
+    chat: '<path d="M4 5h16v11H9.5L4 20z"/><path d="M8 9h8M8 12.5h5"/>',
+    mobile: '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/>',
+    cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+    grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.2"/>'
+  };
+  const svg = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SI[n] || ''}</svg>`;
+  /* group order = tile order; keys that an app does not have simply do not show, an empty group is hidden */
+  const GROUPS = () => [
+    { id: 'people', ic: 'people', t: 0, label: L('الناس والصلاحيات', 'People & permissions'), keys: ['staff', 'depts', 'jobs', 'acctdel'] },
+    { id: 'att', ic: 'clock', t: 1, label: L('الحضور والإجازات', 'Attendance & leave'), keys: ['shifts', 'policy', 'leaves', 'geo'] },
+    { id: 'hr', ic: 'book', t: 2, label: L('الموارد البشرية واللائحة', 'HR & regulation'), keys: ['regulation', 'advances', 'housing', 'kpi'] },
+    { id: 'work', ic: 'factory', t: 3, label: studio() || cons() ? L('البراندات والشغل', 'Brands & work') : L('المصنع والإنتاج', 'Factory & production'), keys: ['brands', 'brandkit', 'itemcodes', 'rules', 'escalation', 'fgate'] },
+    { id: 'cx', ic: 'building', t: 4, label: L('المقاولات', 'Construction'), keys: ['construction', 'cxstages'] },
+    { id: 'money', ic: 'money', t: 1, label: L('المشتريات والحسابات', 'Purchasing & accounts'), keys: ['accounting', 'purchflow', 'rfq', 'fx'] },
+    { id: 'fleet', ic: 'truck', t: 2, label: L('العربيات والخرايط', 'Vehicles & maps'), keys: ['fleet', 'gmaps'] },
+    { id: 'sec', ic: 'shield', t: 4, label: L('الأمان والمراقبة', 'Security & monitoring'), keys: ['security', 'datasafe', 'privacy', 'cctv', 'stulock', 'studoor'] },
+    { id: 'ai', ic: 'spark', t: 0, label: L('المساعد الذكي', 'AI assistant'), keys: ['ai', 'stuai', 'voice', 'gptlink'] },
+    { id: 'msg', ic: 'chat', t: 3, label: L('الرسائل والمكالمات', 'Messages & calls'), keys: ['sms', 'calls', 'stumail'] },
+    { id: 'apps', ic: 'mobile', t: 0, label: L('الأبلكيشن', 'Mobile apps'), keys: ['apns', 'android', 'stulogin'] },
+    { id: 'gen', ic: 'cog', t: 5, label: L('عام والبيانات', 'General & data'), keys: ['general', 'data', 'backend', 'stustore', 'help'] },
+    { id: 'other', ic: 'grid', t: 5, label: L('أخرى', 'Other'), keys: [] }
+  ];
+  function grouped() {
+    const tabs = settingsTabList(); const gs = GROUPS(); const byKey = {};
+    gs.forEach(g => g.keys.forEach(k => { byKey[k] = g; }));
+    gs.forEach(g => { g.items = []; });
+    tabs.forEach(t => { const x = typeof EXTRA_SETTINGS === 'object' && EXTRA_SETTINGS[t[0]]; const g = (x && x.group && gs.find(q => q.id === x.group)) || byKey[t[0]] || gs[gs.length - 1]; g.items.push(t); });
+    gs.forEach(g => { g.items.sort((a, b) => { const ia = g.keys.indexOf(a[0]), ib = g.keys.indexOf(b[0]); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); }); });
+    return { tabs, groups: gs.filter(g => g.items.length) };
+  }
+  const groupOf = (key, groups) => groups.find(g => g.items.some(t => t[0] === key)) || null;
+  const nrm = s => String(s || '').toLowerCase().replace(/[ً-ْـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ').trim();
+  const trEn = s => { try { return en() && typeof i18nTr === 'function' ? i18nTr(s) || '' : ''; } catch (e) { return ''; } };
+  const navStackSet = h => { try { if (typeof _navStack !== 'undefined' && _navStack.length) _navStack[_navStack.length - 1] = h; } catch (e) { /* ignore */ } };
+
+  /* which section is open: a pending deep link wins (consumed once), then the URL, else the tiles */
+  function current() {
+    if (!S.route || S.route.view !== 'settings') return null;
+    const keys = settingsTabList().map(t => t[0]); const pend = S.ui && S.ui.tab ? S.ui.tab.settings : null;
+    if (pend && pend !== 'home' && keys.includes(pend)) {
+      S.ui.tab.settings = null; S.route.id = pend; const h = '#/settings/' + pend;
+      if (location.hash !== h) { try { history.replaceState(history.state, '', h); navStackSet(h); } catch (e) { /* ignore */ } }
+      return pend;
+    }
+    if (pend === 'home') S.ui.tab.settings = null;
+    return S.route.id && keys.includes(S.route.id) ? S.route.id : null;
+  }
+
+  function homeHTML() {
+    const { tabs, groups } = grouped(); const q = S._setQ || ''; const nq = nrm(q);
+    const hay = t => { const g = groupOf(t[0], groups); return nrm([t[1], g ? g.label : '', t[0], trEn(t[1])].join(' ')); };
+    const hits = nq ? tabs.filter(t => hay(t).includes(nq)) : [];
+    return `<div class="set-home">
+      <label class="set-search">${icon('search')}<input id="set-q" type="search" value="${esc(q)}" placeholder="${esc(L('دوّر على إعداد…', 'Search settings…'))}" autocomplete="off" enterkeyhint="search"></label>
+      <div class="set-grid" id="set-grid" ${nq ? 'hidden' : ''}>${groups.map(g => `<button type="button" class="set-tile" data-action="setGo" data-arg="${esc(g.items[0][0])}"><span class="set-ic t${g.t}">${svg(g.ic)}</span><b>${esc(g.label)}</b><span class="set-sub">${g.items.map(t => esc(t[1])).join(' · ')}</span>${g.items.length > 1 ? `<span class="set-n num">${g.items.length}</span>` : ''}</button>`).join('')}</div>
+      <div class="list set-res" id="set-res" ${nq ? '' : 'hidden'}>${tabs.map(t => { const g = groupOf(t[0], groups); return `<div class="item" data-action="setGo" data-arg="${esc(t[0])}" data-s="${esc(hay(t))}" ${nq && !hits.includes(t) ? 'hidden' : ''}><span class="set-ic sm t${g ? g.t : 5}">${svg(g ? g.ic : 'grid')}</span><div class="main"><div class="title">${esc(t[1])}</div><div class="meta"><span>${esc(g ? g.label : '')}</span></div></div></div>`; }).join('')}<div class="empty" id="set-none" ${nq && !hits.length ? '' : 'hidden'}>${L('مفيش إعداد بالاسم ده', 'No setting matches')}</div></div>
+    </div>`;
+  }
+
+  function sectionHTML(key) {
+    const { groups } = grouped(); const g = groupOf(key, groups);
+    const chips = g && g.items.length > 1 ? `<div class="set-chips" role="tablist">${g.items.map(t => `<button type="button" role="tab" class="${t[0] === key ? 'on' : ''}" data-action="setGo" data-arg="${esc(t[0])}">${esc(t[1])}</button>`).join('')}</div>` : '';
+    const gps = g && g.id === 'fleet' && typeof VIEW_TITLES === 'object' && VIEW_TITLES.fleet && typeof gpsSettingsCard === 'function'
+      ? `<div class="banner info set-tip">${icon('info')}<span class="grow">${L('إعدادات GPS وتنبيهات العربيات (ومنها «إشعاراتي أنا: حركة العربيات بعد الساعة») في صفحة حركة النقل ← GPS العربيات', 'Vehicle GPS and fleet-alert settings (including «My own notifications: vehicles moving after») are on the Fleet page → Vehicle GPS')}</span><button type="button" class="btn sm" data-action="setFleetGps">${L('افتح', 'Open')}</button></div>` : '';
+    /* phones: the top bar truncates the group name — repeat it here (hidden on wider screens) */
+    const mhead = g ? `<div class="set-mhead"><span class="set-ic sm t${g.t}">${svg(g.ic)}</span><b>${esc(g.label)}</b></div>` : '';
+    return mhead + chips + gps + base(key);
+  }
+
+  vSettings = function () {
+    if (!isAdmin()) return base();
+    const key = current();
+    return key ? sectionHTML(key) : homeHTML();
+  };
+
+  /* top bar: the group name + a back button to the tiles (parts/99y9-nav-back.js turns it into «back» when you came from elsewhere) */
+  if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.settings = () => {
+    if (!isAdmin()) return {};
+    const key = current();
+    if (!key) return { sub: L('كل الإعدادات متجمّعة — دوس على أي مربع', 'All settings, grouped — tap a tile') };
+    const { groups } = grouped(); const g = groupOf(key, groups); const t = (settingsTabList().find(x => x[0] === key) || [])[1] || '';
+    return { title: g ? g.label : L('الإعدادات', 'Settings'), sub: g && g.items.length > 1 ? esc(t) : '', actions: `<a class="btn ghost" href="#/settings">${icon('back')}<span>${L('الإعدادات', 'Settings')}</span></a>` };
+  };
+
+  ACTIONS.setGo = key => {
+    if (!key) return;
+    if (S.route && S.route.view === 'settings' && S.route.id) {
+      /* switching chips inside a group: replace, so «back» still goes to the tiles */
+      const h = '#/settings/' + key; try { history.replaceState(history.state, '', h); } catch (e) { location.replace(h); return; }
+      navStackSet(h); parseRoute(); render(true); window.scrollTo(0, 0); return;
+    }
+    go('settings/' + key);
+  };
+  ACTIONS.setFleetGps = () => { S.ui.filter = S.ui.filter || {}; S.ui.filter.fleet = Object.assign({ status: 'open' }, S.ui.filter.fleet || {}, { tab: 'gps' }); go('fleet'); };
+
+  /* live search without re-rendering (keeps the keyboard open on phones) */
+  document.addEventListener('input', ev => {
+    const inp = ev.target; if (!inp || inp.id !== 'set-q') return;
+    S._setQ = inp.value; const nq = nrm(inp.value); const grid = document.getElementById('set-grid'); const res = document.getElementById('set-res'); if (!grid || !res) return;
+    grid.hidden = !!nq; res.hidden = !nq; let n = 0;
+    res.querySelectorAll('.item[data-s]').forEach(it => { const ok = !nq || it.dataset.s.includes(nq) || nrm(it.textContent).includes(nq); it.hidden = !ok; if (ok) n++; });
+    const none = document.getElementById('set-none'); if (none) none.hidden = !nq || n > 0;
+  });
+  document.addEventListener('keydown', ev => {
+    if (!ev.target || ev.target.id !== 'set-q') return;
+    if (ev.key === 'Escape') { ev.target.value = ''; ev.target.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (ev.key === 'Enter') { ev.preventDefault(); const first = document.querySelector('#set-res .item[data-s]:not([hidden])'); if (first) { S._setQ = ''; ACTIONS.setGo(first.dataset.arg); } }
+  });
+  /* leaving the settings page forgets the search */
+  window.addEventListener('hashchange', () => { if (!/^#\/?settings/.test(location.hash || '')) S._setQ = ''; });
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.set-search{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:0 12px;margin-bottom:14px;cursor:text}
+.set-search svg{width:18px;height:18px;color:var(--muted);flex:none}
+.set-search input{border:0!important;background:none!important;box-shadow:none!important;outline:none;flex:1;min-width:0;padding:12px 0;font:inherit;font-size:16px;color:var(--ink)}
+.set-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.set-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:7px;text-align:start;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;min-height:132px;cursor:pointer;color:var(--ink);font:inherit;-webkit-tap-highlight-color:transparent;transition:border-color .15s,box-shadow .15s,transform .1s}
+.set-tile:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+.set-tile:active{transform:scale(.98)}
+.set-tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.set-tile b{font-size:15px;line-height:1.35}
+.set-sub{font-size:12px;color:var(--muted);line-height:1.55;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.set-n{position:absolute;top:12px;inset-inline-end:12px;font-size:12px;color:var(--muted);background:var(--surface-2);border-radius:10px;padding:1px 8px}
+.set-ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--accent-soft);color:var(--accent)}
+.set-ic svg{width:22px;height:22px}
+.set-ic.sm{width:32px;height:32px;border-radius:9px}.set-ic.sm svg{width:18px;height:18px}
+.set-ic.t1{background:var(--good-soft);color:var(--good-ink)}.set-ic.t2{background:var(--warn-soft);color:var(--warn-ink)}.set-ic.t3{background:var(--serious-soft);color:var(--serious-ink)}.set-ic.t4{background:var(--crit-soft);color:var(--crit-ink)}.set-ic.t5{background:var(--surface-2);color:var(--ink-2)}
+.set-home [hidden]{display:none!important}
+.set-res .item{gap:10px;align-items:center}
+.set-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.set-chips button{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:8px 14px;font:inherit;font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.set-chips button.on{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.set-tip{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.set-mhead{display:none;align-items:center;gap:10px;margin-bottom:12px}.set-mhead b{font-size:17px}
+@media (max-width:560px){.set-mhead{display:flex}.set-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.set-tile{min-height:124px;padding:12px}.set-tile b{font-size:14px}.set-sub{-webkit-line-clamp:2}}
+</style>`);
+})();
+/* =====================================================================
+   v7.10 — the owner's own name + photo follow him across the three Ninety apps (Mahmoud, 9 Oct: «where is my photo here»).
+   The apps share one origin, so localStorage is shared: whichever app knows his real name / photo remembers it on this
+   device ('nf.ownerCard.<login>'); an app whose account still has the default manager name or no photo uses it, and saves
+   the photo into its own settings once (settings.avatars[session id]) so it shows on his other devices too.
+   Owner only (isOwnerReal, not while viewing as someone else); nothing about anyone else is stored.
+   ===================================================================== */
+function ownerNameGeneric(n) { const t = String(n || '').trim(); return !t || ['المدير', 'المالك', 'admin', 'owner', 'manager'].includes(t.toLowerCase()); }
+function ownerCardKey() { try { const u = S.sbUser; const login = (u && ((u.user_metadata && u.user_metadata.login) || String(u.email || '').split('@')[0])) || (S.me && S.me.login) || ''; return login ? 'nf.ownerCard.' + login : ''; } catch (e) { return ''; } }
+function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
+(function () {
+  let busy = false;
+  const isOwner = () => !!S.session && typeof isOwnerReal === 'function' && isOwnerReal() && typeof role === 'function' && role() !== 'kiosk';
+  function sync() {
+    if (busy || !isOwner() || S.mode === 'boot') return; const k = ownerCardKey(); if (!k) return;
+    const c = ownerCard() || {}; const nm = (S.session.name || '').trim(); const src = typeof myAvatarSrc === 'function' ? myAvatarSrc() : null; let dirty = false;
+    if (!ownerNameGeneric(nm) && c.name !== nm) { c.name = nm; dirty = true; }
+    if (S.session.nameEn && c.nameEn !== S.session.nameEn) { c.nameEn = S.session.nameEn; dirty = true; }
+    if (src && src.length < 400000 && c.avatar !== src) { c.avatar = src; dirty = true; }
+    if (dirty) { c.at = Date.now(); try { localStorage.setItem(k, JSON.stringify(c)); } catch (e) { /* storage full — skip */ } }
+    /* fill the gaps here */
+    if (ownerNameGeneric(nm) && c.name) S.session.name = c.name;
+    if (!S.session.nameEn && c.nameEn) S.session.nameEn = c.nameEn;
+    if (!src && c.avatar && !S._ownerAvSaved && S.settings && S.loaded && S.loaded.settings === true && typeof Store === 'object' && typeof Store.saveSettings === 'function' && (typeof sbOn !== 'function' || sbOn())) {
+      S._ownerAvSaved = true; busy = true;
+      const av = Object.assign({}, S.settings.avatars || {}); av[S.session.id] = c.avatar;
+      Promise.resolve(Store.saveSettings(Object.assign({}, S.settings, { avatars: av }))).catch(() => {}).then(() => { busy = false; rerender(); });
+    }
+  }
+  /* before every render (the Ninety home renders outside the normal view pipeline, so RENDER_HOOKS do not run there) and after it */
+  if (typeof render === 'function') render = (base => function () { try { sync(); } catch (e) { /* ignore */ } const r = base.apply(this, arguments); try { sync(); } catch (e) { /* ignore */ } return r; })(render);
 })();
 </script>
 
