@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1609-b9883a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1708-32d920";</script>
 
 <script>
 'use strict';
@@ -2649,6 +2649,29 @@ const fmtHrs = h => h == null ? '—' : (+h).toLocaleString('en-US', { maximumFr
 function visibleWorkers(deptFilter) { let arr = list('workers'); if (role() === 'head') arr = arr.filter(w => myDepts().includes(w.deptId)); if (deptFilter) arr = arr.filter(w => w.deptId === deptFilter); return sortBy(arr, w => (w.deptId || '') + (w.name || '')); }
 
 /* ---------------- attendance ---------------- */
+/* v7.17 (Mahmoud, 9 Oct: «order the people by department — each department with its people under it»):
+   the daily attendance table has one heading row per department (in the order of the departments, people by name inside),
+   with how many of them are present, absent and late; the people without a department come last. */
+function attGroups(workers) {
+  const deps = (S.settings && S.settings.departments) || []; const idx = new Map(deps.map((d, i) => [d.id, i]));
+  const map = new Map(); workers.forEach(w => { const k = idx.has(w.deptId) ? w.deptId : ''; if (!map.has(k)) map.set(k, []); map.get(k).push(w); });
+  const ord = k => (k === '' ? 1e9 : idx.get(k));
+  return [...map.entries()].sort((a, b) => ord(a[0]) - ord(b[0])).map(([k, ws]) => ({ id: k, name: k ? deptName(k) : 'من غير قسم', ws: sortBy(ws, w => w.name || '') }));
+}
+function attDeptRow(g, att) {
+  const n = g.ws.length; const p = g.ws.filter(w => ['P', 'H'].includes(att[w.id]?.s)).length; const a = g.ws.filter(w => att[w.id]?.s === 'A').length; const lt = g.ws.filter(w => +att[w.id]?.late > 0).length;
+  return `<tr class="attdh" data-dept="${esc(g.id)}"><td colspan="7"><div class="attdhin"><b>${esc(g.name)}</b><span class="attdhc"><span>حاضر</span> ${p} / ${n}</span>${a ? `<span class="attdhc bad"><span>غياب</span> ${a}</span>` : ''}${lt ? `<span class="attdhc warn"><span>متأخر</span> ${lt}</span>` : ''}</div></td></tr>`;
+}
+document.head.insertAdjacentHTML('beforeend', `<style>
+table.att tr.attdh td{background:var(--surface-2)!important;padding:9px 12px;border-top:1px solid var(--line)}
+table.att tr.attdh:hover td{background:var(--surface-2)!important}
+table.att tr.attdh:first-child td{border-top:0}
+table.att .attdhin{display:flex;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;inset-inline-start:12px;width:max-content;max-width:calc(100vw - 48px)}
+table.att .attdhin b{font-size:14px}
+table.att .attdhc{font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--surface-3,var(--line));color:var(--ink-2,var(--ink))}
+table.att .attdhc.bad{background:var(--crit-soft,#fde8e8);color:var(--crit-ink,#b42318)}
+table.att .attdhc.warn{background:var(--warn-soft,#fef3c7);color:var(--warn-ink,#92400e)}
+</style>`);
 function vAttendance() {
   const f = S.ui.filter.att || (S.ui.filter.att = { date: todayISO(), dept: role() === 'head' ? (myDepts()[0] || '') : '' });
   const date = f.date; const workers = visibleWorkers(f.dept).filter(w => w.status !== 'inactive' && !(window.nfAttAway && window.nfAttAway(w))); const att = attendanceFor(date);
@@ -2659,7 +2682,7 @@ function vAttendance() {
   return `<div class="toolbar"><button class="btn sm" data-action="attDay" data-arg="-1">${icon('back')}</button><input class="inp" type="date" id="fl-attdate" value="${date}" data-filter="att:date"><button class="btn sm" data-action="attDay" data-arg="1">${icon('arrow')}</button><span class="bold">${fmtDateLong(date)}</span>${dow === 5 ? '<span class="badge">الجمعة</span>' : ''}
     ${role() !== 'head' ? `<select class="sel" id="fl-attdept" data-filter="att:dept"><option value="">كل الأقسام</option>${opts(S.settings.departments, f.dept)}</select>` : (myDepts().length > 1 ? `<select class="sel" id="fl-attdept" data-filter="att:dept">${opts(S.settings.departments.filter(d => myDepts().includes(d.id)), f.dept)}</select>` : '')}
     <div class="grow"></div><span class="muted small">حاضر ${present} / ${workers.length} · ${fmtNum(sum(workers, w => att[w.id]?.hrs))} ساعة فعلية · ${fmtNum(hours)} موزعة</span>${(isAdmin() || role() === 'office' || role() === 'hr') && writable() ? `<button class="btn sm" data-action="attImport">${icon('attendance')}استيراد من Mawared / Excel</button>` : ''}${editable && workers.length ? `<button class="btn sm" data-action="attAll" data-arg="${date}">الكل حاضر</button><button class="btn sm" data-action="attAutoAlloc" data-arg="${date}" title="توزيع ساعات الحاضرين على الأوامر الجارية عند أقسامهم">${icon('orders')}توزيع تلقائي على الأوامر</button>` : ''}</div>
-  ${workers.length ? `<div class="card tight"><div class="tablewrap"><table class="att"><thead><tr><th>العامل</th><th>القسم</th><th>الحالة</th><th>حضور</th><th>انصراف</th><th class="n">ساعات</th><th class="n">إضافي</th><th>توزيع الساعات على أوامر التشغيل</th></tr></thead><tbody>${workers.map(w => { const r = att[w.id] || {}; const al = r.alloc || []; const allocated = sum(al, a => a.h); const cap = r.hrs != null ? (+r.hrs || 0) : (r.s === 'H' ? hpd / 2 : r.s === 'P' ? hpd + (+r.ot || 0) : 0); const tm = k => `<input class="ot tm" id="tm-${k}-${w.id}" type="time" value="${esc(r[k] || '')}" ${editable ? `data-tm="${k}:${date}:${w.id}"` : 'disabled'}>`; return `<tr><td><b>${esc(w.name)}</b><div class="tiny muted">${esc(w.trade || '')}${r.src === 'import' ? ' · <span class="badge" style="padding:0 6px">مورد</span>' : ''}</div></td><td class="small">${esc(deptName(w.deptId))}${r.perm ? `<div class="tiny" style="color:var(--accent)">إذن ${fmtNum(r.perm.h)} س</div>` : ''}${r.s === 'L' && r.leaveType ? `<div class="tiny muted">${esc((S.settings.leaveTypes || []).find(t => t.id === r.leaveType)?.name || '')}</div>` : ''}</td><td><div class="sbtn">${Object.keys(ATT).map(k => `<button type="button" class="${r.s === k ? k : ''}" title="${ATT[k]}" ${editable ? `data-action="attSet" data-arg="${date}:${w.id}:${k}"` : 'disabled'}>${k === 'P' ? 'ح' : k === 'A' ? 'غ' : k === 'H' ? '½' : 'إ'}</button>`).join('')}</div><div class="tiny muted">${r.s ? ATT[r.s] : 'لم يُسجّل'} ${r.method ? methodBadge(r) : ''} ${geoBadge(r.geo)} ${verifyBadge(r)}${r.late ? ` · <span style="color:var(--serious-ink)">متأخر ${r.late} د</span>` : (r.lateRaw ? ` · <span class="muted">تأخير ${r.lateRaw} د ضمن السماح</span>` : '')}${r.early ? ` · <span style="color:var(--serious-ink)">مبكر ${r.early} د</span>` : ''}</div><div class="tiny">${attFlagsBadges(r, w, date)}</div></td><td>${tm('in')}</td><td>${tm('out')}</td><td class="n">${fmtHrs(r.hrs)}</td><td class="n"><input class="ot" id="ot-${w.id}" type="number" step="0.5" min="0" value="${r.ot ?? ''}" placeholder="0" ${editable && r.s === 'P' ? `data-ot="${date}:${w.id}"` : 'disabled'}>${editable ? `<button class="iconbtn" data-action="attFlags" data-arg="${date}:${w.id}" title="تكليف إضافي / وجبة / سفر">${icon('more')}</button>` : ''}</td><td>${al.map(a => { const o = byId('orders', a.orderId); return `<span class="badge acc" style="margin:2px"><span class="code">${esc(o?.code || '?')}</span> ${fmtNum(a.h)} س</span>`; }).join('')}${editable && ['P', 'H'].includes(r.s) ? `<button class="btn xs ghost" data-action="attAlloc" data-arg="${date}:${w.id}">${icon('plus')}توزيع</button>` : ''}${cap && allocated < cap ? `<span class="tiny muted"> (${fmtNum(cap - allocated)} س غير موزعة)</span>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
+  ${workers.length ? `<div class="card tight"><div class="tablewrap"><table class="att"><thead><tr><th>العامل</th><th>الحالة</th><th>حضور</th><th>انصراف</th><th class="n">ساعات</th><th class="n">إضافي</th><th>توزيع الساعات على أوامر التشغيل</th></tr></thead><tbody>${attGroups(workers).map(g => attDeptRow(g, att) + g.ws.map(w => { const r = att[w.id] || {}; const al = r.alloc || []; const allocated = sum(al, a => a.h); const cap = r.hrs != null ? (+r.hrs || 0) : (r.s === 'H' ? hpd / 2 : r.s === 'P' ? hpd + (+r.ot || 0) : 0); const tm = k => `<input class="ot tm" id="tm-${k}-${w.id}" type="time" value="${esc(r[k] || '')}" ${editable ? `data-tm="${k}:${date}:${w.id}"` : 'disabled'}>`; return `<tr><td><b>${esc(w.name)}</b><div class="tiny muted">${esc(w.trade || '')}${r.src === 'import' ? ' · <span class="badge" style="padding:0 6px">مورد</span>' : ''}</div>${r.perm ? `<div class="tiny" style="color:var(--accent)">إذن ${fmtNum(r.perm.h)} س</div>` : ''}${r.s === 'L' && r.leaveType ? `<div class="tiny muted">${esc((S.settings.leaveTypes || []).find(t => t.id === r.leaveType)?.name || '')}</div>` : ''}</td><td><div class="sbtn">${Object.keys(ATT).map(k => `<button type="button" class="${r.s === k ? k : ''}" title="${ATT[k]}" ${editable ? `data-action="attSet" data-arg="${date}:${w.id}:${k}"` : 'disabled'}>${k === 'P' ? 'ح' : k === 'A' ? 'غ' : k === 'H' ? '½' : 'إ'}</button>`).join('')}</div><div class="tiny muted">${r.s ? ATT[r.s] : 'لم يُسجّل'} ${r.method ? methodBadge(r) : ''} ${geoBadge(r.geo)} ${verifyBadge(r)}${r.late ? ` · <span style="color:var(--serious-ink)">متأخر ${r.late} د</span>` : (r.lateRaw ? ` · <span class="muted">تأخير ${r.lateRaw} د ضمن السماح</span>` : '')}${r.early ? ` · <span style="color:var(--serious-ink)">مبكر ${r.early} د</span>` : ''}</div><div class="tiny">${attFlagsBadges(r, w, date)}</div></td><td>${tm('in')}</td><td>${tm('out')}</td><td class="n">${fmtHrs(r.hrs)}</td><td class="n"><input class="ot" id="ot-${w.id}" type="number" step="0.5" min="0" value="${r.ot ?? ''}" placeholder="0" ${editable && r.s === 'P' ? `data-ot="${date}:${w.id}"` : 'disabled'}>${editable ? `<button class="iconbtn" data-action="attFlags" data-arg="${date}:${w.id}" title="تكليف إضافي / وجبة / سفر">${icon('more')}</button>` : ''}</td><td>${al.map(a => { const o = byId('orders', a.orderId); return `<span class="badge acc" style="margin:2px"><span class="code">${esc(o?.code || '?')}</span> ${fmtNum(a.h)} س</span>`; }).join('')}${editable && ['P', 'H'].includes(r.s) ? `<button class="btn xs ghost" data-action="attAlloc" data-arg="${date}:${w.id}">${icon('plus')}توزيع</button>` : ''}${cap && allocated < cap ? `<span class="tiny muted"> (${fmtNum(cap - allocated)} س غير موزعة)</span>` : ''}</td></tr>`; }).join('')).join('')}</tbody></table></div></div>
   <p class="tiny muted" style="margin-top:8px">ح = حاضر · غ = غائب · ½ = نصف يوم · إ = إجازة. عند تسجيل وقتي الحضور والانصراف تُحسب الساعات الفعلية والإضافي والتأخير تلقائيًا حسب اللائحة (الوردية 9–5، سماح 15 دقيقة حتى 4 مرات شهريًا). زر ⋯ بجانب الإضافي: اعتماد تكليف الإضافي، صرف وجبة، يوم سفر. توزيع الساعات على الأوامر يُستخدم لحساب تكلفة العمالة لكل أمر تشغيل.</p>` : `<div class="empty"><b>لا يوجد عمال في هذا القسم</b></div>`}`;
 }
 ACTIONS.attAutoAlloc = async date => { const f = S.ui.filter.att; const ws = visibleWorkers(f.dept).filter(w => w.status !== 'inactive' && !(window.nfAttAway && window.nfAttAway(w))); const att = attendanceFor(date); let n = 0; for (const w of ws) { const r = att[w.id]; if (!r || !['P', 'H'].includes(r.s)) continue; const nr = autoAllocRow(w, Object.assign({}, r, { alloc: (r.alloc || []).filter(a => !a.auto) }), r.s === 'H' ? (+S.settings.hoursPerDay || 8) / 2 : (+S.settings.hoursPerDay || 8) + (+r.ot || 0)); if ((nr.alloc || []).some(a => a.auto)) { await setAtt(date, w, nr); n++; } } toast(n ? `تم توزيع ساعات ${n} عامل على الأوامر الجارية` : 'لا يوجد ما يُوزَّع — تأكد من وجود مراحل جارية عند الأقسام'); };
@@ -34776,7 +34799,7 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
     v.querySelectorAll('table.att tbody tr').forEach(tr => {
       const inp1 = tr.querySelector('input[id^="tm-in-"]'); if (!inp1) return; const wid = inp1.id.slice(6); const r = att[wid] || {};
       if (!(+r.ot > 0)) return;
-      const cell = (tr.querySelector('.badge[data-otb]') || {}).parentElement || tr.children[2]; if (!cell) return;
+      const cell = (tr.querySelector('.badge[data-otb]') || {}).parentElement || (tr.querySelector('.sbtn') || {}).parentElement || tr.children[1]; if (!cell) return;
       const t = anyTaskFor(date, wid); let html = '';
       if (t && t.ot.status === 'ok') html = `<div class="ottinfo tiny" title="${esc(t.desc || '')}">📋 ${esc(projName(t))} — ${esc(String(t.title || '').startsWith(OT_PFX) ? String(t.title).slice(OT_PFX.length) : (t.title || ''))}</div>`;
       else if (t) html = `<div class="ottinfo tiny"><span class="badge warn">مهمة مشروع قديم مستنية مدير المصنع</span> ${esc(t.ot.oldProject || '')}${(isMgr() || isAdmin()) && writable() ? ` <button type="button" class="btn xs p" data-action="otTaskOk" data-arg="${esc(t.id)}">وافق</button><button type="button" class="btn xs" data-action="otTaskNo" data-arg="${esc(t.id)}">ارفض</button>` : ''}</div>`;
@@ -39271,12 +39294,18 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
      are a module of their own.
    Same in the three systems, Advanced and Classic, phone and computer. Nothing about who sees what changes — the pages
    inside each module are exactly the ones the menu already showed.
+   v7.17 (Mahmoud, 9 Oct: «make this side bar half as wide, and when I tap the arrow a dialog comes out of it with what is inside»):
+   where the menu is a drawer (phone / tablet) it takes half the screen, and a module opens its pages in a small dialog beside
+   the drawer (on the page side, level with the module) instead of under it; tapping the same module again, anywhere else, or a
+   page closes it. The computer keeps the modules opening under each other.
    ===================================================================== */
 (function () {
   if (typeof navHTML !== 'function') return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const NG = { open: null, route: null };
+  const FLY = { el: null, k: null, side: null, mo: null, mo2: null };
+  const drawer = () => window.matchMedia('(max-width:900px)').matches;
   const FLEET = /^#\/(fleet|fleetmap|fleetalerts|fleethistory|fleetreport)(\/|$)/;
   const chev = '<svg class="ngch" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
 
@@ -39312,7 +39341,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
       let sum = 0; let hot = false;
       links.forEach(a => (a.querySelectorAll ? a.querySelectorAll('.cnt') : []).forEach(c => { const v = parseInt(c.textContent, 10); if (v > 0) { sum += v; if (/crit|bad/.test(c.className)) hot = true; } }));
       const svg = links[0].querySelector && links[0].querySelector('svg');
-      s += `<div class="ngrp${open ? ' open' : ''}${active === g ? ' cur' : ''}" data-g="${esc(k)}"><button type="button" class="ngh" data-action="navGrp" data-arg="${esc(k)}" aria-expanded="${open}">${svg ? svg.outerHTML : ''}<span class="ngt">${esc(g.label)}</span>${sum ? `<span class="ngc${hot ? ' hot' : ''}">${sum}</span>` : ''}${chev}</button><div class="ngb"><div class="ngi">${links.map(ser).join('')}</div></div></div>`;
+      s += `<div class="ngrp${open ? ' open' : ''}${active === g ? ' cur' : ''}${FLY.k === k ? ' fly' : ''}" data-g="${esc(k)}"><button type="button" class="ngh" data-action="navGrp" data-arg="${esc(k)}" aria-expanded="${open}">${svg ? svg.outerHTML : ''}<span class="ngt">${esc(g.label)}</span>${sum ? `<span class="ngc${hot ? ' hot' : ''}">${sum}</span>` : ''}${chev}</button><div class="ngb"><div class="ngi">${links.map(ser).join('')}</div></div></div>`;
     });
     return s;
   }
@@ -39321,11 +39350,68 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     try { return modular(html); } catch (e) { console.warn('nav modules', e); return html; }
   })(navHTML);
 
+  /* ---------- the dialog beside the drawer ---------- */
+  let SA = null;
+  const safeTop = () => { if (!SA) { SA = document.createElement('div'); SA.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none'; document.body.appendChild(SA); } return SA.offsetHeight || 0; };
+  const grpEl = k => [...document.querySelectorAll('#nav .ngrp[data-g]')].find(g => g.dataset.g === k);
+  function flyClose() {
+    if (FLY.el) FLY.el.remove(); FLY.el = null; FLY.k = null;
+    if (FLY.mo) FLY.mo.disconnect(); FLY.mo = null; if (FLY.mo2) FLY.mo2.disconnect(); FLY.mo2 = null;
+    if (FLY.side) FLY.side.removeEventListener('scroll', flyPlace); FLY.side = null;
+    document.querySelectorAll('#nav .ngrp.fly').forEach(g => { g.classList.remove('fly'); const b = g.querySelector('.ngh'); if (b) b.setAttribute('aria-expanded', 'false'); });
+  }
+  function flyFill() {
+    const g = grpEl(FLY.k); if (!g || !FLY.el) return false;
+    const svg = g.querySelector('.ngh > svg:first-child'); const label = (g.querySelector('.ngt') || {}).textContent || '';
+    const links = [...g.querySelectorAll('.ngi > a')].map(a => a.outerHTML).join('');
+    FLY.el.setAttribute('aria-label', label);
+    FLY.el.innerHTML = `<i class="ngfa" aria-hidden="true"></i><div class="ngfin"><div class="ngfh">${svg ? svg.outerHTML : ''}<span>${esc(label)}</span></div><div class="ngfl">${links}</div></div>`;
+    g.classList.add('fly'); const b = g.querySelector('.ngh'); if (b) b.setAttribute('aria-expanded', 'true');
+    return true;
+  }
+  function flyPlace() {
+    const el = FLY.el; const g = grpEl(FLY.k); const side = document.getElementById('side');
+    if (!el || !g || !side || !side.classList.contains('open')) { flyClose(); return; }
+    const h = g.querySelector('.ngh').getBoundingClientRect(); const sr = side.getBoundingClientRect();
+    if (h.bottom < sr.top + 8 || h.top > Math.min(innerHeight, sr.bottom) - 8) { flyClose(); return; }
+    const onRight = sr.left + sr.width / 2 > innerWidth / 2; const gap = 8;
+    const room = (onRight ? sr.left : innerWidth - sr.right) - gap * 2; const w = Math.max(150, Math.min(290, room));
+    el.style.width = w + 'px'; el.classList.toggle('r', onRight);
+    /* the little pointer toward the drawer: set inline, because the English layout mirrors left/right in the style sheets */
+    const ar = el.querySelector('.ngfa'); if (ar) ar.style.cssText = onRight ? 'right:-7px;left:auto;border-left-width:0;border-bottom-width:0;border-right-width:1px;border-top-width:1px' : 'left:-7px;right:auto;border-right-width:0;border-top-width:0;border-left-width:1px;border-bottom-width:1px';
+    el.style.left = (onRight ? Math.max(gap, sr.left - gap - w) : Math.min(innerWidth - gap - w, sr.right + gap)) + 'px'; el.style.right = 'auto';
+    const st = safeTop(); el.style.maxHeight = (innerHeight - st - 24) + 'px';
+    const fh = el.offsetHeight; let top = h.top - 6; top = Math.min(top, innerHeight - fh - 12); top = Math.max(top, st + 10);
+    el.style.top = top + 'px'; el.style.setProperty('--ay', Math.max(18, Math.min(fh - 18, h.top + h.height / 2 - top)) + 'px');
+  }
+  function flyOpen(k) {
+    flyClose(); FLY.k = k;
+    FLY.el = document.createElement('div'); FLY.el.id = 'ngfly'; FLY.el.className = 'ngfly'; FLY.el.setAttribute('role', 'dialog');
+    document.body.appendChild(FLY.el);
+    if (!flyFill()) { flyClose(); return; }
+    flyPlace(); if (!FLY.el) return;
+    const side = document.getElementById('side');
+    if (side) { FLY.side = side; side.addEventListener('scroll', flyPlace, { passive: true }); FLY.mo = new MutationObserver(() => { if (!side.classList.contains('open')) setTimeout(flyClose, 0); }); FLY.mo.observe(side, { attributes: true, attributeFilter: ['class'] }); }
+    /* the language switched (the drawer moves to the other side): follow it */
+    FLY.mo2 = new MutationObserver(() => requestAnimationFrame(flyPlace)); FLY.mo2.observe(document.documentElement, { attributes: true, attributeFilter: ['dir', 'lang'] });
+  }
+  document.addEventListener('click', e => {
+    if (!FLY.k) return; const t = e.target;
+    if (t.closest && t.closest('#nav .ngh')) return;
+    if (t.closest && t.closest('#ngfly')) { if (t.closest('a')) setTimeout(flyClose, 0); return; }
+    flyClose();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && FLY.k) flyClose(); });
+  window.addEventListener('resize', () => { if (FLY.k) flyClose(); });
+  window.addEventListener('hashchange', () => { if (FLY.k) setTimeout(flyClose, 0); });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!FLY.k) return; const side = document.getElementById('side'); if (!drawer() || !side || !side.classList.contains('open') || !flyFill()) { flyClose(); return; } flyPlace(); });
+
   ACTIONS.navGrp = k => {
+    if (drawer()) { if (FLY.k === k) flyClose(); else flyOpen(k); return; }
     NG.open = NG.open === k ? '' : k;
     document.querySelectorAll('#nav .ngrp[data-g]').forEach(g => { const on = g.dataset.g === NG.open; g.classList.toggle('open', on); const b = g.querySelector('.ngh'); if (b) b.setAttribute('aria-expanded', String(on)); });
   };
-  window.nfNavModules = { state: NG };
+  window.nfNavModules = { state: NG, fly: FLY, flyClose };
 
   (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
 .nav .ngrp{margin:1px 0}
@@ -39351,6 +39437,62 @@ html.apple .side .nav .ngc.hot{background:#ff453a}
 html.apple .side .nav .ngrp.open > .ngh{background:rgba(255,255,255,.06)}
 html.apple .side .nav .ngi{padding-inline-start:14px}
 @media (prefers-reduced-motion: reduce){ .nav .ngb,.nav .ngch{transition:none} }
+/* ---------- v7.17: drawer = half the screen + the module dialog beside it ---------- */
+@media (max-width:900px){
+  .side,.side.open{width:clamp(200px,52vw,264px)!important;padding-inline:8px!important}
+  /* the top of the drawer, narrower now: switches one under the other, buttons one per row, long texts cut with … */
+  .side .brand img.wordmark{max-width:100%;height:auto}
+  .side .userchip > div:last-child{min-width:0}
+  .side .userchip .n,.side .userchip .r{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .side .langrow,.side .lookrow{flex-direction:column!important;align-items:stretch!important;flex-wrap:nowrap!important;gap:8px!important}
+  .side .langrow > *,.side .lookrow > *{width:100%!important;max-width:100%!important;min-width:0!important;margin-inline:0!important}
+  .side .langsw > span,.side .lookmine > button{min-width:0!important;padding-inline:6px!important;font-size:13px!important;white-space:nowrap}
+  .side .viewbtn{min-width:0}
+  .side .viewbtn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .side .acct,.side .mobextra{grid-template-columns:1fr!important}
+  .side .acct > *,.side .mobextra > *{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .side .mobextra > button{flex-direction:row!important;justify-content:flex-start!important;text-align:start!important}
+  .side .nav .ngh{font-size:14px!important}
+  .side .nav .ngrp.single > a{font-size:14px}
+  .side .nav .ngrp .ngb{display:none!important}
+  .side .nav .ngrp .ngch,.side .nav .ngrp.open .ngch{transform:none}
+  html[dir="ltr"] .side .nav .ngrp .ngch,html[dir="ltr"] .side .nav .ngrp.open .ngch{transform:scaleX(-1)}
+  .side .nav .ngrp.open > .ngh{background:transparent}
+  .side .nav .ngrp.fly > .ngh,html.apple .side .nav .ngrp.fly > .ngh{background:var(--side-hover,var(--surface-2))}
+  html.apple .side .nav .ngrp.fly > .ngh{background:rgba(255,255,255,.12)}
+  .side .nav .ngrp.fly .ngch{opacity:1}
+  .side .nav .ngh{gap:6px;padding:10px 6px}
+  html.apple .side .nav .ngh{margin:1px 0;width:100%;padding:10px 6px}
+  .side .nav .ngh > svg:first-child{width:17px;height:17px}
+  .side .nav .ngc{min-width:18px;height:19px;padding:0 5px}
+  .side .nav .ngch{width:14px;height:14px}
+  .side .nav .ngt{white-space:normal;line-height:1.25;overflow:visible;text-overflow:clip;overflow-wrap:break-word;hyphens:auto}
+  .side .nav .ngrp.cur > .ngh .ngt::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7;margin-inline-start:6px;vertical-align:middle}
+  .side .nav .ngrp.single > a{padding-inline:8px}
+}
+.ngfly{position:fixed;z-index:63;top:0;max-height:80vh;display:flex;flex-direction:column;border-radius:16px;background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--line,rgba(0,0,0,.1));box-shadow:0 18px 50px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.18);animation:ngfIn .16s ease-out;--ay:24px}
+@keyframes ngfIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.ngfly .ngfa{position:absolute;top:calc(var(--ay) - 7px);width:14px;height:14px;background:inherit;border-style:solid;border-color:inherit;border-width:1px;transform:rotate(45deg);pointer-events:none}
+.ngfly .ngfin{flex:1;min-height:0;max-height:inherit;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:6px;border-radius:inherit}
+.ngfly .ngfh{display:flex;align-items:center;gap:8px;padding:8px 10px 6px;font-size:12px;font-weight:700;color:var(--muted,#888)}
+.ngfly .ngfh svg{width:15px;height:15px;flex:none}
+.ngfly .ngfl{display:flex;flex-direction:column;gap:1px}
+.ngfly .ngfl a{display:flex!important;flex-direction:row!important;align-items:center;justify-content:flex-start;text-align:start;gap:8px;padding:10px 8px;border-radius:10px;color:inherit;text-decoration:none;font-size:14px;font-weight:600;line-height:1.25;-webkit-tap-highlight-color:transparent}
+.ngfly .ngfl a > svg:first-child{width:18px;height:18px;flex:none;opacity:.75}
+.ngfly .ngfl a > span:not(.cnt){flex:1;min-width:0}
+.ngfly .ngfl a:hover{background:var(--surface-2,rgba(127,127,127,.12))}
+.ngfly .ngfl a.on{background:var(--accent-soft,rgba(37,99,235,.12));color:var(--accent,#2563eb)}
+.ngfly .cnt{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:rgba(127,127,127,.22);font-size:11px;font-weight:700;display:inline-grid;place-items:center;flex:none;color:inherit}
+.ngfly .cnt.crit,.ngfly .cnt.bad{background:var(--crit,#e5484d);color:#fff}
+.ngfly [data-tabnew],.ngfly .nftabnew{display:none!important}
+html.apple .ngfly{background:#2c2c2e;color:#fff;border-color:rgba(255,255,255,.08)}
+html.apple .ngfly .ngfh{color:#98989f}
+html.apple .ngfly .ngfl a > svg:first-child{color:#98989f;opacity:1}
+html.apple .ngfly .ngfl a:hover{background:rgba(255,255,255,.07)}
+html.apple .ngfly .ngfl a.on{background:rgba(255,255,255,.14);color:#fff}
+html.apple .ngfly .cnt{background:rgba(255,255,255,.14)}
+html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
+@media (prefers-reduced-motion: reduce){ .ngfly{animation:none} }
 </style>`);
 })();
 </script>
