@@ -48,6 +48,11 @@ m = open(MANIFEST).read()
 if 'android.permission.POST_NOTIFICATIONS' not in m:
     m = m.replace('<uses-permission android:name="android.permission.INTERNET" />', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.NFC" />\n    <uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />')
 m = m.replace('android:allowBackup="true"', 'android:allowBackup="false"')
+# v7.11 calls: the Ninety calls plugin takes the Firebase messages first (calls → call screen, the rest → Capacitor as before)
+if 'xmlns:tools=' not in m:
+    m = m.replace('xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
+if 'pushnotifications.MessagingService' not in m:
+    m = m.replace('</application>', '    <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />\n    </application>', 1)
 open(MANIFEST, 'w').write(m)
 
 strings = APP + '/src/main/res/values/strings.xml'

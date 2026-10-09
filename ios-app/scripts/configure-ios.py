@@ -15,7 +15,7 @@ d.update({
     'NSFaceIDUsageDescription': 'Ninety uses Face ID to confirm it is you when you punch in.',
     'NFCReaderUsageDescription': 'Ninety reads the office door NFC sticker to open the door.',
     'ITSAppUsesNonExemptEncryption': False,
-    'UIBackgroundModes': ['remote-notification', 'location'],
+    'UIBackgroundModes': ['remote-notification', 'location', 'voip', 'audio'],
     'UIRequiredDeviceCapabilities': ['arm64'],
     'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait'],
 })
@@ -51,5 +51,16 @@ if 'capacitorDidRegisterForRemoteNotifications' not in a:
     }
 }
 '''
+    open(DELEGATE, 'w').write(a)
+# v7.11 calls: start the PushKit / CallKit side at launch (by class name — the plugin module needs no import here),
+# so a call that wakes the closed app shows the iPhone call screen at once
+a = open(DELEGATE).read()
+if 'NinetyCallBoot' not in a:
+    i = a.find('didFinishLaunchingWithOptions')
+    j = a.find('return true', i)
+    if i < 0 or j < 0:
+        raise SystemExit('AppDelegate: didFinishLaunching not found')
+    boot = '(NSClassFromString("NinetyCallsPlugin.NinetyCallBoot") as AnyObject?)?.perform(NSSelectorFromString("boot"))\n        '
+    a = a[:j] + boot + a[j:]
     open(DELEGATE, 'w').write(a)
 print('ios configured')
