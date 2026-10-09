@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1529-55abbe";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1549-23ed1b";</script>
 
 <script>
 'use strict';
@@ -15282,7 +15282,7 @@ Object.assign(window, { tripAskConfirm, tripGeoCheck });
   .topbar .tb-actions .bellbtn,.topbar .tb-actions .nfhomebtn,.topbar .tb-actions .frzbtn,.topbar .tb-actions .nfsysbtn{height:36px}
   .topbar .tb-actions .bellbtn,.topbar .tb-actions .nfhomebtn,.topbar .tb-actions .frzbtn{width:36px}
   .topbar h1{min-width:0}
-  .side .mobextra{display:grid}
+  .side .mobextra{display:grid!important}   /* v7.15: the plain rule below used to win, so the night-mode button never showed on phones */
 }
 .side .mobextra{display:none;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 .side .mobextra button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 8px;font:inherit;font-size:12.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
@@ -38815,12 +38815,16 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
     apply(); render(true);
   };
   const mineHTML = () => { const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
+  /* v7.15 — day / night as the same kind of switch, on phones (Mahmoud: «where is night mode here?» — the phone menu button
+     never showed, and the switches should match each other) */
+  const themeHTML = () => { if (typeof themeCurrent !== 'function' || !ACTIONS.themeToggle) return ''; const dark = themeCurrent() === 'dark'; return `<div class="lookmine thememine" role="group" aria-label="${L('الوضع', 'Mode')}"><button type="button" class="${dark ? '' : 'on'}" data-action="themeSet" data-arg="light">☀︎ ${L('نهاري', 'Light')}</button><button type="button" class="${dark ? 'on' : ''}" data-action="themeSet" data-arg="dark">☾ ${L('ليلي', 'Dark')}</button></div>`; };
+  ACTIONS.themeSet = k => { if (typeof themeCurrent === 'function' && themeCurrent() !== k && ACTIONS.themeToggle) ACTIONS.themeToggle(); setTimeout(() => render(false), 0); };
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
     document.querySelectorAll('#root .side .lookrow').forEach(x => x.remove());
-    document.querySelectorAll('#root .side .langrow.inside .lookmine').forEach(x => x.remove());
+    document.querySelectorAll('#root .side .langrow.inside .lookmine, #root .side .langrow.inside .thememine').forEach(x => x.remove());
     const chip = document.querySelector('#root .side .userchip'); if (!chip) return;
     const lr = chip.parentNode.querySelector('.langrow.inside');
-    if (lr) lr.insertAdjacentHTML('beforeend', mineHTML()); else chip.insertAdjacentHTML('afterend', `<div class="lookrow">${mineHTML()}</div>`);
+    if (lr) lr.insertAdjacentHTML('beforeend', mineHTML() + themeHTML()); else chip.insertAdjacentHTML('afterend', `<div class="lookrow">${mineHTML()}${themeHTML()}</div>`);
   });
   /* the Ninety home has no RENDER_HOOKS — same switch under its name chip */
   if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
@@ -38895,7 +38899,7 @@ ${A} .tb-logo{border-radius:12px;background:#1d1d1f}
 ${A} .side .brand{border:0!important;background:transparent!important;box-shadow:none!important;padding:16px 14px 6px!important;margin:0!important}
 ${A} .side .brand .wordmark{max-height:32px}
 ${A} .side .userchip{margin:6px 10px 10px!important;padding:10px 12px!important;border-radius:16px!important;background:rgba(255,255,255,.07)!important;border:0!important}
-${A} .side .langrow.inside{margin:0 10px 10px!important;display:flex!important;flex-direction:column;gap:8px;align-items:stretch}
+${A} .side .langrow.inside,${A} .side .lookrow{margin:0 10px 10px!important;display:flex!important;flex-direction:column;gap:8px;align-items:stretch}
 ${A} .side .langsw{margin:0!important;border:0!important;opacity:1!important;background:rgba(255,255,255,.1)!important;border-radius:12px!important;padding:3px!important;gap:2px!important;color:#e5e5ea!important}
 ${A} .side .langsw{display:flex!important;width:100%}
 ${A} .side .langsw span:not(.sep){flex:1;text-align:center;padding:6px 10px;border-radius:9px;font-weight:600;font-size:12.5px;text-decoration:none!important}
@@ -38907,7 +38911,11 @@ ${A} .side .viewbtn{border:0!important;background:rgba(255,255,255,.07)!importan
 ${A} .side .acct{padding:0 10px 10px!important;gap:8px!important;flex-wrap:nowrap!important}
 ${A} .side .acct a{flex:1;justify-content:center;border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important;border-radius:12px!important;padding:9px 8px!important;white-space:nowrap}
 ${A} .side .acct a.logout{color:#ff6961!important}
-${A} .side .mobextra button{border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important;border-radius:12px!important}
+${A} .side .mobextra{grid-template-columns:1fr!important;margin:0 10px 10px!important}
+${A} .side .mobextra [data-action="themeToggle"]{display:none!important}
+${A} .side .mobextra button{border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important;border-radius:12px!important;justify-content:flex-start!important;padding:10px 12px!important;font-size:12.5px!important}
+@media (min-width:601px){ ${A} .side .thememine{display:none!important} }
+html:not(.apple) .side .thememine{display:none}
 ${A} .side .nav .grp{color:#8e8e93!important;font-size:11.5px;font-weight:600;letter-spacing:.02em;padding:14px 18px 6px!important}
 ${A} .side .nav a{margin:1px 8px;padding:9px 12px!important;border-radius:12px!important;color:#e5e5ea}
 ${A} .side .nav a svg{color:#98989f}
