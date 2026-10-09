@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261008-1828-b32a9e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0411-377c76";</script>
 
 <script>
 'use strict';
@@ -36199,11 +36199,31 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;
     /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
     const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
+    /* v7.01 (Mahmoud, 9 Oct: «الكلام داخل في بعضه» — the four vehicles parked at the factory had their tags drawn over each other):
+       vehicles whose icons would overlap ON SCREEN are laid out as one vertical column (icon + tag per row) around their true spot,
+       recomputed at every zoom through the map projection; until the projection exists (first paint, or the test stub) the old
+       few-metres fan-out applies */
+    let ov = null; try { if (g.OverlayView) { ov = new g.OverlayView(); ov.onAdd = () => { }; ov.draw = () => { }; ov.onRemove = () => { }; ov.setMap(map); } } catch (e) { ov = null; }
+    const fanOut = rows => { const out = new Map(); const taken = []; rows.forEach(r => { let k = 0; for (const t of taken) if (Math.abs(t.lat - r.lat) < 0.00015 && Math.abs(t.lng - r.lng) < 0.00015) k++; taken.push({ lat: r.lat, lng: r.lng }); const a = k * 1.7; out.set(r.id, k ? { lat: r.lat + 0.00016 * Math.sin(a), lng: r.lng + 0.00020 * Math.cos(a) } : { lat: r.lat, lng: r.lng }); }); return out; };
+    const layout = rows => {
+      const pr = ov && ov.getProjection ? ov.getProjection() : null;
+      if (!pr || !pr.fromLatLngToContainerPixel || !pr.fromContainerPixelToLatLng || !g.LatLng || !g.Point) return fanOut(rows);
+      const sz = big ? 44 : 34; const step = sz + (big ? 22 : 20); const near = sz + 16; const out = new Map();
+      let px; try { px = rows.map(r => { const p = pr.fromLatLngToContainerPixel(new g.LatLng(r.lat, r.lng)); return { r, x: p.x, y: p.y }; }); } catch (e) { return fanOut(rows); }
+      /* a vehicle joins the group of any member whose icon or tag would touch its own (tags are wide, so the horizontal reach is larger) */
+      const groups = []; px.forEach(a => { let gi = -1; for (let i = 0; i < groups.length && gi < 0; i++) if (groups[i].some(b => Math.abs(a.x - b.x) < near * 3 && Math.abs(a.y - b.y) < near)) gi = i; if (gi < 0) groups.push([a]); else groups[gi].push(a); });
+      groups.forEach(grp => {
+        if (grp.length === 1) { out.set(grp[0].r.id, { lat: grp[0].r.lat, lng: grp[0].r.lng }); return; }
+        const cx = grp.reduce((s, a) => s + a.x, 0) / grp.length, cy = grp.reduce((s, a) => s + a.y, 0) / grp.length;
+        grp.sort((a, b) => String(a.r.name).localeCompare(String(b.r.name), 'ar'));
+        grp.forEach((a, i) => { const ll = pr.fromContainerPixelToLatLng(new g.Point(cx, cy + (i - (grp.length - 1) / 2) * step)); out.set(a.r.id, ll && typeof ll.lat === 'function' ? { lat: ll.lat(), lng: ll.lng() } : { lat: a.r.lat, lng: a.r.lng }); });
+      });
+      return out;
+    };
     const tick = () => {
       const rows = fleetNow().filter(r => r.lat != null); const keep = new Set(); const bounds = new g.LatLngBounds(); let n = 0;
       if (fz) { bounds.extend({ lat: fz.lat, lng: fz.lng }); n++; }
-      /* vehicles parked on the same spot are fanned out a few metres so every one stays visible and clickable */
-      const taken = []; const spread = r => { let k = 0; for (const t of taken) if (Math.abs(t.lat - r.lat) < 0.00015 && Math.abs(t.lng - r.lng) < 0.00015) k++; taken.push({ lat: r.lat, lng: r.lng }); if (!k) return { lat: r.lat, lng: r.lng }; const a = k * 1.7; return { lat: r.lat + 0.00016 * Math.sin(a), lng: r.lng + 0.00020 * Math.cos(a) }; };
+      const placed = layout(rows); const spread = r => placed.get(r.id) || { lat: r.lat, lng: r.lng };
       rows.forEach(r => {
         keep.add(r.id); let e = marks.get(r.id); const pos = spread(r); const lbl = { text: r.name.split('—')[0].trim() + (r.gpsLost ? ` · ${L('GPS مفقود', 'GPS lost')}` : r.delayed ? ` · ⏱ ${r.delayed} ${L('د', 'min')}` : r.st === 'id' && r.stopSince ? ` · ${L('واقفة', 'stopped')} ${dur(r.stopSince)}` : r.st === 'of' ? ` · ${ST.of[1]}` : ''), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
         if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: iconFor(r), label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else location.hash = '#/fleetmap'; }); e = { m }; marks.set(r.id, e); }
@@ -36226,6 +36246,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     };
     b3._gm = { map, tick, drawRouteOn, fitAll: () => { tick(); if (lastBounds) map.fitBounds(lastBounds, big ? 70 : 30); else { const r = fleetNow().find(x => x.lat != null); if (r && map.setCenter) { map.setCenter({ lat: r.lat, lng: r.lng }); if (map.setZoom) map.setZoom(14); } } }, focus: id => { const r = fleetNow().find(x => x.id === id); if (r && r.lat != null && map.panTo) { map.panTo({ lat: r.lat, lng: r.lng }); if (map.getZoom && map.getZoom() < 14 && map.setZoom) map.setZoom(14); } } };
     FM.maps[elId] = b3._gm; tick();
+    /* v7.01: the column layout is in pixels, so it is redone whenever the map settles after a zoom or a pan */
+    if (map.addListener) map.addListener('idle', () => { try { if (document.getElementById(elId)) tick(); } catch (e) { /* keep the last layout */ } });
   }
   const focus = (m, id) => m.focus(id);
   function drawRoute() { const m = FM.maps['fm-map']; if (m && document.getElementById('fm-map')) m.drawRouteOn(); }
