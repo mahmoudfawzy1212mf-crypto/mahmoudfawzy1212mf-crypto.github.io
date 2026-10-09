@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1232-658189";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1358-bc53ca";</script>
 
 <script>
 'use strict';
@@ -27452,7 +27452,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     let el = document.getElementById('nfcall');
     if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '') || el.dataset.n !== String(legs.length)) {
       const grid = vid && legs.length ? `<div class="vgrid n${legs.length}"><div class="tile"><video class="rv" autoplay playsinline></video><span>${esc(d.name || nameOf(other))}</span></div>${legs.map(l => `<div class="tile"><video class="tv" data-leg="${esc(l.id || l.uid)}" autoplay playsinline></video><span>${esc(nameOf(l.uid))}${l.state !== 'active' ? ' · بيرن…' : ''}</span></div>`).join('')}</div><video class="lv" autoplay playsinline muted></video>` : '';
-      el = screen(`${grid || (vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`)}${!vid ? legs.map(l => `<audio class="la" data-leg="${esc(l.id || l.uid)}" autoplay></audio>`).join('') : ''}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div></div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%"><div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>`);
+      el = screen(`${grid || (vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`)}${!vid ? legs.map(l => `<audio class="la" data-leg="${esc(l.id || l.uid)}" autoplay></audio>`).join('') : ''}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div>${c.ctx ? `<div class="ctx">${c.ctx.important ? '<b>هام</b> · ' : ''}بخصوص: ${esc(c.ctx.title)}</div>` : ''}</div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%"><div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>`);
       el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.dataset.n = String(legs.length); el.classList.toggle('vid', !!vid); el.classList.toggle('grp', !!legs.length); el.classList.remove('hideui');
       attach(); if (vid) pipDrag(el);
     } else { const s = document.getElementById('nfc-st'); if (s) s.textContent = st; const b = el.querySelector('.bar'); if (b) b.innerHTML = bar; }
@@ -27593,7 +27593,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const gathered = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 4000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
   function cleanup(c) { if (!c) return; (c.legs || []).forEach(l => { clearTimeout(l.timeout); try { l.pc && l.pc.close(); } catch (e) { /* ignore */ } }); stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearInterval(c.mon); if (c.boost) { try { c.boost.src.disconnect(); c.boost.g.disconnect(); } catch (e) { /* ignore */ } c.boost = null; } clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
   async function finish(status, note) {
-    const c = C.cur; if (!c) return; C.cur = null; const legs = (c.legs || []).slice(); cleanup(c);
+    const c = C.cur; if (!c) return; C.cur = null; const legs = (c.legs || []).slice(); cleanup(c); hook('end', c, { status, note });
     for (const l of legs) if (l.id) S.sb.from('nf_calls').update({ status: l.state === 'active' ? 'ended' : 'missed' }).eq('id', l.id).in('status', ['ringing', 'active']).then(() => { }, () => { });
     if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
     if (c.id && c.diag) { try { await S.sb.from('nf_calls').update({ [c.dir === 'out' ? 'diag_caller' : 'diag_callee']: Object.assign({}, c.diag, { end: status || 'remote' }) }).eq('id', c.id); } catch (e) { /* ignore */ } }
@@ -27603,21 +27603,23 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     else closeScreen();
     C.logAt = 0; if (S.route && S.route.view === 'calls') render(false);
   }
-  async function startCall(uid, video) {
+  /* v7.11: ctx = { taskId, title, important } — a call about a task (parts/99zzZzZZe-task-calls.js); hook = window.nfCallHook(evt, c, extra) */
+  const hook = (evt, c, x) => { try { if (typeof window.nfCallHook === 'function') window.nfCallHook(evt, c, x || {}); } catch (e) { console.warn('call hook', e); } };
+  async function startCall(uid, video, ctx) {
     if (!hosted()) { toast('المكالمات بتشتغل في النسخة المستضافة بس', 'err'); return; }
     if (C.cur) { toast('إنت في مكالمة دلوقتي', 'err'); return; }
     if (!uid || uid === me()) return;
     await loadDir();
-    const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'calling' }; paint(); tone('out');
+    const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'calling', ctx: ctx && ctx.taskId ? { taskId: String(ctx.taskId), title: String(ctx.title || '').slice(0, 120), important: !!ctx.important } : null }; paint(); tone('out');
     try {
       c.local = await media(video); c.video = c.local.getVideoTracks().length > 0; paint(); attach();
       c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
       if (C.cur !== c) return cleanup(c);
-      const { data, error } = await S.sb.from('nf_calls').insert({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }).select('id').single();
+      const { data, error } = await S.sb.from('nf_calls').insert(Object.assign({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }, c.ctx ? { ctx: c.ctx } : {})).select('id').single();
       if (error) throw error; c.id = data.id; paint();
       const myName = (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
-      const ring = () => S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.video ? 'مكالمة فيديو — اضغط «رد» أو افتح' : 'مكالمة صوت — اضغط «رد» أو افتح', url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, sms: false } }).catch(() => { });
-      ring(); c.myName = myName; c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(); else clearInterval(c.reRing); }, 7000);
+      const ring = again => S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.ctx ? `${c.ctx.important ? 'هام — ' : ''}بخصوص: ${c.ctx.title}` : (c.video ? 'مكالمة فيديو — اضغط «رد» أو افتح' : 'مكالمة صوت — اضغط «رد» أو افتح'), url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, caller: myName, video: !!c.video, task: c.ctx ? c.ctx.title : '', important: !!(c.ctx && c.ctx.important), sms: false, ...(again ? { noVoip: true, again: true } : {}) } }).catch(() => { });
+      ring(); c.myName = myName; hook('start', c); c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(true); else clearInterval(c.reRing); }, 7000);   /* v7.11: the re-rings are for browsers — the iPhone call screen rings once */
       c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
     } catch (e) { console.warn(e); const msg = /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون' + (video ? ' والكاميرا' : '') + ' للسيستم' : 'تعذّر بدء المكالمة'; C.cur = c; finish(c.id ? 'failed' : null, msg); }
   }
@@ -27627,8 +27629,8 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (C.cur && row.room && row.joining && roomOf(C.cur) === row.room) return autoLeg(row);
     if (C.cur) { if (C.cur.id !== row.id && !(C.cur.legs || []).some(l => l.id === row.id)) await S.sb.from('nf_calls').update({ status: 'busy' }).eq('id', row.id); return; }
     await loadDir();
-    C.cur = { id: row.id, dir: 'in', caller: row.caller, callee: row.callee, video: !!row.video, state: 'incoming', offer: row.offer, room: row.room || null, legs: [] }; paint(); tone('in');
-    C.cur.timeout = setTimeout(() => { if (C.cur && C.cur.id === row.id && C.cur.state === 'incoming') { const c = C.cur; C.cur = null; cleanup(c); closeScreen(); } }, RING_MS);
+    C.cur = { id: row.id, dir: 'in', caller: row.caller, callee: row.callee, video: !!row.video, state: 'incoming', offer: row.offer, room: row.room || null, legs: [], ctx: row.ctx || null }; paint(); if (!window.nfNativeRing) tone('in');
+    C.cur.timeout = setTimeout(() => { if (C.cur && C.cur.id === row.id && C.cur.state === 'incoming') { const c = C.cur; C.cur = null; cleanup(c); closeScreen(); hook('end', c, { status: 'missed' }); } }, RING_MS);
   }
   async function accept(withVideo) {
     const c = C.cur; if (!c || c.state !== 'incoming') return; stopTone(); clearTimeout(c.timeout);
@@ -27638,7 +27640,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       c.pc = await makePc(c); await c.pc.setRemoteDescription(c.offer); const ans = await c.pc.createAnswer(); await c.pc.setLocalDescription(ans); await gathered(c.pc);
       const { error } = await S.sb.from('nf_calls').update({ answer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp }, status: 'active' }).eq('id', c.id).eq('status', 'ringing');
       if (error) throw error;
-      S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { });
+      S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { }); hook('accept', c);
       if (c.room) { const waitActive = n => { if (C.cur !== c) return; if (c.state === 'active') joinOthers(c); else if (n < 30) setTimeout(() => waitActive(n + 1), 500); }; waitActive(0); }
     } catch (e) { console.warn(e); finish('failed', /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون للسيستم' : 'تعذّر الرد'); }
   }
@@ -27661,7 +27663,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     }
     if (['ended', 'declined', 'missed', 'busy', 'failed'].includes(row.status)) {
       const note = row.status === 'declined' ? 'رفض المكالمة' : row.status === 'busy' ? 'في مكالمة تانية' : row.status === 'missed' ? (c.dir === 'in' ? 'مكالمة فايتة' : 'مردّش') : row.status === 'failed' ? 'الاتصال ماكملش' : 'المكالمة خلصت';
-      C.cur = null; cleanup(c); C.cur = null; if (c.state === 'incoming') closeScreen(); else { C.cur = c; finish(null, note); }
+      C.cur = null; cleanup(c); C.cur = null; c.remoteStatus = row.status; if (c.state === 'incoming') closeScreen(); else { C.cur = c; finish(null, note); }
     }
   }
   function subscribe() {
@@ -27739,6 +27741,8 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   document.addEventListener('change', e => { if (e.target && e.target.id === 'nfc-myphoto' && e.target.files && e.target.files[0]) setMyPhoto(e.target.files[0]); });
   document.addEventListener('input', e => { if (e.target && e.target.id === 'nfc-q') { S.ui = S.ui || {}; S.ui.callQ = e.target.value; const pos = e.target.selectionStart; render(false); const n = document.getElementById('nfc-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } } } });
   if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.calls = 'المكالمات';
+  /* v7.11: used by the task calls and the native app bridge */
+  window.nfCalls = { start: (uid, video, ctx) => startCall(uid, video, ctx), dir: force => loadDir(force), dirOf: uid => dirOf(uid), me, available: () => !!hosted() && !noCalls(), current: () => C.cur };
   if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.calls = () => vCalls();
   if (typeof NAV !== 'undefined' && !NAV.some(n => n.id === 'calls')) NAV.push({ id: 'calls', label: 'المكالمات', icon: 'bell', count: () => missedCount(), countCls: 'crit' });
   setTimeout(() => { if (typeof ROLE_VIEWS !== 'undefined') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('calls') && r !== 'kiosk' && r !== 'bdd' && r !== 'tech') ROLE_VIEWS[r].push('calls'); }); }, 0);
@@ -27786,7 +27790,7 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
     } catch (e) { toast('تعذّر الحفظ', 'err'); }
   });
   ACTIONS.turnClear = async () => { if (!isAdmin() || !(await confirmDlg('شيل مفتاح TURN؟ المكالمات هترجع تشتغل من غير السيرفر.', 'شيل'))) return; await S.sb.functions.invoke('rtc', { body: { action: 'setup', clear: true } }); C.ice = null; toast('اتشال'); render(false); };
-  window.nfCalls = { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount, addPerson };
+  window.nfCalls = Object.assign(window.nfCalls || {}, { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount, addPerson });
 })();
 /* =====================================================================
    v5.38/v5.39 — صورة المنتج من بره + البرزنتيشن
@@ -34894,10 +34898,11 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
   let token = '', listening = false;
   async function sendToken(force) {
     if (!token || !S.session || !hosted()) return false;
-    const key = 'nf.apns.' + (S.session.id || ''); const v = token.slice(-12) + ':' + todayISO();   // refreshed once a day
+    const caps = (() => { try { const c = Cap(); return c && c.Plugins && c.Plugins.NinetyCalls ? ['call'] : []; } catch (e) { return []; } })();   /* v7.11: the app's native call screen */
+    const key = 'nf.apns.' + (S.session.id || ''); const v = token.slice(-12) + ':' + todayISO() + ':' + caps.join(',');   // refreshed once a day
     if (!force && lsGet(key) === v) return true;
     try {
-      const r = await S.sb.functions.invoke('push', { body: { action: isAndroid() ? 'fcm-register' : 'apns-register', token, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar' } });
+      const r = await S.sb.functions.invoke('push', { body: { action: isAndroid() ? 'fcm-register' : 'apns-register', token, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar', caps } });
       if (r.error || !(r.data && r.data.ok)) throw (r.error || new Error((r.data && r.data.error) || 'apns'));
       lsSet(key, v); return true;
     } catch (e) { console.warn('apns-register', e); return false; }
@@ -38663,8 +38668,13 @@ body.fv-flash .camwrap{outline:28px solid #fff}
     const key = current();
     if (!key) return { sub: L('كل الإعدادات متجمّعة — دوس على أي مربع', 'All settings, grouped — tap a tile') };
     const { groups } = grouped(); const g = groupOf(key, groups); const t = (settingsTabList().find(x => x[0] === key) || [])[1] || '';
-    return { title: g ? g.label : L('الإعدادات', 'Settings'), sub: g && g.items.length > 1 ? esc(t) : '', actions: `<a class="btn ghost" href="#/settings">${icon('back')}<span>${L('الإعدادات', 'Settings')}</span></a>` };
+    return { title: g ? g.label : L('الإعدادات', 'Settings'), sub: g && g.items.length > 1 ? esc(t) : '', actions: `<a class="btn ghost setback" href="#/settings">${icon('back')}<span>${L('الإعدادات', 'Settings')}</span></a>` };
   };
+  /* the generic «back» of parts/99y9-nav-back.js is not wanted here: the button above always returns to the tiles */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'settings') return; const tb = document.getElementById('topbar'); if (!tb) return;
+    tb.querySelectorAll('a[data-navback]').forEach(a => { if (a.classList.contains('setback')) { delete a.dataset.navback; const sp = a.querySelector('span'); if (sp) sp.textContent = L('الإعدادات', 'Settings'); } else a.remove(); });
+  });
 
   ACTIONS.setGo = key => {
     if (!key) return;
@@ -38750,6 +38760,410 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   }
   /* before every render (the Ninety home renders outside the normal view pipeline, so RENDER_HOOKS do not run there) and after it */
   if (typeof render === 'function') render = (base => function () { try { sync(); } catch (e) { /* ignore */ } const r = base.apply(this, arguments); try { sync(); } catch (e) { /* ignore */ } return r; })(render);
+})();
+/* =====================================================================
+   v7.11 — «Apple» look for the whole system (Mahmoud, 9 Oct: «the UX/UI like the iPhone / Apple — crystal, chic»; primary = black).
+   One stylesheet scoped under <html class="apple"> so the classic look is one switch away (Settings → General & data →
+   «System look», owner). All three apps + the Ninety home + the kiosk. Layout and content are untouched — styling only.
+   · system font (SF on iPhone / Mac, the current Arabic font elsewhere) · soft wallpaper · frosted bars, sidebar and sheets
+   · cards and lists as light glass (real blur on iPhone / Mac / desktop; plain translucent on other phones to stay fast)
+   · black pill buttons · segmented tabs · grouped lists · bottom sheets with a grabber on phones · floating glass tab bar
+   · «reduce transparency» (or an old Android) → solid surfaces, no blur
+   ===================================================================== */
+(function () {
+  const KEY = 'nf.look';
+  const cached = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+  const want = () => { const s = (typeof S !== 'undefined' && S.settings && S.settings.ui) || null; return s && s.look ? s.look : (cached() || 'apple'); };
+  const ua = navigator.userAgent || '';
+  const blurOK = /iPhone|iPad|Macintosh/.test(ua) || (!/Android/.test(ua) && matchMedia('(hover:hover)').matches);
+  function apply() {
+    const on = want() !== 'classic'; const h = document.documentElement;
+    h.classList.toggle('apple', on); h.classList.toggle('apple-blur', on && blurOK);
+    try { localStorage.setItem(KEY, on ? 'apple' : 'classic'); } catch (e) { /* ignore */ }
+  }
+  apply();
+  if (typeof render === 'function') render = (base => function () { try { apply(); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
+
+  /* Settings → «System look» (owner) */
+  if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.look = {
+    label: 'شكل السيستم', group: 'gen',
+    render: () => {
+      const cur = want(); const opt = (k, t, d) => `<button type="button" class="lookopt ${cur === k ? 'on' : ''}" data-action="lookSet" data-arg="${k}"><span class="lookprev ${k}"><i></i><i></i><i></i></span><b>${t}</b><span class="small muted">${d}</span></button>`;
+      return `<div class="card"><div class="cardhead"><h3>شكل السيستم</h3><span class="muted small">بيتطبّق على كل الناس في السيستم ده — المحتوى والصلاحيات زي ما هي</span></div>
+        <div class="lookgrid">${opt('apple', 'Apple', 'زجاج شفاف، أزرار سودا مدوّرة، شيتات من تحت على الموبايل')}${opt('classic', 'الكلاسيك', 'الشكل القديم زي ما كان')}</div></div>`;
+    }
+  };
+  ACTIONS.lookSet = async k => {
+    if (!isAdmin() || !['apple', 'classic'].includes(k)) return;
+    await Store.saveSettings(Object.assign({}, S.settings, { ui: Object.assign({}, S.settings.ui || {}, { look: k }) }));
+    apply(); render(true); toast(k === 'apple' ? 'اتغيّر لشكل Apple' : 'رجع للشكل الكلاسيك');
+  };
+
+  const A = 'html.apple';
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="apple-look">
+${A}{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Arabic","IBM Plex Sans Arabic","Segoe UI","Noto Sans Arabic",system-ui,sans-serif;
+  --bg:#f2f2f7; --surface:rgba(255,255,255,.82); --surface-2:rgba(118,118,128,.08); --surface-3:rgba(118,118,128,.14);
+  --ink:#1d1d1f; --ink-2:#3a3a3c; --muted:#86868b; --line:rgba(60,60,67,.11); --line-2:rgba(60,60,67,.2);
+  --primary:#1d1d1f; --primary-ink:#fff; --accent:#0071e3; --accent-ink:#fff; --accent-soft:rgba(0,113,227,.1);
+  --good:#28a745; --warn:#ff9f0a; --serious:#ff7a1a; --crit:#ff3b30;
+  --good-soft:rgba(52,199,89,.13); --warn-soft:rgba(255,159,10,.15); --serious-soft:rgba(255,122,26,.14); --crit-soft:rgba(255,59,48,.11);
+  --good-ink:#1d7d36; --warn-ink:#9a5800; --serious-ink:#b04608; --crit-ink:#c6271c;
+  --side-bg:rgba(28,28,30,.86); --side-ink:#e5e5ea; --side-muted:#8e8e93; --side-line:rgba(255,255,255,.08); --side-hover:rgba(255,255,255,.08); --side-on:#1d1d1f; --side-on-bg:#f5f5f7;
+  --nf-side:rgba(28,28,30,.9);
+  --radius:20px; --radius-sm:13px;
+  --glass:rgba(255,255,255,.7); --glass-solid:rgba(255,255,255,.92); --glass-brd:rgba(255,255,255,.8);
+  --shadow:0 1px 1px rgba(0,0,0,.02),0 8px 28px -14px rgba(30,35,60,.22);
+  --shadow-lg:0 30px 80px -24px rgba(0,0,0,.35);
+  --wall:radial-gradient(1100px 620px at 108% -10%,rgba(196,214,240,.85),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(240,222,206,.8),transparent 60%),#f2f2f7;
+}
+@media (prefers-color-scheme: dark){ html.apple:not([data-theme="light"]){
+  --bg:#000; --surface:rgba(28,28,30,.82); --surface-2:rgba(118,118,128,.18); --surface-3:rgba(118,118,128,.26);
+  --ink:#f5f5f7; --ink-2:#d1d1d6; --muted:#8e8e93; --line:rgba(84,84,88,.45); --line-2:rgba(120,120,128,.5);
+  --primary:#f5f5f7; --primary-ink:#1d1d1f; --accent:#2997ff; --accent-ink:#000; --accent-soft:rgba(41,151,255,.16);
+  --good-soft:rgba(48,209,88,.18); --warn-soft:rgba(255,159,10,.2); --serious-soft:rgba(255,122,26,.2); --crit-soft:rgba(255,69,58,.2);
+  --good-ink:#5fe08a; --warn-ink:#ffc15e; --serious-ink:#ffa066; --crit-ink:#ff8a80;
+  --glass:rgba(44,44,46,.62); --glass-solid:rgba(36,36,38,.94); --glass-brd:rgba(255,255,255,.08);
+  --shadow:0 1px 1px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.7);
+  --wall:radial-gradient(1100px 620px at 108% -10%,rgba(40,60,96,.55),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(70,48,36,.45),transparent 60%),#000;
+}}
+html.apple[data-theme="dark"]{
+  --bg:#000; --surface:rgba(28,28,30,.82); --surface-2:rgba(118,118,128,.18); --surface-3:rgba(118,118,128,.26);
+  --ink:#f5f5f7; --ink-2:#d1d1d6; --muted:#8e8e93; --line:rgba(84,84,88,.45); --line-2:rgba(120,120,128,.5);
+  --primary:#f5f5f7; --primary-ink:#1d1d1f; --accent:#2997ff; --accent-ink:#000; --accent-soft:rgba(41,151,255,.16);
+  --good-soft:rgba(48,209,88,.18); --warn-soft:rgba(255,159,10,.2); --serious-soft:rgba(255,122,26,.2); --crit-soft:rgba(255,69,58,.2);
+  --good-ink:#5fe08a; --warn-ink:#ffc15e; --serious-ink:#ffa066; --crit-ink:#ff8a80;
+  --glass:rgba(44,44,46,.62); --glass-solid:rgba(36,36,38,.94); --glass-brd:rgba(255,255,255,.08);
+  --shadow:0 1px 1px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.7);
+  --wall:radial-gradient(1100px 620px at 108% -10%,rgba(40,60,96,.55),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(70,48,36,.45),transparent 60%),#000;
+}
+${A} body{background:var(--wall);background-attachment:fixed;letter-spacing:-.003em;-webkit-font-smoothing:antialiased}
+${A} .nhome,${A} .login{background:var(--wall)!important;background-attachment:fixed!important}
+${A} h1,${A} h2,${A} h3{letter-spacing:-.015em}
+${A} ::selection{background:rgba(0,113,227,.22)}
+${A} input[type=checkbox],${A} input[type=radio]{accent-color:var(--primary)}
+
+/* ---------- shell: dark glass sidebar · frosted top bar ---------- */
+${A} .side{background:var(--side-bg)!important;box-shadow:none;border:0}
+${A}.apple-blur .side{-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%)}
+${A} .nav a{border-radius:12px}
+${A} .nav a.on{background:var(--side-on-bg)!important;color:var(--side-on)!important;box-shadow:0 6px 18px -8px rgba(0,0,0,.6)}
+${A} .nav a.on svg{color:var(--side-on)}
+${A} .nav a .cnt{border-radius:999px}
+${A} .side .avatar{background:linear-gradient(135deg,#3a3a3c,#1d1d1f)}
+${A} .topbar{background:color-mix(in srgb,var(--bg) 62%,transparent)!important;border-bottom:.5px solid var(--line)!important;-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
+${A} .topbar h1{font-weight:700;letter-spacing:-.022em}
+${A} .tb-home,${A} .helpbtn{border:0!important;background:var(--surface-2)!important;border-radius:999px}
+${A} .tb-logo{border-radius:12px;background:#1d1d1f}
+
+/* ---------- surfaces ---------- */
+${A} .card,${A} .kpi,${A} .item,${A} .vehcard,${A} .vcard,${A} .orgnode,${A} .set-tile{background:var(--glass-solid)!important;border:1px solid var(--glass-brd)!important;box-shadow:var(--shadow)!important}
+${A}.apple-blur .card,${A}.apple-blur .kpi,${A}.apple-blur .item,${A}.apple-blur .vehcard,${A}.apple-blur .set-tile{background:var(--glass)!important;-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%)}
+${A} .card{border-radius:22px}
+${A} .item{border-radius:16px}
+${A} .list{gap:8px}
+${A} .item:hover,${A} .kpi:hover,${A} .vehcard:hover{transform:none;border-color:var(--glass-brd)!important;box-shadow:0 1px 1px rgba(0,0,0,.02),0 14px 34px -16px rgba(30,35,60,.3)!important}
+${A} .item:active,${A} .kpi:active,${A} .set-tile:active{transform:scale(.985)}
+${A} .kpi{border-radius:20px}
+${A} .kpi .stripe{display:none}
+${A} .kpi .v{letter-spacing:-.03em}
+${A} .kpi.acc .v{color:var(--accent)} ${A} .kpi.good .v{color:var(--good-ink)} ${A} .kpi.warn .v{color:var(--serious-ink)} ${A} .kpi.crit .v{color:var(--crit-ink)}
+${A} .banner{border-radius:16px;border:0}
+${A} .empty{border-radius:20px;border:1.5px dashed var(--line-2)}
+${A} .col{background:color-mix(in srgb,var(--surface-3) 70%,transparent);border-radius:20px}
+${A} .tcard{border-radius:14px;box-shadow:var(--shadow)}
+
+/* ---------- buttons: pills, black primary ---------- */
+${A} .btn{border-radius:999px!important;border:0!important;background:var(--surface-3)!important;color:var(--ink)!important;box-shadow:none!important;font-weight:600}
+${A} .btn:hover{filter:brightness(.97)}
+${A} .btn.p{background:var(--primary)!important;color:var(--primary-ink)!important;box-shadow:0 8px 18px -10px rgba(0,0,0,.55)!important}
+${A} .btn.a{background:var(--accent)!important;color:#fff!important}
+${A} .btn.d{background:var(--crit-soft)!important;color:var(--crit-ink)!important}
+${A} .btn.ghost{background:transparent!important}
+${A} .btn.ghost:hover{background:var(--surface-2)!important}
+${A} .btn:disabled{opacity:.45}
+${A} .iconbtn{border-radius:999px!important}
+${A} .badge{border-radius:999px!important;border:0!important;padding:2px 9px}
+${A} .brandchip{border-radius:999px}
+
+/* ---------- forms ---------- */
+${A} .field input,${A} .field select,${A} .field textarea,${A} select.sel,${A} input.inp,${A} .search input{border-radius:12px!important;border:1px solid transparent!important;background:var(--surface-2)!important;box-shadow:none!important}
+${A} .field input:focus,${A} .field select:focus,${A} .field textarea:focus,${A} select.sel:focus,${A} input.inp:focus,${A} .search input:focus{background:var(--surface)!important;border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;box-shadow:0 0 0 4px var(--accent-soft)!important;outline:none}
+${A} .field label{font-weight:600;color:var(--ink-2)}
+${A} .check{border-radius:999px!important;border:0!important;background:var(--surface-2)!important}
+${A} .check.on{background:var(--primary)!important;color:var(--primary-ink)!important}
+
+/* ---------- tabs → segmented control ---------- */
+${A} .tabs{display:inline-flex!important;max-width:100%;overflow-x:auto;border:0!important;background:var(--surface-3);border-radius:12px;padding:3px;gap:2px;scrollbar-width:none}
+${A} .tabs::-webkit-scrollbar{display:none}
+${A} .tabs button{border:0!important;margin:0!important;border-radius:10px!important;padding:7px 14px;color:var(--ink-2)!important;background:transparent!important;white-space:nowrap}
+${A} .tabs button.on{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 2px rgba(0,0,0,.08),0 3px 10px rgba(0,0,0,.08)}
+${A} .seg{background:var(--surface-3);border-radius:12px}
+${A} .seg button{border-radius:10px}
+${A} .seg button.on{background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.08),0 3px 10px rgba(0,0,0,.08)}
+
+/* ---------- tables: hairlines, no zebra ---------- */
+${A} th{background:color-mix(in srgb,var(--bg) 80%,transparent)!important;font-weight:600}
+${A} tbody tr:nth-child(even) td{background:transparent}
+${A} td{border-color:var(--line)!important}
+${A} .tablewrap{border-radius:16px}
+
+/* ---------- sheets / modals ---------- */
+${A} .overlay{background:rgba(0,0,0,.28)!important}
+${A} .modal{border-radius:26px!important;background:var(--glass-solid)!important;box-shadow:var(--shadow-lg)!important;border:1px solid var(--glass-brd)}
+${A}.apple-blur .modal{background:color-mix(in srgb,var(--surface) 88%,transparent)!important;-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%)}
+${A} .modal .mh{background:transparent!important;border-bottom:.5px solid var(--line)!important;position:sticky}
+${A} .modal .mh h2{font-weight:700;letter-spacing:-.015em}
+${A} .modal .mf{border-top:.5px solid var(--line)!important;background:transparent!important}
+${A} .toast{border-radius:999px!important;background:rgba(29,29,31,.88)!important;color:#fff!important;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 12px 30px -12px rgba(0,0,0,.5)}
+
+/* ---------- settings tiles → iOS squircles ---------- */
+${A} .set-ic{border-radius:11px!important;color:#fff!important;background:#0a84ff!important}
+${A} .set-ic.t1{background:#30d158!important} ${A} .set-ic.t2{background:#ff9f0a!important} ${A} .set-ic.t3{background:#5e5ce6!important} ${A} .set-ic.t4{background:#ff375f!important} ${A} .set-ic.t5{background:#8e8e93!important}
+${A} .set-chips button{border:0!important;background:var(--surface-3)!important}
+${A} .set-chips button.on{background:var(--primary)!important;color:var(--primary-ink)!important}
+${A} .set-search{background:var(--surface-3)!important;border:0!important}
+
+/* ---------- Ninety home + login ---------- */
+${A} .nhome .nside{background:var(--nf-side)!important}
+${A}.apple-blur .nhome .nside{-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%)}
+${A} .nhome .blk,${A} .nhome .st{border-radius:20px!important;background:var(--glass-solid)!important;border:1px solid var(--glass-brd)!important;box-shadow:var(--shadow)!important}
+${A}.apple-blur .nhome .blk,${A}.apple-blur .nhome .st{background:var(--glass)!important;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+${A} .nhome .co{border-radius:14px}
+${A} .loginbox{border-radius:28px!important;background:var(--glass-solid)!important;border:1px solid var(--glass-brd)}
+${A}.apple-blur .loginbox{background:var(--glass)!important;-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%)}
+
+${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important;box-shadow:0 12px 26px -10px rgba(0,0,0,.55)!important}
+/* ---------- look picker ---------- */
+.lookgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.lookopt{display:flex;flex-direction:column;gap:6px;align-items:flex-start;text-align:start;border:2px solid var(--line);border-radius:18px;padding:14px;background:var(--surface);cursor:pointer;font:inherit;color:var(--ink)}
+.lookopt.on{border-color:var(--primary)}
+.lookprev{display:flex;gap:6px;width:100%;height:64px;border-radius:12px;padding:8px;box-sizing:border-box}
+.lookprev i{flex:1;border-radius:8px}
+.lookprev.apple{background:linear-gradient(135deg,#dfe7f3,#f2ece6)}.lookprev.apple i{background:rgba(255,255,255,.75);box-shadow:0 4px 10px -6px rgba(0,0,0,.3)}.lookprev.apple i:last-child{background:#1d1d1f;flex:.5;border-radius:999px;align-self:flex-end;height:18px}
+.lookprev.classic{background:#eef1f5}.lookprev.classic i{background:#fff;border:1px solid #e3e7ec}.lookprev.classic i:first-child{background:#12161c;flex:.5}
+
+/* ---------- phones: floating glass tab bar · sheets from the bottom ---------- */
+@media (max-width:900px){
+  ${A} .tabbar{left:10px!important;right:10px!important;bottom:calc(8px + env(safe-area-inset-bottom,0px))!important;height:64px!important;padding:0 6px!important;border-radius:32px!important;border:1px solid var(--glass-brd)!important;background:var(--glass-solid)!important;box-shadow:0 14px 36px -12px rgba(0,0,0,.3)!important}
+  ${A}.apple-blur .tabbar{background:color-mix(in srgb,var(--surface) 70%,transparent)!important;-webkit-backdrop-filter:blur(30px) saturate(190%)!important;backdrop-filter:blur(30px) saturate(190%)!important}
+  ${A} .tabbar a{border-radius:26px!important;margin:6px 1px!important}
+  ${A} .tabbar a.on{color:var(--primary)!important;background:var(--surface-3)!important}
+  ${A} .view{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))!important}
+  ${A} .overlay{align-items:flex-end!important;padding:0!important}
+  ${A} .modal{width:100%!important;max-width:100%!important;border-radius:28px 28px 0 0!important;max-height:94vh!important;border-bottom:0;animation:nfSheetUp .28s cubic-bezier(.2,.9,.25,1)}
+  ${A} .modal .mh{padding-top:22px!important}
+  ${A} .modal .mh::before{content:"";position:absolute;top:7px;left:50%;width:38px;height:5px;margin-left:-19px;border-radius:3px;background:var(--line-2)}
+  ${A} .card{border-radius:20px}
+  ${A} .topbar h1{font-size:19px}
+}
+@keyframes nfSheetUp{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-transparency: reduce){
+  html.apple *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  html.apple .card,html.apple .item,html.apple .kpi,html.apple .modal,html.apple .tabbar,html.apple .topbar{background:var(--glass-solid)!important}
+}
+@media (prefers-reduced-motion: reduce){ html.apple .modal{animation:none!important} }
+@media print{ html.apple body{background:#fff!important} html.apple .card,html.apple .item{box-shadow:none!important;background:#fff!important} }
+</style>`);
+})();
+/* =====================================================================
+   v7.11 — «call about a task» + «important» (Mahmoud, 9 Oct: «add a call command … important if someone calls about a task,
+   it notifies me / the head of department / the manager / the employee — each by his task — so when the call happens the
+   notification is on the phone and one tap takes him to the action»).
+   · Task page → «📞 Call»: the task's people (assignee, his manager, the department heads, the creator, added people) plus the
+     owner and the factory managers, each with voice / video; «important» is ticked by itself for urgent / high tasks.
+   · The callee's ring says «X is calling about: <task>» (also on the phone's own call screen in the apps).
+   · Important: the other task people get «📞 important call about: <task>» → tap opens the task.
+   · After the call a line in the task's chat (who called whom, answered + duration / declined / no answer); an important
+     call nobody answered → «missed important call» notification to the callee + a banner on the task until he opens it.
+   No permission change: the call directory and the task visibility are the existing ones.
+   ===================================================================== */
+(function () {
+  if (typeof vTaskDetail !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const api = () => window.nfCalls || null;
+  const avail = () => { const a = api(); return !!(a && a.available()); };
+  const myUid = () => (S.sbUser && S.sbUser.id) || '';
+  const fmtT = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+#nfcall .ctx{margin-top:8px;font-size:14px;opacity:.92;max-width:86vw;text-align:center;line-height:1.5}
+#nfcall .ctx b{background:#ff3b30;color:#fff;border-radius:999px;padding:1px 8px;font-size:12px}
+.tcall-list .item{gap:10px}
+.tcall-list .item .why{font-size:12px;color:var(--muted)}
+.tcall-imp{display:flex;align-items:center;gap:8px;margin:4px 0 12px;font-weight:600}
+.tcall-miss{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+</style>`);
+
+  /* who can be called about this task → [{ uid, name, why }] (only people in the call directory, never me) */
+  function people(t, dir) {
+    const out = new Map(); const me = myUid();
+    const add = (uid, name, why) => { if (!uid || uid === me || out.has(uid)) return; out.set(uid, { uid, name, why }); };
+    const byPid = pid => { if (!pid) return null; const s = String(pid); if (s.startsWith('sb:')) return dir.find(d => d.uid === s.slice(3)) || null; return dir.find(d => d.person_id === 'w:' + s || d.person_id === s) || null; };
+    (typeof taskParties === 'function' ? taskParties(t) : []).forEach(p => { const d = byPid(p.id); if (d) add(d.uid, d.name || p.name, p.why); });
+    dir.filter(d => d.role === 'admin').forEach(d => add(d.uid, d.name, L('المالك', 'Owner')));
+    dir.filter(d => d.role === 'manager').forEach(d => add(d.uid, d.name, L('المدير', 'Manager')));
+    return [...out.values()];
+  }
+  const importantDefault = t => ['urgent', 'high'].includes(t.priority);
+
+  ACTIONS.taskCall = async id => {
+    const t = byId('tasks', id); if (!t || !avail()) return;
+    const dir = await api().dir(); const ps = people(t, dir || []);
+    if (!ps.length) { toast(L('مفيش حد من أطراف المهمة متاح للاتصال', 'Nobody on this task can be called'), 'err'); return; }
+    const row = p => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(p.name)}</div><div class="why">${esc(p.why || '')}</div></div><button type="button" class="btn sm p" data-action="taskCallGo" data-arg="${esc(t.id)}|${esc(p.uid)}|0">${icon('phone')}${L('صوت', 'Voice')}</button><button type="button" class="btn sm" data-action="taskCallGo" data-arg="${esc(t.id)}|${esc(p.uid)}|1">${icon('camera')}${L('فيديو', 'Video')}</button></div>`;
+    openModal({ title: L('اتصال بخصوص المهمة', 'Call about this task'), body: `<div class="small muted" style="margin-bottom:8px">${esc(t.title)}</div>
+      <label class="tcall-imp"><input type="checkbox" id="tcall-imp" ${importantDefault(t) ? 'checked' : ''}> ${L('مكالمة هامة — يوصل إشعار لباقي أطراف المهمة', 'Important call — the other people on the task are notified')}</label>
+      <div class="list tcall-list">${ps.map(row).join('')}</div>`, footer: `<button type="button" class="btn" data-action="closemodal">${L('إلغاء', 'Cancel')}</button>` });
+  };
+  ACTIONS.taskCallGo = arg => {
+    const [tid, uid, v] = String(arg || '').split('|'); const t = byId('tasks', tid); if (!t || !uid || !avail()) return;
+    const imp = !!(document.getElementById('tcall-imp') || {}).checked; closeModal();
+    api().start(uid, v === '1', { taskId: t.id, title: t.title, important: imp });
+  };
+  ACTIONS.taskCallBack = arg => { const [tid, uid] = String(arg || '').split('|'); const t = byId('tasks', tid); if (!t || !uid || !avail()) return; api().start(uid, false, { taskId: t.id, title: t.title, important: true }); };
+
+  /* the task page: the call button + the «missed important call» banner */
+  vTaskDetail = (base => function (t) {
+    let html = base.apply(this, arguments);
+    if (!t || !avail()) return html;
+    const party = (typeof taskVisible === 'function' && taskVisible(t)) || (typeof taskIsParty === 'function' && taskIsParty(t)); if (!party) return html;
+    const btn = `<button class="btn sm" data-action="taskCall" data-arg="${esc(t.id)}">${icon('phone')}${L('اتصال', 'Call')}</button>`;
+    const i = html.indexOf('<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">');
+    if (i >= 0) { const j = i + '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">'.length; html = html.slice(0, j) + btn + html.slice(j); }
+    const m = t.missedCall; if (m && m.to === myUid()) {
+      html = `<div class="banner warn tcall-miss">${icon('phone')}<span class="grow">${L(`${esc(m.byName || '')} اتصل بيك بخصوص المهمة دي (هام) ومارديتش`, `${esc(m.byName || '')} called you about this task (important) and you did not answer`)} · ${esc(fmtDate(String(m.at || '').slice(0, 10)))} ${esc(String(m.at || '').slice(11, 16))}</span>${m.by ? `<button class="btn sm p" data-action="taskCallBack" data-arg="${esc(t.id)}|${esc(m.by)}">${L('اتصل بيه', 'Call back')}</button>` : ''}</div>` + html;
+      setTimeout(() => { const cur = byId('tasks', t.id); if (cur && cur.missedCall && cur.missedCall.to === myUid()) Store.update('tasks', t.id, { missedCall: null }, { silent: true }).catch(() => {}); }, 4000);
+    }
+    return html;
+  })(vTaskDetail);
+
+  /* what happens around a task call */
+  const push = (to, title, body, url, tag) => { try { return S.sb.functions.invoke('push', { body: { action: 'send', to, title, body, url, tag, sms: false } }).catch(() => {}); } catch (e) { return null; } };
+  const prev = window.nfCallHook;
+  window.nfCallHook = function (evt, c, x) {
+    if (typeof prev === 'function') { try { prev(evt, c, x); } catch (e) { /* ignore */ } }
+    if (!c || !c.ctx || !c.ctx.taskId || c.dir !== 'out') return;
+    const t = byId('tasks', c.ctx.taskId); const a = api(); if (!a) return;
+    const calleeName = (a.dirOf(c.callee) || {}).name || ''; const myName = c.myName || (S.session && S.session.name) || '';
+    if (evt === 'start' && c.ctx.important && t) {
+      a.dir().then(dir => {
+        const others = people(t, dir || []).filter(p => p.uid !== c.callee).map(p => 'uid:' + p.uid);
+        if (others.length) push(others, `📞 ${L('مكالمة هامة بخصوص', 'Important call about')}: ${c.ctx.title}`, `${myName} ${L('بيكلّم', 'is calling')} ${calleeName}`, '/#/tasks/' + t.id, 'tcall-' + (c.id || t.id));
+      }).catch(() => {});
+    }
+    if (evt === 'end' && t) {
+      const answered = c.state === 'active' || (c.secs || 0) > 0; const st = String((x && x.status) || c.remoteStatus || '');
+      const declined = st === 'declined'; const busy = st === 'busy';
+      const res = answered ? `${L('اترد', 'answered')} ${fmtT(c.secs || 0)}` : declined ? L('رفض المكالمة', 'declined') : busy ? L('كان في مكالمة تانية', 'was on another call') : L('مردّش', 'no answer');
+      const m = { id: uid(), at: nowISO(), by: (S.session && (S.session.id || S.session.workerId)) || null, byName: myName, kind: 'call', text: `📞 ${myName} ${L('اتصل بـ', 'called')} ${calleeName}${c.ctx.important ? ' (' + L('هام', 'important') + ')' : ''} — ${res}` };
+      const patch = { thread: (Array.isArray(t.thread) ? t.thread : []).concat([m]), lastMsgAt: m.at, updatedAt: nowISO() };
+      if (!answered && c.ctx.important && !declined) patch.missedCall = { to: c.callee, by: myUid(), byName: myName, at: m.at };
+      Store.update('tasks', t.id, patch, { silent: true }).catch(() => {});
+      if (!answered && c.ctx.important && !declined) push(['uid:' + c.callee], `📞 ${L('مكالمة هامة فايتة', 'Missed important call')} — ${myName}`, `${L('بخصوص', 'About')}: ${c.ctx.title} — ${L('افتح المهمة', 'open the task')}`, '/#/tasks/' + t.id, 'tcallmiss-' + t.id);
+    }
+  };
+})();
+/* =====================================================================
+   v7.11 — the system side of the apps' native call screen (Mahmoud, 9 Oct: «when I call someone it shows outside at once»,
+   «the app stays running in the background from the morning punch»). Works only inside the iPhone / Android app builds that
+   carry the «NinetyCalls» plugin; the website and older app builds keep the ordinary notification.
+   · iPhone: registers the PushKit (VoIP) token with Edge "push" (voip-register) — the server then rings the iPhone call screen.
+   · Answer on the phone's call screen → the app opens straight on the call (#/calls/<id>/accept); the in-app call ends the
+     phone's call screen once it is joined / hung up.
+   · Android «work mode» (owner switch, on by default): from the punch-in to the punch-out (or one hour after the shift end)
+     a small fixed notification keeps the app alive so calls always ring; first time it asks for «no battery restriction»
+     and, on Android 14, «full-screen notifications».
+   ===================================================================== */
+(function () {
+  const P = () => { try { const c = window.Capacitor; return c && c.Plugins && c.Plugins.NinetyCalls; } catch (e) { return null; } };
+  const native = () => typeof nfIsNative === 'function' && nfIsNative() && !!P();
+  const plat = () => (typeof nfPlatform === 'function' ? nfPlatform() : 'web');
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb;
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  const workOn = () => !(S.settings && S.settings.calls && S.settings.calls.workMode === false);
+
+  /* the owner's switch lives in Settings → Messages & calls → «Calls» */
+  if (typeof EXTRA_SETTINGS === 'object' && EXTRA_SETTINGS.calls && typeof EXTRA_SETTINGS.calls.render === 'function') EXTRA_SETTINGS.calls.render = (base => function () {
+    return base.apply(this, arguments) + `<div class="card" style="margin-top:14px"><div class="cardhead"><h3>${L('وضع الشغل على أبلكيشن الأندرويد', 'Work mode on the Android app')}</h3></div>
+      <label class="check ${workOn() ? 'on' : ''}" style="display:inline-flex"><input type="checkbox" id="nfc-work" ${workOn() ? 'checked' : ''} data-action="nfcWorkToggle"> ${L('من بصمة الحضور لحد الانصراف الأبلكيشن يفضل شغال في الخلفية علشان المكالمات ترن على طول', 'From punch-in to punch-out the app stays running in the background so calls always ring')}</label>
+      <div class="small muted" style="margin-top:8px">${L('بيظهر إشعار صغير ثابت «Ninety شغال» على الموبايل طول الشغل. الآيفون مش محتاجه — شاشة المكالمة بتصحّي الأبلكيشن لوحدها.', 'A small fixed «Ninety is on» notification shows during work. iPhones do not need it — the call screen wakes the app by itself.')}</div></div>`;
+  })(EXTRA_SETTINGS.calls.render);
+  ACTIONS.nfcWorkToggle = async () => {
+    if (!isAdmin()) return; const v = !workOn();
+    await Store.saveSettings(Object.assign({}, S.settings, { calls: Object.assign({}, S.settings.calls || {}, { workMode: v }) }));
+    toast(v ? L('وضع الشغل اتفعّل', 'Work mode is on') : L('وضع الشغل اتقفل', 'Work mode is off')); render(false);
+  };
+
+  if (!native()) return;
+  const p = P();
+
+  /* ---------- iPhone: PushKit token ---------- */
+  async function voip() {
+    if (plat() !== 'ios' || !S.session || !hosted()) return;
+    try {
+      const r = await p.voipToken(); const tok = r && r.token; if (!tok) return;
+      const key = 'nf.voip.' + (S.session.id || ''); const v = String(tok).slice(-12) + ':' + todayISO(); if (lsGet(key) === v) { window.nfNativeRing = true; return; }
+      const x = await S.sb.functions.invoke('push', { body: { action: 'voip-register', token: tok, personId: S.session.id || '', lang: typeof I18N !== 'undefined' ? I18N.lang : 'ar' } });
+      if (x.data && x.data.ok) { lsSet(key, v); window.nfNativeRing = true; }   /* the iPhone call screen rings — the page stays quiet */
+    } catch (e) { console.warn('voip-register', e); }
+  }
+  try { p.addListener('voipToken', () => voip()); } catch (e) { /* ignore */ }
+
+  /* ---------- answer / decline pressed on the phone's call screen ---------- */
+  /* answer: close the phone's call screen first (so the microphone is free on the iPhone), then join the call in the app;
+     open: a «missed call» note was tapped → its page */
+  let lastAns = '';
+  const go = a => {
+    if (!a || !a.action) return;
+    if (a.action === 'open') { const u = String(a.url || ''); const i = u.indexOf('#/'); if (i >= 0) location.hash = u.slice(i); return; }
+    const id = String(a.callId || '');
+    if (a.action !== 'answer' || !/^[0-9a-f-]{36}$/.test(id) || lastAns === id) return; lastAns = id;
+    try { p.endCall({ callId: id }); } catch (e) { /* ignore */ }
+    setTimeout(() => { location.hash = '#/calls/' + id + '/accept'; }, plat() === 'ios' ? 700 : 60);
+  };
+  async function pending() { try { go(await p.pending()); } catch (e) { /* ignore */ } }
+  try { p.addListener('callAction', go); } catch (e) { /* ignore */ }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pending(); });
+  /* the in-app call took over (or ended) → close the phone's call screen */
+  const prev = window.nfCallHook;
+  window.nfCallHook = function (evt, c, x) {
+    if (typeof prev === 'function') { try { prev(evt, c, x); } catch (e) { /* ignore */ } }
+    if ((evt === 'accept' || evt === 'end') && c && c.id) { try { p.endCall({ callId: String(c.id) }); } catch (e) { /* ignore */ } }
+  };
+
+  /* ---------- Android work mode ---------- */
+  const W = { on: null, day: '' };
+  function untilTs() {
+    const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null;
+    const sh = typeof shiftFor === 'function' ? shiftFor(w) : null; const end = (sh && sh.end) || '19:00';
+    const [h, m] = end.split(':').map(Number); const d = new Date(); d.setHours(h || 19, (m || 0) + 60, 0, 0);
+    return Math.max(d.getTime(), Date.now() + 30 * 60000);
+  }
+  async function prompts() {
+    if (lsGet('nf.callperm') === '1') return; lsSet('nf.callperm', '1');
+    let st = {}; try { st = (await p.permState()) || {}; } catch (e) { return; }
+    if (st.fullScreen === false && await confirmDlg(L('علشان المكالمة تظهر على الشاشة حتى وهي مقفولة، اسمح لـ Ninety بـ«إشعارات ملء الشاشة» من الإعدادات.', 'To show calls on the screen even when it is locked, allow Ninety «full-screen notifications» in Settings.'), L('افتح الإعدادات', 'Open settings'))) { try { await p.openFullScreenSettings(); } catch (e) { /* ignore */ } }
+    if (st.battery === false && await confirmDlg(L('علشان المكالمات توصلك حتى في توفير البطارية، اسمح لـ Ninety يشتغل في الخلفية من غير قيود.', 'So calls reach you even in battery saver, let Ninety run in the background without restrictions.'), L('سماح', 'Allow'))) { try { await p.requestIgnoreBattery(); } catch (e) { /* ignore */ } }
+  }
+  function workSync() {
+    if (plat() !== 'android' || !S.session || !S.session.workerId || !hosted()) return;
+    const today = todayISO(); const rec = (typeof attendanceFor === 'function' ? attendanceFor(today) : {})[S.session.workerId];
+    const on = workOn() && !!(rec && rec.in && !rec.out);
+    if (on === W.on && W.day === today) return; W.on = on; W.day = today;
+    try {
+      if (on) { p.startWork({ title: 'Ninety', text: L('شغال — المكالمات هتوصلك على طول', 'On — calls will reach you right away'), until: untilTs() }); setTimeout(prompts, 1500); }
+      else p.stopWork();
+    } catch (e) { console.warn('work mode', e); }
+  }
+  let booted = '';
+  RENDER_HOOKS.push(() => {
+    const sid = S.session && S.session.id; if (sid && booted !== sid && hosted()) { booted = sid; setTimeout(() => { voip(); pending(); }, 1200); }
+    try { workSync(); } catch (e) { /* ignore */ }
+  });
 })();
 </script>
 
