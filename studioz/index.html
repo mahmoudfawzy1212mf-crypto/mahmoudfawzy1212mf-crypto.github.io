@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0755-da02e0";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0814-11b59e";</script>
 
 <script>
 'use strict';
@@ -36499,6 +36499,14 @@ html body .fmd-row:hover{background:var(--surface-2)}
   const drv = () => typeof isDriver === 'function' && isDriver();
   const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
   ['fleetalerts', 'fleetday'].forEach(c => { if (typeof COLS !== 'undefined' && !COLS.includes(c)) COLS.push(c); S.data[c] = S.data[c] || new Map(); });
+  /* v7.06 (Mahmoud, 9 Oct: «I opened the notification and the alerts page is empty»): the two collections were added to COLS but
+     never subscribed, so on the hosted system the alerts page, the «last alerts» card and the fleet reports' day counters were
+     always empty — load them (and keep them live) like every other collection */
+  let _faT = 0; const faPaint = () => { clearTimeout(_faT); _faT = setTimeout(() => { if (typeof render === 'function') render(false); }, 80); };
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () {
+    base.call(this); const db = S.db; if (!db) return;
+    ['fleetalerts', 'fleetday'].forEach(c => S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; faPaint(); }, e => console.warn('snapshot ' + c, e))));
+  })(Store.subscribeAll);
   const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : iso);
   const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const AT = {
