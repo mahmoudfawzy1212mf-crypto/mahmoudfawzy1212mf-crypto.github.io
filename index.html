@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1549-23ed1b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1609-b9883a";</script>
 
 <script>
 'use strict';
@@ -34440,6 +34440,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     .lhcard .muted,.lhcard .lhnum .small{color:var(--muted)}.lhcard:hover{background:var(--surface-2)}
     .lhcard.warn{border-inline-start-color:#f59e0b}.lhcard.bad{border-inline-start-color:#dc2626}
     .lhtop{display:flex;align-items:center;gap:10px}
+    .lhtop > .grow{flex:1;min-width:0}
     .lhnum{display:flex;flex-direction:column;align-items:center;line-height:1}.lhnum b{font-size:24px}
     .lhcard.bad .lhnum b{color:#dc2626}.lhcard.warn .lhnum b{color:#d97706}
     .lhmax{margin:8px 0 6px}
@@ -38926,6 +38927,23 @@ ${A} .side .foot{color:#8e8e93!important;border-top:.5px solid rgba(255,255,255,
 @media (hover:none){ ${A} .side .nftabnew{display:none!important} }
 @media (max-width:900px){ ${A} .side.open{box-shadow:0 0 0 100vmax rgba(0,0,0,.4)!important} }
 
+/* ---------- the strip behind the phone's clock / battery: the page used to scroll under it (Mahmoud's screenshot) ---------- */
+html.apple body::before{content:"";position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:16;pointer-events:none}
+html.apple.apple-blur body::before{background:color-mix(in srgb,var(--bg) 62%,transparent);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
+html.apple body:has(.side.open)::before{z-index:61;background:#1c1c1e;-webkit-backdrop-filter:none;backdrop-filter:none}
+
+/* ---------- «late work by team lead» cards (Mahmoud: «this part needs fixing too»): soft tiles, no thick side stripe,
+   the count as a tinted pill, hairlines instead of dashes ---------- */
+${A} .lhgrid{gap:10px}
+${A} .lhcard{border:0!important;border-radius:18px!important;background:var(--surface-2)!important;padding:14px!important}
+${A} .lhcard:hover{background:var(--surface-3)!important}
+${A} .lhnum{min-width:52px;padding:6px 10px;border-radius:14px;background:var(--accent-soft)}
+${A} .lhnum b{font-size:22px!important;color:var(--accent)}
+${A} .lhcard.warn .lhnum{background:var(--warn-soft)} ${A} .lhcard.warn .lhnum b{color:var(--warn-ink)!important}
+${A} .lhcard.bad .lhnum{background:var(--crit-soft)} ${A} .lhcard.bad .lhnum b{color:var(--crit-ink)!important}
+${A} .lhmax{color:var(--muted);margin:10px 0 4px!important}
+${A} .lhrow{border-top:.5px solid var(--line)!important;padding:9px 0!important;color:var(--ink)!important}
+
 /* ---------- surfaces ---------- */
 ${A} .card,${A} .kpi,${A} .item,${A} .vehcard,${A} .vcard,${A} .orgnode,${A} .set-tile{background:var(--glass-solid)!important;border:1px solid var(--glass-brd)!important;box-shadow:var(--shadow)!important}
 ${A}.apple-blur .card,${A}.apple-blur .kpi,${A}.apple-blur .item,${A}.apple-blur .vehcard,${A}.apple-blur .set-tile{background:var(--glass)!important;-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%)}
@@ -39242,6 +39260,98 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     const sid = S.session && S.session.id; if (sid && booted !== sid && hosted()) { booted = sid; setTimeout(() => { voip(); pending(); }, 1200); }
     try { workSync(); } catch (e) { /* ignore */ }
   });
+})();
+/* =====================================================================
+   v7.16 — the side menu as modules (Mahmoud, 9 Oct: «the side bar is far too long — split it so each module is together,
+   and when I tap a module it shows what is inside»; «each module should not show what is under it until I tap it»).
+   · every group of the menu becomes one row: its icon, its name, the sum of the numbers inside it, and a chevron;
+   · tapping a module opens its pages under it and closes the others (one open at a time);
+   · the module that holds the current page is the one open when a page opens; a module with a single page shows that page;
+   · «Operations» was too long: the vehicle pages (transport, fleet map, fleet alerts, route history, vehicle reports)
+     are a module of their own.
+   Same in the three systems, Advanced and Classic, phone and computer. Nothing about who sees what changes — the pages
+   inside each module are exactly the ones the menu already showed.
+   ===================================================================== */
+(function () {
+  if (typeof navHTML !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const NG = { open: null, route: null };
+  const FLEET = /^#\/(fleet|fleetmap|fleetalerts|fleethistory|fleetreport)(\/|$)/;
+  const chev = '<svg class="ngch" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
+
+  function modular(html) {
+    const t = document.createElement('template'); t.innerHTML = html;
+    const head = []; const groups = []; let cur = null;
+    [...t.content.childNodes].forEach(n => {
+      if (n.nodeType === 1 && n.classList.contains('grp')) { cur = { label: n.textContent.trim(), nodes: [] }; groups.push(cur); return; }
+      if (n.nodeType === 3 && !n.textContent.trim()) return;
+      (cur ? cur.nodes : head).push(n);
+    });
+    if (!groups.length) return html;
+    const out = [];
+    groups.forEach(g => {
+      const fleet = g.nodes.filter(n => n.nodeType === 1 && n.tagName === 'A' && FLEET.test(n.getAttribute('href') || ''));
+      if (fleet.length >= 2 && fleet.length < g.nodes.length) {
+        out.push({ label: g.label, nodes: g.nodes.filter(n => !fleet.includes(n)) });
+        out.push({ label: L('العربيات', 'Vehicles'), key: 'fleet', nodes: fleet });
+      } else out.push(g);
+    });
+    const key = g => g.key || g.label;
+    const isOn = n => n.nodeType === 1 && ((n.matches && n.matches('a.on')) || (n.querySelector && n.querySelector('a.on')));
+    const active = out.find(g => g.nodes.some(isOn));
+    const route = (location.hash || '').split('?')[0];
+    if (NG.route !== route) { NG.route = route; if (active) NG.open = key(active); }
+    const ser = n => (n.nodeType === 1 ? n.outerHTML : n.textContent);
+    let s = head.map(ser).join('');
+    out.forEach(g => {
+      const links = g.nodes.filter(n => n.nodeType === 1);
+      if (!links.length) return;
+      if (links.length === 1) { s += `<div class="ngrp single">${ser(links[0])}</div>`; return; }
+      const k = key(g); const open = NG.open === k;
+      let sum = 0; let hot = false;
+      links.forEach(a => (a.querySelectorAll ? a.querySelectorAll('.cnt') : []).forEach(c => { const v = parseInt(c.textContent, 10); if (v > 0) { sum += v; if (/crit|bad/.test(c.className)) hot = true; } }));
+      const svg = links[0].querySelector && links[0].querySelector('svg');
+      s += `<div class="ngrp${open ? ' open' : ''}${active === g ? ' cur' : ''}" data-g="${esc(k)}"><button type="button" class="ngh" data-action="navGrp" data-arg="${esc(k)}" aria-expanded="${open}">${svg ? svg.outerHTML : ''}<span class="ngt">${esc(g.label)}</span>${sum ? `<span class="ngc${hot ? ' hot' : ''}">${sum}</span>` : ''}${chev}</button><div class="ngb"><div class="ngi">${links.map(ser).join('')}</div></div></div>`;
+    });
+    return s;
+  }
+  navHTML = (base => function () {
+    const html = base.apply(this, arguments);
+    try { return modular(html); } catch (e) { console.warn('nav modules', e); return html; }
+  })(navHTML);
+
+  ACTIONS.navGrp = k => {
+    NG.open = NG.open === k ? '' : k;
+    document.querySelectorAll('#nav .ngrp[data-g]').forEach(g => { const on = g.dataset.g === NG.open; g.classList.toggle('open', on); const b = g.querySelector('.ngh'); if (b) b.setAttribute('aria-expanded', String(on)); });
+  };
+  window.nfNavModules = { state: NG };
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.nav .ngrp{margin:1px 0}
+.nav .ngh{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:10px;cursor:pointer;color:var(--side-ink,var(--ink));font-weight:700;font-size:13.5px;-webkit-tap-highlight-color:transparent}
+.nav .ngh:hover{background:var(--side-hover,var(--surface-2))}
+.nav .ngh > svg:first-child{width:18px;height:18px;flex:none;opacity:.8}
+.nav .ngt{flex:1;min-width:0;text-align:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav .ngc{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:rgba(127,127,127,.28);font-size:11px;font-weight:700;display:inline-grid;place-items:center;flex:none}
+.nav .ngc.hot{background:var(--crit,#e5484d);color:#fff}
+.nav .ngch{flex:none;opacity:.55;transition:transform .2s ease}
+html[dir="ltr"] .nav .ngch{transform:scaleX(-1)}
+.nav .ngrp.open .ngch,html[dir="ltr"] .nav .ngrp.open .ngch{transform:rotate(-90deg)}
+.nav .ngrp.cur:not(.open) > .ngh .ngt::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7;margin-inline-start:8px;vertical-align:middle}
+.nav .ngb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}
+.nav .ngrp.open .ngb{grid-template-rows:1fr}
+.nav .ngi{overflow:hidden;min-height:0;padding-inline-start:10px}
+.nav .ngrp.open .ngi{padding-bottom:4px}
+html.apple .side .nav .ngh{margin:1px 8px;width:calc(100% - 16px);padding:10px 12px;border-radius:12px;color:#fff}
+html.apple .side .nav .ngh:hover{background:rgba(255,255,255,.07)}
+html.apple .side .nav .ngh > svg:first-child{color:#98989f;opacity:1}
+html.apple .side .nav .ngc{background:rgba(255,255,255,.14);color:#fff}
+html.apple .side .nav .ngc.hot{background:#ff453a}
+html.apple .side .nav .ngrp.open > .ngh{background:rgba(255,255,255,.06)}
+html.apple .side .nav .ngi{padding-inline-start:14px}
+@media (prefers-reduced-motion: reduce){ .nav .ngb,.nav .ngch{transition:none} }
+</style>`);
 })();
 </script>
 
