@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0649-f0e986";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0755-da02e0";</script>
 
 <script>
 'use strict';
@@ -37199,10 +37199,20 @@ html body .fmd-row:hover{background:var(--surface-2)}
   /* the fuel tab: the status line + no more «paste the statement» hint when the link is live */
   if (typeof vFleet === 'function') vFleet = (base => function () {
     let html = base.apply(this, arguments); const f = S.ui.filter.fleet || {}; if (f.tab !== 'fuel') return html;
-    const pa = (S.settings.fleet || {}).petroapp; if (!pa || !pa.lastSync) return html;
+    const pa = (S.settings.fleet || {}).petroapp;
+    if (!pa || !pa.lastSync) {
+      /* v7.05: the owner on the fuel tab with no link yet → a button straight to the PetroApp card (it lives on the GPS tab) */
+      if (!owner()) return html;
+      const go = `<div class="banner warn pa-go" style="margin:0 0 10px">${icon('alert')}<span>${L('PetroApp لسه مش متوصّل — التفويلات بتتسحب لوحدها كل ساعة أول ما تربطه.', 'PetroApp is not linked yet — refuels are pulled every hour once you link it.')}</span><button type="button" class="btn sm p" data-action="paGo">${L('اربط PetroApp', 'Link PetroApp')}</button></div>`;
+      const j = html.indexOf('<div class="kpis"'); return j < 0 ? go + html : html.slice(0, j) + go + html.slice(j);
+    }
     const line = `<div class="banner info" style="margin:0 0 10px">${icon('info')}<span>${L(`PetroApp متوصّل (${pa.env === 'production' ? 'إنتاج' : 'Staging'}) — السيرفر بيسحب التفويلات كل ساعة · آخر مزامنة ${ago(pa.lastSync)} · ${pa.bills || 0} فاتورة${pa.unknownPlate ? ` · ${pa.unknownPlate} بلوحة مش معروفة (راجع لوحات العربيات)` : ''}`, `PetroApp connected (${pa.env}) — the server pulls refuels hourly · last sync ${ago(pa.lastSync)} · ${pa.bills || 0} bills${pa.unknownPlate ? ` · ${pa.unknownPlate} with an unknown plate (check the vehicle plates)` : ''}`)}</span></div>`;
     const i = html.indexOf('<div class="kpis"'); return i < 0 ? line + html : html.slice(0, i) + line + html.slice(i);
   })(vFleet);
+  ACTIONS.paGo = () => {
+    (S.ui.filter.fleet ||= { tab: 'trips', status: 'open' }).tab = 'gps'; render(false);
+    let n = 0; const t = setInterval(() => { const c = document.getElementById('pa-card'); if (c || ++n > 20) { clearInterval(t); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'start' }); const inp = c.querySelector('input[name=token]'); if (inp) setTimeout(() => { try { inp.focus({ preventScroll: true }); } catch (e) { /* old browsers */ } }, 400); } } }, 100);
+  };
   window.nfPetroApp = { state: PA, loadStatus };
 })();
 /* =====================================================================
@@ -38063,6 +38073,8 @@ html body .fmd-row:hover{background:var(--surface-2)}
     return `<div class="field full fs-pf" data-kindshow="fuel"><label class="check"><input type="checkbox" name="petro" value="1" ${x && x.petro ? 'checked' : ''}> ${esc(L('متعاقدين مع PetroApp', 'Contracted with PetroApp'))}</label><div class="row" style="gap:12px;flex-wrap:wrap;margin-top:6px">${FKEYS.map(k => `<label class="check"><input type="checkbox" data-vfuel="${k}" ${ks.includes(k) ? 'checked' : ''}> ${esc(FUEL()[k])}</label>`).join('')}</div><input type="hidden" name="fuels" value="${esc(ks.join(','))}"></div>`;
   };
   window.nfFuelListOf = toList;
+  /* v7.05: the server now pushes «needs fuel soon» too (fleet-alerts 'fuel') — its label on the fleet alerts page */
+  if (window.nfFleetAlerts && window.nfFleetAlerts.types) window.nfFleetAlerts.types.fuel = { ar: 'محتاجة تموين قريب', en: 'Needs fuel soon', ic: 'fuel' };
 
   document.head.insertAdjacentHTML('beforeend', `<style>
 .fs{display:grid;gap:8px}.fs-kinds{display:flex;gap:6px;flex-wrap:wrap}.fs-kind{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}.fs-kind.on{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -38077,6 +38089,77 @@ html body .fmd-row:hover{background:var(--surface-2)}
 .fv-acts{display:flex;gap:8px;flex-wrap:wrap}.fv-acts .btn{flex:1 1 auto;justify-content:center}.fv-img{width:100%;max-height:220px;object-fit:cover;border-radius:12px;cursor:zoom-in}
 .fs-lows{display:grid;gap:4px;margin-top:8px}.fs-card .item{cursor:pointer}
 </style>`);
+})();
+/* =====================================================================
+   v7.05 — task form lists follow the picked department / brand (Mahmoud, 9 Oct, iPhone screenshot):
+   · Department picked → «Assignee» lists only that department's people (+ «whole department»); «General» → everyone.
+   · Brand picked → «Job order» lists only that brand's job orders (the v4.x filter hid the other options with
+     option.hidden — iPhone Safari ignores hidden inside a <select>, so every order still showed, greyed out).
+   · Both lists are rebuilt from a master copy taken when the form opens (no hidden options), so iPhone and Android
+     show exactly the same thing. The task's own assignee / order stays while its department / brand is unchanged.
+   ===================================================================== */
+(function () {
+  const MASTER = new WeakMap();
+  const escA = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const escT = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  function master(sel) {
+    let m = MASTER.get(sel);
+    if (!m) {
+      m = { opts: Array.from(sel.options).map(o => ({ v: o.value, t: o.textContent, brand: o.dataset ? o.dataset.brand : undefined, notr: o.classList && o.classList.contains('notr') })), orig: sel.value };
+      MASTER.set(sel, m);
+    }
+    return m;
+  }
+  function rebuild(sel, keep) {
+    const m = master(sel); const cur = sel.value;
+    const rows = m.opts.filter(x => !x.v || keep(x, m));
+    const html = rows.map(x => `<option value="${escA(x.v)}"${x.brand != null ? ` data-brand="${escA(x.brand)}"` : ''}${x.notr ? ' class="notr"' : ''}>${escT(x.t)}</option>`).join('');
+    if (sel.innerHTML !== html) sel.innerHTML = html;
+    const next = rows.some(x => x.v === cur) ? cur : '';
+    sel.value = next;
+    if (next !== cur) { try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* old browsers */ } }
+  }
+
+  /* who belongs to a department: the worker's own department, a head's extra departments, a staff account's departments */
+  function inDept(id, d) {
+    const w = typeof byId === 'function' ? byId('workers', id) : null;
+    if (w) return w.deptId === d || (Array.isArray(w.accessDepts) && w.accessDepts.includes(d));
+    const s = typeof byId === 'function' ? byId('staff', id) : null;
+    if (s) return Array.isArray(s.deptIds) && s.deptIds.includes(d);
+    return true;   /* an option this filter does not know (another system's list) stays */
+  }
+  function filterAssignees(f) {
+    const ds = f.querySelector('#f-deptId'); const sel = f.querySelector('#f-assigneeId'); if (!ds || !sel) return;
+    const m = master(sel); if (m.dept0 === undefined) m.dept0 = ds.value;
+    const d = ds.value;
+    rebuild(sel, (x, mm) => !d || inDept(x.v, d) || (x.v === mm.orig && d === mm.dept0));
+  }
+  window.nfFilterTaskAssignees = filterAssignees;
+
+  /* brand → job orders (replaces the hidden-option version from 88-viewas-tasks) */
+  const ordersByBrand = function (f) {
+    const bs = f.querySelector('#f-brandId'); const sel = f.querySelector('#f-orderId'); if (!bs || !sel) return;
+    const m = master(sel); if (m.brand0 === undefined) m.brand0 = bs.value;
+    const b = bs.value;
+    rebuild(sel, (x, mm) => {
+      if (!b) return true;
+      const ob = x.brand != null ? x.brand : ((typeof byId === 'function' ? byId('orders', x.v) : null) || {}).brandId || '';
+      return ob === b || (x.v === mm.orig && b === mm.brand0);
+    });
+  };
+  if (typeof filterTaskOrders === 'function') filterTaskOrders = ordersByBrand;
+
+  document.addEventListener('change', ev => {
+    const t = ev.target; if (!t || t.id !== 'f-deptId') return;
+    const f = t.closest && t.closest('#mform'); if (f && f.querySelector('#f-assigneeId')) filterAssignees(f);
+  });
+  /* the form just opened: take the master lists and apply the preset department / brand */
+  const mo = new MutationObserver(() => {
+    const f = document.getElementById('mform'); if (!f || f.dataset.dfilt) return;
+    if (!f.querySelector('#f-deptId') || !f.querySelector('#f-assigneeId')) return;
+    f.dataset.dfilt = '1'; filterAssignees(f); if (f.querySelector('#f-brandId') && f.querySelector('#f-orderId')) ordersByBrand(f);
+  });
+  mo.observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>
 
