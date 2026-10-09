@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0425-d58fe9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0649-f0e986";</script>
 
 <script>
 'use strict';
@@ -25966,7 +25966,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const tripLine = (it = {}) => `<div class="etl"><select name="t-eq"><option value="">— اختار معدة —</option>${sortBy(eqs().filter(e => e.cls === 'install' && e.status === 'ok' && avail(e) > 0 && (seeAll() || myD().includes(e.deptId))), e => e.name).map(e => `<option value="${e.id}" ${it.equipId === e.id ? 'selected' : ''}>${esc(e.code)} ${esc(e.name)} — متاح ${avail(e)}</option>`).join('')}</select><input name="t-qty" type="number" min="1" step="1" value="${it.qty || 1}"><button type="button" class="iconbtn" data-etl="del">${icon('x')}</button></div>`;
   document.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-etl]'); if (!b) return; const box = document.getElementById('etlines'); if (!box) return; if (b.dataset.etl === 'add') box.insertAdjacentHTML('beforeend', tripLine()); else if (box.querySelectorAll('.etl').length > 1) b.closest('.etl').remove(); });
   const canTripReq = () => writable() && (mgr() || R() === 'head');
-  ACTIONS.tripNew = () => { if (!canTripReq()) return; const depts = S.settings.departments.filter(d => !d.admin && (seeAll() || myD().includes(d.id)));
+  ACTIONS.equipTripNew = () => { if (!canTripReq()) return; const depts = S.settings.departments.filter(d => !d.admin && (seeAll() || myD().includes(d.id)));
     openModal({ title: 'خروج معدات تركيبات لموقع', wide: true, submitLabel: 'إرسال لمدير المصنع', body: `<div class="form">${field('القسم', `<select name="deptId">${opts(depts, R() === 'head' ? myD()[0] : '')}</select>`)}${field('المستلم (مسؤول عنها وهي برة)', `<select name="holderId" required><option value="">— اختار —</option>${opts(sortBy(list('workers').filter(w => !w.left), w => w.name), '')}</select>`)}
       ${field('المشروع', `<select name="orderId"><option value="">— من غير مشروع —</option>${opts(sortBy(list('orders').filter(o => typeof isOpen !== 'function' || isOpen(o)), o => o.code || ''), '', o => `${o.code || ''} — ${o.title || ''}`)}</select>`)}${field('الموقع', inp('site', '', 'placeholder="العنوان / اسم الموقع"'))}${field('ميعاد الرجوع المتوقع', inp('expectedBack', addDays(todayISO(), 3), 'type="date" required'))}
       <div class="field full"><label>المعدات</label><div id="etlines">${tripLine()}</div><button type="button" class="btn sm" data-etl="add">${icon('plus')}معدة</button></div>${field('ملاحظات', `<textarea name="notes"></textarea>`, 'full')}</div>`,
@@ -25978,11 +25978,11 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         const r = { id: uid(), type: 'equipout', tripId: t.id, requesterId: me.workerId || me.id, requesterName: me.name || '', deptId: d.deptId, reason: `${t.no}: ${items.map(i => { const e = byId('equip', i.equipId); return `${e.name} × ${i.qty}`; }).join('، ')} — مع ${t.holderName}${t.orderCode ? ' — ' + t.orderCode : ''}${t.site ? ' — ' + t.site : ''} — رجوع ${fmtDate(t.expectedBack)}`, status: 'pending', createdBy: me.id || null, createdByName: me.name || '', createdAt: nowISO(), chain: chainFor('equipout'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: R(), kind: 'system', text: 'طلب خروج معدات تركيبات — بانتظار اعتماد مدير المصنع' }] };
         t.outReqId = r.id; await Store.save('etrips', t, { silent: true }); await Store.save('requests', r, { silent: true });
         await notifyRole('manager', `اعتماد خروج معدات ${t.no}`, r.reason, { id: `eqout_${t.id}`, priority: 'high' }).catch(() => {}); toast('اتبعت لمدير المصنع'); render(false); return true; } }); };
-  ACTIONS.tripHand = async id => { const t = byId('etrips', id); if (!t || t.status !== 'approved' || !canStore()) return; if (!(await confirmDlg(`تسليم ${t.no} لـ ${t.holderName}؟`, 'تم التسليم', false))) return;
+  ACTIONS.equipTripHand = async id => { const t = byId('etrips', id); if (!t || t.status !== 'approved' || !canStore()) return; if (!(await confirmDlg(`تسليم ${t.no} لـ ${t.holderName}؟`, 'تم التسليم', false))) return;
     for (const it of t.items) { const e = byId('equip', it.equipId); if (e) await Store.update('equip', e.id, { outQty: (+e.outQty || 0) + it.qty }); }
     await Store.update('etrips', id, { status: 'out', outAt: nowISO(), handedBy: S.session?.name || '' }); toast('اتسلّمت'); render(false); };
-  ACTIONS.tripHolderOk = async id => { const t = byId('etrips', id); if (!t || S.session?.workerId !== t.holderId) return; await Store.update('etrips', id, { holderOkAt: nowISO() }); toast('اتأكد الاستلام'); render(false); };
-  ACTIONS.tripReturn = id => { const t = byId('etrips', id); if (!t || t.status !== 'out' || !(canStore() || (R() === 'head' && myD().includes(t.deptId)))) return;
+  ACTIONS.equipTripHolderOk = async id => { const t = byId('etrips', id); if (!t || S.session?.workerId !== t.holderId) return; await Store.update('etrips', id, { holderOkAt: nowISO() }); toast('اتأكد الاستلام'); render(false); };
+  ACTIONS.equipTripReturn = id => { const t = byId('etrips', id); if (!t || t.status !== 'out' || !(canStore() || (R() === 'head' && myD().includes(t.deptId)))) return;
     openModal({ title: `رجوع ${t.no} — من ${t.holderName}`, wide: true, submitLabel: 'إرسال لمدير المصنع', body: `<div class="form"><div class="field full"><div class="tablewrap"><table class="tbl"><thead><tr><th>المعدة</th><th class="n">خرج</th><th class="n">سليم</th><th class="n">فيه عطل</th><th class="n">ناقص</th></tr></thead><tbody>${t.items.map((it, i) => { const e = byId('equip', it.equipId) || {}; return `<tr><td>${esc(e.code || '')} ${esc(e.name || '')}</td><td class="n">${it.qty}</td><td class="n"><input name="ok-${i}" type="number" min="0" value="${it.qty}" style="width:70px"></td><td class="n"><input name="br-${i}" type="number" min="0" value="0" style="width:70px"></td><td class="n"><input name="ms-${i}" type="number" min="0" value="0" style="width:70px"></td></tr>`; }).join('')}</tbody></table></div></div>${field('ملاحظات (لو فيه عطل اكتبه)', `<textarea name="note"></textarea>`, 'full')}</div>`,
       onSubmit: async f => { const d = formData(f); const ret = []; for (let i = 0; i < t.items.length; i++) { const ok = Math.round(num(d['ok-' + i])), br = Math.round(num(d['br-' + i])), ms = Math.round(num(d['ms-' + i])); if (ok + br + ms !== t.items[i].qty) { toast(`البند ${i + 1}: المجموع لازم = ${t.items[i].qty}`, 'err'); return false; } ret.push({ equipId: t.items[i].equipId, ok, broken: br, missing: ms }); }
         const me = S.session || {}; const bad = ret.some(x => x.broken || x.missing);
@@ -26012,10 +26012,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   /* ---------- views ---------- */
   const thumb = e => e.photo ? `<img class="eqthumb" src="${esc(e.photo)}" alt="" data-action="equipPhoto" data-arg="${e.id}">` : `<span class="eqph">${icon('settings')}</span>`;
   const tripsCard = () => { let ts = list('etrips').filter(t => ['req', 'approved', 'out', 'retpend'].includes(t.status) && (seeAll() || myD().includes(t.deptId))); ts = sortBy(ts, t => t.at || '', true); const tday = todayISO();
-    return `<div class="card"><div class="cardhead"><h3>معدات التركيبات برة / في الطريق</h3><span class="badge">${ts.length}</span><div class="grow"></div>${canTripReq() ? `<button class="btn xs p" data-action="tripNew">${icon('arrow')}خروج معدات لموقع</button>` : ''}</div>${ts.length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>الإذن</th><th>المعدات</th><th>مع</th><th>المشروع / الموقع</th><th>الرجوع</th><th>الحالة</th><th></th></tr></thead><tbody>${ts.map(t => { const late = t.status === 'out' && t.expectedBack < tday; const acts = [];
-      if (t.status === 'approved' && canStore()) acts.push(`<button class="btn xs p" data-action="tripHand" data-arg="${t.id}">تسليم</button>`);
-      if (t.status === 'out' && S.session?.workerId === t.holderId && !t.holderOkAt) acts.push(`<button class="btn xs" data-action="tripHolderOk" data-arg="${t.id}">أكّد إني استلمت</button>`);
-      if (t.status === 'out' && (canStore() || (R() === 'head' && myD().includes(t.deptId)))) acts.push(`<button class="btn xs" data-action="tripReturn" data-arg="${t.id}">استلام الرجوع</button>`);
+    return `<div class="card"><div class="cardhead"><h3>معدات التركيبات برة / في الطريق</h3><span class="badge">${ts.length}</span><div class="grow"></div>${canTripReq() ? `<button class="btn xs p" data-action="equipTripNew">${icon('arrow')}خروج معدات لموقع</button>` : ''}</div>${ts.length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>الإذن</th><th>المعدات</th><th>مع</th><th>المشروع / الموقع</th><th>الرجوع</th><th>الحالة</th><th></th></tr></thead><tbody>${ts.map(t => { const late = t.status === 'out' && t.expectedBack < tday; const acts = [];
+      if (t.status === 'approved' && canStore()) acts.push(`<button class="btn xs p" data-action="equipTripHand" data-arg="${t.id}">تسليم</button>`);
+      if (t.status === 'out' && S.session?.workerId === t.holderId && !t.holderOkAt) acts.push(`<button class="btn xs" data-action="equipTripHolderOk" data-arg="${t.id}">أكّد إني استلمت</button>`);
+      if (t.status === 'out' && (canStore() || (R() === 'head' && myD().includes(t.deptId)))) acts.push(`<button class="btn xs" data-action="equipTripReturn" data-arg="${t.id}">استلام الرجوع</button>`);
       if ((t.status === 'req' || t.status === 'retpend') && mgr()) acts.push(`<button class="btn xs" data-action="reqOpen" data-arg="${t.status === 'req' ? t.outReqId : t.retReqId}">اعتماد</button>`);
       return `<tr><td class="code">${esc(t.no)}</td><td class="small">${t.items.map(i => { const e = byId('equip', i.equipId) || {}; return `${esc(e.name || '')} × ${i.qty}`; }).join('، ')}</td><td>${esc(t.holderName)}${t.holderOkAt ? ' ✓' : ''}</td><td class="small">${esc(t.orderCode || '')} ${esc(t.site || '')}</td><td class="${late ? 'eqlate' : ''}">${fmtDate(t.expectedBack)}${late ? ' — متأخرة' : ''}</td><td>${badge(TST, t.status)}</td><td>${acts.join(' ')}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="muted small">مفيش معدات برة دلوقتي.</div>'}</div>`; };
   const maintCard = (items, title) => items.length ? `<div class="card"><div class="cardhead"><h3>${title}</h3><span class="badge">${items.length}</span></div><div class="tablewrap"><table class="tbl"><thead><tr><th>الطلب</th><th>المعدة</th><th>المشكلة</th><th>مين يصلح</th><th>الحالة</th>${canMoney() ? '<th class="n">التكلفة</th>' : ''}<th></th></tr></thead><tbody>${items.map(m => { const e = byId('equip', m.equipId) || {}; const c = canMoney() ? ((fin(m.equipId).costs || []).find(x => x.maintId === m.id) || {}).cost : null; const acts = [];
@@ -37204,6 +37204,879 @@ html body .fmd-row:hover{background:var(--surface-2)}
     const i = html.indexOf('<div class="kpis"'); return i < 0 ? line + html : html.slice(0, i) + line + html.slice(i);
   })(vFleet);
   window.nfPetroApp = { state: PA, loadStatus };
+})();
+/* =====================================================================
+   v7.03 — «+» by department (Mahmoud, 9 Oct — brief claude/driver-trip-fab-brief.md, go-ahead): the floating «+» opens a short
+   menu of what the person's department creates every day. Each item opens the form that already exists in the system and shows
+   only when the person may use it; «Task» is always the last item. A driver goes straight to «New trip» (99zzZzZV). Items that
+   need a record first (a job order, a supplier, a vehicle) ask for it in a small picker. Factory only — the studio and the
+   construction company keep the plain «+» (quick task).
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const W = () => typeof writable === 'function' && writable();
+  const has = n => typeof ACTIONS[n] === 'function';
+  const admin = () => typeof isAdmin === 'function' && isAdmin();
+  const can = n => typeof canDo === 'function' && canDo(n);
+
+  /* every item: label, icon, the ACTIONS entry it runs, an optional picker, and whether this person may use it */
+  const IT = {
+    drvtrip: () => ({ l: L('مشوار جديد', 'New trip'), ic: 'map', a: 'drvTripNew', ok: R() === 'driver' }),
+    fuel: () => ({ l: L('تموين', 'Refuel'), ic: 'fuel', a: 'fuelStop', ok: R() === 'driver' && W() }),
+    trip: () => ({ l: L('تكليف مشوار', 'Assign a trip'), ic: 'map', a: 'tripNew', ok: typeof canFleet === 'function' && canFleet() }),
+    place: () => ({ l: L('مكان جديد', 'New place'), ic: 'map', a: 'placeNew', ok: typeof window.nfCanPlaces === 'function' && window.nfCanPlaces() }),
+    vmaint: () => ({ l: L('صيانة عربية', 'Vehicle maintenance'), ic: 'settings', a: 'maintLog', pick: 'vehicle', ok: typeof canFleet === 'function' && canFleet() }),
+    order: () => ({ l: L('أمر تشغيل', 'Job order'), ic: 'orders', a: 'orderNew', ok: W() && can('orders.edit') }),
+    need: () => ({ l: L('طلب خامات', 'Materials request'), ic: 'purchase', a: 'needNew', ok: typeof canNeed === 'function' && canNeed() }),
+    issue: () => ({ l: L('إذن صرف خامات', 'Materials issue'), ic: 'inventory', a: 'issueNew', pick: 'order', ok: W() && (admin() || ['head', 'manager', 'tech', 'office', 'purch'].includes(R())) }),
+    mat: () => ({ l: L('خامة جديدة', 'New material'), ic: 'inventory', a: 'materialNew', ok: W() && ((typeof window.canMatStore === 'function' && window.canMatStore()) || admin() || R() === 'office') }),
+    move: () => ({ l: L('حركة مخزن', 'Stock movement'), ic: 'inventory', a: 'moveNew', ok: W() && can('inventory.edit') }),
+    po: () => ({ l: L('طلب شراء', 'Purchase order'), ic: 'purchase', a: 'poNew', ok: W() && can('purchases') }),
+    rfq: () => ({ l: L('طلب عرض سعر', 'Request for quotation'), ic: 'quote', a: 'rfqNew', ok: typeof canNeed === 'function' && canNeed() }),
+    sup: () => ({ l: L('مورد جديد', 'New supplier'), ic: 'user', a: 'supplierNew', ok: typeof canSuppliers === 'function' && canSuppliers() }),
+    exp: () => ({ l: L('مصروف', 'Expense'), ic: 'money', a: 'expNew', ok: typeof canExpense === 'function' && canExpense() }),
+    chqIn: () => ({ l: L('شيك وارد من عميل', 'Incoming cheque'), ic: 'money', a: 'inChequeNew', pick: 'order', ok: W() && (admin() || R() === 'hr') }),
+    supPay: () => ({ l: L('دفعة لمورد', 'Supplier payment'), ic: 'money', a: 'supPayAdd', pick: 'supplier', ok: W() && (admin() || ['hr', 'acc', 'purch'].includes(R())) }),
+    worker: () => ({ l: L('موظف جديد', 'New employee'), ic: 'workers', a: 'workerNew', ok: W() && typeof canEditHr === 'function' && canEditHr() }),
+    pen: () => ({ l: L('جزاء / إنذار', 'Penalty / warning'), ic: 'penalty', a: 'penNew', ok: W() && (admin() || ['hr', 'manager', 'head'].includes(R())) }),
+    adv: () => ({ l: L('سلفة', 'Advance'), ic: 'money', a: 'advNew', ok: W() && (admin() || R() === 'hr') }),
+    product: () => ({ l: L('منتج جديد', 'New product'), ic: 'cube', a: 'productNew', ok: W() && typeof seesProducts === 'function' && seesProducts() }),
+    lead: () => ({ l: L('عميل محتمل', 'New lead'), ic: 'user', a: 'leadNew', ok: typeof canCrm === 'function' && canCrm() }),
+    quote: () => ({ l: L('عرض سعر', 'Quotation'), ic: 'quote', a: 'quoteNew', ok: W() && can('sales') }),
+    client: () => ({ l: L('عميل جديد', 'New client'), ic: 'clients', a: 'clientNew', ok: W() && can('sales') }),
+    req: () => ({ l: L('طلب (إجازة / إذن / سلفة)', 'Request (leave / permission / advance)'), ic: 'request', a: 'reqNew', ok: W() && !!(S.session && S.session.workerId) }),
+    errand: () => ({ l: L('مأمورية', 'Errand'), ic: 'map', a: 'taskNew', errand: true, ok: W() && admin() }),
+    task: () => ({ l: R() === 'head' ? L('مهمة لفريقك', 'Task for your team') : L('مهمة', 'Task'), ic: 'plus', a: 'taskNew', ok: typeof canTasks === 'function' && canTasks() }),
+  };
+  /* what each role's «+» offers (the brief's table) */
+  const MENU = {
+    driver: ['drvtrip', 'fuel'],
+    fleet: ['trip', 'place', 'vmaint'],
+    manager: ['order', 'trip', 'need'],
+    vice: ['order', 'trip', 'need'],
+    head: ['need', 'issue'],
+    store: ['mat', 'move'],
+    purch: ['po', 'rfq', 'sup'],
+    acc: ['exp', 'supPay'],
+    hr: ['exp', 'chqIn', 'supPay', 'worker', 'adv'],
+    tech: ['product', 'need'],
+    bdd: ['lead', 'quote', 'client'],
+    office: ['order', 'client', 'quote'],
+    employee: ['req'],
+    admin: ['errand', 'order', 'trip'],
+  };
+  function items() {
+    const keys = (MENU[R()] || []).concat(R() === 'driver' ? [] : ['task']);
+    return keys.map(k => Object.assign({ k }, IT[k]())).filter(x => x.ok && has(x.a));
+  }
+  window.nfFabItems = () => items().map(x => x.k);
+
+  /* pickers for items that need a record */
+  const PICK = {
+    order: () => ({ t: L('اختار أمر التشغيل', 'Pick the job order'), rows: sortBy(list('orders').filter(o => (typeof isOpen === 'function' ? isOpen(o) : true)), o => o.code || '').map(o => [o.id, `${o.code || ''} — ${o.title || ''}`]) }),
+    supplier: () => ({ t: L('اختار المورد', 'Pick the supplier'), rows: sortBy(list('suppliers'), s => s.name || '').map(s => [s.id, s.name || '']) }),
+    vehicle: () => ({ t: L('اختار العربية', 'Pick the vehicle'), rows: sortBy(list('vehicles'), v => v.name || '').map(v => [v.id, `${v.name || ''}${v.plate ? ` (${v.plate})` : ''}`]) }),
+  };
+  const later = f => setTimeout(f, 90);
+  function run(x) {
+    if (x.pick) {
+      const p = PICK[x.pick](); if (!p.rows.length) { toast(L('مفيش حاجة تختار منها', 'Nothing to pick from'), 'err'); return; }
+      openModal({ title: p.t, submitLabel: L('كمّل', 'Continue'),
+        body: `<div class="form"><div class="field full"><input class="inp" id="fab-q" placeholder="${esc(L('ابحث…', 'Search…'))}" autocomplete="off"></div>${field(p.t, `<select id="f-fabpick" name="fabpick" size="8" style="height:auto">${p.rows.map(r => `<option value="${esc(r[0])}">${esc(r[1])}</option>`).join('')}</select>`, 'full')}</div>`,
+        onOpen: f => { const q = f.querySelector('#fab-q'), s = f.querySelector('#f-fabpick'); if (s && s.options.length) s.selectedIndex = 0; if (q) q.addEventListener('input', () => { const v = q.value.trim().toLowerCase(); let first = -1; Array.from(s.options).forEach((o, i) => { const hit = !v || o.textContent.toLowerCase().includes(v); o.hidden = !hit; if (hit && first < 0) first = i; }); if (first >= 0) s.selectedIndex = first; }); },
+        onSubmit: f => { const id = (formData(f).fabpick || ''); if (!id) { toast(p.t, 'err'); return false; } later(() => ACTIONS[x.a](id)); return true; } });
+      return;
+    }
+    ACTIONS[x.a]();
+    if (x.errand) setTimeout(() => { const c = document.querySelector('#mform [name=errand]'); if (c && !c.checked) { c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); } }, 150);
+  }
+  ACTIONS.fabMenu = () => {
+    const xs = items();
+    if (R() === 'driver' && has('drvTripNew') && xs.length <= 1) return ACTIONS.drvTripNew();
+    if (xs.length <= 1) { if (xs[0]) run(xs[0]); else if (has('taskNew')) ACTIONS.taskNew(); return; }
+    openModal({ title: L('إضافة', 'Add'), footer: `<button type="button" class="btn" data-action="closemodal">${L('إغلاق', 'Close')}</button>`,
+      body: `<div class="fabm">${xs.map(x => `<button type="button" class="fabm-i${x.k === 'task' ? ' last' : ''}" data-action="fabGo" data-arg="${esc(x.k)}">${icon(x.ic)}<span>${esc(x.l)}</span></button>`).join('')}</div>` });
+  };
+  ACTIONS.fabGo = k => { const x = items().find(y => y.k === k); if (!x) return; closeModal(); later(() => run(x)); };
+
+  /* the floating button runs the menu instead of the quick task (the store's «new material» swap on the inventory page stays) */
+  RENDER_HOOKS.push(() => {
+    const fab = document.querySelector('.fab'); if (!fab || !['taskNew', 'fabMenu'].includes(fab.dataset.action)) return;
+    const t = R() === 'driver' ? L('مشوار جديد', 'New trip') : L('إضافة', 'Add'); if (fab.dataset.action === 'fabMenu' && fab.title === t) return;
+    fab.dataset.action = 'fabMenu'; fab.title = t; fab.setAttribute('aria-label', t);
+  });
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.fabm{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.fabm-i{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 12px;font:inherit;font-size:14.5px;font-weight:700;color:var(--ink);cursor:pointer;text-align:start;min-height:56px}
+.fabm-i svg{width:22px;height:22px;flex:0 0 22px;color:var(--accent)}
+.fabm-i:active{transform:scale(.98)}.fabm-i.last{grid-column:1 / -1;justify-content:center;background:var(--surface-2,var(--surface))}
+@media (max-width:420px){.fabm{grid-template-columns:1fr}}
+</style>`);
+})();
+/* =====================================================================
+   v7.03 — the driver opens his own trip (Mahmoud, 9 Oct — brief claude/driver-trip-fab-brief.md, go-ahead; factory only):
+   · «+» for a driver = «New trip»: FROM (factory by default) and TO from one searchable list — Ninety (factory / office),
+     suppliers and their warehouses, service factories and their branches, sites (live job sites + work sites), transport
+     places — each group split by AREA; or «a place not on the list» (name + the phone's current location).
+   · WHY is picked by itself from the destination (supplier → materials pickup, service factory → pickup, job site → delivery,
+     work site → installation crew, else other) and can be changed; the VEHICLE defaults to his own (vehicle.driverId); a
+     vehicle on the road with another driver is refused; a driver with a running trip cannot open another.
+   · optional LINK: open purchase orders at that supplier, open external orders at that service factory, the job order of a site.
+   · the trip starts right away (no approval — Mahmoud): status approved in his name, «start now» on by default; the fleet
+     manager and the factory manager get a push and may cancel it (also after the start).
+   · the steps are the existing ones (start → arrive → hand over / receive with a photo → department confirmation for pickups →
+     head back → arrive); every step pushes to the fleet manager and the factory manager; «arrived» is also logged by itself
+     when the vehicle tracker reaches the destination (the server sets trip.arrivedAt); vehicles on a tracker take the odometer
+     from it, so the driver types no readings.
+   · «Today's trips» card for the owner / factory manager / fleet manager / vice (dashboard + top of the fleet page).
+   · PLACES: collection 'places' — supplier warehouses (kind wh), transport places (kind place) and area overrides (kind area) for
+     the places already on the system; the fleet page «Places» tab (owner / factory manager / fleet manager) lists every place by
+     area (edit the area, add a place / warehouse) and the new places drivers typed, to pin them. Purchasing adds warehouses from
+     the supplier page. Areas fill themselves from the map (geo reverse, OpenStreetMap) and stay editable.
+   · driver-side writes the server refuses are kept local (vehicle odometer) or given the field the server needs (workerId on the
+     pickup-confirmation request), so a driver's step never fails half-way.
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const W = () => typeof writable === 'function' && writable();
+  const me = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const drv = () => R() === 'driver';
+  const seesAll = () => !!S.session && (isAdmin() || ['manager', 'vice', 'fleet'].includes(R()));
+  const fleetOk = () => typeof canFleet === 'function' && canFleet();
+  const canPlaces = () => !!S.session && W() && (isAdmin() || ['manager', 'fleet', 'purch'].includes(R()));
+  window.nfCanPlaces = canPlaces;
+  const later = f => setTimeout(f, 90);
+  const hhmm = iso => { if (!iso) return ''; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const okLL = x => !!x && x.lat != null && x.lat !== '' && x.lng != null && x.lng !== '' && isFinite(+x.lat) && isFinite(+x.lng);
+  if (typeof COLS !== 'undefined' && !COLS.includes('places')) COLS.push('places'); S.data.places = S.data.places || new Map();
+
+  /* ---------- areas ---------- */
+  const NOAREA = () => L('منطقة غير محددة', 'Area not set');
+  const areaDocId = key => 'area_' + String(key).replace(/[^A-Za-z0-9_-]/g, '_');
+  const areaDoc = key => byId('places', areaDocId(key));
+  /* the first part of a typed address («Obour — 3rd industrial zone» → «Obour») */
+  const textArea = s => { const t = String(s || '').split(/\s+[—–-]\s+|،|,/)[0].trim(); return t.length >= 2 && t.length <= 40 ? t : ''; };
+  function areaOf(p) {
+    const o = areaDoc(p.key); if (o && o.area && !o.auto) return o.area;
+    if (p.area) return p.area;
+    if (o && o.area) return o.area;
+    return textArea(p.address);
+  }
+  const knownAreas = () => [...new Set(nfPlaces().map(p => p.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar'));
+
+  /* ---------- the places list grows: supplier warehouses + transport places + areas ---------- */
+  if (typeof nfPlaces === 'function') nfPlaces = (base => function () {
+    const out = base.apply(this, arguments);
+    const sup = id => byId('suppliers', id);
+    list('places').filter(x => x && x.kind === 'wh' && x.supplierId).forEach(x => out.push({ group: 'الموردين', key: 'pl:' + x.id, name: `${(sup(x.supplierId) || {}).name || ''} — ${x.name || ''}`, lat: okLL(x) ? +x.lat : null, lng: okLL(x) ? +x.lng : null, address: x.address || '', area: x.area || '', supplierId: x.supplierId, pid: x.id }));
+    list('places').filter(x => x && x.kind === 'place').forEach(x => out.push({ group: 'أماكن الحركة', key: 'pl:' + x.id, name: x.name || '', lat: okLL(x) ? +x.lat : null, lng: okLL(x) ? +x.lng : null, address: x.address || '', area: x.area || '', pid: x.id }));
+    out.forEach(p => {
+      if (/^sup:/.test(p.key)) p.supplierId = p.key.slice(4);
+      if (/^sf:/.test(p.key)) p.sfId = p.key.split(':')[1];
+      if (/^ord:/.test(p.key)) p.orderId = p.key.slice(4);
+      if (!p.pid) p.area = areaOf(p); else if (!p.area) p.area = areaOf(p);
+    });
+    return out;
+  })(nfPlaces);
+  const catOf = p => (p.key === 'factory' || p.key === 'office') ? 'ninety' : /^sf:/.test(p.key) ? 'sf' : /^(ord|site):/.test(p.key) ? 'site' : (/^sup:/.test(p.key) || p.supplierId) ? 'sup' : 'pl';
+  const CAT = () => ({ ninety: 'Ninety', sup: L('الموردين ومخازنهم', 'Suppliers & warehouses'), sf: L('المصانع الخدمية', 'Service factories'), site: L('المواقع', 'Sites'), pl: L('أماكن الحركة', 'Transport places') });
+  function placeGroups(q) {
+    const ps = nfPlaces(); const v = String(q || '').trim().toLowerCase(); const out = [];
+    ['ninety', 'sup', 'sf', 'site', 'pl'].forEach(c => {
+      const arr = ps.filter(p => catOf(p) === c && (!v || `${p.name} ${p.area || ''} ${p.address || ''}`.toLowerCase().includes(v)));
+      if (!arr.length) return;
+      if (c === 'ninety') { out.push({ label: 'Ninety', items: arr }); return; }
+      const areas = [...new Set(arr.map(p => p.area || ''))].sort((a, b) => ((a ? 0 : 1) - (b ? 0 : 1)) || a.localeCompare(b, 'ar'));
+      areas.forEach(a => out.push({ label: `${CAT()[c]} — ${a || NOAREA()}`, items: sortBy(arr.filter(p => (p.area || '') === a), p => p.name || '') }));
+    });
+    return out;
+  }
+  window.nfPlaceGroups = placeGroups;
+
+  /* ---------- the driver's «New trip» ---------- */
+  const KINDS = ['materials', 'pickup_ext', 'delivery', 'install', 'return', 'other'];
+  const kindFor = p => { if (!p) return 'other'; const c = catOf(p); return c === 'sup' ? 'materials' : c === 'sf' ? 'pickup_ext' : /^ord:/.test(p.key) ? 'delivery' : /^site:/.test(p.key) ? 'install' : 'other'; };
+  const optsHTML = (groups, cur) => groups.map(g => `<optgroup label="${esc(g.label)}">${g.items.map(p => `<option value="${esc(p.key)}" ${p.key === cur ? 'selected' : ''}>${esc(p.name)}${p.lat == null ? ` · ${esc(L('بدون لوكيشن', 'no location'))}` : ''}</option>`).join('')}</optgroup>`).join('');
+  const selInner = (q, cur) => `<option value="">${esc(L('— اختار المكان —', '— pick the place —'))}</option>${optsHTML(placeGroups(q), cur)}<option value="new" ${cur === 'new' ? 'selected' : ''}>${esc(L('+ مكان مش في القايمة', '+ A place not on the list'))}</option>`;
+  function pickerHTML(n, cur) {
+    return `<div class="dtp" data-dtp="${n}"><input class="inp dtp-q" data-dtpq="${n}" placeholder="${esc(L('ابحث بالاسم أو المنطقة', 'Search by name or area'))}" autocomplete="off" enterkeyhint="search"><select id="f-dt${n}" name="dt${n}" data-dtps="${n}">${selInner('', cur)}</select>
+      <div class="dtp-new" data-dtpn="${n}" hidden><input class="inp" name="dt${n}Name" placeholder="${esc(L('اسم المكان', 'Place name'))}"><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><button type="button" class="btn sm" data-dtpgeo="${n}">${icon('map')}${esc(L('سجّل مكاني الحالي', 'Use my current location'))}</button><span class="tiny muted" data-dtpgeos="${n}"></span></div><input type="hidden" name="dt${n}Lat"><input type="hidden" name="dt${n}Lng"></div></div>`;
+  }
+  const busyWith = vid => list('trips').find(x => x.status === 'started' && x.vehicleId === vid && x.driverId !== me());
+  const openPOs = sid => list('purchases').filter(p => !['received', 'cancelled', 'draft', 'rfq'].includes(p.status) && ((p.supplierId && p.supplierId === sid) || (typeof supplierOf === 'function' && (supplierOf(p) || {}).id === sid)));
+  const openExts = sfId => list('extorders').filter(x => x.servFactoryId === sfId && ['sent', 'approved', 'inprogress', 'ready'].includes(x.status));
+  function linkHTML(toKey) {
+    const p = toKey && toKey !== 'new' ? placeByKey(toKey) : null;
+    if (p && p.supplierId) { const ps = openPOs(p.supplierId); return ps.length ? field(L('أمر الشراء (اختياري)', 'Purchase order (optional)'), `<select name="dtPo"><option value="">—</option>${ps.map(x => `<option value="${esc(x.id)}">${esc(x.number || '')}${x.items && x.items[0] ? ` — ${esc(x.items[0].name || '')}${x.items.length > 1 ? ` +${x.items.length - 1}` : ''}` : ''}</option>`).join('')}</select>`, 'full') : ''; }
+    if (p && p.sfId) { const xs = openExts(p.sfId); return xs.length ? field(L('الأمر الخارجي (اختياري)', 'External order (optional)'), `<select name="dtExt"><option value="">—</option>${xs.map(x => `<option value="${esc(x.id)}">${esc(x.number || '')} — ${esc(x.title || '')}</option>`).join('')}</select>`, 'full') : ''; }
+    if (p && p.orderId) { const o = byId('orders', p.orderId); return o ? `<div class="small muted full">${esc(L('أمر التشغيل', 'Job order'))}: <b>${esc(o.code || '')}</b> — ${esc(o.title || '')}</div>` : ''; }
+    const os = sortBy(list('orders').filter(o => (typeof isOpen === 'function' ? isOpen(o) : true)), o => o.code || '');
+    return os.length ? field(L('أمر تشغيل (اختياري)', 'Job order (optional)'), `<select name="dtOrder"><option value="">—</option>${os.map(o => `<option value="${esc(o.id)}">${esc(o.code || '')} — ${esc(o.title || '')}</option>`).join('')}</select>`, 'full') : '';
+  }
+  ACTIONS.drvTripNew = () => {
+    if (!drv() || !W()) return;
+    const cur = list('trips').find(x => x.status === 'started' && x.driverId === me());
+    if (cur) { toast(L(`عندك مشوار شغّال (${cur.number}) — خلّصه الأول`, `You have a trip running (${cur.number}) — finish it first`), 'err'); go('fleet/' + cur.id); return; }
+    const vs = sortBy(list('vehicles').filter(v => (v.status || 'active') !== 'out'), v => v.name || '');
+    if (!vs.length) { toast(L('مفيش عربيات متسجلة', 'No vehicles registered'), 'err'); return; }
+    const mine = vs.find(v => v.driverId === me() && !busyWith(v.id)) || vs.find(v => !busyWith(v.id)) || vs[0];
+    const vopts = vs.map(v => { const b = busyWith(v.id); return `<option value="${esc(v.id)}" ${v.id === mine.id ? 'selected' : ''} ${b ? 'disabled' : ''}>${esc(v.name)}${v.plate ? ` (${esc(v.plate)})` : ''}${b ? ` — ${esc(L('مع', 'with'))} ${esc(assigneeName(b.driverId))}` : ''}</option>`; }).join('');
+    openModal({ title: L('مشوار جديد', 'New trip'), wide: true, submitLabel: L('افتح المشوار', 'Open the trip'), cls: 'dtrip',
+      body: `<div class="form">
+        <div class="field full"><label>${esc(L('من', 'From'))}</label>${pickerHTML('From', 'factory')}</div>
+        <div class="field full"><label>${esc(L('إلى', 'To'))}</label>${pickerHTML('To', '')}</div>
+        ${field(L('رايح ليه', 'What for'), `<select id="f-dtKind" name="dtKind">${KINDS.map(k => `<option value="${k}">${esc(TRIP_KINDS[k] || k)}</option>`).join('')}</select>`)}
+        ${field(L('العربية', 'Vehicle'), `<select id="f-dtVeh" name="dtVeh" required>${vopts}</select>`)}
+        <div class="full" id="dt-link"></div>
+        ${field(L('الغرض (اختياري)', 'Purpose (optional)'), inp('dtPurpose', '', `placeholder="${esc(L('مثال: استلام ألواح خشب', 'e.g. picking up wood panels'))}"`), 'full')}
+        <label class="check full on"><input type="checkbox" name="dtNow" checked> ${esc(L('انطلق دلوقتي', 'Start now'))}</label>
+        <div class="banner info full" style="margin:0">${icon('info')}<span>${esc(L('المشوار بيتفتح باسمك على طول، ومدير الحركة ومدير المصنع بيوصلهم إشعار.', 'The trip opens in your name right away; the fleet manager and the factory manager get a notice.'))}</span></div></div>`,
+      onOpen: f => { f._kindTouched = false; if (typeof wireChecks === 'function') wireChecks(f); syncTo(f); },
+      onSubmit: f => saveDrvTrip(f) });
+  };
+  function syncTo(f) {
+    const to = f.querySelector('#f-dtTo'); const key = to ? to.value : '';
+    const box = f.querySelector('#dt-link'); if (box) box.innerHTML = linkHTML(key);
+    if (!f._kindTouched) { const k = kindFor(key && key !== 'new' ? placeByKey(key) : null); const ks = f.querySelector('#f-dtKind'); if (ks) ks.value = k; }
+  }
+  /* search, «new place», current location, destination → kind + link */
+  document.addEventListener('input', e => {
+    const q = e.target.closest && e.target.closest('[data-dtpq]'); if (!q) return;
+    const n = q.dataset.dtpq; const f = q.closest('form'); const s = f && f.querySelector(`[data-dtps="${n}"]`); if (!s) return;
+    const keep = s.value; s.innerHTML = selInner(q.value, keep);
+    if (q.value.trim() && (!keep || !s.querySelector(`option[value="${CSS.escape(keep)}"]`))) { const first = s.querySelector('optgroup option'); if (first) { s.value = first.value; s.dispatchEvent(new Event('change', { bubbles: true })); } }
+  });
+  document.addEventListener('change', e => {
+    const t = e.target; if (!t || !t.closest) return; const f = t.closest('form'); if (!f || !f.classList.contains('dtrip')) return;
+    if (t.dataset && t.dataset.dtps) { const n = t.dataset.dtps; const nb = f.querySelector(`[data-dtpn="${n}"]`); if (nb) nb.hidden = t.value !== 'new'; if (n === 'To') syncTo(f); }
+    if (t.id === 'f-dtKind') f._kindTouched = true;
+    if (t.name === 'dtPo' || t.name === 'dtExt' || t.name === 'dtOrder') { const pu = f.querySelector('[name=dtPurpose]'); const o = t.options[t.selectedIndex]; if (pu && !pu.value && t.value && o) pu.value = o.textContent.trim(); }
+  });
+  document.addEventListener('click', async e => {
+    const b = e.target.closest && e.target.closest('[data-dtpgeo]'); if (!b) return; e.preventDefault();
+    const n = b.dataset.dtpgeo; const f = b.closest('form'); const st = f.querySelector(`[data-dtpgeos="${n}"]`); if (st) st.textContent = L('جارٍ تحديد موقعك…', 'Getting your location…');
+    let g = null; try { g = await getGeo(9000); } catch (err) { g = null; }
+    if (!g) { if (st) st.textContent = L('مقدرتش أحدد موقعك — شغّل الـGPS', 'Could not get your location — turn on GPS'); return; }
+    f.querySelector(`[name=dt${n}Lat]`).value = Math.round(g.lat * 1e6) / 1e6; f.querySelector(`[name=dt${n}Lng]`).value = Math.round(g.lng * 1e6) / 1e6;
+    if (st) st.textContent = L(`اتسجّل (±${Math.round(g.acc || 0)} م)`, `Saved (±${Math.round(g.acc || 0)} m)`);
+  });
+  function locOf(d, n) {
+    const k = d['dt' + n]; if (!k) return null;
+    if (k === 'new') { const name = String(d[`dt${n}Name`] || '').trim(); if (!name) return null; const lat = d[`dt${n}Lat`], lng = d[`dt${n}Lng`]; return { key: 'new', name, lat: lat !== '' && lat != null ? +lat : null, lng: lng !== '' && lng != null ? +lng : null, newPlace: true }; }
+    const p = placeByKey(k); return p ? { key: p.key, name: p.name, lat: p.lat, lng: p.lng, area: p.area || '' } : null;
+  }
+  const uniqueTripNo = () => { let n = nextTripNo(); const used = new Set(list('trips').map(t => t.number)); let i = 0; while (used.has(n) && i++ < 500) { const m = /^(TR-\d\d-)(\d+)$/.exec(n); n = m ? m[1] + String(+m[2] + 1).padStart(3, '0') : n + 'x'; } return n; };
+  async function saveDrvTrip(f) {
+    const d = formData(f); const from = locOf(d, 'From'), to = locOf(d, 'To');
+    if (!from) { toast(L('اختار المكان اللي طالع منه', 'Pick where you leave from'), 'err'); return false; }
+    if (!to) { toast(L('اختار المكان اللي رايح له', 'Pick where you are going'), 'err'); return false; }
+    if (from.key !== 'new' && from.key === to.key) { toast(L('«من» و«إلى» نفس المكان', '«From» and «To» are the same place'), 'err'); return false; }
+    const vid = d.dtVeh; const b = vid && busyWith(vid); if (!vid) { toast(L('اختار العربية', 'Pick the vehicle'), 'err'); return false; }
+    if (b) { toast(L(`العربية دي مع ${assigneeName(b.driverId)} دلوقتي`, `This vehicle is with ${assigneeName(b.driverId)} now`), 'err'); return false; }
+    if (list('trips').some(x => x.status === 'started' && x.driverId === me())) { toast(L('عندك مشوار شغّال — خلّصه الأول', 'You have a trip running — finish it first'), 'err'); return false; }
+    const kind = KINDS.includes(d.dtKind) ? d.dtKind : 'other'; const now = nowISO();
+    const toP = to.key !== 'new' ? placeByKey(to.key) : null;
+    const trip = { id: uid(), number: uniqueTripNo(), kind, purpose: String(d.dtPurpose || '').trim() || `${TRIP_KINDS[kind] || ''} — ${to.name}`, from: from.name, to: to.name, fromLoc: from, toLoc: to, date: todayISO(), time: hhmm(now), vehicleId: vid, driverId: me(),
+      purchaseId: d.dtPo || null, extId: d.dtExt || null, orderId: d.dtOrder || (toP && toP.orderId) || (d.dtExt ? ((byId('extorders', d.dtExt) || {}).orderId || null) : null),
+      status: 'approved', approvedAt: now, approvedByName: L('فتحه السواق', 'Opened by the driver'), selfOpened: true, pipe2: true, createdAt: now, createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '' };
+    await Store.save('trips', trip);
+    const startNow = !!d.dtNow;
+    if (!startNow) pushStaff(trip, L(`${trip.createdByName} فتح مشوار ${trip.number}`, `${trip.createdByName} opened trip ${trip.number}`), `${L('من', 'From')} ${trip.from} ${L('إلى', 'to')} ${trip.to} · ${vehicleName(vid)}`);
+    later(() => { go('fleet/' + trip.id); if (startNow && ACTIONS.tripStart) later(() => ACTIONS.tripStart(trip.id)); });
+    toast(L('اتفتح المشوار', 'Trip opened'));
+    return true;
+  }
+
+  /* ---------- pushes to the fleet manager + the factory manager ---------- */
+  function pushStaff(t, title, body) { try { if (typeof pushSend === 'function') pushSend(['role:fleet', 'role:manager'], title, body, '/#/fleet/' + t.id, 'nf-trip-' + t.id); } catch (e) { /* ignore */ } }
+  function stepPush(t, prevStatus) {
+    const legs = tripLegs(t); const last = legs[legs.length - 1]; const who = assigneeName(t.driverId);
+    if (t.status === 'started' && prevStatus === 'approved') return pushStaff(t, L(`${who} انطلق — ${t.number}`, `${who} set off — ${t.number}`), `${t.selfOpened ? L('فتح المشوار بنفسه · ', 'opened it himself · ') : ''}${L('من', 'From')} ${t.from || '—'} ${L('إلى', 'to')} ${t.to || '—'} · ${vehicleName(t.vehicleId)}`);
+    if (t.status === 'done' && prevStatus !== 'done') return pushStaff(t, L(`${who} خلّص المشوار ${t.number}`, `${who} finished trip ${t.number}`), `${t.to || ''}${t.km ? ` · ${fmtNum(t.km)} ${L('كم', 'km')}` : ''}`);
+    if (!last) return; const def = legsWithState(t).find(x => x.key === last.key); const lab = def ? def.label : last.key;
+    pushStaff(t, `${t.number} · ${who}`, `${lab}${last.thumb ? ` (${L('بصورة', 'with a photo')})` : ''}${last.status === 'issue' ? ` — ${L('فيه مشكلة', 'there is a problem')}` : ''}${last.note ? ` — ${String(last.note).slice(0, 80)}` : ''}`);
+  }
+  ['tripStart', 'tripLeg', 'tripEnd'].forEach(n => {
+    const base = ACTIONS[n]; if (typeof base !== 'function') return;
+    ACTIONS[n] = async function (id) {
+      const t0 = byId('trips', id); const n0 = t0 ? tripLegs(t0).length : 0; const s0 = t0 ? t0.status : '';
+      const r = await base.apply(this, arguments);
+      try { const t = byId('trips', id); if (t && (tripLegs(t).length > n0 || t.status !== s0)) stepPush(t, s0); } catch (e) { /* ignore */ }
+      return r;
+    };
+  });
+
+  /* ---------- odometer from the tracker; driver writes the server refuses ---------- */
+  if (typeof odoDialog === 'function') odoDialog = (base => function (title, v, hint) {
+    if (v && v.gpsId && v.odoSync && (typeof vehOdo === 'function' ? vehOdo(v) : +v.odometer) > 0) return Promise.resolve({ km: typeof vehOdo === 'function' ? vehOdo(v) : +v.odometer, thumb: null, at: nowISO(), auto: true });
+    return base.apply(this, arguments);
+  })(odoDialog);
+  /* a trip written twice in a row (start: odometer, then «started») — the server echo of the first write must not undo the second
+     on screen: while a trip write is in flight (and 3 s after), a newer local copy wins over an older one from the server */
+  const _tIn = new Map();
+  const _upd = Store.update.bind(Store);
+  Store.update = async function (col, id, patch) {
+    if (col === 'vehicles' && drv() && patch && Object.keys(patch).every(k => k === 'odometer')) { const cur = S.data.vehicles.get(id); if (cur) S.data.vehicles.set(id, deepMerge(cur, patch)); return; }   /* only the odometer of a trip step; anything else (fuel log) still goes to the server */
+    if (col !== 'trips') return _upd.apply(Store, arguments);
+    _tIn.set(id, Date.now());
+    try { return await _upd.apply(Store, arguments); } finally { _tIn.set(id, Date.now() - 5000); }
+  };
+  try {
+    let _trips = S.data.trips;
+    Object.defineProperty(S.data, 'trips', { configurable: true, enumerable: true, get: () => _trips, set: m => {
+      try { if (m instanceof Map && _trips instanceof Map) _tIn.forEach((t, id) => { if (Date.now() - t >= 8000) { _tIn.delete(id); return; } const loc = _trips.get(id), inc = m.get(id); if (loc && inc && String(loc.updatedAt || '') > String(inc.updatedAt || '')) m.set(id, loc); }); } catch (e) { /* ignore */ }
+      _trips = m;
+    } });
+  } catch (e) { /* ignore */ }
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('places').onSnapshot(snap => { S.data.places = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.places = true; rerender(); }, e => console.warn('snapshot places', e))); })(Store.subscribeAll);
+  const _save = Store.save.bind(Store);
+  Store.save = async function (col, doc, opts) {
+    if (col === 'requests' && doc && doc.type === 'tripconfirm' && drv() && !doc.workerId) doc.workerId = me();
+    return _save(col, doc, opts);
+  };
+
+  /* ---------- «arrived» from the vehicle tracker (the server sets trip.arrivedAt) ---------- */
+  let _arrAt = 0;
+  RENDER_HOOKS.push(() => {
+    if (!S.session || !W() || Date.now() - _arrAt < 15000) return; _arrAt = Date.now();
+    list('trips').filter(t => t.status === 'started' && t.arrivedAt && (t.driverId === me() || fleetOk())).forEach(t => {
+      const nx = typeof tripNextLeg === 'function' ? tripNextLeg(t) : null; if (!nx || nx.key !== 'arrive') return;
+      Store.update('trips', t.id, { legs: tripLegs(t).concat([{ key: 'arrive', at: t.arrivedAt, auto: true, note: L('اتسجّل لوحده من جهاز العربية', 'logged by the vehicle tracker') }]) }).then(() => { try { stepPush(byId('trips', t.id), 'started'); } catch (e) { /* ignore */ } }).catch(() => { /* next round */ });
+    });
+  });
+
+  /* ---------- cancel: the fleet manager / factory manager (also after the start); the driver before he sets off ---------- */
+  ACTIONS.drvTripCancel = async id => {
+    const t = byId('trips', id); if (!t || !t.selfOpened || ['done', 'cancelled'].includes(t.status)) return;
+    const mineOk = drv() && t.driverId === me() && t.status === 'approved'; if (!(fleetOk() || mineOk)) return;
+    if (!(await confirmDlg(L(`إلغاء المشوار ${t.number}؟`, `Cancel trip ${t.number}?`), L('إلغاء المشوار', 'Cancel the trip')))) return;
+    await Store.update('trips', id, { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '' });
+    try { if (typeof stopTracking === 'function' && drv()) stopTracking(); } catch (e) { /* ignore */ }
+    try { if (fleetOk() && t.driverId && typeof pushSend === 'function') pushSend(['w:' + t.driverId], L(`اتلغى المشوار ${t.number}`, `Trip ${t.number} was cancelled`), L(`${(S.session && S.session.name) || ''} لغى المشوار — ارجع للمصنع أو كلّم مدير الحركة.`, `${(S.session && S.session.name) || ''} cancelled the trip — go back to the factory or call the fleet manager.`), '/#/fleet/' + id, 'nf-trip-' + id); else if (mineOk) pushStaff(t, L(`${assigneeName(t.driverId)} لغى المشوار ${t.number}`, `${assigneeName(t.driverId)} cancelled trip ${t.number}`), t.to || ''); } catch (e) { /* ignore */ }
+    toast(L('اتلغى المشوار', 'Trip cancelled'));
+  };
+  if (typeof vTripDetail === 'function') vTripDetail = (base => id => {
+    let html = base(id); const t = byId('trips', id); if (!t || !t.selfOpened) return html;
+    const canX = !['done', 'cancelled'].includes(t.status) && (fleetOk() || (drv() && t.driverId === me() && t.status === 'approved'));
+    const np = [t.fromLoc, t.toLoc].filter(x => x && x.newPlace);
+    const ban = `<div class="banner info" style="margin-bottom:12px">${icon('info')}<span>${esc(L('فتحه السواق بنفسه', 'Opened by the driver himself'))} — ${esc(assigneeName(t.driverId))} ${esc(hhmm(t.createdAt))}${np.length ? ` · ${esc(L('مكان جديد', 'new place'))}: ${np.map(x => esc(x.name)).join('، ')}` : ''}${t.cancelledAt ? ` · ${esc(L('اتلغى', 'cancelled'))} ${esc(hhmm(t.cancelledAt))} — ${esc(t.cancelledByName || '')}` : ''}</span>${canX ? `<button type="button" class="btn sm ghost" style="margin-inline-start:auto" data-action="drvTripCancel" data-arg="${esc(t.id)}">${esc(L('إلغاء المشوار', 'Cancel the trip'))}</button>` : ''}</div>`;
+    return ban + html;
+  })(vTripDetail);
+
+  /* ---------- the driver: a big «New trip» button on his trips page and his portal ---------- */
+  const bigBtn = () => `<button type="button" class="btn p dtrip-big" data-action="drvTripNew">${icon('plus')}${esc(L('مشوار جديد', 'New trip'))}</button>`;
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    const html = base.apply(this, arguments);
+    if (drv() && W()) return bigBtn() + html;
+    if (seesAll() && !(S.route && S.route.id) && ((S.ui.filter.fleet || {}).tab !== 'places')) return todayCard() + html;
+    return html;
+  })(vFleet);
+  if (typeof meExtraCards === 'function') meExtraCards = (base => function (w) { const h = base.apply(this, arguments); return w && w.role === 'driver' && drv() && W() ? bigBtn() + h : h; })(meExtraCards);
+
+  /* ---------- «Today's trips» (owner / factory manager / fleet manager / vice) ---------- */
+  function todayTrips() {
+    const d = todayISO();
+    return sortBy(list('trips').filter(t => t && !['cancelled', 'rejected'].includes(t.status) && (t.date === d || t.status === 'started' || String(t.startedAt || '').slice(0, 10) === d || String(t.endedAt || '').slice(0, 10) === d)), t => (t.status === 'started' ? '0' : t.status === 'approved' ? '1' : t.status === 'planned' ? '2' : '3') + (t.time || ''));
+  }
+  function stepLine(t) {
+    if (t.status === 'started' && typeof window.nfTripStep === 'function') { const ex = window.nfTripStep(t); if (ex) return ex; }
+    if (t.status === 'done') return [L('رجع', 'Back'), 'good'];
+    if (t.status === 'planned') return [L('مستني الاعتماد', 'Awaiting approval'), 'warn'];
+    if (t.status === 'approved') return [L('لسه ما انطلقش', 'Not started yet'), ''];
+    const st = typeof legsWithState === 'function' ? legsWithState(t) : []; const done = st.filter(x => x.done); const last = done[done.length - 1];
+    return [last ? last.label : L('في الطريق', 'On the road'), 'acc'];
+  }
+  function todayCard() {
+    const ts = todayTrips(); if (!ts.length) return '';
+    const run = ts.filter(t => t.status === 'started').length;
+    return `<div class="card dtoday" id="dt-today"><div class="cardhead"><h3>${icon('map')}${esc(L('مشاوير النهارده', "Today's trips"))}</h3><span class="muted small">${ts.length}${run ? ` · ${run} ${esc(L('في الطريق', 'on the road'))}` : ''}</span></div><div class="list">${ts.map(t => {
+      const [lab, cls] = stepLine(t); const legs = tripLegs(t); const last = legs[legs.length - 1]; const th = legs.slice().reverse().find(x => x.thumb);
+      return `<a class="item" href="#/fleet/${esc(t.id)}"><div class="main"><div class="title"><span class="code">${esc(t.number || '')}</span><span>${esc(assigneeName(t.driverId))}</span>${t.selfOpened ? `<span class="tiny muted">· ${esc(L('فتحه بنفسه', 'self-opened'))}</span>` : ''}</div><div class="meta"><span>${esc(String(vehicleName(t.vehicleId)).split('—')[0].trim())}</span><span>${esc(t.from || '—')} ← ${esc(t.to || '—')}</span><span class="badge ${cls}">${esc(lab)}</span></div></div><div class="end"><span class="tiny muted">${esc(hhmm((last && last.at) || t.startedAt || t.createdAt))}</span>${th ? `<img src="${esc(th.thumb)}" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:6px">` : ''}</div></a>`;
+    }).join('')}</div></div>`;
+  }
+  window.nfTodayTrips = todayTrips;
+  if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); return seesAll() ? todayCard() + html : html; })(vDashboard);
+
+  /* ---------- places: form, «Places» tab on the fleet page, warehouses on the supplier page ---------- */
+  function placeForm(x) {
+    const sups = sortBy(list('suppliers'), s => s.name || '');
+    return `<div class="form">
+      ${field(L('النوع', 'Type'), `<select id="f-pkind" name="kind"><option value="place" ${x.kind !== 'wh' && x.kind !== 'fuel' ? 'selected' : ''}>${esc(L('مكان للحركة', 'Transport place'))}</option><option value="wh" ${x.kind === 'wh' ? 'selected' : ''}>${esc(L('مخزن / فرع مورد', 'Supplier warehouse / branch'))}</option>${typeof window.nfFuelPlaceFields === 'function' ? `<option value="fuel" ${x.kind === 'fuel' ? 'selected' : ''}>${esc(L('محطة وقود', 'Fuel station'))}</option>` : ''}</select>`)}
+      ${field(L('المورد', 'Supplier'), `<select id="f-psup" name="supplierId"><option value="">—</option>${opts(sups, x.supplierId || '')}</select>`)}
+      ${field(L('اسم المكان', 'Place name'), inp('name', x.name || '', 'required'), 'full')}
+      ${field(L('المنطقة', 'Area'), inp('area', x.area || '', `list="dl-areas" placeholder="${esc(L('بتتملي لوحدها من اللوكيشن', 'fills itself from the location'))}"`) + `<datalist id="dl-areas">${knownAreas().map(a => `<option value="${esc(a)}">`).join('')}</datalist>`)}
+      ${typeof window.nfFuelPlaceFields === 'function' ? window.nfFuelPlaceFields(x) : ''}
+      ${field(L('العنوان', 'Address'), inp('address', x.address || ''), 'full')}
+      ${field(L('خط العرض', 'Latitude'), inp('lat', x.lat ?? '', 'type="number" step="any" class="ltr"'))}${field(L('خط الطول', 'Longitude'), inp('lng', x.lng ?? '', 'type="number" step="any" class="ltr"'))}
+    </div>`;
+  }
+  function wirePlaceForm(f) {
+    const ks = f.querySelector('#f-pkind'); const showK = () => { const k = ks ? ks.value : 'place'; const sup = f.querySelector('#f-psup'); if (sup) sup.closest('.field').hidden = k !== 'wh'; f.querySelectorAll('[data-kindshow]').forEach(el => { el.hidden = el.dataset.kindshow !== k; }); };
+    if (ks) { ks.addEventListener('change', showK); showK(); }
+    const la = f.querySelector('#f-lat'); const ar = f.querySelector('[name=area]');
+    if (la && ar) la.addEventListener('change', async () => { const ln = f.querySelector('#f-lng'); if (ar.value.trim() || !la.value || !ln || !ln.value) return; const a = await reverseArea(+la.value, +ln.value); if (a && !ar.value.trim()) ar.value = a; });
+  }
+  async function savePlace(f, x, extra) {
+    const d = formData(f); if (!String(d.name || '').trim()) { toast(L('اكتب اسم المكان', 'Type the place name'), 'err'); return false; }
+    if (d.kind === 'wh' && !d.supplierId) { toast(L('اختار المورد', 'Pick the supplier'), 'err'); return false; }
+    let area = String(d.area || '').trim(); const lat = d.lat !== '' && d.lat != null ? +d.lat : null, lng = d.lng !== '' && d.lng != null ? +d.lng : null;
+    if (!area && lat != null && lng != null) area = await reverseArea(lat, lng);
+    const doc = Object.assign({}, x || {}, { id: (x && x.id) || uid(), kind: d.kind === 'wh' ? 'wh' : d.kind === 'fuel' ? 'fuel' : 'place', supplierId: d.kind === 'wh' ? d.supplierId : null, petro: d.kind === 'fuel' ? d.petro === '1' : undefined, fuels: d.kind === 'fuel' ? (typeof window.nfFuelListOf === 'function' ? window.nfFuelListOf(d.fuels) : []) : undefined, name: String(d.name).trim(), area, address: String(d.address || '').trim(), lat, lng, createdByName: (x && x.createdByName) || (S.session && S.session.name) || '' });
+    await Store.save('places', doc);
+    if (extra && extra.tripId && fleetOk()) { const t = byId('trips', extra.tripId); const k = extra.which === 'from' ? 'fromLoc' : 'toLoc'; if (t && t[k]) await Store.update('trips', t.id, { [k]: Object.assign({}, t[k], { key: 'pl:' + doc.id, pinned: doc.id, newPlace: false }) }, { silent: true }); }
+    toast(L('اتحفظ المكان', 'Place saved')); rerender(); return true;
+  }
+  ACTIONS.placeNew = arg => {
+    if (!canPlaces()) return; const pre = {}; let extra = null;
+    if (arg && /^sup:/.test(arg)) Object.assign(pre, { kind: 'wh', supplierId: arg.slice(4) });
+    if (arg && /^trip:/.test(arg)) { const [, tid, which] = arg.split(':'); const t = byId('trips', tid); const l = t && (which === 'from' ? t.fromLoc : t.toLoc); if (l) { Object.assign(pre, { name: l.name, lat: l.lat, lng: l.lng }); extra = { tripId: tid, which }; } }
+    if (arg === 'fuel') Object.assign(pre, { kind: 'fuel', petro: true });
+    if (R() === 'purch' && !pre.kind) pre.kind = 'wh';
+    openModal({ title: pre.kind === 'wh' ? L('مخزن مورد جديد', 'New supplier warehouse') : pre.kind === 'fuel' ? L('محطة وقود جديدة', 'New fuel station') : L('مكان جديد', 'New place'), wide: true, body: placeForm(pre), onOpen: wirePlaceForm, onSubmit: f => savePlace(f, null, extra) });
+  };
+  ACTIONS.placeEdit = id => { const x = byId('places', id); if (!x || !canPlaces()) return; openModal({ title: L(`تعديل ${x.name}`, `Edit ${x.name}`), wide: true, body: placeForm(x), onOpen: wirePlaceForm, onSubmit: f => savePlace(f, x) }); };
+  ACTIONS.placeDel = async id => { const x = byId('places', id); if (!x || !canPlaces()) return; if (!(await confirmDlg(L(`مسح «${x.name}»؟`, `Delete «${x.name}»?`), L('مسح', 'Delete')))) return; await Store.remove('places', id); toast(L('اتمسح', 'Deleted')); };
+  ACTIONS.placeArea = key => {
+    if (!canPlaces()) return; const p = placeByKey(key); if (!p) return;
+    openModal({ title: L(`منطقة: ${p.name}`, `Area: ${p.name}`), body: `<div class="form">${field(L('المنطقة', 'Area'), inp('area', p.area || '', 'list="dl-areas2" required') + `<datalist id="dl-areas2">${knownAreas().map(a => `<option value="${esc(a)}">`).join('')}</datalist>`, 'full')}</div>`,
+      onSubmit: async f => { const a = String(formData(f).area || '').trim(); if (!a) return false; if (p.pid) await Store.update('places', p.pid, { area: a }); else await Store.save('places', { id: areaDocId(key), kind: 'area', ref: key, area: a, auto: false }); toast(L('اتحفظت المنطقة', 'Area saved')); return true; } });
+  };
+  /* the area from the map: the geo function (server) and, if it has no «reverse» yet, OpenStreetMap straight from the browser */
+  const AREA_FIELDS = ['suburb', 'city_district', 'neighbourhood', 'quarter', 'town', 'city', 'village', 'county', 'state'];
+  async function reverseArea(lat, lng) {
+    if (!isFinite(lat) || !isFinite(lng)) return '';
+    try { if (typeof geoCall === 'function') { const r = await geoCall({ action: 'reverse', lat, lng }); if (r && r.area) return String(r.area); } } catch (e) { /* fall back */ }
+    try { const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=ar&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`); const j = await r.json(); const a = (j && j.address) || {}; for (const k of AREA_FIELDS) if (a[k] && !/[0-9\u0660-\u0669]/.test(String(a[k]))) return String(a[k]); } catch (e) { /* offline */ }
+    return '';
+  }
+  window.nfReverseArea = reverseArea;
+  let _fillRun = false;
+  async function fillAreas(max) {
+    if (_fillRun || !canPlaces()) return 0; _fillRun = true; let n = 0;
+    try {
+      for (const p of nfPlaces()) {
+        if (n >= (max || 20)) break; if (p.lat == null || p.key === 'factory' || p.key === 'office') continue;
+        if (p.pid ? (byId('places', p.pid) || {}).area : (areaDoc(p.key) || {}).area) continue;
+        const a = await reverseArea(p.lat, p.lng); n++;
+        if (a) { if (p.pid) await Store.update('places', p.pid, { area: a }); else await Store.save('places', { id: areaDocId(p.key), kind: 'area', ref: p.key, area: a, auto: true }, { silent: true }); }
+        await new Promise(r => setTimeout(r, 1100));
+      }
+    } finally { _fillRun = false; }
+    if (n) rerender(); return n;
+  }
+  ACTIONS.placesFill = async () => { if (!canPlaces()) return; toast(L('جارٍ ملء المناطق من الخريطة…', 'Filling the areas from the map…')); const n = await fillAreas(40); toast(n ? L(`اتملت ${n} منطقة`, `${n} areas filled`) : L('كل الأماكن ليها منطقة', 'Every place has an area')); };
+  let _fillOnce = false;
+  RENDER_HOOKS.push(() => { if (_fillOnce || !S.session || !canPlaces() || !(typeof sbOn === 'function' && sbOn())) return; _fillOnce = true; setTimeout(() => fillAreas(20).catch(() => 0), 8000); });
+
+  const newFromDrivers = () => {
+    const out = []; list('trips').forEach(t => [['from', t.fromLoc], ['to', t.toLoc]].forEach(([w, l]) => { if (l && l.newPlace && !l.pinned && t.status !== 'cancelled') out.push({ t, w, l }); }));
+    return sortBy(out, x => x.t.createdAt || '').reverse();
+  };
+  function placesTab() {
+    const ps = nfPlaces().filter(p => p.key !== 'factory' && p.key !== 'office'); const nf = newFromDrivers();
+    const byArea = {}; ps.forEach(p => { const a = p.area || ''; (byArea[a] = byArea[a] || []).push(p); });
+    const areas = Object.keys(byArea).sort((a, b) => ((a ? 0 : 1) - (b ? 0 : 1)) || a.localeCompare(b, 'ar'));
+    return `${nf.length ? `<div class="card"><div class="cardhead"><h3>${esc(L('أماكن جديدة من السواقين', 'New places from the drivers'))}</h3><span class="muted small">${nf.length}</span></div><div class="list">${nf.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.l.name)}</div><div class="meta"><span>${esc(assigneeName(x.t.driverId))}</span><a href="#/fleet/${esc(x.t.id)}"><span class="code">${esc(x.t.number || '')}</span></a>${x.l.lat != null ? `<a href="${esc(mapsLink(x.l.lat, x.l.lng))}" target="_blank" rel="noopener">${esc(L('على الخريطة', 'on the map'))}</a>` : `<span class="muted">${esc(L('بدون لوكيشن', 'no location'))}</span>`}</div></div><div class="end">${fleetOk() ? `<button type="button" class="btn xs p" data-action="placeNew" data-arg="trip:${esc(x.t.id)}:${x.w}">${esc(L('ثبّت في القايمة', 'Pin to the list'))}</button>` : ''}</div></div>`).join('')}</div></div>` : ''}
+      <div class="card"><div class="cardhead"><h3>${esc(L('أماكن الحركة حسب المنطقة', 'Transport places by area'))}</h3><span class="muted small">${ps.length}</span><div class="grow"></div>${canPlaces() ? `<button type="button" class="btn sm" data-action="placesFill">${icon('map')}${esc(L('املا المناطق من الخريطة', 'Fill areas from the map'))}</button><button type="button" class="btn sm p" data-action="placeNew">${icon('plus')}${esc(L('مكان', 'Place'))}</button>` : ''}</div>
+      ${areas.map(a => `<div class="dt-area"><div class="dt-areah">${esc(a || NOAREA())} <span class="muted tiny">${byArea[a].length}</span></div><div class="list">${sortBy(byArea[a], p => catOf(p) + (p.name || '')).map(p => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(p.name)}</div><div class="meta"><span>${esc(CAT()[catOf(p)] || '')}</span>${p.lat == null ? `<span class="muted">${esc(L('بدون لوكيشن', 'no location'))}</span>` : ''}</div></div><div class="end">${canPlaces() ? `<button type="button" class="btn xs" data-action="placeArea" data-arg="${esc(p.key)}">${esc(L('المنطقة', 'Area'))}</button>${p.pid ? `<button type="button" class="btn xs" data-action="placeEdit" data-arg="${esc(p.pid)}">${icon('edit')}</button><button type="button" class="btn xs ghost" data-action="placeDel" data-arg="${esc(p.pid)}">${icon('trash')}</button>` : ''}` : ''}</div></div>`).join('')}</div></div>`).join('')}
+      </div>${typeof window.nfFuelStationsCard === 'function' ? window.nfFuelStationsCard(canPlaces()) : ''}`;
+  }
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    let html = base.apply(this, arguments); if (drv() || !(isAdmin() || ['manager', 'fleet'].includes(R()))) return html;
+    const f = S.ui.filter.fleet || {};
+    html = html.replace(/(<div class="tabs">[\s\S]*?)(<\/div>)/, (m, a, b) => a + `<button class="${f.tab === 'places' ? 'on' : ''}" data-action="fleetTab" data-arg="places">${esc(L('الأماكن', 'Places'))}</button>` + b);
+    if (f.tab !== 'places') return html;
+    const t0 = html.indexOf('<div class="tabs">'); const cut = html.indexOf('</div>', t0) + 6;
+    return html.slice(0, cut) + placesTab();
+  })(vFleet);
+  /* purchasing: the supplier's warehouses on the supplier page */
+  if (typeof EXTRA_VIEWS !== 'undefined' && EXTRA_VIEWS.suppliers) EXTRA_VIEWS.suppliers = (base => function (r) {
+    const html = base.apply(this, arguments); const id = r && r.id; const s = id && byId('suppliers', id); if (!s) return html;
+    const whs = sortBy(list('places').filter(x => x.kind === 'wh' && x.supplierId === id), x => x.name || '');
+    if (!whs.length && !canPlaces()) return html;
+    const card = `<div class="card"><div class="cardhead"><h3>${icon('map')}${esc(L('مخازن وفروع المورد', "The supplier's warehouses & branches"))}</h3><span class="muted small">${whs.length}</span><div class="grow"></div>${canPlaces() ? `<button type="button" class="btn sm" data-action="placeNew" data-arg="sup:${esc(id)}">${icon('plus')}${esc(L('مخزن', 'Warehouse'))}</button>` : ''}</div>${whs.length ? `<div class="list">${whs.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.name)}</div><div class="meta">${x.area ? `<span>${esc(x.area)}</span>` : ''}${x.address ? `<span>${esc(x.address)}</span>` : ''}${okLL(x) ? `<a href="${esc(mapsLink(x.lat, x.lng))}" target="_blank" rel="noopener">${esc(L('على الخريطة', 'on the map'))}</a>` : ''}</div></div><div class="end">${canPlaces() ? `<button type="button" class="btn xs" data-action="placeEdit" data-arg="${esc(x.id)}">${icon('edit')}</button>` : ''}</div></div>`).join('')}</div>` : `<div class="muted small">${esc(L('ضيف مخازن المورد عشان السواقين يختاروها في المشوار.', "Add the supplier's warehouses so drivers can pick them for a trip."))}</div>`}</div>`;
+    return html + card;
+  })(EXTRA_VIEWS.suppliers);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.dtp{display:grid;gap:6px}.dtp-new{display:grid;gap:6px;border:1px dashed var(--line);border-radius:10px;padding:8px}
+.dtp-new[hidden]{display:none}
+.dtrip-big{width:100%;justify-content:center;padding:14px 12px;font-size:16px;font-weight:800;border-radius:14px;margin-bottom:12px}
+.dt-area{margin-top:10px}.dt-areah{font-weight:800;font-size:13px;padding:4px 2px;border-bottom:1px solid var(--line)}
+.dtoday .item{text-decoration:none;color:inherit}
+</style>`);
+})();
+/* =====================================================================
+   v7.04 — refuelling on the road (Mahmoud, 9 Oct — brief claude/fuel-stop-brief.md, go-ahead; factory only):
+   · «⛽ Refuel» for the driver (his «+», his trips page, the running trip): the vehicle's fuel (petrol 92 / 95 / diesel / natural gas;
+     a vehicle may have two — the driver picks which) → PetroApp stations (contracted — places of kind «fuel», petro on) nearest to
+     the vehicle (its tracker, else the phone), «on your way» when close to the trip's line, «open the route»; gas = gas stations only.
+   · emergency: stations nearby that are NOT contracted (OpenStreetMap through the geo function) — a reason is required and the fleet
+     manager must approve first (push with approve / reject; after 10 minutes the factory manager gets it too); the driver can call him.
+   · «I refuelled»: PetroApp — nothing to type (the PetroApp bill arrives by itself, matched by time), photo optional; emergency —
+     quantity + amount + receipt photo, paid from the driver's custody when it covers it, else a refund request for accounts.
+   · the refuel stop shows on the trip page and in «today's trips»; notices never carry amounts.
+   · «needs fuel soon»: an estimate from the last fill + the km since (tracker odometer) + the vehicle's consumption (gas on its own:
+     cylinder m³ + m³/100 km) — banner for the driver, card for the fleet manager.
+   · data: collection «fuelfills» (the driver writes his own; fleet / factory manager decide; accounts settle) — the driver's old
+     «log fuel» wrote into the vehicle record, which the server refuses for drivers, so a driver now goes through this screen.
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const W = () => typeof writable === 'function' && writable();
+  const me = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const drv = () => R() === 'driver';
+  const admin = () => typeof isAdmin === 'function' && isAdmin();
+  const seesAll = () => !!S.session && (admin() || ['manager', 'vice', 'fleet'].includes(R()));
+  const canDecide = () => !!S.session && W() && (admin() || ['fleet', 'manager'].includes(R()));
+  const canSettle = () => !!S.session && W() && (admin() || ['acc', 'hr'].includes(R()));
+  const later = f => setTimeout(f, 90);
+  const hhmm = iso => { if (!iso) return ''; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const okLL = x => !!x && x.lat != null && x.lat !== '' && x.lng != null && x.lng !== '' && isFinite(+x.lat) && isFinite(+x.lng);
+  const pt = x => ({ lat: +x.lat, lng: +x.lng });
+  const distM = (a, b) => (typeof haversine === 'function' ? haversine(pt(a), pt(b)) : 1e9);
+  const fmtD = m => (m < 1000 ? `${Math.round(m)} ${L('م', 'm')}` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} ${L('كم', 'km')}`);
+  if (typeof ICONS === 'object' && !ICONS.fuel) ICONS.fuel = '<path d="M4 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15"/><path d="M3 20h12"/><path d="M6.5 8h5"/><path d="M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8.5L18 5"/>';
+  if (typeof COLS !== 'undefined' && !COLS.includes('fuelfills')) COLS.push('fuelfills'); S.data.fuelfills = S.data.fuelfills || new Map();
+  if (Store.subscribeAll) Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('fuelfills').onSnapshot(snap => { S.data.fuelfills = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.fuelfills = true; rerender(); }, e => console.warn('snapshot fuelfills', e))); })(Store.subscribeAll);
+
+  /* ---------- fuels ---------- */
+  const FKEYS = ['b92', 'b95', 'diesel', 'cng'];
+  const FUEL = () => ({ b92: L('بنزين 92', 'Petrol 92'), b95: L('بنزين 95', 'Petrol 95'), diesel: L('سولار', 'Diesel'), cng: L('غاز طبيعي', 'Natural gas') });
+  const toList = x => (Array.isArray(x) ? x : String(x || '').split(',')).map(s => String(s).trim()).filter(k => FKEYS.includes(k));
+  const vFuels = v => toList(v && v.fuels);
+  const unit = k => (k === 'cng' ? L('م³', 'm³') : L('لتر', 'L'));
+  const OPEN = ['requested', 'approved', 'going', 'arrived'];
+  const ST = () => ({ requested: [L('مستني موافقة', 'Awaiting approval'), 'warn'], approved: [L('اتوافق — روح موّن', 'Approved — go and refuel'), 'acc'], going: [L('رايح يموّن', 'On the way to refuel'), 'acc'], arrived: [L('وصل المحطة', 'At the station'), 'acc'], done: [L('اتموّن', 'Refuelled'), 'good'], rejected: [L('اترفض', 'Rejected'), 'crit'], cancelled: [L('اتلغى', 'Cancelled'), ''] });
+  const openFill = vid => list('fuelfills').find(x => x.vehicleId === vid && OPEN.includes(x.status)) || null;
+  const stations = () => list('places').filter(x => x && x.kind === 'fuel' && okLL(x));
+  const sells = (st, kind) => { const fs = toList(st.fuels); return kind === 'cng' ? fs.includes('cng') : (!fs.length || fs.some(f => f !== 'cng')); };
+  window.nfFuelKinds = FUEL;
+
+  /* the tracker bridge (gps-bridge through gpsCall); window.nfGpsTest replaces it in the tests */
+  const G = () => window.nfGpsTest || { on: () => typeof gpsOn === 'function' && gpsOn(), call: (a, p) => gpsCall(a, p) };
+  /* the vehicle's place: its tracker (fresh), else the phone */
+  async function vehPos(v) {
+    if (v && v.gpsId && G().on()) {
+      try { const r = await G().call('track', { imeis: v.gpsId }); const p = (r.positions || []).find(x => String(x.imei) === String(v.gpsId)); if (p && p.lat != null && (!p.at || Date.now() - Date.parse(p.at) < 30 * 60000)) return { lat: +p.lat, lng: +p.lng, at: p.at || nowISO(), via: 'tracker' }; } catch (e) { /* phone */ }
+    }
+    try { const g = await getGeo(8000); if (g) return { lat: g.lat, lng: g.lng, at: nowISO(), via: 'phone', acc: g.acc }; } catch (e) { /* none */ }
+    return null;
+  }
+  /* metres from p to the segment a→b (flat projection — fine for a city) */
+  function segDist(p, a, b) {
+    const k = Math.cos(((+a.lat + +b.lat) / 2) * Math.PI / 180) * 111320, kl = 110540;
+    const ax = +a.lng * k, ay = +a.lat * kl, bx = +b.lng * k, by = +b.lat * kl, px = +p.lng * k, py = +p.lat * kl;
+    const dx = bx - ax, dy = by - ay; const l2 = dx * dx + dy * dy; let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+  const onWay = (st, t) => !!t && okLL(t.fromLoc) && okLL(t.toLoc) && segDist(st, t.fromLoc, t.toLoc) <= 2000;
+
+  /* ---------- «needs fuel soon» (estimate) ---------- */
+  function fuelLeft(v, kind) {
+    if (!v) return null; const cng = kind === 'cng';
+    const cap = +(cng ? v.cngCap : v.tankCap) || 0; const use = +(cng ? v.cngUse : (v.consumption || (typeof fleetCfg === 'function' ? fleetCfg().consumption : 0))) || 0;
+    if (!(cap > 0) || !(use > 0)) return null;
+    const fills = list('fuelfills').filter(x => x.vehicleId === v.id && x.status === 'done' && +x.odo > 0 && (cng ? x.kind === 'cng' : x.kind !== 'cng')).sort((a, b) => String(b.doneAt || '').localeCompare(String(a.doneAt || '')));
+    let last = fills[0] ? { odo: +fills[0].odo, day: String(fills[0].doneAt || '').slice(0, 10) } : null;
+    if (!cng && typeof vehFuel === 'function') { const b = vehFuel(v).filter(f => +f.odo > 0).sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')))[0]; if (b && (!last || String(b.date) > last.day)) last = { odo: +b.odo, day: b.date }; }
+    if (!last) return null;
+    const range = cap / use * 100; const odo = typeof vehOdo === 'function' ? vehOdo(v) : +v.odometer || 0; const since = Math.max(0, odo - last.odo); const left = Math.round(range - since);
+    return { left, range: Math.round(range), since: Math.round(since), low: left <= Math.max(80, range * 0.15) };
+  }
+  const lowOf = v => { const ks = vFuels(v); const k = ks.includes('cng') ? 'cng' : (ks[0] || 'b92'); const f = fuelLeft(v, k); return f && f.low ? Object.assign({ kind: k }, f) : null; };
+  window.nfFuelLeft = fuelLeft;
+
+  /* ---------- the screen ---------- */
+  const FS = { vid: null, tripId: null, kind: 'b92', pos: null, posTried: false, osm: null, osmBusy: false, osmErr: '' };
+  function fsBody() {
+    const v = byId('vehicles', FS.vid); if (!v) return ''; const kinds = vFuels(v); const t = FS.tripId ? byId('trips', FS.tripId) : null; const k = FS.kind;
+    const est = fuelLeft(v, k);
+    const chips = kinds.length > 1 ? `<div class="fs-kinds">${kinds.map(x => `<button type="button" class="fs-kind${x === k ? ' on' : ''}" data-action="fsKind" data-arg="${x}">${esc(FUEL()[x])}</button>`).join('')}</div>` : `<div class="small"><b>${esc(FUEL()[k])}</b>${kinds.length ? '' : ` · <span class="muted">${esc(L('نوع وقود العربية مش متحدد في بياناتها', "The vehicle's fuel is not set in its data"))}</span>`}</div>`;
+    const posLine = FS.pos ? `${icon('map')}${esc(FS.pos.via === 'tracker' ? L('مكان العربية من جهاز التتبع', "The vehicle's place from its tracker") : L('مكانك من الموبايل', 'Your place from the phone'))}` : FS.posTried ? `${icon('alert')}${esc(L('مقدرتش أحدد المكان — المحطات مش مترتبة بالمسافة', 'Could not get the place — stations are not sorted by distance'))}` : `${icon('map')}${esc(L('جارٍ تحديد المكان…', 'Getting the place…'))}`;
+    const all = stations().filter(s => s.petro && sells(s, k)).map(s => ({ s, d: FS.pos ? distM(FS.pos, s) : null, w: onWay(s, t) }));
+    all.sort((a, b) => (a.d == null || b.d == null) ? String(a.s.name || '').localeCompare(String(b.s.name || ''), 'ar') : a.d - b.d);
+    const row = (key, name, sub, d, way, extra) => `<button type="button" class="fs-st" data-action="${key[0]}" data-arg="${esc(key[1])}"><span class="fs-n">${esc(name)}</span><span class="fs-m">${sub ? `<span>${esc(sub)}</span>` : ''}${d != null ? `<b>${esc(fmtD(d))}</b>` : ''}${way ? `<span class="badge good">${esc(L('على طريقك', 'On your way'))}</span>` : ''}${extra || ''}</span></button>`;
+    const petro = all.length ? all.slice(0, 12).map(x => row(['fsPick', x.s.id], x.s.name, x.s.area || x.s.city || '', x.d, x.w)).join('') : `<div class="muted small">${esc(k === 'cng' ? L('لسه مفيش محطات غاز PetroApp متسجلة — بتتسجل لوحدها من فواتير PetroApp، أو مدير الحركة يضيفها من «الأماكن».', 'No PetroApp gas stations registered yet — they register themselves from PetroApp bills, or the fleet manager adds them in «Places».') : L('لسه مفيش محطات PetroApp متسجلة — بتتسجل لوحدها من فواتير PetroApp، أو مدير الحركة يضيفها من «الأماكن».', 'No PetroApp stations registered yet — they register themselves from PetroApp bills, or the fleet manager adds them in «Places».'))}</div>`;
+    let osm = '';
+    if (FS.osm) {
+      const far = FS.osm;
+      const gasOk = far.filter(o => o.fuels && o.fuels.cng === true), rest = far.filter(o => !(o.fuels && o.fuels.cng === true));
+      const list1 = k === 'cng' ? gasOk : far; const list2 = k === 'cng' ? rest : [];
+      const r2 = (o, i) => row(['fsPickOsm', String(FS.osm.indexOf(o))], o.name || L('محطة وقود', 'Fuel station'), o.brand && o.brand !== o.name ? o.brand : '', o.dist != null ? o.dist : (FS.pos ? distM(FS.pos, o) : null), false, '');
+      osm = `<div class="fs-h warn">${icon('alert')}${esc(L('محطات قريبة مش متعاقدين — محتاجة موافقة مدير الحركة', 'Nearby stations NOT contracted — need the fleet manager’s approval'))}</div>${list1.length ? list1.slice(0, 10).map(r2).join('') : `<div class="muted small">${esc(k === 'cng' ? L('مفيش محطات غاز معروفة قريبة على الخريطة', 'No known gas stations nearby on the map') : L('مفيش محطات قريبة على الخريطة', 'No stations nearby on the map'))}</div>`}${list2.length ? `<div class="tiny muted" style="margin-top:6px">${esc(L('محطات تانية (مش متأكدين إن فيها غاز):', 'Other stations (not sure they sell gas):'))}</div>${list2.slice(0, 6).map(r2).join('')}` : ''}`;
+    } else osm = `<button type="button" class="btn fs-emg" data-action="fsOsm" ${FS.osmBusy ? 'disabled' : ''}>${icon('alert')}${esc(FS.osmBusy ? L('بيدوّر على محطات قريبة…', 'Looking for nearby stations…') : L('محطة قريبة مش متعاقدين (طوارئ)', 'A nearby station that is not contracted (emergency)'))}</button>${FS.osmErr ? `<div class="tiny muted">${esc(FS.osmErr)}</div>` : ''}`;
+    return `<div class="fs">${chips}${est ? `<div class="small ${est.low ? 'fs-low' : 'muted'}">${icon('fuel')}${esc(L(`باقي حوالي ${fmtNum(Math.max(0, est.left))} كم (تقدير)`, `About ${fmtNum(Math.max(0, est.left))} km left (estimate)`))}</div>` : ''}<div class="tiny muted fs-pos">${posLine}</div>
+      <div class="fs-h">${icon('fuel')}${esc(L('محطات PetroApp (المتعاقدين)', 'PetroApp stations (contracted)'))}</div>${petro}
+      <div class="fs-sep"></div>${osm}</div>`;
+  }
+  const fsPaint = () => { const b = document.getElementById('fs-body'); if (b) b.innerHTML = fsBody(); };
+  function pickVehicle() {
+    const vs = sortBy(list('vehicles').filter(v => (v.status || 'active') !== 'out'), v => v.name || ''); if (!vs.length) { toast(L('مفيش عربيات متسجلة', 'No vehicles registered'), 'err'); return; }
+    openModal({ title: L('تموين — اختار العربية', 'Refuel — pick the vehicle'), body: `<div class="form">${field(L('العربية', 'Vehicle'), `<select name="vid">${vs.map(v => `<option value="${esc(v.id)}">${esc(v.name)}${v.plate ? ` (${esc(v.plate)})` : ''}</option>`).join('')}</select>`, 'full')}</div>`, submitLabel: L('كمّل', 'Continue'), onSubmit: f => { const id = formData(f).vid; if (!id) return false; later(() => ACTIONS.fuelStop(id)); return true; } });
+  }
+  ACTIONS.fuelStop = arg => {
+    if (!W() || !(drv() || canDecide())) return; let v = null, trip = null;
+    if (arg && /^trip:/.test(arg)) { trip = byId('trips', arg.slice(5)); v = trip && byId('vehicles', trip.vehicleId); } else if (arg) v = byId('vehicles', arg);
+    if (!v && drv()) { trip = list('trips').find(t => t.status === 'started' && t.driverId === me()) || null; v = trip ? byId('vehicles', trip.vehicleId) : list('vehicles').find(x => x.driverId === me()) || null; }
+    if (!v) return pickVehicle();
+    if (!trip) trip = list('trips').find(t => t.status === 'started' && t.vehicleId === v.id) || null;
+    const of = openFill(v.id); if (of) return ACTIONS.fuelView(of.id);
+    const ks = vFuels(v); Object.assign(FS, { vid: v.id, tripId: trip ? trip.id : null, kind: ks.includes('cng') && ks.length === 1 ? 'cng' : (ks[0] || 'b92'), pos: null, posTried: false, osm: null, osmBusy: false, osmErr: '' });
+    openModal({ title: L(`تموين — ${v.name}`, `Refuel — ${v.name}`), cls: 'fstop', footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button>`, body: `<div id="fs-body">${fsBody()}</div>`,
+      onOpen: () => { vehPos(v).then(p => { FS.pos = p; FS.posTried = true; fsPaint(); }); } });
+  };
+  ACTIONS.fsKind = k => { if (!FKEYS.includes(k)) return; FS.kind = k; FS.osm = null; FS.osmErr = ''; fsPaint(); };
+  ACTIONS.fsOsm = async () => {
+    if (FS.osmBusy) return; FS.osmBusy = true; FS.osmErr = ''; fsPaint();
+    try {
+      if (!FS.pos) { const v = byId('vehicles', FS.vid); FS.pos = await vehPos(v); FS.posTried = true; }
+      if (!FS.pos) { FS.osmErr = L('مقدرتش أحدد مكانك — شغّل الـGPS', 'Could not get your place — turn on GPS'); return; }
+      const r = typeof geoCall === 'function' ? await geoCall({ action: 'fuel', lat: FS.pos.lat, lng: FS.pos.lng, radius: FS.kind === 'cng' ? 15000 : 5000 }) : null;
+      const known = stations(); const mine = known.filter(x => !x.petro && sells(x, FS.kind)).map(x => ({ id: 'pl:' + x.id, name: x.name || '', brand: '', lat: +x.lat, lng: +x.lng, dist: distM(FS.pos, x), fuels: { cng: toList(x.fuels).includes('cng') ? true : null }, known: true }));
+      const fromMap = ((r && Array.isArray(r.stations)) ? r.stations.filter(okLL) : []).filter(o => !known.some(x => distM(x, o) < 150));   /* the same station already on our list */
+      FS.osm = mine.concat(fromMap).sort((x, y) => (x.dist ?? 1e9) - (y.dist ?? 1e9)); if (!FS.osm.length && r && r.error) FS.osmErr = String(r.error);
+    } catch (e) { FS.osmErr = L('مقدرتش أجيب المحطات — جرّب تاني', 'Could not load the stations — try again'); FS.osm = null; } finally { FS.osmBusy = false; fsPaint(); }
+  };
+  const staffPush = (x, title, body) => { try { if (typeof pushSend === 'function') pushSend(['role:fleet', 'role:manager'], title, body, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } };
+  const who = x => (typeof assigneeName === 'function' ? assigneeName(x.driverId) : '') || x.byName || '';
+  const vname = id => (typeof vehicleName === 'function' ? vehicleName(id) : ((byId('vehicles', id) || {}).name || ''));
+  function newFill(st, petro, extra) {
+    const v = byId('vehicles', FS.vid); const now = nowISO();
+    return Object.assign({ id: uid(), vehicleId: v.id, driverId: drv() ? me() : (v.driverId || null), tripId: FS.tripId || null, kind: FS.kind, unit: FS.kind === 'cng' ? 'm3' : 'L', petro: !!petro, station: { key: st.key, name: st.name || L('محطة وقود', 'Fuel station'), lat: +st.lat, lng: +st.lng, brand: st.brand || '' }, from: FS.pos ? { lat: FS.pos.lat, lng: FS.pos.lng, via: FS.pos.via } : null, at: now, date: todayISO(), createdBy: (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '' }, extra || {});
+  }
+  ACTIONS.fsPick = async id => {
+    const s = byId('places', id); if (!s || !FS.vid) return;
+    const x = newFill({ key: 'pl:' + s.id, name: s.name, lat: s.lat, lng: s.lng }, true, { status: 'going' });
+    await Store.save('fuelfills', x);
+    staffPush(x, L(`⛽ ${who(x)} رايح يموّن`, `⛽ ${who(x)} is going to refuel`), `${x.station.name} (PetroApp) · ${vname(x.vehicleId)} · ${FUEL()[x.kind]}`);
+    closeModal(); later(() => ACTIONS.fuelView(x.id));
+  };
+  const REASONS = () => [['low', L('البنزين / السولار / الغاز قرّب يخلص', 'Fuel is about to run out')], ['nopetro', L('مفيش محطة PetroApp قريبة', 'No PetroApp station nearby')], ['other', L('سبب تاني', 'Another reason')]];
+  ACTIONS.fsPickOsm = i => {
+    const o = FS.osm && FS.osm[+i]; if (!o) return; const name = o.name || L('محطة وقود', 'Fuel station');
+    closeModal(); later(() => openModal({ title: L(`طوارئ — ${name}`, `Emergency — ${name}`), submitLabel: L('اطلب موافقة', 'Ask for approval'),
+      body: `<div class="form"><div class="banner warn full" style="margin:0">${icon('alert')}<span>${esc(L('المحطة دي مش متعاقدين مع PetroApp — مدير الحركة لازم يوافق الأول، والدفع بالإيصال.', 'This station is not contracted with PetroApp — the fleet manager must approve first; payment with a receipt.'))}</span></div>${field(L('السبب', 'Reason'), `<select name="reason">${REASONS().map(r => `<option value="${r[0]}">${esc(r[1])}</option>`).join('')}</select>`, 'full')}${field(L('ملاحظة', 'Note'), inp('note', '', `placeholder="${esc(L('مثال: المؤشر على الاحتياطي', 'e.g. the gauge is on reserve'))}"`), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (d.reason === 'other' && !String(d.note || '').trim()) { toast(L('اكتب السبب', 'Write the reason'), 'err'); return false; }
+        const x = newFill({ key: o.id, name, lat: o.lat, lng: o.lng, brand: o.brand }, false, { status: 'requested', reason: d.reason, reasonNote: String(d.note || '').trim(), reqAt: nowISO() });
+        await Store.save('fuelfills', x);
+        const rl = (REASONS().find(r => r[0] === x.reason) || [])[1] || '';
+        try { if (typeof pushSend === 'function') pushSend(['role:fleet'], L(`⚠ ${who(x)} طالب يموّن من محطة مش متعاقدين`, `⚠ ${who(x)} asks to refuel at a non-contracted station`), `${rl}${x.reasonNote ? ' — ' + x.reasonNote : ''} · ${name} · ${vname(x.vehicleId)} — ${L('وافق أو ارفض من السيستم', 'approve or reject in the system')}`, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ }
+        later(() => ACTIONS.fuelView(x.id)); return true;
+      } }));
+  };
+
+  /* ---------- one refuel: status, route, done ---------- */
+  const fleetPhones = () => list('workers').filter(w => w.role === 'fleet' && w.status !== 'inactive' && w.phone).map(w => [w.name, w.phone]);
+  function fvBody(x) {
+    const [lab, cls] = ST()[x.status] || [x.status, '']; const v = byId('vehicles', x.vehicleId); const mine = drv() && x.driverId === me();
+    const rl = (REASONS().find(r => r[0] === x.reason) || [])[1] || '';
+    const seeMoney = canDecide() || canSettle();
+    const lines = [[L('العربية', 'Vehicle'), v ? v.name : ''], [L('السواق', 'Driver'), who(x)], [L('المحطة', 'Station'), `${x.station.name}${x.petro ? ' · PetroApp' : ` · ${L('مش متعاقدين', 'not contracted')}`}`], [L('الوقود', 'Fuel'), FUEL()[x.kind] || x.kind]];
+    if (!x.petro && rl) lines.push([L('السبب', 'Reason'), rl + (x.reasonNote ? ' — ' + x.reasonNote : '')]);
+    if (x.decidedAt) lines.push([x.status === 'rejected' ? L('رفض', 'Rejected by') : L('وافق', 'Approved by'), `${x.decidedByName || ''} ${hhmm(x.decidedAt)}`]);
+    if (x.escalatedAt && x.status === 'requested') lines.push([L('اتبعت كمان', 'Also sent to'), L('مدير المصنع', 'the factory manager')]);
+    if (x.status === 'done') { lines.push([L('الكمية', 'Quantity'), x.qty ? `${fmtNum(x.qty)} ${unit(x.kind)}` : (x.petro ? L('من فاتورة PetroApp', 'from the PetroApp bill') : '—')]); if (seeMoney && x.amount) lines.push([L('المبلغ', 'Amount'), `${fmtMoney(x.amount)} ${typeof CUR === 'function' ? CUR() : ''}`]); if (!x.petro) lines.push([L('الدفع', 'Payment'), x.payment === 'wallet' ? L('من العهدة', 'From custody') : `${L('استرداد من الحسابات', 'Refund from accounts')}${x.settledAt ? ` — ${L('اتسوّى', 'settled')} ${hhmm(x.settledAt)}` : ''}`]); if (x.odo) lines.push([L('العداد', 'Odometer'), `${fmtNum(x.odo)} ${L('كم', 'km')}`]); const m = billOf(x); if (m) lines.push(['PetroApp', `${fmtNum(m.liters || 0)} ${unit(x.kind)}${seeMoney && m.amount ? ` · ${fmtMoney(m.amount)}` : ''}`]); }
+    const acts = [];
+    if (OPEN.includes(x.status) && x.status !== 'requested' && okLL(x.station)) acts.push(`<a class="btn p" href="${esc(typeof navLink === 'function' ? navLink(x.station) : `https://www.google.com/maps/dir/?api=1&destination=${x.station.lat},${x.station.lng}`)}" target="_blank" rel="noopener">${icon('map')}${esc(L('افتح الطريق', 'Open the route'))}</a>`);
+    if (['approved', 'going', 'arrived'].includes(x.status) && (mine || canDecide())) acts.push(`<button type="button" class="btn p" data-action="fuelDone" data-arg="${esc(x.id)}">${icon('check')}${esc(L('اتموّنت', 'I refuelled'))}</button>`);
+    if (x.status === 'requested' && canDecide()) acts.push(`<button type="button" class="btn p" data-action="fuelDecide" data-arg="${esc(x.id)}:1">${icon('check')}${esc(L('وافق', 'Approve'))}</button><button type="button" class="btn d" data-action="fuelDecide" data-arg="${esc(x.id)}:0">${icon('x')}${esc(L('ارفض', 'Reject'))}</button>`);
+    if (x.status === 'requested' && mine) fleetPhones().slice(0, 2).forEach(([n, p]) => acts.push(`<a class="btn" href="tel:${esc(String(p).replace(/[^0-9+]/g, ''))}">${esc(L(`اتصل بـ${n}`, `Call ${n}`))}</a>`));
+    if (x.status === 'rejected' && mine) acts.push(`<button type="button" class="btn p" data-action="fuelAgain" data-arg="${esc(x.vehicleId)}">${icon('fuel')}${esc(L('اختار محطة تانية', 'Pick another station'))}</button>`);
+    if (OPEN.includes(x.status) && (mine || canDecide())) acts.push(`<button type="button" class="btn ghost" data-action="fuelCancel" data-arg="${esc(x.id)}">${esc(L('إلغاء', 'Cancel'))}</button>`);
+    if (x.status === 'done' && !x.petro && x.payment === 'reimburse' && !x.settledAt && canSettle()) acts.push(`<button type="button" class="btn p" data-action="fuelSettle" data-arg="${esc(x.id)}">${esc(L('اتسوّى', 'Settled'))}</button>`);
+    return `<div class="fv"><div class="fv-st"><span class="badge ${cls}">${esc(lab)}</span>${x.status === 'requested' ? `<span class="tiny muted">${esc(L('بيوصلك الرد هنا وفي إشعار', 'The answer arrives here and as a notice'))}</span>` : ''}</div>
+      <div class="fv-lines">${lines.map(l => `<div><span class="muted">${esc(l[0])}</span><b>${esc(l[1] || '—')}</b></div>`).join('')}</div>${x.thumb ? `<img class="fv-img" src="${esc(x.thumb)}" alt="" data-action="lightboxSrc" data-arg="${esc(x.thumb)}">` : ''}
+      <div class="fv-acts">${acts.join('')}</div></div>`;
+  }
+  let _fv = null;
+  ACTIONS.fuelView = id => { const x = byId('fuelfills', id); if (!x) return; _fv = { id, sig: JSON.stringify(x) }; openModal({ title: L(`تموين — ${x.station.name}`, `Refuel — ${x.station.name}`), cls: 'fview', footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button>`, body: `<div id="fv-body">${fvBody(x)}</div>` }); };
+  RENDER_HOOKS.push(() => { const b = document.getElementById('fv-body'); if (!b || !_fv) return; const x = byId('fuelfills', _fv.id); if (!x) return; const sig = JSON.stringify(x); if (sig === _fv.sig) return; _fv.sig = sig; b.innerHTML = fvBody(x); });
+  ACTIONS.fuelAgain = vid => { closeModal(); later(() => ACTIONS.fuelStop(vid)); };
+  ACTIONS.fuelDecide = async arg => {
+    const [id, ok] = String(arg).split(':'); const x = byId('fuelfills', id); if (!x || x.status !== 'requested' || !canDecide()) return;
+    await Store.update('fuelfills', id, { status: ok === '1' ? 'approved' : 'rejected', decidedAt: nowISO(), decidedByName: (S.session && S.session.name) || '' });
+    try { if (typeof pushSend === 'function' && x.driverId) pushSend(['w:' + x.driverId], ok === '1' ? L(`✅ اتوافق — موّن من ${x.station.name}`, `✅ Approved — refuel at ${x.station.name}`) : L(`❌ اترفض التموين من ${x.station.name}`, `❌ Refuelling at ${x.station.name} rejected`), ok === '1' ? L('ابعت صورة الإيصال بعد التموين.', 'Send the receipt photo after refuelling.') : L('كلّم مدير الحركة أو اختار محطة PetroApp.', 'Call the fleet manager or pick a PetroApp station.'), '/#/fleet', 'nf-fuel-' + id); } catch (e) { /* ignore */ }
+    toast(ok === '1' ? L('اتوافق', 'Approved') : L('اترفض', 'Rejected'));
+  };
+  ACTIONS.fuelCancel = async id => { const x = byId('fuelfills', id); if (!x || !OPEN.includes(x.status) || !((drv() && x.driverId === me()) || canDecide())) return; await Store.update('fuelfills', id, { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '' }); toast(L('اتلغى', 'Cancelled')); };
+  ACTIONS.fuelSettle = async id => { const x = byId('fuelfills', id); if (!x || !canSettle()) return; await Store.update('fuelfills', id, { settledAt: nowISO(), settledByName: (S.session && S.session.name) || '' }); toast(L('اتسجلت التسوية', 'Settlement recorded')); };
+  /* the PetroApp bill of a PetroApp refuel: same vehicle, same day, within 3 hours */
+  function billOf(x) {
+    if (!x.petro || typeof vehFuel !== 'function') return null; const v = byId('vehicles', x.vehicleId); if (!v) return null; const t0 = Date.parse(x.doneAt || x.at);
+    return vehFuel(v).filter(f => f.via === 'petroapp' && f.date === String(x.doneAt || x.at).slice(0, 10)).map(f => ({ f, dt: f.at ? Math.abs(Date.parse(`${f.date}T${f.at}`) - t0) : 0 })).filter(y => y.dt <= 3 * 3600e3).sort((a, b) => a.dt - b.dt).map(y => y.f)[0] || null;
+  }
+  ACTIONS.fuelDone = id => {
+    const x = byId('fuelfills', id); if (!x || !['approved', 'going', 'arrived'].includes(x.status)) return; const v = byId('vehicles', x.vehicleId);
+    const auto = v && v.gpsId && v.odoSync && (typeof vehOdo === 'function' ? vehOdo(v) : 0) > 0; const odo0 = v ? (typeof vehOdo === 'function' ? vehOdo(v) : +v.odometer || 0) : 0;
+    const need = !x.petro;
+    closeModal(); later(() => openModal({ title: L(`اتموّنت — ${x.station.name}`, `Refuelled — ${x.station.name}`), submitLabel: L('تسجيل', 'Save'),
+      body: `<div class="form">${x.petro ? `<div class="banner info full" style="margin:0">${icon('info')}<span>${esc(L('PetroApp: الكمية والمبلغ بييجوا لوحدهم من الفاتورة — مش لازم تكتب حاجة.', 'PetroApp: the quantity and amount come from the bill by themselves — nothing to type.'))}</span></div>` : ''}
+        ${field(`${L('الكمية', 'Quantity')} (${unit(x.kind)})${need ? '' : ` — ${L('اختياري', 'optional')}`}`, inp('qty', '', `type="number" step="0.01" min="0" inputmode="decimal" ${need ? 'required' : ''}`))}
+        ${need ? field(`${L('المبلغ', 'Amount')} (${typeof CUR === 'function' ? CUR() : ''})`, inp('amount', '', 'type="number" step="0.01" min="0" inputmode="decimal" required')) : ''}
+        ${auto ? `<div class="small muted full">${icon('check')}${esc(L(`العداد من جهاز التتبع: ${fmtNum(odo0)} كم`, `Odometer from the tracker: ${fmtNum(odo0)} km`))}</div>` : field(`${L('قراءة العداد (كم)', 'Odometer (km)')} — ${L('اختياري', 'optional')}`, inp('odo', odo0 || '', 'type="number" min="0" inputmode="numeric" class="ltr"'))}
+        <div class="field full"><label>${esc(need ? L('صورة الإيصال (مطلوبة)', 'Receipt photo (required)') : L('صورة الطلمبة أو الإيصال (اختياري)', 'Pump or receipt photo (optional)'))}</label><input type="file" id="f-ffile" name="ffile" accept="image/*" capture="environment" ${need ? 'required' : ''}></div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const qty = num(d.qty), amount = num(d.amount); const file = f.querySelector('#f-ffile') && f.querySelector('#f-ffile').files[0];
+        if (need && (!qty || !amount)) { toast(L('اكتب الكمية والمبلغ', 'Enter the quantity and the amount'), 'err'); return false; }
+        if (need && !file) { toast(L('صورة الإيصال مطلوبة', 'The receipt photo is required'), 'err'); return false; }
+        let fileId = null, thumb = null;
+        if (file) { try { const doc = await proofAttach(file, { kind: 'receipt', ownerKind: 'fuelfill', ownerId: x.id, note: `${L('تموين', 'Refuel')} ${x.station.name}` }); if (doc) { fileId = doc.id; thumb = doc.thumb || null; } } catch (e) { /* thumb below */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* none */ } } }
+        const odo = auto ? odo0 : (num(d.odo) || null); const patch = { status: 'done', doneAt: nowISO(), qty: qty || null, odo, fileId, thumb, doneByName: (S.session && S.session.name) || '' };
+        if (need) {
+          patch.amount = amount; const wid = x.driverId; const wl = typeof wallets === 'function' && wid ? wallets().filter(w => w.holder === wid) : [];
+          const w = wl.find(w0 => typeof walletBalance === 'function' && walletBalance(w0.id).balance + 0.5 >= amount);
+          if (w && drv() && wid === me()) {
+            const eid = uid(); try { await Store.save('expenses', { id: eid, date: todayISO(), month: monthOf(todayISO()), amount, cat: 'fuel_cash', account: w.id, holderId: wid, orderId: null, vehicleId: x.vehicleId, homeId: null, payee: x.station.name, ref: '', note: `${L('تموين طوارئ', 'Emergency refuel')} — ${(REASONS().find(r => r[0] === x.reason) || [])[1] || ''}`, src: 'wallet', fileIds: fileId ? [fileId] : [], thumb, byName: (S.session && S.session.name) || '', fuelFillId: x.id }); patch.payment = 'wallet'; patch.expenseId = eid; patch.walletId = w.id; } catch (e) { patch.payment = 'reimburse'; }
+          } else patch.payment = 'reimburse';
+        }
+        await Store.update('fuelfills', x.id, patch);
+        staffPush(x, L(`⛽ ${who(x)} اتموّن`, `⛽ ${who(x)} refuelled`), `${x.station.name}${x.petro ? ' (PetroApp)' : ` — ${L('مش متعاقدين', 'not contracted')}`} · ${vname(x.vehicleId)}${thumb ? ` · ${L('بصورة', 'with a photo')}` : ''}`);
+        if (need && patch.payment === 'reimburse') { try { if (typeof pushSend === 'function') pushSend(['role:acc', 'role:hr'], L(`تموين طوارئ محتاج تسوية — ${who(x)}`, `Emergency refuel to settle — ${who(x)}`), `${x.station.name} · ${vname(x.vehicleId)} · ${L('الإيصال في السيستم', 'the receipt is in the system')}`, '/#/dashboard', 'nf-fuel-acc-' + x.id); } catch (e) { /* ignore */ } }
+        toast(L('اتسجّل التموين', 'Refuel recorded')); return true;
+      } }));
+  };
+  /* the driver's old «log fuel» wrote into the vehicle record (the server refuses that for drivers) → this screen */
+  if (typeof ACTIONS.fuelNew === 'function') { const base = ACTIONS.fuelNew; ACTIONS.fuelNew = function (arg) { if (drv()) return ACTIONS.fuelStop(String(arg || '').split(':')[0] || undefined); return base.apply(this, arguments); }; }
+
+  /* ---------- the driver: escalate a request nobody answered (10 min) ---------- */
+  let _esc = 0;
+  RENDER_HOOKS.push(() => {
+    if (!drv() || !W() || Date.now() - _esc < 30000) return; _esc = Date.now();
+    list('fuelfills').filter(x => x.status === 'requested' && x.driverId === me() && !x.escalatedAt && x.reqAt && Date.now() - Date.parse(x.reqAt) >= 10 * 60000).forEach(x => {
+      Store.update('fuelfills', x.id, { escalatedAt: nowISO() }).then(() => { try { if (typeof pushSend === 'function') pushSend(['role:manager'], L(`⚠ ${who(x)} مستني موافقة على تموين من 10 دقايق`, `⚠ ${who(x)} has waited 10 min for a refuel approval`), `${x.station.name} · ${vname(x.vehicleId)} — ${L('مدير الحركة ما ردّش', 'the fleet manager has not answered')}`, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } }).catch(() => { /* next round */ });
+    });
+  });
+  /* «arrived at the station» — the vehicle tracker (or the phone) within 150 m */
+  let _arr = 0;
+  RENDER_HOOKS.push(() => {
+    if (!W() || Date.now() - _arr < 45000) return; const xs = list('fuelfills').filter(x => ['going', 'approved'].includes(x.status) && okLL(x.station) && (drv() ? x.driverId === me() : false)); if (!xs.length) return; _arr = Date.now();
+    xs.forEach(x => { const v = byId('vehicles', x.vehicleId); vehPos(v).then(p => { if (p && distM(p, x.station) <= 150) Store.update('fuelfills', x.id, { status: 'arrived', arrivedAt: nowISO() }).catch(() => { /* next round */ }); }); });
+  });
+
+  /* ---------- PetroApp stations learn their place: a PetroApp bill (station name + time) + where the vehicle stood then ---------- */
+  const normName = x => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const _tried = new Set(); let _learnAt = 0;
+  async function learnStations(max) {
+    if (!canDecide() || !G().on() || typeof vehFuel !== 'function') return 0; let n = 0; const from = addDays(todayISO(), -30);
+    const have = new Set(list('places').filter(x => x.kind === 'fuel').map(x => normName(x.name)));
+    for (const v of list('vehicles').filter(x => x.gpsId)) {
+      for (const f of vehFuel(v).filter(b => b.via === 'petroapp' && b.station && b.date >= from && b.at)) {
+        const nm = normName(f.station); if (!nm || have.has(nm) || _tried.has(nm) || n >= (max || 5)) continue; _tried.add(nm);
+        const t0 = new Date(`${f.date}T${f.at}`).getTime(); if (!isFinite(t0)) continue;
+        try {
+          const r = await G().call('playback', { imei: v.gpsId, from: new Date(t0 - 12 * 60000).toISOString(), to: new Date(t0 + 12 * 60000).toISOString() });
+          const pts = ((r && r.track) || []).filter(okLL).map(p => ({ p, dt: Math.abs(Date.parse(p.at) - t0) + ((+p.speed || 0) > 5 ? 600000 : 0) })).sort((a, b) => a.dt - b.dt);
+          const best = pts[0] && pts[0].dt < 15 * 60000 ? pts[0].p : null; if (!best) continue;
+          const near = list('places').find(x => x.kind === 'fuel' && okLL(x) && distM(x, best) < 120);
+          if (near) { if (!near.petro) await Store.update('places', near.id, { petro: true }); have.add(nm); continue; }
+          await Store.save('places', { id: 'fuel_' + uid(), kind: 'fuel', petro: true, name: String(f.station).trim(), city: f.city || '', area: f.city || '', lat: Math.round(+best.lat * 1e6) / 1e6, lng: Math.round(+best.lng * 1e6) / 1e6, fuels: [], src: 'petroapp', learnedAt: nowISO(), fromBill: f.id || null }, { silent: true });
+          have.add(nm); n++;
+        } catch (e) { /* the next session tries again */ }
+      }
+    }
+    return n;
+  }
+  RENDER_HOOKS.push(() => { if (_learnAt || !S.session || !canDecide() || !S.loaded.vehicles) return; _learnAt = Date.now(); setTimeout(() => learnStations(5).catch(() => 0), 6000); });
+  window.nfFuelLearn = learnStations;
+
+  /* ---------- cards ---------- */
+  function fillRow(x) {
+    const [lab, cls] = ST()[x.status] || [x.status, '']; const rl = (REASONS().find(r => r[0] === x.reason) || [])[1] || '';
+    const dec = x.status === 'requested' && canDecide() ? `<button type="button" class="btn xs p" data-action="fuelDecide" data-arg="${esc(x.id)}:1" data-stop="1">${esc(L('وافق', 'Approve'))}</button><button type="button" class="btn xs d" data-action="fuelDecide" data-arg="${esc(x.id)}:0" data-stop="1">${esc(L('ارفض', 'Reject'))}</button>` : '';
+    return `<div class="item" data-action="fuelView" data-arg="${esc(x.id)}"><div class="main"><div class="title">${icon('fuel')}<span>${esc(who(x))}</span><span class="muted small">· ${esc(String(vname(x.vehicleId)).split('—')[0].trim())}</span></div><div class="meta"><span>${esc(x.station.name)}${x.petro ? ' · PetroApp' : ''}</span>${!x.petro && rl ? `<span>${esc(rl)}</span>` : ''}<span class="badge ${cls}">${esc(lab)}</span><span class="tiny muted">${esc(hhmm(x.doneAt || x.at))}</span></div></div><div class="end">${dec}</div></div>`;
+  }
+  function fuelCard() {
+    if (!seesAll()) return ''; const d = todayISO();
+    const req = list('fuelfills').filter(x => x.status === 'requested'); const act = list('fuelfills').filter(x => ['approved', 'going', 'arrived'].includes(x.status) || (x.status === 'done' && String(x.doneAt || '').slice(0, 10) === d));
+    const lows = list('vehicles').filter(v => (v.status || 'active') !== 'out').map(v => ({ v, f: lowOf(v) })).filter(y => y.f);
+    if (!req.length && !act.length && !lows.length) return '';
+    const near = v => { const p = (typeof gpsState !== 'undefined' && v.gpsId && gpsState.positions[v.gpsId]) || null; if (!p || p.lat == null) return ''; const s = stations().filter(st => st.petro && sells(st, lowOf(v).kind)).map(st => ({ st, dd: distM(p, st) })).sort((a, b) => a.dd - b.dd)[0]; return s ? ` · ${L('أقرب PetroApp', 'nearest PetroApp')}: ${s.st.name} (${fmtD(s.dd)})` : ''; };
+    return `<div class="card fs-card" id="fs-card"><div class="cardhead"><h3>${icon('fuel')}${esc(L('التموين', 'Refuelling'))}</h3>${req.length ? `<span class="badge warn">${req.length} ${esc(L('مستني موافقة', 'awaiting approval'))}</span>` : ''}</div>
+      ${req.length || act.length ? `<div class="list">${req.concat(sortBy(act, x => x.doneAt || x.at).reverse()).slice(0, 10).map(fillRow).join('')}</div>` : ''}
+      ${lows.length ? `<div class="fs-lows">${lows.map(y => `<div class="small">${icon('alert')}<b>${esc(y.v.name)}</b> — ${esc(L(`محتاجة تموين قريب: باقي حوالي ${fmtNum(Math.max(0, y.f.left))} كم (${FUEL()[y.f.kind]})`, `Needs fuel soon: about ${fmtNum(Math.max(0, y.f.left))} km left (${FUEL()[y.f.kind]})`))}${esc(near(y.v))}</div>`).join('')}</div>` : ''}</div>`;
+  }
+  function settleCard() {
+    if (!canSettle()) return ''; const xs = list('fuelfills').filter(x => x.status === 'done' && !x.petro && x.payment === 'reimburse' && !x.settledAt); if (!xs.length) return '';
+    return `<div class="card" id="fs-settle"><div class="cardhead"><h3>${icon('fuel')}${esc(L('تموينات طوارئ للتسوية', 'Emergency refuels to settle'))}</h3><span class="muted small">${xs.length}</span></div><div class="list">${xs.map(x => `<div class="item" data-action="fuelView" data-arg="${esc(x.id)}"><div class="main"><div class="title">${esc(who(x))} · ${esc(String(vname(x.vehicleId)).split('—')[0].trim())}</div><div class="meta"><span>${esc(x.station.name)}</span><span>${esc(fmtMoney(x.amount || 0))} ${esc(typeof CUR === 'function' ? CUR() : '')}</span><span class="tiny muted">${esc(String(x.doneAt || '').slice(0, 10))}</span></div></div><div class="end"><button type="button" class="btn xs p" data-action="fuelSettle" data-arg="${esc(x.id)}" data-stop="1">${esc(L('اتسوّى', 'Settled'))}</button></div></div>`).join('')}</div></div>`;
+  }
+  /* the driver: «⛽ Refuel» next to «New trip», the open refuel, «needs fuel soon» */
+  function driverBlock() {
+    if (!drv() || !W()) return ''; const v = (() => { const t = list('trips').find(x => x.status === 'started' && x.driverId === me()); return t ? byId('vehicles', t.vehicleId) : list('vehicles').find(x => x.driverId === me()); })();
+    const of = list('fuelfills').find(x => x.driverId === me() && OPEN.includes(x.status)); const low = v && !of ? lowOf(v) : null;
+    return `${of ? `<button type="button" class="banner ${of.status === 'requested' ? 'warn' : 'info'} fs-open" data-action="fuelView" data-arg="${esc(of.id)}">${icon('fuel')}<span>${esc((ST()[of.status] || [''])[0])} — ${esc(of.station.name)}</span></button>` : ''}${low ? `<div class="banner warn fs-lowb">${icon('alert')}<span>${esc(L(`العربية محتاجة تموين قريب — باقي حوالي ${fmtNum(Math.max(0, low.left))} كم`, `The vehicle needs fuel soon — about ${fmtNum(Math.max(0, low.left))} km left`))}</span></div>` : ''}<button type="button" class="btn fs-big" data-action="fuelStop">${icon('fuel')}${esc(L('تموين', 'Refuel'))}</button>`;
+  }
+  if (typeof vFleet === 'function') vFleet = (base => function () {
+    let html = base.apply(this, arguments);
+    if (drv()) { const blk = driverBlock(); if (!blk) return html; const m = /^<button type="button" class="btn p dtrip-big"[\s\S]*?<\/button>/.exec(html); return m ? m[0] + blk + html.slice(m[0].length) : blk + html; }
+    const f = S.ui.filter.fleet || {};
+    if (f.tab === 'fuel' && (seesAll() || canSettle())) return html + driversFillsCard();
+    if (seesAll() && !(S.route && S.route.id) && f.tab !== 'places') { const c = fuelCard(); if (c) { const i = html.indexOf('<div class="tabs">'); return i < 0 ? c + html : html.slice(0, i) + c + html.slice(i); } }
+    return html;
+  })(vFleet);
+  function driversFillsCard() {
+    const from = addDays(todayISO(), -30); const xs = sortBy(list('fuelfills').filter(x => x.status === 'done' && String(x.doneAt || '').slice(0, 10) >= from), x => x.doneAt || '').reverse();
+    return `<div class="card"><div class="cardhead"><h3>${icon('fuel')}${esc(L('تموينات السواقين (آخر 30 يوم)', "Drivers' refuels (last 30 days)"))}</h3><span class="muted small">${xs.length}</span></div>${xs.length ? `<div class="list">${xs.slice(0, 60).map(fillRow).join('')}</div>` : `<div class="muted small">${esc(L('لسه مفيش', 'None yet'))}</div>`}</div>`;
+  }
+  if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); return fuelCard() + settleCard() + html; })(vDashboard);
+  if (typeof vExpenses === 'function') vExpenses = (base => function () { const html = base.apply(this, arguments); return settleCard() + html; })(vExpenses);
+  if (typeof meExtraCards === 'function') meExtraCards = (base => function (w) { const h = base.apply(this, arguments); return canSettle() && S.route && S.route.view === 'me' ? settleCard() + h : w && w.role === 'driver' && drv() && W() ? h.replace(/(<button type="button" class="btn p dtrip-big"[\s\S]*?<\/button>)/, `$1<button type="button" class="btn fs-big" data-action="fuelStop">${icon('fuel')}${esc(L('تموين', 'Refuel'))}</button>`) : h; })(meExtraCards);
+  /* the trip page: its refuel stops + «⛽ Refuel» while it runs */
+  if (typeof vTripDetail === 'function') vTripDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const t = byId('trips', id); if (!t) return html;
+    const xs = sortBy(list('fuelfills').filter(x => x.tripId === id && x.status !== 'cancelled'), x => x.at || '');
+    const can = t.status === 'started' && W() && ((drv() && t.driverId === me()) || canDecide());
+    if (!xs.length && !can) return html;
+    const card = `<div class="card fs-trip"><div class="cardhead"><h3>${icon('fuel')}${esc(L('التموين في المشوار', 'Refuelling on this trip'))}</h3><div class="grow"></div>${can ? `<button type="button" class="btn sm" data-action="fuelStop" data-arg="trip:${esc(id)}">${icon('fuel')}${esc(L('تموين', 'Refuel'))}</button>` : ''}</div>${xs.length ? `<div class="list">${xs.map(fillRow).join('')}</div>` : `<div class="muted small">${esc(L('محتاج بنزين أو سولار أو غاز؟ دوس «تموين».', 'Need fuel? Tap «Refuel».'))}</div>`}</div>`;
+    return html + card;
+  })(vTripDetail);
+  /* «today's trips» (v7.03): a running refuel shows as the trip's step */
+  window.nfTripStep = t => { const x = list('fuelfills').find(y => y.tripId === t.id && OPEN.includes(y.status)); return x ? [x.status === 'requested' ? L('مستني موافقة تموين', 'Awaiting a refuel approval') : L('بيموّن', 'Refuelling'), x.status === 'requested' ? 'warn' : 'acc'] : null; };
+
+  /* ---------- the vehicle form: its fuel(s), tank, consumption, gas cylinder ---------- */
+  if (typeof vehForm === 'function') vehForm = (base => function (v) {
+    v = v || {}; const h = base.apply(this, arguments); const ks = vFuels(v);
+    const extra = `<div class="field full"><label>${esc(L('نوع الوقود (ممكن نوعين — بنزين + غاز)', 'Fuel (can be two — petrol + gas)'))}</label><div class="row fs-vf" style="gap:12px;flex-wrap:wrap">${FKEYS.map(k => `<label class="check"><input type="checkbox" data-vfuel="${k}" ${ks.includes(k) ? 'checked' : ''}> ${esc(FUEL()[k])}</label>`).join('')}</div><input type="hidden" name="fuels" value="${esc(ks.join(','))}"></div>
+      ${field(L('سعة التانك (لتر)', 'Tank size (L)'), inp('tankCap', v.tankCap ?? '', 'type="number" min="0" step="1" inputmode="numeric"'))}${field(L('الاستهلاك (لتر لكل 100 كم)', 'Consumption (L per 100 km)'), inp('consumption', v.consumption ?? '', 'type="number" min="0" step="0.1" inputmode="decimal"'))}
+      ${field(L('سعة أسطوانة الغاز (م³)', 'Gas cylinder (m³)'), inp('cngCap', v.cngCap ?? '', 'type="number" min="0" step="0.1" inputmode="decimal"'))}${field(L('استهلاك الغاز (م³ لكل 100 كم)', 'Gas use (m³ per 100 km)'), inp('cngUse', v.cngUse ?? '', 'type="number" min="0" step="0.1" inputmode="decimal"'))}`;
+    const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i);
+  })(vehForm);
+  document.addEventListener('change', e => { const c = e.target && e.target.closest && e.target.closest('[data-vfuel]'); if (!c) return; const f = c.closest('form'); const hid = f && f.querySelector('input[name=fuels]'); if (!hid) return; hid.value = Array.from(f.querySelectorAll('[data-vfuel]')).filter(x => x.checked).map(x => x.dataset.vfuel).join(','); });
+
+  /* ---------- places: fuel stations (v7.03 places) ---------- */
+  window.nfFuelStationsCard = canEdit => {
+    const xs = sortBy(list('places').filter(x => x && x.kind === 'fuel'), x => (x.petro ? '0' : '1') + (x.name || ''));
+    return `<div class="card"><div class="cardhead"><h3>${icon('fuel')}${esc(L('محطات الوقود', 'Fuel stations'))}</h3><span class="muted small">${xs.length}</span><div class="grow"></div>${canEdit ? `<button type="button" class="btn sm p" data-action="placeNew" data-arg="fuel">${icon('plus')}${esc(L('محطة', 'Station'))}</button>` : ''}</div>${xs.length ? `<div class="list">${xs.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.name || '')}${x.petro ? '<span class="badge good">PetroApp</span>' : ''}</div><div class="meta">${x.area || x.city ? `<span>${esc(x.area || x.city)}</span>` : ''}${toList(x.fuels).length ? `<span>${esc(toList(x.fuels).map(k => FUEL()[k]).join('، '))}</span>` : ''}${x.src === 'petroapp' ? `<span class="tiny muted">${esc(L('اتسجلت من فاتورة PetroApp', 'learned from a PetroApp bill'))}</span>` : ''}${okLL(x) ? '' : `<span class="muted">${esc(L('بدون لوكيشن', 'no location'))}</span>`}</div></div><div class="end">${canEdit ? `<button type="button" class="btn xs" data-action="placeEdit" data-arg="${esc(x.id)}">${icon('edit')}</button><button type="button" class="btn xs ghost" data-action="placeDel" data-arg="${esc(x.id)}">${icon('trash')}</button>` : ''}</div></div>`).join('')}</div>` : `<div class="muted small">${esc(L('ضيف محطات PetroApp عشان السواقين يلاقوها — وبتتسجل لوحدها من فواتير PetroApp.', 'Add the PetroApp stations so drivers find them — they also register themselves from PetroApp bills.'))}</div>`}</div>`;
+  };
+  window.nfFuelPlaceFields = x => {
+    const ks = toList(x && x.fuels);
+    return `<div class="field full fs-pf" data-kindshow="fuel"><label class="check"><input type="checkbox" name="petro" value="1" ${x && x.petro ? 'checked' : ''}> ${esc(L('متعاقدين مع PetroApp', 'Contracted with PetroApp'))}</label><div class="row" style="gap:12px;flex-wrap:wrap;margin-top:6px">${FKEYS.map(k => `<label class="check"><input type="checkbox" data-vfuel="${k}" ${ks.includes(k) ? 'checked' : ''}> ${esc(FUEL()[k])}</label>`).join('')}</div><input type="hidden" name="fuels" value="${esc(ks.join(','))}"></div>`;
+  };
+  window.nfFuelListOf = toList;
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.fs{display:grid;gap:8px}.fs-kinds{display:flex;gap:6px;flex-wrap:wrap}.fs-kind{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}.fs-kind.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.fs-h{display:flex;align-items:center;gap:6px;font-weight:800;font-size:13.5px;margin-top:4px}.fs-h svg{width:18px;height:18px}.fs-h.warn{color:var(--warn,#b26a00)}
+.fs-st{display:flex;flex-direction:column;align-items:stretch;gap:2px;text-align:start;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:10px 12px;font:inherit;color:var(--ink);cursor:pointer;width:100%}
+.fs-st .fs-n{font-weight:700;font-size:14.5px}.fs-st .fs-m{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--ink2,var(--muted))}.fs-st:active{transform:scale(.99)}
+.fs-pos svg,.fs-low svg,.fs-lows svg{width:15px;height:15px;vertical-align:-3px;margin-inline-end:4px}.fs-low{color:var(--crit,#c62828);font-weight:700}
+.fs-sep{border-top:1px dashed var(--line);margin:4px 0}.fs-emg{width:100%;justify-content:center;border-color:var(--warn,#b26a00);color:var(--warn,#b26a00)}
+.fs-big{width:100%;justify-content:center;padding:12px;font-size:15px;font-weight:800;border-radius:14px;margin-bottom:12px}
+.fs-open{width:100%;text-align:start;cursor:pointer;margin-bottom:10px;font:inherit}.fs-lowb{margin-bottom:10px}
+.fv{display:grid;gap:10px}.fv-lines{display:grid;gap:6px}.fv-lines>div{display:flex;justify-content:space-between;gap:12px;font-size:14px;border-bottom:1px solid var(--line);padding-bottom:5px}
+.fv-acts{display:flex;gap:8px;flex-wrap:wrap}.fv-acts .btn{flex:1 1 auto;justify-content:center}.fv-img{width:100%;max-height:220px;object-fit:cover;border-radius:12px;cursor:zoom-in}
+.fs-lows{display:grid;gap:4px;margin-top:8px}.fs-card .item{cursor:pointer}
+</style>`);
 })();
 </script>
 
