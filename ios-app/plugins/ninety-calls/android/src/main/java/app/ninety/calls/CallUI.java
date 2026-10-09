@@ -16,6 +16,7 @@ import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
+import android.service.notification.StatusBarNotification;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -123,6 +124,7 @@ public final class CallUI {
         if (exp > 0 && System.currentTimeMillis() > exp) return;
         if (handled(ctx, id)) return;
         if (appInFront(ctx)) return;   /* the app is open on the screen — its own call screen rings */
+        if (showing(ctx, nid(id))) return;   /* already ringing (the caller's page rings again every few seconds) */
         channels(ctx);
         String caller = val(d, "caller");
         if (caller.isEmpty()) caller = val(d, "title");
@@ -160,6 +162,7 @@ public final class CallUI {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setAutoCancel(false)
+                .setOnlyAlertOnce(true)
                 .setTimeoutAfter(RING_MS)
                 .setContentIntent(fullPI)
                 .setFullScreenIntent(fullPI, true)
@@ -222,6 +225,15 @@ public final class CallUI {
         try {
             NotificationManagerCompat.from(ctx).notify(n, b.build());
         } catch (Exception ignored) { }
+    }
+
+    static boolean showing(Context ctx, int n) {
+        try {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return false;
+            for (StatusBarNotification s : nm.getActiveNotifications()) if (s.getId() == n) return true;
+        } catch (Exception ignored) { }
+        return false;
     }
 
     static boolean appInFront(Context ctx) {
