@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0915-2aff70";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1103-a537ae";</script>
 
 <script>
 'use strict';
@@ -3646,7 +3646,7 @@ function loadFaceApi(onStatus) {
 }
 async function faceDescriptor(el) { if (!_faceReady) return null; const det = await faceapi.detectSingleFace(el, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor(); return det ? { d: Array.from(det.descriptor), box: det.detection.box, score: det.detection.score } : null; }
 function faceDistance(a, b) { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); }
-function faceMatch(desc) { const th = +faceCfg().threshold || 0.5; let best = null, bestD = 9; list('workers').forEach(w => { if (w.status === 'inactive' || !w.face || !Array.isArray(w.face.d) || punchMethodsOf(w).face === false) return; w.face.d.forEach(d => { const dist = faceDistance(desc, d); if (dist < bestD) { bestD = dist; best = w; } }); }); return bestD <= th ? { w: best, dist: r2(bestD) } : { w: null, dist: r2(bestD) }; }
+function faceMatch(desc) { const th = +faceCfg().threshold || 0.5; let best = null, bestD = 9; list('workers').forEach(w => { if (w.status === 'inactive' || !w.face || !Array.isArray(w.face.d) || punchMethodsOf(w).face === false) return; (typeof faceSamples === 'function' ? faceSamples(w) : w.face.d).forEach(d => { const dist = faceDistance(desc, d); if (dist < bestD) { bestD = dist; best = w; } }); }); return bestD <= th ? { w: best, dist: r2(bestD) } : { w: null, dist: r2(bestD) }; }
 async function openCamera(video) { const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); video.srcObject = stream; await video.play().catch(() => { }); return stream; }
 function stopStream(v) { try { const s = v && v.srcObject; if (s) s.getTracks().forEach(t => t.stop()); if (v) v.srcObject = null; } catch (e) { /* ignore */ } }
 const camAvailable = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -4122,7 +4122,7 @@ ACTIONS.selfPunch = async (arg, btn) => {
     const res = await kioskPunch(w, { method: 'self', faceScore: typeof verify.face === 'number' ? verify.face : undefined, verify: Object.keys(verify).length ? verify : undefined }); if (res && res.blocked) { toast(res.msg, 'err'); if (live) live.textContent = res.msg; }
   } finally { btn.disabled = false; }
 };
-const verifyBadge = r => { const v = r && (r.verify || r.verifyOut); if (!v) return ''; const parts = []; if (v.dev === 'other') parts.push('<span class="badge" title="دخل وبصم من جهاز غير جهازه المعتاد">من جهاز آخر</span>'); if (v.suspect && v.suspect.length) parts.push(`<span class="badge crit" title="${esc(v.suspect.map(x => (typeof SUSPECT_LABEL !== 'undefined' && SUSPECT_LABEL[x]) || x).join(' · '))}">مشتبه — للمراجعة</span>`); if (v.live) parts.push('<span class="badge good" title="اجتاز فحص الحيوية">حي ✓</span>'); if (v.face === 'unavailable') parts.push('<span class="badge warn" title="لم تتوفر الكاميرا عند البصمة">بدون تحقق وجه</span>'); else if (v.face != null) parts.push('<span class="badge good">وجه ✓</span>'); if (v.device) parts.push('<span class="badge good">جهاز ✓</span>'); return parts.join(' '); };
+const verifyBadge = r => { const v = r && (r.verify || r.verifyOut); if (!v) return ''; const parts = []; if (v.dev === 'other') parts.push('<span class="badge" title="دخل وبصم من جهاز غير جهازه المعتاد">من جهاز آخر</span>'); const sus = (v.suspect || []).filter(x => x !== 'gesture'); if (sus.length) parts.push(`<span class="badge crit" title="${esc(sus.map(x => (typeof SUSPECT_LABEL !== 'undefined' && SUSPECT_LABEL[x]) || x).join(' · '))}">مشتبه — للمراجعة</span>`); if (!v.live && !v.device && (v.nolive || (v.suspect || []).includes('gesture'))) parts.push('<span class="badge" title="الوش اتعرف بس حركة التحقق ما اكتملتش وبصمة الصباع ماكانتش متاحة">من غير حركة تحقق</span>'); if (v.live) parts.push('<span class="badge good" title="اجتاز فحص الحيوية">حي ✓</span>'); if (v.face === 'unavailable') parts.push('<span class="badge warn" title="لم تتوفر الكاميرا عند البصمة">بدون تحقق وجه</span>'); else if (v.face != null) parts.push('<span class="badge good">وجه ✓</span>'); if (v.device) parts.push('<span class="badge good">جهاز ✓</span>'); return parts.join(' '); };
 /* =====================================================================
    Accounts: phone + self-set password · first-login activation (face / activation code) ·
    forgot-password with identity verification + HR approval · biometric-only attendance
@@ -4219,17 +4219,75 @@ ACTIONS.actCode = async wid => {
 function requestVisible(r) { const rl = role(); if (r.type === 'regchange') return rl === 'admin' || rl === 'hr'; if (r.type === 'password') return rl === 'admin' || rl === 'hr'; if (rl === 'admin' || rl === 'hr' || rl === 'manager' || rl === 'vice') return true; if (rl === 'head' && myDepts().includes(r.deptId)) return true; if (Array.isArray(r.chain) && r.chain.includes(rl)) return true; if (r.createdBy && S.session && r.createdBy === S.session.id) return true; if (rl === 'fleet' && r.type === 'trip') return true; return isManagerOf(byId('workers', r.workerId)); }
 
 /* ---------------- biometric-only attendance from the phone ---------------- */
+/* v7.08 (Mahmoud, 9 Oct: «any employee with a face print — if the face is not found, ask for the finger after it»): the punch
+   tries the employee's registered way first (the finger when it is set on this phone, else the face) and falls back to the
+   other one by itself: face not recognised / the move not finished / no camera / «finger instead» → the finger; finger
+   refused (an injured finger, a wet sensor) → the face. A finger never set up on this phone is set up on the spot, once (the
+   phone asks for the finger, so that is the check). A matched face whose move did not finish is accepted only when the finger
+   cannot be used here; both failed → «send a punch request» (time + place + the camera picture to the head). */
+async function punchVerify(w) {
+  const pm = punchMethodsOf(w); const devOn = pm.device !== false && deviceBioAvailable(); const hasFace = pm.selfie !== false && !!(w.face && w.face.d) && camAvailable();
+  const verify = {}; const tried = []; let frame = null, noLive = null, faceR = null;
+  const order = devOn && w.deviceCred ? ['device', 'face'] : ['face', 'device'];
+  for (const m of order) {
+    if (m === 'device') {
+      if (!devOn) continue;
+      const cur = byId('workers', w.id) || w;
+      if (!cur.deviceCred) {
+        const msg = tried.length ? 'وشّك ما اتأكدش — فعّل بصمة صباعك على الموبايل ده دلوقتي (مرة واحدة بس) وابصم بيها؟' : 'فعّل بصمة صباعك على الموبايل ده دلوقتي (مرة واحدة بس) وابصم بيها؟';
+        if (!(await confirmDlg(msg, 'فعّل وابصم', false))) { tried.push('device-skip'); continue; }
+        await ACTIONS.deviceEnroll(w.id); const w2 = byId('workers', w.id);
+        if (w2 && w2.deviceCred) { verify.device = 'enroll'; if (noLive) verify.face = noLive.dist; S._faceLive = null; S.session.deviceAt = Date.now(); return { ok: true, verify }; }
+        tried.push('device'); continue;
+      }
+      let r = false; try { r = await deviceVerify(cur); } catch (e) { r = false; }
+      if (r) { verify.device = true; if (noLive) verify.face = noLive.dist; S._faceLive = null; S.session.deviceAt = Date.now(); return { ok: true, verify }; }
+      tried.push('device');
+      if (hasFace && !tried.includes('face') && !noLive) toast('بصمة الصباع ما اتأكدتش — جرّب بوشّك', 'err');
+      continue;
+    }
+    if (!hasFace) continue;
+    const r = await faceVerify(w, { title: 'التحقق بالوجه قبل البصمة', alt: devOn && !tried.includes('device') ? 'بصمة الصباع بدل الوش' : '' });
+    faceR = r; if (r.frame) frame = r.frame;
+    if (r.ok && r.live !== false) { verify.face = r.dist; S.session.faceAt = Date.now(); return { ok: true, verify }; }
+    if (r.ok) { noLive = r; tried.push('face-nolive'); continue; }
+    if (r.reason === 'cancel') return { ok: false, cancelled: true };
+    tried.push(r.reason === 'alt' ? 'face-alt' : 'face');
+  }
+  /* the face matched but the move did not finish, and the finger could not be used on this phone → accepted, marked for the head */
+  if (noLive && !tried.includes('device')) { verify.face = noLive.dist; verify.nolive = true; S.session.faceAt = Date.now(); return { ok: true, verify }; }
+  if (noLive) S._faceLive = null;
+  return { ok: false, frame, tried, devOn, hasFace, faceR };
+}
+/* both ways failed: one button to the «forgotten punch» request, filled with now, carrying the place and the picture */
+function punchFailBox(w, res) {
+  const cur = attendanceFor(todayISO())[w.id] || {}; const kind = cur.in ? 'out' : 'in'; const done = !!(cur.in && cur.out);   /* already left: the punch was only an update, nothing to request */
+  const why = !res.hasFace && !res.devOn ? 'مفيش بصمة وش متسجّلة لك والموبايل ده مش بيدعم بصمة الصباع' : !res.hasFace ? 'بصمة الصباع ما اتأكدتش ومفيش بصمة وش متسجّلة لك' : !res.devOn ? 'وشّك ما اتأكدش والموبايل ده مش بيدعم بصمة الصباع' : 'وشّك ما اتأكدش وبصمة الصباع كمان';
+  S._bioFail = { wid: w.id, kind, at: nowISO(), frame: res.frame || null, tried: res.tried || [] };
+  try { Promise.resolve(typeof getGeoBase === 'function' ? getGeoBase(6000) : null).then(g => { if (S._bioFail && S._bioFail.wid === w.id && g) S._bioFail.geo = { lat: g.lat, lng: g.lng, acc: g.acc }; }).catch(() => { }); } catch (e) { /* no location */ }
+  openModal({ title: 'ماقدرناش نتأكد منك دلوقتي', footer: `${done ? '' : `<button type="button" class="btn p" id="pf-req">${icon('plus')}قدّم طلب بصمة</button>`}<button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
+    body: `<p>${esc(why)}.</p><p class="small ink2">${done ? `انصرافك متسجّل الساعة ${esc(cur.out)} — جرّب تاني في مكان فيه نور لو عايز تحدّثه.` : 'جرّب تاني في مكان فيه نور، أو قدّم طلب بصمة بالوقت دلوقتي — بيروح لرئيس قسمك ومعاه مكانك والصورة.'}</p>${res.frame ? `<div style="text-align:center"><img src="${res.frame}" alt="" style="max-width:140px;border-radius:10px"></div>` : ''}`,
+    onOpen: f => { const rb = $('#pf-req', f); if (rb) rb.addEventListener('click', () => { closeModal(); ACTIONS.kioskReq(w.id); setTimeout(() => punchReqFill(kind), 60); }); } });
+}
+function punchReqFill(kind) {
+  const f = $('#mform'); if (!f) return; const t = $('[name=type]', f); if (!t) return; t.value = 'punch'; t.dispatchEvent(new Event('change', { bubbles: true }));
+  const hm = new Date().toTimeString().slice(0, 5); const pk = $('[name=pkind]', f); if (pk) { pk.value = kind; pk.dispatchEvent(new Event('change', { bubbles: true })); }
+  const ti = $(kind === 'in' ? '[name=timeIn]' : '[name=timeOut]', f); if (ti) ti.value = hm;
+  const rs = $('[name=reason]', f); if (rs && !rs.value) rs.value = 'البصمة ما اشتغلتش من الموبايل (الوش والصباع)';
+}
 ACTIONS.selfPunch = async (arg, btn) => {
   const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return; btn.disabled = true; const live = $('#geo-live'); const fresh = t => t && Date.now() - t < 5 * 60 * 1000;
   try {
-    const pm = punchMethodsOf(w); const strict = punchStrict(); const verify = {}; let ok = false, why = '';
-    const canDevice = !!(pm.device && w.deviceCred); const canFace = !!(pm.selfie !== false && w.face && w.face.d);
+    const strict = punchStrict(); let verify = {}; let ok = false;
     if (fresh(S.session.deviceAt)) { verify.device = 'session'; ok = true; }
     else if (fresh(S.session.faceAt)) { verify.face = 'session'; ok = true; }
-    else if (canDevice && deviceBioAvailable()) { let r = false; try { r = await deviceVerify(w); } catch (e) { r = false; } if (!r) { toast('لم يتم التحقق من بصمة الجهاز', 'err'); return; } verify.device = true; S.session.deviceAt = Date.now(); ok = true; }
-    else if (canFace && camAvailable()) { const r = await faceVerify(w, { title: 'التحقق بالوجه قبل البصمة' }); if (r.ok) { verify.face = r.dist; S.session.faceAt = Date.now(); ok = true; } else if (r.reason === 'nomatch' || r.reason === 'cancel') { toast(verifyFailMsg(r), 'err'); return; } else why = verifyFailMsg(r); }
-    else why = !canFace && !canDevice ? 'لم تُسجَّل لك بصمة وجه ولم تُفعَّل بصمة الجهاز — راجع الموارد البشرية' : canDevice && !canFace ? 'بصمة الجهاز تحتاج فتح التطبيق من رابط https على الموبايل' : 'الكاميرا غير متاحة هنا — افتح التطبيق من رابط https على الموبايل أو من النسخة المكتبية';
-    if (!ok) { if (strict) { toast('البصمة لا تُقبل إلا ببصمة الوجه أو بصمة الجهاز — ' + why, 'err'); if (live) live.textContent = why; return; } verify.face = 'unavailable'; }
+    else {
+      const r = await punchVerify(w);
+      if (r.cancelled) { toast('تم الإلغاء', 'err'); return; }
+      if (r.ok) { verify = r.verify; ok = true; }
+      else if (!r.hasFace && !r.devOn && !strict) { verify.face = 'unavailable'; ok = true; }
+      else { punchFailBox(w, r); if (live) live.textContent = 'ماقدرناش نتأكد منك — جرّب تاني أو قدّم طلب بصمة'; return; }
+    }
     if (live) live.textContent = 'جارٍ تحديد موقعك…';
     const res = await kioskPunch(w, { method: 'self', faceScore: typeof verify.face === 'number' ? verify.face : undefined, verify }); if (res && res.blocked) { toast(res.msg, 'err'); if (live) live.textContent = res.msg; }
   } finally { btn.disabled = false; }
@@ -9093,51 +9151,89 @@ const GESTURES = [['right', 'لُفّ وجهك ناحية اليمين ببطء'
 function earOf(pts) { const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y); return (d(pts[1], pts[5]) + d(pts[2], pts[4])) / (2 * d(pts[0], pts[3])); };
 async function faceFrame(v) { if (!_faceReady) return null; const det = await faceapi.detectSingleFace(v, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor(); if (!det) return null; const lm = det.landmarks; let ear = null; try { const l = lm.getLeftEye(), r = lm.getRightEye(); if (l.length >= 6 && r.length >= 6) ear = (earOf(l) + earOf(r)) / 2; } catch (e) { /* tiny model has 68 pts too */ } return { d: Array.from(det.descriptor), box: det.detection.box, score: det.detection.score, ear }; }
 function snapFrame(v) { try { const c = document.createElement('canvas'); const r = Math.min(1, 200 / Math.max(v.videoWidth, v.videoHeight)); c.width = Math.round(v.videoWidth * r); c.height = Math.round(v.videoHeight * r); c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.6); } catch (e) { return null; } }
+/* v7.08 (Mahmoud, 9 Oct: «a suspicious punch every little while — people get hurt, the light is low»): 25 of 37 face punches
+   since 25 Sep were flagged, every one because the random move after the match did not finish in 12 s (turn right / left by
+   10 % of the frame, come 28 % closer, blink twice — at ~3 frames a second a blink is never seen); the face itself matched
+   every time. Now one easy move: turn the head a little to EITHER side (from the landmarks — the nose against the eyes, so a
+   mirrored camera or a moving phone does not matter) or bring the phone 15 % closer, 15 s, with a progress bar. A dark picture
+   turns the screen white (a front «flash») + «come closer to a light»; the face is found in less light (detector 0.3) while the
+   match threshold stays the same; the match must hold on 2 of the last 3 frames; a sure live match (≤ 0.40) is kept as an
+   extra sample (up to 3, face.x) so the system learns the factory light, glasses, a beard. A matched face whose move did not
+   finish is no longer «suspicious»: it comes back live:false + nolive and the punch asks for the finger (parts/15). */
+const LIVE_MOVE = 'لِف وشّك شوية لأي ناحية — أو قرّب الموبايل';
+const faceSamples = w => { const f = (w && w.face) || {}; return (Array.isArray(f.d) ? f.d : []).concat(Array.isArray(f.x) ? f.x : []); };
+function lmMean(p, a, b) { let x = 0, y = 0; for (let i = a; i <= b; i++) { x += p[i].x; y += p[i].y; } return { x: x / (b - a + 1), y: y / (b - a + 1) }; }
+async function faceFrameLL(v) {
+  if (!_faceReady) return null;
+  const det = await faceapi.detectSingleFace(v, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 })).withFaceLandmarks(true).withFaceDescriptor();
+  if (!det) return null; let yaw = null;
+  try { const p = det.landmarks.positions; if (p && p.length >= 48) { const le = lmMean(p, 36, 41), re = lmMean(p, 42, 47), nose = p[30]; const ed = Math.hypot(re.x - le.x, re.y - le.y); if (ed > 1) yaw = (nose.x - (le.x + re.x) / 2) / ed; } } catch (e) { /* no landmarks */ }
+  return { d: Array.from(det.descriptor), box: det.detection.box, score: det.detection.score, yaw };
+}
+let _lumaC = null;
+function frameLuma(v) { try { const c = _lumaC || (_lumaC = document.createElement('canvas')); c.width = 32; c.height = 24; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(v, 0, 0, 32, 24); const px = x.getImageData(0, 0, 32, 24).data; let s = 0; for (let i = 0; i < px.length; i += 4) s += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; return s / (px.length / 4); } catch (e) { return null; } }
+const setFlash = on => { try { document.body.classList.toggle('fv-flash', !!on); } catch (e) { /* ignore */ } };
+async function keepFaceSample(w, d, dist) {
+  try {
+    const cur = byId('workers', w.id) || w; const f = cur.face || {}; if (!Array.isArray(f.d) || !f.d.length || !(dist <= 0.40)) return;
+    if (faceSamples(cur).some(s => faceDistance(s, d) < 0.15)) return;   /* close to a sample already: nothing new to learn */
+    const x = (Array.isArray(f.x) ? f.x : []).concat([d.map(n => Math.round(n * 1e4) / 1e4)]).slice(-3);
+    await Store.update('workers', cur.id, { face: Object.assign({}, f, { x, xAt: nowISO() }) }, { silent: true });
+  } catch (e) { /* not allowed / offline: fine */ }
+}
 function faceVerify(w, opts = {}) {
   if (!secCfg().liveness || opts.noLiveness) return faceVerifyBase(w, opts);
   return new Promise(resolve => {
-    let done = false; const fin = r => { if (done) return; done = true; stopStream($('#cam')); closeModal(); resolve(r); };
-    const g = GESTURES[Math.floor(Math.random() * GESTURES.length)];
-    openModal({ title: opts.title || `التحقق بالوجه — ${w.name}`, sticky: true, footer: `<span class="muted small grow" id="face-hint">انظر إلى الكاميرا بإضاءة جيدة</span><button type="button" class="btn" id="face-cancel">إلغاء</button>`,
-      body: `<div class="camwrap"><video id="cam" autoplay muted playsinline></video><div class="camov" id="camov"></div></div><p id="face-status" class="small muted" style="text-align:center;margin-top:10px">جارٍ فتح الكاميرا…</p><div class="tiny muted" style="text-align:center">فحص الحيوية: بعد التعرف عليك ستُطلب حركة بسيطة — الصور والشاشات لا تُقبل</div>`,
+    let done = false; let lastSnap = null; const fin = r => { if (done) return; done = true; setFlash(false); stopStream($('#cam')); closeModal(); resolve(r); };
+    openModal({ title: opts.title || `التحقق بالوجه — ${w.name}`, sticky: true,
+      footer: `<span class="muted small grow" id="face-hint">${opts.alt ? '' : 'بصّ للكاميرا في نور كويس'}</span>${opts.alt ? `<button type="button" class="btn" id="face-alt">${icon('user')}${esc(opts.alt)}</button>` : ''}<button type="button" class="btn" id="face-cancel">إلغاء</button>`,
+      body: `<div class="camwrap"><video id="cam" autoplay muted playsinline></video><div class="camov" id="camov"></div></div><div class="fv-bar"><i id="fv-prog"></i></div><p id="face-status" class="small muted" style="text-align:center;margin-top:8px">جارٍ فتح الكاميرا…</p><div class="tiny muted" style="text-align:center">بعد ما يتعرّف عليك: لِف وشّك شوية لأي ناحية أو قرّب الموبايل — الصور والشاشات مش بتتقبل</div>`,
       onOpen: async f => {
+        const v = $('#cam', f); const st = $('#face-status', f); const prog = $('#fv-prog', f); const say = h => { if (st) st.innerHTML = h; };
         $('#face-cancel', f).addEventListener('click', () => fin({ ok: false, reason: 'cancel' }));
-        const v = $('#cam', f); const st = $('#face-status', f);
+        const altB = $('#face-alt', f); if (altB) altB.addEventListener('click', () => fin({ ok: false, reason: 'alt', frame: lastSnap || snapFrame(v) }));
         try { await openCamera(v); } catch (e) { fin({ ok: false, reason: 'camera' }); return; }
-        const ok = await loadFaceApi(m => { if (st) st.textContent = m; }); if (!ok) { fin({ ok: false, reason: 'load' }); return; }
-        const th = Math.min(0.6, (+faceCfg().threshold || 0.5) + 0.05); const t0 = Date.now(); let best = 9; let phase = 'match'; let matched = null; const frames = []; let gT0 = 0; let base = null; let blinks = 0, eyesClosed = false;
-        if (st) st.textContent = 'جارٍ التحقق…';
+        const ok = await loadFaceApi(m => say(esc(m))); if (!ok) { fin({ ok: false, reason: 'load' }); return; }
+        const samples = faceSamples(w); const th = Math.min(0.6, (+faceCfg().threshold || 0.5) + 0.05);
+        const t0 = Date.now(); let best = 9, phase = 'match', matched = null, base = null, gT0 = 0, lumaAt = 0, dark = false; const hits = []; const frames = [];
+        say('جارٍ التحقق…');
         const loop = async () => {
           if (done) return; if (!$('#cam')) { fin({ ok: false, reason: 'cancel' }); return; }
           try {
-            const r = await faceFrame(v); const ov = $('#camov');
-            if (!r) { if (ov) ov.innerHTML = ''; if (st) st.textContent = phase === 'match' ? 'لا يوجد وجه أمام الكاميرا — اقترب قليلًا' : `${g[1]} — وجهك خارج الكادر`; }
+            if (Date.now() - lumaAt > 900) { lumaAt = Date.now(); const lu = frameLuma(v); if (lu != null) { if (!dark && lu < 70) { dark = true; setFlash(true); } else if (dark && lu > 115) { dark = false; setFlash(false); } } }
+            const r = await faceFrameLL(v); const ov = $('#camov');
+            if (!r) { if (ov) ov.innerHTML = ''; hits.push(false); if (hits.length > 3) hits.shift(); say(phase === 'match' ? (dark ? 'النور ضعيف — الشاشة هتنوّر وشّك، قرّب الموبايل' : 'مفيش وش قدام الكاميرا — قرّب شوية') : `${LIVE_MOVE} — وشّك خرج من الكادر`); }
             else {
               if (ov) ov.innerHTML = `<i style="left:${r.box.x / v.videoWidth * 100}%;top:${r.box.y / v.videoHeight * 100}%;width:${r.box.width / v.videoWidth * 100}%;height:${r.box.height / v.videoHeight * 100}%"></i>`;
-              frames.push({ d: r.d, cx: (r.box.x + r.box.width / 2) / v.videoWidth, wdt: r.box.width / v.videoWidth, ear: r.ear, at: Date.now() }); if (frames.length > 40) frames.shift();
+              frames.push({ d: r.d, wdt: r.box.width / v.videoWidth, yaw: r.yaw }); if (frames.length > 30) frames.shift();
               if (phase === 'match') {
-                const dist = Math.min(...w.face.d.map(d => faceDistance(r.d, d))); best = Math.min(best, dist);
-                if (dist <= th) { matched = { dist: r2(dist), d: r.d, frame: snapFrame(v) }; phase = 'gesture'; gT0 = Date.now(); base = { cx: frames[frames.length - 1].cx, wdt: frames[frames.length - 1].wdt }; if (st) st.innerHTML = `<b>تم التعرف ✓</b> — الآن: <b>${g[1]}</b>`; }
-                else if (st) st.textContent = 'جارٍ التحقق… ثبّت الموبايل أمام وجهك';
+                const dist = samples.length ? Math.min(...samples.map(s => faceDistance(r.d, s))) : 9; best = Math.min(best, dist);
+                hits.push(dist <= th); if (hits.length > 3) hits.shift();
+                if (hits.filter(Boolean).length >= 2 && dist <= th) {
+                  lastSnap = snapFrame(v); matched = { dist: r2(dist), d: r.d, frame: lastSnap }; phase = 'move'; gT0 = Date.now();
+                  const ws = frames.slice(-3).map(x => x.wdt).sort((a, b) => a - b); base = { wdt: ws[Math.floor(ws.length / 2)], yaw: r.yaw };
+                  say(`<b>اتعرّفنا عليك ✓</b> — دلوقتي: <b>${LIVE_MOVE}</b>`);
+                } else say(dark ? 'النور ضعيف — قرّب الموبايل والشاشة هتنوّر وشّك' : 'جارٍ التحقق… ثبّت الموبايل قدام وشّك');
               } else {
-                const cur = frames[frames.length - 1]; let pass = false; const dx = cur.cx - base.cx;
-                if (g[0] === 'right') pass = dx < -0.10; else if (g[0] === 'left') pass = dx > 0.10; else if (g[0] === 'closer') pass = cur.wdt > base.wdt * 1.28;
-                else if (g[0] === 'blink') { if (cur.ear != null) { if (cur.ear < 0.19 && !eyesClosed) eyesClosed = true; else if (cur.ear > 0.25 && eyesClosed) { eyesClosed = false; blinks++; } } pass = blinks >= 2; }
-                if (pass) {
-                  /* anti-flat check: descriptors across the last frames must vary (a printed photo / screen barely changes) */
+                const cur = frames[frames.length - 1]; const dy = cur.yaw != null && base.yaw != null ? Math.abs(cur.yaw - base.yaw) : 0; const grow = base.wdt > 0 ? cur.wdt / base.wdt - 1 : 0;
+                const p = Math.max(dy / 0.18, grow / 0.15); if (prog) prog.style.width = Math.max(0, Math.min(100, Math.round(p * 100))) + '%';
+                const same = faceDistance(r.d, matched.d) < 0.75;   /* the same person stays in front of the camera while moving */
+                if (p >= 1 && same) {
+                  /* anti-flat check: descriptors across the last frames must vary (a printed photo / a screen barely changes) */
                   const recent = frames.slice(-8); let vari = 0; for (let i = 1; i < recent.length; i++) vari += faceDistance(recent[i].d, recent[i - 1].d); vari = recent.length > 1 ? vari / (recent.length - 1) : 0;
-                  const flags = []; if (vari < 0.012 && g[0] !== 'blink') flags.push('static');
+                  const flags = []; if (vari < 0.010) flags.push('static');
                   const prev = (w.lastSelfie || {}).d; if (prev && faceDistance(prev, matched.d) < 0.008) flags.push('replay');
                   try { await Store.update('workers', w.id, { lastSelfie: { d: matched.d, at: nowISO() } }, { silent: true }); } catch (e) { /* ro */ }
-                  S._faceLive = { ok: true, dist: matched.dist, live: true, gesture: g[0], frame: matched.frame, flags }; fin(S._faceLive);
+                  if (!flags.length) keepFaceSample(w, matched.d, matched.dist);
+                  S._faceLive = { ok: true, dist: matched.dist, live: true, gesture: dy / 0.18 >= grow / 0.15 ? 'turn' : 'closer', frame: matched.frame, flags }; fin(S._faceLive);
                   return;
                 }
-                if (Date.now() - gT0 > 12000) { S._faceLive = { ok: true, dist: matched.dist, live: false, gesture: g[0], frame: matched.frame, flags: ['gesture'] }; fin(S._faceLive); return; }
+                if (Date.now() - gT0 > 15000) { S._faceLive = { ok: true, dist: matched.dist, live: false, nolive: true, gesture: 'move', frame: matched.frame, flags: [] }; fin(S._faceLive); return; }
               }
             }
           } catch (e) { console.warn(e); }
-          if (phase === 'match' && Date.now() - t0 > (opts.timeout || 20000)) { fin({ ok: false, reason: 'nomatch', dist: r2(best) }); return; }
-          setTimeout(loop, 300);
+          if (phase === 'match' && Date.now() - t0 > (opts.timeout || 18000)) { fin({ ok: false, reason: 'nomatch', dist: r2(best), dark, frame: snapFrame(v) }); return; }
+          setTimeout(loop, 150);
         };
         loop();
       } });
@@ -38405,6 +38501,38 @@ html body .fmd-row:hover{background:var(--surface-2)}
     return { title: a ? vShort(a.vehicleId) || L('تنبيه', 'Alert') : L('تنبيه', 'Alert'), sub: a ? esc(a.title || '') : '', actions: `<a class="btn ghost" href="#/fleetalerts">${icon('back')}<span>${L('كل التنبيهات', 'All alerts')}</span></a>` };
   })(EXTRA_TITLES.fleetalerts);
   window.nfAutoTrip = { askMe, claim };
+})();
+/* =====================================================================
+   v7.08 — face print accuracy + the finger after the face (Mahmoud, 9 Oct — claude/pending-batch.md, go-ahead; all systems).
+   The logic lives where it always did: the face check in parts/51-login-plus.js (faceVerify — one easy move, low-light
+   «flash», 2-frame match, learned samples) and the punch in parts/15-account-security.js (punchVerify — the registered way
+   first, the other one as the fallback, the finger set up on the spot, «send a punch request» when both fail).
+   Here: the styles (progress bar, white screen in the dark), the picture / place / time carried by that punch request and
+   shown to whoever reviews it.
+   ===================================================================== */
+(function () {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.fv-bar{height:6px;border-radius:3px;background:var(--line,#e3e3e3);margin:10px auto 0;max-width:320px;overflow:hidden}
+.fv-bar i{display:block;height:100%;width:0;background:var(--good,#1b7f4b);transition:width .2s}
+body.fv-flash #overlay,body.fv-flash .overlay{background:#fff!important}
+body.fv-flash .modal{background:#fff!important;color:#111!important;box-shadow:0 0 0 100vmax #fff,0 0 80px 60px #fff!important}
+body.fv-flash .camwrap{outline:28px solid #fff}
+</style>`);
+  /* the request made from the «couldn't verify you» box carries the moment, the place and the camera picture */
+  if (typeof requestCreateHook === 'function') requestCreateHook = (base => async function (r, d, w) {
+    const ok = await base.apply(this, arguments); if (ok === false) return false;
+    const b = S._bioFail; if (b && w && b.wid === w.id && r.type === 'punch' && Date.now() - Date.parse(b.at) < 30 * 60000) { r.bioFail = { at: b.at, kind: b.kind, frame: b.frame || null, geo: b.geo || null, tried: b.tried || [] }; S._bioFail = null; }
+    return ok;
+  })(requestCreateHook);
+  if (typeof ACTIONS.reqOpen === 'function') ACTIONS.reqOpen = (base => id => {
+    base(id); const r = byId('requests', id); if (!r || !r.bioFail) return; const mb = document.querySelector('#mform .mb'); if (!mb || mb.querySelector('.bf-card')) return;
+    const b = r.bioFail; const hm = String(b.at || '').slice(11, 16); const g = b.geo && b.geo.lat != null ? b.geo : null;
+    const zone = g && typeof geoCheck === 'function' ? geoCheck(g) : null;
+    mb.insertAdjacentHTML('afterbegin', `<div class="card bf-card" style="margin-bottom:10px"><div class="small"><b>${L('البصمة ما اشتغلتش من الموبايل', 'The phone punch did not work')}</b> — ${L('الطلب اتعمل من صفحة البصمة', 'sent from the punch page')} ${esc(fmtDate(String(b.at || '').slice(0, 10)))} ${esc(new Date(b.at).toTimeString().slice(0, 5) || hm)}</div>
+      <div class="row" style="gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">${b.frame ? `<img src="${b.frame}" alt="" style="width:96px;border-radius:8px">` : ''}<div class="tiny">${g ? `${L('المكان', 'Place')}: <a href="https://www.google.com/maps?q=${g.lat},${g.lng}" target="_blank" rel="noopener">${esc(g.lat + ', ' + g.lng)}</a>${zone && zone.inside === true ? ` <span class="badge good">${L('جوه النطاق', 'inside the zone')}</span>` : zone && zone.inside === false ? ` <span class="badge warn">${L('بره النطاق', 'outside the zone')} (${fmtNum(zone.dist)} ${L('م', 'm')})</span>` : ''}` : L('المكان مش متاح', 'Place not available')}</div></div></div>`);
+  })(ACTIONS.reqOpen);
 })();
 </script>
 
