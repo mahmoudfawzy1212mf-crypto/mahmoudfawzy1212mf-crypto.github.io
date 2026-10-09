@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1103-a537ae";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1136-85e261";</script>
 
 <script>
 'use strict';
@@ -36623,6 +36623,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
   const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const AT = {
     afterhours: { ar: 'حركة خارج ساعات الشغل', en: 'Moving outside working hours', ic: 'alert' },
+    night_trip: { ar: 'مشوار بالليل / يوم إجازة', en: 'Trip at night / on a day off', ic: 'map' },
     overspeed: { ar: 'تجاوز السرعة', en: 'Over the speed limit', ic: 'alert' },
     offline: { ar: 'الجهاز فاصل', en: 'Tracker offline', ic: 'link' },
     idle: { ar: 'واقفة والموتور شغّال', en: 'Idling (engine on)', ic: 'info' },
@@ -36636,7 +36637,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
   };
   const tLabel = t => (AT[t] ? L(AT[t].ar, AT[t].en) : t);
   const LV = { crit: 'var(--crit-ink)', warn: '#d98a00', info: 'var(--acc-ink, #1b5fb4)' };
-  const DEF = { afterHours: true, overspeed: true, offline: true, idle: true, deviation: true, returnPrompt: true, autoClose: true, speedLimit: 100, offlineH: 1, idleMin: 10, autoCloseH: 24, homeRadius: 300, workFrom: '', workTo: '' };
+  const DEF = { afterHours: true, overspeed: true, offline: true, idle: true, deviation: true, returnPrompt: true, autoClose: true, speedLimit: 100, offlineH: 1, idleMin: 10, autoCloseH: 24, homeRadius: 300, workFrom: '', workTo: '', ownerNight: '21:00' };
   const cfg = () => Object.assign({}, DEF, (S.settings.fleet && S.settings.fleet.alerts) || {});
   const all = () => list('fleetalerts').filter(a => a && a.id && a.at).sort((a, b) => (a.at < b.at ? 1 : -1));
   const open = () => all().filter(a => !a.ack && a.type !== 'return');
@@ -36670,9 +36671,12 @@ html body .fmd-row:hover{background:var(--surface-2)}
   ACTIONS.faAckAll = async () => { if (!mayAck()) return; const rows = open(); if (!rows.length) return; if (!(await confirmDlg(L(`تعليم ${rows.length} تنبيه كـ«تم»؟`, `Mark ${rows.length} alerts as done?`), L('تم', 'Done'), false))) return; for (const a of rows) await Store.update('fleetalerts', a.id, { ack: { by: S.session.id, byName: S.session.name || '', at: nowISO() } }); toast(L('تم', 'Done')); };
 
   /* ---------- 2) the «last alerts» card: tracking tab + dashboard ---------- */
+  /* v7.09 (Mahmoud, 9 Oct: «show me the vehicle notifications only when a vehicle moved after 9 at night or on a day off»): the owner's
+     card lists only what was pushed to him (ownerPush) + SOS; the alerts page keeps everything */
+  const forMe = a => !owner() || !!a.ownerPush || a.type === 'sos';
   function lastCard(id) {
-    const rows = open().filter(a => Date.now() - new Date(a.at).getTime() < 48 * 3600e3).slice(0, 5); if (!rows.length) return '';
-    return `<div class="card" id="${id}"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول', 'Fleet alerts')}</h3><span class="badge warn">${open().length}</span><div class="grow"></div><a class="btn sm ghost" href="#/fleetalerts">${L('الكل', 'All')}</a></div><div class="list">${rows.map(a => row(a, true)).join('')}</div></div>`;
+    const mine = open().filter(forMe); const rows = mine.filter(a => Date.now() - new Date(a.at).getTime() < 48 * 3600e3).slice(0, 5); if (!rows.length) return '';
+    return `<div class="card" id="${id}"><div class="cardhead"><h3>${icon('alert')}${L('تنبيهات الأسطول', 'Fleet alerts')}</h3><span class="badge warn">${mine.length}</span><div class="grow"></div><a class="btn sm ghost" href="#/fleetalerts">${L('الكل', 'All')}</a></div><div class="list">${rows.map(a => row(a, true)).join('')}</div></div>`;
   }
   if (typeof vFleet === 'function') vFleet = (base => function () { const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {}; if (f.tab !== 'track' || !mayView()) return html; return html + lastCard('fa-track'); })(vFleet);
   if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!mayView()) return html; const card = lastCard('fa-dash'); if (!card) return html; const i = html.indexOf('<div class="card'); return i < 0 ? card + html : html.slice(0, i) + card + html.slice(i); })(vDashboard);
@@ -36707,6 +36711,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
         ${field(L('تسخين أكتر من (دقايق)', 'Idling more than (minutes)'), inp('idleMin', c.idleMin, `type="number" min="5" max="120" step="5" ${d}`))}
         ${field(L('إقفال تلقائي بعد (ساعات)', 'Auto-close after (hours)'), inp('autoCloseH', c.autoCloseH, `type="number" min="2" max="72" step="1" ${d}`))}
         ${field(L('نطاق المصنع (متر)', 'Factory radius (m)'), inp('homeRadius', c.homeRadius, `type="number" min="50" max="2000" step="50" ${d}`))}
+        ${field(L('إشعاراتي أنا: حركة العربيات بعد الساعة', 'My own notifications: vehicles moving after'), inp('ownerNight', c.ownerNight || '21:00', `type="time" ${d}`))}<div class="tiny muted" style="align-self:end">${L('المالك بيوصله إشعار العربيات بس لو عربية اتحركت بعد الساعة دي أو يوم إجازة — مدير الحركة ومدير المصنع بيوصلهم كله.', 'The owner is notified only when a vehicle moves after this time or on a day off — the fleet manager and the factory manager get everything.')}</div>
         ${field(L('ساعات الشغل من (اختياري)', 'Working hours from (optional)'), inp('workFrom', c.workFrom || '', `type="time" ${d}`))}
         ${field(L('إلى (اختياري)', 'to (optional)'), inp('workTo', c.workTo || '', `type="time" ${d}`))}
         ${st ? `<div class="full tiny muted">${L('النافذة الحالية', 'Current window')}: ${mm(st.window[0])} – ${mm(st.window[1])} · ${L('أيام الإجازة', 'Days off')}: ${(st.offDays || []).map(x => ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][x] || x).join('، ') || '—'}</div>` : ''}
@@ -36718,7 +36723,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (ev.target.id !== 'fa-cfg') return; ev.preventDefault(); if (!owner()) return;
     const f = ev.target; const d = formData(f); const c = cfg();
     ['afterHours', 'overspeed', 'offline', 'idle', 'deviation', 'returnPrompt', 'autoClose'].forEach(k => { c[k] = !!f.querySelector(`[name="${k}"]`).checked; });
-    c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 10; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || '';
+    c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 10; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || ''; c.ownerNight = d.ownerNight || '21:00';
     await Store.saveSettings(Object.assign({}, S.settings, { fleet: Object.assign({}, S.settings.fleet || {}, { alerts: c }) })); FA.st = null; FA.at = 0; toast(L('تم حفظ إعدادات التنبيهات', 'Alert settings saved'));
   });
   ACTIONS.faRun = async () => {
