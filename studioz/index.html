@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-1358-bc53ca";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-1453-c3b97e";</script>
 
 <script>
 'use strict';
@@ -38762,7 +38762,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   if (typeof render === 'function') render = (base => function () { try { sync(); } catch (e) { /* ignore */ } const r = base.apply(this, arguments); try { sync(); } catch (e) { /* ignore */ } return r; })(render);
 })();
 /* =====================================================================
-   v7.11 — «Apple» look for the whole system (Mahmoud, 9 Oct: «the UX/UI like the iPhone / Apple — crystal, chic»; primary = black).
+   v7.11 — «Apple» look (named «Advanced» since v7.12) for the whole system (Mahmoud, 9 Oct: «the UX/UI like the iPhone / Apple — crystal, chic»; primary = black).
    One stylesheet scoped under <html class="apple"> so the classic look is one switch away (Settings → General & data →
    «System look», owner). All three apps + the Ninety home + the kiosk. Layout and content are untouched — styling only.
    · system font (SF on iPhone / Mac, the current Arabic font elsewhere) · soft wallpaper · frosted bars, sidebar and sheets
@@ -38771,33 +38771,62 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
    · «reduce transparency» (or an old Android) → solid surfaces, no blur
    ===================================================================== */
 (function () {
-  const KEY = 'nf.look';
-  const cached = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
-  const want = () => { const s = (typeof S !== 'undefined' && S.settings && S.settings.ui) || null; return s && s.look ? s.look : (cached() || 'apple'); };
+  /* v7.12 — the look is named «Advanced» (Mahmoud: «the Apple look on the whole system, same look, call it Advanced»).
+     The owner picks the system's look (Advanced / Classic); every person can switch HIS OWN device (menu under his name,
+     kept on that device only), and a weak phone (2 GB RAM or less, or an Android with 4 cores or less) gets Classic by itself. */
+  const KEY = 'nf.look', DKEY = 'nf.look.device';
+  const ls = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
   const ua = navigator.userAgent || '';
   const blurOK = /iPhone|iPad|Macintosh/.test(ua) || (!/Android/.test(ua) && matchMedia('(hover:hover)').matches);
+  const weak = () => { try { const m = navigator.deviceMemory, c = navigator.hardwareConcurrency; if (m && m <= 3) return true; if (/Android/.test(ua) && c && c <= 4) return true; } catch (e) { /* ignore */ } return false; };
+  const sysLook = () => { const s = (typeof S !== 'undefined' && S.settings && S.settings.ui) || null; return s && s.look ? s.look : (ls(KEY) || 'apple'); };
+  const device = () => { const d = ls(DKEY); return d === 'apple' || d === 'classic' ? d : ''; };
+  const want = () => device() || (sysLook() === 'apple' && weak() ? 'classic' : sysLook());
   function apply() {
     const on = want() !== 'classic'; const h = document.documentElement;
     h.classList.toggle('apple', on); h.classList.toggle('apple-blur', on && blurOK);
-    try { localStorage.setItem(KEY, on ? 'apple' : 'classic'); } catch (e) { /* ignore */ }
+    try { const s = typeof S !== 'undefined' && S.settings && S.settings.ui; if (s && s.look) localStorage.setItem(KEY, s.look); } catch (e) { /* ignore */ }
   }
   apply();
   if (typeof render === 'function') render = (base => function () { try { apply(); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
+  window.nfLook = { want, sysLook, device, weak };
 
   /* Settings → «System look» (owner) */
   if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.look = {
     label: 'شكل السيستم', group: 'gen',
     render: () => {
-      const cur = want(); const opt = (k, t, d) => `<button type="button" class="lookopt ${cur === k ? 'on' : ''}" data-action="lookSet" data-arg="${k}"><span class="lookprev ${k}"><i></i><i></i><i></i></span><b>${t}</b><span class="small muted">${d}</span></button>`;
-      return `<div class="card"><div class="cardhead"><h3>شكل السيستم</h3><span class="muted small">بيتطبّق على كل الناس في السيستم ده — المحتوى والصلاحيات زي ما هي</span></div>
-        <div class="lookgrid">${opt('apple', 'Apple', 'زجاج شفاف، أزرار سودا مدوّرة، شيتات من تحت على الموبايل')}${opt('classic', 'الكلاسيك', 'الشكل القديم زي ما كان')}</div></div>`;
+      const cur = sysLook(); const opt = (k, t, d) => `<button type="button" class="lookopt ${cur === k ? 'on' : ''}" data-action="lookSet" data-arg="${k}"><span class="lookprev ${k}"><i></i><i></i><i></i></span><b>${t}</b><span class="small muted">${d}</span></button>`;
+      return `<div class="card"><div class="cardhead"><h3>${L('شكل السيستم', 'System look')}</h3><span class="muted small">${L('الشكل الأساسي لكل الناس في السيستم ده — المحتوى والصلاحيات زي ما هي', 'The main look for everyone in this system — content and permissions stay the same')}</span></div>
+        <div class="lookgrid">${opt('apple', 'Advanced', L('زجاج شفاف، أزرار سودا مدوّرة، شيتات من تحت على الموبايل', 'Frosted glass, black pill buttons, sheets from the bottom on phones'))}${opt('classic', 'Classic', L('الشكل القديم — أخف على الأجهزة البطيئة', 'The previous look — lighter on slow devices'))}</div>
+        <div class="small muted" style="margin-top:12px">${L('كل موظف يقدر يغيّر جهازه هو بس من القايمة تحت اسمه (Advanced / Classic)، والموبايلات الضعيفة بتاخد Classic لوحدها.', 'Each person can switch his own device from the menu under his name (Advanced / Classic); weak phones get Classic by themselves.')}</div></div>`;
     }
   };
   ACTIONS.lookSet = async k => {
     if (!isAdmin() || !['apple', 'classic'].includes(k)) return;
     await Store.saveSettings(Object.assign({}, S.settings, { ui: Object.assign({}, S.settings.ui || {}, { look: k }) }));
-    apply(); render(true); toast(k === 'apple' ? 'اتغيّر لشكل Apple' : 'رجع للشكل الكلاسيك');
+    apply(); render(true); toast(k === 'apple' ? L('الشكل الأساسي بقى Advanced', 'The main look is now Advanced') : L('الشكل الأساسي بقى Classic', 'The main look is now Classic'));
   };
+  /* this device only (any person) */
+  ACTIONS.lookMine = k => {
+    if (!['apple', 'classic'].includes(k)) return;
+    try { localStorage.setItem(DKEY, k); } catch (e) { /* ignore */ }
+    apply(); render(true);
+  };
+  const mineHTML = () => { const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    document.querySelectorAll('#root .side .lookrow').forEach(x => x.remove());
+    const chip = document.querySelector('#root .side .userchip'); if (chip) { const after = (chip.parentNode.querySelector('.langrow.inside')) || chip; after.insertAdjacentHTML('afterend', `<div class="lookrow">${mineHTML()}</div>`); }
+  });
+  /* the Ninety home has no RENDER_HOOKS — same switch under its name chip */
+  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.lookrow{display:flex;justify-content:center;margin:6px 10px 2px}
+.lookmine{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:rgba(127,127,127,.18)}
+.lookmine button{border:0;background:transparent;color:inherit;opacity:.75;font:inherit;font-size:12px;font-weight:600;padding:5px 12px;border-radius:9px;cursor:pointer}
+.lookmine button.on{background:rgba(255,255,255,.92);color:#1d1d1f;opacity:1;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+</style>`);
 
   const A = 'html.apple';
   (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="apple-look">
@@ -38890,6 +38919,9 @@ ${A} .brandchip{border-radius:999px}
 ${A} .field input,${A} .field select,${A} .field textarea,${A} select.sel,${A} input.inp,${A} .search input{border-radius:12px!important;border:1px solid transparent!important;background:var(--surface-2)!important;box-shadow:none!important}
 ${A} .field input:focus,${A} .field select:focus,${A} .field textarea:focus,${A} select.sel:focus,${A} input.inp:focus,${A} .search input:focus{background:var(--surface)!important;border-color:color-mix(in srgb,var(--accent) 55%,transparent)!important;box-shadow:0 0 0 4px var(--accent-soft)!important;outline:none}
 ${A} .field label{font-weight:600;color:var(--ink-2)}
+/* any other plain field on a page gets the same soft look (zero specificity: a page's own styling still wins) */
+:where(html.apple) :where(#view,.modal) :where(input[type=search],input[type=text],input:not([type]),input[type=number],input[type=date],input[type=time],input[type=tel],input[type=email],select,textarea){border:1px solid transparent;background:var(--surface-2);border-radius:12px;color:var(--ink)}
+:where(html.apple) :where(#view,.modal) :where(input[type=search],input[type=text],input:not([type]),input[type=number],input[type=date],input[type=time],input[type=tel],input[type=email],select,textarea):focus{outline:none;background:var(--surface);border-color:color-mix(in srgb,var(--accent) 55%,transparent);box-shadow:0 0 0 4px var(--accent-soft)}
 ${A} .check{border-radius:999px!important;border:0!important;background:var(--surface-2)!important}
 ${A} .check.on{background:var(--primary)!important;color:var(--primary-ink)!important}
 
