@@ -1402,7 +1402,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261009-0814-11b59e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261009-0915-2aff70";</script>
 
 <script>
 'use strict';
@@ -36364,16 +36364,17 @@ html body .fmd-row:hover{background:var(--surface-2)}
 
   /* ---------- 1) the driver's phone ---------- */
   const DA = { pos: null, cand: null, hits: 0, misses: 0, auto: null, lastSend: 0, watcher: null, webWatch: null, denied: false, lastTrack: 0, vehPos: [] };
-  function take(lat, lng, acc, kmh, at) { DA.pos = { lat: +(+lat).toFixed(6), lng: +(+lng).toFixed(6), acc: Math.round(acc || 0), kmh: kmh == null ? null : Math.round(kmh), at: at || nowISO() }; }
+  function take(lat, lng, acc, kmh, at) { DA.locErr = null; DA.pos = { lat: +(+lat).toFixed(6), lng: +(+lng).toFixed(6), acc: Math.round(acc || 0), kmh: kmh == null ? null : Math.round(kmh), at: at || nowISO() }; }
   async function startWatch() {
     if (DA.watcher || DA.webWatch) return;
+    DA.watchStart = Date.now();
     if (native()) {
-      try { DA.watcher = await BG().addWatcher({ backgroundTitle: L('Ninety · في الشغل', 'Ninety · at work'), backgroundMessage: L('بيحدّد مكانك أثناء الدوام — بيقف لوحده مع الانصراف', 'Locating you during the shift — stops by itself at punch-out'), requestPermissions: true, stale: false, distanceFilter: 15 }, (loc, err) => { if (err) { if (err.code === 'NOT_AUTHORIZED') DA.denied = true; return; } if (!loc || loc.latitude == null) return; DA.denied = false; take(loc.latitude, loc.longitude, loc.accuracy, loc.speed != null ? loc.speed * 3.6 : null, new Date(loc.time || Date.now()).toISOString()); }); }
+      try { DA.watcher = await BG().addWatcher({ backgroundTitle: L('Ninety · في الشغل', 'Ninety · at work'), backgroundMessage: L('بيحدّد مكانك أثناء الدوام — بيقف لوحده مع الانصراف', 'Locating you during the shift — stops by itself at punch-out'), requestPermissions: true, stale: false, distanceFilter: 15 }, (loc, err) => { if (err) { DA.locErr = err.code || 'err'; if (err.code === 'NOT_AUTHORIZED') DA.denied = true; return; } if (!loc || loc.latitude == null) return; DA.denied = false; take(loc.latitude, loc.longitude, loc.accuracy, loc.speed != null ? loc.speed * 3.6 : null, new Date(loc.time || Date.now()).toISOString()); }); }
       catch (e) { console.warn('driverpos watcher', e); DA.watcher = null; }
       return;
     }
     if (!navigator.geolocation) return;
-    try { DA.webWatch = navigator.geolocation.watchPosition(p => { DA.denied = false; take(p.coords.latitude, p.coords.longitude, p.coords.accuracy, p.coords.speed != null ? p.coords.speed * 3.6 : null); }, e => { if (e && e.code === 1) DA.denied = true; }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }); } catch (e) { DA.webWatch = null; }
+    try { DA.webWatch = navigator.geolocation.watchPosition(p => { DA.denied = false; take(p.coords.latitude, p.coords.longitude, p.coords.accuracy, p.coords.speed != null ? p.coords.speed * 3.6 : null); }, e => { DA.locErr = (e && e.code) || 2; if (e && e.code === 1) DA.denied = true; }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }); } catch (e) { DA.webWatch = null; }
   }
   async function stopWatch() {
     const w = DA.watcher; DA.watcher = null; if (w) { try { await BG().removeWatcher({ id: w }); } catch (e) { /* ignore */ } }
@@ -36413,13 +36414,28 @@ html body .fmd-row:hover{background:var(--surface-2)}
       if (vid && DA.hits >= 2) { if (!DA.auto || DA.auto.vehicleId !== vid) DA.auto = { vehicleId: vid, since: nowISO() }; DA.misses = 0; }
       else if (DA.auto) { DA.misses++; if (DA.misses >= 3) DA.auto = null; }
     } else if (trip) { DA.auto = null; DA.cand = null; DA.hits = 0; }
-    const row = { id: meId(), workerId: meId(), at: nowISO(), denied: !!DA.denied, src: native() ? 'app' : 'web', tripId: trip ? trip.id : null, vehicleId: DA.auto ? DA.auto.vehicleId : null, since: DA.auto ? DA.auto.since : null };
+    const row = { id: meId(), workerId: meId(), at: nowISO(), denied: !!DA.denied, src: native() ? 'app' : 'web', tripId: trip ? trip.id : null, vehicleId: DA.auto ? DA.auto.vehicleId : null, since: DA.auto ? DA.auto.since : null, locErr: DA.pos ? null : (DA.locErr || (DA.watchStart && Date.now() - DA.watchStart > 60000 ? 'nofix' : null)) };
     if (DA.pos) Object.assign(row, { lat: DA.pos.lat, lng: DA.pos.lng, acc: DA.pos.acc, kmh: DA.pos.kmh, posAt: DA.pos.at });
     try { await Store.save('driverpos', row, { silent: true }); } catch (e) { /* next tick retries */ }
     if (!trip) renderBanner();
+    renderLocBanner();
   }
   setInterval(() => { tick().catch(() => { }); }, 5000);
-  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (drv()) renderBanner(); });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (drv()) { renderBanner(); renderLocBanner(); } });
+  /* v7.07: punched in but the phone gives no location → tell the driver how to turn it on (the auto trip / «who drives» need it) */
+  function renderLocBanner() {
+    const old = document.getElementById('da-loc'); const me = meId();
+    const bad = drv() && me && punchedIn(me) && !DA.pos && (DA.denied || DA.locErr || (DA.watchStart && Date.now() - DA.watchStart > 60000));
+    if (!bad) { if (old) old.remove(); return; }
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const how = native() ? (ios ? L('افتح الإعدادات ← Ninety ← الموقع ← «دايمًا»، وشغّل خدمات الموقع.', 'Settings → Ninety → Location → «Always», and turn Location Services on.')
+      : L('افتح إعدادات الموبايل ← التطبيقات ← Ninety ← الأذونات ← الموقع ← «السماح طول الوقت»، وشغّل الـGPS.', 'Phone settings → Apps → Ninety → Permissions → Location → «Allow all the time», and turn GPS on.'))
+      : ios ? L('افتح الإعدادات ← الخصوصية ← خدمات الموقع ← شغّلها، وبعدين Safari ← اسمح بالموقع، وسيب الصفحة دي مفتوحة وإنت سايق.', 'Settings → Privacy → Location Services → on, then Safari → allow location, and keep this page open while driving.')
+      : L('الأحسن تنزّل أبلكيشن Ninety (بيبعت والموبايل مقفول). أو هنا: دوس القفل جنب الرابط ← الأذونات ← الموقع ← سماح، وشغّل الـGPS.', 'Best: install the Ninety app (it sends with the phone locked). Or here: tap the lock by the address → Permissions → Location → Allow, and turn GPS on.');
+    const html = `<div class="banner crit" id="da-loc" style="margin:10px 12px 0;align-items:center;gap:8px;flex-wrap:wrap">${icon('alert')}<span><b>${L('موقعك مش واصل للسيستم', 'Your location is not reaching the system')}</b> — ${how}</span>${native() || ios ? '' : `<a class="btn sm p" href="Ninety.apk" download>${L('نزّل الأبلكيشن', 'Get the app')}</a>`}</div>`;
+    if (old) { if (old.outerHTML !== html) old.outerHTML = html; return; }
+    const main = document.getElementById('view') || document.querySelector('main') || document.body; if (main) main.insertAdjacentHTML('afterbegin', html);
+  }
 
   /* the banner on the driver's pages */
   const snooze = () => { try { return +localStorage.getItem('nf.autoveh.snooze') || 0; } catch (e) { return 0; } };
@@ -36468,7 +36484,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {};
     if (f.tab !== 'drivers' || !S.session || !(isAdmin() || (typeof role === 'function' && role() === 'manager') || (typeof canFleet === 'function' && canFleet()))) return html;
     const ds = typeof drivers === 'function' ? drivers() : [];
-    const rows = ds.map(w => { const r = byId('driverpos', w.id); const on = punchedIn(w.id); let st, col; if (!on) { st = L('مش في الشغل', 'Off shift'); col = 'var(--muted)'; } else if (r && r.denied) { st = L('الموقع متقفل على موبايله', 'Location is off on his phone'); col = 'var(--crit-ink)'; } else if (r && fresh(r)) { st = L('بيبعت مكانه ✓', 'Sending ✓'); col = 'var(--good-ink, #1b7f4b)'; } else if (r && r.at && (Date.now() - new Date(r.at).getTime()) < 3600000) { st = L('الأبليكيشن مقفول من', 'App closed since') + ' ' + ago(r.at); col = '#d98a00'; } else { st = L('مفيش مكان النهارده — الأبليكيشن مش مفتوح أو الموقع متقفل', 'No place today — the app is not open or location is off'); col = 'var(--crit-ink)'; } const v = r && r.vehicleId && fresh(r) ? byId('vehicles', r.vehicleId) : null; return { w, r, st, col, v }; });
+    const rows = ds.map(w => { const r = byId('driverpos', w.id); const on = punchedIn(w.id); let st, col; if (!on) { st = L('مش في الشغل', 'Off shift'); col = 'var(--muted)'; } else if (r && r.denied) { st = L('الموقع متقفل على موبايله', 'Location is off on his phone'); col = 'var(--crit-ink)'; } else if (r && fresh(r) && r.lat == null && r.locErr) { st = L('الأبلكيشن مفتوح بس الموقع مش واصل — الإذن أو الـGPS مقفول', 'App open but no location — permission or GPS off'); col = 'var(--crit-ink)'; } else if (r && fresh(r)) { st = L('بيبعت مكانه ✓', 'Sending ✓'); col = 'var(--good-ink, #1b7f4b)'; } else if (r && r.at && (Date.now() - new Date(r.at).getTime()) < 3600000) { st = L('الأبليكيشن مقفول من', 'App closed since') + ' ' + ago(r.at); col = '#d98a00'; } else { st = L('مفيش مكان النهارده — الأبليكيشن مش مفتوح أو الموقع متقفل', 'No place today — the app is not open or location is off'); col = 'var(--crit-ink)'; } const v = r && r.vehicleId && fresh(r) ? byId('vehicles', r.vehicleId) : null; return { w, r, st, col, v }; });
     const card = `<div class="card" style="margin-bottom:12px"><div class="cardhead"><h3>${icon('map')}${L('موقع السواقين', 'Where the drivers are')}</h3><span class="tiny muted">${L('من موبايل كل سواق أثناء دوامه بس', 'from each driver phone, during his shift only')}</span></div><div class="list">${rows.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.w.name)}</div><div class="meta"><span style="color:${x.col};font-weight:700">${x.st}</span>${x.v ? `<span class="badge warn">${L('راكب', 'riding')} ${esc(x.v.name.split('—')[0].trim())} · ${L('تلقائي', 'auto')}</span>` : ''}${x.r && x.r.tripId ? `<span class="badge acc">${L('في مشوار', 'on a trip')}</span>` : ''}${x.r && x.r.posAt ? `<span class="tiny muted">${ago(x.r.posAt)}</span>` : ''}</div></div>${x.r && x.r.lat != null && fresh(x.r) ? `<div class="end"><a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${x.r.lat},${x.r.lng}">${icon('map')}${L('الخريطة', 'Map')}</a></div>` : ''}</div>`).join('') || `<div class="muted small">${L('مفيش سواقين', 'No drivers')}</div>`}</div></div>`;
     const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
     return cut > 5 ? html.slice(0, cut) + card + html.slice(cut) : html + card;
@@ -36534,7 +36550,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
   const F = () => (S.ui.filter.fa ||= { type: '', veh: '', open: '1' });
   function row(a, compact) {
     const col = LV[a.level] || LV.info; const v = byId('vehicles', a.vehicleId);
-    return `<div class="item" style="cursor:default;align-items:flex-start${a.ack ? ';opacity:.65' : ''}"><span class="fm-dot" style="background:${col};margin-top:6px;flex:none"></span><div class="main"><div class="title">${esc(a.title || tLabel(a.type))}</div><div class="meta"><span>${esc(a.body || '')}</span></div><div class="meta"><span class="badge" style="color:${col}">${tLabel(a.type)}</span>${v ? `<a href="#/fleet/veh/${esc(v.id)}">${esc(vName(a))}</a>` : ''}${a.driverId ? `<span>${esc(assigneeName(a.driverId))}</span>` : ''}${a.kmh != null ? `<span>${fmtNum(Math.round(a.kmh))} ${L('كم/س', 'km/h')}${a.limit ? ` / ${a.limit}` : ''}</span>` : ''}<span class="tiny muted">${esc((a.at || '').slice(0, 10))} ${hhmm(a.at)} · ${ago(a.at)}</span>${a.ack ? `<span class="tiny muted">✓ ${esc(a.ack.byName || '')}</span>` : ''}</div></div>${compact ? '' : `<div class="end" style="display:flex;gap:6px;flex-wrap:wrap">${a.lat != null ? `<a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${a.lat},${a.lng}">${icon('map')}${L('الخريطة', 'Map')}</a>` : ''}${a.tripId ? `<a class="btn xs" href="#/fleet/${esc(a.tripId)}">${L('المشوار', 'Trip')}</a>` : ''}${!a.ack && mayAck() && a.type !== 'return' ? `<button type="button" class="btn xs p" data-action="faAck" data-arg="${esc(a.id)}">${icon('check')}${L('تم', 'Done')}</button>` : ''}</div>`}</div>`;
+    return `<div class="item" style="cursor:default;align-items:flex-start${a.ack ? ';opacity:.65' : ''}"><span class="fm-dot" style="background:${col};margin-top:6px;flex:none"></span><div class="main"><div class="title"><a href="#/fleetalerts/${esc(a.id)}" style="color:inherit">${esc(a.title || tLabel(a.type))}</a></div><div class="meta"><span>${esc(a.body || '')}</span></div><div class="meta"><span class="badge" style="color:${col}">${tLabel(a.type)}</span>${v ? `<a href="#/fleet/veh/${esc(v.id)}">${esc(vName(a))}</a>` : ''}${a.driverId ? `<span>${esc(assigneeName(a.driverId) || a.driverName || '')}</span>` : ''}${a.kmh != null ? `<span>${fmtNum(Math.round(a.kmh))} ${L('كم/س', 'km/h')}${a.limit ? ` / ${a.limit}` : ''}</span>` : ''}<span class="tiny muted">${esc((a.at || '').slice(0, 10))} ${hhmm(a.at)} · ${ago(a.at)}</span>${a.ack ? `<span class="tiny muted">✓ ${esc(a.ack.byName || '')}</span>` : ''}</div></div>${compact ? '' : `<div class="end" style="display:flex;gap:6px;flex-wrap:wrap">${a.lat != null ? `<a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${a.lat},${a.lng}">${icon('map')}${L('الخريطة', 'Map')}</a>` : ''}${a.tripId ? `<a class="btn xs" href="#/fleet/${esc(a.tripId)}">${L('المشوار', 'Trip')}</a>` : ''}${!a.ack && mayAck() && a.type !== 'return' ? `<button type="button" class="btn xs p" data-action="faAck" data-arg="${esc(a.id)}">${icon('check')}${L('تم', 'Done')}</button>` : ''}</div>`}</div>`;
   }
   function vAlerts() {
     if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع ومدير الحركة', 'This page is for the owner, the factory manager and the fleet manager')}</b></div></div>`;
@@ -36748,6 +36764,8 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (!mayView()) return `<div class="card"><div class="empty"><b>${L('الصفحة دي للمالك ومدير المصنع ومدير الحركة', 'This page is for the owner, the factory manager and the fleet manager')}</b></div></div>`;
     const vs = sortBy(list('vehicles').filter(v => v.gpsId), v => v.name);
     if (route && route.id && route.id !== H.vid && byId('vehicles', route.id)) { H.vid = route.id; H.data = null; H.err = ''; }
+    /* v7.07: #/fleethistory/<vehicle>/<YYYY-MM-DD> (from an alert) opens that day once; the date picker keeps working after */
+    if (route && route.sub && route.sub !== H.rs) { H.rs = route.sub; if (/^\d{4}-\d{2}-\d{2}$/.test(route.sub) && route.sub !== H.date) { H.date = route.sub; H.data = null; H.err = ''; } }
     if (!H.vid && vs[0]) H.vid = vs[0].id; if (!H.date) H.date = todayLocal();
     const v = byId('vehicles', H.vid); const d = H.data; const s = d && d.summary;
     setTimeout(() => { if (!H.data && !H.loading && !H.err && H.vid) loadHistory(); else ensureHMap(); }, 30);
@@ -37426,7 +37444,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     return `<div class="dtp" data-dtp="${n}"><input class="inp dtp-q" data-dtpq="${n}" placeholder="${esc(L('ابحث بالاسم أو المنطقة', 'Search by name or area'))}" autocomplete="off" enterkeyhint="search"><select id="f-dt${n}" name="dt${n}" data-dtps="${n}">${selInner('', cur)}</select>
       <div class="dtp-new" data-dtpn="${n}" hidden><input class="inp" name="dt${n}Name" placeholder="${esc(L('اسم المكان', 'Place name'))}"><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><button type="button" class="btn sm" data-dtpgeo="${n}">${icon('map')}${esc(L('سجّل مكاني الحالي', 'Use my current location'))}</button><span class="tiny muted" data-dtpgeos="${n}"></span></div><input type="hidden" name="dt${n}Lat"><input type="hidden" name="dt${n}Lng"></div></div>`;
   }
-  const busyWith = vid => list('trips').find(x => x.status === 'started' && x.vehicleId === vid && x.driverId !== me());
+  const busyWith = vid => list('trips').find(x => x.status === 'started' && !x.gpsAuto && x.vehicleId === vid && x.driverId !== me());
   const openPOs = sid => list('purchases').filter(p => !['received', 'cancelled', 'draft', 'rfq'].includes(p.status) && ((p.supplierId && p.supplierId === sid) || (typeof supplierOf === 'function' && (supplierOf(p) || {}).id === sid)));
   const openExts = sfId => list('extorders').filter(x => x.servFactoryId === sfId && ['sent', 'approved', 'inprogress', 'ready'].includes(x.status));
   function linkHTML(toKey) {
@@ -37439,7 +37457,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
   }
   ACTIONS.drvTripNew = () => {
     if (!drv() || !W()) return;
-    const cur = list('trips').find(x => x.status === 'started' && x.driverId === me());
+    const cur = list('trips').find(x => x.status === 'started' && !x.gpsAuto && x.driverId === me());
     if (cur) { toast(L(`عندك مشوار شغّال (${cur.number}) — خلّصه الأول`, `You have a trip running (${cur.number}) — finish it first`), 'err'); go('fleet/' + cur.id); return; }
     const vs = sortBy(list('vehicles').filter(v => (v.status || 'active') !== 'out'), v => v.name || '');
     if (!vs.length) { toast(L('مفيش عربيات متسجلة', 'No vehicles registered'), 'err'); return; }
@@ -37497,7 +37515,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (from.key !== 'new' && from.key === to.key) { toast(L('«من» و«إلى» نفس المكان', '«From» and «To» are the same place'), 'err'); return false; }
     const vid = d.dtVeh; const b = vid && busyWith(vid); if (!vid) { toast(L('اختار العربية', 'Pick the vehicle'), 'err'); return false; }
     if (b) { toast(L(`العربية دي مع ${assigneeName(b.driverId)} دلوقتي`, `This vehicle is with ${assigneeName(b.driverId)} now`), 'err'); return false; }
-    if (list('trips').some(x => x.status === 'started' && x.driverId === me())) { toast(L('عندك مشوار شغّال — خلّصه الأول', 'You have a trip running — finish it first'), 'err'); return false; }
+    if (list('trips').some(x => x.status === 'started' && !x.gpsAuto && x.driverId === me())) { toast(L('عندك مشوار شغّال — خلّصه الأول', 'You have a trip running — finish it first'), 'err'); return false; }
     const kind = KINDS.includes(d.dtKind) ? d.dtKind : 'other'; const now = nowISO();
     const toP = to.key !== 'new' ? placeByKey(to.key) : null;
     const trip = { id: uid(), number: uniqueTripNo(), kind, purpose: String(d.dtPurpose || '').trim() || `${TRIP_KINDS[kind] || ''} — ${to.name}`, from: from.name, to: to.name, fromLoc: from, toLoc: to, date: todayISO(), time: hhmm(now), vehicleId: vid, driverId: me(),
@@ -38168,6 +38186,225 @@ html body .fmd-row:hover{background:var(--surface-2)}
     f.dataset.dfilt = '1'; filterAssignees(f); if (f.querySelector('#f-brandId') && f.querySelector('#f-orderId')) ordersByBrand(f);
   });
   mo.observe(document.documentElement, { childList: true, subtree: true });
+})();
+/* =====================================================================
+   v7.07 — automatic trips from the vehicle tracker + the details of every fleet alert
+   (Mahmoud, 9 Oct — claude/pending-batch.md items 1-3, go-ahead; factory only):
+   · the SERVER (Edge "fleet-alerts") opens a trip by itself when a vehicle drives off with no trip (kind auto, gpsAuto),
+     guesses the driver (his phone next to the vehicle → the vehicle's main driver → the only driver punched in → unknown),
+     records the stops and closes it back in the factory; every alert now carries since when / from where / where now /
+     speed / trip / driver + why.
+   · here: the alert page #/fleetalerts/<id> (the push opens it — map, route of that day, call the driver, done),
+     the automatic-trip card on the trip page (start, stops, driver status; the driver confirms «it is me» with where to,
+     or «not me» — through the server, the docs rules let a driver write only trips already in his name; the fleet
+     manager / owner sets the driver and marks a reviewed trip), a banner asking the driver, and an «auto» badge on trip cards.
+   · names come from the trip / alert rows (the server writes them): the fleet manager and the factory manager cannot read
+     worker records.
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const W = () => typeof writable === 'function' && writable();
+  const owner = () => typeof isAdmin === 'function' && isAdmin();
+  const drv = () => typeof isDriver === 'function' && isDriver();
+  const me = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const fleetOk = () => typeof canFleet === 'function' && canFleet();
+  const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet'].includes(R()));
+  const FA = () => window.nfFleetAlerts || null;
+  const p2 = n => String(n).padStart(2, '0');
+  const hm = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  const dayOf = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
+  const mins = (a, b) => { const x = Date.parse(a), y = b ? Date.parse(b) : Date.now(); return isFinite(x) && isFinite(y) ? Math.max(0, Math.round((y - x) / 60000)) : null; };
+  const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : '');
+  const vShort = id => String(((byId('vehicles', id) || {}).name) || '').split('—')[0].trim();
+  const maps = (lat, lng) => `https://www.google.com/maps?q=${encodeURIComponent(lat + ',' + lng)}`;
+  const tel = p => String(p || '').replace(/[^0-9+]/g, '');
+  const phoneOf = id => { const w = id ? byId('workers', id) : null; return w && w.phone ? tel(w.phone) : ''; };
+  const nameIn = (row, id) => (id ? assigneeName(id) || ((row && row.candNames) || {})[id] || (row && id === row.driverId ? row.driverName || '' : '') : '');
+  const fresh = (t, h) => Date.now() - Date.parse(t.createdAt || t.startedAt || 0) < h * 3600e3;
+  const WHY = {
+    trip: ['من المشوار المسجّل', 'from the recorded trip'],
+    auto: ['مشوار تلقائي — لسه ما أكّدش', 'automatic trip — not confirmed yet'],
+    phone: ['من موقع موبايله', 'from his phone location'],
+    primary: ['السواق الأساسي للعربية', 'the vehicle\'s main driver'],
+    shift: ['الوحيد المسجّل حضور', 'the only one punched in'],
+    many: ['أكتر من سواق في الشغل', 'more than one driver at work'],
+    none: ['مفيش سواق مسجّل حضور', 'no driver punched in'],
+    confirmed: ['أكّد إنه هو', 'confirmed it is him'],
+    fleet: ['حدّده مدير الحركة', 'set by the fleet manager'],
+    denied: ['السواق المرجّح قال مش هو', 'the guessed driver said it is not him'],
+  };
+  const why = k => (WHY[k] ? L(WHY[k][0], WHY[k][1]) : '');
+
+  if (typeof ICONS === 'object' && !ICONS.phone) ICONS.phone = '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>';
+  /* labels: the alert type and the trip kind */
+  if (FA() && FA().types) FA().types.autotrip = { ar: 'مشوار تلقائي من GPS', en: 'Automatic trip (GPS)', ic: 'map' };
+  if (typeof TRIP_KINDS !== 'undefined' && !TRIP_KINDS.auto) TRIP_KINDS.auto = 'مشوار تلقائي (GPS)';
+
+  /* ---------- the server call (confirm / deny) ---------- */
+  const ERR = {
+    taken: ['المشوار ده اتأكّد لسواق تاني', 'This trip was already confirmed by another driver'],
+    too_old: ['المشوار ده قديم — كلّم مدير الحركة', 'This trip is too old — talk to the fleet manager'],
+    drivers_only: ['التأكيد للسواقين بس', 'Only drivers can confirm'],
+    not_yours: ['المشوار مش متسجّل باسمك', 'The trip is not in your name'],
+    not_auto: ['ده مش مشوار تلقائي', 'This is not an automatic trip'],
+    forbidden: ['سجّل دخول الأول', 'Log in first'],
+  };
+  async function claim(tripId, mine, purpose, to) {
+    if (!S.sb || !S.sb.functions) { toast(L('محتاج نت — جرّب تاني', 'Needs the internet — try again'), 'err'); return false; }
+    try {
+      const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'tripclaim', tripId, mine: !!mine, purpose: purpose || '', to: to || '' } });
+      const j = (r && r.data) || {}; if (j.ok) return true;
+      let e = j.error; if (!e && r && r.error && r.error.context && typeof r.error.context.json === 'function') { try { e = ((await r.error.context.json()) || {}).error; } catch (x) { /* no body */ } }
+      toast(ERR[e] ? L(ERR[e][0], ERR[e][1]) : L('ماقدرناش نسجّل ده — جرّب تاني', 'Could not save that — try again'), 'err'); return false;
+    } catch (e) { toast(L('ماقدرناش نسجّل ده — جرّب تاني', 'Could not save that — try again'), 'err'); return false; }
+  }
+  /* the server writes the trip; show the answer right away until the realtime copy arrives */
+  const local = (id, patch) => { const t = byId('trips', id); if (t && S.data.trips) { S.data.trips.set(id, Object.assign({}, t, patch)); if (typeof render === 'function') render(false); } };
+
+  ACTIONS.atYes = id => {
+    const t = byId('trips', id); if (!t || !drv() || !W()) return;
+    openModal({ title: L('أكّد المشوار', 'Confirm the trip'), submitLabel: L('أيوه أنا اللي سايق', 'Yes, I am driving'),
+      body: `<div class="form"><div class="small full">${esc(L(`${t.number || ''} — ${vShort(t.vehicleId)} · بدأ الساعة ${hm(t.startedAt)}${t.from ? ' من ' + t.from : ''}`, `${t.number || ''} — ${vShort(t.vehicleId)} · started at ${hm(t.startedAt)}${t.from ? ' from ' + t.from : ''}`))}</div>
+        ${field(L('رايح فين', 'Going to'), inp('atTo', t.to || '', `placeholder="${esc(L('مثال: مخزن الخشب — العبور', 'e.g. the wood store'))}"`), 'full')}
+        ${field(L('ليه (الغرض)', 'Why (purpose)'), inp('atPurpose', t.purpose && !t.gpsAuto ? t.purpose : '', `placeholder="${esc(L('مثال: استلام خامات من المورد', 'e.g. picking up materials'))}"`), 'full')}</div>`,
+      onSubmit: async f => { const d = formData(f); const ok = await claim(id, true, d.atPurpose, d.atTo); if (!ok) return false; local(id, { driverId: me(), driverName: (S.session && S.session.name) || '', driverConfirmed: true, driverGuess: 'confirmed', to: d.atTo || t.to || '', purpose: d.atPurpose || t.purpose }); toast(L('تمام — المشوار بقى باسمك', 'Done — the trip is in your name')); }
+    });
+  };
+  ACTIONS.atNo = async id => {
+    const t = byId('trips', id); if (!t || !drv() || !W()) return;
+    if (!(await confirmDlg(L(`متأكد إنك مش اللي سايق ${vShort(t.vehicleId)}؟ مدير الحركة هيتبلّغ.`, `Sure you are not driving ${vShort(t.vehicleId)}? The fleet manager will be told.`), L('مش أنا', 'Not me'), false))) return;
+    if (!(await claim(id, false))) return;
+    const den = Array.from(new Set([...(t.driverDenied || []), me()]));
+    local(id, t.driverId === me() ? { driverId: null, driverName: '', driverConfirmed: false, driverGuess: 'denied', driverDenied: den } : { driverDenied: den });
+    toast(L('اتبلّغ مدير الحركة', 'The fleet manager was told'));
+  };
+  ACTIONS.atAssign = id => {
+    const t = byId('trips', id); if (!t || !fleetOk()) return;
+    const ids = Array.from(new Set([...(typeof drivers === 'function' ? drivers().map(w => w.id) : []), ...(t.driverCands || []), ...(t.driverId ? [t.driverId] : [])]));
+    const opt = ids.map(w => `<option value="${esc(w)}" ${w === t.driverId ? 'selected' : ''}>${esc(nameIn(t, w) || w)}</option>`).join('');
+    openModal({ title: L(`مين كان سايق — ${t.number || ''}`, `Who was driving — ${t.number || ''}`), submitLabel: L('حفظ', 'Save'),
+      body: `<div class="form">${field(L('السواق', 'Driver'), `<select id="f-atDrv" name="atDrv" required><option value="">—</option>${opt}</select>`, 'full')}
+        ${field(L('رايح فين', 'Going to'), inp('atTo', t.to || ''), 'full')}${field(L('ليه (الغرض)', 'Why (purpose)'), inp('atPurpose', t.purpose || ''), 'full')}</div>`,
+      onSubmit: async f => { const d = formData(f); if (!d.atDrv) { toast(L('اختار السواق', 'Pick the driver'), 'err'); return false; }
+        await Store.update('trips', id, { driverId: d.atDrv, driverName: nameIn(t, d.atDrv) || '', driverConfirmed: true, driverGuess: 'fleet', confirmedAt: nowISO(), confirmedByName: (S.session && S.session.name) || '', to: String(d.atTo || '').trim() || t.to || '', purpose: String(d.atPurpose || '').trim() || t.purpose || '' });
+        toast(L('اتحفظ', 'Saved')); }
+    });
+  };
+  ACTIONS.atReviewed = async id => { const t = byId('trips', id); if (!t || !fleetOk()) return; await Store.update('trips', id, { needsReview: false, reviewedAt: nowISO(), reviewedByName: (S.session && S.session.name) || '' }); toast(L('تمت المراجعة', 'Reviewed')); };
+
+  /* ---------- the automatic-trip card on the trip page ---------- */
+  function stopsHTML(t) {
+    const st = t.stops || []; if (!st.length) return `<div class="muted small">${L('لسه مفيش وقفات (أي وقفة 5 دقايق أو أكتر بره المصنع بتتسجّل).', 'No stops yet (any stop of 5 minutes or more outside the factory is recorded).')}</div>`;
+    return `<div class="list">${st.map((x, i) => { const m = mins(x.from, x.to); return `<div class="item" style="cursor:default"><div class="main"><div class="title"><span class="code">${i + 1}</span><span>${esc(x.name || L('وقفة', 'Stop'))}</span></div><div class="meta"><span>${hm(x.from)}${x.to ? ' – ' + hm(x.to) : ' · ' + L('لسه واقفة', 'still there')}</span>${m != null ? `<span>${m} ${L('دقيقة', 'min')}</span>` : ''}${x.lat != null && x.lng != null ? `<a href="${maps(x.lat, x.lng)}" target="_blank" rel="noopener">${L('على الخريطة', 'On the map')}</a>` : ''}</div></div></div>`; }).join('')}</div>`;
+  }
+  function driverStatus(t) {
+    const n = nameIn(t, t.driverId);
+    if (t.driverId && t.driverConfirmed) return `<b>${esc(n || '—')}</b> <span class="badge good">✓ ${esc(why(t.driverGuess === 'fleet' ? 'fleet' : 'confirmed'))}</span>`;
+    if (t.driverId) return `<b>${esc(n || '—')}</b> <span class="badge warn">${esc(L('مرجّح', 'likely'))}</span> <span class="tiny muted">${esc(why(t.driverGuess))} · ${esc(L('لسه ما أكّدش', 'not confirmed yet'))}</span>`;
+    const c = (t.driverCands || []).filter(x => !(t.driverDenied || []).includes(x)).map(x => nameIn(t, x)).filter(Boolean);
+    return `<b>${esc(L('مش معروف', 'Unknown'))}</b>${c.length ? ` <span class="tiny muted">— ${esc(L('اللي كانوا في الشغل', 'at work then'))}: ${esc(c.join('، '))}</span>` : ` <span class="tiny muted">— ${esc(why(t.driverGuess === 'denied' ? 'denied' : 'none'))}</span>`}`;
+  }
+  function autoCard(t) {
+    const m = me(); const age = fresh(t, 72);
+    const den = (t.driverDenied || []).filter(Boolean).map(x => nameIn(t, x)).filter(Boolean);
+    const acts = [];
+    if (drv() && W() && age && m) {
+      if (t.driverId === m && !t.driverConfirmed) acts.push(`<button type="button" class="btn sm p" data-action="atYes" data-arg="${esc(t.id)}">${icon('check')}${L('أيوه أنا', 'Yes, it is me')}</button>`, `<button type="button" class="btn sm" data-action="atNo" data-arg="${esc(t.id)}">${L('مش أنا', 'Not me')}</button>`);
+      else if (!t.driverId && !(t.driverDenied || []).includes(m)) { acts.push(`<button type="button" class="btn sm p" data-action="atYes" data-arg="${esc(t.id)}">${icon('check')}${L('أنا اللي سايقها', 'I am driving it')}</button>`); if ((t.driverCands || []).includes(m)) acts.push(`<button type="button" class="btn sm" data-action="atNo" data-arg="${esc(t.id)}">${L('مش أنا', 'Not me')}</button>`); }
+    }
+    if (fleetOk()) { acts.push(`<button type="button" class="btn sm" data-action="atAssign" data-arg="${esc(t.id)}">${icon('edit')}${t.driverId && t.driverConfirmed ? L('غيّر السواق', 'Change the driver') : L('حدّد السواق', 'Set the driver')}</button>`); if (t.needsReview) acts.push(`<button type="button" class="btn sm" data-action="atReviewed" data-arg="${esc(t.id)}">${icon('check')}${L('تمت المراجعة', 'Reviewed')}</button>`); }
+    if (mayView() && t.vehicleId) acts.push(`<a class="btn sm ghost" href="#/fleethistory/${esc(t.vehicleId)}/${esc(dayOf(t.startedAt) || '')}">${icon('map')}${L('المسار على الخريطة', 'Route on the map')}</a>`);
+    const km = t.km != null ? t.km : null;
+    return `<div class="card" id="at-card"><div class="cardhead"><h3>${icon('map')}${L('مشوار تلقائي من جهاز تتبع العربية', 'Automatic trip from the vehicle tracker')}</h3><div class="grow"></div>${t.needsReview ? `<span class="badge warn">${L('محتاج مراجعة', 'Needs review')}</span>` : ''}</div>
+      <div class="small ink2" style="margin-bottom:8px">${L('السيستم فتح المشوار ده لوحده لما العربية خرجت ومفيش مشوار مسجّل عليها.', 'The system opened this trip by itself when the vehicle drove off with no trip recorded.')}</div>
+      <div class="grid g3" style="gap:8px 14px;font-size:13px">
+        <div><div class="tiny muted">${L('بدأت تتحرك', 'Started moving')}</div><b>${hm(t.startedAt) || '—'}</b>${t.from ? ` <span class="small">${L('من', 'from')} ${esc(t.from)}</span>` : ''}</div>
+        <div><div class="tiny muted">${L('رجعت / وقفت', 'Back / ended')}</div>${t.endedAt ? `<b>${hm(t.endedAt)}</b>` : `<span class="small">${L('لسه في الطريق', 'Still on the road')}</span>`}${km != null ? ` <span class="small">· ${fmtNum(km)} ${L('كم', 'km')}</span>` : ''}</div>
+        <div><div class="tiny muted">${L('السواق', 'Driver')}</div>${driverStatus(t)}</div>
+      </div>
+      ${den.length ? `<div class="tiny muted" style="margin-top:6px">${L('قالوا مش هم', 'Said it is not them')}: ${esc(den.join('، '))}</div>` : ''}
+      ${t.endNote ? `<div class="banner ${t.needsReview ? 'warn' : 'info'}" style="margin-top:8px">${icon('info')}<span>${esc(t.endNote)}</span></div>` : ''}
+      <div class="tiny muted" style="margin:10px 0 4px;font-weight:700">${L('الوقفات', 'Stops')}</div>${stopsHTML(t)}
+      ${acts.length ? `<div class="row no-print" style="margin-top:10px;flex-wrap:wrap;gap:6px">${acts.join('')}</div>` : ''}</div>`;
+  }
+  function mergedCard(t) {
+    return `<div class="card" id="at-merged"><div class="cardhead"><h3>${icon('map')}${L('العربية كانت خرجت قبل ما المشوار يتفتح', 'The vehicle left before the trip was opened')}</h3></div>
+      <div class="small">${esc(L(`جهاز التتبع سجّل خروجها الساعة ${hm(t.gpsStartedAt)} (مشوار تلقائي ${t.mergedAuto || ''}) واتدمج في المشوار ده.`, `The tracker logged it leaving at ${hm(t.gpsStartedAt)} (automatic trip ${t.mergedAuto || ''}) and it was merged into this trip.`))}</div>
+      ${(t.stops || []).length ? `<div class="tiny muted" style="margin:10px 0 4px;font-weight:700">${L('الوقفات', 'Stops')}</div>${stopsHTML(t)}` : ''}</div>`;
+  }
+  if (typeof vTripDetail === 'function') vTripDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const t = byId('trips', id); if (!t || !(t.gpsAuto || t.mergedAuto)) return html;
+    const card = t.gpsAuto ? autoCard(t) : mergedCard(t); const i = html.indexOf('<div class="card">'); return i < 0 ? html + card : html.slice(0, i) + card + html.slice(i);
+  })(vTripDetail);
+  /* trip cards: «auto» / «needs review» */
+  if (typeof tripItem === 'function') tripItem = (base => function (t) {
+    const h = base.apply(this, arguments); if (!t || !(t.gpsAuto || t.needsReview)) return h;
+    const code = `<span class="code">${esc(t.number)}</span>`; const i = h.indexOf(code); if (i < 0) return h;
+    const b = `${t.gpsAuto ? `<span class="badge acc">${L('تلقائي', 'Auto')}</span>` : ''}${t.gpsAuto && !t.driverConfirmed ? `<span class="badge warn">${L('السواق مش متأكّد', 'Driver not confirmed')}</span>` : ''}${t.needsReview ? `<span class="badge warn">${L('محتاج مراجعة', 'Needs review')}</span>` : ''}`;
+    return h.slice(0, i + code.length) + b + h.slice(i + code.length);
+  })(tripItem);
+
+  /* ---------- the driver is asked (banner on his pages, 48 h) ---------- */
+  const askMe = () => { const m = me(); if (!drv() || !m) return []; return list('trips').filter(t => t && t.gpsAuto && fresh(t, 48) && ((t.driverId === m && !t.driverConfirmed) || (!t.driverId && (t.driverCands || []).includes(m) && !(t.driverDenied || []).includes(m)))).sort((a, b) => ((a.startedAt || '') < (b.startedAt || '') ? 1 : -1)); };
+  function renderAsk() {
+    const old = document.getElementById('at-ask'); const rows = askMe(); const r = S.route || {};
+    const t = rows[0]; if (!t || (r.view === 'fleet' && r.id === t.id)) { if (old) old.remove(); return; }
+    const guessed = t.driverId === me();
+    const html = `<div class="banner warn" id="at-ask" style="margin:10px 12px 0;align-items:center;gap:8px;flex-wrap:wrap">${icon('map')}<span><b>${esc(L(`السيستم سجّل مشوار تلقائي على ${vShort(t.vehicleId)} الساعة ${hm(t.startedAt)}${t.from ? ' من ' + t.from : ''}`, `The system recorded an automatic trip on ${vShort(t.vehicleId)} at ${hm(t.startedAt)}${t.from ? ' from ' + t.from : ''}`))}</b> — ${guessed ? L('إنت اللي سايقها؟', 'Are you driving it?') : L('لو إنت اللي سايقها أكّد.', 'If you are driving it, confirm.')}${rows.length > 1 ? ` <span class="tiny muted">(+${rows.length - 1})</span>` : ''}</span>
+      <button type="button" class="btn sm p" data-action="atYes" data-arg="${esc(t.id)}">${guessed ? L('أيوه أنا', 'Yes, it is me') : L('أنا اللي سايقها', 'I am driving it')}</button><button type="button" class="btn sm" data-action="atNo" data-arg="${esc(t.id)}">${L('مش أنا', 'Not me')}</button><a class="btn sm ghost" href="#/fleet/${esc(t.id)}">${L('افتح', 'Open')}</a></div>`;
+    if (old) { if (old.outerHTML !== html) old.outerHTML = html; return; }
+    const main = document.getElementById('view') || document.querySelector('main') || document.body; if (main) main.insertAdjacentHTML('afterbegin', html);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { if (drv()) renderAsk(); else { const o = document.getElementById('at-ask'); if (o) o.remove(); } } catch (e) { /* never break a render */ } });
+
+  /* ---------- the alert page (#/fleetalerts/<id>) ---------- */
+  function who(a) {
+    const out = []; const id = a.driverId; const n = nameIn(a, id);
+    if (id && n) { const p = phoneOf(id); out.push(`<div><b>${esc(n)}</b>${a.driverWhy ? ` <span class="tiny muted">(${esc(why(a.driverWhy))})</span>` : ''}${p ? ` <a class="btn xs" href="tel:${esc(p)}">${icon('phone')}${L('اتصل', 'Call')}</a>` : ''}</div>`); }
+    const c = (a.driverCands || []).filter(x => x && x !== id);
+    if (c.length) out.push(`<div class="small">${L('السواقين اللي في الشغل', 'Drivers at work')}: ${c.map(x => { const p = phoneOf(x); return `<span style="white-space:nowrap">${esc(nameIn(a, x) || '—')}${p ? ` <a class="btn xs" href="tel:${esc(p)}">${icon('phone')}</a>` : ''}</span>`; }).join(' · ')}</div>`);
+    if (!out.length) out.push(`<span class="muted">${esc(a.driverWhy ? why(a.driverWhy) : L('مش معروف', 'Unknown'))}</span>`);
+    return out.join('');
+  }
+  function vAlert(id) {
+    const a = byId('fleetalerts', id);
+    if (!a) return `<div class="card"><div class="empty"><b>${S.db && !(S.loaded || {}).fleetalerts ? L('بيحمّل…', 'Loading…') : L('التنبيه مش موجود — ممكن يكون اتمسح (بيتحفظ 90 يوم)', 'Alert not found — it may have been removed (90 days are kept)')}</b><a class="btn sm" href="#/fleetalerts">${L('كل التنبيهات', 'All alerts')}</a></div></div>`;
+    const types = (FA() && FA().types) || {}; const ty = types[a.type] ? L(types[a.type].ar, types[a.type].en) : a.type;
+    const col = { crit: 'var(--crit-ink)', warn: '#d98a00' }[a.level] || 'var(--acc-ink, #1b5fb4)';
+    const v = byId('vehicles', a.vehicleId); const tid = a.tripId || a.autoTripId; const t = tid ? byId('trips', tid) : null;
+    const has = a.lat != null && a.lng != null && a.lat !== '' && a.lng !== '';
+    const acts = [];
+    if (!a.ack && W()) acts.push(`<button type="button" class="btn sm p" data-action="faAck" data-arg="${esc(a.id)}">${icon('check')}${L('تم', 'Done')}</button>`);
+    if (a.vehicleId) acts.push(`<a class="btn sm" href="#/fleethistory/${esc(a.vehicleId)}/${esc(a.date || dayOf(a.at))}">${icon('map')}${L('مسار اليوم', 'The day\'s route')}</a>`);
+    acts.push(`<a class="btn sm ghost" href="#/fleetmap">${icon('map')}${L('الخريطة الحية', 'Live map')}</a>`);
+    if (has) acts.push(`<a class="btn sm ghost" href="${maps(a.lat, a.lng)}" target="_blank" rel="noopener">${L('افتح في جوجل ماب', 'Open in Google Maps')}</a>`);
+    const cell = (k, val) => (val ? `<div><div class="tiny muted">${k}</div>${val}</div>` : '');
+    return `<div class="grid gmain"><div class="stack">
+      <div class="card"><div class="cardhead"><span class="fm-dot" style="background:${col};flex:none"></span><h3 style="margin:0 6px">${esc(a.title || ty)}</h3><div class="grow"></div><span class="badge" style="color:${col}">${esc(ty)}</span></div>
+        ${a.body ? `<div style="font-size:15px;line-height:1.7">${esc(a.body)}</div>` : ''}
+        <div class="grid g3" style="gap:10px 14px;font-size:13px;margin-top:10px">
+          ${cell(L('وقت التنبيه', 'Alert time'), `<b>${esc(a.date || dayOf(a.at))} ${hm(a.at)}</b> <span class="tiny muted">${esc(ago(a.at))}</span>`)}
+          ${cell(L('العربية', 'Vehicle'), v ? `<a href="#/fleet/veh/${esc(v.id)}"><b>${esc(v.name)}</b></a>` : esc(a.vehicleName || ''))}
+          ${cell(L('السواق', 'Driver'), who(a))}
+          ${cell(L('بدأت تتحرك', 'Started moving'), a.moveSince ? `<b>${hm(a.moveSince)}</b>${a.startPlace ? ` <span class="small">${L('من', 'from')} ${esc(a.startPlace)}</span>` : ''}` : '')}
+          ${cell(L('كانت فين', 'Where it was'), a.placeNow ? esc(a.placeNow) : has ? `<span class="ltr tiny">${esc((+a.lat).toFixed(5))}, ${esc((+a.lng).toFixed(5))}</span>` : '')}
+          ${cell(L('السرعة', 'Speed'), a.kmh != null ? `<b>${fmtNum(Math.round(a.kmh))}</b> ${L('كم/س', 'km/h')}${a.limit ? ` <span class="tiny muted">/ ${L('الحد', 'limit')} ${a.limit}</span>` : ''}` : '')}
+          ${cell(L('المشوار', 'Trip'), t ? `<a href="#/fleet/${esc(t.id)}"><b>${esc(t.number || '')}</b></a>${t.gpsAuto ? ` <span class="badge acc">${L('تلقائي', 'Auto')}</span>` : ''}` : a.tripNo ? esc(a.tripNo) : `<span class="muted">${L('مفيش مشوار مسجّل', 'No trip recorded')}</span>`)}
+        </div>
+        ${a.ack ? `<div class="tiny muted" style="margin-top:8px">✓ ${esc(a.ack.byName || '')} · ${esc(hm(a.ack.at))}</div>` : ''}
+        <div class="row no-print" style="margin-top:12px;flex-wrap:wrap;gap:6px">${acts.join('')}</div></div>
+      ${has && typeof mapMiniHTML === 'function' ? `<div class="card"><div class="cardhead"><h3>${L('مكانها وقت التنبيه', 'Its place at the alert')}</h3></div>${mapMiniHTML(+a.lat, +a.lng, 0)}</div>` : ''}
+    </div><div class="stack">${t && t.gpsAuto ? autoCard(t) : ''}</div></div>`;
+  }
+  if (EXTRA_VIEWS.fleetalerts) EXTRA_VIEWS.fleetalerts = (base => r => (r && r.id ? vAlert(r.id) : base(r)))(EXTRA_VIEWS.fleetalerts);
+  if (EXTRA_TITLES.fleetalerts) EXTRA_TITLES.fleetalerts = (base => function (r) {
+    if (!r || !r.id) return base.apply(this, arguments); const a = byId('fleetalerts', r.id);
+    return { title: a ? vShort(a.vehicleId) || L('تنبيه', 'Alert') : L('تنبيه', 'Alert'), sub: a ? esc(a.title || '') : '', actions: `<a class="btn ghost" href="#/fleetalerts">${icon('back')}<span>${L('كل التنبيهات', 'All alerts')}</span></a>` };
+  })(EXTRA_TITLES.fleetalerts);
+  window.nfAutoTrip = { askMe, claim };
 })();
 </script>
 
