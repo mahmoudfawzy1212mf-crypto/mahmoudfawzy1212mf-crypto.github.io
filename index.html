@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1312-140b3b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1530-24f08f";</script>
 
 <script>
 'use strict';
@@ -7332,7 +7332,7 @@ function vTripDetailBase(id) {
       <div class="row no-print" style="margin-top:12px;flex-wrap:wrap">${acts.join('')}</div></div>
     <div class="card"><div class="cardhead"><h3>المسار</h3>${m ? `<span class="badge ${m.pct >= 70 ? 'good' : 'crit'}">تطابق هاتف السائق مع GPS العربية ${m.pct}%</span>` : ''}</div>
       ${(t.track || []).length > 1 || (t.gpsTrack || []).length > 1 ? trackSvg(t) : '<div class="muted small">لا توجد نقاط مسار بعد — تُسجَّل تلقائيًا من هاتف السائق أثناء المشوار</div>'}${t.gpsPulledAt ? `<div class="tiny muted">مسار العربية من eTrack: ${(t.gpsTrack || []).length} نقطة${t.gpsKm ? ` · ${fmtNum(t.gpsKm)} كم` : ''} · سُحب ${fmtDate(t.gpsPulledAt.slice(0, 10))} ${t.gpsPulledAt.slice(11, 16)}</div>` : ''}
-      <div class="grid g3" style="gap:8px;font-size:13px;margin-top:8px"><div><div class="tiny muted">الانطلاق</div>${t.startedAt ? `${fmtDate(t.startedAt.slice(0, 10))} ${t.startedAt.slice(11, 16)}` : '—'}${t.startPos ? `<div class="tiny muted ltr">${t.startPos.lat}, ${t.startPos.lng} (±${t.startPos.acc}م)</div>` : ''}</div><div><div class="tiny muted">الوصول</div>${t.endedAt ? `${fmtDate(t.endedAt.slice(0, 10))} ${t.endedAt.slice(11, 16)}` : '—'}${t.endPos ? `<div class="tiny muted ltr">${t.endPos.lat}, ${t.endPos.lng}</div>` : ''}</div><div><div class="tiny muted">المسافة (هاتف)</div>${t.km ? `${fmtNum(t.km)} كم` : '—'}</div></div>
+      <div class="grid g3" style="gap:8px;font-size:13px;margin-top:8px"><div><div class="tiny muted">الانطلاق</div>${t.startedAt ? `${fmtDate(t.startedAt.slice(0, 10))} ${t.startedAt.slice(11, 16)}` : '—'}${t.startPos ? `<div class="tiny muted ltr">${(+t.startPos.lat).toFixed(5)}, ${(+t.startPos.lng).toFixed(5)}${t.startPos.acc != null ? ` (±${Math.round(t.startPos.acc)}م)` : ''}</div>` : ''}</div><div><div class="tiny muted">الوصول</div>${t.endedAt ? `${fmtDate(t.endedAt.slice(0, 10))} ${t.endedAt.slice(11, 16)}` : '—'}${t.endPos ? `<div class="tiny muted ltr">${(+t.endPos.lat).toFixed(5)}, ${(+t.endPos.lng).toFixed(5)}</div>` : ''}</div><div><div class="tiny muted">المسافة (هاتف)</div>${t.km ? `${fmtNum(t.km)} كم` : '—'}</div></div>
       ${m && m.pct < 70 ? `<div class="banner warn" style="margin-top:8px">${icon('alert')}<span>مسار السائق لا يطابق مسار العربية بنسبة كافية — راجع مع مدير الحركة</span></div>` : ''}</div>
     </div><div class="stack">
     <div class="card"><div class="cardhead"><h3>التوثيق</h3></div>${t.proof ? `<div class="small">${badge({ ok: ['تم بدون مشاكل', 'good'], issue: ['توجد مشكلة', 'crit'] }, t.proof.status || 'ok')}</div><div class="small" style="white-space:pre-wrap;margin-top:4px">${esc(t.proof.note || '')}</div><div style="margin-top:6px">${proofChip(t.proof, `trip:${id}:proof`, 'صورة الإنهاء')}</div>` : '<div class="muted small">يُوثَّق المشوار بصورة وتقرير عند الإنهاء</div>'}</div>
@@ -40001,25 +40001,59 @@ html.apple.apple-blur .modal .mh,html.apple.apple-blur .modal .mf{background:col
    · sign out keeps its red colour; every tile does exactly what its old row did;
    · the night / day button (Classic) stays where it was.
    All three systems, Advanced and Classic, Arabic and English, iPhone and Android.
+   v7.29 (Mahmoud, 10 Oct: «put "see the system through…" next to sign out and password so the four are together, and
+   Arabic/English, Advanced/Classic — all of them in one strip»):
+   · «see the system through…» (owner only) is the first tile of the same row → view as · password · sign out · guide;
+   · the language, the look and (on the phone) night/day become one row of three tiles above it — each tile shows what is
+     on now and a tap switches it (Arabic / English, Advanced / Classic, dark / light). The old full-width switches are
+     only hidden, nothing else changes.
    ===================================================================== */
 (function () {
   if (window.__NF_SIDESTRIP__) return; window.__NF_SIDESTRIP__ = 1;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const SHORT = { navgo: () => L('بوابتي', 'My page'), changePassword: () => L('كلمة السر', 'Password'), logout: () => L('خروج', 'Sign out'), helpOpen: () => L('الشرح', 'Guide') };
+  const SHORT = { viewPick: () => L('شوف بعين', 'View as'), deleteMyAccount: () => L('مسح حسابي', 'Delete account'), navgo: () => L('بوابتي', 'My page'), changePassword: () => L('كلمة السر', 'Password'), logout: () => L('خروج', 'Sign out'), helpOpen: () => L('الشرح', 'Guide') };
   const tile = el => {
     const k = el.dataset.action; const name = SHORT[k] ? SHORT[k]() : (el.textContent || '').trim();
     const svg = el.querySelector('svg'); el.title = (el.textContent || '').trim() || name;
     el.innerHTML = (svg ? svg.outerHTML : '') + `<span>${esc(name)}</span>`; el.classList.add('nfst');
   };
+  const phone = () => !!(window.matchMedia && window.matchMedia('(max-width:600px)').matches);
+  const SV = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const IC = {
+    globe: SV('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 3.6 5.6 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.6-3.6-9S9.6 5.6 12 3z"/>'),
+    adv: SV('<path d="M12 3.5l1.9 4.6 4.6 1.9-4.6 1.9L12 16.5l-1.9-4.6L5.5 10l4.6-1.9z"/><path d="M18.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/>'),
+    cls: SV('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 9.5h16M9.5 9.5V20"/>'),
+    sun: SV('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
+    moon: SV('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>')
+  };
+  /* language · look · night/day: one row of three tiles, each shows what is on and a tap switches it */
+  function togs(side) {
+    const lr = side.querySelector('.langrow.inside'); if (!lr || !lr.parentNode) return;
+    let row = side.querySelector('.nftogs');
+    if (!row) { row = document.createElement('div'); row.className = 'nftogs'; }
+    if (row.nextSibling !== lr || row.parentNode !== lr.parentNode) lr.parentNode.insertBefore(row, lr);
+    const lm = side.querySelector('.lookmine:not(.thememine)'); const lookOn = lm && lm.querySelector('button.on'); const hasLook = !!lm;
+    const adv = lookOn ? lookOn.dataset.arg !== 'classic' : document.documentElement.classList.contains('apple');
+    const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark';
+    const items = [];
+    if (lr.querySelector('[data-action="langToggle"]')) items.push(`<button type="button" class="nfst nftg" data-action="langToggle" title="${en() ? 'التحويل للعربي' : 'Switch to English'}">${IC.globe}<span>${en() ? 'English' : 'عربي'}</span></button>`);
+    if (hasLook) items.push(`<button type="button" class="nfst nftg" data-action="lookMine" data-arg="${adv ? 'classic' : 'apple'}" title="${adv ? L('التحويل لـ Classic', 'Switch to Classic') : L('التحويل لـ Advanced', 'Switch to Advanced')}">${adv ? IC.adv : IC.cls}<span>${adv ? 'Advanced' : 'Classic'}</span></button>`);
+    if (phone() && typeof themeCurrent === 'function' && typeof ACTIONS !== 'undefined' && ACTIONS.themeToggle) items.push(`<button type="button" class="nfst nftg" data-action="themeToggle" title="${dark ? L('الوضع النهاري', 'Light mode') : L('الوضع الليلي', 'Dark mode')}">${dark ? IC.moon : IC.sun}<span>${dark ? L('ليلي', 'Dark') : L('نهاري', 'Light')}</span></button>`);
+    const h = items.join(''); if (row.dataset.h !== h) { row.innerHTML = h; row.dataset.h = h; }
+    row.hidden = !items.length; lr.classList.toggle('nfhid', !!items.length);
+    side.querySelectorAll('.lookrow').forEach(x => x.classList.toggle('nfhid', !!items.length));
+  }
   function strip() {
     document.querySelectorAll('.side').forEach(side => {
       const acct = side.querySelector('.acct'); if (!acct) return;
       const help = side.querySelector('.mobextra [data-action="helpOpen"]');
       if (help && !acct.contains(help)) acct.appendChild(help);
+      const vb = side.querySelector('.viewbtn'); if (vb && !acct.contains(vb)) acct.insertBefore(vb, acct.firstChild);
+      togs(side);
       acct.classList.add('nfstrip');
       [...acct.children].forEach(el => { if (!el.classList.contains('nfst') || el.dataset.lang !== (en() ? 'en' : 'ar')) { tile(el); el.dataset.lang = en() ? 'en' : 'ar'; } });
-      const mx = side.querySelector('.mobextra'); if (mx) mx.classList.toggle('nfempty', !mx.querySelector('button:not([data-action="themeToggle"])') && !!document.documentElement.classList.contains('apple'));
+      const mx = side.querySelector('.mobextra'); if (mx) mx.classList.toggle('nfempty', !mx.querySelector('button:not([data-action="themeToggle"])') && (!!document.documentElement.classList.contains('apple') || phone()));
     });
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(strip, 0));
@@ -40034,6 +40068,18 @@ html.apple.apple-blur .modal .mh,html.apple.apple-blur .modal .mf{background:col
 .side .mobextra.nfempty{display:none!important}
 html.apple .side .acct.nfstrip>.nfst{border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important}
 html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
+.side .acct.nfstrip>.viewbtn.nfst{margin:0!important;border-style:dashed}
+html.apple .side .acct.nfstrip>.viewbtn.nfst{border:0!important}
+:root .side .langrow.inside.nfhid,:root .side .lookrow.nfhid{display:none!important}
+.side .nftogs{display:flex;flex-wrap:wrap;gap:3px;margin:0 -4px 6px}
+.side .nftogs>.nfst{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;flex:1 1 0;min-width:max-content;padding:7px 4px 6px;border-radius:12px;font:inherit;font-size:10.5px;font-weight:600;letter-spacing:-.01em;line-height:1.2;white-space:nowrap;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:var(--side-ink);cursor:pointer}
+.side .nftogs>.nfst svg{width:17px;height:17px;flex:none}
+html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#e5e5ea}
+:root .side .acct.nfstrip.nfstrip{gap:3px!important;flex-wrap:wrap!important;margin-left:-4px!important;margin-right:-4px!important;margin-inline:-4px!important;padding-left:0!important;padding-right:0!important;padding-inline:0!important}
+:root .side .acct.nfstrip>.nfst{flex:1 1 auto!important;min-width:max-content!important;width:auto!important;padding:7px 2px 6px!important;font-size:10px!important}
+:root .side .acct.nfstrip>.nfst span{max-width:100%;overflow:hidden;text-overflow:clip!important;white-space:nowrap}
+:root[lang="en"] .side .acct.nfstrip>.nfst{font-size:9.5px!important}
+@media (max-width:600px){ .side .mobextra [data-action="themeToggle"]{display:none!important} }
 </style>`);
 })();
 /* =====================================================================
@@ -40147,6 +40193,78 @@ html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
     }, () => { });
     return out;
   })(Store.save);
+})();
+/* =====================================================================
+   v7.29 (Mahmoud, 10 Oct, on the route card of an auto trip: «I want its background to be Google Maps»):
+   every trip route (the trip page, the vehicle card of a task) is drawn on a real Google map — the driver's phone path in
+   blue, the vehicle tracker path dashed green, a blue dot where it started and a red one where it ended, fitted to the
+   route. Pan and zoom with two fingers so the page still scrolls; the full-screen button opens it big. Without a map key
+   (or offline) the old drawing stays as it was. Uses the same map key as the fleet map (Settings → Google Maps).
+   ===================================================================== */
+(function () {
+  if (window.__NF_TRIPMAP__) return; window.__NF_TRIPMAP__ = 1;
+  if (typeof trackSvg !== 'function') return;
+  const TG = {}; let seq = 0; const KEEP = new Map(); /* one live map per route, moved into the new box on every re-render (no new map load) */
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser && !!S.sb.functions;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  let keyP = null;
+  const mapKey = () => {
+    if (!hosted()) return Promise.resolve('');
+    if (!keyP) keyP = S.sb.functions.invoke('traffic', { body: { action: 'mapkey' } }).then(r => (r && r.data && r.data.key) || '', () => '').then(k => { if (!k) keyP = null; return k; });
+    return keyP;
+  };
+  let gmP = null;
+  const loadGmaps = key => {
+    if (window.google && window.google.maps && window.google.maps.Map) return Promise.resolve();
+    if (gmP) return gmP;
+    gmP = new Promise((res, rej) => {
+      const done = () => window.google && window.google.maps && window.google.maps.Map;
+      const old = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
+      if (old) { let n = 0; const iv = setInterval(() => { if (done()) { clearInterval(iv); res(); } else if (++n > 80) { clearInterval(iv); gmP = null; rej(new Error('timeout')); } }, 250); return; }
+      const prev = window.__nfGm; window.__nfGm = () => { res(); if (prev) try { prev(); } catch (e) { /* ignore */ } };
+      const s = document.createElement('script'); s.async = true;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__nfGm&language=${en() ? 'en' : 'ar'}&region=EG&loading=async`;
+      s.onerror = () => { gmP = null; rej(new Error('load')); }; document.head.appendChild(s);
+      setTimeout(() => { if (!done()) { gmP = null; rej(new Error('timeout')); } }, 20000);
+    });
+    return gmP;
+  };
+  const pts = arr => (Array.isArray(arr) ? arr : []).filter(p => p && isFinite(+p.lat) && isFinite(+p.lng) && (+p.lat || +p.lng)).map(p => ({ lat: +p.lat, lng: +p.lng }));
+  trackSvg = (base => function (t) {
+    const html = base.apply(this, arguments); if (!html || !t) return html;
+    const ph = pts(t.track), gv = pts(t.gpsTrack); if (ph.length + gv.length < 2) return html;
+    const cut = html.indexOf('</svg>'); if (cut < 0) return html;
+    const k = 'tg' + (++seq); TG[k] = { ph, gv, sig: String(t.id || '') + ':' + ph.length + ':' + gv.length + ':' + (ph.length ? ph[ph.length - 1].lat + ',' + ph[ph.length - 1].lng : '') }; if (seq > 400) { Object.keys(TG).slice(0, 200).forEach(x => delete TG[x]); }
+    return `<div class="nf-tripgm" data-tg="${k}">${html.slice(0, cut + 6)}</div>${html.slice(cut + 6)}`;
+  })(trackSvg);
+  async function paint(box) {
+    const d = TG[box.dataset.tg]; box.dataset.done = '1'; if (!d) return;
+    const key = await mapKey(); if (!key || !box.isConnected) return;
+    try { await loadGmaps(key); } catch (e) { return; }
+    if (!box.isConnected || !window.google) return;
+    const kept = KEEP.get(d.sig); if (kept && !kept.isConnected) { box.innerHTML = ''; box.appendChild(kept); box.classList.add('on'); return; }
+    const g = window.google.maps; const fb = box.innerHTML;
+    const host = document.createElement('div'); host.className = 'nf-tripgm-map'; box.innerHTML = ''; box.appendChild(host); box.classList.add('on');
+    try {
+      const map = new g.Map(host, { center: d.ph[0] || d.gv[0], zoom: 13, mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: false, gestureHandling: 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
+      const bounds = new g.LatLngBounds();
+      if (d.gv.length > 1) { new g.Polyline({ map, path: d.gv, strokeOpacity: 0, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#1b7f4b', strokeWeight: 4, scale: 3 }, offset: '0', repeat: '14px' }] }); d.gv.forEach(p => bounds.extend(p)); }
+      if (d.ph.length > 1) { new g.Polyline({ map, path: d.ph, strokeColor: '#2a78d6', strokeOpacity: .95, strokeWeight: 4 }); d.ph.forEach(p => bounds.extend(p)); }
+      const line = d.ph.length > 1 ? d.ph : d.gv;
+      const dot = (p, c) => new g.Marker({ map, position: p, clickable: false, icon: { path: g.SymbolPath.CIRCLE, scale: 7, fillColor: c, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 } });
+      dot(line[0], '#2a78d6'); dot(line[line.length - 1], '#e33');
+      map.fitBounds(bounds, 28);
+      KEEP.set(d.sig, host); if (KEEP.size > 12) KEEP.delete(KEEP.keys().next().value);
+    } catch (e) { box.innerHTML = fb; box.classList.remove('on'); }
+  }
+  const scan = () => { document.querySelectorAll('.nf-tripgm:not([data-done])').forEach(b => { paint(b); }); };
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(scan, 0));
+  new MutationObserver(() => { clearTimeout(scan.t); scan.t = setTimeout(scan, 120); }).observe(document.documentElement, { childList: true, subtree: true });
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-tripgm">
+.nf-tripgm.on{height:240px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+.nf-tripgm-map{width:100%;height:100%}
+@media (min-width:900px){.nf-tripgm.on{height:300px}}
+</style>`);
 })();
 </script>
 
