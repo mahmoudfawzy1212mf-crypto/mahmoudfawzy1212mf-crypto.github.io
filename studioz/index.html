@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0952-336e7b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1312-140b3b";</script>
 
 <script>
 'use strict';
@@ -11105,7 +11105,7 @@ function askLocal(w, q) {
     out.push(`رصيد إجازاتك لسنة ${F.ym.slice(0, 4)}:\n${lines.join('\n') || '— لا توجد أنواع إجازات معرّفة'}\n(تُقدَّم الإجازة من «طلب جديد» ويعتمدها رئيس قسمك ثم الموارد البشرية)`);
   }
   if (has('سلف', 'سلفه', 'سلفة', 'قرض')) {
-    out.push(`حسب اللائحة يحق لك سلفة حتى ${F.pct}% من راتبك الذي عملت به، من يوم ${F.pol.advanceFromDay || 10} حتى نهاية الشهر — أي حتى ${fmtMoney(F.maxAdv)} ${CUR()} تقريبًا على أساس أجرك الحالي.${F.advRem > 0 ? `\nعليك سلف قائمة متبقٍ منها ${fmtMoney(F.advRem)} ${CUR()} (${F.advs.length} سلفة) — تُخصم أقساطها من المرتب.` : '\nلا توجد عليك سلف قائمة.'}\nالطلب من «طلب جديد ← سلفة» ويمر على رئيس القسم ثم مدير المصنع ثم الموارد البشرية.`);
+    out.push(`حسب اللائحة يحق لك سلفة حتى ${F.pct}% من راتبك الذي عملت به، من يوم ${F.pol.advanceFromDay || 10} حتى نهاية الشهر — أي حتى ${fmtMoney(F.maxAdv)} ${CUR()} تقريبًا على أساس أجرك الحالي.${F.advRem > 0 ? `\nعليك سلف قائمة متبقٍ منها ${fmtMoney(F.advRem)} ${CUR()} (${F.advs.length} سلفة) — تُخصم أقساطها من المرتب.` : '\nلا توجد عليك سلف قائمة.'}\nالطلب من «طلب جديد ← سلفة» ${typeof nfAdvChainOf === 'function' && !((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) ? 'ولو في حدك بيروح لمدير الحسابات على طول (فوق الحد: رئيس القسم ثم مدير الحسابات).' : 'ويمر على رئيس القسم ثم مدير المصنع ثم الموارد البشرية.'}`);
   }
   if (has('حضور', 'تأخير', 'تاخير', 'غياب', 'اوفر', 'أوفر', 'ساعات')) {
     out.push(`شهر ${fmtMonth(F.ym)}: حضور ${F.s.present} يوم${F.s.half ? ` + ${F.s.half} نصف يوم` : ''} · غياب ${F.s.absent} · إجازة ${F.s.leave} · تأخير ${F.s.late} دقيقة (${F.s.lateCount} مرة) · انصراف مبكر ${F.s.early} دقيقة · ساعات إضافية ${fmtHrs(F.s.ot + F.s.otHoliday)} · أذونات ${F.s.perms}${F.s.missing ? ` · بصمات ناقصة ${F.s.missing}` : ''}.\nالسماح: ${F.pol.graceTimesPerMonth || 4} مرات تأخير في الشهر بدون خصم، وبعدها تُطبَّق شرائح اللائحة.`);
@@ -40104,6 +40104,49 @@ html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
     if (view === 'attendance' && window.nfAttEditor()) return true;
     return base.apply(this, arguments);
   })(canSee);
+})();
+/* =====================================================================
+   v7.28 (PIN approved 10 Oct — Mahmoud: «within the allowed limit an advance does not pass through the department heads
+   or the factory manager»). Who approves a new advance request:
+   · within the limit (50% of the worked days, unchanged) — anyone, heads and the factory manager included → HR (Saeed) directly
+   · Saeed's own advance (within or over the limit) → the owner directly
+   · over the limit (exception with a written reason): an employee → his department head → HR (the admin departments:
+     the factory manager instead of the head, as before); a department head → the factory manager → HR; the factory
+     manager → HR directly
+   The first approver also gets a phone notice. Factory only.
+   ===================================================================== */
+(function () {
+  if (window.__NF_ADVCHAIN__) return; window.__NF_ADVCHAIN__ = 1;
+  const factory = () => !((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction()));
+  const chainOf = (doc, w) => {
+    const wr = (w && w.role) || '';
+    if (wr === 'hr') return ['admin'];
+    if (!doc.overLimit) return ['hr'];
+    if (wr === 'manager') return ['hr'];
+    if (wr === 'head') return ['manager', 'hr'];
+    const base = typeof normalizeChain === 'function' ? normalizeChain(['head', 'hr'], w) : ['head', 'hr'];
+    const c = base.filter(x => x === 'hr' || x !== wr);
+    return c.length ? c : ['hr'];
+  };
+  window.nfAdvChainOf = chainOf;
+  if (typeof Store === 'undefined' || typeof Store.save !== 'function') return;
+  Store.save = (base => function (col, doc) {
+    let fresh = false;
+    try {
+      if (col === 'requests' && doc && doc.type === 'advance' && doc.status === 'pending' && !(doc.step > 0) && factory() && !byId('requests', doc.id)) {
+        doc.chain = chainOf(doc, byId('workers', doc.workerId)); doc.step = 0; fresh = true;
+      }
+    } catch (e) { /* ignore */ }
+    const out = base.apply(this, arguments);
+    if (fresh) Promise.resolve(out).then(() => {
+      try {
+        if (typeof pushSend !== 'function' || typeof reqStepTargets !== 'function') return;
+        const w = byId('workers', doc.workerId);
+        pushSend(reqStepTargets(doc), `طلب بانتظار اعتمادك — ${REQ_TYPES.advance || ''}${w ? ' · ' + w.name : ''}`.slice(0, 100), '', '/#/approvals', 'req-' + doc.id).catch(() => { });
+      } catch (e) { /* ignore */ }
+    }, () => { });
+    return out;
+  })(Store.save);
 })();
 </script>
 
