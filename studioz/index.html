@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1530-24f08f";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1637-ebaf6b";</script>
 
 <script>
 'use strict';
@@ -27373,12 +27373,25 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
    · ICE: Edge Function «rtc» (STUN — ولو اتضبط TURN في admin_config.turn_cfg بيتدّي تلقائي)
    · صفحة «المكالمات»: كل اللي عندهم حساب (اسم + وظيفة بس، من غير أرقام) + سجل المكالمات والفايتة · v5.62 (30 سبتمبر — طلب محمود): المدير التجاري (bdd) ومهندس المكتب الفني (tech) مالهمش مكالمات خالص — لا صفحة ولا زرار ولا يظهروا لحد (السيرفر كمان: nf_calls_allowed / nf_call_visible)
    ===================================================================== */
+/* v7.30 (Mahmoud, 10 Oct: «make the calls better, faster and practical» — brief claude/calls-v2-brief.md, «ابدأ»):
+   · the other phone rings at once: the call row and its ring go out the moment «call» is pressed (no offer yet); the
+     microphone and the network paths get ready while it rings and the offer is added to the row (nf_calls_guard lets the
+     caller set it once). Answering before it is there waits for it.
+   · talking starts sooner: a live channel per call (broadcast «nfrtc-<id>») carries the late network paths (trickle ICE) so
+     the answer goes out without waiting for the full gathering; the ICE servers are fetched when the app opens.
+   · a short network drop no longer ends the call: «reconnecting…» and an ICE restart over the same channel (up to 20 s).
+   · no answer after 30 s (and on the end screen): leave a voice message (a task with the voice note in its chat), call his
+     mobile (only when this account can already see the number) or «remind me in an hour» (nf_call_remind + pg_cron push).
+   · missed-call notification opens #/calls/back/<person> with the call buttons; favourites on top of the contacts (starred on
+     this phone + the most called); the call can be shrunk to a small bubble while you keep working.
+   · readiness next to every name (nf_call_reach): green rings like a phone call / the system is open now, orange ordinary
+     notification only, grey not reachable — the owner also sees why and what to fix. */
 (() => {
   if (typeof isStudioz === 'function' && isStudioz() || isConstruction()) return;
   const hosted = () => typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from && S.sbUser;
   const me = () => (S.sbUser && S.sbUser.id) || ''; const noCalls = () => typeof role === 'function' && ['bdd', 'tech'].includes(role()); /* v5.62: المدير التجاري ومهندس المكتب الفني — من غير مكالمات خالص */
-  const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
-  const RING_MS = 45000;
+  const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null, reach: null, reachAt: 0, lastOther: '' };
+  const RING_MS = 45000; const NOANS_MS = 30000;
   /* v7.23: an outgoing call could stay on «ringing…» for ever while the phone never answered the microphone question — no call
      was created and nothing rang on the other side. Every step before the call exists now has a time limit, the screen says
      «getting the call ready…» until the call really exists, and the reason of any failure is kept in nf_call_diag (owner only). */
@@ -27399,6 +27412,30 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     C.log = data || []; C.logAt = Date.now(); return C.log;
   }
   const missedCount = () => { const seen = +(localStorage.getItem('nf.calls.seen') || 0); return (C.log || []).filter(c => c.callee === me() && c.status === 'missed' && Date.parse(c.created_at) > seen).length; };
+  /* v7.30: readiness of each person (nf_call_reach) — the owner also gets the device and the last time seen */
+  async function loadReach(force) {
+    if (!hosted() || !S.sb.rpc) return C.reach;
+    if (!force && C.reach && Date.now() - C.reachAt < 120000) return C.reach;
+    try { const { data, error } = await S.sb.rpc('nf_call_reach'); if (!error && Array.isArray(data)) { C.reach = new Map(data.map(r => [r.uid, r])); C.reachAt = Date.now(); } } catch (e) { /* ignore */ }
+    return C.reach;
+  }
+  const reachOf = u => (C.reach && C.reach.get(u)) || null;
+  const REACH = { ring: ['#34c759', 'هيرن زي التليفون'], online: ['#34c759', 'فاتح السيستم دلوقتي'], notify: ['#ff9f0a', 'هيوصله إشعار بس'], off: ['#8e8e93', 'مش متاح دلوقتي'] };
+  const reachTxt = u => { const r = reachOf(u); return r ? (REACH[r.lvl] || REACH.off)[1] : ''; };
+  const dotHtml = u => { const r = reachOf(u); if (!r) return ''; const k = REACH[r.lvl] || REACH.off; return `<span class="nfc-dot" style="background:${k[0]}" title="${esc(k[1])}"></span>`; };
+  const avDot = (d, size) => `<div class="nfc-avw">${avHtml(d, size)}${dotHtml(d.uid)}</div>`;
+  const WHY = { 'iphone-app': ['أبلكيشن الآيفون — شاشة مكالمة', ''], 'android-app': ['أبلكيشن الأندرويد الجديد — شاشة مكالمة', ''], 'android-old': ['أندرويد على النسخة القديمة', 'ينزّل Ninety.apk تاني من الموقع'], 'ios-old': ['أبلكيشن آيفون قديم', 'يحدّث الأبلكيشن من TestFlight'], 'iphone-web': ['آيفون من سفاري', 'ينزّل أبلكيشن الآيفون (TestFlight)'], web: ['من المتصفح بس', 'ينزّل الأبلكيشن على موبايله'], none: ['الإشعارات مقفولة / مفيش جهاز', 'يفتح السيستم ويسمح بالإشعارات'] };
+  const READY = w => w === 'iphone-app' || w === 'android-app';
+  /* v7.30: favourites (starred on this phone) */
+  const favKey = () => 'nf.calls.fav.' + me();
+  const favs = () => { try { const a = JSON.parse(localStorage.getItem(favKey()) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } };
+  const setFavs = a => { try { localStorage.setItem(favKey(), JSON.stringify(a.slice(0, 12))); } catch (e) { /* ignore */ } };
+  const isFav = u => favs().includes(u);
+  /* the number on the person's file — only when this account can already see it (owner / HR / office); nobody gets a new number */
+  const phoneOf = u => { try { const d = (C.dir || []).find(x => x.uid === u); const pid = String((d && d.person_id) || ''); const rec = pid.startsWith('w:') ? byId('workers', pid.slice(2)) : (pid ? byId('staff', pid) : null); const ph = rec && !rec.safe ? String(rec.phone || rec.workPhone || '').replace(/[^\d+]/g, '') : ''; return ph.length >= 8 ? ph : ''; } catch (e) { return ''; } };
+  const voiceTarget = u => { const d = (C.dir || []).find(x => x.uid === u); if (!d) return null; const pid = String(d.person_id || ''); if (pid.startsWith('w:')) return { assigneeId: pid.slice(2) }; if (d.role === 'admin') return { toRole: 'admin' }; return null; };
+  const canVoice = u => !!voiceTarget(u) && typeof taskPost === 'function' && !!window.MediaRecorder && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const myNameNow = () => (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
   async function iceServers() {
     if (C.ice && Date.now() - C.ice.at < 3 * 3600e3) return C.ice.servers;
     try { const r = await within(S.sb.functions.invoke('rtc', { body: {} }), 8000, 'ice'); if (r && r.data && Array.isArray(r.data.iceServers)) { C.ice = { at: Date.now(), servers: r.data.iceServers, turn: !!r.data.turn }; return C.ice.servers; } } catch (e) { /* ignore */ }
@@ -27427,6 +27464,10 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     spk: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round"/>',
     addp: '<circle cx="9" cy="8" r="3.6" fill="currentColor"/><path d="M2.5 19c.6-3.6 3.2-5.6 6.5-5.6s5.9 2 6.5 5.6z" fill="currentColor"/><path d="M19 8v6M16 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
     chev: '<path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    chevd: '<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    clock: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round"/>',
+    star: '<path d="M12 3.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.6l-5.1 2.7 1.1-5.7-4.3-4 5.8-.7z" fill="currentColor"/>',
+    staro: '<path d="M12 3.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.6l-5.1 2.7 1.1-5.7-4.3-4 5.8-.7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>',
   };
   const svg = (k, s = 24) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${IC[k]}</svg>`;
   const dirOf = uid => (C.dir || []).find(x => x.uid === uid) || { uid, name: nameOf(uid) };
@@ -27474,26 +27515,63 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       #nfc-sheet .nfc-avt{margin:6px auto 12px}#nfc-sheet .n{font-size:26px;font-weight:600}#nfc-sheet .r{opacity:.6;margin-top:2px}
       #nfc-sheet .acts{display:flex;gap:10px;margin-top:20px}#nfc-sheet .acts button{flex:1;border:0;border-radius:14px;padding:12px 0 10px;background:var(--surface-2,rgba(127,127,127,.14));color:#0a84ff;font:inherit;font-size:13px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}#nfc-sheet .acts button.g{color:#34c759}
       .nfc-me{display:flex;align-items:center;gap:12px;margin-bottom:12px}.nfc-me .grow{flex:1}.nfc-me label{cursor:pointer}
+      #nfcall.mini{opacity:0!important;pointer-events:none!important;transform:translateY(110%)}
+      #nfcall .nfc-min{position:absolute;z-index:4;top:max(14px,env(safe-area-inset-top));inset-inline-end:14px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+      #nfcbub{position:fixed;z-index:9998;inset-inline-end:12px;bottom:calc(96px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:10px;padding:7px 7px 7px 12px;border-radius:30px;background:rgba(20,22,26,.94);color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.35);cursor:pointer;max-width:calc(100vw - 24px);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+      #nfcbub .bt{display:flex;flex-direction:column;min-width:0;line-height:1.25}#nfcbub .bt b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}#nfcbub .bt span{font-size:12px;opacity:.75;font-variant-numeric:tabular-nums}
+      #nfcbub .be{width:40px;height:40px;border-radius:50%;border:0;background:#ff3b30;color:#fff;display:grid;place-items:center;cursor:pointer;flex:none;padding:0}
+      #nfcall .nfc-opts{position:relative;z-index:2;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:0 auto 18px;max-width:440px;width:100%}
+      #nfcall .nfc-opts>*{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:96px;flex:1 1 0;padding:12px 8px;border-radius:18px;border:0;background:rgba(255,255,255,.16);color:#fff;font:inherit;font-size:13px;line-height:1.25;text-align:center;text-decoration:none;cursor:pointer;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+      #nfcall .hint{opacity:.62;font-size:13px;margin-top:4px}
+      .nfc-avw{position:relative;flex:0 0 auto;display:inline-block}.nfc-dot{position:absolute;bottom:1px;inset-inline-end:1px;width:12px;height:12px;border-radius:50%;border:2px solid var(--surface,#1c1c1e);box-sizing:border-box}
+      .nfc-favs{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 4px;scrollbar-width:none}.nfc-favs::-webkit-scrollbar{display:none}
+      .nfc-favs .fv{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:5px;border:0;background:none;color:inherit;font:inherit;font-size:12px;cursor:pointer;width:64px;padding:0}.nfc-favs .fv>span{max-width:64px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .nfc-reach{border-radius:14px;border:1px solid var(--line,rgba(127,127,127,.18));background:var(--surface,transparent);padding:12px 14px;margin:0 0 12px}.nfc-reach .rh{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.nfc-reach .rh b{font-size:15px}.nfc-reach .ct{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;margin-top:6px}.nfc-reach .ct span{display:inline-flex;align-items:center;gap:5px}.nfc-reach .ct i{width:10px;height:10px;border-radius:50%;display:inline-block}
+      .nfc-reach .rl{margin-top:10px;display:flex;flex-direction:column;gap:2px}.nfc-reach .rr{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line,rgba(127,127,127,.14))}.nfc-reach .rr .grow{flex:1;min-width:0}.nfc-reach .rr .t{font-weight:600;font-size:14px}.nfc-reach .rr .s{font-size:12px;opacity:.65}.nfc-reach .rr .f{font-size:12px;color:#ff9f0a}
+      #nfc-sheet .note{margin-top:8px;font-size:13px;opacity:.75}#nfc-sheet .missed{color:#ff453a;font-weight:600;margin-top:6px}
+      #nfc-sheet .vtime{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:6px}#nfc-sheet .recdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff3b30;margin-inline-end:6px;animation:nfcblink 1s infinite}@keyframes nfcblink{50%{opacity:.25}}
     </style>`);
   }
-  function screen(html) { css(); let el = document.getElementById('nfcall'); if (!el) { el = document.createElement('div'); el.id = 'nfcall'; document.body.appendChild(el); } el.innerHTML = html; return el; }
-  function closeScreen() { const el = document.getElementById('nfcall'); if (el) el.remove(); }
+  function screen(html) { css(); let el = document.getElementById('nfcall'); if (!el) { el = document.createElement('div'); el.id = 'nfcall'; document.body.appendChild(el); } el.innerHTML = html; el.classList.remove('mini'); return el; }
+  function closeScreen() { const el = document.getElementById('nfcall'); if (el) el.remove(); const b = document.getElementById('nfcbub'); if (b) b.remove(); }
+  /* v7.30: what can be done when he does not answer — voice message / his mobile (only a number this account already sees) / remind me */
+  const optsHtml = u => {
+    const a = []; const ph = phoneOf(u);
+    if (canVoice(u)) a.push(`<button type="button" data-nfc="vmsg" data-u="${esc(u)}">${svg('mic', 22)}<span>سيبله رسالة صوتية</span></button>`);
+    if (ph) a.push(`<a href="tel:${esc(ph)}" data-nfc="tel" data-u="${esc(u)}">${svg('phone', 22)}<span>اتصل على موبايله</span></a>`);
+    a.push(`<button type="button" data-nfc="remind" data-u="${esc(u)}">${svg('clock', 22)}<span>فكّرني بعد ساعة</span></button>`);
+    return `<div class="nfc-opts">${a.join('')}</div>`;
+  };
+  const reachHint = u => { const r = reachOf(u); return !r ? '' : r.lvl === 'notify' ? 'هيوصله إشعار بس' : r.lvl === 'off' ? 'غالبًا مش هيوصله دلوقتي' : ''; };
+  /* v7.30: the call shrunk to a small bubble — tap it to go back, red button ends the call */
+  function bubble(c) {
+    let b = document.getElementById('nfcbub');
+    const on = c && c.mini && ['calling', 'connecting', 'active'].includes(c.state);
+    if (!on) { if (b) b.remove(); return; }
+    const other = c.dir === 'out' ? c.callee : c.caller; const d = dirOf(other);
+    const st = c.state === 'active' ? fmtT(c.secs || 0) + (c.warn ? ' · ' + c.warn : '') : c.state === 'calling' ? 'بيرن…' : 'بيوصّل…';
+    if (!b) { css(); document.body.insertAdjacentHTML('beforeend', `<div id="nfcbub" data-nfc="restore" role="button" aria-label="رجوع للمكالمة">${avHtml(d, 40)}<div class="bt"><b>${esc(d.name || nameOf(other))}</b><span class="bs">${esc(st)}</span></div><button type="button" class="be" data-nfc="hang" aria-label="إنهاء">${svg('end', 22)}</button></div>`); return; }
+    const s = b.querySelector('.bs'); if (s && s.textContent !== st) s.textContent = st;
+  }
   const fmtT = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   function paint() {
     const c = C.cur; if (!c) return closeScreen();
     const other = c.dir === 'out' ? c.callee : c.caller; const d = dirOf(other); const legs = (c.legs || []); const nm = esc([d.name || nameOf(other)].concat(legs.map(l => nameOf(l.uid))).join('، '));
-    const st = c.state === 'incoming' ? (c.room ? 'بيضيفك لمكالمة جماعية…' : c.video ? 'مكالمة فيديو…' : 'مكالمة صوت…') : c.state === 'prep' ? 'بيجهّز المكالمة…' : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) + (c.warn ? ' · ' + c.warn : '') : c.note || '';
+    const rh = c.dir === 'out' && c.state === 'calling' ? reachHint(other) : '';
+    const st = c.state === 'incoming' ? (c.room ? 'بيضيفك لمكالمة جماعية…' : c.video ? 'مكالمة فيديو…' : 'مكالمة صوت…') : c.state === 'prep' ? 'بيجهّز المكالمة…' : c.state === 'calling' ? (c.slow ? 'مردّش لسه…' : 'بيرن…') + (rh ? ' · ' + rh : '') : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) + (c.warn ? ' · ' + c.warn : '') : c.note || '';
+    const slow = c.dir === 'out' && c.state === 'calling' && c.slow && !legs.length;
     const vid = c.video && c.state !== 'incoming';
     const bar = c.state === 'incoming'
       ? `${cbtn('decline', 'end', 'رفض', 'red')}${cbtn('accept', c.video ? 'video' : 'phone', 'رد', 'grn')}`
       : `${cbtn('mute', c.muted ? 'micoff' : 'mic', c.muted ? 'مكتوم' : 'كتم', c.muted ? 'off' : '')}${c.video ? `${cbtn('cam', c.camOff ? 'camoff' : 'video', 'الكاميرا', c.camOff ? 'off' : '')}${cbtn('flip', 'flip', 'قلب', '')}` : ''}${cbtn('spk', 'spk', 'سبيكر', c.spk ? 'off' : '')}${c.state === 'active' && legs.length < 3 ? cbtn('add', 'addp', 'إضافة', '') : ''}${cbtn('hang', 'end', 'إنهاء', 'red')}`;
     let el = document.getElementById('nfcall');
-    if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '') || el.dataset.n !== String(legs.length)) {
+    if (!el || el.dataset.state !== c.state || el.dataset.id !== String(c.id || '') || el.dataset.n !== String(legs.length) || el.dataset.slow !== (slow ? '1' : '')) {
       const grid = vid && legs.length ? `<div class="vgrid n${legs.length}"><div class="tile"><video class="rv" autoplay playsinline></video><span>${esc(d.name || nameOf(other))}</span></div>${legs.map(l => `<div class="tile"><video class="tv" data-leg="${esc(l.id || l.uid)}" autoplay playsinline></video><span>${esc(nameOf(l.uid))}${l.state !== 'active' ? ' · بيرن…' : ''}</span></div>`).join('')}</div><video class="lv" autoplay playsinline muted></video>` : '';
-      el = screen(`${grid || (vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`)}${!vid ? legs.map(l => `<audio class="la" data-leg="${esc(l.id || l.uid)}" autoplay></audio>`).join('') : ''}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div>${c.ctx ? `<div class="ctx">${c.ctx.important ? '<b>هام</b> · ' : ''}بخصوص: ${esc(c.ctx.title)}</div>` : ''}</div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%"><div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>`);
-      el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.dataset.n = String(legs.length); el.classList.toggle('vid', !!vid); el.classList.toggle('grp', !!legs.length); el.classList.remove('hideui');
+      el = screen(`${grid || (vid ? '<video class="rv" autoplay playsinline></video><video class="lv" autoplay playsinline muted></video>' : `${bgOf(other)}<audio class="ra" autoplay></audio>`)}${!vid ? legs.map(l => `<audio class="la" data-leg="${esc(l.id || l.uid)}" autoplay></audio>`).join('') : ''}<div class="top">${avHtml(d, 120, 'av')}<div class="nm">${nm}</div><div class="st" id="nfc-st">${st}</div>${c.ctx ? `<div class="ctx">${c.ctx.important ? '<b>هام</b> · ' : ''}بخصوص: ${esc(c.ctx.title)}</div>` : ''}</div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%">${slow ? optsHtml(other) : ''}<div class="bar ${c.state === 'incoming' ? 'inc' : ''}">${bar}</div>${c.state === 'incoming' && c.video ? '<button class="alt" data-nfc="accept-a">رد بالصوت بس</button>' : ''}</div>${['calling', 'connecting', 'active'].includes(c.state) ? `<button type="button" class="nfc-min" data-nfc="min" aria-label="تصغير المكالمة" title="تصغير — كمّل شغلك والمكالمة شغالة">${svg('chevd', 24)}</button>` : ''}`);
+      el.dataset.state = c.state; el.dataset.id = String(c.id || ''); el.dataset.n = String(legs.length); el.dataset.slow = slow ? '1' : ''; el.classList.toggle('vid', !!vid); el.classList.toggle('grp', !!legs.length); el.classList.remove('hideui');
       attach(); if (vid) pipDrag(el);
     } else { const s = document.getElementById('nfc-st'); if (s) s.textContent = st; const b = el.querySelector('.bar'); if (b) b.innerHTML = bar; }
+    el.classList.toggle('mini', !!c.mini && c.state !== 'incoming'); bubble(c);
   }
   function attach() {
     const c = C.cur; const el = document.getElementById('nfcall'); if (!c || !el) return;
@@ -27575,7 +27653,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
         stale = inB <= lastIn ? stale + 1 : 0; lastIn = inB;
         const mic = c.local && c.local.getAudioTracks()[0];
         c.diag = { inAudioBytes: inB, outAudioBytes: outB, maxInLevel: Math.max((c.diag && c.diag.maxInLevel) || 0, lvl), path: `${lc}/${rc}`, micMuted: !!(mic && mic.muted), micEnabled: !!(mic && mic.enabled), micLabel: mic ? String(mic.label || '').slice(0, 40) : '', ua: navigator.userAgent.slice(0, 80), secs: c.secs || 0 };
-        const w = stale >= 2 ? '⚠️ صوت الطرف التاني مش واصل' : (mic && mic.muted) ? '⚠️ الميكروفون بتاعك مش شغال (تطبيق تاني ماسكه؟)' : '';
+        const w = c.recon ? 'بيرجّع الاتصال…' : stale >= 2 ? '⚠️ صوت الطرف التاني مش واصل' : (mic && mic.muted) ? '⚠️ الميكروفون بتاعك مش شغال (تطبيق تاني ماسكه؟)' : '';
         if (w !== (c.warn || '')) { c.warn = w; paint(); }
       } catch (e) { /* ignore */ }
     }, 2000);
@@ -27586,7 +27664,8 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     lv.addEventListener('pointerdown', e => { drag = true; moved = false; const r = lv.getBoundingClientRect(); sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top; lv.style.transition = 'none'; lv.setPointerCapture(e.pointerId); e.stopPropagation(); });
     lv.addEventListener('pointermove', e => { if (!drag) return; const dx = e.clientX - sx, dy = e.clientY - sy; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; lv.style.left = (ox + dx) + 'px'; lv.style.top = (oy + dy) + 'px'; lv.style.right = 'auto'; lv.style.bottom = 'auto'; });
     lv.addEventListener('pointerup', e => { if (!drag) return; drag = false; lv.style.transition = ''; const r = lv.getBoundingClientRect(); const W = innerWidth, H = innerHeight, m = 16; const left = r.left + r.width / 2 < W / 2; const top = r.top + r.height / 2 < H / 2; lv.style.left = left ? m + 'px' : (W - r.width - m) + 'px'; lv.style.top = top ? Math.max(m, 18) + 'px' : (H - r.height - 120) + 'px'; e.stopPropagation(); });
-    el.addEventListener('click', e => { if (!el.classList.contains('vid') || e.target.closest('.bar') || e.target.closest('.lv')) return; el.classList.toggle('hideui'); });
+    if (el.dataset.pip) return; el.dataset.pip = '1'; /* v7.30: the screen tap is added once per screen (it was added again on every rebuild, so two taps cancelled each other) */
+    el.addEventListener('click', e => { if (!el.classList.contains('vid') || e.target.closest('.bar') || e.target.closest('.lv') || e.target.closest('.nfc-min') || e.target.closest('.nfc-opts')) return; el.classList.toggle('hideui'); });
   }
   /* ---------- employee photos for calls (small copies made by the owner / HR from the employee file) ---------- */
   let avBusy = false;
@@ -27619,25 +27698,121 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const pc = new RTCPeerConnection({ iceServers: await iceServers() });
     c.remote = new MediaStream();
     pc.ontrack = ev => { ev.streams[0] ? ev.streams[0].getTracks().forEach(t => { if (!c.remote.getTracks().includes(t)) c.remote.addTrack(t); }) : c.remote.addTrack(ev.track); attach(); };
+    /* v7.30: every late network path goes to the other phone at once over the call's live channel */
+    pc.onicecandidate = ev => { const k = ev.candidate; if (!k) return; if (/ typ (srflx|relay)/.test(k.candidate || '')) pc.nfOut = true; if (C.cur === c && (!c.pc || c.pc === pc)) rtcSend(c, { t: 'cand', c: k.toJSON ? k.toJSON() : { candidate: k.candidate, sdpMid: k.sdpMid, sdpMLineIndex: k.sdpMLineIndex } }); };
+    pc.oniceconnectionstatechange = () => { if (c.recon && ['connected', 'completed'].includes(pc.iceConnectionState)) reconDone(c); };
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
+      if (s === 'connected' && c.recon) reconDone(c);
       if (s === 'connected' && c.state !== 'active') { c.state = 'active'; stopTone(); monitor(c); c.t0 = Date.now(); c.tick = setInterval(() => { c.secs = Math.round((Date.now() - c.t0) / 1000); paint(); }, 1000); paint(); }
-      if (s === 'failed') { finish('failed', 'الاتصال ماوصلش — الشبكة قافلة المكالمات (جرّب واي فاي)'); }
-      if (s === 'disconnected') { setTimeout(() => { if (C.cur === c && pc.connectionState === 'disconnected') finish('ended', 'انقطع الاتصال'); }, 8000); }
+      if (s === 'failed') { if (c.recon) return; if (canRecon(c, pc)) reconnect(c, pc); else finish('failed', 'الاتصال ماوصلش — الشبكة قافلة المكالمات (جرّب واي فاي)'); }
+      if (s === 'disconnected') {
+        setTimeout(() => { if (C.cur === c && pc.connectionState === 'disconnected' && canRecon(c, pc)) reconnect(c, pc); }, 2000);
+        setTimeout(() => { if (C.cur === c && pc.connectionState === 'disconnected' && !c.recon) finish('ended', 'انقطع الاتصال'); }, 8000);
+      }
     };
     c.local.getTracks().forEach(t => pc.addTrack(t, c.local));
     return pc;
   }
   const gathered = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 4000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
-  function cleanup(c) { if (!c) return; (c.legs || []).forEach(l => { clearTimeout(l.timeout); try { l.pc && l.pc.close(); } catch (e) { /* ignore */ } }); stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearInterval(c.mon); if (c.boost) { try { c.boost.src.disconnect(); c.boost.g.disconnect(); } catch (e) { /* ignore */ } c.boost = null; } clearTimeout(c.timeout); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
+  /* ---------- v7.30: live channel per call (realtime broadcast «nfrtc-<call id>») — late network paths + reconnect ---------- */
+  function rtcOpen(c) {
+    if (!c || !c.id || c.rtc || !S.sb.channel) return;
+    c.rtc = { ch: null, ready: false, peer: false, q: [] };
+    try {
+      const ch = S.sb.channel('nfrtc-' + c.id, { config: { broadcast: { self: false, ack: false } } });
+      if (!ch || typeof ch.send !== 'function' || typeof ch.on !== 'function') return; /* an old client: the full offer / answer still carry every path */
+      const r = c.rtc; r.ch = ch;
+      ch.on('broadcast', { event: 'rtc' }, p => { const m = p && p.payload; if (!m || !m.t || m.from === me() || C.cur !== c) return; if (!r.peer) r.peer = true; if (m.t === 'hi') { if (!m.re) rtcSend(c, { t: 'hi', re: 1 }); return; } rtcMsg(c, m); })
+        .subscribe(st => { if (st === 'SUBSCRIBED' && !r.ready) { r.ready = true; rtcSend(c, { t: 'hi' }); r.q.splice(0).forEach(m => rtcSend(c, m)); } });
+    } catch (e) { console.warn('rtc', e); }
+  }
+  function rtcSend(c, m) {
+    const r = c && c.rtc; if (!r || !r.ch) return false;
+    if (!r.ready) { if (r.q.length < 60) r.q.push(m); return true; }
+    try { const p = r.ch.send({ type: 'broadcast', event: 'rtc', payload: Object.assign({}, m, { from: me() }) }); if (p && p.catch) p.catch(() => { }); } catch (e) { /* ignore */ }
+    return true;
+  }
+  function rtcClose(c) { const r = c && c.rtc; if (!r) return; c.rtc = null; if (!r.ch) return; try { if (S.sb.removeChannel) S.sb.removeChannel(r.ch); else if (r.ch.unsubscribe) r.ch.unsubscribe(); } catch (e) { /* ignore */ } }
+  function addCand(c, k) {
+    if (!k || !k.candidate) return; const pc = c.pc;
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) { pc.addIceCandidate(k).catch(() => { }); return; }
+    (c.cq = c.cq || []).push(k); if (c.cq.length > 80) c.cq.shift();
+  }
+  function flushCands(c) { const pc = c.pc; if (!pc || !pc.remoteDescription) return; (c.cq || []).splice(0).forEach(k => pc.addIceCandidate(k).catch(() => { })); }
+  const fpOf = sdp => (String(sdp || '').match(/a=fingerprint:[^\r\n]+/g) || []).sort().join('|');
+  async function rtcMsg(c, m) {
+    if (m.t === 'cand') return addCand(c, m.c);
+    const pc = c.pc; if (!pc || !m.sdp || !m.sdp.sdp || !pc.remoteDescription) return;
+    if (!fpOf(m.sdp.sdp) || fpOf(m.sdp.sdp) !== fpOf(pc.remoteDescription.sdp)) return; /* only the same phone (same encryption keys) may restart the call */
+    try {
+      if (m.t === 'reoffer' && c.dir === 'in' && m.sdp.type === 'offer') { await pc.setRemoteDescription(m.sdp); flushCands(c); const a = await pc.createAnswer(); await pc.setLocalDescription(a); rtcSend(c, { t: 'reanswer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } }); reconWatch(c, pc); }
+      else if (m.t === 'reanswer' && c.dir === 'out' && m.sdp.type === 'answer' && pc.signalingState === 'have-local-offer') { await pc.setRemoteDescription(m.sdp); flushCands(c); reconWatch(c, pc); }
+    } catch (e) { console.warn('rtc restart', e); }
+  }
+  /* the answer goes out as soon as one outside path is known — the rest follows on the live channel */
+  const gatherFast = (pc, c) => !(c && c.rtc && c.rtc.ready && c.rtc.peer) ? gathered(pc) : new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    let t2 = null; const t = setTimeout(() => done(), 1500);
+    const done = () => { clearTimeout(t); clearTimeout(t2); res(); };
+    const soon = () => { if (!t2) t2 = setTimeout(done, 250); };
+    if (pc.nfOut) soon();
+    pc.addEventListener('icecandidate', ev => { if (!ev.candidate) done(); else if (/ typ (srflx|relay)/.test(ev.candidate.candidate || '')) soon(); });
+    pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') done(); });
+  });
+  /* answering before the caller's phone finished getting ready: wait for its offer (live row update, or a look every 0.7 s) */
+  function waitOffer(c, ms) {
+    return new Promise((res, rej) => {
+      if (c.offer) return res(c.offer);
+      let iv = null, t = null;
+      const stop = () => { clearInterval(iv); clearTimeout(t); c.offerWait = null; };
+      c.offerWait = () => { if (c.offer) { stop(); res(c.offer); } };
+      iv = setInterval(async () => {
+        if (C.cur !== c) { stop(); rej(Object.assign(new Error('gone'), { name: 'Gone' })); return; }
+        try { const { data } = await S.sb.from('nf_calls').select('offer,status').eq('id', c.id).maybeSingle(); if (data && data.offer && !c.offer) c.offer = data.offer; if (c.offerWait) c.offerWait(); } catch (e) { /* keep waiting */ }
+      }, 700);
+      t = setTimeout(() => { stop(); rej(Object.assign(new Error('no offer'), { name: 'NoOffer' })); }, ms);
+    });
+  }
+  /* a short network drop: «reconnecting…» and an ICE restart (the caller sends the new offer, the other phone answers) for up to 20 s */
+  const canRecon = (c, pc) => C.cur === c && c.pc === pc && c.state === 'active' && !(c.legs || []).length && !!(c.rtc && c.rtc.ch && c.rtc.ready && c.rtc.peer);
+  /* after the new offer / answer: back to talking as soon as the path is up again (the state may not change if it never really dropped) */
+  function reconWatch(c, pc) { let n = 0; const iv = setInterval(() => { if (C.cur !== c || c.pc !== pc || !c.recon || ++n > 24) return clearInterval(iv); if (pc.connectionState === 'connected' && ['connected', 'completed'].includes(pc.iceConnectionState)) { clearInterval(iv); reconDone(c); } }, 500); }
+  function reconDone(c) { if (!c.recon) return; c.recon = 0; clearTimeout(c.reconT); (c.reconR || []).forEach(clearTimeout); c.reconR = []; c.warn = ''; paint(); }
+  function reconnect(c, pc) {
+    if (c.recon || !canRecon(c, pc)) return;
+    c.recon = Date.now(); c.warn = 'بيرجّع الاتصال…'; paint();
+    const once = async () => {
+      if (C.cur !== c || c.pc !== pc || !c.recon || c.dir !== 'out') return;
+      try {
+        if (pc.signalingState === 'stable') await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+        if (pc.signalingState === 'have-local-offer' && pc.localDescription) rtcSend(c, { t: 'reoffer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+      } catch (e) { console.warn('ice restart', e); }
+    };
+    c.reconR = [setTimeout(once, 300), setTimeout(once, 6000), setTimeout(once, 12000)];
+    c.reconT = setTimeout(() => { if (C.cur === c && c.recon) finish('ended', 'انقطع الاتصال'); }, 20000);
+  }
+  /* after a call ended while a step was still running: free the microphone without touching anything else */
+  const release = c => { try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } rtcClose(c); };
+  function cleanup(c) { if (!c) return; (c.legs || []).forEach(l => { clearTimeout(l.timeout); try { l.pc && l.pc.close(); } catch (e) { /* ignore */ } }); stopTone(); clearInterval(c.tick); clearInterval(c.reRing); clearInterval(c.mon); if (c.boost) { try { c.boost.src.disconnect(); c.boost.g.disconnect(); } catch (e) { /* ignore */ } c.boost = null; } clearTimeout(c.timeout); clearTimeout(c.noAns); clearTimeout(c.reconT); (c.reconR || []).forEach(clearTimeout); c.recon = 0; rtcClose(c); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ } try { c.local && c.local.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
   async function finish(status, note) {
     const c = C.cur; if (!c) return; C.cur = null; const legs = (c.legs || []).slice(); cleanup(c); hook('end', c, { status, note });
+    const o = c.dir === 'out' ? c.callee : c.caller; C.lastOther = o;
     for (const l of legs) if (l.id) S.sb.from('nf_calls').update({ status: l.state === 'active' ? 'ended' : 'missed' }).eq('id', l.id).in('status', ['ringing', 'active']).then(() => { }, () => { });
     if (c.id && status) { try { await S.sb.from('nf_calls').update({ status }).eq('id', c.id).in('status', ['ringing', 'active']); } catch (e) { /* ignore */ } }
     if (c.id && c.diag) { try { await S.sb.from('nf_calls').update({ [c.dir === 'out' ? 'diag_caller' : 'diag_callee']: Object.assign({}, c.diag, { end: status || 'remote' }) }).eq('id', c.id); } catch (e) { /* ignore */ } }
     if (c.id && c.dir === 'in' && c.state === 'incoming' && status === 'declined') S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { });
-    if (c.id && c.dir === 'out' && ['calling', 'connecting'].includes(c.state)) { const miss = status === 'missed' || !status; S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + c.callee], title: miss ? `📞 مكالمة فايتة من ${c.myName || ''}` : 'Ninety', body: miss ? 'اضغط علشان ترجع تتصل' : '', url: '/#/calls', tag: 'call-' + c.id, call: (miss ? 'end:' : 'stop:') + c.id, sms: false } }).catch(() => { }); }
-    if (note) { const o = c.dir === 'out' ? c.callee : c.caller; screen(`${bgOf(o)}<div class="top">${avHtml(dirOf(o), 120, 'av')}<div class="nm">${esc(nameOf(o))}</div><div class="st">${esc(note)}</div></div><div class="bar">${cbtn('close', 'x', 'إغلاق', '')}</div>`); setTimeout(() => { if (!C.cur) closeScreen(); }, 3500); }
+    /* v7.30: the missed-call notification opens the caller's card with the call buttons («call back») */
+    if (c.id && c.dir === 'out' && ['calling', 'connecting'].includes(c.state)) { const miss = status === 'missed' || !status; S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + c.callee], title: miss ? `📞 مكالمة فايتة من ${c.myName || ''}` : 'Ninety', body: miss ? 'دوس علشان تتصل بيه تاني' : '', url: miss ? '/#/calls/back/' + me() : '/#/calls', tag: 'call-' + c.id, call: (miss ? 'end:' : 'stop:') + c.id, sms: false } }).catch(() => { }); }
+    /* v7.30: not answered / declined / busy → the end screen keeps «call again» and what else can be done */
+    const unans = !!note && c.dir === 'out' && c.state === 'calling' && !legs.length && (status === 'missed' || ['missed', 'declined', 'busy'].includes(c.remoteStatus));
+    if (note) {
+      const h = unans ? reachHint(o) : '';
+      const el = screen(`${bgOf(o)}<div class="top">${avHtml(dirOf(o), 120, 'av')}<div class="nm">${esc(nameOf(o))}</div><div class="st">${esc(note)}</div>${h ? `<div class="hint">${esc(h)}</div>` : ''}</div><div class="bw" style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%">${unans ? optsHtml(o) : ''}<div class="bar">${cbtn('close', 'x', 'إغلاق', '')}${unans ? cbtn('again', c.video ? 'video' : 'phone', 'اتصل تاني', 'grn') : ''}</div></div>`);
+      el.dataset.state = 'end'; el.dataset.u = o; el.dataset.v = c.video ? '1' : ''; el.classList.remove('vid', 'grp', 'hideui');
+      const b = document.getElementById('nfcbub'); if (b) b.remove();
+      setTimeout(() => { if (!C.cur && el.isConnected && el.dataset.state === 'end') closeScreen(); }, unans ? 25000 : 3500);
+    }
     else closeScreen();
     C.logAt = 0; if (S.route && S.route.view === 'calls') render(false);
   }
@@ -27647,29 +27822,37 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (!hosted()) { toast('المكالمات بتشتغل في النسخة المستضافة بس', 'err'); return; }
     if (C.cur) { toast('إنت في مكالمة دلوقتي', 'err'); return; }
     if (!uid || uid === me()) return;
-    await loadDir();
+    closeScreen(); await loadDir();
     const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'prep', ctx: ctx && ctx.taskId ? { taskId: String(ctx.taskId), title: String(ctx.title || '').slice(0, 120), important: !!ctx.important } : null }; paint();
-    let step = 'mic';
+    loadReach().then(() => { if (C.cur === c) paint(); }).catch(() => { });
+    /* v7.30: the call and its ring go out first — the microphone and the network paths get ready while the other phone rings */
+    let step = 'insert';
     try {
-      c.local = await within(media(video), 15000, 'mic'); c.video = c.local.getVideoTracks().length > 0; paint(); attach();
-      if (C.cur !== c) return cleanup(c);
-      step = 'net'; c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
-      if (C.cur !== c) return cleanup(c);
-      step = 'insert'; const { data, error } = await within(S.sb.from('nf_calls').insert(Object.assign({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }, c.ctx ? { ctx: c.ctx } : {})).select('id').single(), 12000, 'insert');
-      if (error) throw error; c.id = data.id; c.state = 'calling'; paint(); tone('out');
-      const myName = (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
+      const { data, error } = await within(S.sb.from('nf_calls').insert(Object.assign({ callee: uid, video: c.video }, c.ctx ? { ctx: c.ctx } : {})).select('id').single(), 12000, 'insert');
+      if (error) throw error;
+      if (C.cur !== c) { S.sb.from('nf_calls').update({ status: 'ended' }).eq('id', data.id).in('status', ['ringing', 'active']).then(() => { }, () => { }); return release(c); }
+      c.id = data.id; c.state = 'calling'; paint(); tone('out'); rtcOpen(c);
+      const myName = myNameNow(); c.myName = myName;
       const ring = again => S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.ctx ? `${c.ctx.important ? 'هام — ' : ''}بخصوص: ${c.ctx.title}` : (c.video ? 'مكالمة فيديو — اضغط «رد» أو افتح' : 'مكالمة صوت — اضغط «رد» أو افتح'), url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, caller: myName, video: !!c.video, task: c.ctx ? c.ctx.title : '', important: !!(c.ctx && c.ctx.important), sms: false, ...(again ? { noVoip: true, again: true } : {}) } }).catch(() => { });
-      ring(); c.myName = myName; hook('start', c); c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(true); else clearInterval(c.reRing); }, 7000);   /* v7.11: the re-rings are for browsers — the iPhone call screen rings once */
+      ring(); hook('start', c); c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(true); else clearInterval(c.reRing); }, 7000);   /* v7.11: the re-rings are for browsers — the iPhone call screen rings once */
       c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
+      c.noAns = setTimeout(() => { if (C.cur === c && c.state === 'calling') { c.slow = true; paint(); } }, C.noAnsMs || NOANS_MS);
+      step = 'mic'; const loc = await within(media(c.video), 15000, 'mic');
+      if (C.cur !== c) { try { loc.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } return; }
+      c.local = loc; c.video = c.local.getVideoTracks().length > 0; paint(); attach();
+      step = 'net'; c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
+      if (C.cur !== c) return release(c);
+      step = 'offer'; const { error: e2 } = await within(S.sb.from('nf_calls').update(Object.assign({ offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }, video && !c.video ? { video: false } : {})).eq('id', c.id).eq('status', 'ringing'), 12000, 'offer');
+      if (e2) throw e2;
     } catch (e) {
-      console.warn(e); if (C.cur !== c && !c.id) return cleanup(c); callDiag(uid, step, e, { video: !!video, task: !!c.ctx });
+      console.warn(e); if (C.cur !== c) return release(c); callDiag(uid, step, e, { video: !!video, task: !!c.ctx });
       const n = String(e && (e.name + ' ' + e.message));
       const msg = /Permission|NotAllowed|Security/i.test(n) ? 'الميكروفون مقفول للسيستم — اسمح بيه من إعدادات الموبايل (أو من القفل جنب العنوان في المتصفح) وجرّب تاني'
         : e && e.name === 'Timeout' && step === 'mic' ? 'الموبايل لسه ماسمحش بالميكروفون — دوس «سماح» لما يسألك أو اسمح بيه من إعدادات الموبايل وجرّب تاني'
         : /NotFound|Overconstrained/i.test(n) ? 'مفيش ميكروفون شغال على الجهاز ده'
         : /NotReadable|AbortError/i.test(n) ? 'الميكروفون مشغول — اقفل أي مكالمة تانية وجرّب'
-        : step === 'insert' || step === 'net' ? 'النت ضعيف — المكالمة ماوصلتش، جرّب تاني' : 'تعذّر بدء المكالمة';
-      C.cur = c; finish(c.id ? 'failed' : null, msg);
+        : ['insert', 'net', 'offer'].includes(step) ? 'النت ضعيف — المكالمة ماوصلتش، جرّب تاني' : 'تعذّر بدء المكالمة';
+      finish(c.id ? 'failed' : null, msg);
     }
   }
   async function incoming(row) {
@@ -27678,20 +27861,25 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (C.cur && row.room && row.joining && roomOf(C.cur) === row.room) return autoLeg(row);
     if (C.cur) { if (C.cur.id !== row.id && !(C.cur.legs || []).some(l => l.id === row.id)) await S.sb.from('nf_calls').update({ status: 'busy' }).eq('id', row.id); return; }
     await loadDir();
-    C.cur = { id: row.id, dir: 'in', caller: row.caller, callee: row.callee, video: !!row.video, state: 'incoming', offer: row.offer, room: row.room || null, legs: [], ctx: row.ctx || null }; paint(); if (!window.nfNativeRing) tone('in');
+    C.cur = { id: row.id, dir: 'in', caller: row.caller, callee: row.callee, video: !!row.video, state: 'incoming', offer: row.offer || null, room: row.room || null, legs: [], ctx: row.ctx || null }; paint(); if (!window.nfNativeRing) tone('in');
+    rtcOpen(C.cur); /* v7.30: listen for the caller's late network paths while it rings */
     C.cur.timeout = setTimeout(() => { if (C.cur && C.cur.id === row.id && C.cur.state === 'incoming') { const c = C.cur; C.cur = null; cleanup(c); closeScreen(); hook('end', c, { status: 'missed' }); } }, RING_MS);
   }
   async function accept(withVideo) {
     const c = C.cur; if (!c || c.state !== 'incoming') return; stopTone(); clearTimeout(c.timeout);
-    c.state = 'connecting'; c.video = !!(c.video && withVideo); paint();
+    c.state = 'connecting'; c.video = !!(c.video && withVideo); paint(); rtcOpen(c);
+    const offP = waitOffer(c, 20000); offP.catch(() => { }); /* v7.30: answered before the caller's phone finished getting ready — wait for its offer */
     try {
-      c.local = await media(c.video); c.video = c.local.getVideoTracks().length > 0 || !!(c.video); paint(); attach();
-      c.pc = await makePc(c); await c.pc.setRemoteDescription(c.offer); const ans = await c.pc.createAnswer(); await c.pc.setLocalDescription(ans); await gathered(c.pc);
+      const loc = await media(c.video); if (C.cur !== c) { try { loc.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } return; }
+      c.local = loc; c.video = c.local.getVideoTracks().length > 0 || !!(c.video); paint(); attach();
+      c.pc = await makePc(c); const offer = await offP; if (C.cur !== c) return release(c);
+      await c.pc.setRemoteDescription(offer); flushCands(c); const ans = await c.pc.createAnswer(); await c.pc.setLocalDescription(ans); await gatherFast(c.pc, c);
+      if (C.cur !== c) return release(c);
       const { error } = await S.sb.from('nf_calls').update({ answer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp }, status: 'active' }).eq('id', c.id).eq('status', 'ringing');
       if (error) throw error;
       S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + me()], title: 'Ninety', body: '', url: '/#/calls', tag: 'call-' + c.id, call: 'stop:' + c.id, sms: false } }).catch(() => { }); hook('accept', c);
       if (c.room) { const waitActive = n => { if (C.cur !== c) return; if (c.state === 'active') joinOthers(c); else if (n < 30) setTimeout(() => waitActive(n + 1), 500); }; waitActive(0); }
-    } catch (e) { console.warn(e); finish('failed', /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون للسيستم' : 'تعذّر الرد'); }
+    } catch (e) { console.warn(e); if (C.cur !== c) return release(c); finish('failed', e && e.name === 'NoOffer' ? 'الاتصال ماكملش — اطلب منه يتصل تاني' : /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون للسيستم' : 'تعذّر الرد'); }
   }
   async function onRow(row) {
     if (!row) return;
@@ -27704,10 +27892,11 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     }
     if (row.callee === me() && row.status === 'ringing' && (!c || c.id !== row.id)) return incoming(row);
     if (!c || c.id !== row.id) { C.logAt = 0; return; }
-    if (c.dir === 'out' && row.status === 'active' && row.answer && c.pc && !c.pc.currentRemoteDescription) { if (c.answering === c.id) return; c.answering = c.id; c.state = 'connecting'; stopTone(); clearTimeout(c.timeout); paint(); try { await c.pc.setRemoteDescription(row.answer); } catch (e) { finish('failed', 'تعذّر الاتصال'); } return; }
+    if (c.dir === 'in' && row.offer && !c.offer) { c.offer = row.offer; if (c.offerWait) c.offerWait(); } /* v7.30: the caller's offer arrived after the ring */
+    if (c.dir === 'out' && row.status === 'active' && row.answer && c.pc && !c.pc.currentRemoteDescription) { if (c.answering === c.id) return; c.answering = c.id; c.state = 'connecting'; c.slow = false; stopTone(); clearTimeout(c.timeout); clearTimeout(c.noAns); paint(); try { await c.pc.setRemoteDescription(row.answer); flushCands(c); } catch (e) { finish('failed', 'تعذّر الاتصال'); } return; }
     if (['ended', 'declined', 'missed', 'busy', 'failed'].includes(row.status) && c.state === 'active' && (c.legs || []).some(l => l.state === 'active')) {
       const l = c.legs.find(x => x.state === 'active'); const gone = c.dir === 'out' ? c.callee : c.caller; const R = roomOf(c); try { c.pc && c.pc.close(); } catch (e) { /* ignore */ }
-      c.legs = c.legs.filter(x => x !== l); Object.assign(c, { id: l.id, dir: l.dir, caller: l.dir === 'out' ? me() : l.uid, callee: l.dir === 'out' ? l.uid : me(), pc: l.pc, remote: l.remote, room: R, diag: null }); monitor(c);
+      c.legs = c.legs.filter(x => x !== l); rtcClose(c); Object.assign(c, { id: l.id, dir: l.dir, caller: l.dir === 'out' ? me() : l.uid, callee: l.dir === 'out' ? l.uid : me(), pc: l.pc, remote: l.remote, room: R, diag: null }); monitor(c);
       toast(`${nameOf(gone)} خرج من المكالمة`); paint(); attach(); return;
     }
     if (['ended', 'declined', 'missed', 'busy', 'failed'].includes(row.status)) {
@@ -27728,6 +27917,9 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   }
   /* opened from the push notification */
   async function fromHash() {
+    /* v7.30: the missed-call notification → that person's card with the call buttons */
+    const mb = (location.hash || '').match(/^#\/calls\/back\/([\w-]{3,64})/);
+    if (mb) { if (!hosted() || noCalls()) return; try { history.replaceState(null, '', '#/calls'); } catch (e) { /* ignore */ } await Promise.all([loadDir(), loadLog().catch(() => [])]); if (mb[1] !== me() && (C.dir || []).some(x => x.uid === mb[1])) openSheet(mb[1]); return; }
     const m = (location.hash || '').match(/^#\/calls\/([0-9a-f-]{36})(?:\/(accept|decline))?/); if (!m || !hosted() || noCalls()) return;
     subscribe();
     const { data } = await S.sb.from('nf_calls').select('*').eq('id', m[1]).maybeSingle();
@@ -27739,6 +27931,16 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
       const a = b.dataset.nfc; const c = C.cur;
       if (a === 'accept') return accept(true); if (a === 'accept-a') return accept(false);
       if (a === 'decline') return finish('declined'); if (a === 'hang') return finish(c && c.state === 'calling' ? 'missed' : c && c.state === 'prep' ? null : 'ended'); if (a === 'close') return closeScreen();
+      /* v7.30: shrink to a bubble / back to the call · call again · no answer: voice message, his mobile, remind me */
+      if (a === 'min' && c) { c.mini = true; paint(); return; }
+      if (a === 'restore') { if (c) { c.mini = false; paint(); attach(); } else b.remove(); return; }
+      if (a === 'again') { const el = document.getElementById('nfcall'); const u = el && el.dataset.u; const v = el && el.dataset.v === '1'; closeScreen(); if (u) startCall(u, v); return; }
+      if (a === 'vmsg' || a === 'remind' || a === 'tel') {
+        const u = b.dataset.u; if (!u) return; const live = c && c.dir === 'out' && c.callee === u && ['calling', 'prep'].includes(c.state);
+        const stop = () => { if (live && C.cur === c) finish('missed'); else if (!C.cur) closeScreen(); };
+        if (a === 'tel') { setTimeout(stop, 350); return; } /* let the phone open its dialer first */
+        stop(); if (a === 'vmsg') voiceMsg(u); else remindLater(u); return;
+      }
       if (a === 'spk' && c) { setSpeaker(c, !c.spk); return; }
       if (a === 'add' && c) { openAddSheet(); return; }
       if (a === 'mute' && c && c.local) { c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); return paint(); }
@@ -27748,6 +27950,58 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     }
     const k = e.target.closest && e.target.closest('[data-nfcall]'); if (k) { e.preventDefault(); startCall(k.dataset.nfcall, k.dataset.v === '1'); }
   });
+  /* ---------- v7.30: voice message when he does not answer (a task to him with the voice note in its chat) ---------- */
+  let REC = null;
+  async function voiceMsg(u) {
+    if (!canVoice(u)) { toast('الرسالة الصوتية مش متاحة للشخص ده من هنا', 'err'); return; }
+    css(); recStop(true); document.getElementById('nfc-sheet')?.remove(); const d = dirOf(u);
+    document.body.insertAdjacentHTML('beforeend', `<div id="nfc-sheet" class="rec"><div class="sh"><div class="grab"></div>${avHtml(d, 72)}<div class="n" style="font-size:20px">رسالة صوتية لـ${esc(d.name || nameOf(u))}</div><div class="vtime"><span class="recdot"></span><span id="nfcv-t">00:00</span></div><div class="note" id="nfcv-n">بيجهّز الميكروفون…</div><div class="acts"><button type="button" data-nfcv="cancel">${svg('x', 22)}<span>إلغاء</span></button><button type="button" class="g" data-nfcv="send">${svg('mic', 22)}<span>إرسال</span></button></div></div></div>`);
+    try {
+      const st = await within(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }), 15000, 'mic');
+      const sh = document.getElementById('nfc-sheet'); if (!sh || !sh.classList.contains('rec')) { st.getTracks().forEach(t => t.stop()); return; }
+      const mt = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/aac'].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+      const mr = new MediaRecorder(st, mt ? { mimeType: mt } : undefined);
+      const r = REC = { u, st, mr, chunks: [], t0: Date.now(), send: false, mt };
+      mr.ondataavailable = ev => { if (ev.data && ev.data.size) r.chunks.push(ev.data); };
+      mr.onstop = () => { try { st.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } if (r.send) recSend(r); };
+      mr.start(500);
+      const n = document.getElementById('nfcv-n'); if (n) n.textContent = 'بيسجّل — لحد دقيقة، وتوصله مهمة فيها الرسالة';
+      r.iv = setInterval(() => { const el = document.getElementById('nfcv-t'); if (el) el.textContent = fmtT(Math.round((Date.now() - r.t0) / 1000)); }, 500);
+      r.max = setTimeout(() => { if (REC === r) recStop(false); }, 60000);
+    } catch (e) { console.warn('voice msg', e); document.getElementById('nfc-sheet')?.remove(); toast('الميكروفون مش متاح — اسمح بيه وجرّب تاني', 'err'); }
+  }
+  function recStop(cancel) {
+    const r = REC; if (!r) return; REC = null; r.send = !cancel; r.dur = Math.round((Date.now() - r.t0) / 1000); clearInterval(r.iv); clearTimeout(r.max);
+    try { if (r.mr.state !== 'inactive') r.mr.stop(); else if (r.send) recSend(r); } catch (e) { if (r.send) recSend(r); }
+    if (cancel) { try { r.st.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ } }
+    const sh = document.getElementById('nfc-sheet'); if (sh && sh.classList.contains('rec')) sh.remove();
+  }
+  async function recSend(r) {
+    if (r.sent) return; r.sent = true;
+    if (!r.chunks.length || r.dur < 1) { toast('التسجيل قصير جدًا', 'err'); return; }
+    const type = String(r.mr.mimeType || r.mt || r.chunks[0].type || 'audio/webm').split(';')[0];
+    const file = new File(r.chunks, `voice-${Date.now()}.${/mp4|aac|m4a/.test(type) ? 'm4a' : 'webm'}`, { type });
+    if (file.size > 8 * 1024 * 1024) { toast('الرسالة الصوتية أكبر من 8 ميجا', 'err'); return; }
+    const tg = voiceTarget(r.u); if (!tg) return;
+    toast('جارٍ إرسال الرسالة الصوتية…');
+    try {
+      const t = Object.assign({ id: uid(), title: `🎤 رسالة صوتية من ${myNameNow()} — اتصل بيك ومالحقكش`, desc: 'افتح المهمة واسمع الرسالة، وكلّمه أو رد عليه هنا.', deptId: null, assigneeId: null, orderId: null, dueDate: todayISO(), priority: 'normal', status: 'open', kind: 'task', source: 'callmsg', callFrom: me(), createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: nowISO(), updatedAt: nowISO() }, tg);
+      await Store.save('tasks', t, { silent: true });
+      const ok = await taskPost(byId('tasks', t.id) || t, '', file, { dur: r.dur });
+      toast(ok === false ? 'الرسالة ماتبعتتش — جرّب تاني' : `✓ الرسالة الصوتية وصلت لـ${nameOf(r.u)}`, ok === false ? 'err' : undefined);
+    } catch (e) { console.warn('voice msg send', e); toast('الرسالة ماتبعتتش — جرّب تاني', 'err'); }
+  }
+  /* ---------- v7.30: «remind me in an hour» (a reminder on the server — the notification comes even if the system is closed) ---------- */
+  async function remindLater(u) {
+    const at = new Date(Date.now() + 3600e3);
+    try { const { error } = await S.sb.from('nf_call_remind').insert({ target: u, at: at.toISOString() }); if (error) throw error; toast(`هفكّرك الساعة ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')} تكلّم ${nameOf(u)}`); }
+    catch (e) { console.warn('remind', e); toast('التذكير ماتسجّلش — جرّب تاني', 'err'); }
+  }
+  document.addEventListener('click', e => {
+    const v = e.target.closest && e.target.closest('[data-nfcv]'); if (v) { recStop(v.dataset.nfcv !== 'send'); return; }
+    const f = e.target.closest && e.target.closest('[data-nfcfav]'); if (f) { const u = f.dataset.nfcfav; const a = favs(); setFavs(a.includes(u) ? a.filter(x => x !== u) : [u].concat(a)); openSheet(u); if (S.route && S.route.view === 'calls') render(false); return; }
+    const rc = e.target.closest && e.target.closest('[data-nfcreach]'); if (rc) { S.ui = S.ui || {}; S.ui.reachOpen = !S.ui.reachOpen; render(false); }
+  });
   window.addEventListener('beforeunload', () => { if (C.cur && C.cur.id) { try { S.sb.from('nf_calls').update({ status: C.cur.state === 'incoming' ? 'missed' : 'ended' }).eq('id', C.cur.id); } catch (e) { /* ignore */ } } });
 
   /* ---------- page: المكالمات (iPhone «Contacts / Recents» look) ---------- */
@@ -27755,10 +28009,31 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const stTxt = c => { const out = c.caller === me(); if (c.status === 'missed' || c.status === 'busy') return out ? 'مردّش' : 'فايتة'; if (c.status === 'declined') return out ? 'رفض' : 'رفضتها'; if (c.status === 'failed') return 'ماوصلتش'; return out ? 'صادرة' : 'واردة'; };
   const dur = c => c.answered_at && c.ended_at ? fmtT(Math.max(0, Math.round((Date.parse(c.ended_at) - Date.parse(c.answered_at)) / 1000))) : '';
   const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : fmtDate(String(iso).slice(0, 10)); };
+  const lastWith = u => (C.log || []).find(x => x.caller === u || x.callee === u) || null;
+  /* v7.30: favourites on top — starred on this phone, then the people called most */
+  function favList() {
+    const st = favs().filter(u => u !== me() && (C.dir || []).some(x => x.uid === u));
+    const n = new Map(); (C.log || []).forEach(x => { const o = x.caller === me() ? x.callee : x.caller; if (o && o !== me()) n.set(o, (n.get(o) || 0) + 1); });
+    const top = [...n.entries()].filter(([u, k]) => k >= 2 && !st.includes(u) && (C.dir || []).some(x => x.uid === u)).sort((x, y) => y[1] - x[1]).map(x => x[0]);
+    return st.concat(top).slice(0, 10);
+  }
+  /* v7.30: owner — whose phone will really ring, and what to fix for the rest */
+  function reachCard() {
+    if (!(typeof isAdmin === 'function' && isAdmin()) || !C.reach) return '';
+    const rows = [...C.reach.values()].filter(r => r.uid !== me() && (C.dir || []).some(x => x.uid === r.uid));
+    if (!rows.length) return '';
+    const nR = rows.filter(r => r.lvl === 'ring' || r.lvl === 'online').length, nN = rows.filter(r => r.lvl === 'notify').length, nO = rows.length - nR - nN;
+    const need = rows.filter(r => r.why && !READY(r.why)).sort((x, y) => String(x.why).localeCompare(String(y.why)) || String(nameOf(x.uid)).localeCompare(String(nameOf(y.uid)), 'ar'));
+    const open = !!(S.ui && S.ui.reachOpen);
+    return `<div class="nfc-reach"><div class="rh"><b>جاهزية المكالمات</b><span class="muted small">مين المكالمة هترن عنده دلوقتي</span></div>
+      <div class="ct"><span><i style="background:#34c759"></i>${nR} هيرن / فاتح</span><span><i style="background:#ff9f0a"></i>${nN} إشعار بس</span><span><i style="background:#8e8e93"></i>${nO} مش متاح</span></div>
+      ${need.length ? `<button type="button" class="btn sm ghost" data-nfcreach style="margin-top:8px">${open ? 'إخفاء' : `مين محتاج يحدّث (${need.length})`}</button>` : ''}
+      ${open && need.length ? `<div class="rl">${need.map(r => { const d = dirOf(r.uid); const w = WHY[r.why] || WHY.none; return `<div class="rr">${avHtml(d, 32)}<div class="grow"><div class="t">${esc(d.name || nameOf(r.uid))}</div><div class="s">${esc(w[0])}${r.seen ? ' · آخر ظهور ' + esc(whenTxt(r.seen)) : ''}</div>${w[1] ? `<div class="f">${esc(w[1])}</div>` : ''}</div></div>`; }).join('')}</div>` : ''}</div>`;
+  }
   function vCalls() {
     css();
     if (!hosted()) return '<div class="empty">المكالمات بتشتغل في النسخة المستضافة بس.</div>'; if (noCalls()) return '<div class="empty">المكالمات مش متاحة لهذا الحساب.</div>';
-    if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog()]).then(() => { if (S.route.view === 'calls') render(false); }); }
+    if (!C.dir || !C.logAt || Date.now() - C.logAt > 30000) { Promise.all([loadDir(), loadLog(), loadReach()]).then(() => { if (S.route.view === 'calls') render(false); }); }
     try { localStorage.setItem('nf.calls.seen', String(Date.now())); } catch (e) { /* ignore */ }
     S.ui = S.ui || {}; const tab = S.ui.callTab || 'contacts';
     const q = String(S.ui.callQ || '').trim(); const dir = (C.dir || []).filter(x => x.uid !== me() && (!q || String(x.name).includes(q) || roleName(x.role).includes(q)));
@@ -27766,24 +28041,28 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const sub = x => `${esc(roleName(x.role))}${x.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(x.dept_id)) : ''}`;
     let body = '';
     if (tab === 'contacts') {
-      let last = ''; const rows = dir.map(x => { const L = String(x.name || '').trim()[0] || ''; const idx = L !== last ? (last = L, `</div><div class="nfc-idx">${esc(L)}</div><div class="nfc-list">`) : ''; return `${idx}<div class="nfc-row" data-nfcsheet="${esc(x.uid)}">${avHtml(x, 44)}<div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${sub(x)}</div></div>${callBtns(x.uid)}</div>`; }).join('');
-      body = `<input type="search" id="nfc-q" placeholder="ابحث بالاسم أو الوظيفة…" value="${esc(q)}" style="width:100%;margin:0 0 4px;border-radius:12px">${dir.length ? `<div class="nfc-list" style="display:none">${rows}</div>` : '<div class="empty small">مفيش نتايج</div>'}`;
+      const fl = q ? [] : favList();
+      const favHtml = fl.length ? `<div class="nfc-idx">المفضّلين</div><div class="nfc-favs">${fl.map(u => { const d = dirOf(u); return `<button type="button" class="fv" data-nfcsheet="${esc(u)}">${avDot(d, 56)}<span>${esc(String(d.name || '').split(' ')[0])}</span></button>`; }).join('')}</div>` : '';
+      let last = ''; const rows = dir.map(x => { const L = String(x.name || '').trim()[0] || ''; const idx = L !== last ? (last = L, `</div><div class="nfc-idx">${esc(L)}</div><div class="nfc-list">`) : ''; return `${idx}<div class="nfc-row" data-nfcsheet="${esc(x.uid)}">${avDot(x, 44)}<div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${sub(x)}</div></div>${callBtns(x.uid)}</div>`; }).join('');
+      body = `${q ? '' : reachCard()}<input type="search" id="nfc-q" placeholder="ابحث بالاسم أو الوظيفة…" value="${esc(q)}" style="width:100%;margin:0 0 4px;border-radius:12px">${favHtml}${dir.length ? `<div class="nfc-list" style="display:none">${rows}</div>` : '<div class="empty small">مفيش نتايج</div>'}`;
     } else {
-      body = log.length ? `<div class="nfc-list">${log.map(c => { const other = c.caller === me() ? c.callee : c.caller; const d = dirOf(other); const miss = (c.status === 'missed' || c.status === 'busy') && c.callee === me(); return `<div class="nfc-row" data-nfcsheet="${esc(other)}">${avHtml(d, 40)}<div class="grow"><div class="t ${miss ? 'miss' : ''}">${esc(d.name || nameOf(other))}</div><div class="s">${svg(c.video ? 'video' : 'phone', 12)} ${stTxt(c)}${dur(c) ? ' · ' + dur(c) : ''}</div></div><span class="s" style="opacity:.55;font-size:13px">${esc(whenTxt(c.created_at))}</span>${callBtns(other)}</div>`; }).join('')}</div>` : '<div class="empty small">لسه مفيش مكالمات</div>';
+      body = log.length ? `<div class="nfc-list">${log.map(c => { const other = c.caller === me() ? c.callee : c.caller; const d = dirOf(other); const miss = (c.status === 'missed' || c.status === 'busy') && c.callee === me(); return `<div class="nfc-row" data-nfcsheet="${esc(other)}">${avDot(d, 40)}<div class="grow"><div class="t ${miss ? 'miss' : ''}">${esc(d.name || nameOf(other))}</div><div class="s">${svg(c.video ? 'video' : 'phone', 12)} ${stTxt(c)}${dur(c) ? ' · ' + dur(c) : ''}</div></div><span class="s" style="opacity:.55;font-size:13px">${esc(whenTxt(c.created_at))}</span>${callBtns(other)}</div>`; }).join('')}</div>` : '<div class="empty small">لسه مفيش مكالمات</div>';
     }
     return `<div style="max-width:640px;margin:0 auto">
       <div class="nfc-me">${avHtml(mine || { name: (S.session && S.session.name) || '' }, 52)}<div class="grow"><div style="font-weight:700;font-size:17px">${esc((mine && mine.name) || (S.session && S.session.name) || '')}</div><div class="muted small">${(C.dir || []).length ? (C.dir.length - 1) + ' شخص على السيستم' : 'جارٍ التحميل…'}</div></div><label class="btn sm ghost">${svg('cam', 16)}<span>صورتي</span><input type="file" accept="image/*" id="nfc-myphoto" hidden></label></div>
       <div class="nfc-seg"><button class="${tab === 'contacts' ? 'on' : ''}" data-nfctab="contacts">جهات الاتصال</button><button class="${tab === 'recent' ? 'on' : ''}" data-nfctab="recent">الأخيرة${missedCount() ? ` <span style="color:#ff453a">(${missedCount()})</span>` : ''}</button></div>
       ${body}
-      <p class="small ink2" style="margin:14px 4px 0;opacity:.7">المكالمة على النت (واي فاي أو باقة) من غير رصيد، ومشفّرة من جهاز لجهاز — السيستم مابيسجّلش الصوت ولا الصورة. علشان توصلك المكالمة والتطبيق مقفول لازم الإشعارات تبقى شغالة.</p>
+      <p class="small ink2" style="margin:14px 4px 0;opacity:.7">النقطة جنب الاسم: <b style="color:#34c759">خضرا</b> هترن عنده زي التليفون أو فاتح السيستم دلوقتي · <b style="color:#ff9f0a">برتقاني</b> هيوصله إشعار بس · <b style="color:#8e8e93">رمادي</b> مش متاح دلوقتي. المكالمة على النت (واي فاي أو باقة) من غير رصيد، ومشفّرة من جهاز لجهاز — السيستم مابيسجّلش الصوت ولا الصورة.</p>
     </div>`;
   }
   function openSheet(uid) {
     const d = dirOf(uid); if (!d || uid === me()) return; css(); document.getElementById('nfc-sheet')?.remove();
-    document.body.insertAdjacentHTML('beforeend', `<div id="nfc-sheet"><div class="sh"><div class="grab"></div>${avHtml(d, 112)}<div class="n">${esc(d.name)}</div><div class="r">${esc(roleName(d.role))}${d.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(d.dept_id)) : ''}</div><div class="acts"><button class="g" data-nfcall="${esc(uid)}">${svg('phone', 24)}<span>صوت</span></button><button data-nfcall="${esc(uid)}" data-v="1">${svg('video', 24)}<span>فيديو</span></button></div></div></div>`);
+    const rt = reachTxt(uid); const lw = lastWith(uid); const missed = lw && lw.callee === me() && (lw.status === 'missed' || lw.status === 'busy'); const fav = isFav(uid);
+    document.body.insertAdjacentHTML('beforeend', `<div id="nfc-sheet"><div class="sh"><div class="grab"></div><div style="display:flex;justify-content:center">${avDot(d, 112)}</div><div class="n">${esc(d.name)}</div><div class="r">${esc(roleName(d.role))}${d.dept_id && typeof deptName === 'function' ? ' · ' + esc(deptName(d.dept_id)) : ''}</div>${rt ? `<div class="note">${esc(rt)}</div>` : ''}${missed ? `<div class="missed">مكالمة فايتة منه · ${esc(whenTxt(lw.created_at))}</div>` : ''}<div class="acts"><button class="g" data-nfcall="${esc(uid)}">${svg('phone', 24)}<span>صوت</span></button><button data-nfcall="${esc(uid)}" data-v="1">${svg('video', 24)}<span>فيديو</span></button>${canVoice(uid) ? `<button type="button" data-nfc="vmsg" data-u="${esc(uid)}">${svg('mic', 24)}<span>رسالة صوتية</span></button>` : ''}<button type="button" data-nfcfav="${esc(uid)}">${svg(fav ? 'star' : 'staro', 24)}<span>${fav ? 'في المفضّلين' : 'مفضّل'}</span></button></div></div></div>`);
   }
   document.addEventListener('click', e => {
-    const sh = document.getElementById('nfc-sheet'); if (sh && (e.target === sh || e.target.closest('#nfc-sheet [data-nfcall]'))) setTimeout(() => sh.remove(), 0);
+    const sh = document.getElementById('nfc-sheet'); if (sh && sh.classList.contains('rec')) { if (e.target === sh) recStop(true); return; }
+    if (sh && (e.target === sh || e.target.closest('#nfc-sheet [data-nfcall]'))) setTimeout(() => sh.remove(), 0);
     const t = e.target.closest && e.target.closest('[data-nfctab]'); if (t) { S.ui = S.ui || {}; S.ui.callTab = t.dataset.nfctab; render(false); return; }
     const r = e.target.closest && e.target.closest('[data-nfcsheet]'); if (r && !e.target.closest('[data-nfcall]')) openSheet(r.dataset.nfcsheet);
   });
@@ -27799,6 +28078,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   /* call buttons on a person's page (workers / staff) */
   RENDER_HOOKS.push(() => {
     if (noCalls()) return; subscribe(); document.body.classList.toggle('nf-callspage', !!(S.route && S.route.view === 'calls'));
+    if (!C.icePre && hosted()) { C.icePre = 1; setTimeout(() => { iceServers().catch(() => { }); }, 2500); } /* v7.30: the call servers are ready before the first call */
     const r = S.route || {}; if (!hosted() || !r.id || !['workers', 'staff'].includes(r.view)) return;
     const pid = r.view === 'workers' ? 'w:' + r.id : r.id; const d = (C.dir || []).find(x => x.person_id === pid);
     if (!C.dir) { loadDir().then(() => { if (S.route.id === r.id) render(false); }); return; }
@@ -27839,7 +28119,7 @@ body.printing .callfab,body.fab-hide .callfab,body.nf-typing .callfab,body.nf-ch
     } catch (e) { toast('تعذّر الحفظ', 'err'); }
   });
   ACTIONS.turnClear = async () => { if (!isAdmin() || !(await confirmDlg('شيل مفتاح TURN؟ المكالمات هترجع تشتغل من غير السيرفر.', 'شيل'))) return; await S.sb.functions.invoke('rtc', { body: { action: 'setup', clear: true } }); C.ice = null; toast('اتشال'); render(false); };
-  window.nfCalls = Object.assign(window.nfCalls || {}, { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, vCalls, missedCount, addPerson });
+  window.nfCalls = Object.assign(window.nfCalls || {}, { C, startCall, incoming, accept, finish, onRow, loadDir, loadLog, loadReach, vCalls, missedCount, addPerson, reconnect, openSheet, voiceMsg, remindLater, reachOf });
 })();
 /* =====================================================================
    v5.38/v5.39 — صورة المنتج من بره + البرزنتيشن
@@ -40264,6 +40544,75 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 .nf-tripgm.on{height:240px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
 .nf-tripgm-map{width:100%;height:100%}
 @media (min-width:900px){.nf-tripgm.on{height:300px}}
+</style>`);
+})();
+/* =====================================================================
+   v7.30 (Mahmoud, 10 Oct, calls «better, faster, practical» — brief claude/calls-v2-brief.md):
+   · Android phones still on the old app (no «NinetyCalls» call screen — every Android phone today): a banner on the home page
+     and the calls page «download the new version» (Ninety.apk from the site, installs over the old one, the account stays)
+     with the steps after installing (notifications, full-screen notifications, no battery restriction). It stays until the
+     phone runs the new app; «later» hides it until the app is opened again.
+   · the microphone is asked once from the home page (not in the middle of the first call), so answering starts at once.
+   ===================================================================== */
+(function () {
+  if (window.__NF_CALLREADY__) return; window.__NF_CALLREADY__ = 1;
+  if (typeof isStudioz === 'function' && isStudioz() || typeof isConstruction === 'function' && isConstruction()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  const APK = 'https://raw.githubusercontent.com/mahmoudfawzy1212mf-crypto/mahmoudfawzy1212mf-crypto.github.io/HEAD/Ninety.apk';
+  const callsOn = () => !!(window.nfCalls && typeof window.nfCalls.available === 'function' && window.nfCalls.available()) && !!S.session;
+  const cap = () => { try { return window.Capacitor || null; } catch (e) { return null; } };
+  const oldAndroid = () => { const c = cap(); try { return !!c && typeof c.isNativePlatform === 'function' && c.isNativePlatform() && typeof c.getPlatform === 'function' && c.getPlatform() === 'android' && !(c.Plugins && c.Plugins.NinetyCalls); } catch (e) { return false; } };
+  const homeish = () => { const v = S.route && S.route.view; if (!v) return false; if (v === 'calls' || v === 'dashboard' || v === 'me') return true; try { return typeof homeView === 'function' && v === homeView() && !S.route.id; } catch (e) { return false; } };
+  let later = false, micState = '';
+  const ic = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  function apkBanner() {
+    return `<div class="nf-cready" id="nf-apkup"><div class="ci">${ic('<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>')}</div><div class="cb"><b>${L('نزّل النسخة الجديدة من أبلكيشن Ninety', 'Download the new Ninety app')}</b><span>${L('علشان المكالمات ترن عندك زي التليفون حتى والموبايل مقفول. بتتسطّب فوق القديمة — حسابك وكل حاجة زي ما هي.', 'So calls ring like a phone call even when the phone is locked. It installs over the old one — your account and everything stay as they are.')}</span>
+      <div class="cs" id="nf-apkhow" hidden><ol><li>${L('دوس «تنزيل» واستنى لحد ما الملف يخلص، وافتحه.', 'Tap «Download», wait for the file and open it.')}</li><li>${L('دوس «تحديث» (أو «تثبيت») — لو سألك اسمح بالتثبيت من المصدر ده.', 'Tap «Update» (or «Install») — if asked, allow installing from this source.')}</li><li>${L('افتح Ninety وادخل بنفس الرقم وكلمة السر.', 'Open Ninety and sign in with the same number and password.')}</li><li>${L('لما يسألك: اسمح بالإشعارات، و«إشعارات ملء الشاشة»، والبطارية «بدون قيود».', 'When asked: allow notifications, «full-screen notifications» and battery «unrestricted».')}</li></ol></div>
+      <div class="ca"><a class="btn sm p" href="${APK}" target="_blank" rel="noopener">${L('تنزيل', 'Download')}</a><button type="button" class="btn sm ghost" data-nfcr="how">${L('إزاي؟', 'How?')}</button><button type="button" class="btn sm ghost" data-nfcr="later">${L('بعدين', 'Later')}</button></div></div></div>`;
+  }
+  function micBanner() {
+    return `<div class="nf-cready" id="nf-micask"><div class="ci">${ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>')}</div><div class="cb"><b>${L('اسمح بالميكروفون مرة واحدة', 'Allow the microphone once')}</b><span>${L('علشان لما حد يكلّمك من السيستم ترد وتتكلم على طول من غير ما يسألك وقت المكالمة.', 'So when someone calls you in the system you answer and talk at once, without being asked during the call.')}</span>
+      <div class="ca"><button type="button" class="btn sm p" data-nfcr="mic">${L('اسمح', 'Allow')}</button><button type="button" class="btn sm ghost" data-nfcr="micno">${L('مش دلوقتي', 'Not now')}</button></div></div></div>`;
+  }
+  async function micCheck() {
+    if (micState || lsGet('nf.mic.ok') || lsGet('nf.mic.no')) return;
+    micState = 'checking';
+    try { if (navigator.permissions && navigator.permissions.query) { const p = await navigator.permissions.query({ name: 'microphone' }); if (p && p.state === 'granted') { lsSet('nf.mic.ok', '1'); micState = 'ok'; return; } } } catch (e) { /* not supported here */ }
+    micState = 'ask'; paint();
+  }
+  function paint() {
+    const v = document.getElementById('view');
+    const on = !!v && callsOn() && homeish();
+    const wantApk = on && !later && oldAndroid();
+    const wantMic = on && !wantApk && micState === 'ask' && !lsGet('nf.mic.ok') && !lsGet('nf.mic.no') && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    let a = document.getElementById('nf-apkup'), m = document.getElementById('nf-micask');
+    if (!wantApk && a) a.remove(); if (!wantMic && m) m.remove();
+    if (wantApk && (!a || !v.contains(a))) { if (a) a.remove(); v.insertAdjacentHTML('afterbegin', apkBanner()); }
+    if (wantMic && (!m || !v.contains(m))) { if (m) m.remove(); v.insertAdjacentHTML('afterbegin', micBanner()); }
+    if (on && !wantApk && !micState) micCheck();
+  }
+  document.addEventListener('click', async e => {
+    const b = e.target.closest && e.target.closest('[data-nfcr]'); if (!b) return;
+    const k = b.dataset.nfcr;
+    if (k === 'how') { const h = document.getElementById('nf-apkhow'); if (h) h.hidden = !h.hidden; return; }
+    if (k === 'later') { later = true; paint(); return; }
+    if (k === 'micno') { lsSet('nf.mic.no', String(Date.now())); paint(); return; }
+    if (k === 'mic') {
+      try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach(t => t.stop()); lsSet('nf.mic.ok', '1'); micState = 'ok'; toast(L('✓ الميكروفون جاهز للمكالمات', '✓ The microphone is ready for calls')); }
+      catch (x) { toast(L('الموبايل رفض — اسمح بالميكروفون للسيستم من الإعدادات', 'The phone refused — allow the microphone for the system in Settings'), 'err'); }
+      paint();
+    }
+  });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(paint, 0));
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-cready-css">
+.nf-cready{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:0 0 12px;border-radius:14px;border:1px solid color-mix(in srgb,#0a84ff 35%,var(--line));background:color-mix(in srgb,#0a84ff 9%,var(--surface))}
+.nf-cready .ci{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#0a84ff;color:#fff}
+.nf-cready .cb{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.nf-cready .cb b{font-size:15px}.nf-cready .cb>span{font-size:13px;opacity:.8;line-height:1.5}
+.nf-cready .ca{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.nf-cready .cs ol{margin:6px 0 0;padding-inline-start:20px;font-size:13px;line-height:1.8}
+#nf-micask{border-color:color-mix(in srgb,#34c759 35%,var(--line));background:color-mix(in srgb,#34c759 8%,var(--surface))}#nf-micask .ci{background:#34c759}
 </style>`);
 })();
 </script>
