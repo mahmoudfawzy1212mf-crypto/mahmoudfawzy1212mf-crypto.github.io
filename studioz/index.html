@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0934-5815b7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0952-336e7b";</script>
 
 <script>
 'use strict';
@@ -11227,7 +11227,7 @@ async function applyRequestEffectsApr(r, w, patch, opts = {}) {
 const isPunchRow = row => !!row && (row.method === 'self' || row.src === 'self' || row.src === 'kiosk' || row.src === 'request' || row.method === 'kiosk' || row.method === 'request' || row.fixReqId);
 const _storeUpdateApprovals = Store.update;
 Store.update = async function (col, id, patch, opts = {}) {
-  if (col === 'attendance' && !S._attBypass && wageGuardRole() && patch && patch.rows && typeof patch.rows === 'object') {
+  if (col === 'attendance' && !S._attBypass && (wageGuardRole() || (typeof window.nfAttEditor === 'function' && window.nfAttEditor())) && patch && patch.rows && typeof patch.rows === 'object') {
     const me = S.session || {}; const myWid = me.workerId || null; const notes = []; let pending = 0;
     for (const [date, rows] of Object.entries(patch.rows)) {
       for (const [wid, row] of Object.entries(rows || {})) {
@@ -40076,6 +40076,34 @@ html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
     if (act === 'suppliers' && S.session && role() === 'acc' && writable() && !(typeof isStuSys === 'function' && isStuSys())) return true;
     return base.apply(this, arguments);
   })(canDo);
+})();
+/* =====================================================================
+   v7.27 (PIN approved 10 Oct — Mahmoud: «open the daily attendance for Bahaa so he can fix people»):
+   people named in settings → policy.attEditorIds (today: Bahaa, purchasing) see the daily attendance page of every
+   department and edit status / in / out / overtime exactly like HR. Their own row stays closed (a change there becomes a
+   request to the owner, 78-owner-approvals), every edit sends the owner a notice like HR's edits, overtime approvals,
+   payroll and advances stay where they were. The server side is nf_att_editor() inside nf_can_write.
+   Factory only (the list lives in the factory settings).
+   ===================================================================== */
+(function () {
+  if (window.__NF_ATTEDIT__) return; window.__NF_ATTEDIT__ = 1;
+  const myWid = () => (S.session && S.session.workerId) || null;
+  const ids = () => { const p = (S.settings && S.settings.policy) || {}; return Array.isArray(p.attEditorIds) ? p.attEditorIds.map(String) : []; };
+  window.nfAttEditor = () => {
+    try {
+      if (!S.session || isAdmin() || role() === 'hr' || !myWid()) return false;
+      if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return false;
+      return ids().includes(String(myWid()));
+    } catch (e) { return false; }
+  };
+  if (typeof canDo === 'function') canDo = (base => function (act, ctx) {
+    if (act === 'attendance.edit' && window.nfAttEditor() && writable()) return !(ctx && ctx.workerId && ctx.workerId === myWid());
+    return base.apply(this, arguments);
+  })(canDo);
+  if (typeof canSee === 'function') canSee = (base => function (view) {
+    if (view === 'attendance' && window.nfAttEditor()) return true;
+    return base.apply(this, arguments);
+  })(canSee);
 })();
 </script>
 
