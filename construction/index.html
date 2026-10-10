@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1637-ebaf6b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1725-213aa9";</script>
 
 <script>
 'use strict';
@@ -6902,10 +6902,11 @@ function proofDialog(opts) {
     openModal({ title: opts.title, submitLabel: opts.submitLabel || 'تسجيل وتوثيق', body: `<div class="form">
       ${opts.intro ? `<div class="banner info full" style="margin:0">${icon('info')}<span>${esc(opts.intro)}</span></div>` : ''}
       ${st ? `<div class="field full"><label>${esc(opts.statusLabel || 'الحالة')}</label><div class="seg" id="pf-status">${st.map((s, i) => `<button type="button" class="${i === 0 ? 'on' : ''}" data-st="${esc(s[0])}">${esc(s[1])}</button>`).join('')}</div><input type="hidden" name="status" value="${esc(st[0][0])}"></div>` : ''}
-      <div class="field full"><label>${esc(opts.fileLabel || 'صورة / ملف الإثبات')}${opts.requireFile === false ? ' (اختياري)' : ''}${opts.fileOptionalWhen ? `<span class="pf-opt" ${st && opts.fileOptionalWhen.includes(st[0][0]) ? '' : 'hidden'}> (اختياري لو في مشكلة)</span>` : ''}</label><input type="file" id="pf-file" name="file" accept="image/*,application/pdf" capture="environment" ${opts.multiple ? 'multiple' : ''}><div class="tiny muted" style="margin-top:4px">${canUp ? 'تُحفظ على السيستم وتظهر في سجل التوثيق' : 'في هذا الوضع تُحفظ صورة مصغّرة داخل السجل (الرفع الكامل عند التشغيل على السيرفر)'}</div></div>
+      <div class="field full"><label>${esc(opts.fileLabel || 'صورة / ملف الإثبات')}${opts.requireFile === false ? ' (اختياري)' : ''}${opts.fileOptionalWhen ? `<span class="pf-opt" ${st && opts.fileOptionalWhen.includes(st[0][0]) ? '' : 'hidden'}> (اختياري لو في مشكلة)</span>` : ''}</label><label for="pf-file" class="pf-pick">${icon('camera')}<span id="pf-pickt">صوّر أو اختار صورة</span></label><input type="file" id="pf-file" class="pf-in" name="file" accept="image/*,application/pdf" capture="environment" ${opts.multiple ? 'multiple' : ''}><div class="pf-prev" id="pf-prev"></div><div class="tiny muted" style="margin-top:4px">${canUp ? 'تُحفظ على السيستم وتظهر في سجل التوثيق' : 'في هذا الوضع تُحفظ صورة مصغّرة داخل السجل (الرفع الكامل عند التشغيل على السيرفر)'}</div></div>
       ${field(opts.noteLabel || 'تقرير / ملاحظة', `<textarea id="pf-note" name="note" placeholder="${esc(opts.notePlaceholder || '')}"></textarea>`, 'full')}
     </div>`,
-      onOpen: f => { const seg = $('#pf-status', f); if (seg) seg.addEventListener('click', ev => { const b = ev.target.closest('[data-st]'); if (!b) return; ev.preventDefault(); $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); $('[name=status]', f).value = b.dataset.st; const po = $('.pf-opt', f); if (po && opts.fileOptionalWhen) po.hidden = !opts.fileOptionalWhen.includes(b.dataset.st); }); },
+      onOpen: f => { const fi = $('#pf-file', f); if (fi) fi.addEventListener('change', () => { const fs = Array.from(fi.files || []); const pv = $('#pf-prev', f), pt = $('#pf-pickt', f); if (pt) pt.textContent = fs.length ? (fs.length > 1 ? `✓ ${fs.length} صور — غيّرهم` : '✓ الصورة جاهزة — غيّرها') : 'صوّر أو اختار صورة'; if (pv) { pv.innerHTML = ''; fs.slice(0, 4).forEach(x => { if (/^image\//.test(x.type || '')) { const im = document.createElement('img'); im.src = URL.createObjectURL(x); im.alt = ''; pv.appendChild(im); } else { const d = document.createElement('span'); d.className = 'pf-doc'; d.textContent = '📄 ' + (x.name || 'ملف'); pv.appendChild(d); } }); } $('.pf-pick', f)?.classList.toggle('on', !!fs.length); });
+        const seg = $('#pf-status', f); if (seg) seg.addEventListener('click', ev => { const b = ev.target.closest('[data-st]'); if (!b) return; ev.preventDefault(); $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); $('[name=status]', f).value = b.dataset.st; const po = $('.pf-opt', f); if (po && opts.fileOptionalWhen) po.hidden = !opts.fileOptionalWhen.includes(b.dataset.st); }); },
       onSubmit: async f => {
         const d = formData(f); const files = Array.from($('#pf-file', f)?.files || []);
         if (opts.requireFile !== false && !(opts.fileOptionalWhen || []).includes(d.status) && !files.length) { toast('الصورة أو الملف مطلوب للتوثيق', 'err'); return false; }   /* v7.26: fileOptionalWhen — e.g. a trip that ended with a problem (nothing to photograph) */
@@ -6994,6 +6995,17 @@ function docLogCard(o) {
     ${pend.map(d => `<div class="banner warn" style="margin-bottom:8px">${icon('alert')}<span>قسم ${esc(deptName(d))} لم يسجّل استلام الشغل من ${esc(deptName(needsHandover(o, d)))} بعد${canDo('stage.update', { deptId: d }) ? ` — <button class="lnk" data-action="handoverReceive" data-arg="${o.id}:${d}:${needsHandover(o, d)}">تسجيل الاستلام الآن</button>` : ''}</span></div>`).join('')}
     <div class="hlog">${sortBy(rows, r => r.at || '', true).map(r => `<div class="hrow">${r.pr.thumb ? `<img src="${esc(r.pr.thumb)}" alt="" data-action="lightbox" data-arg="${esc(r.arg)}">` : `<div class="noimg">${icon(r.icon)}</div>`}<div class="grow"><div class="small bold">${r.cls ? `<span class="badge ${r.cls}">${icon(r.icon)}</span> ` : ''}${esc(r.title)}</div>${r.pr.note ? `<div class="small" style="white-space:pre-wrap">${esc(r.pr.note)}</div>` : ''}<div class="tiny muted">${esc(r.pr.byName || '')} · ${fmtDate((r.pr.at || '').slice(0, 10))} ${(r.pr.at || '').slice(11, 16)}${r.pr.fileIds && r.pr.fileIds.length > 1 ? ` · ${r.pr.fileIds.length} ملفات` : ''}</div></div></div>`).join('')}</div></div>`;
 }
+/* v7.31 (Mahmoud, on a driver's phone: «messy, big text — keep it simple and clear for technicians»): the raw «choose file /
+   no file chosen» box became one big «take or pick a photo» button with the photo shown under it */
+document.head.insertAdjacentHTML('beforeend', `<style>
+input.pf-in{position:absolute!important;width:1px!important;height:1px!important;min-width:0!important;min-height:0!important;max-width:1px!important;max-height:1px!important;padding:0!important;margin:0!important;border:0!important;opacity:0!important;overflow:hidden!important;pointer-events:none;clip-path:inset(50%)}
+.pf-pick{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;box-sizing:border-box;min-height:52px;padding:12px;border-radius:14px;border:1.5px dashed var(--accent);background:var(--accent-soft,rgba(10,132,255,.08));color:var(--accent);font-weight:700;font-size:15px;cursor:pointer;margin:0}
+.pf-pick svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8}
+.pf-pick.on{border-style:solid;color:var(--good-ink,#1b7f4b);border-color:var(--good-ink,#1b7f4b);background:rgba(48,164,108,.1)}
+.pf-prev{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.pf-prev:empty{display:none}
+.pf-prev img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+.pf-prev .pf-doc{font-size:12px;padding:6px 10px;border-radius:8px;background:var(--surface-2)}
+</style>`);
 /* =====================================================================
    v4.4 — التشغيل الخارجي: المصانع الخدمية (مثل الرضوان: الثابتية للصاج الرفيع /
    قليوب للصاج السميك) وأوامر التشغيل الخارجية
@@ -36735,7 +36747,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     setTimeout(() => { ensureMap('fmd-map', false); pollStart(document.getElementById('fm-map') ? 3000 : 10000); }, 40);
     return `<div class="card fmd-card" id="fmd-card"><div class="cardhead"><h3>${icon('map')}${L('الأسطول الآن', 'Fleet now')}${c.warn ? `<span class="fm-warn" style="position:static;margin-inline-start:6px">${c.warn}</span>` : ''}</h3><span class="tiny"><b style="color:${ST.mv[0]}">${c.mv}</b> ${ST.mv[1]} · <b style="color:${ST.id[0]}">${c.id}</b> ${ST.id[1]} · <b style="color:${ST.of[0]}">${c.of}</b> ${ST.of[1]}</span><div class="grow"></div><button type="button" class="btn xs" data-action="fmLocate" data-arg="fmd-map" title="${L('حدّد مكان كل العربيات', 'Locate every vehicle')}">${icon('map')}${L('حدّد المكان', 'Locate')}</button><a class="btn xs" href="#/fleetmap">${L('الخريطة الكاملة', 'Full map')}</a></div>
       <div id="fmd-map" class="fmd-map" data-action="go" data-arg="fleetmap"><div class="muted small" style="padding:12px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
-      <div class="fmd-list">${rows.map(r => `<a class="fmd-row" href="#/fleetmap" data-fmd="${esc(r.id)}"><span class="fm-dot" style="background:${ST[r.st][0]}"></span><b>${esc(r.name.split('—')[0].trim())}</b><span style="color:${ST[r.st][0]}">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.alarm ? `<span style="color:var(--crit-ink)">⚠</span>` : ''}${r.driverId ? `<span class="muted">${esc(assigneeName(r.driverId))}${r.autoDriver ? ' ·' + L('تلقائي', 'auto') : ''}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : ''}<span class="tiny muted" style="margin-inline-start:auto">${ago(r.at)}</span></a>`).join('')}</div></div>`;
+      <div class="fmd-list">${rows.map(r => `<a class="fmd-row" href="#/fleetmap" data-fmd="${esc(r.id)}"><div class="fmd-l1"><span class="fm-dot" style="background:${ST[r.st][0]}"></span><b>${esc(r.name.split('—')[0].trim())}</b>${r.alarm ? `<span style="color:var(--crit-ink)">⚠</span>` : ''}<span class="tiny muted fmd-ago">${ago(r.at)}</span></div><div class="fmd-l2"><span style="color:${ST[r.st][0]}">${ST[r.st][1]}${r.st === 'id' && r.stopSince ? ` ${dur(r.stopSince)}` : ''}</span>${r.st === 'mv' && r.speed != null ? `<span>${fmtNum(Math.round(r.speed))} ${L('كم/س', 'km/h')}</span>` : ''}${r.driverId ? `<span class="muted">${esc(assigneeName(r.driverId))}${r.autoDriver ? ' ·' + L('تلقائي', 'auto') : ''}</span>` : ''}${r.task ? `<span class="fm-task">${esc(r.task.title || '')}</span>` : ''}</div></a>`).join('')}</div></div>`;
   }
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-fmd]'); if (a) FM.sel = a.getAttribute('data-fmd'); });
   if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); if (!mayView()) return html; return dashCard() + html; })(vDashboard);
@@ -36765,11 +36777,14 @@ html body .fm-dh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 html body .fm-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 10px;font-size:13px}
 html body .fm-replay{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 html body .fm-lbl{color:#1b2430;background:rgba(255,255,255,.92);border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:1px 6px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.15)}
-html body .fmd-map{height:220px;border-radius:12px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);cursor:pointer}
-html body .fmd-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
-html body .fmd-row{display:flex;gap:10px;align-items:center;font-size:13px;padding:6px 8px;border-radius:8px;color:inherit;text-decoration:none}
-html body .fmd-row:hover{background:var(--surface-2)}
-@media (max-width:900px){html body .fm-tiles{grid-template-columns:repeat(4,1fr)}html body .fm-tile.fm-locate{grid-column:1 / -1;padding:8px}html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:180px}}
+html body .fmd-map{height:400px;border-radius:12px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);cursor:pointer}
+html body .fmd-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+html body .fmd-row{display:flex;flex-direction:column;gap:3px;min-width:0;font-size:13px;padding:8px 10px;border-radius:12px;color:inherit;text-decoration:none;background:var(--surface-2);border:1px solid var(--line)}
+html body .fmd-row:hover{border-color:var(--accent)}
+html body .fmd-l1{display:flex;align-items:center;gap:7px;min-width:0}html body .fmd-l1 b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}html body .fmd-l1 .fm-dot{width:10px;height:10px;flex-basis:10px}
+html body .fmd-ago{flex:none;white-space:nowrap;font-size:11px}
+html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-height:1.35;min-width:0}html body .fmd-l2>span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:900px){html body .fm-tiles{grid-template-columns:repeat(4,1fr)}html body .fm-tile.fm-locate{grid-column:1 / -1;padding:8px}html body .fm-body{grid-template-columns:1fr}html body .fm-map{height:52vh;min-height:300px}html body .fm-rail{max-height:none;min-height:0}html body .fm-list{max-height:48vh}html body .fm-tile b{font-size:18px}html body .fm-detail{inset-inline-start:8px;bottom:8px;width:calc(100% - 78px)}html body .fm-grid{grid-template-columns:1fr 1fr}html body .fmd-map{height:320px}}
 </style>`);
   /* v7.02: the vehicle form — pick the colour the vehicle wears on the map (defaults to its palette colour) */
   if (typeof vehForm === 'function') vehForm = (base => function (v) { v = v || {}; const h = base.apply(this, arguments); const extra = field(L('لون العربية على الخريطة', 'Vehicle colour on the map'), `<input type="color" id="f-color" name="color" value="${esc(vehColor(v))}" style="width:64px;height:36px;padding:2px">`); const i = h.lastIndexOf('</div>'); return i < 0 ? h + extra : h.slice(0, i) + extra + h.slice(i); })(vehForm);
@@ -37601,7 +37616,7 @@ html body .fmd-row:hover{background:var(--surface-2)}
     if (!b) { b = document.createElement('button'); b.id = 'sos-fab'; b.className = 'sos-fab'; b.setAttribute('data-action', 'sosOpen'); b.title = 'SOS'; b.innerHTML = 'SOS'; document.body.appendChild(b); }
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(mountSos); setInterval(() => { try { mountSos(); } catch (e) { /* ignore */ } }, 3000);
-  const css = document.createElement('style'); css.textContent = `.sos-fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:60;width:56px;height:56px;border-radius:50%;border:3px solid #fff;background:#d93025;color:#fff;font-weight:900;font-size:13px;letter-spacing:.5px;box-shadow:0 4px 14px rgba(217,48,37,.45);cursor:pointer}@media (max-width:900px){.sos-fab{bottom:calc(78px + env(safe-area-inset-bottom,0px));right:14px}}body.printing .sos-fab,body.nf-chatpage .sos-fab{display:none}`; document.head.appendChild(css);
+  const css = document.createElement('style'); css.textContent = `body:has(#overlay) .sos-fab,body:has(#mform) .sos-fab{display:none!important}.sos-fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:60;width:56px;height:56px;border-radius:50%;border:3px solid #fff;background:#d93025;color:#fff;font-weight:900;font-size:13px;letter-spacing:.5px;box-shadow:0 4px 14px rgba(217,48,37,.45);cursor:pointer}@media (max-width:900px){.sos-fab{bottom:calc(78px + env(safe-area-inset-bottom,0px));right:14px}}body.printing .sos-fab,body.nf-chatpage .sos-fab{display:none}`; document.head.appendChild(css);
   if (typeof meExtraCardsBase === 'function' && typeof meExtraCardsFleet === 'function') meExtraCardsFleet = (base => function (w) { let html = base.apply(this, arguments); if (!w || w.role !== 'driver') return html; return `<div class="card" style="border-color:#d93025"><div class="cardhead"><h3>🆘 ${L('طوارئ', 'Emergency')}</h3><div class="grow"></div><button class="btn sm danger" data-action="sosOpen">${icon('alert')}${L('ابعت طوارئ', 'Send SOS')}</button></div><div class="small muted">${L('حادث أو عطل أو خطر؟ زرار واحد وبيوصل موقعك فورًا للإدارة.', 'Accident, breakdown or danger? One tap sends your position to management.')}</div></div>` + html; })(meExtraCardsFleet);
   /* the alert row of an SOS gets a «call the driver» button next to the acknowledge button (the map link is already there) */
   if (typeof EXTRA_VIEWS.fleetalerts === 'function') EXTRA_VIEWS.fleetalerts = (base => r => { let html = base(r); list('fleetalerts').filter(a => a.type === 'sos' && a.phone && !a.ack).forEach(a => { html = html.split(`<button type="button" class="btn xs p" data-action="faAck" data-arg="${a.id}"`).join(`<a class="btn xs danger" href="tel:${esc(a.phone)}">${icon('mic')}${L('اتصل بالسواق', 'Call the driver')}</a><button type="button" class="btn xs p" data-action="faAck" data-arg="${a.id}"`); }); return html; })(EXTRA_VIEWS.fleetalerts);
@@ -37891,23 +37906,34 @@ html body .fmd-row:hover{background:var(--surface-2)}
 
   /* ---------- the driver's «New trip» ---------- */
   const KINDS = ['materials', 'pickup_ext', 'delivery', 'install', 'return', 'other'];
+  const KSHORT = () => ({ materials: L('خامات من مورد', 'Materials from a supplier'), pickup_ext: L('شغل من مصنع خدمي', 'Work from a service factory'), delivery: L('تسليم لعميل', 'Delivery to a client'), install: L('نقل فريق تركيب', 'Installation team'), return: L('إرجاع مرفوض', 'Return a rejected item'), other: L('مشوار تاني', 'Other') });
   const kindFor = p => { if (!p) return 'other'; const c = catOf(p); return c === 'sup' ? 'materials' : c === 'sf' ? 'pickup_ext' : /^ord:/.test(p.key) ? 'delivery' : /^site:/.test(p.key) ? 'install' : 'other'; };
   const optsHTML = (groups, cur) => groups.map(g => `<optgroup label="${esc(g.label)}">${g.items.map(p => `<option value="${esc(p.key)}" ${p.key === cur ? 'selected' : ''}>${esc(p.name)}${p.lat == null ? ` · ${esc(L('بدون لوكيشن', 'no location'))}` : ''}</option>`).join('')}</optgroup>`).join('');
   const selInner = (q, cur) => `<option value="">${esc(L('— اختار المكان —', '— pick the place —'))}</option>${optsHTML(placeGroups(q), cur)}<option value="new" ${cur === 'new' ? 'selected' : ''}>${esc(L('+ مكان مش في القايمة', '+ A place not on the list'))}</option>`;
+  /* v7.31 (Mahmoud, on the driver's phone: «the screen is messy, the text is big — we deal with technicians, keep it simple and
+     clear»): the phone's own list dialog (huge text on phones with a big font size, group titles mixed with places) is gone — the
+     places show inside the form: a search box and short rows grouped by area; the chosen one folds into one line «… · change».
+     The hidden select keeps the value for the rest of the form. */
+  const listInner = (n, q, cur) => { const gs = placeGroups(q); return gs.map(g => `<div class="dtp-g">${esc(g.label)}</div>${g.items.map(p => `<button type="button" class="dtp-i ${p.key === cur ? 'on' : ''}" data-dtpv="${esc(p.key)}" data-dtpn2="${n}"><b>${esc(p.name)}</b>${p.lat == null ? `<span>${esc(L('بدون لوكيشن', 'no location'))}</span>` : ''}</button>`).join('')}`).join('') + (gs.length ? '' : `<div class="dtp-g">${esc(L('مفيش نتايج', 'No results'))}</div>`) + `<button type="button" class="dtp-i dtp-add" data-dtpv="new" data-dtpn2="${n}"><b>+ ${esc(L('مكان مش في القايمة', 'A place not on the list'))}</b></button>`; };
+  const curName = key => key === 'new' ? L('مكان جديد', 'A new place') : ((placeByKey(key) || {}).name || '');
   function pickerHTML(n, cur) {
-    return `<div class="dtp" data-dtp="${n}"><input class="inp dtp-q" data-dtpq="${n}" placeholder="${esc(L('ابحث بالاسم أو المنطقة', 'Search by name or area'))}" autocomplete="off" enterkeyhint="search"><select id="f-dt${n}" name="dt${n}" data-dtps="${n}">${selInner('', cur)}</select>
+    return `<div class="dtp" data-dtp="${n}"><button type="button" class="dtp-cur" data-dtpopen="${n}" ${cur ? '' : 'hidden'}><b>${esc(curName(cur))}</b><span>${esc(L('تغيير', 'Change'))}</span></button>
+      <div class="dtp-pick" data-dtppick="${n}" ${cur ? 'hidden' : ''}><input class="inp dtp-q" data-dtpq="${n}" placeholder="${esc(L('ابحث بالاسم أو المنطقة', 'Search by name or area'))}" autocomplete="off" enterkeyhint="search"><div class="dtp-list" data-dtpl="${n}">${listInner(n, '', cur)}</div></div>
+      <select id="f-dt${n}" name="dt${n}" data-dtps="${n}" class="dtp-sel" tabindex="-1" aria-hidden="true">${selInner('', cur)}</select>
       <div class="dtp-new" data-dtpn="${n}" hidden><input class="inp" name="dt${n}Name" placeholder="${esc(L('اسم المكان', 'Place name'))}"><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><button type="button" class="btn sm" data-dtpgeo="${n}">${icon('map')}${esc(L('سجّل مكاني الحالي', 'Use my current location'))}</button><span class="tiny muted" data-dtpgeos="${n}"></span></div><input type="hidden" name="dt${n}Lat"><input type="hidden" name="dt${n}Lng"></div></div>`;
   }
   const busyWith = vid => list('trips').find(x => x.status === 'started' && !x.gpsAuto && x.vehicleId === vid && x.driverId !== me());
   const openPOs = sid => list('purchases').filter(p => !['received', 'cancelled', 'draft', 'rfq'].includes(p.status) && ((p.supplierId && p.supplierId === sid) || (typeof supplierOf === 'function' && (supplierOf(p) || {}).id === sid)));
   const openExts = sfId => list('extorders').filter(x => x.servFactoryId === sfId && ['sent', 'approved', 'inprogress', 'ready'].includes(x.status));
+  /* v7.31: the optional links are tap rows too (no phone list dialog) */
+  const chips = (name, items) => `<div class="dtk dtk-col" data-chips="${name}"><label class="dtk-i"><input type="radio" name="${name}" value="" checked><span>${esc(L('مش مربوط', 'Not linked'))}</span></label>${items.map(([v, t]) => `<label class="dtk-i"><input type="radio" name="${name}" value="${esc(v)}"><span>${esc(t)}</span></label>`).join('')}</div>`;
   function linkHTML(toKey) {
     const p = toKey && toKey !== 'new' ? placeByKey(toKey) : null;
-    if (p && p.supplierId) { const ps = openPOs(p.supplierId); return ps.length ? field(L('أمر الشراء (اختياري)', 'Purchase order (optional)'), `<select name="dtPo"><option value="">—</option>${ps.map(x => `<option value="${esc(x.id)}">${esc(x.number || '')}${x.items && x.items[0] ? ` — ${esc(x.items[0].name || '')}${x.items.length > 1 ? ` +${x.items.length - 1}` : ''}` : ''}</option>`).join('')}</select>`, 'full') : ''; }
-    if (p && p.sfId) { const xs = openExts(p.sfId); return xs.length ? field(L('الأمر الخارجي (اختياري)', 'External order (optional)'), `<select name="dtExt"><option value="">—</option>${xs.map(x => `<option value="${esc(x.id)}">${esc(x.number || '')} — ${esc(x.title || '')}</option>`).join('')}</select>`, 'full') : ''; }
+    if (p && p.supplierId) { const ps = openPOs(p.supplierId); return ps.length ? field(L('أمر الشراء (اختياري)', 'Purchase order (optional)'), chips('dtPo', ps.map(x => [x.id, `${x.number || ''}${x.items && x.items[0] ? ` — ${x.items[0].name || ''}${x.items.length > 1 ? ` +${x.items.length - 1}` : ''}` : ''}`])), 'full') : ''; }
+    if (p && p.sfId) { const xs = openExts(p.sfId); return xs.length ? field(L('الأمر الخارجي (اختياري)', 'External order (optional)'), chips('dtExt', xs.map(x => [x.id, `${x.number || ''} — ${x.title || ''}`])), 'full') : ''; }
     if (p && p.orderId) { const o = byId('orders', p.orderId); return o ? `<div class="small muted full">${esc(L('أمر التشغيل', 'Job order'))}: <b>${esc(o.code || '')}</b> — ${esc(o.title || '')}</div>` : ''; }
     const os = sortBy(list('orders').filter(o => (typeof isOpen === 'function' ? isOpen(o) : true)), o => o.code || '');
-    return os.length ? field(L('أمر تشغيل (اختياري)', 'Job order (optional)'), `<select name="dtOrder"><option value="">—</option>${os.map(o => `<option value="${esc(o.id)}">${esc(o.code || '')} — ${esc(o.title || '')}</option>`).join('')}</select>`, 'full') : '';
+    return os.length ? field(L('أمر تشغيل (اختياري)', 'Job order (optional)'), chips('dtOrder', os.map(o => [o.id, `${o.code || ''} — ${o.title || ''}`])), 'full') : '';
   }
   ACTIONS.drvTripNew = () => {
     if (!drv() || !W()) return;
@@ -37916,13 +37942,13 @@ html body .fmd-row:hover{background:var(--surface-2)}
     const vs = sortBy(list('vehicles').filter(v => (v.status || 'active') !== 'out'), v => v.name || '');
     if (!vs.length) { toast(L('مفيش عربيات متسجلة', 'No vehicles registered'), 'err'); return; }
     const mine = vs.find(v => v.driverId === me() && !busyWith(v.id)) || vs.find(v => !busyWith(v.id)) || vs[0];
-    const vopts = vs.map(v => { const b = busyWith(v.id); return `<option value="${esc(v.id)}" ${v.id === mine.id ? 'selected' : ''} ${b ? 'disabled' : ''}>${esc(v.name)}${v.plate ? ` (${esc(v.plate)})` : ''}${b ? ` — ${esc(L('مع', 'with'))} ${esc(assigneeName(b.driverId))}` : ''}</option>`; }).join('');
+    const vopts = vs.map(v => { const b = busyWith(v.id); return `<label class="dtk-i ${b ? 'off' : ''}"><input type="radio" name="dtVeh" value="${esc(v.id)}" ${v.id === mine.id ? 'checked' : ''} ${b ? 'disabled' : ''}><span><b>${esc(String(v.name || '').split('—')[0].trim())}</b>${b ? `<small>${esc(L('مع', 'with'))} ${esc(assigneeName(b.driverId))}</small>` : v.plate ? `<small>${esc(v.plate)}</small>` : ''}</span></label>`; }).join('');
     openModal({ title: L('مشوار جديد', 'New trip'), wide: true, submitLabel: L('افتح المشوار', 'Open the trip'), cls: 'dtrip',
       body: `<div class="form">
         <div class="field full"><label>${esc(L('من', 'From'))}</label>${pickerHTML('From', 'factory')}</div>
         <div class="field full"><label>${esc(L('إلى', 'To'))}</label>${pickerHTML('To', '')}</div>
-        ${field(L('رايح ليه', 'What for'), `<select id="f-dtKind" name="dtKind">${KINDS.map(k => `<option value="${k}">${esc(TRIP_KINDS[k] || k)}</option>`).join('')}</select>`)}
-        ${field(L('العربية', 'Vehicle'), `<select id="f-dtVeh" name="dtVeh" required>${vopts}</select>`)}
+        <div class="field full"><label>${esc(L('رايح ليه', 'What for'))}</label><div class="dtk" id="f-dtKind">${KINDS.map(k => `<label class="dtk-i"><input type="radio" name="dtKind" value="${k}" ${k === 'other' ? 'checked' : ''}><span>${esc(KSHORT()[k] || TRIP_KINDS[k] || k)}</span></label>`).join('')}</div></div>
+        <div class="field full"><label>${esc(L('العربية', 'Vehicle'))}</label><div class="dtk" id="f-dtVeh">${vopts}</div></div>
         <div class="full" id="dt-link"></div>
         ${field(L('الغرض (اختياري)', 'Purpose (optional)'), inp('dtPurpose', '', `placeholder="${esc(L('مثال: استلام ألواح خشب', 'e.g. picking up wood panels'))}"`), 'full')}
         <label class="check full on"><input type="checkbox" name="dtNow" checked> ${esc(L('انطلق دلوقتي', 'Start now'))}</label>
@@ -37933,20 +37959,29 @@ html body .fmd-row:hover{background:var(--surface-2)}
   function syncTo(f) {
     const to = f.querySelector('#f-dtTo'); const key = to ? to.value : '';
     const box = f.querySelector('#dt-link'); if (box) box.innerHTML = linkHTML(key);
-    if (!f._kindTouched) { const k = kindFor(key && key !== 'new' ? placeByKey(key) : null); const ks = f.querySelector('#f-dtKind'); if (ks) ks.value = k; }
+    if (!f._kindTouched) { const k = kindFor(key && key !== 'new' ? placeByKey(key) : null); const r = f.querySelector(`input[name=dtKind][value="${k}"]`); if (r) r.checked = true; }
   }
   /* search, «new place», current location, destination → kind + link */
   document.addEventListener('input', e => {
     const q = e.target.closest && e.target.closest('[data-dtpq]'); if (!q) return;
-    const n = q.dataset.dtpq; const f = q.closest('form'); const s = f && f.querySelector(`[data-dtps="${n}"]`); if (!s) return;
-    const keep = s.value; s.innerHTML = selInner(q.value, keep);
-    if (q.value.trim() && (!keep || !s.querySelector(`option[value="${CSS.escape(keep)}"]`))) { const first = s.querySelector('optgroup option'); if (first) { s.value = first.value; s.dispatchEvent(new Event('change', { bubbles: true })); } }
+    const n = q.dataset.dtpq; const f = q.closest('form'); const s = f && f.querySelector(`[data-dtps="${n}"]`); const l = f && f.querySelector(`[data-dtpl="${n}"]`); if (!s || !l) return;
+    l.innerHTML = listInner(n, q.value, s.value); l.scrollTop = 0;
+  });
+  /* v7.31: tap a place → it is chosen and the list folds into one line; «change» opens it again */
+  const dtpShow = (f, n, open) => { const pk = f.querySelector(`[data-dtppick="${n}"]`), cu = f.querySelector(`[data-dtpopen="${n}"]`), s = f.querySelector(`[data-dtps="${n}"]`); if (pk) pk.hidden = !open; if (cu) { cu.hidden = open || !(s && s.value); const b = cu.querySelector('b'); if (b && s) b.textContent = curName(s.value); } };
+  document.addEventListener('click', e => {
+    const it = e.target.closest && e.target.closest('[data-dtpv]'); const op = !it && e.target.closest && e.target.closest('[data-dtpopen]'); if (!it && !op) return; e.preventDefault();
+    const f = (it || op).closest('form'); if (!f) return;
+    if (op) { dtpShow(f, op.dataset.dtpopen, true); return; }
+    const n = it.dataset.dtpn2; const s = f.querySelector(`[data-dtps="${n}"]`); if (!s) return;
+    s.value = it.dataset.dtpv; s.dispatchEvent(new Event('change', { bubbles: true }));
+    f.querySelectorAll(`[data-dtpl="${n}"] .dtp-i`).forEach(x => x.classList.toggle('on', x === it)); dtpShow(f, n, false);
   });
   document.addEventListener('change', e => {
     const t = e.target; if (!t || !t.closest) return; const f = t.closest('form'); if (!f || !f.classList.contains('dtrip')) return;
     if (t.dataset && t.dataset.dtps) { const n = t.dataset.dtps; const nb = f.querySelector(`[data-dtpn="${n}"]`); if (nb) nb.hidden = t.value !== 'new'; if (n === 'To') syncTo(f); }
-    if (t.id === 'f-dtKind') f._kindTouched = true;
-    if (t.name === 'dtPo' || t.name === 'dtExt' || t.name === 'dtOrder') { const pu = f.querySelector('[name=dtPurpose]'); const o = t.options[t.selectedIndex]; if (pu && !pu.value && t.value && o) pu.value = o.textContent.trim(); }
+    if (t.name === 'dtKind') f._kindTouched = true;
+    if (t.name === 'dtPo' || t.name === 'dtExt' || t.name === 'dtOrder') { const pu = f.querySelector('[name=dtPurpose]'); const o = t.options ? t.options[t.selectedIndex] : t.closest('label'); if (pu && !pu.value && t.value && o) pu.value = o.textContent.trim(); }
   });
   document.addEventListener('click', async e => {
     const b = e.target.closest && e.target.closest('[data-dtpgeo]'); if (!b) return; e.preventDefault();
@@ -38082,14 +38117,29 @@ html body .fmd-row:hover{background:var(--surface-2)}
     const st = typeof legsWithState === 'function' ? legsWithState(t) : []; const done = st.filter(x => x.done); const last = done[done.length - 1];
     return [last ? last.label : L('في الطريق', 'On the road'), 'acc'];
   }
+  /* v7.31 (Mahmoud, 10 Oct, on the dashboard: «the trips card should be a small box that takes little space — with many trips it
+     fills my whole screen and I scroll to reach the next card; the data summed up, short»): four small counters (all · on the road
+     · back · waiting), then one line per trip (the open ones first, then the latest back) — four lines, «all trips» opens the rest
+     in place. */
+  const DOT = { good: '#30a46c', acc: '#2a78d6', warn: '#e5932a', '': '#8a8f98' };
   function todayCard() {
     const ts = todayTrips(); if (!ts.length) return '';
-    const run = ts.filter(t => t.status === 'started').length;
-    return `<div class="card dtoday" id="dt-today"><div class="cardhead"><h3>${icon('map')}${esc(L('مشاوير النهارده', "Today's trips"))}</h3><span class="muted small">${ts.length}${run ? ` · ${run} ${esc(L('في الطريق', 'on the road'))}` : ''}</span></div><div class="list">${ts.map(t => {
-      const [lab, cls] = stepLine(t); const legs = tripLegs(t); const last = legs[legs.length - 1]; const th = legs.slice().reverse().find(x => x.thumb);
-      return `<a class="item" href="#/fleet/${esc(t.id)}"><div class="main"><div class="title"><span class="code">${esc(t.number || '')}</span><span>${esc(assigneeName(t.driverId))}</span>${t.selfOpened ? `<span class="tiny muted">· ${esc(L('فتحه بنفسه', 'self-opened'))}</span>` : ''}</div><div class="meta"><span>${esc(String(vehicleName(t.vehicleId)).split('—')[0].trim())}</span><span>${esc(t.from || '—')} ← ${esc(t.to || '—')}</span><span class="badge ${cls}">${esc(lab)}</span></div></div><div class="end"><span class="tiny muted">${esc(hhmm((last && last.at) || t.startedAt || t.createdAt))}</span>${th ? `<img src="${esc(th.thumb)}" alt="" style="width:40px;height:32px;object-fit:cover;border-radius:6px">` : ''}</div></a>`;
-    }).join('')}</div></div>`;
+    const open = ts.filter(t => t.status !== 'done'), back = ts.filter(t => t.status === 'done');
+    const run = ts.filter(t => t.status === 'started').length, wait = ts.filter(t => t.status === 'planned' || t.status === 'approved').length;
+    const when = t => { const legs = tripLegs(t); const last = legs[legs.length - 1]; return (last && last.at) || t.endedAt || t.startedAt || t.createdAt || ''; };
+    const order = open.concat(back.slice().sort((x, y) => String(when(y)).localeCompare(String(when(x)))));
+    const all = !!(S.ui && S.ui.dtAll); const shown = all ? order : order.slice(0, 4);
+    const tile = (n, lab, c) => `<div class="dtc-t"><b style="${c ? `color:${c}` : ''}">${n}</b><span>${esc(lab)}</span></div>`;
+    const row = t => {
+      const [lab, cls] = stepLine(t); const veh = String(vehicleName(t.vehicleId) || '').split('—')[0].trim(); const drvN = t.driverId ? assigneeName(t.driverId) : '';
+      return `<a class="dtc-r" href="#/fleet/${esc(t.id)}"><span class="dtc-dot" style="background:${DOT[cls] || DOT['']}"></span><b class="dtc-code">${esc(t.number || '')}</b><span class="dtc-who">${esc([drvN, veh].filter(Boolean).join(' · '))}${t.to ? ` <span class="muted">← ${esc(t.to)}</span>` : ''}</span>${t.status !== 'done' ? `<span class="badge ${cls} dtc-b">${esc(lab)}</span>` : ''}<span class="dtc-h">${esc(hhmm(when(t)))}</span></a>`;
+    };
+    return `<div class="card dtoday dtc" id="dt-today"><div class="cardhead"><h3>${icon('map')}${esc(L('مشاوير النهارده', "Today's trips"))}</h3><div class="grow"></div><a class="btn xs ghost" href="#/fleet">${esc(L('الحركة', 'Fleet'))}</a></div>
+      <div class="dtc-s">${tile(ts.length, L('مشوار', 'trips'))}${tile(run, L('في الطريق', 'on the road'), run ? DOT.acc : '')}${tile(back.length, L('رجعوا', 'back'), back.length ? DOT.good : '')}${tile(wait, L('مستنيين', 'waiting'), wait ? DOT.warn : '')}</div>
+      <div class="dtc-l">${shown.map(row).join('')}</div>
+      ${order.length > 4 ? `<button type="button" class="dtc-more" data-action="dtAll">${esc(all ? L('أقل', 'Less') : L(`كل المشاوير (${order.length})`, `All trips (${order.length})`))}</button>` : ''}</div>`;
   }
+  ACTIONS.dtAll = () => { S.ui = S.ui || {}; S.ui.dtAll = !S.ui.dtAll; render(false); };
   window.nfTodayTrips = todayTrips;
   if (typeof vDashboard === 'function') vDashboard = (base => function () { const html = base.apply(this, arguments); return seesAll() ? todayCard() + html : html; })(vDashboard);
 
@@ -38200,6 +38250,40 @@ html body .fmd-row:hover{background:var(--surface-2)}
 .dtrip-big{width:100%;justify-content:center;padding:14px 12px;font-size:16px;font-weight:800;border-radius:14px;margin-bottom:12px}
 .dt-area{margin-top:10px}.dt-areah{font-weight:800;font-size:13px;padding:4px 2px;border-bottom:1px solid var(--line)}
 .dtoday .item{text-decoration:none;color:inherit}
+/* v7.31: driver forms — tap rows and tiles instead of the phone's list dialogs */
+select.dtp-sel{position:absolute!important;width:1px!important;height:1px!important;min-width:0!important;min-height:0!important;max-width:1px!important;max-height:1px!important;padding:0!important;margin:0!important;border:0!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important;clip-path:inset(50%)}
+.dtp{position:relative}
+.dtp-cur{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border-radius:12px;border:1.5px solid var(--accent);background:var(--accent-soft,rgba(10,132,255,.08));color:var(--ink);font:inherit;text-align:start;cursor:pointer}
+.dtp-cur b{flex:1;min-width:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dtp-cur span{flex:none;font-size:13px;color:var(--accent);font-weight:600}
+.dtp-cur[hidden],.dtp-pick[hidden]{display:none}
+.dtp-pick{display:grid;gap:6px}
+.dtp-list{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface);-webkit-overflow-scrolling:touch}
+.dtp-g{position:sticky;top:0;z-index:1;padding:5px 12px;font-size:11.5px;font-weight:700;color:var(--muted);background:var(--surface-2);border-bottom:1px solid var(--line)}
+.dtp-i{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);font:inherit;font-size:14px;text-align:start;cursor:pointer}
+.dtp-i b{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dtp-i span{flex:none;font-size:11px;color:var(--muted)}
+.dtp-i.on{background:var(--accent-soft,rgba(10,132,255,.1))}.dtp-i.on b{color:var(--accent)}.dtp-i:last-child{border-bottom:0}.dtp-add b{color:var(--accent)}
+.dtk{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.dtk.dtk-col{grid-template-columns:1fr;max-height:200px;overflow:auto}
+.dtk-i{display:block;margin:0;cursor:pointer;min-width:0}
+.dtk-i input{position:absolute!important;opacity:0!important;width:1px!important;height:1px!important;min-height:0!important;padding:0!important;margin:0!important;pointer-events:none}
+.dtk-i span{display:flex;flex-direction:column;justify-content:center;gap:1px;min-height:44px;height:100%;box-sizing:border-box;padding:8px 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-size:13.5px;font-weight:600;line-height:1.3;color:var(--ink)}
+.dtk-i span small{font-size:11px;font-weight:500;color:var(--muted)}
+.dtk-i input:checked+span{border-color:var(--accent);background:var(--accent-soft,rgba(10,132,255,.1));color:var(--accent)}
+.dtk-i input:focus-visible+span{outline:2px solid var(--accent)}
+.dtk-i.off span{opacity:.45}
+.dtc .cardhead{margin-bottom:8px}
+.dtc-s{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:8px}
+.dtc-t{display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 4px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);min-width:0}
+.dtc-t b{font-size:18px;line-height:1.15;font-variant-numeric:tabular-nums}.dtc-t span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.dtc-l{display:flex;flex-direction:column}
+.dtc-r{display:flex;align-items:center;gap:8px;min-width:0;padding:7px 2px;font-size:13px;color:inherit;text-decoration:none;border-top:1px solid var(--line)}
+.dtc-r:first-child{border-top:0}.dtc-r:active{background:var(--surface-2)}
+.dtc-dot{width:9px;height:9px;border-radius:50%;flex:none}
+.dtc-code{flex:none;font-size:12px;font-variant-numeric:tabular-nums;direction:ltr}
+.dtc-who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dtc-b{flex:none;font-size:11px;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dtc-h{flex:none;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.dtc-more{display:block;width:100%;margin-top:6px;padding:7px;border:0;border-radius:10px;background:var(--surface-2);color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 </style>`);
 })();
 /* =====================================================================
