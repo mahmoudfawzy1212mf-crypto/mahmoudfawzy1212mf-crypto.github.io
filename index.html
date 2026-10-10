@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1725-213aa9";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1836-6873f1";</script>
 
 <script>
 'use strict';
@@ -40698,6 +40698,490 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 .nf-cready .ca{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.nf-cready .cs ol{margin:6px 0 0;padding-inline-start:20px;font-size:13px;line-height:1.8}
 #nf-micask{border-color:color-mix(in srgb,#34c759 35%,var(--line));background:color-mix(in srgb,#34c759 8%,var(--surface))}#nf-micask .ci{background:#34c759}
 </style>`);
+})();
+/* =====================================================================
+   v7.32 — overtime nights and their meals (Mahmoud, 10 Oct — «start»; brief claude/meals-brief.md):
+   · a work order is «open for overtime» (with an optional «until» day) — only the owner and the factory manager open / close it;
+     no overtime night except on an open project, in the factory or on the project site.
+   · «Tonight's overtime» page (#/otnight): the department head picks the project (open ones only), where (factory / project
+     site) and his people; every person is checked against today's punch (checked in, not out, at that place — or on that
+     project's team today). Someone not confirmed shows in red with the reason and counts only if the head confirms him
+     (the confirmation is saved with the head's name and shows to the owner). Heads edit until 19:00, then only the factory
+     manager / owner.
+   · a save is an overtime task (the same task the overtime approval already needs) with the night details: place, meal
+     price (factory / site, from the house rules), the checks.
+   · it goes at once to Bahaa (names, project, place) and to the owner as a custody request «money for Bahaa's custody — overtime
+     meals» (the amount only on the money pages). Bahaa pays one of two ways: a transfer to each person's registered number or
+     «I ordered the food» for the group — both an expense out of his custody, item «meals», linked to the day and the project.
+   · whoever was registered and checked out before the meal time (21:00, house rules) gets the meal price deducted by itself in the
+     payroll (the automatic penalties) — only when the meal was given to him (transferred to him, or the food was ordered).
+   · the 14:00 reminder to heads, the 17:30 note to people still in and not registered (and their head), and the 21:00 notes
+     run on the server (Edge «remind») even when nobody has the system open.
+   · report: every night, who stayed, on which project, where, how it was paid, who was deducted; month totals per department
+     and per project.
+   · no money amounts in tasks or notifications. Factory only. iPhone and Android · Advanced and Classic · Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_OTNIGHT__) return; window.__NF_OTNIGHT__ = 1;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof EXTRA_VIEWS === 'undefined' || typeof NAV === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const pol = () => (S.settings && S.settings.policy) || {};
+  const isMgr = () => role() === 'manager'; const isHead = () => role() === 'head'; const isHr = () => role() === 'hr';
+  const myWid = () => (S.session && S.session.workerId) || '';
+  const payerId = () => String(pol().otMealPayerId || pol().advPayerId || '');
+  const isPayer = () => !!myWid() && myWid() === payerId();
+  const canOtn = () => !!S.session && (isAdmin() || isMgr() || isHead() || isHr() || isPayer());
+  const canOpenProj = () => !!S.session && writable() && (isAdmin() || isMgr());
+  const canReg = () => !!S.session && writable() && (isAdmin() || isMgr() || isHead());
+  const seesMoney = () => isAdmin() || isHr() || isPayer() || role() === 'acc';
+  const mealFactory = () => +pol().mealCost || 50;
+  const mealSite = () => +pol().mealCostSite || 115;
+  const mealUntil = () => String(pol().mealUntil || '21:00');
+  const editUntil = () => String(pol().otEditUntil || '19:00');
+  const OT_PFX = 'إضافي: ';
+  const PLACE = () => ({ factory: L('في المصنع', 'At the factory'), site: L('في موقع المشروع', 'On the project site') });
+  const placeShort = p => p === 'site' ? L('الموقع', 'site') : L('المصنع', 'factory');
+  const hm = t => String(t || '').slice(0, 5);
+  const hmOf = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const money = n => `${fmtMoney(n)} ${CUR()}`;
+
+  /* ---------- projects open for overtime ---------- */
+  const isOtOpen = (o, date) => !!(o && isOpen(o) && o.status !== 'hold' && o.otOpen && o.otOpen.on && (!o.otOpen.until || o.otOpen.until >= (date || todayISO())));
+  const openOrders = date => sortBy(list('orders').filter(o => isOtOpen(o, date)), o => o.code || '');
+  const oName = o => o ? `${o.code || ''} — ${o.title || ''}` : '';
+  const oSite = o => (typeof orderSite === 'function' ? orderSite(o) : null);
+  window.nfOtOpen = isOtOpen;
+
+  /* ---------- the night entries (overtime tasks with .ot.night) ---------- */
+  const nights = date => list('tasks').filter(t => t && t.ot && t.ot.night && t.status !== 'cancelled' && (!date || t.ot.date === date));
+  const liveIds = t => (t.ot.workerIds || []).filter(Boolean);
+  const nightOf = (date, wid) => nights(date).find(t => liveIds(t).includes(wid)) || null;
+  window.nfOtNightOf = nightOf;
+  const given = (t, wid) => !!(t && t.ot && t.ot.night && ((t.ot.night.paid || {})[wid] || (t.ot.night.food && t.ot.night.food.at)));
+  const myDeptsAll = () => isHead() ? myDepts() : (S.settings.departments || []).map(d => d.id);
+  const visibleNight = t => !isHead() || myDepts().includes(t.deptId) || liveIds(t).some(id => { const w = byId('workers', id); return w && myDepts().includes(w.deptId); });
+  const payerWallet = () => (typeof wallets === 'function' ? wallets().find(w => String(w.holder) === payerId()) : null) || null;
+  const payerName = () => { const w = byId('workers', payerId()); return w ? w.name : L('بهاء', 'Bahaa'); };
+
+  /* ---------- the punch check: present now, at that place ---------- */
+  const near = (g, pt, r) => !!(g && g.lat != null && pt && pt.lat != null && typeof haversine === 'function' && haversine({ lat: +g.lat, lng: +g.lng }, { lat: +pt.lat, lng: +pt.lng }) <= (+r || 100) + Math.min(30, (+g.acc || 0) * 0.5));
+  function check(w, o, place, date) {
+    const r = (attendanceFor(date) || {})[w.id] || {};
+    if (!r.in) return { ok: false, why: L('مابصمش حضور النهارده', 'No check-in today') };
+    if (r.out) return { ok: false, why: L(`انصرف الساعة ${hm(r.out)}`, `Checked out at ${hm(r.out)}`) };
+    if (r.s && !['P', 'H'].includes(r.s)) return { ok: false, why: L('مش متسجّل حاضر', 'Not marked present') };
+    const g = r.geo || null; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
+    if (place === 'factory') {
+      if (r.siteLeave) return { ok: true, why: L(`رجع المصنع من الموقع ${hm(r.siteLeave)}`, `Back at the factory from the site ${hm(r.siteLeave)}`) };
+      if (!g) return r.src === 'kiosk' ? { ok: true, why: L(`باصم في المصنع ${hm(r.in)}`, `Checked in at the factory ${hm(r.in)}`) } : { ok: false, why: L('البصمة من غير موقع', 'Check-in without a location') };
+      if ((fz && g.zone === fz.name) || (fz && near(g, fz, fz.radius))) return { ok: true, why: L(`باصم في المصنع ${hm(r.in)}`, `Checked in at the factory ${hm(r.in)}`) };
+      return { ok: false, why: L(`باصم في مكان تاني: ${g.zone || 'برة المصنع'}`, `Checked in elsewhere: ${g.zone || 'outside the factory'}`) };
+    }
+    if (o && typeof assignmentsFor === 'function' && assignmentsFor(w, date).some(a => a.o.id === o.id)) return { ok: true, why: L('على فريق المشروع النهارده', "On the project's team today") };
+    if (o && r.siteOrder === o.id) return { ok: true, why: L('في موقع المشروع النهارده', 'At the project site today') };
+    const st = oSite(o);
+    if (g && st && near(g, st, st.radius || 100)) return { ok: true, why: L(`باصم في موقع المشروع ${hm(r.in)}`, `Checked in at the project site ${hm(r.in)}`) };
+    if (g && o && g.zone && String(g.zone).indexOf(String(o.code) + ' ') === 0) return { ok: true, why: L(`باصم في موقع المشروع ${hm(r.in)}`, `Checked in at the project site ${hm(r.in)}`) };
+    return { ok: false, why: g ? L(`باصم في: ${g.zone || 'مكان تاني'}`, `Checked in at: ${g.zone || 'another place'}`) : L('البصمة من غير موقع', 'Check-in without a location') };
+  }
+  window.nfOtCheck = check;
+
+  /* ---------- house rules: the site meal price next to the factory one ---------- */
+  try {
+    if (typeof REG_PARAMS !== 'undefined' && typeof P === 'function' && typeof polOf === 'function' && !REG_PARAMS.some(p => p.id === 'mealCostSite')) {
+      const i = REG_PARAMS.findIndex(p => p.id === 'mealCost'); const mc = REG_PARAMS[i];
+      if (mc) mc.label = 'ثمن وجبة السهر في المصنع';
+      REG_PARAMS.splice(i < 0 ? REG_PARAMS.length : i + 1, 0, P('mealCostSite', 'الماليات وصرفها', 'ثمن وجبة السهر في موقع المشروع', 'money', s => polOf(s).mealCostSite ?? 115, (s, v) => { polOf(s).mealCostSite = v; }));
+    }
+  } catch (e) { /* ignore */ }
+
+  /* ---------- the meal deduction (automatic penalties) ---------- */
+  if (typeof computeAutoPenalties === 'function') computeAutoPenalties = (base => function (w, ym) {
+    const out = base.apply(this, arguments);
+    try {
+      const rows = attMonthRows(w, ym); const until = tmToMin(mealUntil());
+      list('tasks').filter(t => t && t.ot && t.ot.night && t.status !== 'cancelled' && String(t.ot.date || '').slice(0, 7) === ym && liveIds(t).includes(w.id)).forEach(t => {
+        const date = t.ot.date; const row = rows[date]; if (!row || !row.out || until == null || tmToMin(row.out) >= until || !given(t, w.id)) return;
+        const id = `${ym}_${w.id}_${date}_meal`; const i = out.findIndex(p => p.id === id); if (i >= 0) out.splice(i, 1);
+        out.push({ id, workerId: w.id, deptId: w.deptId || null, date, month: ym, kind: 'meal', days: 0, minutes: 0, amount: +t.ot.night.amt || (t.ot.night.place === 'site' ? mealSite() : mealFactory()), auto: true, catId: 'meal', status: 'active', otTaskId: t.id, reason: `سجّل في سهر النهارده (${placeShort(t.ot.night.place)}) وانصرف ${hm(row.out)} قبل ${mealUntil()}` });
+      });
+    } catch (e) { console.warn('otnight pen', e); }
+    return out;
+  })(computeAutoPenalties);
+  if (typeof hrMonthExtras === 'function') hrMonthExtras = (base => function (w, ym) {
+    const x = base.apply(this, arguments);
+    try { const rows = attMonthRows(w, ym); x.meals = (+x.meals || 0) + list('tasks').filter(t => t && t.ot && t.ot.night && t.status !== 'cancelled' && String(t.ot.date || '').slice(0, 7) === ym && liveIds(t).includes(w.id) && given(t, w.id) && !(rows[t.ot.date] || {}).meal).length; } catch (e) { /* ignore */ }
+    return x;
+  })(hrMonthExtras);
+
+  /* ---------- 0) open / close a project for overtime ---------- */
+  ACTIONS.otnOpen = id => {
+    if (!canOpenProj()) return; const pick = !id; const os = list('orders').filter(o => isOpen(o) && o.status !== 'hold');
+    const o0 = id ? byId('orders', id) : null; if (id && !o0) return; const cur = (o0 && o0.otOpen) || {};
+    openModal({ title: L('مفتوح للسهر', 'Open for overtime'), submitLabel: L('افتح للسهر', 'Open for overtime'), body: `<div class="form">
+      ${pick ? field(L('المشروع', 'Project'), `<select name="oid" required><option value="">${esc(L('— اختار —', '— choose —'))}</option>${sortBy(os.filter(o => !isOtOpen(o)), o => o.code || '').map(o => `<option value="${esc(o.id)}">${esc(oName(o))}</option>`).join('')}</select>`, 'full') : `<div class="full"><b>${esc(oName(o0))}</b></div>`}
+      ${field(L('لحد يوم (اختياري)', 'Until (optional)'), inp('until', cur.on ? (cur.until || '') : '', `type="date" min="${todayISO()}"`))}
+      <div class="tiny muted full">${esc(L('رؤساء الأقسام يقدروا يسجّلوا سهر على المشروع ده بس وهو مفتوح. من غير يوم = مفتوح لحد ما تقفله.', 'Heads can register overtime on this project only while it is open. No day = open until you close it.'))}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const o = pick ? byId('orders', d.oid) : o0; if (!o) { toast(L('اختار المشروع', 'Choose the project'), 'err'); return false; }
+        if (d.until && d.until < todayISO()) { toast(L('اليوم ده فات', 'That day has passed'), 'err'); return false; }
+        await Store.update('orders', o.id, { otOpen: { on: true, until: d.until || null, by: S.session.id || null, byName: S.session.name || '', at: nowISO() } });
+        toast(L('المشروع مفتوح للسهر', 'The project is open for overtime')); render(false);
+      } });
+  };
+  ACTIONS.otnClose = async id => {
+    const o = byId('orders', id); if (!o || !canOpenProj()) return;
+    if (!(await confirmDlg(L(`قفل «${oName(o)}» للسهر؟ اللي اتسجّل النهارده بيفضل زي ما هو.`, `Close «${oName(o)}» for overtime? What was registered today stays.`), L('قفل', 'Close')))) return;
+    await Store.update('orders', o.id, { otOpen: { on: false, until: null, by: S.session.id || null, byName: S.session.name || '', at: nowISO() } });
+    toast(L('اتقفل للسهر', 'Closed for overtime')); render(false);
+  };
+  function orderCard(o) {
+    const on = isOtOpen(o); const x = o.otOpen || {}; const today = nights(todayISO()).filter(t => t.orderId === o.id);
+    const n = today.reduce((a, t) => a + liveIds(t).length, 0);
+    if (!on && !canOpenProj() && !today.length) return '';
+    return `<div class="card otn-ocard" id="otn-ocard"><div class="cardhead"><h3>${icon('moon')}${esc(L('السهر', 'Overtime nights'))}</h3><span class="badge ${on ? 'good' : ''}">${esc(on ? (x.until ? L(`مفتوح للسهر لحد ${fmtDate(x.until)}`, `Open for overtime until ${fmtDate(x.until)}`) : L('مفتوح للسهر', 'Open for overtime')) : L('مقفول للسهر', 'Closed for overtime'))}</span><div class="grow"></div>
+      ${canOpenProj() && isOpen(o) ? (on ? `<button type="button" class="btn sm" data-action="otnOpen" data-arg="${esc(o.id)}">${esc(L('تعديل', 'Edit'))}</button><button type="button" class="btn sm" data-action="otnClose" data-arg="${esc(o.id)}">${esc(L('قفل', 'Close'))}</button>` : `<button type="button" class="btn sm p" data-action="otnOpen" data-arg="${esc(o.id)}">${icon('moon')}${esc(L('افتح للسهر', 'Open for overtime'))}</button>`) : ''}</div>
+      ${x.byName ? `<div class="tiny muted">${esc(on ? L('فتحه', 'Opened by') : L('آخر تعديل', 'Last change'))} ${esc(x.byName)} · ${esc(fmtDate(String(x.at || '').slice(0, 10)))}</div>` : ''}
+      ${today.length ? `<div class="small" style="margin-top:6px">${esc(L(`سهر النهارده: ${n} شخص`, `Tonight: ${n} people`))} — ${today.map(t => esc(L(`${deptName(t.deptId)}: ${liveIds(t).length} — ${placeShort(t.ot.night.place)}`, `${deptName(t.deptId)}: ${liveIds(t).length} — ${placeShort(t.ot.night.place)}`))).join(' · ')} · <a href="#/otnight">${esc(L('افتح', 'Open'))}</a></div>` : ''}</div>`;
+  }
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const o = byId('orders', id); if (!o) return html;
+    let c = ''; try { c = orderCard(o); } catch (e) { c = ''; } if (!c) return html;
+    const k = html.indexOf('<div class="card"><div class="cardhead"><h3>مراحل التصنيع</h3>'); return k < 0 ? html + c : html.slice(0, k) + c + html.slice(k);
+  })(vOrderDetail);
+
+  /* ---------- 2) the head registers tonight's people ---------- */
+  const workersOf = dept => sortBy(list('workers').filter(w => w.status !== 'inactive' && w.status !== 'suspended' && w.role !== 'admin' && w.deptId === dept), w => w.name || '');
+  function peopleHTML(f) {
+    const d = formData(f); const date = todayISO(); const o = byId('orders', d.oid || '') || null; const place = d.place || 'factory';
+    const pre = new Set(String(f.dataset.pre || '').split(',').filter(Boolean)); const keep = new Set(Array.from(f.querySelectorAll('input[name="otnw"]:checked')).map(x => x.value));
+    const sel = keep.size || f.dataset.touched ? keep : pre;
+    const ws = workersOf(d.dept || ''); if (!ws.length) return `<div class="muted small">${esc(L('مفيش موظفين في القسم ده', 'No staff in this department'))}</div>`;
+    const busy = id => { const t = nightOf(date, id); return t && t.id !== f.dataset.tid ? t : null; };
+    const rows = ws.map(w => ({ w, c: check(w, o, place, date), b: busy(w.id) })); rows.sort((x, y) => (y.c.ok ? 1 : 0) - (x.c.ok ? 1 : 0));
+    return rows.map(({ w, c, b }) => {
+      return `<label class="otn-p ${c.ok ? 'ok' : 'no'} ${b ? 'off' : ''}"><input type="checkbox" name="otnw" value="${esc(w.id)}" ${sel.has(w.id) && !b ? 'checked' : ''} ${b ? 'disabled' : ''} data-ok="${c.ok ? 1 : 0}" data-why="${esc(c.why)}"><span class="otn-pn"><b>${esc(w.name)}</b><small>${b ? esc(L(`متسجّل على ${(byId('orders', b.orderId) || {}).code || ''}`, `Registered on ${(byId('orders', b.orderId) || {}).code || ''}`)) : `${c.ok ? '✓' : '⚠'} ${esc(c.why)}`}</small></span></label>`; }).join('');
+  }
+  function formHTML(t, preIds) {
+    const date = todayISO(); const os = openOrders(date); const depts = myDeptsAll().filter(id => dept(id));
+    const d0 = t ? t.deptId : (isHead() ? myDepts()[0] : (preIds && preIds.length ? ((byId('workers', preIds[0]) || {}).deptId || depts[0]) : depts[0]));
+    const o0 = t ? t.orderId : (os.length === 1 ? os[0].id : ''); const p0 = t ? t.ot.night.place : 'factory'; const work0 = t ? String(t.title || '').replace(OT_PFX, '') : '';
+    const lockOP = !!t;
+    return `<div class="form otn-form">
+      ${depts.length > 1 && !t ? field(L('القسم', 'Department'), `<select name="dept" id="otn-dept">${depts.map(id => `<option value="${esc(id)}" ${id === d0 ? 'selected' : ''}>${esc(deptName(id))}</option>`).join('')}</select>`, 'full') : `<input type="hidden" name="dept" value="${esc(d0 || '')}"><div class="full small"><b>${esc(deptName(d0))}</b></div>`}
+      <div class="field full"><label>${esc(L('المشروع (المفتوح للسهر بس)', 'Project (open for overtime only)'))}</label><div class="otn-tiles">${(lockOP ? os.filter(o => o.id === o0).concat(os.some(o => o.id === o0) ? [] : [byId('orders', o0)].filter(Boolean)) : os).map(o => `<label class="otn-t"><input type="radio" name="oid" value="${esc(o.id)}" ${o.id === o0 ? 'checked' : ''}><span><b>${esc(o.code || '')}</b><small>${esc(o.title || '')}</small></span></label>`).join('')}</div></div>
+      <div class="field full"><label>${esc(L('فين', 'Where'))}</label><div class="otn-tiles two">${['factory', 'site'].map(p => `<label class="otn-t" data-pl="${p}"><input type="radio" name="place" value="${p}" ${p === p0 ? 'checked' : ''} ${lockOP && p !== p0 ? 'disabled' : ''}><span><b>${esc(PLACE()[p])}</b><small class="otn-psub"></small></span></label>`).join('')}</div></div>
+      <div class="field full"><div class="row" style="align-items:center;gap:8px"><label style="margin:0">${esc(L('مين هيسهر', 'Who stays'))}</label><div class="grow"></div><button type="button" class="btn xs" data-otnall="1">${esc(L('كل المتأكد منهم', 'All confirmed'))}</button></div><div class="otn-people" id="otn-people"></div></div>
+      <label class="check full otn-conf" id="otn-conf" hidden><input type="checkbox" name="otnconf" value="1"> ${esc(L('أنا متأكد إن اللي باللون الأحمر موجودين — تأكيدي هيتسجّل باسمي ويظهر للمالك', 'I am sure the people in red are here — my confirmation is saved with my name and shows to the owner'))}</label>
+      ${field(L('الشغل المطلوب', 'The work'), `<textarea name="work" required placeholder="${esc(L('مثال: لحام هيكل 4 كراسي + تجليخ', 'e.g. welding 4 chair frames + grinding'))}">${esc(work0)}</textarea>`, 'full')}
+      <div class="tiny muted full">${esc(L(`بيوصل ${payerName()} والمالك على طول. التعديل لحد الساعة ${editUntil()}.`, `Goes to ${payerName()} and the owner at once. Changes until ${editUntil()}.`))}</div></div>`;
+  }
+  function wire(f) {
+    const paint = () => {
+      const d = formData(f); const o = byId('orders', d.oid || ''); const st = oSite(o);
+      const siteT = f.querySelector('.otn-t[data-pl="site"]'); const siteR = siteT && siteT.querySelector('input');
+      if (siteR && !f.dataset.tid) { siteR.disabled = !st; if (!st && siteR.checked) { siteR.checked = false; const fr = f.querySelector('input[name=place][value=factory]'); if (fr) fr.checked = true; } }
+      const sub = siteT && siteT.querySelector('.otn-psub'); if (sub) sub.textContent = o ? (st ? (st.address || '') : L('المشروع ملوش لوكيشن', 'The project has no location')) : '';
+      const box = f.querySelector('#otn-people'); if (box) box.innerHTML = peopleHTML(f);
+    };
+    const conf = () => { const c = f.querySelector('#otn-conf'); if (c) c.hidden = !f.querySelector('input[name="otnw"][data-ok="0"]:checked'); };
+    f.addEventListener('change', e => { if (e.target.name === 'otnw') { f.dataset.touched = '1'; conf(); return; } if (['oid', 'place', 'dept'].includes(e.target.name)) { paint(); conf(); } });
+    f.addEventListener('click', e => { if (!e.target.closest('[data-otnall]')) return; e.preventDefault(); f.dataset.touched = '1'; f.querySelectorAll('input[name="otnw"]').forEach(x => { if (!x.disabled) x.checked = x.dataset.ok === '1'; }); conf(); });
+    paint(); conf();
+  }
+  ACTIONS.otnNew = arg => {
+    if (!canReg()) return; const date = todayISO();
+    if (!openOrders(date).length) { toast(L('مفيش مشروع مفتوح للسهر النهارده — المالك أو مدير المصنع يفتحه من صفحة أمر التشغيل', 'No project is open for overtime today — the owner or the factory manager opens one from the work order page'), 'err'); return; }
+    if (isHead() && nowTm() >= editUntil()) { toast(L(`التسجيل لحد الساعة ${editUntil()} — بعدها مدير المصنع أو المالك`, `Registering is until ${editUntil()} — after that the factory manager or the owner`), 'err'); return; }
+    const pre = String(arg || '').split(',').filter(Boolean);
+    openModal({ title: L('سهر النهارده', "Tonight's overtime"), wide: true, body: formHTML(null, pre), submitLabel: L('حفظ وإرسال', 'Save and send'), onOpen: f => { f.dataset.pre = pre.join(','); wire(f); }, onSubmit: f => save(f, null) });
+  };
+  ACTIONS.otnEdit = id => {
+    const t = byId('tasks', id); if (!t || !t.ot || !t.ot.night || !canReg()) return;
+    if (t.ot.date !== todayISO() && !isAdmin()) { toast(L('ده يوم فات', 'That day has passed'), 'err'); return; }
+    if (isHead() && nowTm() >= editUntil()) { toast(L(`التعديل لحد الساعة ${editUntil()} — بعدها مدير المصنع أو المالك`, `Changes are until ${editUntil()} — after that the factory manager or the owner`), 'err'); return; }
+    openModal({ title: L('تعديل سهر النهارده', "Edit tonight's overtime"), wide: true, body: formHTML(t), submitLabel: L('حفظ', 'Save'), onOpen: f => { f.dataset.tid = t.id; f.dataset.pre = liveIds(t).join(','); wire(f); }, onSubmit: f => save(f, t) });
+  };
+  async function save(f, t0) {
+    const d = formData(f); const date = t0 ? t0.ot.date : todayISO(); const me = S.session || {};
+    if (isHead() && nowTm() >= editUntil()) { toast(L(`التسجيل لحد الساعة ${editUntil()}`, `Registering is until ${editUntil()}`), 'err'); return false; }
+    const o = byId('orders', d.oid || ''); if (!o) { toast(L('اختار المشروع', 'Choose the project'), 'err'); return false; }
+    if (!t0 && !isOtOpen(o, date)) { toast(L('المشروع ده مش مفتوح للسهر', 'This project is not open for overtime'), 'err'); return false; }
+    const place = d.place === 'site' ? 'site' : 'factory'; if (place === 'site' && !oSite(o)) { toast(L('المشروع ملوش لوكيشن — اختار المصنع', 'The project has no location — choose the factory'), 'err'); return false; }
+    const work = String(d.work || '').trim(); if (work.length < 4) { toast(L('اكتب الشغل المطلوب', 'Write the work'), 'err'); return false; }
+    const boxes = Array.from(f.querySelectorAll('input[name="otnw"]:checked')); const wids = boxes.map(x => x.value);
+    if (!wids.length && !t0) { toast(L('علّم على اللي هيسهروا', 'Tick who stays'), 'err'); return false; }
+    const unsure = boxes.filter(x => x.dataset.ok !== '1').map(x => ({ id: x.value, why: x.dataset.why || '' }));
+    if (unsure.length && !d.otnconf) { const c = f.querySelector('#otn-conf'); if (c) { c.hidden = false; c.scrollIntoView({ block: 'nearest' }); } toast(L('فيه ناس باللون الأحمر — أكّد إنهم موجودين', 'Some people are in red — confirm they are here'), 'err'); return false; }
+    const now = nowISO(); const id = t0 ? t0.id : `otn_${date}_${d.dept || 'x'}_${o.id}_${place}`; const ex = t0 || byId('tasks', id);
+    const n0 = (ex && ex.ot && ex.ot.night) || {}; const prev = ex ? liveIds(ex) : [];
+    const checks = Object.assign({}, n0.checks || {}); boxes.forEach(x => { if (prev.includes(x.value) && checks[x.value]) return; checks[x.value] = x.dataset.ok === '1' ? { ok: true, why: x.dataset.why || '', at: now } : { ok: false, why: x.dataset.why || '', at: now, conf: { by: me.id || null, byName: me.name || '', at: now } }; });
+    const removed = Object.assign({}, n0.removed || {}); prev.filter(x => !wids.includes(x)).forEach(x => { removed[x] = { at: now, byName: me.name || '' }; }); wids.forEach(x => { delete removed[x]; });
+    const amt = place === 'site' ? mealSite() : mealFactory();
+    const ws = wids.map(x => byId('workers', x)).filter(Boolean);
+    const night = Object.assign({}, n0, { place, amt: n0.amt || amt, checks, removed, edits: (n0.edits || 0) + (ex ? 1 : 0) });
+    const doc = Object.assign({}, ex || {}, { id, kind: 'task', source: 'ot', title: OT_PFX + work.slice(0, 80), desc: `${work}\n${L('العمال', 'Staff')}: ${ws.map(w => w.name).join('، ')}\n${oName(o)} — ${PLACE()[place]}`, deptId: d.dept || (ws[0] && ws[0].deptId) || null, assigneeId: ws.length === 1 ? ws[0].id : null, orderId: o.id, dueDate: date, priority: 'normal', status: wids.length ? (ex && ex.status === 'done' ? 'done' : 'open') : 'cancelled',
+      ot: Object.assign({}, (ex && ex.ot) || {}, { date, workerIds: wids, hours: (ex && ex.ot && ex.ot.hours) || null, oldProject: '', status: wids.length ? 'ok' : 'rejected', retro: false, by: (ex && ex.ot && ex.ot.by) || me.id || null, byName: (ex && ex.ot && ex.ot.byName) || me.name || '', at: (ex && ex.ot && ex.ot.at) || now, okBy: me.name || '', okAt: now, night }),
+      createdBy: (ex && ex.createdBy) || me.id || null, createdByName: (ex && ex.createdByName) || me.name || '', createdAt: (ex && ex.createdAt) || now, updatedAt: now });
+    await Store.save('tasks', doc);
+    try { await afterSave(doc, prev, o); } catch (e) { console.warn('otnight send', e); }
+    toast(wids.length ? L(`اتسجّل سهر ${wids.length} شخص — وصل ${payerName()} والمالك`, `${wids.length} people registered — sent to ${payerName()} and the owner`) : L('اتلغى السهر ده', 'This overtime night was cancelled')); render(false); return true;
+  }
+  /* to Bahaa (names) + a custody request to the owner (the amount lives in the request only) */
+  async function afterSave(t, prev, o) {
+    const n = t.ot.night; const wids = liveIds(t); const added = wids.filter(x => !prev.includes(x)); const me = S.session || {}; const now = nowISO();
+    const names = wids.map(x => (byId('workers', x) || {}).name || '').filter(Boolean);
+    const pid = payerId(); const head = me.name || '';
+    if (pid) {
+      const nid = `otb_${t.id}`; const title = wids.length ? `🌙 سهر النهارده: ${wids.length} شخص — ${o.code || ''}` : `🌙 اتلغى سهر ${o.code || ''} — ${deptName(t.deptId)}`;
+      const desc = wids.length ? `${oName(o)} (${placeShort(n.place)}) — ${deptName(t.deptId)}\n${names.join('، ')}\nمن ${head}` : `${deptName(t.deptId)} — من ${head}`;
+      const had = byId('tasks', nid);
+      await Store.save('tasks', Object.assign({}, had || {}, { id: nid, title, desc, assigneeId: pid, deptId: null, orderId: o.id, kind: 'update', source: 'otnight', priority: 'high', status: 'open', link: '/#/otnight', taskRef: wids.length ? null : t.id, createdBy: (had && had.createdBy) || me.id || null, createdByName: (had && had.createdByName) || head, createdAt: (had && had.createdAt) || now, updatedAt: now }), { silent: true });
+      if (had && typeof pushSend === 'function') pushSend([pid], title, desc.split('\n')[0], '/#/otnight', 'otb-' + t.id).catch(() => { });
+    }
+    /* custody request: one per entry; while it waits it follows the list, after the owner paid only additions ask again */
+    const wl = payerWallet(); if (!wl) return;
+    const reqs = (n.fundReqIds || []).map(id => byId('requests', id)).filter(Boolean);
+    const paidN = reqs.filter(r => r.status === 'approved').reduce((a, r) => a + (+r.otCount || 0), 0);
+    const pend = reqs.find(r => r.status === 'pending');
+    const want = Math.max(0, wids.length - paidN); const amt = +n.amt || 0;
+    const reason = `وجبات سهر ${fmtDate(t.ot.date)} — ${oName(o)} (${placeShort(n.place)}) — ${deptName(t.deptId)}`;
+    if (pend) {
+      if (!want) { await Store.update('requests', pend.id, { status: 'cancelled', decidedAt: now, otCount: 0 }); try { if (typeof window.nfCloseNotesFor === 'function') await window.nfCloseNotesFor(pend.id); } catch (e) { /* ignore */ } }
+      else if (want !== +pend.otCount) await Store.update('requests', pend.id, { amount: want * amt, otCount: want, reason: `${reason} — ${want} شخص` });
+      return;
+    }
+    if (!want || !added.length) return;
+    const r = { id: uid(), type: 'fund', walletId: wl.id, amount: want * amt, cat: 'meals', vehicleId: null, reason: `${reason} — ${want} شخص`, otTaskId: t.id, otCount: want, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `وجبات سهر — ${want} شخص — ${o.code || ''}` }] };
+    await Store.save('requests', r, { silent: true });
+    await Store.update('tasks', t.id, { ot: Object.assign({}, t.ot, { night: Object.assign({}, n, { fundReqIds: (n.fundReqIds || []).concat([r.id]) }) }) }, { silent: true });
+    if (typeof notifyOwner === 'function') await notifyOwner(`طلب مبلغ لعهدة ${wl.name} — وجبات سهر`, `${o.code || ''} — ${want} شخص (${placeShort(n.place)}) — ${deptName(t.deptId)} — من ${me.name || ''}`, { id: `fund_${r.id}`, reqId: r.id });
+  }
+
+  /* ---------- 5) Bahaa pays: a transfer to each one, or the food for the group ---------- */
+  const WT = () => ({ vf: L('فودافون كاش', 'Vodafone Cash'), et: L('اتصالات كاش', 'Etisalat Cash'), or: L('أورنج كاش', 'Orange Cash'), we: L('وي باي', 'WE Pay'), ip: L('إنستاباي', 'InstaPay'), card: L('كارت', 'Card') });
+  const wlOf = wid => byId('wallets', wid) || null;
+  const wlShow = x => !x ? '' : (x.number || x.ipa || (x.last4 ? `•••• ${x.last4}` : ''));
+  async function pay(tid, mode) {
+    const t = byId('tasks', tid); if (!t || !t.ot || !t.ot.night || !(isPayer() || isAdmin()) || !writable()) return;
+    const n = t.ot.night; const o = byId('orders', t.orderId) || {}; const wl = payerWallet(); if (!wl) { toast(L('مفيش عهدة متسجّلة لبهاء', 'No custody wallet is set for Bahaa'), 'err'); return; }
+    const att = attendanceFor(t.ot.date) || {}; const until = tmToMin(mealUntil());
+    let wids;
+    if (mode === 'food') { if (n.food && n.food.at) return; wids = liveIds(t); }
+    else { wids = Array.from(document.querySelectorAll(`input[data-otnpay="${t.id}"]:checked`)).map(x => x.value); if (!wids.length) { toast(L('علّم على اللي حوّلتلهم', 'Tick who you transferred to'), 'err'); return; } }
+    const names = wids.map(x => (byId('workers', x) || {}).name || '').join('، ');
+    const left = wids.filter(x => { const r = att[x] || {}; return r.out && until != null && tmToMin(r.out) < until; });
+    const total = wids.length * (+n.amt || 0);
+    const res = await moneyDialog({ title: mode === 'food' ? L(`طلبت الأكل — ${o.code || ''}`, `Food ordered — ${o.code || ''}`) : L(`تحويل وجبات سهر — ${o.code || ''}`, `Overtime meals transfer — ${o.code || ''}`), intro: esc(`${names}${left.length ? ' — ' + L(`انصرف بدري: ${left.map(x => (byId('workers', x) || {}).name || '').join('، ')}`, `Left early: ${left.map(x => (byId('workers', x) || {}).name || '').join(', ')}`) : ''}`), amount: total, fileLabel: mode === 'food' ? L('صورة الفاتورة', 'Photo of the bill') : L('صورة التحويل', 'Photo of the transfer'), submitLabel: L('تسجيل', 'Save'), ownerKind: 'expense' });
+    if (!res) return; const bal = walletBalance(wl.id).balance;
+    if (res.amount > bal + 0.5) { toast(L(`رصيد العهدة ${money(bal)} — مستني تحويل المالك`, `Custody balance ${money(bal)} — waiting for the owner's transfer`), 'err'); return; }
+    const now = nowISO(); const eid = uid();
+    await Store.save('expenses', { id: eid, date: t.ot.date, month: monthOf(t.ot.date), amount: res.amount, cat: 'meals', account: wl.id, holderId: wl.holder, orderId: t.orderId || null, payee: names, ref: '', note: `${mode === 'food' ? 'أكل سهر' : 'وجبات سهر'} — ${o.code || ''} — ${deptName(t.deptId)}${res.note ? ' — ' + res.note : ''}`, src: 'wallet', otTaskId: t.id, otMode: mode, otWids: wids, fileIds: res.fileIds, thumb: res.thumb, byName: S.session.name || '', createdAt: now });
+    const n1 = Object.assign({}, t.ot.night);
+    if (mode === 'food') n1.food = { at: now, by: S.session.name || '', expId: eid, amount: res.amount };
+    else { const p = Object.assign({}, n1.paid || {}); wids.forEach(x => { p[x] = { at: now, by: S.session.name || '', expId: eid }; }); n1.paid = p; }
+    await Store.update('tasks', t.id, { ot: Object.assign({}, t.ot, { night: n1 }), updatedAt: now });
+    const note = byId('tasks', `otb_${t.id}`); const done = mode === 'food' || liveIds(t).every(x => (n1.paid || {})[x]);
+    if (note && done && ['open', 'doing'].includes(note.status)) await Store.update('tasks', note.id, { status: 'done', doneAt: now, doneByName: S.session.name || '', autoClosed: true, doneNote: mode === 'food' ? 'طلب الأكل' : 'اتحوّل للكل' }, { silent: true });
+    toast(L('اتسجّل من عهدتك', 'Saved from your custody')); render(false);
+  }
+  ACTIONS.otnPay = tid => pay(tid, 'xfer');
+  ACTIONS.otnFood = tid => pay(tid, 'food');
+  ACTIONS.otnCopy = async v => { try { await navigator.clipboard.writeText(v); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(v); } };
+
+  /* ---------- the page ---------- */
+  function entryCard(t) {
+    const o = byId('orders', t.orderId) || {}; const n = t.ot.night; const wids = liveIds(t); const att = attendanceFor(t.ot.date) || {}; const until = tmToMin(mealUntil());
+    const payer = isPayer() || isAdmin(); const today = t.ot.date === todayISO(); const food = n.food && n.food.at;
+    const reqs = (n.fundReqIds || []).map(id => byId('requests', id)).filter(Boolean);
+    const fund = reqs.length ? (reqs.some(r => r.status === 'pending') ? ['warn', L('طلب العهدة مستني المالك', 'Custody request waiting for the owner')] : ['good', L('المالك حوّل لعهدة بهاء', 'The owner transferred to the custody')]) : null;
+    const paidN = wids.filter(x => (n.paid || {})[x]).length;
+    const status = food ? ['good', L('طلب الأكل', 'Food ordered')] : paidN && paidN === wids.length ? ['good', L('اتحوّل للكل', 'Transferred to all')] : paidN ? ['warn', L(`اتحوّل لـ ${paidN} من ${wids.length}`, `Transferred to ${paidN} of ${wids.length}`)] : ['', L('لسه ماتصرفش', 'Not paid yet')];
+    const row = id => {
+      const w = byId('workers', id) || { name: id }; const c = (n.checks || {})[id] || {}; const r = att[id] || {}; const p = (n.paid || {})[id]; const x = wlOf(id);
+      const early = r.out && until != null && tmToMin(r.out) < until;
+      const can = payer && today && !food && !p && writable();
+      const info = [c.conf ? `<span class="badge warn" title="${esc(c.why || '')}">${esc(L(`أكّده ${c.conf.byName}`, `Confirmed by ${c.conf.byName}`))}</span>` : c.ok ? `<span class="otn-ok">✓</span>` : '', r.out ? `<span class="badge ${early ? 'crit' : ''}">${esc(L(`انصرف ${hm(r.out)}`, `Out ${hm(r.out)}`))}</span>` : '', p ? `<span class="badge good">${esc(L('اتحوّل', 'Transferred'))}</span>` : ''].filter(Boolean).join(' ');
+      const pay1 = payer && !food ? (x ? `<span class="otn-wl ltr">${esc(WT()[x.type] || '')} ${esc(wlShow(x))}</span>${x.number || x.ipa ? `<button type="button" class="btn xs" data-action="otnCopy" data-arg="${esc(x.number || x.ipa)}">${esc(L('نسخ', 'Copy'))}</button>` : ''}` : `<span class="badge crit">${esc(L('مش متسجّل رقم', 'No number registered'))}</span>`) : '';
+      return `<div class="otn-r">${can ? `<input type="checkbox" data-otnpay="${esc(t.id)}" value="${esc(id)}" ${early ? '' : ''}>` : ''}<b>${esc(w.name)}</b>${info}<div class="grow"></div>${pay1}</div>`;
+    };
+    const rem = Object.keys(n.removed || {}).filter(x => !wids.includes(x));
+    return `<div class="card otn-e" id="otn-${esc(t.id)}"><div class="cardhead"><h3 class="ltr-num">${esc(o.code || '')}</h3><span class="badge acc">${esc(placeShort(n.place))}</span><div class="grow"></div><span class="badge ${status[0]}">${esc(status[1])}</span></div>
+      <div class="small otn-ot">${esc(o.title || '')}</div>
+      <div class="tiny muted">${esc(deptName(t.deptId))} · ${esc(L(`${wids.length} شخص`, `${wids.length} people`))} · ${esc(t.ot.byName || '')} ${esc(hmOf(t.ot.at))}${seesMoney() ? ` · ${esc(L('الوجبة', 'Meal'))} ${esc(money(n.amt || 0))}` : ''}${fund && (seesMoney() || isMgr()) ? ` · <span class="badge ${fund[0]}">${esc(fund[1])}</span>` : ''}</div>
+      <div class="small otn-work">${esc(String(t.title || '').replace(OT_PFX, ''))}</div>
+      <div class="otn-rows">${wids.map(row).join('') || `<div class="muted small">${esc(L('مفيش حد', 'Nobody'))}</div>`}</div>
+      ${rem.length ? `<div class="tiny muted">${esc(L('اتشال', 'Removed'))}: ${rem.map(x => esc((byId('workers', x) || {}).name || '')).join('، ')}</div>` : ''}
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
+        ${today && canReg() && (!isHead() || nowTm() < editUntil()) ? `<button type="button" class="btn sm" data-action="otnEdit" data-arg="${esc(t.id)}">${icon('edit')}${esc(L('تعديل', 'Edit'))}</button>` : ''}
+        ${(isPayer() || isAdmin()) && today && !food && writable() ? `<button type="button" class="btn sm p" data-action="otnPay" data-arg="${esc(t.id)}">${esc(L('اتحوّل للمحددين', 'Transferred to the ticked'))}</button>${!paidN ? `<button type="button" class="btn sm" data-action="otnFood" data-arg="${esc(t.id)}">${esc(L('طلبت الأكل للمجموعة', 'I ordered the food'))}</button>` : ''}` : ''}
+      </div></div>`;
+  }
+  function todayHTML(date) {
+    const os = openOrders(date); const es = sortBy(nights(date).filter(visibleNight), t => (t.deptId || '') + (t.orderId || ''));
+    const total = es.reduce((a, t) => a + liveIds(t).length, 0);
+    const head = `<div class="card otn-top"><div class="cardhead"><h3>${icon('moon')}${esc(L('مفتوح للسهر النهارده', 'Open for overtime today'))}</h3><div class="grow"></div>${canOpenProj() ? `<button type="button" class="btn sm" data-action="otnOpen">${icon('plus')}${esc(L('افتح مشروع', 'Open a project'))}</button>` : ''}</div>
+      ${os.length ? `<div class="otn-chips">${os.map(o => `<a class="otn-chip" href="#/orders/${esc(o.id)}"><b>${esc(o.code || '')}</b> ${esc(o.title || '')}${o.otOpen.until ? ` <small>${esc(L(`لحد ${fmtDate(o.otOpen.until)}`, `until ${fmtDate(o.otOpen.until)}`))}</small>` : ''}</a>`).join('')}</div>` : `<div class="muted small">${esc(L('مفيش مشروع مفتوح للسهر — المالك أو مدير المصنع يفتحه من صفحة أمر التشغيل (مفيش سهر غير على مشروع مفتوح).', 'No project is open for overtime — the owner or the factory manager opens it from the work order page (no overtime except on an open project).'))}</div>`}
+      ${canReg() && os.length ? `<div style="margin-top:10px"><button type="button" class="btn p" data-action="otnNew">${icon('plus')}${esc(L('سجّل سهر النهارده', "Register tonight's overtime"))}</button> <span class="tiny muted">${esc(isHead() ? L(`لحد الساعة ${editUntil()}`, `until ${editUntil()}`) : '')}</span></div>` : ''}</div>`;
+    return head + (es.length ? `<div class="small muted" style="margin:6px 2px">${esc(L(`النهارده: ${total} شخص في ${es.length} تسجيل`, `Today: ${total} people in ${es.length} entries`))}</div>` + es.map(entryCard).join('') : `<div class="empty"><b>${esc(L('لسه محدش اتسجّل في سهر النهارده', 'Nobody registered for tonight yet'))}</b></div>`);
+  }
+  function reportHTML() {
+    const ym = S._otnYm || monthOf(todayISO()); const until = tmToMin(mealUntil()); const showMoney = seesMoney();
+    const es = sortBy(list('tasks').filter(t => t && t.ot && t.ot.night && t.status !== 'cancelled' && String(t.ot.date || '').slice(0, 7) === ym && visibleNight(t)), t => t.ot.date, true);
+    const byDept = {}, byProj = {}; let meals = 0, amount = 0, deducted = 0;
+    const rows = es.map(t => {
+      const o = byId('orders', t.orderId) || {}; const n = t.ot.night; const wids = liveIds(t); const att = attendanceFor(t.ot.date) || {};
+      const early = wids.filter(x => { const r = att[x] || {}; return r.out && until != null && tmToMin(r.out) < until && given(t, x); });
+      const giv = wids.filter(x => given(t, x)).length; const a = list('expenses').filter(e => e.otTaskId === t.id).reduce((s0, e) => s0 + (+e.amount || 0), 0);
+      meals += giv; amount += a; deducted += early.length;
+      const dk = t.deptId || '—'; byDept[dk] = byDept[dk] || { n: 0, a: 0 }; byDept[dk].n += giv; byDept[dk].a += a;
+      const pk = o.id || t.orderId || '—'; byProj[pk] = byProj[pk] || { n: 0, a: 0, name: oName(o) }; byProj[pk].n += giv; byProj[pk].a += a;
+      const how = n.food && n.food.at ? L('أكل', 'Food') : Object.keys(n.paid || {}).length ? L('تحويل', 'Transfer') : L('لسه', 'Not yet');
+      return `<tr><td>${esc(fmtDate(t.ot.date))}</td><td>${esc(deptName(t.deptId))}</td><td><a href="#/orders/${esc(t.orderId || '')}">${esc(o.code || '')}</a></td><td>${esc(placeShort(n.place))}</td><td class="n">${wids.length}</td><td>${esc(how)}</td><td class="n">${early.length ? `<span class="badge crit" title="${esc(early.map(x => (byId('workers', x) || {}).name || '').join('، '))}">${early.length}</span>` : '0'}</td>${showMoney ? `<td class="n">${esc(fmtMoney(a))}</td>` : ''}</tr>`;
+    });
+    const sumT = (obj, label) => `<div class="card"><div class="cardhead"><h3>${esc(label)}</h3></div><div class="tablewrap"><table><thead><tr><th></th><th class="n">${esc(L('وجبات', 'Meals'))}</th>${showMoney ? `<th class="n">${esc(L('المبلغ', 'Amount'))}</th>` : ''}</tr></thead><tbody>${Object.entries(obj).sort((a, b) => b[1].n - a[1].n).map(([k, v]) => `<tr><td>${esc(v.name || deptName(k))}</td><td class="n">${v.n}</td>${showMoney ? `<td class="n">${esc(fmtMoney(v.a))}</td>` : ''}</tr>`).join('')}</tbody></table></div></div>`;
+    const prev = monthOf(addDays(ym + '-01', -1)); const next = monthOf(addDays(ym + '-28', 5));
+    return `<div class="row" style="gap:8px;align-items:center;margin-bottom:10px"><button type="button" class="btn sm" data-otnym="${esc(prev)}">‹</button><b>${esc(typeof fmtMonth === 'function' ? fmtMonth(ym) : ym)}</b><button type="button" class="btn sm" data-otnym="${esc(next)}">›</button></div>
+      <div class="otn-k">${[[L('وجبات اتصرفت', 'Meals given'), meals], [L('اتخصم (مشي بدري)', 'Deducted (left early)'), deducted]].concat(showMoney ? [[L('التكلفة', 'Cost'), money(amount)]] : []).map(([l, v]) => `<div><span>${esc(l)}</span><b class="num">${esc(String(v))}</b></div>`).join('')}</div>
+      ${es.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>${esc(L('اليوم', 'Day'))}</th><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('المشروع', 'Project'))}</th><th>${esc(L('فين', 'Where'))}</th><th class="n">${esc(L('ناس', 'People'))}</th><th>${esc(L('اتصرف', 'Paid'))}</th><th class="n">${esc(L('اتخصم', 'Deducted'))}</th>${showMoney ? `<th class="n">${esc(L('المبلغ', 'Amount'))}</th>` : ''}</tr></thead><tbody>${rows.join('')}</tbody></table></div></div>
+      <div class="grid g2" style="gap:10px;margin-top:10px">${sumT(byDept, L('لكل قسم', 'Per department'))}${sumT(byProj, L('لكل مشروع', 'Per project'))}</div>` : `<div class="empty"><b>${esc(L('مفيش سهر في الشهر ده', 'No overtime nights this month'))}</b></div>`}`;
+  }
+  const canReport = () => isAdmin() || isHr() || isPayer() || isMgr();
+  VIEW_TITLES.otnight = 'سهر النهارده';
+  (() => { const i = NAV.findIndex(n => n.id === 'attendance'); const entry = { id: 'otnight', label: 'سهر النهارده', icon: 'moon', count: () => { try { if (!canOtn()) return 0; const es = nights(todayISO()); if (isPayer()) return es.filter(t => !(t.ot.night.food && t.ot.night.food.at) && liveIds(t).some(x => !(t.ot.night.paid || {})[x])).length; return 0; } catch (e) { return 0; } }, countCls: 'warn' }; if (i >= 0) NAV.splice(i + 1, 0, entry); else NAV.push(entry); })();
+  canSee = (base => function (v) { if (v === 'otnight') return canOtn(); return base.apply(this, arguments); })(canSee);
+  EXTRA_VIEWS.otnight = () => {
+    if (!canOtn()) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const tab = S._otnTab === 'report' && canReport() ? 'report' : 'today';
+    const bar = canReport() ? `<div class="tabs" style="margin-bottom:12px"><button type="button" class="${tab === 'today' ? 'on' : ''}" data-otntab="today">${esc(L('النهارده', 'Today'))}</button><button type="button" class="${tab === 'report' ? 'on' : ''}" data-otntab="report">${esc(L('التقرير', 'Report'))}</button></div>` : '';
+    return `<div class="otn">${bar}${tab === 'report' ? reportHTML() : todayHTML(todayISO())}</div>`;
+  };
+  EXTRA_TITLES.otnight = () => ({ title: L('سهر النهارده', "Tonight's overtime"), sub: L(`السهر على المشاريع المفتوحة بس · الوجبة: اللي يمشي قبل ${mealUntil()} تتخصم منه`, `Overtime on open projects only · meal: whoever leaves before ${mealUntil()} pays for it`) });
+  document.addEventListener('click', e => {
+    const tb = e.target.closest && e.target.closest('[data-otntab]'); if (tb) { S._otnTab = tb.dataset.otntab; render(true); return; }
+    const ym = e.target.closest && e.target.closest('[data-otnym]'); if (ym) { S._otnYm = ym.dataset.otnym; render(true); }
+  });
+  /* «from the 17:30 note»: #/otnight/pre/<ids> opens the form with those people ticked */
+  let _preDone = '';
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; if (r.view !== 'otnight' || r.id !== 'pre' || !r.sub || _preDone === r.sub || document.getElementById('mform')) return;
+      _preDone = r.sub; if (canReg()) setTimeout(() => ACTIONS.otnNew(decodeURIComponent(r.sub)), 60);
+    } catch (e) { /* ignore */ }
+  });
+  /* the dashboard line + the attendance button */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; const v = document.getElementById('view'); if (!v || !canOtn()) return;
+      if (r.view === 'dashboard' && !v.querySelector('.otn-dash')) {
+        const os = openOrders(todayISO()); if (!os.length) return; const n = nights(todayISO()).reduce((a, t) => a + liveIds(t).length, 0);
+        v.insertAdjacentHTML('afterbegin', `<a class="otn-dash" href="#/otnight">${icon('moon')}<span><b>${esc(L('مفتوح للسهر النهارده:', 'Open for overtime today:'))}</b> ${os.map(o => esc(oName(o))).join('، ')}</span><span class="otn-dn">${esc(L(`${n} شخص`, `${n} people`))}</span></a>`);
+      }
+      if (r.view === 'attendance') { const tb = v.querySelector('.toolbar'); if (tb && !tb.querySelector('.otn-attb')) tb.insertAdjacentHTML('beforeend', `<a class="btn sm otn-attb" href="#/otnight">${icon('moon')}${esc(L('سهر النهارده', "Tonight's overtime"))}</a>`); }
+    } catch (e) { /* ignore */ }
+  });
+  /* the old «overtime task» form for today goes through «tonight's overtime» (heads: only on an open project) */
+  if (typeof ACTIONS.otTaskNew === 'function') ACTIONS.otTaskNew = (base => function (arg) {
+    const d = String(arg || '').split(':')[0]; const date = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayISO();
+    if (isHead() && date >= todayISO()) { const wid = String(arg || '').split(':')[1] || ''; if (date === todayISO()) { location.hash = '#/otnight'; setTimeout(() => ACTIONS.otnNew(wid), 120); } else toast(L('السهر بيتسجّل في يومه من «سهر النهارده»', 'Overtime is registered on its day from «Tonight\'s overtime»'), 'err'); return; }
+    return base.apply(this, arguments);
+  })(ACTIONS.otTaskNew);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .otn-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.otn-tiles.two{grid-template-columns:1fr 1fr}
+    .otn-t{display:block;margin:0;cursor:pointer;min-width:0;position:relative}
+    .otn-t input{position:absolute!important;opacity:0!important;width:1px!important;height:1px!important;min-height:0!important;padding:0!important;margin:0!important;pointer-events:none}
+    .otn-t span{display:flex;flex-direction:column;gap:1px;min-height:44px;height:100%;box-sizing:border-box;padding:8px 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-size:13.5px;line-height:1.3}
+    .otn-t span small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .otn-t input:checked+span{border-color:var(--accent);background:var(--accent-soft,rgba(10,132,255,.1))}.otn-t input:checked+span b{color:var(--accent)}
+    .otn-t input:disabled+span{opacity:.45}.otn-t input:focus-visible+span{outline:2px solid var(--accent)}
+    .otn-people{display:grid;gap:4px;max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:6px;-webkit-overflow-scrolling:touch}
+    .otn-p{display:flex;align-items:center;gap:10px;margin:0;padding:7px 8px;border-radius:10px;cursor:pointer;min-width:0}
+    .otn-p input{flex:none;width:20px!important;height:20px!important;min-height:0!important;padding:0!important;margin:0}
+    .otn-p.ok{background:rgba(48,164,108,.07)}.otn-p.no{background:rgba(229,72,77,.07)}.otn-p.off{opacity:.5}
+    .otn-pn{display:flex;flex-direction:column;min-width:0}.otn-pn b{font-size:14px}.otn-pn small{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .otn-p.no .otn-pn small{color:var(--crit-ink,#c4302b)}.otn-p.ok .otn-pn small{color:var(--good-ink,#1f7a4d)}
+    .otn-chips{display:flex;flex-wrap:wrap;gap:6px}.otn-chip b{white-space:nowrap;direction:ltr;unicode-bidi:isolate}.otn-chip{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:inherit;text-decoration:none;font-size:13px;max-width:100%}.otn-chip small{color:var(--muted)}
+    .otn-rows{display:grid;gap:2px;margin-top:6px}.otn-r{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 2px;border-top:1px solid var(--line);font-size:13.5px}.otn-r:first-child{border-top:0}
+    .otn-r input{width:20px!important;height:20px!important;min-height:0!important;padding:0!important;margin:0}.otn-ok{color:var(--good-ink,#1f7a4d);font-weight:700}.otn-wl{font-size:12.5px;font-variant-numeric:tabular-nums}
+    .otn-work{margin-top:4px;color:var(--ink2,inherit)}.otn-ot{color:var(--muted);margin:-4px 0 4px}
+    .otn-k{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:10px}.otn-k>div{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);min-width:0}
+    .otn-k span{font-size:11.5px;color:var(--muted)}.otn-k b{font-size:20px;line-height:1.2}
+    .otn-conf{padding:8px 10px;border-radius:10px;background:rgba(229,72,77,.08);font-size:13px}.otn-conf[hidden]{display:none}
+    .otn-dash{display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);color:inherit;text-decoration:none;font-size:13.5px}
+    .otn-dash>span:first-of-type{flex:1;min-width:0}.otn-dn{flex:none;font-weight:700;color:var(--accent)}
+  </style>`);
+})();
+/* =====================================================================
+   v7.32 — money first for the owner (Mahmoud, 10 Oct: «the money things must show to me first — very necessary»; Saeed's
+   advance batch reached him as an ordinary update, not in the bell).
+   · one list of everything about money that waits for the owner: advance batches sent by Saeed, custody requests, running
+     costs approved by HR, supplier POs to transfer, deferred supplier payments due in 3 days or late, and any open owner note
+     about money (cheques, supplier dues, …);
+   · it is the first card of the dashboard («Money waiting for you»), the first thing on the tasks page, and the first lines of
+     the bell (with the bell number).
+   · no amounts in the card or the bell — the amounts stay on the money pages. Owner only; every system that has these pages.
+   ===================================================================== */
+(function () {
+  if (window.__NF_MONEYFIRST__) return; window.__NF_MONEYFIRST__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const KIND = () => ({ adv: [L('سلف', 'Advances'), 'warn'], fund: [L('عهدة', 'Custody'), 'warn'], po: [L('مورد', 'Supplier'), 'acc'], opex: [L('تشغيل', 'Running cost'), ''], chq: [L('شيك', 'Cheque'), 'acc'], money: [L('فلوس', 'Money'), ''] });
+  const SRC = new Set(['advbatch', 'advpay', 'money', 'opex', 'suppay', 'cheque', 'chq', 'podue', 'fund']);
+  const RE = /سلف|عهد|تحويل|شيك|مصروف تشغيل|دفعة|سداد|مستحق/;
+  const isMoneyTask = t => !!t && (SRC.has(t.source) || /^(podue|fund|abt|opx|chq)_/.test(String(t.id)) || RE.test(String(t.title || '')));
+  function moneyItems() {
+    if (!S.session || !isAdmin()) return [];
+    const out = []; const seen = new Set(); const today = todayISO();
+    try {
+      list('advbatch').filter(b => b && ['sent', 'review'].includes(b.status)).forEach(b => { seen.add('abt_' + b.id); out.push({ k: 'adv', id: 'ab:' + b.id, label: L(`دفعة سلف ${b.number || ''} مستنية تحويلك`, `Advance batch ${b.number || ''} waiting for your transfer`), sub: L(`${(b.items || []).length} سلفة — من ${b.sentByName || ''}`, `${(b.items || []).length} advances — from ${b.sentByName || ''}`), href: '#/advpay' }); });
+    } catch (e) { /* ignore */ }
+    try {
+      if (typeof moneyDue === 'function') moneyDue().forEach(x => {
+        if (x.action === 'poPayLater') { const p = byId('purchases', x.id); const due = p && p.deferred && p.deferred.due; if (!due || due > addDays(today, 3)) return; }
+        seen.add('fund_' + x.id); seen.add(x.id);
+        out.push({ k: x.kind === 'fund' ? 'fund' : x.kind === 'opex' ? 'opex' : 'po', id: x.kind + ':' + x.id, label: x.label, sub: x.sub || '', href: x.href ? '#/' + x.href : '#/money' });
+      });
+    } catch (e) { /* ignore */ }
+    try {
+      if (typeof tasksForMe === 'function') tasksForMe().filter(t => t && !seen.has(t.id) && !(t.reqId && seen.has(t.reqId)) && isMoneyTask(t)).forEach(t => {
+        out.push({ k: /شيك/.test(String(t.title)) || /chq|cheque/.test(String(t.id) + String(t.source)) ? 'chq' : 'money', id: 't:' + t.id, label: String(t.title || ''), sub: String(t.desc || '').split('\n')[0].slice(0, 90), href: '#/tasks/' + t.id });
+      });
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+  window.nfOwnerMoney = moneyItems;
+  function card(items) {
+    const K = KIND(); const shown = items.slice(0, 6);
+    return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div><a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
+      <div class="omf-l">${shown.map(x => `<a class="omf-r" href="${esc(x.href)}"><span class="badge ${K[x.k][1]}">${esc(K[x.k][0])}</span><span class="omf-t"><b>${esc(x.label)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span><span class="omf-go">${icon('back')}</span></a>`).join('')}</div>
+      ${items.length > shown.length ? `<a class="omf-more" href="#/money">${esc(L(`كل البنود (${items.length})`, `All items (${items.length})`))}</a>` : ''}</div>`;
+  }
+  RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; const v = document.getElementById('view'); if (!v || !S.session || !isAdmin()) return;
+      if (!(r.view === 'dashboard' || (r.view === 'tasks' && !r.id))) return;
+      const old = v.querySelector('#omf'); if (old) old.remove();
+      const items = moneyItems(); if (!items.length) return;
+      v.insertAdjacentHTML('afterbegin', card(items));
+    } catch (e) { /* ignore */ }
+  });
+  /* the bell: money first */
+  if (typeof notifItems === 'function') notifItems = (base => function () {
+    const arr = base.apply(this, arguments);
+    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', n: 1, at: '9999', title: x.label, sub: x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
+  })(notifItems);
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .omf{border-color:var(--warn,#e5932a)!important}.omf .cardhead{margin-bottom:6px}
+    .omf-l{display:flex;flex-direction:column}
+    .omf-r{display:flex;align-items:center;gap:8px;padding:8px 2px;border-top:1px solid var(--line);color:inherit;text-decoration:none;min-width:0}.omf-r:first-child{border-top:0}.omf-r:active{background:var(--surface-2)}
+    .omf-r .badge{flex:none}.omf-t{flex:1;min-width:0;display:flex;flex-direction:column}.omf-t b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.omf-t small{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .omf-go{flex:none;opacity:.5;transform:scaleX(-1)}[dir=ltr] .omf-go,html[lang=en] .omf-go{transform:none}.omf-go svg{width:14px;height:14px}
+    .omf-more{display:block;margin-top:6px;padding:7px;border-radius:10px;background:var(--surface-2);color:var(--accent);text-align:center;font-size:13px;font-weight:600;text-decoration:none}
+  </style>`);
 })();
 </script>
 
