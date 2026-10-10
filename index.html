@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0802-5e0a2d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0934-5815b7";</script>
 
 <script>
 'use strict';
@@ -6902,13 +6902,13 @@ function proofDialog(opts) {
     openModal({ title: opts.title, submitLabel: opts.submitLabel || 'تسجيل وتوثيق', body: `<div class="form">
       ${opts.intro ? `<div class="banner info full" style="margin:0">${icon('info')}<span>${esc(opts.intro)}</span></div>` : ''}
       ${st ? `<div class="field full"><label>${esc(opts.statusLabel || 'الحالة')}</label><div class="seg" id="pf-status">${st.map((s, i) => `<button type="button" class="${i === 0 ? 'on' : ''}" data-st="${esc(s[0])}">${esc(s[1])}</button>`).join('')}</div><input type="hidden" name="status" value="${esc(st[0][0])}"></div>` : ''}
-      <div class="field full"><label>${esc(opts.fileLabel || 'صورة / ملف الإثبات')}${opts.requireFile === false ? ' (اختياري)' : ''}</label><input type="file" id="pf-file" name="file" accept="image/*,application/pdf" capture="environment" ${opts.multiple ? 'multiple' : ''}><div class="tiny muted" style="margin-top:4px">${canUp ? 'تُحفظ على السيستم وتظهر في سجل التوثيق' : 'في هذا الوضع تُحفظ صورة مصغّرة داخل السجل (الرفع الكامل عند التشغيل على السيرفر)'}</div></div>
+      <div class="field full"><label>${esc(opts.fileLabel || 'صورة / ملف الإثبات')}${opts.requireFile === false ? ' (اختياري)' : ''}${opts.fileOptionalWhen ? `<span class="pf-opt" ${st && opts.fileOptionalWhen.includes(st[0][0]) ? '' : 'hidden'}> (اختياري لو في مشكلة)</span>` : ''}</label><input type="file" id="pf-file" name="file" accept="image/*,application/pdf" capture="environment" ${opts.multiple ? 'multiple' : ''}><div class="tiny muted" style="margin-top:4px">${canUp ? 'تُحفظ على السيستم وتظهر في سجل التوثيق' : 'في هذا الوضع تُحفظ صورة مصغّرة داخل السجل (الرفع الكامل عند التشغيل على السيرفر)'}</div></div>
       ${field(opts.noteLabel || 'تقرير / ملاحظة', `<textarea id="pf-note" name="note" placeholder="${esc(opts.notePlaceholder || '')}"></textarea>`, 'full')}
     </div>`,
-      onOpen: f => { const seg = $('#pf-status', f); if (seg) seg.addEventListener('click', ev => { const b = ev.target.closest('[data-st]'); if (!b) return; ev.preventDefault(); $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); $('[name=status]', f).value = b.dataset.st; }); },
+      onOpen: f => { const seg = $('#pf-status', f); if (seg) seg.addEventListener('click', ev => { const b = ev.target.closest('[data-st]'); if (!b) return; ev.preventDefault(); $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); $('[name=status]', f).value = b.dataset.st; const po = $('.pf-opt', f); if (po && opts.fileOptionalWhen) po.hidden = !opts.fileOptionalWhen.includes(b.dataset.st); }); },
       onSubmit: async f => {
         const d = formData(f); const files = Array.from($('#pf-file', f)?.files || []);
-        if (opts.requireFile !== false && !files.length) { toast('الصورة أو الملف مطلوب للتوثيق', 'err'); return false; }
+        if (opts.requireFile !== false && !(opts.fileOptionalWhen || []).includes(d.status) && !files.length) { toast('الصورة أو الملف مطلوب للتوثيق', 'err'); return false; }   /* v7.26: fileOptionalWhen — e.g. a trip that ended with a problem (nothing to photograph) */
         if (opts.requireNote && !(d.note || '').trim()) { toast('اكتب التقرير / الملاحظة', 'err'); return false; }
         const res = { note: (d.note || '').trim(), status: d.status || null, fileIds: [], thumb: null, at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '' };
         for (const file of files) { const doc = await proofAttach(file, { kind: opts.kind || 'proof', ownerKind: opts.ownerKind || 'proof', ownerId: opts.ownerId || '', note: res.note }); if (doc) { res.fileIds.push(doc.id); if (!res.thumb && doc.thumb) res.thumb = doc.thumb; } }
@@ -7247,7 +7247,7 @@ RENDER_HOOKS.push(() => { if (_trackTimer || !S.session) return; const mine = li
 ACTIONS.tripPing = async id => { const t = byId('trips', id); if (!t || t.status !== 'started') return; const p = await posNow(); if (!p) { toast('تعذر تحديد الموقع', 'err'); return; } await Store.update('trips', id, { track: (t.track || []).concat([p]).slice(-400) }); toast('تم تسجيل موقعك'); };
 ACTIONS.tripEnd = async id => {
   const t = byId('trips', id); if (!t || t.status !== 'started') return; if (!(isAdmin() || canFleet() || t.driverId === myDriverId())) return;
-  const pr = await proofDialog({ title: `إنهاء المشوار ${t.number}`, intro: t.kind === 'pickup_ext' ? 'صورة الشغل المستلم على العربية + ملاحظة (العدد، الحالة)' : t.kind === 'delivery' ? 'صورة التسليم عند العميل (محضر/الشغل) + من استلم' : 'صورة عند إنهاء المشوار + ملاحظة', kind: 'proof', ownerKind: 'trip', ownerId: id, requireNote: true, noteLabel: 'تقرير المشوار', status: [['ok', 'تم بدون مشاكل'], ['issue', 'توجد مشكلة']], statusLabel: 'النتيجة' });
+  const pr = await proofDialog({ title: `إنهاء المشوار ${t.number}`, intro: t.kind === 'pickup_ext' ? 'صورة الشغل المستلم على العربية + ملاحظة (العدد، الحالة)' : t.kind === 'delivery' ? 'صورة التسليم عند العميل (محضر/الشغل) + من استلم' : 'صورة عند إنهاء المشوار + ملاحظة', kind: 'proof', ownerKind: 'trip', ownerId: id, requireNote: true, noteLabel: 'تقرير المشوار', status: [['ok', 'تم بدون مشاكل'], ['issue', 'توجد مشكلة']], statusLabel: 'النتيجة', fileOptionalWhen: ['issue'] });
   if (!pr) return; const p = await posNow();
   const track = (t.track || []).concat(p ? [p] : []); const km = r2(trackKm(track));
   await Store.update('trips', id, { status: 'done', endedAt: nowISO(), endPos: p, track, km, proof: pr });
