@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1950-37a7ef";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-2120-9c7ec1";</script>
 
 <script>
 'use strict';
@@ -41242,22 +41242,36 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   function tileSelect(sel, o = {}) {
     if (!sel || sel.dataset.nft) return; sel.dataset.nft = '1';
     const name = 'nft_' + (sel.name || sel.id || Math.random().toString(36).slice(2));
-    const optsOf = () => Array.from(sel.options).filter(op => !op.hidden && !op.disabled && (op.value !== '' || o.keepEmpty));
-    const many = o.search || optsOf().length > 8;
-    const box = document.createElement('div'); box.className = 'nft ' + (many ? 'nft-list' : 'nft-tiles') + (o.cols === 1 ? ' one' : '');
+    /* v7.34: the radios belong to no form (form="nft-none") so they never land in the saved data */
+    const keep = op => (typeof o.keepEmpty === 'function' ? o.keepEmpty(op) : !!o.keepEmpty);
+    const optsOf = () => Array.from(sel.options).filter(op => !op.hidden && !op.disabled && (op.value !== '' || keep(op)));
+    const lbl = op => (String(op.textContent || '').replace(/[\s—–-]/g, '') ? op.textContent : L('بدون', 'None'));
+    const box = document.createElement('div'); let many = null;
     const paint = q => {
       const qq = String(q || '').trim().toLowerCase(); const cur = sel.value;
-      const items = optsOf().filter(op => !qq || op.textContent.toLowerCase().includes(qq));
+      const items = optsOf().filter(op => !qq || lbl(op).toLowerCase().includes(qq));
       const sub = v => (o.sub ? o.sub(v) : '');
-      const html = items.map(op => `<label class="nft-i"><input type="radio" name="${esc(name)}" value="${esc(op.value)}" ${op.value === cur ? 'checked' : ''}><span><b>${esc(op.textContent)}</b>${sub(op.value) ? `<small>${esc(sub(op.value))}</small>` : ''}</span></label>`).join('');
+      const html = items.map(op => `<label class="nft-i"><input type="radio" form="nft-none" name="${esc(name)}" value="${esc(op.value)}" ${op.value === cur ? 'checked' : ''}><span><b>${esc(lbl(op))}</b>${sub(op.value) ? `<small>${esc(sub(op.value))}</small>` : ''}</span></label>`).join('');
       const list = box.querySelector('.nft-items'); if (list) list.innerHTML = html || `<div class="nft-none">${esc(L('مفيش نتايج', 'No results'))}</div>`;
     };
-    box.innerHTML = (many ? `<input class="inp nft-q" placeholder="${esc(L('ابحث…', 'Search…'))}" autocomplete="off" enterkeyhint="search">` : '') + '<div class="nft-items"></div>';
+    const build = () => {
+      const os = optsOf(); const m = !!(o.search || os.length > 8);
+      const one = o.cols === 1 || (os.length && os.reduce((a, op) => a + lbl(op).length, 0) / os.length > 20);   /* long names → one per row */
+      box.classList.toggle('one', !!one);
+      if (m === many) { const q = box.querySelector('.nft-q'); paint(q ? q.value : ''); return; }
+      many = m; box.className = 'nft ' + (many ? 'nft-list' : 'nft-tiles') + (one ? ' one' : '');
+      box.innerHTML = (many ? `<input class="inp nft-q" placeholder="${esc(L('ابحث…', 'Search…'))}" autocomplete="off" enterkeyhint="search">` : '') + '<div class="nft-items"></div>';
+      const q = box.querySelector('.nft-q'); if (q) { q.addEventListener('input', () => paint(q.value)); q.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); }); }
+      paint('');
+    };
     sel.classList.add('nft-sel'); sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
-    sel.parentNode.insertBefore(box, sel.nextSibling); paint('');
+    sel.parentNode.insertBefore(box, sel.nextSibling); build();
     box.addEventListener('change', e => { if (e.target.name !== name) return; e.stopPropagation(); sel.value = e.target.value; sel.dispatchEvent(new Event('change', { bubbles: true })); });
-    const q = box.querySelector('.nft-q'); if (q) q.addEventListener('input', () => paint(q.value));
-    sel.addEventListener('change', () => { box.querySelectorAll(`input[name="${name}"]`).forEach(r => { r.checked = r.value === sel.value; }); });
+    const sync = () => box.querySelectorAll(`input[name="${name}"]`).forEach(r => { r.checked = r.value === sel.value; });
+    sel.addEventListener('change', sync);
+    /* options filled or changed later by the form (e.g. the people of the chosen department), or a value set from code */
+    try { new MutationObserver(build).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'hidden', 'label'] }); } catch (e) { /* ignore */ }
+    if (sel.form) { sel.form.addEventListener('change', () => setTimeout(sync, 0)); sel.form.addEventListener('input', () => setTimeout(sync, 0)); }
   }
   window.nfTileSelect = tileSelect;
 
@@ -41345,7 +41359,9 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const old = document.getElementById('bellpop'); if (old) { old.remove(); return; }
     const gs = noteGroups(); if (!gs.length) return base.apply(this, arguments);
     const push = 'Notification' in window && Notification.permission !== 'granted';
-    document.body.insertAdjacentHTML('beforeend', `<div class="bellpop ahbell" id="bellpop">${gs.map(groupCard).join('')}${push ? `<div style="padding:8px 4px 2px"><button class="btn sm p" data-action="pushEnable">${icon('alert')}${esc(L('تفعيل الإشعارات على هذا الجهاز', 'Turn on notifications on this device'))}</button></div>` : ''}</div>`);
+    /* v7.34: the «test notification» button (when notifications are on) stays at the bottom, as in the old list */
+    let tst = false; try { tst = !push && 'Notification' in window && typeof pushAvailable === 'function' && pushAvailable() && typeof ACTIONS.pushTest === 'function'; } catch (e) { tst = false; }
+    document.body.insertAdjacentHTML('beforeend', `<div class="bellpop ahbell" id="bellpop">${gs.map(groupCard).join('')}${push ? `<div style="padding:8px 4px 2px"><button class="btn sm p" data-action="pushEnable">${icon('alert')}${esc(L('تفعيل الإشعارات على هذا الجهاز', 'Turn on notifications on this device'))}</button></div>` : ''}${tst ? `<div style="padding:8px 4px 2px"><button class="btn sm" data-action="pushTest">${icon('bell')}${esc(L('إشعار تجريبي للموبايل والساعة', 'Test notification to the phone and watch'))}</button></div>` : ''}</div>`);
     setTimeout(() => document.addEventListener('click', function cl(ev) { const p = document.getElementById('bellpop'); if (!p) { document.removeEventListener('click', cl); return; } if (!ev.target.closest('#bellpop') && !ev.target.closest('.bellbtn')) { p.remove(); document.removeEventListener('click', cl); } }), 50);
   })(ACTIONS.bellOpen);
   ACTIONS.bellGo = (base => function (href) { const p = document.getElementById('bellpop'); if (p) p.remove(); return base ? base.apply(this, arguments) : (location.hash = href); })(ACTIONS.bellGo);
@@ -41410,7 +41426,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   EXTRA_VIEWS.home = () => homeHTML();
   EXTRA_TITLES.home = () => ({ title: L('الرئيسية', 'Home'), sub: '' });
   canSee = (base => function (v) { if (v === 'home') return !!S.session && role() !== 'kiosk'; return base.apply(this, arguments); })(canSee);
-  if (typeof homeView === 'function') homeView = (base => function () { try { if (homeOn()) return 'home'; } catch (e) { /* ignore */ } return base.apply(this, arguments); })(homeView);
+  /* v7.34: a home that was made for the job stays (construction: the site engineer opens on «the site today») */
+  if (typeof homeView === 'function') homeView = (base => function () { const b = base.apply(this, arguments); try { if (homeOn() && b !== 'csite') return 'home'; } catch (e) { /* ignore */ } return b; })(homeView);
   /* the bar puts «More» first (right) and moves the first tab to its old place (v4.39) — so Home goes second here and lands next to «More» */
   if (typeof tabbarItems === 'function') tabbarItems = (base => function () { const arr = base.apply(this, arguments); if (!homeOn()) return arr; const want = ['home'].concat(arr.filter(x => x !== 'home' && x !== 'dashboard')).slice(0, 4); return want.length > 1 ? [want[want.length - 1]].concat(want.slice(0, -1)) : want; })(tabbarItems);
   /* the switch under the name: Home = dashboard / new */
@@ -41496,6 +41513,180 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     .bellpop.ahbell{padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--surface-2,var(--surface))}
     .bellpop.ahbell .ahn{border-radius:18px}
     @media (max-width:420px){.ahg{grid-template-columns:repeat(4,1fr)}.aha-ic{width:58px;height:58px}}
+  </style>`);
+})();
+/* =====================================================================
+   v7.34 — the iPhone look, step 2 (Mahmoud, 10 Oct: «what was done for Alaa should show to every employee and every head —
+   everything clear and tidy»; «start»; brief claude/apple-home-brief.md, step 2 of 2).
+   · daily attendance on the phone: a card for each person (name, the four status buttons big, check-in / check-out /
+     hours / overtime side by side, the work orders under them) instead of the wide table that ran off the screen.
+     The computer keeps the table.
+   · department board for heads and employees: their department's column first, the helper cards (late work, the department
+     assistant) after it and smaller.
+   · requests: the ones waiting for my answer first; for heads and employees the ones waiting with someone else fold into
+     one line «with someone else (N)» that opens them.
+   · every phone list inside a form (department, person, project, priority, kind…) becomes tiles, or rows with a search
+     box when there are many — on the phone only; the computer keeps its lists.
+   · every photo / file field becomes the big «take or choose a photo» button with a tick and a small preview.
+   · who sees what does not change. All three systems, Advanced and Classic, Arabic and English, iPhone and Android.
+   ===================================================================== */
+(function () {
+  if (window.__NF_APPLE2__) return; window.__NF_APPLE2__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const phone = () => { try { return window.matchMedia('(max-width: 760px)').matches; } catch (e) { return window.innerWidth <= 760; } };
+  const LEAD = () => ['head', 'employee', 'driver'].includes(role());
+  if (typeof ICONS === 'object' && !ICONS.upload) ICONS.upload = '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/>';
+
+  /* ---------- 1) attendance: a card per person on the phone ---------- */
+  RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'attendance') return;
+      const t = document.querySelector('#view table.att'); if (!t || t.dataset.a2) return; t.dataset.a2 = '1';
+      t.classList.add('a2-att'); const w = t.closest('.tablewrap'); if (w) w.classList.add('a2-attw'); const c = t.closest('.card'); if (c) c.classList.add('a2-attc');
+      const ths = Array.from(t.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      t.querySelectorAll('tbody tr:not(.attdh)').forEach(tr => Array.from(tr.children).forEach((td, i) => {
+        if (i < 2 || !ths[i] || td.querySelector(':scope > .a2-l')) return;
+        const s = document.createElement('span'); s.className = 'a2-l'; s.textContent = ths[i]; td.insertBefore(s, td.firstChild);
+      }));
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- 2) the department board: my department first, the helper cards after it ---------- */
+  RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'boards' || S.route.id || !LEAD()) return;
+      const v = document.getElementById('view'); const board = v && v.querySelector(':scope > .board'); if (!board || board.dataset.a2) return; board.dataset.a2 = '1';
+      const mine = (typeof myDepts === 'function' ? myDepts() : []).map(id => (typeof deptName === 'function' ? deptName(id) : '')).filter(Boolean);
+      const cols = Array.from(board.querySelectorAll(':scope > .col'));
+      cols.filter(col => { const n = col.querySelector('.ch span'); return n && mine.includes(n.textContent.trim()); }).reverse().forEach(col => board.insertBefore(col, board.firstChild));
+      const helpers = Array.from(v.children).filter(x => x !== board && x.classList.contains('card'));
+      const tb = v.querySelector(':scope > .toolbar'); if (tb && !tb.querySelector('button,select,input,a')) tb.classList.add('a2-ph-hide');
+      v.insertBefore(board, v.firstChild);
+      let at = board; helpers.forEach(h => { h.classList.add('a2-help'); if (h.id !== 'lateheads') h.classList.add('a2-slim'); at.after(h); at = h; });
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- 3) requests: waiting for me first; the rest folded for heads and employees ---------- */
+  RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'requests' || S.route.id) return;
+      const list = document.querySelector('#view > .list'); if (!list || list.dataset.a2) return;
+      const items = Array.from(list.children).filter(x => x.classList.contains('item'));
+      const mine = items.filter(x => x.querySelector('[data-action="reqDecide"]')); const others = items.filter(x => !mine.includes(x));
+      if (!mine.length || !others.length) return; list.dataset.a2 = '1';
+      const sec = (txt, cls) => { const d = document.createElement('div'); d.className = 'a2-sec ' + (cls || ''); d.textContent = txt; return d; };
+      list.insertBefore(sec(L(`مستنية ردك (${mine.length})`, `Waiting for your answer (${mine.length})`), 'me'), list.firstChild);
+      let at = list.firstChild; mine.forEach(x => { at.after(x); at = x; });
+      const label = L(`عند حد تاني (${others.length})`, `With someone else (${others.length})`);
+      if (LEAD()) {
+        const d = document.createElement('details'); d.className = 'a2-more'; if (S.ui && S.ui.a2reqOpen) d.open = true;
+        d.innerHTML = `<summary>${esc(label)}</summary>`; others.forEach(x => d.appendChild(x)); list.appendChild(d);
+        d.addEventListener('toggle', () => { if (S.ui) S.ui.a2reqOpen = d.open; });
+      } else { list.appendChild(sec(label)); others.forEach(x => list.appendChild(x)); }
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- 4) photo / file fields: the big «take or choose a photo» button ---------- */
+  let seq = 0;
+  function pickText(fi, n) {
+    const acc = String(fi.accept || '').toLowerCase(); const img = /image/.test(acc), pdf = /pdf/.test(acc), vid = /video/.test(acc), sheet = /xls|csv|json|txt|\.md|text\//.test(acc);
+    if (n) {
+      if (n > 1) return L(`✓ ${n} ملفات جاهزة — غيّرهم`, `✓ ${n} files ready — change`);
+      return img && !pdf && !vid ? L('✓ الصورة جاهزة — غيّرها', '✓ Photo ready — change it') : L('✓ الملف جاهز — غيّره', '✓ File ready — change it');
+    }
+    if (sheet) return L('اختار الملف', 'Choose the file');
+    if (vid && !img) return L('صوّر أو اختار فيديو', 'Record or choose a video');
+    if (img && vid) return L('صوّر أو اختار صور أو فيديو', 'Take or choose photos or a video');
+    if (img && pdf) return L('صوّر أو اختار صورة أو ملف', 'Take a photo or choose a file');
+    if (img) return fi.multiple ? L('صوّر أو اختار صور', 'Take or choose photos') : L('صوّر أو اختار صورة', 'Take or choose a photo');
+    return L('اختار ملف', 'Choose a file');
+  }
+  function pickify(root) {
+    if (!root) return;
+    root.querySelectorAll('input[type=file]').forEach(fi => {
+      if (fi.dataset.a2p || fi.classList.contains('pf-in') || fi.hidden || fi.disabled || fi.closest('label') || fi.closest('.pf-pick')) return;
+      let cs; try { cs = getComputedStyle(fi); } catch (e) { return; } if (cs.display === 'none' || cs.visibility === 'hidden') return;
+      fi.dataset.a2p = '1'; if (!fi.id) fi.id = 'a2f-' + (++seq);
+      const acc = String(fi.accept || '').toLowerCase(); const cam = /image|video/.test(acc);
+      const lab = document.createElement('label'); lab.className = 'pf-pick a2-pick' + (fi.closest('.field') ? '' : ' inl'); lab.htmlFor = fi.id;
+      lab.innerHTML = `${icon(cam ? 'camera' : 'upload')}<span class="a2-pt">${esc(pickText(fi, 0))}</span>`;
+      fi.classList.add('pf-in'); fi.parentNode.insertBefore(lab, fi);
+      let pv = null; if (fi.closest('.field')) { pv = document.createElement('div'); pv.className = 'pf-prev a2-prev'; fi.after(pv); }
+      fi.addEventListener('change', () => {
+        const fs = Array.from(fi.files || []); lab.querySelector('.a2-pt').textContent = pickText(fi, fs.length); lab.classList.toggle('on', !!fs.length);
+        if (pv) { pv.innerHTML = ''; fs.slice(0, 4).forEach(x => { if (/^image\//.test(x.type || '')) { const im = document.createElement('img'); im.src = URL.createObjectURL(x); im.alt = ''; pv.appendChild(im); } else { const d = document.createElement('span'); d.className = 'pf-doc'; d.textContent = '📄 ' + (x.name || ''); pv.appendChild(d); } }); }
+      });
+    });
+  }
+
+  /* ---------- 5) phone lists inside forms → tiles / rows (phone only) ---------- */
+  const PLACEHOLDER = /اختر|اختار|choose|select|pick/i;
+  function tileify(f) {
+    if (!f || !phone() || typeof window.nfTileSelect !== 'function') return;
+    f.querySelectorAll('.field > select').forEach(sel => {
+      if (sel.dataset.nft || sel.multiple || sel.size > 1 || sel.hasAttribute('data-native') || sel.hidden || sel.disabled || !sel.options.length) return;
+      let cs; try { cs = getComputedStyle(sel); } catch (e) { return; } if (cs.display === 'none') return;
+      window.nfTileSelect(sel, { keepEmpty: op => !PLACEHOLDER.test(op.textContent || '') });
+    });
+  }
+
+  /* run on every page and on every form that opens */
+  let qd = false;
+  const sweep = () => { qd = false; try { const m = document.getElementById('mform'); if (m) { tileify(m); pickify(m); } pickify(document.getElementById('view')); } catch (e) { /* ignore */ } };
+  const later = () => { if (qd) return; qd = true; setTimeout(sweep, 0); };
+  RENDER_HOOKS.push(later);
+  /* each form that opens is watched while it is open (fields that appear later, options filled later) */
+  if (typeof openModal === 'function') openModal = (base => function () {
+    const r = base.apply(this, arguments); later();
+    try { const m = document.getElementById('mform'); if (m && !m.dataset.a2o) { m.dataset.a2o = '1'; new MutationObserver(later).observe(m, { childList: true, subtree: true }); } } catch (e) { /* ignore */ }
+    return r;
+  })(openModal);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .a2-l{display:none}
+    .a2-pick.inl{display:inline-flex;width:auto;min-height:40px;padding:8px 14px;font-size:14px}
+    .a2-prev:empty{display:none}
+    .a2-sec{grid-column:1/-1;font-size:13px;font-weight:700;color:var(--muted);margin:6px 2px 0}
+    .a2-sec.me{color:var(--accent)}
+    details.a2-more{grid-column:1/-1;border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden}
+    details.a2-more>summary{list-style:none;cursor:pointer;padding:13px 14px;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+    details.a2-more>summary::-webkit-details-marker{display:none}
+    details.a2-more>summary::after{content:'‹';margin-inline-start:auto;color:var(--muted);font-size:18px;transform:rotate(-90deg);transition:transform .2s}
+    details.a2-more[open]>summary::after{transform:rotate(90deg)}
+    details.a2-more[open]{display:flex;flex-direction:column;gap:8px;padding-bottom:8px}
+    details.a2-more>.item{margin:0 8px}
+    .a2-help{margin-top:14px}
+    .card.a2-slim{padding:10px 14px}
+    .card.a2-slim .small.muted{display:none}
+    .card.a2-slim .avatar{width:30px;height:30px}
+    @media (max-width:760px){
+      .a2-ph-hide{display:none!important}
+      #view .card.a2-attc{background:none;border:0;box-shadow:none;padding:0}
+      #view .tablewrap.a2-attw{overflow:visible!important;border:0;background:none}
+      #view table.a2-att{display:block;min-width:0!important;width:100%!important;border:0;background:none}
+      #view table.a2-att thead{display:none}
+      #view table.a2-att tbody{display:flex;flex-direction:column;gap:10px}
+      #view table.a2-att tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 8px;padding:12px;border:1px solid var(--line);border-radius:18px;background:var(--surface)}
+      #view table.a2-att tr.attdh{display:block;padding:0;border:0;background:none;margin-top:8px}
+      #view table.a2-att tr.attdh td{display:block;background:none!important;border:0!important;padding:2px!important}
+      #view table.a2-att tr.attdh .attdhin{position:static;width:auto;max-width:none}
+      #view table.a2-att tr:not(.attdh) td{display:block;padding:0!important;border:0!important;min-width:0!important;max-width:none!important;width:auto!important;text-align:start!important;background:none!important;white-space:normal}
+      #view table.a2-att tr:not(.attdh) td:nth-child(1),#view table.a2-att tr:not(.attdh) td:nth-child(2),#view table.a2-att tr:not(.attdh) td:nth-child(n+7){grid-column:1/-1}
+      #view table.a2-att tr:not(.attdh) td:nth-child(n+3):nth-child(-n+6){grid-column:span 2}
+      #view table.a2-att tr:not(.attdh) td:nth-child(1) b{font-size:16px}
+      #view table.a2-att tr:not(.attdh) td:nth-child(1),#view table.a2-att tr:not(.attdh) td:nth-child(1) *{white-space:normal!important;overflow-wrap:anywhere;max-width:100%}
+      #view table.a2-att .a2-l{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:4px}
+      #view table.a2-att tr:not(.attdh) td:nth-child(n+7){display:flex!important;flex-wrap:wrap;align-items:center;gap:6px}
+      #view table.a2-att tr:not(.attdh) td:nth-child(n+7)>.a2-l{flex-basis:100%;margin-bottom:0}
+      #view table.a2-att tr:not(.attdh) td:nth-child(n+7)>*{margin:0!important}
+      #view table.a2-att input.tm,#view table.a2-att input.ot{width:100%!important;min-width:0!important;max-width:none!important;box-sizing:border-box;height:42px;font-size:15px;padding:0 6px}
+      #view table.a2-att td.n{font-size:16px;font-weight:700}
+      #view table.a2-att .sbtn{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;width:100%}
+      #view table.a2-att .sbtn button{width:100%!important;height:44px;font-size:17px;min-width:0;padding:0}
+      #view table.a2-att td:nth-child(2)>div:not(.sbtn){margin-top:6px}
+    }
   </style>`);
 })();
 </script>
