@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0600-076133";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0703-ccd68a";</script>
 
 <script>
 'use strict';
@@ -27379,6 +27379,11 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const me = () => (S.sbUser && S.sbUser.id) || ''; const noCalls = () => typeof role === 'function' && ['bdd', 'tech'].includes(role()); /* v5.62: المدير التجاري ومهندس المكتب الفني — من غير مكالمات خالص */
   const C = { dir: null, dirAt: 0, log: [], logAt: 0, ice: null, cur: null, ch: null, chUid: '', ring: null };
   const RING_MS = 45000;
+  /* v7.23: an outgoing call could stay on «ringing…» for ever while the phone never answered the microphone question — no call
+     was created and nothing rang on the other side. Every step before the call exists now has a time limit, the screen says
+     «getting the call ready…» until the call really exists, and the reason of any failure is kept in nf_call_diag (owner only). */
+  const within = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error(tag), { name: 'Timeout' })), ms))]);
+  const callDiag = (callee, step, e, extra) => { try { S.sb.from('nf_call_diag').insert({ callee: callee || null, step, err: e ? String((e.name || 'Error') + ': ' + (e.message || e)).slice(0, 380) : null, ua: String(navigator.userAgent || '').slice(0, 280), plat: typeof nfPlatform === 'function' ? String(nfPlatform()) : 'web', extra: extra || null }).then(() => { }, () => { }); } catch (x) { /* ignore */ } };
   const roleName = r => (typeof ROLES !== 'undefined' && ROLES[r]) ? ROLES[r].split(' — ')[0] : (r || '');
   const nameOf = uid => { const d = (C.dir || []).find(x => x.uid === uid); return d ? d.name : 'مستخدم'; };
   async function loadDir(force) {
@@ -27396,7 +27401,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const missedCount = () => { const seen = +(localStorage.getItem('nf.calls.seen') || 0); return (C.log || []).filter(c => c.callee === me() && c.status === 'missed' && Date.parse(c.created_at) > seen).length; };
   async function iceServers() {
     if (C.ice && Date.now() - C.ice.at < 3 * 3600e3) return C.ice.servers;
-    try { const r = await S.sb.functions.invoke('rtc', { body: {} }); if (r && r.data && Array.isArray(r.data.iceServers)) { C.ice = { at: Date.now(), servers: r.data.iceServers, turn: !!r.data.turn }; return C.ice.servers; } } catch (e) { /* ignore */ }
+    try { const r = await within(S.sb.functions.invoke('rtc', { body: {} }), 8000, 'ice'); if (r && r.data && Array.isArray(r.data.iceServers)) { C.ice = { at: Date.now(), servers: r.data.iceServers, turn: !!r.data.turn }; return C.ice.servers; } } catch (e) { /* ignore */ }
     return [{ urls: ['stun:stun.l.google.com:19302'] }];
   }
   /* ---------- tones (WebAudio — no files) ---------- */
@@ -27477,7 +27482,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   function paint() {
     const c = C.cur; if (!c) return closeScreen();
     const other = c.dir === 'out' ? c.callee : c.caller; const d = dirOf(other); const legs = (c.legs || []); const nm = esc([d.name || nameOf(other)].concat(legs.map(l => nameOf(l.uid))).join('، '));
-    const st = c.state === 'incoming' ? (c.room ? 'بيضيفك لمكالمة جماعية…' : c.video ? 'مكالمة فيديو…' : 'مكالمة صوت…') : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) + (c.warn ? ' · ' + c.warn : '') : c.note || '';
+    const st = c.state === 'incoming' ? (c.room ? 'بيضيفك لمكالمة جماعية…' : c.video ? 'مكالمة فيديو…' : 'مكالمة صوت…') : c.state === 'prep' ? 'بيجهّز المكالمة…' : c.state === 'calling' ? 'بيرن…' : c.state === 'connecting' ? 'بيوصّل…' : c.state === 'active' ? fmtT(c.secs || 0) + (c.warn ? ' · ' + c.warn : '') : c.note || '';
     const vid = c.video && c.state !== 'incoming';
     const bar = c.state === 'incoming'
       ? `${cbtn('decline', 'end', 'رفض', 'red')}${cbtn('accept', c.video ? 'video' : 'phone', 'رد', 'grn')}`
@@ -27643,18 +27648,29 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     if (C.cur) { toast('إنت في مكالمة دلوقتي', 'err'); return; }
     if (!uid || uid === me()) return;
     await loadDir();
-    const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'calling', ctx: ctx && ctx.taskId ? { taskId: String(ctx.taskId), title: String(ctx.title || '').slice(0, 120), important: !!ctx.important } : null }; paint(); tone('out');
+    const c = C.cur = { dir: 'out', caller: me(), callee: uid, video: !!video, state: 'prep', ctx: ctx && ctx.taskId ? { taskId: String(ctx.taskId), title: String(ctx.title || '').slice(0, 120), important: !!ctx.important } : null }; paint();
+    let step = 'mic';
     try {
-      c.local = await media(video); c.video = c.local.getVideoTracks().length > 0; paint(); attach();
-      c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
+      c.local = await within(media(video), 15000, 'mic'); c.video = c.local.getVideoTracks().length > 0; paint(); attach();
       if (C.cur !== c) return cleanup(c);
-      const { data, error } = await S.sb.from('nf_calls').insert(Object.assign({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }, c.ctx ? { ctx: c.ctx } : {})).select('id').single();
-      if (error) throw error; c.id = data.id; paint();
+      step = 'net'; c.pc = await makePc(c); const off = await c.pc.createOffer(); await c.pc.setLocalDescription(off); await gathered(c.pc);
+      if (C.cur !== c) return cleanup(c);
+      step = 'insert'; const { data, error } = await within(S.sb.from('nf_calls').insert(Object.assign({ callee: uid, video: c.video, offer: { type: c.pc.localDescription.type, sdp: c.pc.localDescription.sdp } }, c.ctx ? { ctx: c.ctx } : {})).select('id').single(), 12000, 'insert');
+      if (error) throw error; c.id = data.id; c.state = 'calling'; paint(); tone('out');
       const myName = (C.dir && (C.dir.find(x => x.uid === me()) || {}).name) || (S.session && S.session.name) || 'مستخدم';
       const ring = again => S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + uid], title: `${c.video ? '🎥' : '📞'} ${myName} بيتصل بيك`, body: c.ctx ? `${c.ctx.important ? 'هام — ' : ''}بخصوص: ${c.ctx.title}` : (c.video ? 'مكالمة فيديو — اضغط «رد» أو افتح' : 'مكالمة صوت — اضغط «رد» أو افتح'), url: '/#/calls/' + c.id, tag: 'call-' + c.id, call: c.id, caller: myName, video: !!c.video, task: c.ctx ? c.ctx.title : '', important: !!(c.ctx && c.ctx.important), sms: false, ...(again ? { noVoip: true, again: true } : {}) } }).catch(() => { });
       ring(); c.myName = myName; hook('start', c); c.reRing = setInterval(() => { if (C.cur === c && c.state === 'calling') ring(true); else clearInterval(c.reRing); }, 7000);   /* v7.11: the re-rings are for browsers — the iPhone call screen rings once */
       c.timeout = setTimeout(() => { if (C.cur === c && c.state === 'calling') finish('missed', 'مردّش'); }, RING_MS);
-    } catch (e) { console.warn(e); const msg = /Permission|NotAllowed/i.test(String(e && (e.name || e.message))) ? 'لازم تسمح بالميكروفون' + (video ? ' والكاميرا' : '') + ' للسيستم' : 'تعذّر بدء المكالمة'; C.cur = c; finish(c.id ? 'failed' : null, msg); }
+    } catch (e) {
+      console.warn(e); if (C.cur !== c && !c.id) return cleanup(c); callDiag(uid, step, e, { video: !!video, task: !!c.ctx });
+      const n = String(e && (e.name + ' ' + e.message));
+      const msg = /Permission|NotAllowed|Security/i.test(n) ? 'الميكروفون مقفول للسيستم — اسمح بيه من إعدادات الموبايل (أو من القفل جنب العنوان في المتصفح) وجرّب تاني'
+        : e && e.name === 'Timeout' && step === 'mic' ? 'الموبايل لسه ماسمحش بالميكروفون — دوس «سماح» لما يسألك أو اسمح بيه من إعدادات الموبايل وجرّب تاني'
+        : /NotFound|Overconstrained/i.test(n) ? 'مفيش ميكروفون شغال على الجهاز ده'
+        : /NotReadable|AbortError/i.test(n) ? 'الميكروفون مشغول — اقفل أي مكالمة تانية وجرّب'
+        : step === 'insert' || step === 'net' ? 'النت ضعيف — المكالمة ماوصلتش، جرّب تاني' : 'تعذّر بدء المكالمة';
+      C.cur = c; finish(c.id ? 'failed' : null, msg);
+    }
   }
   async function incoming(row) {
     if (!row || row.callee !== me() || row.status !== 'ringing') return;
@@ -27722,7 +27738,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const b = e.target.closest && e.target.closest('[data-nfc]'); if (b) {
       const a = b.dataset.nfc; const c = C.cur;
       if (a === 'accept') return accept(true); if (a === 'accept-a') return accept(false);
-      if (a === 'decline') return finish('declined'); if (a === 'hang') return finish(c && c.state === 'calling' ? 'missed' : 'ended'); if (a === 'close') return closeScreen();
+      if (a === 'decline') return finish('declined'); if (a === 'hang') return finish(c && c.state === 'calling' ? 'missed' : c && c.state === 'prep' ? null : 'ended'); if (a === 'close') return closeScreen();
       if (a === 'spk' && c) { setSpeaker(c, !c.spk); return; }
       if (a === 'add' && c) { openAddSheet(); return; }
       if (a === 'mute' && c && c.local) { c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); return paint(); }
