@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0703-ccd68a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0740-c716d1";</script>
 
 <script>
 'use strict';
@@ -40035,6 +40035,32 @@ html.apple.apple-blur .modal .mh,html.apple.apple-blur .modal .mf{background:col
 html.apple .side .acct.nfstrip>.nfst{border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important}
 html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
 </style>`);
+})();
+/* =====================================================================
+   v7.24 — the phone app reports once a day which of its native parts the system can really reach (owner-only table
+   nf_call_diag, step «appinfo»): the Android call-screen part is inside the published APK, yet every Android phone
+   registers without it — this tells which phones see it and which do not. Factory only (the calls live there).
+   ===================================================================== */
+(function () {
+  if (window.__NF_APPDIAG__) return; window.__NF_APPDIAG__ = 1;
+  let busy = false;
+  const run = () => {
+    try {
+      if (busy) return;
+      if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+      const c = window.Capacitor; if (!c || typeof c.isNativePlatform !== 'function' || !c.isNativePlatform()) return;
+      if (!S || !S.session || !S.sb || !S.sbUser || !S.sb.from) return;
+      const key = 'nf.appinfo.' + S.sbUser.id; const day = new Date().toISOString().slice(0, 10);
+      let last = ''; try { last = localStorage.getItem(key) || ''; } catch (e) { /* ignore */ }
+      if (last === day) return;
+      busy = true;
+      const plugins = Object.keys(c.Plugins || {}).sort();
+      const headers = (Array.isArray(c.PluginHeaders) ? c.PluginHeaders : []).map(h => h && h.name).filter(Boolean).sort();
+      S.sb.from('nf_call_diag').insert({ step: 'appinfo', plat: String(c.getPlatform ? c.getPlatform() : 'native'), ua: String(navigator.userAgent || '').slice(0, 280), extra: { plugins, headers, calls: !!(c.Plugins && c.Plugins.NinetyCalls) } })
+        .then(r => { if (r && !r.error) { try { localStorage.setItem(key, day); } catch (e) { /* ignore */ } } }, () => { /* no retry this session */ });
+    } catch (e) { /* ignore */ }
+  };
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(run, 4000));
 })();
 </script>
 
