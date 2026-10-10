@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0526-396894";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0600-076133";</script>
 
 <script>
 'use strict';
@@ -39932,6 +39932,93 @@ html[data-theme="dark"] .badge.tnd,html.dark .badge.tnd{color:#b3a2ff}
   window.nfDevName = p => (p && window.nfDevOk() ? (p.client || '') : '');
   const CLOSED = new Set(['clients', 'quotes']);
   if (typeof canSee === 'function') canSee = (base => function (view) { return CLOSED.has(view) && !window.nfDevOk() ? false : base.apply(this, arguments); })(canSee);
+})();
+/* =====================================================================
+   v7.22 — every form fits the phone screen (Mahmoud, 10 Oct, on the «new production order» sheet: the text did not fit the
+   screen — the fields ran off the left edge, the title sat on top of the first field and the Save / Cancel buttons floated
+   over the last field; «the font can get a little smaller, what matters is that the screen holds all the details»).
+   · on phones the form column can no longer be stretched by a long value (a long product name in a list, a long link, a long
+     note): it is always the width of the screen, long words wrap;
+   · iPhone no longer enlarges the small text on its own (that is what made the labels big and pushed the sheet wider);
+   · the sheet's title bar and its Save / Cancel bar are solid, so nothing scrolls visibly under them;
+   · on phones the labels, gaps and paddings are a little smaller, so more of the form shows at once (the typing text stays
+     16px — smaller makes iPhone zoom the whole page in while typing).
+   All three systems, Advanced and Classic, Arabic and English, iPhone and Android.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FORMFIT__) return; window.__NF_FORMFIT__ = 1;
+  const TXT = 'input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=file]),select,textarea';
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-formfit">
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.modal{max-width:100vw}
+.modal .mb{min-width:0;overflow-x:hidden;overflow-wrap:anywhere}
+.modal .mb :is(.form,.grid,.row,.field,.stack){min-width:0}
+.modal .form>*,.modal .field>*{min-width:0;max-width:100%}
+.modal :is(${TXT}){max-width:100%;min-width:0;box-sizing:border-box}
+.modal :is(p,label,.hint,.small,.tiny,.muted,.banner,li,td,th){overflow-wrap:anywhere}
+.modal img,.modal video,.modal canvas{max-width:100%}
+.modal table{max-width:100%}
+.modal .mh,.modal .mf{z-index:4}
+html.apple .modal .mh,html.apple .modal .mf{background:var(--surface)!important}
+html.apple.apple-blur .modal .mh,html.apple.apple-blur .modal .mf{background:color-mix(in srgb,var(--surface) 94%,transparent)!important;-webkit-backdrop-filter:blur(22px) saturate(160%);backdrop-filter:blur(22px) saturate(160%)}
+@media (max-width:900px){
+  .form,.modal .form{grid-template-columns:minmax(0,1fr)!important;gap:10px 12px}
+  .modal .mh{padding:12px 16px 10px!important}
+  html.apple .modal .mh{padding-top:20px!important}
+  .modal .mh h2{font-size:16px!important}
+  .modal .mb{padding:12px 16px 14px!important}
+  .modal .field{gap:4px}
+  .modal .field>label{font-size:12px!important;line-height:1.35;margin:0}
+  .modal .field>:is(${TXT}){padding:8px 12px}
+  .modal .field>:is(input:not([type=checkbox]):not([type=radio]),select){min-height:40px}
+  .modal :is(.hint,.tiny){font-size:11.5px}
+  .modal .mf{padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))!important;gap:8px}
+  .modal .mf .btn{min-height:40px}
+}
+</style>`);
+})();
+/* =====================================================================
+   v7.22 — the side menu: «password», «sign out» and «how to use the app» side by side in one short strip
+   (Mahmoud, 10 Oct, on the menu screenshot: they were three full-width rows, one under the other).
+   · one row of small tiles (icon on top, short name under it); «my page» joins the same row for whoever has it (on a very
+     narrow menu a tile that does not fit moves to a second row instead of being cut);
+   · sign out keeps its red colour; every tile does exactly what its old row did;
+   · the night / day button (Classic) stays where it was.
+   All three systems, Advanced and Classic, Arabic and English, iPhone and Android.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SIDESTRIP__) return; window.__NF_SIDESTRIP__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const SHORT = { navgo: () => L('بوابتي', 'My page'), changePassword: () => L('كلمة السر', 'Password'), logout: () => L('خروج', 'Sign out'), helpOpen: () => L('الشرح', 'Guide') };
+  const tile = el => {
+    const k = el.dataset.action; const name = SHORT[k] ? SHORT[k]() : (el.textContent || '').trim();
+    const svg = el.querySelector('svg'); el.title = (el.textContent || '').trim() || name;
+    el.innerHTML = (svg ? svg.outerHTML : '') + `<span>${esc(name)}</span>`; el.classList.add('nfst');
+  };
+  function strip() {
+    document.querySelectorAll('.side').forEach(side => {
+      const acct = side.querySelector('.acct'); if (!acct) return;
+      const help = side.querySelector('.mobextra [data-action="helpOpen"]');
+      if (help && !acct.contains(help)) acct.appendChild(help);
+      acct.classList.add('nfstrip');
+      [...acct.children].forEach(el => { if (!el.classList.contains('nfst') || el.dataset.lang !== (en() ? 'en' : 'ar')) { tile(el); el.dataset.lang = en() ? 'en' : 'ar'; } });
+      const mx = side.querySelector('.mobextra'); if (mx) mx.classList.toggle('nfempty', !mx.querySelector('button:not([data-action="themeToggle"])') && !!document.documentElement.classList.contains('apple'));
+    });
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => setTimeout(strip, 0));
+  document.addEventListener('DOMContentLoaded', () => setTimeout(strip, 300));
+  new MutationObserver(() => { clearTimeout(strip.t); strip.t = setTimeout(strip, 60); }).observe(document.documentElement, { attributes: true, attributeFilter: ['lang', 'dir', 'class'] });
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-sidestrip">
+.side .acct.nfstrip{display:flex!important;flex-wrap:wrap!important;gap:5px!important;grid-template-columns:none!important}
+.side .acct.nfstrip>.nfst{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;min-width:0;padding:7px 2px 6px!important;border-radius:12px!important;font-size:10.5px!important;font-weight:600!important;letter-spacing:-.01em;line-height:1.2!important;text-align:center;white-space:nowrap;text-overflow:clip!important;grid-column:auto!important;flex:1 1 0!important;min-width:max-content!important;width:auto!important}
+.side .acct.nfstrip>.nfst svg{width:17px!important;height:17px!important;margin:0!important;flex:none}
+.side .acct.nfstrip>.nfst span{display:block}
+.side .acct.nfstrip>button.nfst{font:inherit;font-size:10.5px!important;font-weight:600!important;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:var(--side-ink);cursor:pointer}
+.side .mobextra.nfempty{display:none!important}
+html.apple .side .acct.nfstrip>.nfst{border:0!important;background:rgba(255,255,255,.07)!important;color:#e5e5ea!important}
+html.apple .side .acct.nfstrip>.nfst.logout{color:#ff6961!important}
+</style>`);
 })();
 </script>
 
