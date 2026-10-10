@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-1836-6873f1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-1950-37a7ef";</script>
 
 <script>
 'use strict';
@@ -25009,7 +25009,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const total = Math.round(sum(items, p => +p.amount || 0) * 100) / 100; const names = items.map(p => `${p.workerName} ${fmtMoney(p.amount)}`).join('، ');
     if (!(await confirmDlg(`تبعت دفعة ${b.code} لمحمود؟ ${items.length} سلفة — المجموع ${fmtMoney(total)} ${CUR()}`, 'ابعت', false))) return;
     await Store.save('advbatch', Object.assign({}, b, { items: items.map(p => p.id), total, status: 'sent', sentAt: nowISO(), sentBy: S.session?.id || null, sentByName: S.session?.name || '' }));
-    try { await Store.save('tasks', { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك`, desc: 'افتح «تحويل السلف» ← الدفعات', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    try { await Store.save('tasks', { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — المجموع ${fmtMoney(total)} ${CUR()}`, desc: `${items.length} سلفة: ${names}\nحوّل المجموع مرة واحدة لبهاء من «تحويل السلف» ← الدفعات`, link: '/#/advpay', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
     pushTo(['role:admin'], `${S.session?.name || 'سعيد'} وافق على سلف — المجموع ${fmtMoney(total)} ${CUR()}`.slice(0, 100), names.slice(0, 300));
     toast('اتبعتت الدفعة لمحمود');
   };
@@ -34764,10 +34764,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     if (!S.session || !S.route) return;
     const boss = isAdmin() || ['manager', 'vice'].includes(role());
     /* leads have no dashboard (factory: «لوحات الأقسام»): their card shows on their home pages instead */
-    if (boss ? S.route.view !== 'dashboard' : !['dashboard', 'boards', 'me', 'tasks'].includes(S.route.view) || S.route.id) return;
+    /* v7.33: and on the new home screen */
+    if (boss ? !['dashboard', 'home'].includes(S.route.view) : !['dashboard', 'boards', 'me', 'tasks', 'home'].includes(S.route.view) || S.route.id) return;
     const gs = visibleGroups(); if (!gs.length) return;
     const html = `<div class="card" id="lateheads"><div class="cardhead"><h3>${L('متأخرات رؤساء الأقسام', 'Late work by team lead')}</h3><span class="muted small">${gs.reduce((s, x) => s + x.items.length, 0)} ${L('حاجة متأخرة', 'late items')}</span></div><div class="lhgrid">${gs.map(cardHTML).join('')}</div></div>`;
-    const anchor = v.querySelector('.kpis');
+    const anchor = S.route.view === 'home' ? (v.querySelector('.ahm') || v.querySelector('.ahw')) : v.querySelector('.kpis');
     if (anchor) anchor.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
   });
   ACTIONS.lateHeadOpen = (arg, el, ev) => {
@@ -41122,7 +41123,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
      about money (cheques, supplier dues, …);
    · it is the first card of the dashboard («Money waiting for you»), the first thing on the tasks page, and the first lines of
      the bell (with the bell number).
-   · no amounts in the card or the bell — the amounts stay on the money pages. Owner only; every system that has these pages.
+   · v7.33 (Mahmoud, 10 Oct: «when Saeed approves a group of advances tell me the group, who they are and their total, so I transfer
+     that number to Bahaa once»): the card shows each line's amount and the total (owner only — money items for the owner), and an
+     advance batch line carries its code, the names with their amounts and the batch total. The bell keeps no amounts.
+   · Owner only; every system that has these pages.
    ===================================================================== */
 (function () {
   if (window.__NF_MONEYFIRST__) return; window.__NF_MONEYFIRST__ = 1;
@@ -41137,13 +41141,18 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     if (!S.session || !isAdmin()) return [];
     const out = []; const seen = new Set(); const today = todayISO();
     try {
-      list('advbatch').filter(b => b && ['sent', 'review'].includes(b.status)).forEach(b => { seen.add('abt_' + b.id); out.push({ k: 'adv', id: 'ab:' + b.id, label: L(`دفعة سلف ${b.number || ''} مستنية تحويلك`, `Advance batch ${b.number || ''} waiting for your transfer`), sub: L(`${(b.items || []).length} سلفة — من ${b.sentByName || ''}`, `${(b.items || []).length} advances — from ${b.sentByName || ''}`), href: '#/advpay' }); });
+      list('advbatch').filter(b => b && ['sent', 'review'].includes(b.status)).sort((a, b) => String(b.sentAt || '').localeCompare(String(a.sentAt || ''))).forEach(b => {
+        seen.add('abt_' + b.id); const ps = (b.items || []).map(i => byId('advpay', i)).filter(Boolean);
+        const names = ps.map(p => `${String(p.workerName || '').split(' ').slice(0, 2).join(' ')} ${fmtMoney(+p.amount || 0)}`).join(' · ');
+        const plain = ps.map(p => String(p.workerName || '').split(' ').slice(0, 2).join(' ')).join('، ');
+        out.push({ k: 'adv', id: 'ab:' + b.id, label: L(`دفعة سلف ${b.code || b.number || ''} — ${(b.items || []).length} سلفة`, `Advance batch ${b.code || b.number || ''} — ${(b.items || []).length} advances`), sub: names || L(`من ${b.sentByName || ''}`, `from ${b.sentByName || ''}`), subNo: plain, amount: +b.total || 0, href: '#/advpay' });
+      });
     } catch (e) { /* ignore */ }
     try {
       if (typeof moneyDue === 'function') moneyDue().forEach(x => {
         if (x.action === 'poPayLater') { const p = byId('purchases', x.id); const due = p && p.deferred && p.deferred.due; if (!due || due > addDays(today, 3)) return; }
         seen.add('fund_' + x.id); seen.add(x.id);
-        out.push({ k: x.kind === 'fund' ? 'fund' : x.kind === 'opex' ? 'opex' : 'po', id: x.kind + ':' + x.id, label: x.label, sub: x.sub || '', href: x.href ? '#/' + x.href : '#/money' });
+        out.push({ k: x.kind === 'fund' ? 'fund' : x.kind === 'opex' ? 'opex' : 'po', id: x.kind + ':' + x.id, label: x.label, sub: x.sub || '', amount: +x.amount || 0, href: x.href ? '#/' + x.href : '#/money' });
       });
     } catch (e) { /* ignore */ }
     try {
@@ -41157,7 +41166,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   function card(items) {
     const K = KIND(); const shown = items.slice(0, 6);
     return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div><a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
-      <div class="omf-l">${shown.map(x => `<a class="omf-r" href="${esc(x.href)}"><span class="badge ${K[x.k][1]}">${esc(K[x.k][0])}</span><span class="omf-t"><b>${esc(x.label)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span><span class="omf-go">${icon('back')}</span></a>`).join('')}</div>
+      <div class="omf-l">${shown.map(x => `<a class="omf-r" href="${esc(x.href)}"><span class="badge ${K[x.k][1]}">${esc(K[x.k][0])}</span><span class="omf-t"><b>${esc(x.label)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span>${x.amount ? `<b class="omf-a">${esc(fmtMoney(x.amount))}</b>` : ''}<span class="omf-go">${icon('back')}</span></a>`).join('')}</div>
+      ${items.some(x => x.amount) ? `<div class="omf-tot">${esc(L('المجموع', 'Total'))} <b>${esc(fmtMoney(items.reduce((a, x) => a + (+x.amount || 0), 0)))} ${esc(CUR())}</b></div>` : ''}
       ${items.length > shown.length ? `<a class="omf-more" href="#/money">${esc(L(`كل البنود (${items.length})`, `All items (${items.length})`))}</a>` : ''}</div>`;
   }
   RENDER_HOOKS.push(() => {
@@ -41172,7 +41182,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   /* the bell: money first */
   if (typeof notifItems === 'function') notifItems = (base => function () {
     const arr = base.apply(this, arguments);
-    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', n: 1, at: '9999', title: x.label, sub: x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
+    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', n: 1, at: '9999', title: x.label, sub: x.subNo != null ? x.subNo : x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
   })(notifItems);
   document.head.insertAdjacentHTML('beforeend', `<style>
     .omf{border-color:var(--warn,#e5932a)!important}.omf .cardhead{margin-bottom:6px}
@@ -41180,7 +41190,312 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     .omf-r{display:flex;align-items:center;gap:8px;padding:8px 2px;border-top:1px solid var(--line);color:inherit;text-decoration:none;min-width:0}.omf-r:first-child{border-top:0}.omf-r:active{background:var(--surface-2)}
     .omf-r .badge{flex:none}.omf-t{flex:1;min-width:0;display:flex;flex-direction:column}.omf-t b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.omf-t small{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .omf-go{flex:none;opacity:.5;transform:scaleX(-1)}[dir=ltr] .omf-go,html[lang=en] .omf-go{transform:none}.omf-go svg{width:14px;height:14px}
+    .omf-a{flex:none;font-size:13.5px;font-variant-numeric:tabular-nums}.omf-tot{display:flex;justify-content:space-between;margin-top:6px;padding:8px 2px 0;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}.omf-tot b{color:var(--ink)}
     .omf-more{display:block;margin-top:6px;padding:7px;border-radius:10px;background:var(--surface-2);color:var(--accent);text-align:center;font-size:13px;font-weight:600;text-decoration:none}
+  </style>`);
+})();
+/* =====================================================================
+   v7.33 — the iPhone look, step 1 (Mahmoud, 10 Oct, with his lock screen and home screen: «the UX/UI like Apple» + «what was
+   done for Alaa should show to every employee and every head — everything clear and tidy»; «start»; brief claude/apple-home-brief.md).
+   · «Home» (#/home) like the iPhone home screen: a «today» widget like the calendar widget (the day, my status, a big punch
+     button, and what is coming next to me), the latest notifications as stacked glass cards, and an icon for every page the
+     person already sees — rounded coloured icons with the red number.
+     It opens first for employees, heads and drivers. The owner and the managers keep the dashboard and get a switch in the menu
+     under their name («Home: dashboard / new»), kept on that device; the owner's home has a «money waiting for you» widget and a
+     «today» widget (present, overtime tonight, trips, requests waiting).
+   · notifications like the lock screen: the bell shows glass cards grouped by kind with a count, the latest line and «2 h ago»;
+     a group opens its lines.
+   · «new request» in two steps: pick the kind on big tiles (leave · permission · forgotten punch · advance) → only that kind's
+     fields. The kinds are only those four (the list used to show ~30 internal approval types), and every choice inside is a
+     tile or a row — no phone list dialog.
+   · fields marked hidden stay hidden (the forms were showing every field of every kind at once).
+   · «My page»: the punch card comes first.
+   · who sees what does not change: the icons are exactly the pages the person already sees. All three systems, Advanced and
+     Classic, Arabic and English, iPhone and Android.
+   ===================================================================== */
+(function () {
+  if (window.__NF_APPLEHOME__) return; window.__NF_APPLEHOME__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || typeof NAV === 'undefined' || typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ''; if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return ''; } return ''; };
+  const myWid = () => (S.session && S.session.workerId) || '';
+  const sid = () => (S.session && (S.session.id || S.session.workerId)) || 'x';
+  const NEW_ROLES = ['employee', 'head', 'driver'];
+  const prefKey = () => 'nf.home.' + sid();
+  const homeDefault = () => NEW_ROLES.includes(role());
+  const homeOn = () => !!S.session && role() !== 'kiosk' && (ls(prefKey()) ? ls(prefKey()) === 'new' : homeDefault());
+  window.nfHomeOn = homeOn;
+  const hm = t => String(t || '').slice(0, 5);
+  const ago = iso => {
+    const t = new Date(iso || '').getTime(); if (!isFinite(t)) return '';
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) return L('دلوقتي', 'now'); if (m < 60) return L(`من ${m} دقيقة`, `${m} min ago`);
+    const h = Math.round(m / 60); if (h < 24) return h === 1 ? L('من ساعة', '1 h ago') : h === 2 ? L('من ساعتين', '2 h ago') : L(`من ${h} ساعات`, `${h} h ago`);
+    const d = Math.round(h / 24); return d === 1 ? L('امبارح', 'yesterday') : (typeof fmtDate === 'function' ? fmtDate(String(iso).slice(0, 10)) : String(iso).slice(0, 10));
+  };
+
+  /* ---------- 0) hidden means hidden ---------- */
+  document.head.insertAdjacentHTML('beforeend', '<style>[hidden]{display:none!important}</style>');
+
+  /* ---------- 1) a phone list → tiles or rows inside the form ---------- */
+  function tileSelect(sel, o = {}) {
+    if (!sel || sel.dataset.nft) return; sel.dataset.nft = '1';
+    const name = 'nft_' + (sel.name || sel.id || Math.random().toString(36).slice(2));
+    const optsOf = () => Array.from(sel.options).filter(op => !op.hidden && !op.disabled && (op.value !== '' || o.keepEmpty));
+    const many = o.search || optsOf().length > 8;
+    const box = document.createElement('div'); box.className = 'nft ' + (many ? 'nft-list' : 'nft-tiles') + (o.cols === 1 ? ' one' : '');
+    const paint = q => {
+      const qq = String(q || '').trim().toLowerCase(); const cur = sel.value;
+      const items = optsOf().filter(op => !qq || op.textContent.toLowerCase().includes(qq));
+      const sub = v => (o.sub ? o.sub(v) : '');
+      const html = items.map(op => `<label class="nft-i"><input type="radio" name="${esc(name)}" value="${esc(op.value)}" ${op.value === cur ? 'checked' : ''}><span><b>${esc(op.textContent)}</b>${sub(op.value) ? `<small>${esc(sub(op.value))}</small>` : ''}</span></label>`).join('');
+      const list = box.querySelector('.nft-items'); if (list) list.innerHTML = html || `<div class="nft-none">${esc(L('مفيش نتايج', 'No results'))}</div>`;
+    };
+    box.innerHTML = (many ? `<input class="inp nft-q" placeholder="${esc(L('ابحث…', 'Search…'))}" autocomplete="off" enterkeyhint="search">` : '') + '<div class="nft-items"></div>';
+    sel.classList.add('nft-sel'); sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
+    sel.parentNode.insertBefore(box, sel.nextSibling); paint('');
+    box.addEventListener('change', e => { if (e.target.name !== name) return; e.stopPropagation(); sel.value = e.target.value; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    const q = box.querySelector('.nft-q'); if (q) q.addEventListener('input', () => paint(q.value));
+    sel.addEventListener('change', () => { box.querySelectorAll(`input[name="${name}"]`).forEach(r => { r.checked = r.value === sel.value; }); });
+  }
+  window.nfTileSelect = tileSelect;
+
+  /* ---------- 2) «new request» in two steps ---------- */
+  const RQ_KINDS = ['leave', 'permission', 'punch', 'advance'];
+  const RQ_IC = { leave: ['#0a84ff', 'calendar'], permission: ['#ff9f0a', 'clock'], punch: ['#bf5af2', 'finger'], advance: ['#30d158', 'money'] };
+  const SVG = {
+    calendar: '<path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 16H5V9h14z"/>',
+    clock: '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 11h-5v-2h3V6h2z"/>',
+    finger: '<path d="M17.8 4.5A10 10 0 0 0 2 12h2a8 8 0 0 1 12.4-6.6zM12 6a6 6 0 0 0-6 6c0 3 .6 5.8 1.6 8.3l1.9-.7A20 20 0 0 1 8 12a4 4 0 1 1 8 0v1h2v-1a6 6 0 0 0-6-6zm-1 6c0 4 1 7.4 2.5 10l1.7-1A18 18 0 0 1 13 12z"/>',
+    money: '<path d="M12 1a11 11 0 1 0 0 22 11 11 0 0 0 0-22zm1 17.9V20h-2v-1.1A4 4 0 0 1 8 15h2a2 2 0 1 0 2-2 4 4 0 0 1-1-7.9V4h2v1.1A4 4 0 0 1 16 9h-2a2 2 0 1 0-2 2 4 4 0 0 1 1 7.9z"/>',
+    grid: '<path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/>'
+  };
+  const glyph = (k, size = 22) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="#fff" aria-hidden="true">${SVG[k] || SVG.grid}</svg>`;
+  function rqSub(k, wid) {
+    try {
+      const w = wid ? byId('workers', wid) : null;
+      if (k === 'leave') { if (!w || typeof leaveBalances !== 'function') return L('يوم أو أكتر', 'One day or more'); const b = leaveBalances(w).find(x => x.type && x.type.id === 'annual'); return b && b.remaining != null ? L(`باقي لك ${b.remaining} يوم`, `${b.remaining} days left`) : L('يوم أو أكتر', 'One day or more'); }
+      if (k === 'permission') return L('تأخير أو خروج بدري', 'Late arrival or early leave');
+      if (k === 'punch') return L('حضور أو انصراف', 'Check-in or check-out');
+      if (k === 'advance') { if (!w || typeof advanceLimit !== 'function') return L('على المرتب', 'Against the salary'); if (typeof advanceBlock === 'function' && advanceBlock(w)) return L('مقفولة دلوقتي', 'Closed for now'); const l = advanceLimit(w); return L(`تقدر لحد ${fmtMoney(l.limit)} ${CUR()}`, `Up to ${fmtMoney(l.limit)} ${CUR()}`); }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+  if (typeof wireRequestForm === 'function') wireRequestForm = (base => function (f) {
+    const sel = f && f.querySelector('select[name=type]');
+    if (!sel || f.dataset.rq2) return base.apply(this, arguments);
+    f.dataset.rq2 = '1';
+    Array.from(sel.options).forEach(op => { if (!RQ_KINDS.includes(op.value)) op.remove(); });
+    if (!sel.value || !RQ_KINDS.includes(sel.value)) sel.value = 'leave';
+    const res = base.apply(this, arguments);
+    const wsel = f.querySelector('select[name=workerId]'); const widOf = () => (wsel ? wsel.value : ((f.querySelector('input[name=workerId]') || {}).value || myWid()));
+    const tf = sel.closest('.field'); if (tf) tf.classList.add('rq-typef');
+    const rs = f.querySelector('[name=reason]'); if (rs && rs.closest('.field')) rs.closest('.field').classList.add('rq-more');
+    const ap = f.querySelector('[name=approveNow]'); if (ap && ap.closest('label')) ap.closest('label').classList.add('rq-more');
+    const head = document.createElement('div'); head.className = 'rq-hd full';
+    const tiles = document.createElement('div'); tiles.className = 'rq-tiles full';
+    const paintTiles = () => { tiles.innerHTML = `<div class="rq-step">${esc(L('عايز تطلب إيه؟', 'What do you need?'))}</div>` + RQ_KINDS.map(k => `<button type="button" class="rq-t" data-rqk="${k}"><span class="rq-ic" style="background:${RQ_IC[k][0]}">${glyph(RQ_IC[k][1], 21)}</span><b>${esc(REQ_TYPES[k] || k)}</b><small>${esc(rqSub(k, widOf()))}</small></button>`).join(''); };
+    const step = n => {
+      f.classList.toggle('rq-s1', n === 1); f.classList.toggle('rq-s2', n === 2);
+      head.innerHTML = n === 2 ? `<button type="button" class="rq-back">‹ ${esc(L('رجوع', 'Back'))}</button><span class="rq-ic sm" style="background:${(RQ_IC[sel.value] || ['#8e8e93'])[0]}">${glyph((RQ_IC[sel.value] || [0, 'grid'])[1], 15)}</span><b>${esc(REQ_TYPES[sel.value] || '')}</b>` : '';
+      if (n === 1) paintTiles();
+    };
+    const form = f.querySelector('.form') || f; const anchor = wsel ? wsel.closest('.field') : null;
+    if (anchor && anchor.nextSibling) form.insertBefore(head, anchor.nextSibling); else form.insertBefore(head, form.firstChild);
+    form.insertBefore(tiles, head.nextSibling);
+    tiles.addEventListener('click', e => { const b = e.target.closest('[data-rqk]'); if (!b) return; e.preventDefault(); sel.value = b.dataset.rqk; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    head.addEventListener('click', e => { if (e.target.closest('.rq-back')) { e.preventDefault(); step(1); } });
+    sel.addEventListener('change', () => step(2));
+    if (wsel) { tileSelect(wsel, { search: true }); wsel.addEventListener('change', () => { if (f.classList.contains('rq-s1')) paintTiles(); }); }
+    ['leaveType', 'pkind', 'kind'].forEach(n => { const s = f.querySelector(`select[name=${n}]`); if (s) tileSelect(s, n === 'leaveType' ? { sub: v => { try { const w = byId('workers', widOf()); const b = w && leaveBalances(w).find(x => x.type && x.type.id === v); return b && b.remaining != null ? L(`باقي ${b.remaining}`, `${b.remaining} left`) : ''; } catch (e) { return ''; } } } : {}); });
+    step(1);
+    return res;
+  })(wireRequestForm);
+
+  /* ---------- 3) notifications like the lock screen ---------- */
+  const NK = () => ({ money: [L('فلوس مستنياك', 'Money waiting for you'), '#30d158', 'money'], req: [L('طلبات مستنياك', 'Requests waiting for you'), '#ff9f0a', 'clock'], myreq: [L('طلباتي', 'My requests'), '#34c759', 'calendar'], task: [L('مهامي', 'My tasks'), '#ff9500', 'list'], chat: [L('رسايل', 'Messages'), '#0a84ff', 'chat'], notice: [L('تنبيهات', 'Alerts'), '#ff453a', 'bell'] });
+  Object.assign(SVG, { list: '<path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/>', chat: '<path d="M4 4h16v12H5.2L4 17.2zm0-2a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>', bell: '<path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 1 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/>' });
+  function noteItems() {
+    let arr = []; try { if (typeof notifItems === 'function') arr = notifItems().slice(); } catch (e) { arr = []; }
+    const me = [myWid(), S.session && S.session.id].filter(Boolean); const since = Date.now() - 48 * 3600e3;
+    try {
+      const seen = new Set(arr.map(x => x.href));
+      if (typeof tasksForMe === 'function') tasksForMe().forEach(t => { const at = t.createdAt || t.updatedAt || ''; if (!at || new Date(at).getTime() < since) return; if (me.some(id => (t.seenAt || {})[id])) return; const href = '#/tasks/' + t.id; if (seen.has(href)) return; arr.push({ kind: 'task', n: 1, at, title: String(t.title || ''), sub: String(t.desc || '').split('\n')[0].slice(0, 90), href }); });
+      if (myWid()) list('requests').filter(r => r.workerId === myWid() && ['approved', 'rejected'].includes(r.status) && r.decidedAt && new Date(r.decidedAt).getTime() >= since).forEach(r => arr.push({ kind: 'myreq', n: 1, at: r.decidedAt, title: `${REQ_TYPES[r.type] || ''} — ${r.status === 'approved' ? L('اتوافق عليه', 'approved') : L('اترفض', 'rejected')}`, sub: r.from ? fmtDate(r.from) : '', href: '#/me' }));
+    } catch (e) { /* ignore */ }
+    return arr;
+  }
+  function noteGroups() {
+    const g = new Map(); noteItems().forEach(x => { const k = NK()[x.kind] ? x.kind : 'notice'; const a = g.get(k) || []; a.push(x); g.set(k, a); });
+    return Array.from(g.entries()).map(([k, items]) => { items.sort((a, b) => String(b.at).localeCompare(String(a.at))); return { k, items, at: items[0].at }; }).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  }
+  const groupCard = (g, i) => {
+    const K = NK()[g.k]; const x = g.items[0]; const n = g.items.reduce((a, y) => a + (+y.n || 1), 0);
+    return `<a href="#" role="button" class="ahn ${g.items.length > 1 ? 'stack' : ''}" data-ahg="${esc(g.k)}" data-ahh="${esc(g.items.length === 1 ? x.href : '')}"><span class="ahn-ic" style="background:${K[1]}">${glyph(K[2], 20)}${n > 1 ? `<i>${n}</i>` : ''}</span><span class="ahn-t"><b>${esc(K[0])}</b><span>${esc(x.title)}</span></span><span class="ahn-tm">${esc(x.at === '9999' ? L('مستني', 'waiting') : ago(x.at))}</span></a>`;
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-ahg]'); if (!b) return; e.preventDefault();
+    if (b.dataset.ahh) { const p = document.getElementById('bellpop'); if (p) p.remove(); location.hash = b.dataset.ahh; return; }
+    const g = noteGroups().find(x => x.k === b.dataset.ahg); if (!g) return;
+    const open = b.nextElementSibling && b.nextElementSibling.classList.contains('ahn-x'); if (open) { b.nextElementSibling.remove(); return; }
+    b.insertAdjacentHTML('afterend', `<div class="ahn-x">${g.items.slice(0, 12).map(x => `<a class="ahn-xi" href="${esc(x.href)}"><b>${esc(x.title)}</b>${x.sub ? `<span>${esc(x.sub)}</span>` : ''}<small>${esc(x.at === '9999' ? '' : ago(x.at))}</small></a>`).join('')}</div>`);
+  });
+  if (typeof ACTIONS.bellOpen === 'function') ACTIONS.bellOpen = (base => function () {
+    const old = document.getElementById('bellpop'); if (old) { old.remove(); return; }
+    const gs = noteGroups(); if (!gs.length) return base.apply(this, arguments);
+    const push = 'Notification' in window && Notification.permission !== 'granted';
+    document.body.insertAdjacentHTML('beforeend', `<div class="bellpop ahbell" id="bellpop">${gs.map(groupCard).join('')}${push ? `<div style="padding:8px 4px 2px"><button class="btn sm p" data-action="pushEnable">${icon('alert')}${esc(L('تفعيل الإشعارات على هذا الجهاز', 'Turn on notifications on this device'))}</button></div>` : ''}</div>`);
+    setTimeout(() => document.addEventListener('click', function cl(ev) { const p = document.getElementById('bellpop'); if (!p) { document.removeEventListener('click', cl); return; } if (!ev.target.closest('#bellpop') && !ev.target.closest('.bellbtn')) { p.remove(); document.removeEventListener('click', cl); } }), 50);
+  })(ACTIONS.bellOpen);
+  ACTIONS.bellGo = (base => function (href) { const p = document.getElementById('bellpop'); if (p) p.remove(); return base ? base.apply(this, arguments) : (location.hash = href); })(ACTIONS.bellGo);
+
+  /* ---------- 4) the home screen ---------- */
+  const SHORT = () => ({ me: L('بوابتي', 'My page'), dashboard: L('لوحة المتابعة', 'Dashboard'), tasks: L('المهام', 'Tasks'), attendance: L('الحضور', 'Attendance'), otnight: L('السهر', 'Overtime'), requests: L('الطلبات', 'Requests'), penalties: L('الجزاءات', 'Penalties'), payroll: L('الرواتب', 'Payroll'), workers: L('الموظفين', 'Staff'), orders: L('أوامر التشغيل', 'Work orders'), boards: L('لوحات الأقسام', 'Boards'), products: L('المنتجات', 'Products'), external: L('التشغيل الخارجي', 'Outsourcing'), fleet: L('الحركة', 'Fleet'), projects: L('المشاريع', 'Projects'), ai: L('المساعد', 'Assistant'), clients: L('العملاء', 'Clients'), quotes: L('عروض الأسعار', 'Quotes'), inventory: L('المخزون', 'Stock'), purchases: L('المشتريات', 'Purchases'), suppliers: L('الموردين', 'Suppliers'), sites: L('مواقع البصمة', 'Punch sites'), accounts: L('الحسابات', 'Accounts'), expenses: L('المصروفات', 'Expenses'), projectcosts: L('تكلفة المشاريع', 'Project costs'), reports: L('التقارير', 'Reports'), org: L('الهيكل', 'Org chart'), settings: L('الإعدادات', 'Settings'), regulation: L('اللائحة', 'House rules'), calls: L('المكالمات', 'Calls'), money: L('الفلوس', 'Money'), advpay: L('تحويل السلف', 'Advance pay') });
+  const COLORS = { dashboard: ['#636366', '#3a3a3c'], me: ['#5ac8fa', '#007aff'], regulation: ['#8e8e93', '#5a5a60'], orders: ['#ffb340', '#ff8a00'], boards: ['#7d7aff', '#5856d6'], products: ['#40c8e0', '#30a2b8'], external: ['#c69c6d', '#a2845e'], fleet: ['#64d2ff', '#0a84ff'], projects: ['#bf5af2', '#8e44ad'], tasks: ['#ffcc00', '#ff9500'], ai: ['#ffd60a', '#ffb800'], calls: ['#5ee36f', '#2cc74a'], clients: ['#ff6b9d', '#ff2d55'], crm: ['#ff6b9d', '#ff2d55'], quotes: ['#4cd964', '#28b446'], inventory: ['#c69c6d', '#8e6e4a'], purchases: ['#40c8e0', '#0a84a0'], suppliers: ['#7d7aff', '#5856d6'], workers: ['#5ac8fa', '#007aff'], attendance: ['#ff6b6b', '#ff3b30'], otnight: ['#5e5ce6', '#3634a3'], requests: ['#4cd964', '#28b446'], penalties: ['#ff9f0a', '#ff6a00'], payroll: ['#30d158', '#248a3d'], advpay: ['#30d158', '#248a3d'], money: ['#30d158', '#1f8f45'], sites: ['#40c8e0', '#30a2b8'], accounts: ['#30d158', '#248a3d'], expenses: ['#ffb340', '#ff8a00'], projectcosts: ['#bf5af2', '#8e44ad'], reports: ['#7d7aff', '#5856d6'], org: ['#8e8e93', '#5a5a60'], settings: ['#8e8e93', '#48484a'], cctv: ['#48484a', '#1c1c1e'] };
+  const PAL = [['#ff6b6b', '#ff3b30'], ['#ffb340', '#ff8a00'], ['#4cd964', '#28b446'], ['#5ac8fa', '#007aff'], ['#bf5af2', '#8e44ad'], ['#7d7aff', '#5856d6'], ['#40c8e0', '#30a2b8'], ['#ff6b9d', '#ff2d55']];
+  const colorOf = id => COLORS[id] || PAL[Array.from(String(id)).reduce((a, c) => a + c.charCodeAt(0), 0) % PAL.length];
+  const PRIO = { employee: ['me', 'tasks', 'calls', 'regulation', 'ai'], driver: ['fleet', 'me', 'tasks', 'calls'], head: ['attendance', 'otnight', 'boards', 'tasks', 'requests', 'orders', 'workers', 'penalties', 'me', 'calls'] };
+  function apps() {
+    const out = []; let grp = ''; const seen = new Set(['home']);
+    NAV.forEach(n => { if (n.grp) { grp = n.grp; return; } if (!n.id || seen.has(n.id)) return; let ok = false; try { ok = canSee(n.id); } catch (e) { ok = false; } if (!ok) return; seen.add(n.id); let c = 0; try { c = n.count ? +n.count() || 0 : 0; } catch (e) { c = 0; } out.push({ id: n.id, grp, icon: n.icon || 'dashboard', label: SHORT()[n.id] || String(n.short || n.label || '').split(' — ')[0], href: '#/' + n.id, badge: c }); });
+    if (myWid() && typeof ACTIONS.kioskReq === 'function' && canSee('me')) out.splice(1, 0, { id: 'newreq', grp: '', icon: 'plus', label: L('طلب جديد', 'New request'), action: 'kioskReq', arg: myWid(), badge: 0, col: ['#34c759', '#248a3d'] });
+    const pr = PRIO[role()] || []; const rank = a => { const i = pr.indexOf(a.id); return i < 0 ? 99 : i; };
+    return pr.length ? out.slice().sort((a, b) => rank(a) - rank(b)) : out;
+  }
+  const appHTML = a => { const c = a.col || colorOf(a.id); return `<a class="aha" ${a.action ? `href="#" data-action="${esc(a.action)}" data-arg="${esc(a.arg || '')}"` : `href="${esc(a.href)}"`}><span class="aha-ic" style="background:linear-gradient(${c[0]},${c[1]})">${icon(a.icon)}${a.badge ? `<i>${a.badge > 99 ? '99+' : a.badge}</i>` : ''}</span><span class="aha-l">${esc(a.label)}</span></a>`; };
+  function todayWidget() {
+    const d = new Date(); const today = todayISO(); const day = d.toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { weekday: 'long' });
+    const w = myWid() ? byId('workers', myWid()) : null; const r = w ? ((attendanceFor(today) || {})[w.id] || {}) : null;
+    let left = `<div class="ahw-d"><small>${esc(day)}</small><b>${d.getDate()}</b>`;
+    if (w) {
+      const st = !r.in ? [L('لسه مابصمتش', 'Not checked in yet'), 'no'] : r.out ? [L(`انصرفت ${hm(r.out)}`, `Out at ${hm(r.out)}`), 'out'] : [L(`حاضر من ${hm(r.in)}`, `In since ${hm(r.in)}`), 'ok'];
+      left += `<span class="ahw-st ${st[1]}">● ${esc(st[0])}</span>`;
+      if (typeof ACTIONS.selfPunch === 'function' && canSee('me') && !r.out) left += `<button type="button" class="ahw-p" data-action="selfPunch">⏻ ${esc(!r.in ? L('بصمة الحضور', 'Check in') : L('بصمة الانصراف', 'Check out'))}</button><span id="geo-live" class="ahw-geo"></span>`;
+    } else left += `<span class="ahw-st ok">${esc(typeof fmtDate === 'function' ? fmtDate(today) : today)}</span>`;
+    left += '</div>';
+    const next = [];
+    try {
+      if (role() === 'driver' || role() === 'fleet') list('trips').filter(t => t && t.date === today && t.status !== 'done' && t.status !== 'cancelled' && (role() === 'fleet' || t.driverId === myWid())).slice(0, 3).forEach(t => next.push({ t: `${t.number || ''} ${t.to ? '← ' + t.to : ''}`.trim(), s: t.status === 'started' ? L('في الطريق', 'On the road') : (t.time || ''), h: '#/fleet/' + t.id }));
+      if (typeof awaitingMe === 'function') { const n = list('requests').filter(awaitingMe).length; if (n) next.push({ t: L(`${n} طلب مستني ردك`, `${n} requests waiting for you`), s: L('الطلبات', 'Requests'), h: '#/requests' }); }
+      if (typeof tasksForMe === 'function') sortBy(tasksForMe(), t => ({ urgent: '0', high: '1' }[t.priority] || '2') + (t.dueDate || '9999')).forEach(t => next.push({ t: String(t.title || ''), s: t.dueDate ? (t.dueDate === today ? L('النهارده', 'Today') : fmtDate(t.dueDate)) : L('مهمة', 'Task'), h: '#/tasks/' + t.id }));
+    } catch (e) { /* ignore */ }
+    let right = '';
+    if (!w && (isAdmin() || ['manager', 'vice', 'hr'].includes(role()))) {
+      const att = attendanceFor(today) || {}; const ws = list('workers').filter(x => x.status !== 'inactive' && x.status !== 'suspended' && x.role !== 'admin'); const pres = ws.filter(x => (att[x.id] || {}).in).length;
+      const otn = list('tasks').filter(t => t && t.ot && t.ot.night && t.ot.date === today && t.status !== 'cancelled').reduce((a, t) => a + (t.ot.workerIds || []).length, 0);
+      const trips = list('trips').filter(t => t && t.date === today); const road = trips.filter(t => t.status === 'started').length;
+      const kv = [[L('حاضر', 'Present'), `${pres}/${ws.length}`, '#30d158'], [L('سهر', 'Overtime'), otn, '#5e5ce6'], [L('مشاوير', 'Trips'), road ? `${trips.length} · ${road}↗` : trips.length, '#0a84ff']];
+      right = `<div class="ahw-k">${kv.map(([l, v, c]) => `<div><b style="color:${c}">${esc(String(v))}</b><span>${esc(l)}</span></div>`).join('')}</div>`;
+      if (next.length) right += `<a class="ahw-i" href="${esc(next[0].h)}"><b>${esc(next[0].t)}</b><span>${esc(next[0].s)}</span></a>`;
+    } else {
+      right = `<small class="ahw-h">${esc(L('الجاي', 'Up next'))}</small>` + (next.length ? next.slice(0, 2).map(x => `<a class="ahw-i" href="${esc(x.h)}"><b>${esc(x.t)}</b><span>${esc(x.s)}</span></a>`).join('') + (next.length > 2 ? `<a class="ahw-more" href="#/tasks">${esc(L(`${next.length - 2} كمان`, `${next.length - 2} more`))}</a>` : '') : `<div class="ahw-none">${esc(L('مفيش حاجة مستنياك', 'Nothing waiting for you'))}</div>`);
+    }
+    return `<div class="ahw">${left}<div class="ahw-r">${right}</div></div>`;
+  }
+  function moneyWidget() {
+    if (!isAdmin() || typeof window.nfOwnerMoney !== 'function') return '';
+    const items = window.nfOwnerMoney(); if (!items.length) return '';
+    return `<a class="ahm" href="#/money"><span class="ahn-ic" style="background:#30d158">${glyph('money', 20)}</span><span class="ahn-t"><b>${esc(L('فلوس مستنياك', 'Money waiting for you'))}</b><span>${esc(items.slice(0, 2).map(x => x.label).join(' · '))}</span></span><i class="ahm-n">${items.length}</i></a>`;
+  }
+  function homeHTML() {
+    const as = apps(); const gs = noteGroups().slice(0, 3);
+    const grouped = as.length > 20;
+    let grid = '';
+    if (!grouped) grid = `<div class="ahg">${as.map(appHTML).join('')}</div>`;
+    else { const order = []; const by = {}; as.forEach(a => { const k = a.grp || ''; if (!by[k]) { by[k] = []; order.push(k); } by[k].push(a); }); grid = order.map(k => `${k ? `<div class="ahg-h">${esc(k)}</div>` : ''}<div class="ahg">${by[k].map(appHTML).join('')}</div>`).join(''); }
+    return `<div class="ah">${todayWidget()}${moneyWidget()}${gs.length ? `<div class="ahns">${gs.map(groupCard).join('')}</div>` : ''}${grid}</div>`;
+  }
+  VIEW_TITLES.home = 'الرئيسية';
+  EXTRA_VIEWS.home = () => homeHTML();
+  EXTRA_TITLES.home = () => ({ title: L('الرئيسية', 'Home'), sub: '' });
+  canSee = (base => function (v) { if (v === 'home') return !!S.session && role() !== 'kiosk'; return base.apply(this, arguments); })(canSee);
+  if (typeof homeView === 'function') homeView = (base => function () { try { if (homeOn()) return 'home'; } catch (e) { /* ignore */ } return base.apply(this, arguments); })(homeView);
+  /* the bar puts «More» first (right) and moves the first tab to its old place (v4.39) — so Home goes second here and lands next to «More» */
+  if (typeof tabbarItems === 'function') tabbarItems = (base => function () { const arr = base.apply(this, arguments); if (!homeOn()) return arr; const want = ['home'].concat(arr.filter(x => x !== 'home' && x !== 'dashboard')).slice(0, 4); return want.length > 1 ? [want[want.length - 1]].concat(want.slice(0, -1)) : want; })(tabbarItems);
+  /* the switch under the name: Home = dashboard / new */
+  ACTIONS.homeMode = () => { const on = homeOn(); ls(prefKey(), on ? 'classic' : 'new'); toast(on ? L('الرئيسية بقت لوحة المتابعة', 'Home is now the dashboard') : L('الرئيسية بقت الشكل الجديد', 'Home is now the new look')); const h = homeView(); location.hash = '#/' + h; try { parseRoute(); } catch (e) { /* ignore */ } render(true); };
+  RENDER_HOOKS.push(() => setTimeout(() => {
+    try {
+      if (!S.session || role() === 'kiosk') return;
+      document.querySelectorAll('.side .nftogs').forEach(row => {
+        const on = homeOn(); const html = `${glyph('grid', 17).replace('fill="#fff"', 'fill="currentColor"')}<span>${esc(on ? L('الرئيسية الجديدة', 'New home') : L('لوحة المتابعة', 'Dashboard'))}</span>`;
+        let b = row.querySelector('.nfhome'); if (!b) { b = document.createElement('button'); b.type = 'button'; b.className = 'nfst nftg nfhome'; b.dataset.action = 'homeMode'; row.appendChild(b); row.hidden = false; }
+        if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.title = on ? L('التحويل للوحة المتابعة', 'Switch to the dashboard') : L('التحويل للرئيسية الجديدة', 'Switch to the new home'); }
+      });
+    } catch (e) { /* ignore */ }
+  }, 30));
+  /* «My page»: the punch card first */
+  RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'me') return; const v = document.getElementById('view'); if (!v) return;
+      const b = v.querySelector('[data-action="selfPunch"]'); const card = b && b.closest('.card'); if (!card || card.dataset.ahTop) return;
+      card.dataset.ahTop = '1'; if (v.firstElementChild !== card) { card.classList.add('ah-top'); v.insertBefore(card, v.firstElementChild); }
+    } catch (e) { /* ignore */ }
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nft-sel{position:absolute!important;width:1px!important;height:1px!important;min-width:0!important;min-height:0!important;max-width:1px!important;max-height:1px!important;padding:0!important;margin:0!important;border:0!important;opacity:0!important;pointer-events:none!important;overflow:hidden!important;clip-path:inset(50%)}
+    .nft-tiles .nft-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.nft-tiles.one .nft-items{grid-template-columns:1fr}
+    .nft-list .nft-items{display:flex;flex-direction:column;max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:6px;-webkit-overflow-scrolling:touch}
+    .nft-i{display:block;margin:0;cursor:pointer;min-width:0;position:relative}
+    .nft-i input{position:absolute!important;opacity:0!important;width:1px!important;height:1px!important;min-height:0!important;padding:0!important;margin:0!important;pointer-events:none}
+    .nft-tiles .nft-i span{display:flex;flex-direction:column;justify-content:center;gap:1px;min-height:44px;height:100%;box-sizing:border-box;padding:8px 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-size:13.5px;line-height:1.3}
+    .nft-list .nft-i span{display:flex;flex-direction:column;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px}.nft-list .nft-i:last-child span{border-bottom:0}
+    .nft-i span b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}.nft-i span small{font-size:11px;color:var(--muted)}
+    .nft-i input:checked+span{border-color:var(--accent);background:var(--accent-soft,rgba(10,132,255,.1))}.nft-i input:checked+span b{color:var(--accent)}
+    .nft-i input:focus-visible+span{outline:2px solid var(--accent)}.nft-none{padding:10px 12px;font-size:13px;color:var(--muted)}
+    #mform.rq-s1 [data-rq],#mform.rq-s1 .rq-more,#mform .rq-typef,#mform.rq-s2 .rq-tiles{display:none!important}
+    #mform.rq-s1 .mf button[type=submit]{display:none!important}
+    .rq-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .rq-step{grid-column:1/-1;font-size:13px;color:var(--muted)}
+    .rq-t{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-height:100px;padding:13px 12px;border-radius:16px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;text-align:start;cursor:pointer}
+    .rq-t:active{transform:scale(.98)}.rq-t b{font-size:15px;font-weight:700}.rq-t small{font-size:12px;color:var(--muted);margin-top:-5px}
+    .rq-ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;flex:none}.rq-ic.sm{width:26px;height:26px;border-radius:7px}
+    .rq-hd{display:flex;align-items:center;gap:8px}.rq-hd:empty{display:none}.rq-hd b{font-size:16px}
+    .rq-back{border:0;background:none;color:var(--accent);font:inherit;font-size:15px;font-weight:600;padding:4px 0;cursor:pointer}
+    .ah{display:flex;flex-direction:column;gap:12px;max-width:760px;margin:0 auto}
+    .ahw{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px;border-radius:24px;background:var(--surface);border:1px solid var(--line)}
+    html.apple .ahw,html.apple .ahn,html.apple .ahm{background:rgba(255,255,255,.62);border-color:rgba(255,255,255,.5)}
+    html.apple.apple-blur .ahw,html.apple.apple-blur .ahn,html.apple.apple-blur .ahm{-webkit-backdrop-filter:blur(26px) saturate(1.6);backdrop-filter:blur(26px) saturate(1.6)}
+    html.apple[data-theme="dark"] .ahw,html.apple[data-theme="dark"] .ahn,html.apple[data-theme="dark"] .ahm{background:rgba(44,44,50,.66);border-color:rgba(255,255,255,.08)}
+    @media (prefers-color-scheme:dark){html.apple:not([data-theme="light"]) .ahw,html.apple:not([data-theme="light"]) .ahn,html.apple:not([data-theme="light"]) .ahm{background:rgba(44,44,50,.66);border-color:rgba(255,255,255,.08)}html.apple:not([data-theme="light"]) .ahw-p{background:#fff;color:#000}}
+    .ahw-d{display:flex;flex-direction:column;min-width:0}.ahw-d small{color:#ff453a;font-weight:700;font-size:12.5px}
+    .ahw-d b{font-size:46px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
+    .ahw-st{margin-top:4px;font-size:13px;font-weight:600}.ahw-st.ok{color:var(--good-ink,#1f9d4c)}.ahw-st.no{color:var(--warn-ink,#c77700)}.ahw-st.out{color:var(--muted)}
+    .ahw-p{margin-top:10px;min-height:44px;border-radius:999px;border:0;background:var(--ink,#111);color:var(--surface,#fff);font:inherit;font-weight:700;font-size:15px;cursor:pointer;padding:0 14px}
+    html.apple .ahw-p{background:#000;color:#fff}html.apple[data-theme="dark"] .ahw-p{background:#fff;color:#000}
+    .ahw-geo{font-size:11px;color:var(--muted);margin-top:4px;min-height:0}
+    .ahw-r{display:flex;flex-direction:column;gap:6px;min-width:0}.ahw-h{font-size:11.5px;color:var(--muted);font-weight:600}
+    .ahw-i{display:flex;flex-direction:column;padding:7px 9px;border-radius:12px;background:var(--surface-2);color:inherit;text-decoration:none;min-width:0}
+    .ahw-i b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ahw-i span{font-size:11.5px;color:var(--muted)}
+    .ahw-more{font-size:11.5px;color:var(--muted);border-inline-start:3px solid #ff453a;padding-inline-start:6px;text-decoration:none}
+    .ahw-none{font-size:12.5px;color:var(--muted);padding:8px 0}
+    .ahw-k{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.ahw-k div{display:flex;flex-direction:column;align-items:center;padding:7px 2px;border-radius:12px;background:var(--surface-2)}
+    .ahw-k b{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}.ahw-k span{font-size:11px;color:var(--muted)}
+    .ahns{display:flex;flex-direction:column;gap:8px}
+    .ahn,.ahm{position:relative;display:flex!important;flex-direction:row!important;align-items:center;justify-content:flex-start!important;gap:11px;width:100%;box-sizing:border-box;min-width:0;overflow:hidden;padding:11px 13px;border-radius:20px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;text-align:start;text-decoration:none;cursor:pointer}
+    .ahn.stack{margin-bottom:6px;box-shadow:0 6px 0 -3px var(--surface-2)}
+    .ahn-ic{position:relative;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;flex:none}
+    .ahn-ic i{position:absolute;top:-6px;inset-inline-end:-6px;min-width:20px;height:20px;border-radius:10px;background:#e5e5ea;color:#000;font-style:normal;font-size:12px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+    .ahn-t{flex:1;min-width:0;display:flex;flex-direction:column}.ahn-t b{font-size:14px;font-weight:600;align-self:flex-start;max-width:calc(100% - 72px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ahn-t span{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ahn-tm{position:absolute;top:10px;inset-inline-end:13px;font-size:11.5px;color:var(--muted)}
+    .ahn-x{display:flex;flex-direction:column;margin:-4px 8px 4px;border-radius:14px;background:var(--surface-2);overflow:hidden}
+    .ahn-xi{display:flex;flex-direction:column;padding:9px 12px;border-top:1px solid var(--line);color:inherit;text-decoration:none}.ahn-xi:first-child{border-top:0}
+    .ahn-xi b{font-size:13px;font-weight:600}.ahn-xi span{font-size:12px;color:var(--muted)}.ahn-xi small{font-size:11px;color:var(--muted)}
+    .ahm-n{flex:none;min-width:26px;height:26px;border-radius:13px;background:#ff3b30;color:#fff;font-style:normal;font-weight:700;font-size:13px;display:grid;place-items:center;padding:0 7px}
+    .ahg{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:16px 6px;padding:4px 2px}
+    .ahg-h{font-size:13px;font-weight:700;color:var(--muted);margin:6px 4px -4px}
+    .aha{display:flex;flex-direction:column;align-items:center;gap:6px;color:inherit;text-decoration:none;min-width:0}
+    .aha-ic{position:relative;width:60px;height:60px;border-radius:15px;display:grid;place-items:center;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+    .aha-ic svg{width:28px!important;height:28px!important;color:#fff;stroke:#fff}
+    .aha-ic i{position:absolute;top:-7px;inset-inline-end:-9px;min-width:22px;height:22px;border-radius:11px;background:#ff3b30;color:#fff;font-style:normal;font-size:12.5px;font-weight:600;display:grid;place-items:center;padding:0 6px;direction:ltr}
+    .aha-l{font-size:12px;font-weight:500;text-align:center;line-height:1.25;max-width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .aha:active .aha-ic{transform:scale(.94)}
+    .card.ah-top{margin-bottom:14px}
+    .bellpop.ahbell{padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--surface-2,var(--surface))}
+    .bellpop.ahbell .ahn{border-radius:18px}
+    @media (max-width:420px){.ahg{grid-template-columns:repeat(4,1fr)}.aha-ic{width:58px;height:58px}}
   </style>`);
 })();
 </script>
