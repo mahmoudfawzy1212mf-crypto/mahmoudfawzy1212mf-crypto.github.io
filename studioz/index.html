@@ -167,6 +167,7 @@ button{cursor:pointer}
 
 /* KPI tiles */
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.card + .kpis,.banner + .kpis{margin-top:12px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;position:relative;cursor:pointer;min-height:92px}
 .kpi:hover{border-color:var(--line-2)}
 .kpi .l{font-size:12px;color:var(--muted);font-weight:500}
@@ -1402,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-0433-e37bc7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261010-0510-e4a492";</script>
 
 <script>
 'use strict';
@@ -4934,14 +4935,14 @@ function actionItemsBase() {
 function taskFormBase(t) {
   const ws = sortBy(list('workers').filter(w => w.status !== 'inactive'), w => (w.deptId || '') + w.name); const staff = list('staff').filter(s => s.active !== false);
   const people = [{ id: '', name: '— غير محدد (القسم كله) —' }].concat(ws.map(w => ({ id: w.id, name: `${w.name} — ${deptName(w.deptId)}` })), staff.map(s => ({ id: s.id, name: `${s.name} (${ROLES[s.role] || ''})` })));
-  return `<div class="form">${field('المهمة', inp('title', t.title || '', 'required'), 'full')}${field('التفاصيل', `<textarea id="f-desc" name="desc">${esc(t.desc || '')}</textarea>`, 'full')}
+  return `<div class="form">${field('المهمة', inp('title', t.title || '', 'required'), 'full')}${field('التفاصيل', `<textarea id="f-desc" name="desc">${esc(typeof nfMaskMoney === 'function' ? nfMaskMoney(t.desc || '', t) : (t.desc || ''))}</textarea>`, 'full')}
     ${field('القسم', `<select id="f-deptId" name="deptId"><option value="">— عام —</option>${opts(S.settings.departments, t.deptId || (role() === 'head' ? myDepts()[0] : ''))}</select>`)}${field('المكلَّف', `<select id="f-assigneeId" name="assigneeId">${opts(people, t.assigneeId || '')}</select>`)}
     ${field('أمر التشغيل', `<select id="f-orderId" name="orderId"><option value="">—</option>${opts(sortBy(list('orders').filter(isOpen), o => o.code), t.orderId || '', o => `${o.code} — ${o.title}`)}</select>`)}${field('الموعد', inp('dueDate', t.dueDate || '', 'type="date"'))}
     ${field('الأولوية', `<select id="f-priority" name="priority">${opts(Object.keys(TASK_PRIORITY), t.priority || 'normal', k => TASK_PRIORITY[k][0])}</select>`)}${t.id ? field('الحالة', `<select id="f-status" name="status">${opts(Object.keys(TASK_STATUS), t.status || 'open', k => TASK_STATUS[k][0])}</select>`) : ''}</div>`;
 }
 async function saveTaskBase(f, t) {
   const d = formData(f); if (!d.title) { toast('اكتب المهمة', 'err'); return false; }
-  const doc = Object.assign({}, t, { id: t.id || uid(), title: d.title, desc: d.desc || '', deptId: d.deptId || null, assigneeId: d.assigneeId || null, orderId: d.orderId || null, dueDate: d.dueDate || null, priority: d.priority || 'normal', status: d.status || t.status || 'open', kind: t.kind || 'task', source: t.source || 'manual', createdBy: t.createdBy || S.session?.id || null, createdByName: t.createdByName || S.session?.name || '', createdAt: t.createdAt || nowISO(), updatedAt: nowISO() });
+  const doc = Object.assign({}, t, { id: t.id || uid(), title: d.title, desc: (typeof nfUnmaskMoney === 'function' ? nfUnmaskMoney(d.desc || '', t.desc, t) : d.desc) || '', deptId: d.deptId || null, assigneeId: d.assigneeId || null, orderId: d.orderId || null, dueDate: d.dueDate || null, priority: d.priority || 'normal', status: d.status || t.status || 'open', kind: t.kind || 'task', source: t.source || 'manual', createdBy: t.createdBy || S.session?.id || null, createdByName: t.createdByName || S.session?.name || '', createdAt: t.createdAt || nowISO(), updatedAt: nowISO() });
   if (doc.status === 'done' && !doc.doneAt) doc.doneAt = nowISO(); await Store.save('tasks', doc); toast(t.id ? 'تم حفظ المهمة' : 'تمت إضافة المهمة');
 }
 ACTIONS.taskNew = arg => { if (!canTasks()) return; const t = {}; if (arg && arg.startsWith('order:')) t.orderId = arg.slice(6); openModal({ title: 'مهمة جديدة', body: taskForm(t), onSubmit: f => saveTask(f, t) }); };
@@ -4950,7 +4951,7 @@ ACTIONS.taskDelete = async id => { if (!isAdmin()) return; if (!(await confirmDl
 ACTIONS.taskStatus = async arg => { const [id, st] = arg.split(':'); const t = byId('tasks', id); if (!t || !canTasks() || !taskVisible(t)) return; await Store.update('tasks', id, Object.assign({ status: st, updatedAt: nowISO() }, st === 'done' ? { doneAt: nowISO(), doneByName: S.session?.name || '' } : {})); toast(st === 'done' ? 'تم إنهاء المهمة' : 'تم التحديث'); };
 function taskItemBase(t, o = {}) {
   const ord = t.orderId ? byId('orders', t.orderId) : null; const late = t.dueDate && t.dueDate < todayISO() && ['open', 'doing'].includes(t.status);
-  return `<div class="item" style="cursor:default;padding:8px 12px"><div class="main"><div class="title">${t.source === 'ai' ? '<span class="badge acc" title="مقترح من المساعد الذكي">AI</span> ' : ''}${t.kind === 'update' ? '<span class="badge">تحديث</span> ' : ''}${esc(t.title)} ${badge(TASK_PRIORITY, t.priority || 'normal')}</div>${t.desc ? `<div class="small" style="white-space:pre-wrap">${esc(t.desc)}</div>` : ''}${typeof taskProofChip === 'function' ? taskProofChip(t) : ''}<div class="meta">${t.deptId ? `<span>${esc(deptName(t.deptId))}</span>` : ''}${t.assigneeId ? `<span>${esc(assigneeName(t.assigneeId))}</span>` : ''}${ord ? `<a href="#/orders/${ord.id}"><span class="code">${esc(ord.code)}</span></a>` : ''}${t.fromDeptId ? `<span>من ${esc(deptName(t.fromDeptId))}</span>` : ''}${t.dueDate ? `<span style="${late ? 'color:var(--crit-ink)' : ''}">${late ? 'متأخرة · ' : ''}${fmtDate(t.dueDate)}</span>` : ''}<span>${esc(t.createdByName || '')} · ${fmtDate((t.createdAt || '').slice(0, 10))}</span></div></div><div class="end"><div class="row" style="gap:4px;flex-wrap:wrap;justify-content:flex-end">${typeof taskFileBtn === 'function' ? taskFileBtn(t) : ''}${badge(TASK_STATUS, t.status)}${canTasks() && taskVisible(t) && ['open', 'doing'].includes(t.status) ? `${t.status === 'open' ? `<button class="btn xs" data-action="taskStatus" data-arg="${t.id}:doing">بدء</button>` : ''}<button class="btn xs p" data-action="taskStatus" data-arg="${t.id}:done">${icon('check')}تم</button>` : ''}${canTasks() && (isAdmin() || role() === 'hr' || role() === 'office' || t.createdBy === S.session?.id) && !o.compact ? `<button class="iconbtn" data-action="taskEdit" data-arg="${t.id}">${icon('edit')}</button>` : ''}</div></div></div>`;
+  return `<div class="item" style="cursor:default;padding:8px 12px"><div class="main"><div class="title">${t.source === 'ai' ? '<span class="badge acc" title="مقترح من المساعد الذكي">AI</span> ' : ''}${t.kind === 'update' ? '<span class="badge">تحديث</span> ' : ''}${esc(t.title)} ${badge(TASK_PRIORITY, t.priority || 'normal')}</div>${t.desc ? `<div class="small" style="white-space:pre-wrap">${esc(typeof nfMaskMoney === 'function' ? nfMaskMoney(t.desc, t) : t.desc)}</div>` : ''}${typeof taskProofChip === 'function' ? taskProofChip(t) : ''}<div class="meta">${t.deptId ? `<span>${esc(deptName(t.deptId))}</span>` : ''}${t.assigneeId ? `<span>${esc(assigneeName(t.assigneeId))}</span>` : ''}${ord ? `<a href="#/orders/${ord.id}"><span class="code">${esc(ord.code)}</span></a>` : ''}${t.fromDeptId ? `<span>من ${esc(deptName(t.fromDeptId))}</span>` : ''}${t.dueDate ? `<span style="${late ? 'color:var(--crit-ink)' : ''}">${late ? 'متأخرة · ' : ''}${fmtDate(t.dueDate)}</span>` : ''}<span>${esc(t.createdByName || '')} · ${fmtDate((t.createdAt || '').slice(0, 10))}</span></div></div><div class="end"><div class="row" style="gap:4px;flex-wrap:wrap;justify-content:flex-end">${typeof taskFileBtn === 'function' ? taskFileBtn(t) : ''}${badge(TASK_STATUS, t.status)}${canTasks() && taskVisible(t) && ['open', 'doing'].includes(t.status) ? `${t.status === 'open' ? `<button class="btn xs" data-action="taskStatus" data-arg="${t.id}:doing">بدء</button>` : ''}<button class="btn xs p" data-action="taskStatus" data-arg="${t.id}:done">${icon('check')}تم</button>` : ''}${canTasks() && (isAdmin() || role() === 'hr' || role() === 'office' || t.createdBy === S.session?.id) && !o.compact ? `<button class="iconbtn" data-action="taskEdit" data-arg="${t.id}">${icon('edit')}</button>` : ''}</div></div></div>`;
 }
 function vTasksBase() {
   const f = S.ui.filter.tasks ||= { status: 'open', dept: role() === 'head' ? (myDepts()[0] || '') : '', mine: false };
@@ -9408,7 +9409,7 @@ function vTaskDetail(t) {
   return `<div class="grid g2" style="align-items:start">
     <div class="stack">
       <div class="card"><div class="cardhead"><h3>${esc(t.title)}</h3><div class="grow"></div>${badge(TASK_STATUS, t.status)}${badge(TASK_PRIORITY, t.priority || 'normal')}</div>
-        ${t.desc ? `<div class="small" style="white-space:pre-wrap">${esc(t.desc)}</div>` : ''}
+        ${t.desc ? `<div class="small" style="white-space:pre-wrap">${esc(typeof nfMaskMoney === 'function' ? nfMaskMoney(t.desc, t) : t.desc)}</div>` : ''}
         <div class="row small muted" style="gap:12px;flex-wrap:wrap;margin-top:8px">${t.deptId ? `<span>${esc(deptName(t.deptId))}</span>` : ''}${t.assigneeId ? `<span>المكلَّف: ${esc(assigneeName(t.assigneeId))}</span>` : ''}${ord ? `<a href="#/orders/${ord.id}"><span class="code">${esc(ord.code)}</span> ${esc(ord.title)}</a>` : ''}${t.dueDate ? `<span style="${late ? 'color:var(--crit-ink)' : ''}">${late ? 'متأخرة · ' : ''}${fmtDate(t.dueDate)}</span>` : ''}<span>${esc(t.createdByName || '')} · ${fmtDate((t.createdAt || '').slice(0, 10))}</span></div>
         ${typeof taskProofChip === 'function' ? taskProofChip(t) : ''}
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${canTasks() && taskVisible(t) && ['open', 'doing'].includes(t.status) ? `${t.status === 'open' ? `<button class="btn sm" data-action="taskStatus" data-arg="${t.id}:doing">بدء</button>` : ''}<button class="btn sm p" data-action="taskStatus" data-arg="${t.id}:done">${icon('check')}تم</button>` : ''}${canTasks() && (isAdmin() || ['hr', 'office', 'manager'].includes(role()) || t.createdBy === S.session?.id) ? `<button class="btn sm ghost" data-action="taskEdit" data-arg="${t.id}">${icon('edit')}تعديل</button>` : ''}<a class="btn sm ghost" href="#/tasks">${icon('back')}كل المهام</a></div></div>
@@ -17884,7 +17885,7 @@ body.stuboard .fab{display:none!important}
   function stuProjectCard(p) {
     const st = stuStage(p.stage); const cov = stuCoverSrc(p); const team = (p.team || []).slice(0, 5); const nb = stuProjectBoards(p.id).length;
     return `<a class="spcard" href="#/projects/${p.id}"><div class="cov">${cov ? `<img src="${esc(cov)}" alt="">` : esc((p.code || p.name || 'NS').slice(0, 2).toUpperCase())}</div>
-      <div class="bd"><div class="nm">${esc(p.name)}</div><div class="cl">${esc(p.client || '—')}${p.code ? ` · ${esc(p.code)}` : ''}</div>
+      <div class="bd"><div class="nm">${esc(p.name)}</div><div class="cl">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '—')}${p.code ? ` · ${esc(p.code)}` : ''}</div>
       <div class="ft"><span class="stg"><i></i>${esc(st.name)} · ${esc(st.ar)}</span><div class="grow"></div><span class="stuavs">${team.map(id => stuAvatar(id, 24)).join('')}</span></div>
       <div class="tiny muted">${nb} بورد · ${p.dueDate ? 'تسليم ' + fmtDate(p.dueDate) : 'بدون موعد'}</div></div></a>`;
   }
@@ -17906,8 +17907,8 @@ body.stuboard .fab{display:none!important}
     const canStage = stuManager() || p.leadId === stuMe();
     return `<div class="card"><div class="sphead"><div class="cov">${cov ? `<img src="${esc(cov)}" alt="">` : icon('layers')}</div>
       <div style="flex:1;min-width:240px"><div class="row" style="gap:8px;flex-wrap:wrap"><h2 style="margin:0">${esc(p.name)}</h2><span class="stg"><i></i>${esc(stuStage(p.stage).name)}</span><div class="grow"></div>${stuCanEdit() ? `<button class="btn sm ghost" data-action="stuProjectEdit" data-arg="${p.id}">${icon('edit')}تعديل</button>` : ''}</div>
-      <div class="small muted" style="margin-top:4px">${esc(p.client || '')}${p.code ? ` · ${esc(p.code)}` : ''}${p.dueDate ? ` · تسليم ${fmtDate(p.dueDate)}` : ''}${p.area ? ` · ${esc(p.area)} م²` : ''}</div>
-      ${p.desc ? `<p class="small" style="margin:8px 0 0;white-space:pre-wrap">${esc(p.desc)}</p>` : ''}
+      <div class="small muted" style="margin-top:4px">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}${p.code ? ` · ${esc(p.code)}` : ''}${p.dueDate ? ` · تسليم ${fmtDate(p.dueDate)}` : ''}${p.area ? ` · ${esc(p.area)} م²` : ''}</div>
+      ${p.desc ? `<p class="small" style="margin:8px 0 0;white-space:pre-wrap">${esc(typeof nfMaskMoney === 'function' ? nfMaskMoney(p.desc) : p.desc)}</p>` : ''}
       <div class="row" style="gap:6px;margin-top:10px;align-items:center"><span class="tiny muted">الفريق</span><span class="stuavs">${(p.team || []).map(x => stuAvatar(x, 28)).join('')}</span>${p.leadId ? `<span class="tiny muted">· تيم ليدر: ${esc(stuPerson(p.leadId).name)}</span>` : ''}</div></div></div>
       <div class="spsteps">${STU_STAGES.map((s, i) => `<div class="spstep ${i < idx ? 'done' : i === idx ? 'on' : ''}" ${canStage ? `data-action="stuStageSet" data-arg="${p.id}:${s.id}"` : ''} title="${esc(s.desc)}"><b>${esc(s.name)}</b>${esc(s.ar)}</div>`).join('')}</div>
       <div class="sptiles">
@@ -17918,20 +17919,20 @@ body.stuboard .fab{display:none!important}
       ${tasks.length ? tasks.map(t => `<a class="row small" href="#/tasks/${t.id}" style="padding:6px 0;border-bottom:1px solid var(--line);gap:8px"><span class="stagedot ${t.status === 'doing' ? 'active' : ''}"></span><span>${esc(t.title)}</span><div class="grow"></div><span class="muted">${t.assigneeId ? esc(stuPerson(t.assigneeId).name) : ''}${t.dueDate ? ' · ' + fmtDate(t.dueDate) : ''}</span></a>`).join('') : '<p class="small muted">لا توجد مهام مفتوحة</p>'}</div>
       ${files.length ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3></div><div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div></div>` : ''}`;
   }
-  EXTRA_TITLES.projects = () => { if (S.route.id) { const p = byId('projects', S.route.id); return { title: p ? p.name : 'مشروع', sub: p ? `${stuStage(p.stage).ar} · ${p.client || ''}` : '', actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>كل المشاريع</span></a>` }; } return { sub: 'مشاريع التصميم بمراحلها وفِرقها وبورداتها' }; };
+  EXTRA_TITLES.projects = () => { if (S.route.id) { const p = byId('projects', S.route.id); return { title: p ? p.name : 'مشروع', sub: p ? `${stuStage(p.stage).ar} · ${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) || ''}` : '', actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>كل المشاريع</span></a>` }; } return { sub: 'مشاريع التصميم بمراحلها وفِرقها وبورداتها' }; };
   viewTitleProjects = t => { const x = EXTRA_TITLES.projects(); return S.route.view === 'projects' ? Object.assign(t, x) : t; };
   function stuProjectForm(p) {
     const people = stuPeople(); const team = new Set(p.team || []);
-    return `<div class="form">${field('اسم المشروع', inp('name', p.name || '', 'required'), 'full')}${field('العميل', inp('client', p.client || ''))}${field('الكود', inp('code', p.code || '', 'class="ltr"'))}
+    return `<div class="form">${field('اسم المشروع', inp('name', p.name || '', 'required'), 'full')}${typeof nfDevOk === 'function' && !nfDevOk() ? '' : field('العميل', inp('client', p.client || ''))}${field('الكود', inp('code', p.code || '', 'class="ltr"'))}
       ${field('المرحلة', `<select id="f-stage" name="stage">${opts(STU_STAGES, p.stage || 'concept', s => `${s.name} — ${s.ar}`)}</select>`)}${field('تاريخ التسليم', inp('dueDate', p.dueDate || '', 'type="date"'))}
       ${field('التيم ليدر / السينيور', `<select id="f-leadId" name="leadId"><option value="">—</option>${opts(people, p.leadId || '', x => x.name)}</select>`)}${field('المساحة (م²)', inp('area', p.area || '', 'type="number" step="any" min="0"'))}
       <div class="field full"><label>الفريق</label><div class="row" style="flex-wrap:wrap;gap:6px">${people.map(x => `<label class="check ${team.has(x.id) ? 'on' : ''}" style="padding:4px 10px"><input type="checkbox" name="team-${x.id}" ${team.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></div>
-      ${field('وصف / بريف مختصر', `<textarea id="f-desc" name="desc" rows="3">${esc(p.desc || '')}</textarea>`, 'full')}</div>`;
+      ${field('وصف / بريف مختصر', `<textarea id="f-desc" name="desc" rows="3">${esc(typeof nfMaskMoney === 'function' ? nfMaskMoney(p.desc || '') : (p.desc || ''))}</textarea>`, 'full')}</div>`;
   }
   async function stuProjectSave(f, p) {
     const d = formData(f); if (!d.name) { toast('اكتب اسم المشروع', 'err'); return false; }
     const team = stuPeople().filter(x => d['team-' + x.id]).map(x => x.id); if (d.leadId && !team.includes(d.leadId)) team.unshift(d.leadId);
-    const doc = Object.assign({}, p, { name: d.name, client: d.client, code: d.code || p.code || ('NS-' + String(list('projects').length + 1).padStart(3, '0')), stage: d.stage, dueDate: d.dueDate || null, leadId: d.leadId || null, area: d.area || '', team, desc: d.desc, status: p.status || 'active' });
+    const doc = Object.assign({}, p, { name: d.name, client: d.client !== undefined ? d.client : (p.client || ''), code: d.code || p.code || ('NS-' + String(list('projects').length + 1).padStart(3, '0')), stage: d.stage, dueDate: d.dueDate || null, leadId: d.leadId || null, area: d.area || '', team, desc: typeof nfUnmaskMoney === 'function' ? nfUnmaskMoney(d.desc, p.desc) : d.desc, status: p.status || 'active' });
     if (!doc.id) { doc.id = uid(); doc.createdBy = S.session?.id || null; }
     await Store.save('projects', doc); return doc;
   }
@@ -18487,7 +18488,7 @@ if (STU_ON) {
       let src = (d.prompt || '').trim(); if (AI.tab === 'brief' && d.fileId) { const fd = byId('files', d.fileId); if (fd) { toast('جارٍ قراءة الـPDF…'); src = (await aiPdfText(fd)).slice(0, 60000) + '\n' + src; } }
       if (!src) src = aiSelText(); if (!src) { toast('اكتب أو حدّد نص', 'err'); return; }
       const board = AI.ctx === 'ideas' ? wbBoard() : dbBoard(); const p = board && (board.projectId || (dbRoot(board) || {}).projectId) ? byId('projects', board.projectId || dbRoot(board).projectId) : null;
-      const ctx = p ? `المشروع: ${p.name}${p.client ? ' — العميل: ' + p.client : ''} — المرحلة: ${stuStage(p.stage).ar}${p.desc ? ' — ' + p.desc : ''}\n` : '';
+      const ctx = p ? `المشروع: ${p.name}${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) ? ' — العميل: ' + (typeof nfDevName === 'function' ? nfDevName(p) : p.client) : ''} — المرحلة: ${stuStage(p.stage).ar}${p.desc ? ' — ' + p.desc : ''}\n` : '';
       const kind = AI.tab === 'brief' ? 'brief' : (AI.textKind || 'concept');
       const ask = { concept: 'اكتب Concept statement احترافي (عربي أولًا ثم نسخة إنجليزية قصيرة) لمشروع تصميم داخلي/معماري بناءً على المدخل. أرجع JSON فقط: {"cards":[{"title":"Concept","text":"…"},{"title":"Concept (EN)","text":"…"},{"title":"Keywords","text":"…"}]}', prompt: 'اكتب prompt إنجليزي احترافي لتوليد صورة معمارية (render) من المدخل، مع 3 تنويعات. أرجع JSON فقط: {"cards":[{"title":"Prompt 1","text":"…"},{"title":"Prompt 2","text":"…"},{"title":"Prompt 3","text":"…"}]}', ideas: 'اقترح 10 أفكار تصميم مختلفة وقابلة للتنفيذ للمدخل، كل فكرة بعنوان قصير وسطرين. أرجع JSON فقط: {"cards":[{"title":"…","text":"…"}]}', names: 'اقترح 8 أسماء/عناوين للمشروع أو الكونسبت مع سطر شرح. أرجع JSON فقط: {"cards":[{"title":"…","text":"…"}]}', critique: 'انقد الفكرة/النص التالي كآرت دايركتور خبير: نقاط قوة، مخاطر، 5 تحسينات محددة. أرجع JSON فقط: {"cards":[{"title":"نقاط القوة","text":"…"},{"title":"المخاطر","text":"…"},{"title":"تحسينات","text":"…"}]}', brief: 'ده بريف/رسالة عميل. استخرج: ملخص المشروع، متطلبات العميل (نقاط)، القيود (ميزانية/وقت/موقع)، الطراز والمزاج المطلوب، أسئلة مفتوحة نسألها للعميل. أرجع JSON فقط: {"cards":[{"title":"الملخص","text":"…"},{"title":"المتطلبات","text":"…"},{"title":"القيود","text":"…"},{"title":"الطراز والمزاج","text":"…"},{"title":"أسئلة للعميل","text":"…"}]}' }[kind];
       const r = await aiText(`أنت مساعد مكتب تصميم معماري (Ninety Studioz). ${ask}\n\n${ctx}المدخل:\n${src}`, { max_tokens: 3000 });
@@ -19002,7 +19003,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     };
     vProjects = (base => function () { if (S.route.id) return page(S.route.id); return base.apply(this, arguments); })(vProjects);
   }
-  if (EXTRA_TITLES.projects) { const baseT = EXTRA_TITLES.projects; EXTRA_TITLES.projects = function () { const t = baseT.apply(this, arguments); const p = S.route.id && byId('projects', S.route.id); if (p && isOS(p)) t.sub = `${osStatus(p.osStatus || 'data').en}${p.ownerId ? ' · Owner: ' + pName(p.ownerId) : ''} · ${p.client || ''}`; return t; }; }
+  if (EXTRA_TITLES.projects) { const baseT = EXTRA_TITLES.projects; EXTRA_TITLES.projects = function () { const t = baseT.apply(this, arguments); const p = S.route.id && byId('projects', S.route.id); if (p && isOS(p)) t.sub = `${osStatus(p.osStatus || 'data').en}${p.ownerId ? ' · Owner: ' + pName(p.ownerId) : ''} · ${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) || ''}`; return t; }; }
   /* the owner always sees his project */
   if (typeof stuProjectVisible === 'function') { const baseVis = stuProjectVisible; window.stuProjectVisible = p => baseVis(p) || isOwner(p); }
   /* new projects start in the operating system (intake = management only) */
@@ -20361,7 +20362,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* AI on the board (studio «ai» function → Anthropic; the key stays in studio settings) */
   const aiErr2 = e => { const m = String((e && (e.code || e.message)) || e); if (/no_key|not_configured|missing|no_ai|api key/i.test(m)) return L2('مفتاح Anthropic مش متسجل — الإعدادات ← الذكاء الاصطناعي', 'The Anthropic key is not set — Settings → AI'); if (/cap|quota|rate/i.test(m)) return L2('وصلت للحد المسموح — جرّب كمان شوية', 'Limit reached — try again later'); return L2('حصل خطأ في الذكاء الاصطناعي: ', 'AI error: ') + m.slice(0, 100); };
   async function aiJSON(prompt) { if (typeof aiText !== 'function') throw { code: 'no_ai' }; const r = await aiText(prompt, { max_tokens: 3000 }); const t = String((r && (r.text || r.content)) || r || ''); const m = t.match(/\{[\s\S]*\}/); return JSON.parse(m ? m[0] : t); }
-  const aiCtx = () => { const b = wbBoard(); const p = boardProj(); return `Ninety Studioz (architectural visualisation & interior design studio). Board: ${b ? b.title : ''}${p ? ` · Project: ${p.name}${p.client ? ' · Client: ' + p.client : ''}` : ''}.`; };
+  const aiCtx = () => { const b = wbBoard(); const p = boardProj(); return `Ninety Studioz (architectural visualisation & interior design studio). Board: ${b ? b.title : ''}${p ? ` · Project: ${p.name}${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) ? ' · Client: ' + (typeof nfDevName === 'function' ? nfDevName(p) : p.client) : ''}` : ''}.`; };
   const aiLang = () => (enOn() ? 'Write in English.' : 'اكتب بالعربي المصري البسيط، والمصطلحات الفنية تقدر تسيبها بالإنجليزي.');
   const itemTxt = i => [i.text, i.desc, i.name, (i.rows || []).map(r => r.join(' | ')).join('\n')].filter(Boolean).join(' — ');
   async function aiRun2(label, fn) { if (NB.aiBusy) return; NB.aiBusy = true; toast('✦ ' + label + '…'); try { await fn(); } catch (e) { console.warn('ai', e); toast(aiErr2(e), 'err'); } finally { NB.aiBusy = false; } }
@@ -21404,7 +21405,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const boards = () => list('pmboards').filter(b => { const p = proj(b.projectId); return p && p.status !== 'archived' && (visP(p) || list('pmtasks').some(t => t.boardId === b.id && isMine(t.owner))); }).sort((a, b) => String((proj(a.projectId) || {}).name || '').localeCompare(String((proj(b.projectId) || {}).name || ''), 'ar'));
   const B = id => byId('pmboards', id);
   const bName = b => (proj(b.projectId) || {}).name || '—';
-  const bClient = b => (proj(b.projectId) || {}).client || '';
+  const bClient = b => { const p = proj(b.projectId) || {}; return (typeof nfDevName === 'function' ? nfDevName(p) : p.client) || ''; };
   const tasksOf = b => list('pmtasks').filter(t => t.boardId === b.id);
   const T = id => byId('pmtasks', id);
   const fin = b => byId('pmfin', b.id) || { value: 0 };
@@ -21814,7 +21815,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const Tp = TPL[k]; const free = list('projects').filter(p => p.status !== 'archived' && visP(p) && !B(p.id));
     return `${mHead(esc(Tp.l))}<div class="mb">
       <div class="qseg"><button type="button" data-pa="tplMode" data-v="new" class="${PM.tplMode !== 'old' ? 'pon' : ''}">مشروع جديد</button><button type="button" data-pa="tplMode" data-v="old" class="${PM.tplMode === 'old' ? 'pon' : ''}" ${free.length ? '' : 'disabled'}>مشروع موجود (${free.length})</button></div>
-      ${PM.tplMode === 'old' && free.length ? `<div><label for="pmtProj">المشروع</label><select id="pmtProj" class="inp">${free.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.client ? ' · ' + esc(p.client) : ''}</option>`).join('')}</select></div>` : `<div class="frow"><div><label for="pmtName">اسم المشروع</label><input id="pmtName" class="inp"></div><div><label for="pmtClient">العميل</label><input id="pmtClient" class="inp"></div></div>`}
+      ${PM.tplMode === 'old' && free.length ? `<div><label for="pmtProj">المشروع</label><select id="pmtProj" class="inp">${free.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) ? ' · ' + esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client)) : ''}</option>`).join('')}</select></div>` : `<div class="frow"><div><label for="pmtName">اسم المشروع</label><input id="pmtName" class="inp"></div><div><label for="pmtClient">العميل</label><input id="pmtClient" class="inp"></div></div>`}
       <div class="frow"><div><label for="pmtStart">تاريخ البدء</label><input id="pmtStart" type="date" class="inp mono" value="${TODAY()}"></div><div><label for="pmtAllowed">جولات التعديل المتفق عليها</label><input id="pmtAllowed" type="number" min="0" class="inp mono" value="2"></div>${canMoney() ? `<div><label for="pmtValue">قيمة العرض</label><input id="pmtValue" type="number" min="0" class="inp mono" value="0"></div>` : ''}</div>
       <p class="muted" style="font-size:12px;margin:0">لو المشروع عليه لقطات في لوحة التشغيل، هتتنقل مهام في مرحلة Render ومراحل الاعتماد الأربعة تبقى مهام فرعية.</p>
       <div class="rowend"><button type="button" class="pillbtn" data-pa="closeModal">إلغاء</button><button type="button" class="pillbtn primary" data-pa="tplCreate" data-t="${k}">إنشاء المشروع</button></div></div>`;
@@ -21989,7 +21990,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const free = list('projects').filter(p => p.status !== 'archived' && visP(p) && !B(p.id)); const pv = TPL.ai && PM.magic && PM.magic.ok ? TPL.ai : null;
     return `${mHead(`✦ ${L('مشروع من بريف', 'Project from a brief')}`)}<div class="mb">
       <div class="qseg"><button type="button" data-pa="tplMode" data-v="new" class="${PM.tplMode !== 'old' ? 'pon' : ''}">${L('مشروع جديد', 'New project')}</button><button type="button" data-pa="tplMode" data-v="old" class="${PM.tplMode === 'old' ? 'pon' : ''}" ${free.length ? '' : 'disabled'}>${L(`مشروع موجود (${free.length})`, `Existing project (${free.length})`)}</button></div>
-      ${PM.tplMode === 'old' && free.length ? `<div><label for="pmtProj">${L('المشروع', 'Project')}</label><select id="pmtProj" class="inp">${free.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.client ? ' · ' + esc(p.client) : ''}</option>`).join('')}</select></div>` : `<div class="frow"><div><label for="pmtName">${L('اسم المشروع', 'Project name')}</label><input id="pmtName" class="inp" data-keep="1"></div><div><label for="pmtClient">${L('العميل', 'Client')}</label><input id="pmtClient" class="inp" data-keep="1"></div></div>`}
+      ${PM.tplMode === 'old' && free.length ? `<div><label for="pmtProj">${L('المشروع', 'Project')}</label><select id="pmtProj" class="inp">${free.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) ? ' · ' + esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client)) : ''}</option>`).join('')}</select></div>` : `<div class="frow"><div><label for="pmtName">${L('اسم المشروع', 'Project name')}</label><input id="pmtName" class="inp" data-keep="1"></div><div><label for="pmtClient">${L('العميل', 'Client')}</label><input id="pmtClient" class="inp" data-keep="1"></div></div>`}
       <div><label for="pmBrief">${L('البريف — الصقه هنا أو ارفع ملف نص', 'The brief — paste it here or upload a text file')}</label><textarea id="pmBrief" class="inp" data-keep="1" rows="6" placeholder="${L('مثال: فيلا في الساحل، 6 لقطات خارجية نهار وغروب + فيلم 60 ثانية، التسليم خلال 3 أسابيع…', 'e.g. A coast villa: 6 exterior stills (day and dusk) + a 60-second film, delivery in 3 weeks…')}"></textarea><input type="file" id="pmBriefF" accept=".txt,.md,.csv,text/plain" style="margin-top:6px"></div>
       <div class="frow"><div><label for="pmtStart">${L('تاريخ البدء', 'Start date')}</label><input id="pmtStart" type="date" class="inp mono" data-keep="1" value="${TODAY()}"></div><div><label for="pmtAllowed">${L('جولات التعديل المتفق عليها', 'Agreed revision rounds')}</label><input id="pmtAllowed" type="number" min="0" class="inp mono" data-keep="1" value="2"></div></div>
       ${pv ? `<div class="magicpv"><b>${esc(pv.l)}</b>${pv.groups.map(g => `<div><span class="notr" style="background:${g[1]}">${esc(g[0])}</span><ol>${g[2].map(t => `<li>${esc(t[0])} <small class="mono">${t[1]}${L('ي', 'd')} · ${t[2]}${L('س', 'h')}</small></li>`).join('')}</ol></div>`).join('')}</div>` : ''}
@@ -31375,7 +31376,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   };
   const stepL = k => { const s = STEPS[k] || [k, k]; return isEn() ? s[1] : s[0]; };
   const CEO = () => (isEn() ? 'Mahmoud Fawzy' : 'محمود فوزي');
-  const nameOf = (id, e) => { if (id === 'ceo') return CEO(); if (id === 'client') return (e && e.who) || (isEn() ? 'Client' : 'العميل'); const p = typeof stuPerson === 'function' ? stuPerson(id) : null; const n = (p && p.name && p.name !== '—') ? p.name : ((byId('workers', id) || {}).name || '—'); return enNm(id, n); };
+  const nameOf = (id, e) => { if (id === 'ceo') return CEO(); if (id === 'client') return (e && e.who && (typeof nfDevOk !== 'function' || nfDevOk()) ? e.who : '') || (isEn() ? 'Client' : 'العميل'); const p = typeof stuPerson === 'function' ? stuPerson(id) : null; const n = (p && p.name && p.name !== '—') ? p.name : ((byId('workers', id) || {}).name || '—'); return enNm(id, n); };
   /* v6.30: in English the names are written in English too (the saved English name, else a transliteration) */
   const enNm = (id, n) => { if (!isEn() || !/[\u0600-\u06FF]/.test(n || '')) return n; const w = byId('workers', id); return (w && typeof nameEnOf === 'function' && nameEnOf(w)) || (typeof nfTranslit === 'function' ? nfTranslit(n) : n) || n; };
   const COLORS = ['#c8a26a', '#5aa9dc', '#9b8df2', '#58b98a', '#e0896a', '#d9c08a', '#d97aa6', '#6fb3b8'];
@@ -31401,7 +31402,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const ids = []; es.forEach(e => { if (!ids.includes(e.by)) ids.push(e.by); });
     const rk = id => id === 'ceo' ? 0 : id === 'client' ? 9 : ({ manager: 1, head: 2, hr: 3, acc: 3 }[(byId('workers', id) || {}).role] || 4);
     const ord = new Map(ids.map((x, i) => [x, i])); ids.sort((a, b) => rk(a) - rk(b) || ord.get(a) - ord.get(b)); /* v6.30: owner, art director, team leads, then the team in the order they joined */
-    return `<div class="pspeople">${ids.map(id => { const mine = es.filter(e => e.by === id); const on = ST.who === id; return `<button type="button" class="psperson ${on ? 'pson' : ''}" data-action="psWho" data-arg="${esc(id)}">${av(id, mine[0], 40)}<div class="pspi"><b class="notr" dir="auto">${esc(id === 'client' ? (p.client || nameOf(id, mine[0])) : nameOf(id, mine[0]))}</b><small class="ltr">${esc(titleOf(p, id) || (id === 'client' ? (isEn() ? 'Client' : 'العميل') : ''))}</small><span>${mine.length} ${isEn() ? (mine.length === 1 ? 'step' : 'steps') : 'خطوة'}</span></div></button>`; }).join('')}</div>`;
+    return `<div class="pspeople">${ids.map(id => { const mine = es.filter(e => e.by === id); const on = ST.who === id; return `<button type="button" class="psperson ${on ? 'pson' : ''}" data-action="psWho" data-arg="${esc(id)}">${av(id, mine[0], 40)}<div class="pspi"><b class="notr" dir="auto">${esc(id === 'client' ? ((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || nameOf(id, mine[0])) : nameOf(id, mine[0]))}</b><small class="ltr">${esc(titleOf(p, id) || (id === 'client' ? (isEn() ? 'Client' : 'العميل') : ''))}</small><span>${mine.length} ${isEn() ? (mine.length === 1 ? 'step' : 'steps') : 'خطوة'}</span></div></button>`; }).join('')}</div>`;
   }
   function timeline(p, es) {
     const list0 = ST.who ? es.filter(e => e.by === ST.who) : es; let last = '';
@@ -31424,7 +31425,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const shots = list('shots').filter(s => s.projectId === p.id && !s.deleted).length; const ppl = new Set(es.map(e => e.by).filter(x => x !== 'client')).size;
     return `<div class="psv">
       ${p.sim ? `<div class="banner info psim">${icon('info')}<span>${isEn() ? 'Training simulation — this project was entered to show how a real project moves through the system, step by step.' : 'محاكاة تدريبية — المشروع ده متسجّل عشان يوضح إزاي مشروع حقيقي بيمشي على السيستم خطوة خطوة.'}</span>${isAdmin() ? `<div class="psim-btns"><button type="button" class="btn sm ghost" data-action="psOrig" data-arg="${p.id}">${icon('camera')}${isEn() ? 'Upload the original images' : 'ارفع الصور الأصلية'}</button><button type="button" class="btn sm d" data-action="psWipe" data-arg="${p.id}">${isEn() ? 'Remove the simulation' : 'امسح المحاكاة'}</button></div>` : ''}</div>` : ''}
-      <div class="card pshero"><div><h2 style="margin:0" class="notr" dir="auto">${esc(p.name)}</h2><div class="small muted notr" dir="auto">${esc(p.client || '')}${p.code ? ' · ' + esc(p.code) : ''}</div></div><div class="grow"></div>
+      <div class="card pshero"><div><h2 style="margin:0" class="notr" dir="auto">${esc(p.name)}</h2><div class="small muted notr" dir="auto">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}${p.code ? ' · ' + esc(p.code) : ''}</div></div><div class="grow"></div>
         <div class="psk"><span>${isEn() ? 'Days' : 'يوم'}</span><b>${days}</b></div><div class="psk"><span>${isEn() ? 'Steps' : 'خطوة'}</span><b>${es.length}</b></div><div class="psk"><span>${isEn() ? 'People' : 'شخص'}</span><b>${ppl}</b></div><div class="psk"><span>${isEn() ? 'Shots' : 'لقطة'}</span><b>${shots}</b></div>
         <button type="button" class="btn p" data-action="psPlay">${icon('play')}${isEn() ? 'Walk through it step by step' : 'اعرض المشروع خطوة خطوة'}</button><a class="btn ghost" href="#/projects/${esc(p.id)}">${isEn() ? 'Project page' : 'صفحة المشروع'}</a></div>
       <div class="card"><div class="cardhead"><h3 style="margin:0">${isEn() ? 'Who did what' : 'مين عمل إيه'}</h3><div class="grow"></div>${ST.who ? `<button type="button" class="btn xs ghost" data-action="psWho" data-arg="">${isEn() ? 'Show everyone' : 'اعرض الكل'}</button>` : `<span class="small muted">${isEn() ? 'Tap a person to see only their steps' : 'دوس على أي حد تشوف خطواته بس'}</span>`}</div>${peopleCards(p, es)}</div>
@@ -32930,7 +32931,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const ps = active().sort((a, b) => (daysTo(a.clientDeadline) ?? 9e9) - (daysTo(b.clientDeadline) ?? 9e9));
     if (!ps.length) return `<div class="shhero one"><div class="shslide cur"><img src="${esc(stills()[0])}" alt=""><div class="sht"><small>${L('الاستوديو', 'The studio')}</small><h2>${L('لسه مفيش مشاريع شغالة', 'No projects in progress yet')}</h2></div></div></div>`;
     return `<div class="shhero" id="shhero" data-n="${ps.length}">${ps.map((p, i) => { const c = cover(p, i); const d = daysTo(p.clientDeadline); const team = [...new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean))].slice(0, 6);
-      return `<a class="shslide ${i === H.i % ps.length ? 'cur' : ''}" href="#/projects/${esc(p.id)}" data-i="${i}"><img src="${esc(c.src)}" alt="" ${i ? 'loading="lazy"' : ''}>${c.generic ? '' : ''}<div class="sht"><small class="notr" dir="auto">${esc(p.client || '')}</small><h2 class="notr" dir="auto">${esc(p.name)}</h2><div class="shm"><span class="shst">${esc(stageL(p))}</span>${d !== null ? `<span class="shd ${d < 0 ? 'late' : d <= 3 ? 'soon' : ''}">${d < 0 ? L(`متأخر ${-d} يوم`, `${-d} days late`) : d === 0 ? L('التسليم النهارده', 'Due today') : L(`${d} يوم على التسليم`, `${d} days to delivery`)}</span>` : ''}<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span></div></div></a>`; }).join('')}
+      return `<a class="shslide ${i === H.i % ps.length ? 'cur' : ''}" href="#/projects/${esc(p.id)}" data-i="${i}"><img src="${esc(c.src)}" alt="" ${i ? 'loading="lazy"' : ''}>${c.generic ? '' : ''}<div class="sht"><small class="notr" dir="auto">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}</small><h2 class="notr" dir="auto">${esc(p.name)}</h2><div class="shm"><span class="shst">${esc(stageL(p))}</span>${d !== null ? `<span class="shd ${d < 0 ? 'late' : d <= 3 ? 'soon' : ''}">${d < 0 ? L(`متأخر ${-d} يوم`, `${-d} days late`) : d === 0 ? L('التسليم النهارده', 'Due today') : L(`${d} يوم على التسليم`, `${d} days to delivery`)}</span>` : ''}<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span></div></div></a>`; }).join('')}
       <div class="shdots">${ps.map((_, i) => `<i class="${i === H.i % ps.length ? 'on' : ''}" data-action="shGo" data-arg="${i}"></i>`).join('')}</div>
       <button type="button" class="shnav prev" data-action="shStep" data-arg="-1" aria-label="prev">‹</button><button type="button" class="shnav next" data-action="shStep" data-arg="1" aria-label="next">›</button></div>`;
   }
@@ -39575,12 +39576,19 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
   if (window.__NF_FABDIAL__) return; window.__NF_FABDIAL__ = 1;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const PLUS = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
-  const TASK = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></svg>';
+  /* v7.20: one family of thin line glyphs (Mahmoud, 10 Oct: «the colours are loud — I want something calm that looks rich, and the icons too») */
+  const G = (d, w) => `<svg viewBox="0 0 24 24" width="${w || 24}" height="${w || 24}" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const PLUS = G('<path d="M12 5.5v13M5.5 12h13"/>', 26);
+  const ICONS = {
+    add: G('<path d="M11.2 4.6H7.6a3 3 0 0 0-3 3v8.8a3 3 0 0 0 3 3h8.8a3 3 0 0 0 3-3v-3.6"/><path d="M17.7 3.9a1.85 1.85 0 0 1 2.6 2.6l-7.4 7.4-3.4.8.8-3.4z"/>'),
+    ai: G('<path d="M10 3.6c.55 3.75 2.45 5.65 6.2 6.2-3.75.55-5.65 2.45-6.2 6.2-.55-3.75-2.45-5.65-6.2-6.2 3.75-.55 5.65-2.45 6.2-6.2z"/><path d="M18.2 14.6c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5z"/>'),
+    memo: G('<rect x="5.2" y="3.4" width="13.6" height="17.2" rx="2.6"/><path d="M8.8 8.2h6.4M8.8 12h6.4M8.8 15.8h3.8"/>'),
+    call: G('<path d="M20.6 16.3v2.6a1.75 1.75 0 0 1-1.9 1.75 17.3 17.3 0 0 1-7.55-2.7 17 17 0 0 1-5.25-5.25 17.3 17.3 0 0 1-2.7-7.6A1.75 1.75 0 0 1 4.95 3.2h2.6a1.75 1.75 0 0 1 1.75 1.5c.11.85.32 1.67.61 2.46a1.75 1.75 0 0 1-.39 1.85l-1.1 1.1a14 14 0 0 0 5.25 5.25l1.1-1.1a1.75 1.75 0 0 1 1.85-.39c.79.29 1.61.5 2.46.61a1.75 1.75 0 0 1 1.5 1.77z"/>'),
+  };
   const addLabel = el => { const a = el.dataset.action || ''; return a === 'materialNew' ? L('خامة جديدة', 'New material') : a === 'drvTripNew' ? L('مشوار جديد', 'New trip') : a === 'fabMenu' ? (typeof role === 'function' && role() === 'driver' ? L('مشوار جديد', 'New trip') : L('إضافة', 'Add')) : L('مهمة جديدة', 'New task'); };
   /* the actions, in Mahmoud's order */
   const SRC = [
-    { k: 'add', sel: '.fab', label: addLabel, icon: () => TASK, cls: 'add' },
+    { k: 'add', sel: '.fab', label: addLabel, cls: 'add' },
     { k: 'ai', sel: '.aifab', label: () => L('المساعد', 'Assistant'), cls: 'ai' },
     { k: 'memo', sel: '.memofab', label: () => L('المذكرة', 'Memo'), cls: 'memo' },
     { k: 'call', sel: '.callfab', label: () => L('المكالمات', 'Calls'), cls: 'call' },
@@ -39589,7 +39597,7 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
   const shown = el => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
   const avail = () => SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el));
   const badge = el => { const n = el && el.querySelector('.n'); const v = n ? parseInt(n.textContent, 10) : 0; return v > 0 ? v : 0; };
-  const iconOf = x => (x.icon ? x.icon() : ((x.el.querySelector('svg') || {}).outerHTML || PLUS));
+  const iconOf = x => ICONS[x.k] || (x.el && (x.el.querySelector('svg') || {}).outerHTML) || PLUS;
 
   function build() {
     if (D.root && D.root.isConnected) return D.root;
@@ -39658,43 +39666,28 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
 /* the old buttons stay in the page (their own rules decide when they show) but out of sight and out of reach */
 .nfd-src{opacity:0!important;pointer-events:none!important;transform:translateX(-300vw)!important}
 .nfdial[hidden]{display:none!important}
-.nfdial .nfd-main{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;background:var(--accent);color:#fff;box-shadow:0 10px 24px -8px rgba(0,0,0,.5);z-index:66;display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .22s ease,background .2s}
-.nfdial .nfd-main svg{width:26px;height:26px;transition:transform .22s ease}
-.nfdial .nfd-main.solo{background:var(--surface);color:var(--accent);border:1.5px solid color-mix(in srgb,var(--accent) 45%,var(--line))}
+.nfdial{--lx-face:linear-gradient(180deg,#fffdf8,#f2ede3);--lx-ring:linear-gradient(150deg,#efe0bd,#c4a46a 42%,#8d6c39 68%,#e6d2a6);--lx-ink:#7d5f2f;--lx-shadow:0 12px 26px -12px rgba(60,44,20,.45),inset 0 1px 0 rgba(255,255,255,.9);--lx-pill:rgba(255,252,246,.9);--lx-pill-ink:#3a3025;--lx-pill-line:rgba(160,126,70,.28);--lx-veil:rgba(28,22,14,.26);--lx-badge:#b8423a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .nfdial{--lx-face:radial-gradient(120% 120% at 30% 18%,#3a3a3f 0%,#1e1e22 52%,#141416 100%);--lx-ring:linear-gradient(150deg,#f1e2bf,#b8955a 40%,#4f4029 66%,#dcc290);--lx-ink:#e3cb98;--lx-shadow:0 14px 30px -12px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.07);--lx-pill:rgba(26,26,28,.8);--lx-pill-ink:#f1e9d8;--lx-pill-line:rgba(227,203,152,.22);--lx-veil:rgba(0,0,0,.46);--lx-badge:#c9473f}}
+:root[data-theme="dark"] .nfdial{--lx-face:radial-gradient(120% 120% at 30% 18%,#3a3a3f 0%,#1e1e22 52%,#141416 100%);--lx-ring:linear-gradient(150deg,#f1e2bf,#b8955a 40%,#4f4029 66%,#dcc290);--lx-ink:#e3cb98;--lx-shadow:0 14px 30px -12px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.07);--lx-pill:rgba(26,26,28,.8);--lx-pill-ink:#f1e9d8;--lx-pill-line:rgba(227,203,152,.22);--lx-veil:rgba(0,0,0,.46);--lx-badge:#c9473f}
+.nfdial .nfd-main{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:1px solid transparent;background:var(--lx-face) padding-box,var(--lx-ring) border-box;color:var(--lx-ink);box-shadow:var(--lx-shadow);z-index:66;display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .22s ease}
+.nfdial .nfd-main svg{width:26px;height:26px;transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.nfdial .nfd-main.solo svg{width:24px;height:24px}
 .nfdial.open .nfd-main svg{transform:rotate(45deg)}
 .nfdial .nfd-main:active{transform:scale(.95)}
-.nfdial .nfd-dot{position:absolute;top:3px;right:3px;width:12px;height:12px;border-radius:50%;background:#e5484d;border:2px solid var(--bg,#000)}
+.nfdial .nfd-dot{position:absolute;top:4px;right:4px;width:10px;height:10px;border-radius:50%;background:var(--lx-badge);box-shadow:0 0 0 2px var(--bg,#000)}
 .nfdial .nfd-dot[hidden]{display:none}
 @media (max-width:900px){.nfdial .nfd-main{left:14px;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:54px;height:54px}}
-.nfdial .nfd-bg{position:fixed;inset:0;background:rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .2s;z-index:64}
+.nfdial .nfd-bg{position:fixed;inset:0;background:var(--lx-veil);opacity:0;pointer-events:none;transition:opacity .22s;z-index:64}
 .nfdial.open .nfd-bg{opacity:1;pointer-events:auto}
+html.apple-blur .nfdial .nfd-bg{-webkit-backdrop-filter:blur(14px) saturate(120%);backdrop-filter:blur(14px) saturate(120%)}
 .nfdial .nfd-items{position:fixed;width:0;height:0;z-index:65}
-.nfdial .nfd-it{position:absolute;left:-26px;top:-26px;width:52px;height:52px;border:0;padding:0;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transform:translate(0,0) scale(.3);opacity:0;pointer-events:none;transition:transform .26s cubic-bezier(.2,.9,.3,1.25),opacity .18s;transition-delay:calc(var(--i) * 25ms)}
+.nfdial .nfd-it{position:absolute;left:-26px;top:-26px;width:52px;height:52px;border:0;padding:0;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transform:translate(0,0) scale(.4);opacity:0;pointer-events:none;transition:transform .3s cubic-bezier(.2,.85,.25,1.12),opacity .2s;transition-delay:calc(var(--i) * 30ms)}
 .nfdial.open .nfd-it{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1;pointer-events:auto}
-.nfdial .nfd-c{position:absolute;left:0;top:0;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:1.5px solid var(--line);box-shadow:0 8px 20px -8px rgba(0,0,0,.55)}
-.nfdial .nfd-c svg{width:24px;height:24px}
-.nfdial .nfd-it.add .nfd-c{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
-.nfdial .nfd-it.ai .nfd-c{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
-.nfdial .nfd-it.memo .nfd-c{color:#d08a1e;border-color:color-mix(in srgb,#d08a1e 50%,var(--line))}
-.nfdial .nfd-it.call .nfd-c{color:#2fa36b;border-color:color-mix(in srgb,#2fa36b 45%,var(--line))}
-.nfdial .nfd-c .n{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#e5484d;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;font-style:normal}
-.nfdial .nfd-l{position:absolute;white-space:nowrap;font-size:12.5px;font-weight:700;color:#fff;background:rgba(20,20,22,.86);padding:4px 10px;border-radius:999px;box-shadow:0 4px 12px -4px rgba(0,0,0,.5);pointer-events:none}
-/* v7.19 (Mahmoud, 10 Oct: «pamper the look of these icons with the new Apple style»): in Advanced every action is a filled circle
-   in its iOS system colour with a white glyph and a soft glass sheen, the names sit on frosted pills, the «+» is a glass button */
-html.apple .nfdial .nfd-main:not(.solo){background:var(--primary,#fff);color:var(--primary-ink,#000);box-shadow:0 14px 30px -10px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.6)}
-html.apple .nfdial .nfd-c{border:0;color:#fff;overflow:hidden;transition:transform .15s ease;box-shadow:0 12px 26px -10px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.38),inset 0 -1px 0 rgba(0,0,0,.14)}
-html.apple .nfdial .nfd-it .nfd-c{color:#fff}
-html.apple .nfdial .nfd-c::before{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.40),rgba(255,255,255,0) 62%);pointer-events:none}
-html.apple .nfdial .nfd-c svg{position:relative;width:25px;height:25px;stroke-width:2.1}
-html.apple .nfdial .nfd-it.add .nfd-c{background:linear-gradient(180deg,#43a0ff,#0a6cff)}
-html.apple .nfdial .nfd-it.ai .nfd-c{background:linear-gradient(155deg,#b076ff,#5e5ce6 55%,#3a7bff)}
-html.apple .nfdial .nfd-it.memo .nfd-c{background:linear-gradient(180deg,#ffb84d,#ff9500)}
-html.apple .nfdial .nfd-it.call .nfd-c{background:linear-gradient(180deg,#4fe072,#28b84c)}
-html.apple .nfdial .nfd-it:active .nfd-c{transform:scale(.92)}
-html.apple .nfdial .nfd-c .n{background:#ff3b30;box-shadow:0 0 0 2px rgba(0,0,0,.55);z-index:1}
-html.apple .nfdial .nfd-l{font-size:13px;font-weight:600;padding:5px 12px;color:#fff;background:rgba(44,44,46,.74);-webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) saturate(180%);box-shadow:0 6px 16px -8px rgba(0,0,0,.6),inset 0 .5px 0 rgba(255,255,255,.2)}
-html.apple .nfdial .nfd-bg{background:rgba(0,0,0,.32)}
-html.apple.apple-blur .nfdial .nfd-bg{-webkit-backdrop-filter:blur(12px) saturate(140%);backdrop-filter:blur(12px) saturate(140%)}
+.nfdial .nfd-c{position:absolute;left:0;top:0;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;border:1px solid transparent;background:var(--lx-face) padding-box,var(--lx-ring) border-box;color:var(--lx-ink);box-shadow:var(--lx-shadow);transition:transform .15s ease}
+.nfdial .nfd-c svg{width:23px;height:23px}
+.nfdial .nfd-it:active .nfd-c{transform:scale(.93)}
+.nfdial .nfd-c .n{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--lx-badge);color:#fff;font-size:11.5px;font-weight:600;display:grid;place-items:center;font-style:normal;box-shadow:0 0 0 2px var(--bg,#000)}
+.nfdial .nfd-l{position:absolute;white-space:nowrap;font-size:12.5px;font-weight:500;letter-spacing:.02em;color:var(--lx-pill-ink);background:var(--lx-pill);border:1px solid var(--lx-pill-line);padding:4px 12px;border-radius:999px;box-shadow:0 6px 16px -10px rgba(0,0,0,.55);pointer-events:none;-webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%)}
 body.printing .nfdial{display:none!important}
 @media (prefers-reduced-motion: reduce){ .nfdial .nfd-it,.nfdial .nfd-main svg,.nfdial .nfd-bg{transition:none} }
 </style>`);
@@ -39881,6 +39874,63 @@ html[data-theme="dark"] .badge.tnd,html.dark .badge.tnd{color:#b3a2ff}
 .item .qdel:hover,.tndrow .qdel:hover{opacity:1}
 .item.tndcard .main{min-width:0}
 </style>`);
+})();
+/* =====================================================================
+   v7.20 — an amount written by mistake in a project or task description is hidden from whoever may not see prices
+   (Mahmoud, 10 Oct, approved with the agreed code: after the Studioz KSA projects showed quotation values to the team).
+   · who still sees the amount: the owner, and whoever already sees prices / finance (price permission or a finance role);
+   · a task addressed to the person himself (his own custody, his own request…) or written by him is never masked;
+   · only currency amounts are hidden (EGP / USD / SAR / AED / EUR / $ / the Arabic currency words, before or after the number,
+     and a total written as «… + 14% …» or «= …»); other numbers (km, quantities, phone numbers) stay as they are.
+   Used where project and task descriptions are shown (project page and its edit form, task page, task list and edit form).
+   ===================================================================== */
+(function () {
+  const AR = String.fromCharCode(0x600) + '-' + String.fromCharCode(0x6FF);
+  const CUR = '(?:EGP|USD|AED|SAR|EUR|L\\.?E\\.?|\\$|€|ج\\.\\s?م\\.?|جنيه(?:ات)?|دولار|ريال|درهم|ج(?![' + AR + ']))';
+  const NUM = '\\d[\\d,.٬٫]*(?:\\s?(?:k|K|M|million|thousand|ألف|مليون))?';
+  const RE = new RegExp('(?:' + CUR + ')\\s?' + NUM + '|' + NUM + '\\s?' + CUR + '|\\d{1,3}(?:,\\d{3})+(?=\\s*\\+\\s*\\d{1,2}\\s*%)|=\\s?\\d{1,3}(?:,\\d{3})+', 'g');
+  const sees = () => !S.session || (typeof isAdmin === 'function' && isAdmin()) || (typeof priceAllowed === 'function' && priceAllowed()) || (typeof seesFinance === 'function' && seesFinance());
+  const mine = t => { if (!t) return false; const ids = typeof myIds === 'function' ? myIds() : [S.session && S.session.id]; return ids.includes(t.assigneeId) || ids.includes(t.createdBy) || ids.includes(t.workerId); };
+  window.nfMaskMoney = (text, task) => {
+    const s = text == null ? '' : String(text);
+    if (!s || sees() || mine(task)) return s;
+    return s.replace(RE, m => (m.charAt(0) === '=' ? '= ' : '') + '•••');
+  };
+  /* saving an edit form opened by someone who saw the dots: every dot group goes back to the amount it stood for, in order,
+     so editing the rest of the text never wipes the amounts out */
+  window.nfUnmaskMoney = (text, old, task) => {
+    const s = text == null ? '' : String(text);
+    if (sees() || mine(task)) return s;
+    const orig = String(old || '').match(RE) || []; if (!orig.length) return s;
+    let i = 0; return s.replace(/(?:= )?•••/g, m => (i < orig.length ? orig[i++] : m));
+  };
+})();
+/* =====================================================================
+   v7.20 — in the studio, the developer / owner of a project (its client) is seen only by the people the owner names
+   (Mahmoud, 10 Oct: nobody in the studio sees the developer of a project except him, Sabek and Saeed).
+   · the names live in settings.devSeers (worker ids). While that list is not set, nothing changes for anyone;
+   · the owner always sees the developer, and so does whoever is on the list;
+   · everyone else: the project card, the project page and its title, the edit form, the PM boards, the project story,
+     the studio home and the assistants' context carry no developer name; the clients list and the quotations
+     (every row names the developer) are closed for them;
+   · when someone who does not see the developer edits a project, the developer stays exactly as it was.
+   Factory and construction are untouched.
+   ===================================================================== */
+(function () {
+  if (window.__NF_DEVHIDE__) return; window.__NF_DEVHIDE__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const seers = () => { const v = S.settings && S.settings.devSeers; return Array.isArray(v) ? v : null; };
+  window.nfDevOk = () => {
+    if (!stu()) return true;
+    const L0 = seers(); if (!L0) return true;
+    if (!S.session) return false;
+    if (typeof isAdmin === 'function' && isAdmin()) return true;
+    const ids = [S.session.workerId, S.session.id].concat(typeof stuMeIds === 'function' ? stuMeIds() : []).filter(Boolean);
+    return ids.some(x => L0.includes(x));
+  };
+  window.nfDevName = p => (p && window.nfDevOk() ? (p.client || '') : '');
+  const CLOSED = new Set(['clients', 'quotes']);
+  if (typeof canSee === 'function') canSee = (base => function (view) { return CLOSED.has(view) && !window.nfDevOk() ? false : base.apply(this, arguments); })(canSee);
 })();
 </script>
 
