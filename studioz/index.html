@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1620-5924fe";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1638-fe249a";</script>
 
 <script>
 'use strict';
@@ -6043,11 +6043,34 @@ async function sbBoot() {
   const c = nfConfig(); if (!window.supabase || !window.supabase.createClient) { try { await vendorLoad('supabase'); } catch (e) { toast('تعذّر تحميل مكتبة قاعدة البيانات', 'err'); return false; } }
   S.sb = window.supabase.createClient(c.supabaseUrl, c.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
   S.mode = 'sb'; S.db = sbBackend(S.sb); S.canWrite = true;
+  sbHealInvoke(S.sb);
   try { const { data } = await S.sb.auth.getSession(); S.sbUser = data && data.session ? data.session.user : null; } catch (e) { S.sbUser = null; }
   try { const { data } = await S.sb.rpc('nf_needs_bootstrap'); S.sbBootstrap = data === true; } catch (e) { S.sbBootstrap = false; }
   S.sb.auth.onAuthStateChange((ev, session) => { if (ev === 'SIGNED_OUT') { S.sbUser = null; } else if (session) S.sbUser = session.user; if (ev === 'TOKEN_REFRESHED' || ev === 'SIGNED_IN') { /* nothing */ } });
   if (S.sbUser) { sbStartData(); } else { S.staffReady = true; }
   return true;
+}
+/* v7.42: a session closed on the server (refresh-token reuse, a logout elsewhere, an expired family) leaves a token here that
+   still opens the database but every Edge Function answers 401 «unauthorized» (upload a transfer, push, calls...).
+   On a 401: refresh once; if the session is really gone, sign in again through the other Ninety app (SSO) and retry;
+   if that fails too, sign this device out with a clear message instead of a cryptic error. Logout is local now (scope
+   'local'), so leaving one device no longer closes the others. */
+let _sbHealing = null;
+function sbHealInvoke(client) {
+  const fx = client && client.functions; if (!fx || typeof fx.invoke !== 'function' || fx._nfHeal) return; fx._nfInner = fx.invoke.bind(fx); fx._nfHeal = true; const inv = (n, o) => fx._nfInner(n, o);
+  fx.invoke = async (name, opts) => {
+    let r = await inv(name, opts);
+    const st = r && r.error && r.error.context && r.error.context.status;
+    if (st !== 401 || name === 'sso' || !S.sbUser) return r;
+    if (!_sbHealing) _sbHealing = (async () => {
+      try { const { data, error } = await client.auth.refreshSession(); if (!error && data && data.session) return true; if (error && !(error.status >= 400 && error.status < 500)) return false; } catch (e) { return false; }
+      try { const was = S.sbUser; S.sbUser = null; if (typeof ssoTry === 'function' && await ssoTry()) return true; S.sbUser = was; } catch (e) { /* ignore */ }
+      if (typeof sbForceSignOut === 'function') sbForceSignOut('انتهت جلسة الدخول على الجهاز ده — سجّل دخول تاني');
+      return false;
+    })().finally(() => { setTimeout(() => { _sbHealing = null; }, 2000); });
+    if (await _sbHealing) r = await inv(name, opts);
+    return r;
+  };
 }
 function sbStartData() { if (S._sbSubscribed) return; S._sbSubscribed = true; S.staffReady = false; Store.subscribeAll(); }
 function sbWaitLoaded(cols, ms = 15000) { return new Promise(res => { const t0 = Date.now(); const tick = () => { if (cols.every(c => S.loaded[c])) return res(true); if (Date.now() - t0 > ms) return res(false); setTimeout(tick, 80); }; tick(); }); }
@@ -6082,12 +6105,12 @@ async function authenticateSb(identifier, password) {
   if (error) return { ok: false, msg: sbErrText(error) };
   S.sbUser = data.user; sbStartData(); await sbWaitLoaded(['workers', 'staff', 'settings']);
   const p = sbPersonFromUser(S.sbUser);
-  if (!p) { await S.sb.auth.signOut(); S.sbUser = null; return { ok: false, msg: 'الحساب موجود لكن لا يوجد ملف موظف مطابق له — راجع الموارد البشرية' }; }
+  if (!p) { await S.sb.auth.signOut({ scope: 'local' }); S.sbUser = null; return { ok: false, msg: 'الحساب موجود لكن لا يوجد ملف موظف مطابق له — راجع الموارد البشرية' }; }
   return { ok: true, person: p };
 }
 /* v4.6.2: no "user without a record" — a login whose worker/staff record is missing, stopped or without a role is signed out at once (the server bans it too) */
 let _sbKick = 0;
-function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
+function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
 /* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
 async function sbAccessCheckBase() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
 /* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
@@ -6095,7 +6118,7 @@ let _sbLastRefresh = 0;
 async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 5000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); }); if (changed) render(false); } catch (e) { /* offline */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
-document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut().catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
+document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
 
 /* ---------------- login screen (shared build; backend-aware) ---------------- */
 function loginScreenSb() {
@@ -6253,7 +6276,7 @@ function settingsBackendTab() {
   </div>`;
 }
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'sbform') return; ev.preventDefault(); const d = formData(ev.target); if (!/^https:\/\/.+supabase\.(co|in)/.test(d.supabaseUrl) && !/^https?:\/\//.test(d.supabaseUrl)) { toast('اكتب Project URL صحيحًا', 'err'); return; } if (!d.supabaseAnonKey) { toast('اكتب الـ anon key', 'err'); return; } lsSet('nf.sb', JSON.stringify({ supabaseUrl: d.supabaseUrl.replace(/\/$/, ''), supabaseAnonKey: d.supabaseAnonKey })); toast('تم الحفظ — جارٍ إعادة التحميل'); setTimeout(() => location.reload(), 600); });
-ACTIONS.sbDisconnect = async () => { if (!(await confirmDlg('فصل هذا الجهاز عن قاعدة البيانات المشتركة؟ (البيانات على السيرفر لا تُمس)', 'فصل'))) return; lsSet('nf.sb', null); try { if (S.sb) await S.sb.auth.signOut(); } catch (e) { /* ignore */ } location.reload(); };
+ACTIONS.sbDisconnect = async () => { if (!(await confirmDlg('فصل هذا الجهاز عن قاعدة البيانات المشتركة؟ (البيانات على السيرفر لا تُمس)', 'فصل'))) return; lsSet('nf.sb', null); try { if (S.sb) await S.sb.auth.signOut({ scope: 'local' }); } catch (e) { /* ignore */ } location.reload(); };
 
 /* ---------------- installable app: service worker + update notice ---------------- */
 function pwaInit() {
@@ -9196,7 +9219,7 @@ async function flagSuspect(w0, flags, geo) {
 }
 ACTIONS.unlockWorker = async id => { const w = byId('workers', id); if (!w || !(isAdmin() || ['hr', 'manager'].includes(role()))) return; if (!await confirmDlg(`فك قفل حساب ${w.name}؟`)) return; await Store.update('workers', id, { locked: false, lockedAt: null, lockReason: '', suspects: [] }); toast('تم فك القفل'); };
 /* locked accounts cannot sign in (until HR unlocks) */
-async function authenticate(identifier, password) { const r = await authenticateSb(identifier, password); if (r && r.ok && r.person && r.person.kind === 'worker' && r.person.rec.locked) { try { if (typeof sbOn === 'function' && sbOn() && S.sb) { await S.sb.auth.signOut(); S.sbUser = null; } } catch (e) { /* ignore */ } return { ok: false, msg: `حسابك مقفول مؤقتًا (${r.person.rec.locked && r.person.rec.lockReason || 'مراجعة أمنية'}) — راجع الموارد البشرية` }; } return r; }
+async function authenticate(identifier, password) { const r = await authenticateSb(identifier, password); if (r && r.ok && r.person && r.person.kind === 'worker' && r.person.rec.locked) { try { if (typeof sbOn === 'function' && sbOn() && S.sb) { await S.sb.auth.signOut({ scope: 'local' }); S.sbUser = null; } } catch (e) { /* ignore */ } return { ok: false, msg: `حسابك مقفول مؤقتًا (${r.person.rec.locked && r.person.rec.lockReason || 'مراجعة أمنية'}) — راجع الموارد البشرية` }; } return r; }
 /* ---------------- face liveness ---------------- */
 const GESTURES = [['right', 'لُفّ وجهك ناحية اليمين ببطء'], ['left', 'لُفّ وجهك ناحية اليسار ببطء'], ['closer', 'قرّب الموبايل من وجهك'], ['blink', 'اغمض عينيك وافتحهما مرتين']];
 function earOf(pts) { const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y); return (d(pts[1], pts[5]) + d(pts[2], pts[4])) / (2 * d(pts[0], pts[3])); };
@@ -43079,9 +43102,11 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       bx.setTransform(1, 0, 0, 1, 0, 0); bx.globalAlpha = 1; bx.clearRect(0, 0, base.width, base.height);
       drawPaper(bx, d);
       if (bounded) { bx.save(); setVT(bx, d); bx.fillStyle = '#fff'; bx.shadowColor = 'rgba(0,0,0,.35)'; bx.shadowBlur = 18; bx.fillRect(0, 0, opts.width, opts.height); bx.restore(); }
-      bx.setTransform(1, 0, 0, 1, 0, 0); if (LC.nb) bx.drawImage(LC.below, 0, 0);
+      /* focus mode (v7.42): the other layers fade so the active one is worked on alone */
+      const fa = ed.focus && al ? 0.18 : 1;
+      bx.setTransform(1, 0, 0, 1, 0, 0); if (LC.nb) { bx.globalAlpha = fa; bx.drawImage(LC.below, 0, 0); bx.globalAlpha = 1; }
       if (al && al.visible) { bx.globalAlpha = al.opacity == null ? 1 : al.opacity; bx.drawImage(LC.act, 0, 0); bx.globalAlpha = 1; }
-      if (LC.na) bx.drawImage(LC.above, 0, 0);
+      if (LC.na) { bx.globalAlpha = fa; bx.drawImage(LC.above, 0, 0); bx.globalAlpha = 1; }
       renderLive();
     }
     /* a full redraw on the next frame (many pointer events per frame are folded into one) */
@@ -43152,6 +43177,10 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     ed.setLayerOpacity = (id, v, live) => { const l = layerOf(id); if (!l) return; if (live) { if (l._op0 == null) l._op0 = l.opacity; l.opacity = v; render(); return; } if (l._op0 != null) { l.opacity = l._op0; delete l._op0; } const b = snap(); l.opacity = v; commit(b); };
     ed.clearAll = () => { if (!ed.layers.some(l => l.kind !== 'image' && l.items.length)) return; const b = snap(); ed.layers.forEach(l => { if (l.kind !== 'image') l.items = []; }); ed.sel = []; commit(b); };
     ed.renameLayer = (id, n) => { const l = layerOf(id); if (!l || !n) return; const b = snap(); l.name = String(n).slice(0, 40); commit(b); };
+    ed.focus = false; ed.setFocus = on => { ed.focus = !!on; render(); };
+    ed.moveLayerTo = (id, j) => { const i = ed.layers.findIndex(x => x.id === id); j = Math.max(0, Math.min(ed.layers.length - 1, j)); if (i < 0 || i === j) return; const b = snap(); const [l] = ed.layers.splice(i, 1); ed.layers.splice(j, 0, l); commit(b); };
+    /* «by kind»: pictures at the bottom, drawing layers above them (each group keeps its own order) */
+    ed.sortLayersByKind = () => { const im = ed.layers.filter(l => l.kind === 'image'), ink = ed.layers.filter(l => l.kind !== 'image'); const nx = im.concat(ink); if (nx.every((l, i) => l === ed.layers[i])) return false; const b = snap(); ed.layers = nx; commit(b); return true; };
     ed.moveLayer = (id, dir) => { const i = ed.layers.findIndex(x => x.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= ed.layers.length) return; const b = snap(); const [l] = ed.layers.splice(i, 1); ed.layers.splice(j, 0, l); commit(b); };
     ed.removeLayer = id => { const l = layerOf(id); if (!l || ed.layers.filter(x => x.kind !== 'image').length < 2 && l.kind !== 'image') return; const b = snap(); ed.layers = ed.layers.filter(x => x.id !== id); if (ed.active === id) ed.active = (ed.layers.filter(x => x.kind !== 'image').slice(-1)[0] || {}).id; commit(b); };
     ed.mergeDown = id => { const i = ed.layers.findIndex(x => x.id === id); const lo = ed.layers[i - 1]; if (i < 1 || !lo || lo.kind === 'image') return; const b = snap(); lo.items = lo.items.concat(ed.layers[i].items); ed.layers.splice(i, 1); ed.active = lo.id; commit(b); };
@@ -43183,7 +43212,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         if (sb && w[0] >= sb.x && w[0] <= sb.x + sb.w && w[1] >= sb.y && w[1] <= sb.y + sb.h) { G.mode = 'move'; G.drag = { w0: w, b: snap(), items: selItems() }; return; }
         const tol = 8 / ed.view.z; let hitIt = l && !l.locked && l.visible && l.items.slice().reverse().find(it => hit(it, w, tol));
         /* a tap on something in another layer picks that layer (the top one first) */
-        if (!hitIt) for (const ly of ed.layers.slice().reverse()) { if (ly === l || ly.kind === 'image' || !ly.visible || ly.locked) continue; const h2 = ly.items.slice().reverse().find(it => hit(it, w, tol)); if (h2) { ed.active = ly.id; hitIt = h2; break; } }
+        if (!hitIt && !ed.focus) for (const ly of ed.layers.slice().reverse()) { if (ly === l || ly.kind === 'image' || !ly.visible || ly.locked) continue; const h2 = ly.items.slice().reverse().find(it => hit(it, w, tol)); if (h2) { ed.active = ly.id; hitIt = h2; break; } }
         if (hitIt && hitIt.t === 'text' && ed.sel.length === 1 && ed.sel[0] === hitIt.id) { G.mode = 'none'; const sp = toScreen(hitIt.x, hitIt.y - (hitIt.size || 18 * ed.k)); textBox([hitIt.x, hitIt.y], sp, hitIt); return; }
         if (hitIt) { ed.sel = [hitIt.id]; G.mode = 'move'; G.drag = { w0: w, b: snap(), items: [hitIt] }; if (opts.onSelect) opts.onSelect(ed, ed.sel); renderLive(); return; }
         ed.sel = []; G.mode = 'lasso'; G.lasso = [w]; if (opts.onSelect) opts.onSelect(ed, []); return;
