@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1319-45363e";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1342-7dfbfb";</script>
 
 <script>
 'use strict';
@@ -44439,6 +44439,25 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   mergeSettings = (base => function (saved) { return splitDepts(base.apply(this, arguments), saved); })(mergeSettings);
   try { S.settings = mergeSettings(S.settings && Array.isArray(S.settings.departments) && S.loaded && S.loaded.settings ? S.settings : null); } catch (e) { console.warn('stu depts', e); }
+
+  /* a department with no head (Film & Motion Artist, 11 Oct): the «head» step of a request is notified to the person's direct
+     manager, who can already decide that step (stepActor -> isManagerOf) - otherwise nobody would be told */
+  if (typeof reqStepTargets === 'function') reqStepTargets = (base => function (r) {
+    const out = base.apply(this, arguments); if ((out && out.length) || !r || !Array.isArray(r.chain) || r.chain[r.step || 0] !== 'head') return out;
+    const w = r.workerId ? byId('workers', r.workerId) : null; const m = w && w.managerId && typeof managerRef === 'function' ? managerRef(w.managerId) : null;
+    return m && m.id ? [m.id] : out;
+  })(reqStepTargets);
+
+  /* same case, when the person's direct manager is the art director (role manager, who approves the «manager» step anyway):
+     the «head» step is dropped so he approves once instead of twice (Mahmoud: Mohamed Sabek is their manager) */
+  if (typeof normalizeChain === 'function') normalizeChain = (base => function (chain, w) {
+    const out = base.apply(this, arguments); if (!w || !Array.isArray(out) || !out.includes('head') || !out.includes('manager')) return out;
+    const heads = typeof deptHeads === 'function' && w.deptId ? deptHeads(w.deptId).filter(h => h.id !== w.id) : [];
+    if (heads.length) return out;
+    const m = w.managerId ? byId('workers', String(w.managerId).replace(/^w:/, '')) : null;
+    if (!m || m.role !== 'manager') return out;
+    const r = out.filter(x => x !== 'head'); return r.length ? r : out;
+  })(normalizeChain);
 
   /* ---------- 1) project on the task ---------- */
   const projOf = t => (t && t.projectId && byId('projects', t.projectId)) || null;
