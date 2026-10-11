@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-0835-efdc1a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1014-e14edf";</script>
 
 <script>
 'use strict';
@@ -42702,6 +42702,526 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   Object.assign(window, { nfCallPermCheck: check });
 })();
 /* =====================================================================
+   v7.38 - NFDraw: the drawing engine shared by «Screenshot» (all three systems) and «Concept Drawing» (Ninety Studioz).
+   Mahmoud, 11 Oct: «take the concept of the sketching app and its layers and put it on the screenshot» (brief
+   claude/concept-drawing-brief.md). Plain canvas, no library.
+   · a document = layers (picture layer, ink layers, a «hide» layer) of vector items: strokes (pressure from a pen),
+     line / arrow / box / circle, numbered pins, text, hide boxes, dimensions;
+   · brushes: pencil, liner, ink, marker, highlighter, soft, eraser (part of a line) and stroke eraser (whole lines);
+   · a pen draws and a finger moves the canvas once a pen has been seen (until then one finger draws); two fingers zoom /
+     move; mouse wheel / trackpad: ctrl+wheel zooms, wheel moves; holding still at the end of a line makes it straight;
+   · select (tap or lasso): move, resize from the corner, recolour, delete, send to another layer;
+   · unlimited undo / redo; export at any scale; toJSON / load.
+   Bounded documents (a screenshot) or an endless canvas with paper (plain, dots, grid, isometric).
+   ===================================================================== */
+(function () {
+  if (window.NFDraw) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const uidx = () => Math.random().toString(36).slice(2, 10);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const DPR = () => Math.min(window.devicePixelRatio || 1, 2.5);
+
+  /* brushes: w = width in screen points at zoom 1 (times the document scale k), press = how much pen pressure thins it */
+  const BRUSHES = {
+    pencil: { w: 2.2, alpha: 0.82, press: 0.75, label: () => L('رصاص', 'Pencil') },
+    liner: { w: 2.6, alpha: 1, press: 0, label: () => L('لاينر', 'Fine liner') },
+    ink: { w: 4, alpha: 1, press: 0.85, label: () => L('حبر', 'Ink') },
+    marker: { w: 12, alpha: 0.55, press: 0.25, flat: true, label: () => L('ماركر', 'Marker') },
+    highlighter: { w: 22, alpha: 0.38, press: 0, flat: true, blend: 'multiply', label: () => L('هايلايتر', 'Highlighter') },
+    soft: { w: 18, alpha: 0.42, press: 0.6, blur: true, label: () => L('سوفت', 'Soft') },
+    eraser: { w: 18, alpha: 1, press: 0.3, erase: true, label: () => L('أستيكة', 'Eraser') }
+  };
+  const SHAPES = ['line', 'arrow', 'rect', 'oval', 'dim'];
+
+  function create(host, opts) {
+    opts = Object.assign({ width: 0, height: 0, k: 1, background: null, paper: 'plain', fingerDraws: 'auto', minZoom: 0.05, maxZoom: 12, onChange: null, onTextRequest: null, onSelect: null }, opts || {});
+    const bounded = !!(opts.width && opts.height);
+    const ed = {
+      layers: [], active: '', tool: 'ink', color: '#ff3b30', size: 1, opacity: 1, paper: opts.paper, k: opts.k || 1,
+      view: { x: 0, y: 0, z: 1 }, sel: [], penSeen: false, fingerDraws: opts.fingerDraws, scaleRatio: 0, scaleUnit: 'm'
+    };
+    const undo = [], redo = [];
+    let exporting = false;   /* export draws on a sheet of the export size: shadows are in its pixels, not the screen's */
+    /* ---------- canvases ---------- */
+    host.classList.add('nfd-host');
+    host.innerHTML = '<canvas class="nfd-base"></canvas><canvas class="nfd-live"></canvas>';
+    const base = host.querySelector('.nfd-base'), live = host.querySelector('.nfd-live');
+    const bx = base.getContext('2d'), lx = live.getContext('2d');
+    let W = 0, H = 0;
+    const tmpA = document.createElement('canvas'), tmpB = document.createElement('canvas');
+    function resize() {
+      const r = host.getBoundingClientRect(); const d = DPR();
+      const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+      if (w === W && h === H && base.width === Math.round(w * d)) return false;
+      W = w; H = h;
+      [base, live, tmpA, tmpB].forEach(c => { c.width = Math.round(w * d); c.height = Math.round(h * d); });
+      [base, live].forEach(c => { c.style.width = w + 'px'; c.style.height = h + 'px'; });
+      return true;
+    }
+    /* ---------- layers ---------- */
+    function mkLayer(name, kind, extra) { return Object.assign({ id: 'l' + uidx(), name, kind: kind || 'ink', visible: true, locked: false, opacity: 1, items: [] }, extra || {}); }
+    if (opts.background) ed.layers.push(mkLayer(L('الصورة', 'Picture'), 'image', { locked: true, img: opts.background }));
+    ed.layers.push(mkLayer(L('الرسم', 'Drawing'), 'ink'));
+    ed.active = ed.layers[ed.layers.length - 1].id;
+    const layerOf = id => ed.layers.find(l => l.id === id);
+    const act = () => layerOf(ed.active);
+    const bgImg = () => { const l = ed.layers.find(x => x.kind === 'image' && x.img); return l ? l.img : null; };
+
+    /* ---------- history ---------- */
+    const snap = () => ({ layers: ed.layers.map(l => Object.assign({}, l, { items: l.items.slice() })), active: ed.active });
+    function commit(before) { undo.push(before || snap()); if (undo.length > 300) undo.shift(); redo.length = 0; changed(); }
+    function restore(s) { ed.layers = s.layers.map(l => Object.assign({}, l, { items: l.items.slice() })); ed.active = layerOf(s.active) ? s.active : (ed.layers[ed.layers.length - 1] || {}).id; ed.sel = []; }
+    ed.undo = () => { if (!undo.length) return; redo.push(snap()); restore(undo.pop()); changed(); };
+    ed.redo = () => { if (!redo.length) return; undo.push(snap()); restore(redo.pop()); changed(); };
+    ed.canUndo = () => undo.length > 0; ed.canRedo = () => redo.length > 0;
+    function changed() { render(); if (opts.onChange) try { opts.onChange(ed); } catch (e) { /* ignore */ } }
+
+    /* ---------- view ---------- */
+    const toWorld = (sx, sy) => [(sx - ed.view.x) / ed.view.z, (sy - ed.view.y) / ed.view.z];
+    const toScreen = (wx, wy) => [wx * ed.view.z + ed.view.x, wy * ed.view.z + ed.view.y];
+    ed.fit = () => {
+      resize();
+      let bb = bounded ? { x: 0, y: 0, w: opts.width, h: opts.height } : contentBox();
+      if (!bb || bb.w < 2) { ed.view = { x: W / 2, y: H / 2, z: 1 }; render(); return; }
+      const pad = bounded ? 8 : 40; const z = clamp(Math.min((W - pad * 2) / bb.w, (H - pad * 2) / bb.h), opts.minZoom, bounded ? 4 : 2);
+      ed.view = { z, x: (W - bb.w * z) / 2 - bb.x * z, y: (H - bb.h * z) / 2 - bb.y * z }; render(); viewed();
+    };
+    ed.zoomBy = (f, cx, cy) => {
+      if (cx == null) { cx = W / 2; cy = H / 2; }
+      const z = clamp(ed.view.z * f, fitZoom() * 0.5, opts.maxZoom); const [wx, wy] = toWorld(cx, cy);
+      ed.view.z = z; ed.view.x = cx - wx * z; ed.view.y = cy - wy * z; render(); viewed();
+    };
+    function viewed() { if (opts.onView) try { opts.onView(ed); } catch (e) { /* ignore */ } }
+    ed.fitZoom = () => fitZoom();
+    const fitZoom = () => bounded ? Math.min((W - 16) / opts.width, (H - 16) / opts.height) : opts.minZoom * 2;
+
+    /* ---------- items geometry ---------- */
+    function bboxOf(it) {
+      if (it.t === 'stroke') { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; it.pts.forEach(p => { a = Math.min(a, p[0]); b = Math.min(b, p[1]); c = Math.max(c, p[0]); d = Math.max(d, p[1]); }); const w = (it.w || 2) / 2; return { x: a - w, y: b - w, w: c - a + w * 2, h: d - b + w * 2 }; }
+      if (it.t === 'pin') { const r = pinR(); return { x: it.x - r, y: it.y - r, w: r * 2, h: r * 2 }; }
+      if (it.t === 'text') { const s = it.size || 18 * ed.k; const w = measureText(it) || s; return { x: it.x, y: it.y - s, w, h: s * 1.3 }; }
+      const x = Math.min(it.a[0], it.b[0]), y = Math.min(it.a[1], it.b[1]); const pad = (it.w || 2) * 2; return { x: x - pad, y: y - pad, w: Math.abs(it.b[0] - it.a[0]) + pad * 2, h: Math.abs(it.b[1] - it.a[1]) + pad * 2 };
+    }
+    function contentBox() {
+      let bb = null; ed.layers.forEach(l => { if (l.kind === 'image' && l.img) { const r = { x: 0, y: 0, w: l.img.width, h: l.img.height }; bb = uni(bb, r); } l.items.forEach(it => { bb = uni(bb, bboxOf(it)); }); });
+      return bb;
+    }
+    const uni = (a, b) => !a ? Object.assign({}, b) : { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.max(a.x + a.w, b.x + b.w) - Math.min(a.x, b.x), h: Math.max(a.y + a.h, b.y + b.h) - Math.min(a.y, b.y) };
+    const pinR = () => 14 * ed.k;
+    const devScale = () => exporting ? ed.view.z : ed.view.z * DPR();
+    let mctx = null; function measureText(it) { if (!mctx) mctx = document.createElement('canvas').getContext('2d'); mctx.font = `600 ${it.size || 18 * ed.k}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; return Math.max(...String(it.s || '').split('\n').map(x => mctx.measureText(x).width)); }
+    const segDist = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1]; const l2 = dx * dx + dy * dy; let t = l2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0; t = clamp(t, 0, 1); return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    function hit(it, p, tol) {
+      if (it.t === 'stroke') { for (let i = 1; i < it.pts.length; i++) if (segDist(p, it.pts[i - 1], it.pts[i]) <= tol + (it.w || 2) / 2) return true; return it.pts.length === 1 && Math.hypot(p[0] - it.pts[0][0], p[1] - it.pts[0][1]) <= tol + (it.w || 2); }
+      if (it.t === 'pin') return Math.hypot(p[0] - it.x, p[1] - it.y) <= pinR() + tol;
+      if (it.t === 'line' || it.t === 'arrow' || it.t === 'dim') return segDist(p, it.a, it.b) <= tol + (it.w || 2);
+      const b = bboxOf(it); return p[0] >= b.x - tol && p[0] <= b.x + b.w + tol && p[1] >= b.y - tol && p[1] <= b.y + b.h + tol && (it.t !== 'rect' && it.t !== 'oval' || nearEdge(it, p, tol));
+    }
+    function nearEdge(it, p, tol) {
+      const x0 = Math.min(it.a[0], it.b[0]), y0 = Math.min(it.a[1], it.b[1]), x1 = Math.max(it.a[0], it.b[0]), y1 = Math.max(it.a[1], it.b[1]); const t = tol + (it.w || 2) * 1.5;
+      if (it.t === 'rect') return segDist(p, [x0, y0], [x1, y0]) <= t || segDist(p, [x1, y0], [x1, y1]) <= t || segDist(p, [x1, y1], [x0, y1]) <= t || segDist(p, [x0, y1], [x0, y0]) <= t;
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = Math.max(1, (x1 - x0) / 2), ry = Math.max(1, (y1 - y0) / 2); const v = Math.hypot((p[0] - cx) / rx, (p[1] - cy) / ry); return Math.abs(v - 1) * Math.min(rx, ry) <= t;
+    }
+    function moved(it, dx, dy) {
+      const m = q => [q[0] + dx, q[1] + dy, q[2]];
+      if (it.t === 'stroke') return Object.assign({}, it, { pts: it.pts.map(m) });
+      if (it.t === 'pin' || it.t === 'text') return Object.assign({}, it, { x: it.x + dx, y: it.y + dy });
+      return Object.assign({}, it, { a: m(it.a), b: m(it.b) });
+    }
+    function scaled(it, ox, oy, f) {
+      const s = q => [ox + (q[0] - ox) * f, oy + (q[1] - oy) * f, q[2]];
+      if (it.t === 'stroke') return Object.assign({}, it, { pts: it.pts.map(s), w: (it.w || 2) * f });
+      if (it.t === 'pin') return Object.assign({}, it, { x: ox + (it.x - ox) * f, y: oy + (it.y - oy) * f });
+      if (it.t === 'text') return Object.assign({}, it, { x: ox + (it.x - ox) * f, y: oy + (it.y - oy) * f, size: (it.size || 18 * ed.k) * f });
+      return Object.assign({}, it, { a: s(it.a), b: s(it.b), w: (it.w || 2) * f });
+    }
+
+    /* ---------- drawing items ---------- */
+    function strokePath(c, it) {
+      const br = BRUSHES[it.brush] || BRUSHES.ink; const pts = it.pts; const w = it.w || br.w * ed.k;
+      c.lineCap = br.flat ? 'square' : 'round'; c.lineJoin = 'round';
+      if (pts.length === 1) { c.beginPath(); c.arc(pts[0][0], pts[0][1], w / 2, 0, Math.PI * 2); c.fill(); return; }
+      if (!br.press || pts.every(p => p[2] == null)) {
+        c.lineWidth = w; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length - 1; i++) { const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2; c.quadraticCurveTo(pts[i][0], pts[i][1], mx, my); }
+        const l = pts[pts.length - 1]; c.lineTo(l[0], l[1]); c.stroke(); return;
+      }
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i]; const pr = ((p0[2] == null ? 1 : p0[2]) + (p1[2] == null ? 1 : p1[2])) / 2;
+        c.lineWidth = Math.max(0.4, w * (1 - br.press + br.press * pr)); c.beginPath(); c.moveTo(p0[0], p0[1]); c.lineTo(p1[0], p1[1]); c.stroke();
+      }
+    }
+    function drawItem(c, it, layer) {
+      c.save();
+      if (it.t === 'stroke') {
+        const br = BRUSHES[it.brush] || BRUSHES.ink;
+        if (br.erase) { c.globalCompositeOperation = 'destination-out'; c.strokeStyle = c.fillStyle = '#000'; strokePath(c, it); c.restore(); return; }
+        const a = (it.alpha == null ? 1 : it.alpha) * br.alpha;
+        if (a < 1 || br.blur) {
+          /* a see-through brush is drawn whole on its own sheet so it does not darken where it crosses itself */
+          const t = tmpB.getContext('2d'); t.setTransform(1, 0, 0, 1, 0, 0); t.clearRect(0, 0, tmpB.width, tmpB.height); t.setTransform(c.getTransform());
+          t.strokeStyle = t.fillStyle = it.color; if (br.blur) { t.shadowColor = it.color; t.shadowBlur = (it.w || br.w * ed.k) * devScale() * 0.6; }
+          strokePath(t, it); t.shadowBlur = 0;
+          c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = a; if (br.blend) c.globalCompositeOperation = br.blend; c.drawImage(tmpB, 0, 0); c.restore(); return;
+        }
+        c.strokeStyle = c.fillStyle = it.color; strokePath(c, it); c.restore(); return;
+      }
+      const w = it.w || 3 * ed.k; c.strokeStyle = c.fillStyle = it.color || '#ff3b30'; c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round';
+      if (it.t === 'line' || it.t === 'arrow' || it.t === 'dim') {
+        const [x1, y1] = it.a, [x2, y2] = it.b; const ang = Math.atan2(y2 - y1, x2 - x1); const hl = Math.max(w * 4.2, 12 * ed.k);
+        const head = (x, y, a) => { c.beginPath(); c.moveTo(x, y); c.lineTo(x - hl * Math.cos(a - 0.42), y - hl * Math.sin(a - 0.42)); c.lineTo(x - hl * Math.cos(a + 0.42), y - hl * Math.sin(a + 0.42)); c.closePath(); c.fill(); };
+        c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+        if (it.t === 'arrow') head(x2, y2, ang);
+        if (it.t === 'dim') {
+          head(x2, y2, ang); head(x1, y1, ang + Math.PI);
+          const lab = it.label || dimLabel(Math.hypot(x2 - x1, y2 - y1)); if (lab) {
+            const fs = 13 * ed.k; c.font = `600 ${fs}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; const tw = c.measureText(lab).width;
+            c.translate((x1 + x2) / 2, (y1 + y2) / 2); let a = ang; if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI; c.rotate(a);
+            c.fillStyle = 'rgba(255,255,255,.92)'; c.fillRect(-tw / 2 - 4 * ed.k, -fs - 6 * ed.k, tw + 8 * ed.k, fs + 6 * ed.k); c.fillStyle = it.color || '#ff3b30'; c.textAlign = 'center'; c.textBaseline = 'bottom'; c.fillText(lab, 0, -4 * ed.k);
+          }
+        }
+      } else if (it.t === 'rect') {
+        const x = Math.min(it.a[0], it.b[0]), y = Math.min(it.a[1], it.b[1]); c.strokeRect(x, y, Math.abs(it.b[0] - it.a[0]), Math.abs(it.b[1] - it.a[1]));
+      } else if (it.t === 'oval') {
+        c.beginPath(); c.ellipse((it.a[0] + it.b[0]) / 2, (it.a[1] + it.b[1]) / 2, Math.max(0.5, Math.abs(it.b[0] - it.a[0]) / 2), Math.max(0.5, Math.abs(it.b[1] - it.a[1]) / 2), 0, 0, Math.PI * 2); c.stroke();
+      } else if (it.t === 'hide') {
+        const img = bgImg(); const x = Math.round(Math.min(it.a[0], it.b[0])), y = Math.round(Math.min(it.a[1], it.b[1])), ww = Math.round(Math.abs(it.b[0] - it.a[0])), hh = Math.round(Math.abs(it.b[1] - it.a[1]));
+        if (ww > 1 && hh > 1) {
+          if (img) { const blk = Math.max(6, Math.round(9 * ed.k)); const sm = document.createElement('canvas'); sm.width = Math.max(1, Math.ceil(ww / blk)); sm.height = Math.max(1, Math.ceil(hh / blk)); try { sm.getContext('2d').drawImage(img, x, y, ww, hh, 0, 0, sm.width, sm.height); } catch (e) { /* ignore */ } c.imageSmoothingEnabled = false; c.drawImage(sm, 0, 0, sm.width, sm.height, x, y, ww, hh); }
+          c.fillStyle = 'rgba(60,60,67,.55)'; c.fillRect(x, y, ww, hh);
+        }
+      } else if (it.t === 'pin') {
+        const r = pinR(); const fill = it.color === '#ffffff' ? '#1c1c1e' : (it.color || '#ff3b30');
+        c.shadowColor = 'rgba(0,0,0,.3)'; c.shadowBlur = 4 * ed.k * devScale();
+        c.beginPath(); c.arc(it.x, it.y, r, 0, Math.PI * 2); c.fillStyle = fill; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(1.5, r / 6); c.strokeStyle = '#fff'; c.stroke();
+        c.fillStyle = light(fill) ? '#1c1c1e' : '#fff'; c.font = `700 ${Math.round(r * 1.15)}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(it.n || ''), it.x, it.y + r * 0.05);
+      } else if (it.t === 'text') {
+        const s = it.size || 18 * ed.k; c.font = `600 ${s}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; c.textBaseline = 'alphabetic'; c.direction = /[؀-ۿ]/.test(it.s || '') ? 'rtl' : 'ltr'; c.textAlign = 'left';
+        String(it.s || '').split('\n').forEach((ln, i) => { const xx = c.direction === 'rtl' ? it.x + measureText(it) : it.x; c.textAlign = c.direction === 'rtl' ? 'right' : 'left'; c.fillText(ln, xx, it.y + i * s * 1.25); });
+      }
+      c.restore();
+    }
+    function light(h) { const n = parseInt(String(h || '#000').replace('#', '').slice(0, 6), 16); if (isNaN(n)) return false; return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) > 170; }
+    function dimLabel(len) {
+      if (!ed.scaleRatio) return '';
+      /* world units are points at zoom 1 (or picture pixels): 1 pt = 0.3528 mm on paper; times the drawing scale */
+      const mm = len / ed.k * 0.3528 * ed.scaleRatio; return ed.scaleUnit === 'cm' ? (mm / 10).toFixed(1) + ' cm' : (mm / 1000).toFixed(2) + ' m';
+    }
+    ed.dimLabel = dimLabel;
+
+    /* ---------- paper ---------- */
+    function drawPaper(c) {
+      if (bounded || ed.paper === 'plain') return;
+      const step = 24; const z = ed.view.z; let s = step * z; while (s < 10) s *= 2; while (s > 80) s /= 2;
+      const ox = ((ed.view.x % s) + s) % s, oy = ((ed.view.y % s) + s) % s; c.save();
+      if (ed.paper === 'dots') { c.fillStyle = 'rgba(120,120,128,.35)'; for (let x = ox; x < W; x += s) for (let y = oy; y < H; y += s) { c.beginPath(); c.arc(x, y, 1.1, 0, Math.PI * 2); c.fill(); } }
+      if (ed.paper === 'grid') { c.strokeStyle = 'rgba(120,120,128,.18)'; c.lineWidth = 1; c.beginPath(); for (let x = ox; x < W; x += s) { c.moveTo(x, 0); c.lineTo(x, H); } for (let y = oy; y < H; y += s) { c.moveTo(0, y); c.lineTo(W, y); } c.stroke(); }
+      if (ed.paper === 'iso') { c.strokeStyle = 'rgba(120,120,128,.2)'; c.lineWidth = 1; const t = Math.tan(Math.PI / 6); c.beginPath(); for (let x = ox - H / t; x < W + H / t; x += s * 2 / Math.sqrt(3) * 1.0) { c.moveTo(x, 0); c.lineTo(x + H / t, H); c.moveTo(x, 0); c.lineTo(x - H / t, H); } for (let x = ox; x < W; x += s) { c.moveTo(x, 0); c.lineTo(x, H); } c.stroke(); }
+      c.restore();
+    }
+
+    /* ---------- render ---------- */
+    function render() {
+      resize(); const d = DPR(); numberPins();
+      bx.setTransform(1, 0, 0, 1, 0, 0); bx.clearRect(0, 0, base.width, base.height);
+      bx.setTransform(d, 0, 0, d, 0, 0); drawPaper(bx);
+      if (bounded) { bx.save(); bx.setTransform(d * ed.view.z, 0, 0, d * ed.view.z, d * ed.view.x, d * ed.view.y); bx.fillStyle = '#fff'; bx.shadowColor = 'rgba(0,0,0,.35)'; bx.shadowBlur = 18; bx.fillRect(0, 0, opts.width, opts.height); bx.restore(); }
+      const la = tmpA.getContext('2d');
+      ed.layers.forEach(l => {
+        if (!l.visible) return;
+        la.setTransform(1, 0, 0, 1, 0, 0); la.clearRect(0, 0, tmpA.width, tmpA.height);
+        la.setTransform(d * ed.view.z, 0, 0, d * ed.view.z, d * ed.view.x, d * ed.view.y);
+        if (bounded) { la.save(); la.beginPath(); la.rect(0, 0, opts.width, opts.height); la.clip(); }
+        if (l.kind === 'image' && l.img) { la.imageSmoothingEnabled = true; la.drawImage(l.img, 0, 0); }
+        drawLayerItems(la, l);
+        if (bounded) la.restore();
+        bx.save(); bx.setTransform(1, 0, 0, 1, 0, 0); bx.globalAlpha = l.opacity == null ? 1 : l.opacity; bx.drawImage(tmpA, 0, 0); bx.restore();
+      });
+      renderLive();
+    }
+    function renderLive() {
+      const d = DPR(); lx.setTransform(1, 0, 0, 1, 0, 0); lx.clearRect(0, 0, live.width, live.height);
+      lx.setTransform(d * ed.view.z, 0, 0, d * ed.view.z, d * ed.view.x, d * ed.view.y);
+      if (G.cur) {
+        if (bounded) { lx.save(); lx.beginPath(); lx.rect(0, 0, opts.width, opts.height); lx.clip(); }
+        const br = G.cur.t === 'stroke' ? BRUSHES[G.cur.brush] : null;
+        if (br && br.erase) { lx.save(); lx.strokeStyle = 'rgba(255,255,255,.75)'; lx.fillStyle = 'rgba(255,255,255,.75)'; strokePath(lx, G.cur); lx.restore(); }
+        else drawItem(lx, G.cur, act());
+        if (bounded) lx.restore();
+      }
+      if (G.lasso && G.lasso.length > 1) { lx.save(); lx.setLineDash([6 / ed.view.z, 5 / ed.view.z]); lx.lineWidth = 1.5 / ed.view.z; lx.strokeStyle = '#0a84ff'; lx.beginPath(); lx.moveTo(G.lasso[0][0], G.lasso[0][1]); G.lasso.forEach(p => lx.lineTo(p[0], p[1])); lx.stroke(); lx.restore(); }
+      const sb = selBox(); if (sb) {
+        lx.save(); lx.lineWidth = 1.5 / ed.view.z; lx.strokeStyle = '#0a84ff'; lx.setLineDash([5 / ed.view.z, 4 / ed.view.z]); lx.strokeRect(sb.x, sb.y, sb.w, sb.h); lx.setLineDash([]);
+        const hs = 9 / ed.view.z; lx.fillStyle = '#fff'; lx.fillRect(sb.x + sb.w - hs / 2, sb.y + sb.h - hs / 2, hs, hs); lx.strokeRect(sb.x + sb.w - hs / 2, sb.y + sb.h - hs / 2, hs, hs); lx.restore();
+      }
+      if (G.eraserAt) { const r = (BRUSHES.eraser.w * ed.k * ed.size) / 2; lx.save(); lx.lineWidth = 1 / ed.view.z; lx.strokeStyle = 'rgba(0,0,0,.5)'; lx.beginPath(); lx.arc(G.eraserAt[0], G.eraserAt[1], r, 0, Math.PI * 2); lx.stroke(); lx.restore(); }
+    }
+    /* numbered pins and text stay on top of their layer: an eraser stroke never rubs them out */
+    function drawLayerItems(c, l) { l.items.forEach(it => { if (it.t !== 'pin' && it.t !== 'text') drawItem(c, it, l); }); l.items.forEach(it => { if (it.t === 'pin' || it.t === 'text') drawItem(c, it, l); }); }
+    ed.render = render;
+
+    /* ---------- selection ---------- */
+    function selItems() { const l = act(); return l ? l.items.filter(it => ed.sel.includes(it.id)) : []; }
+    function selBox() { const xs = selItems(); if (!xs.length) return null; return xs.map(bboxOf).reduce((a, b) => uni(a, b), null); }
+    ed.selection = () => selItems();
+    ed.clearSelection = () => { ed.sel = []; renderLive(); if (opts.onSelect) opts.onSelect(ed, []); };
+    ed.deleteSelection = () => { const l = act(); if (!l || !ed.sel.length) return; const b = snap(); l.items = l.items.filter(it => !ed.sel.includes(it.id)); ed.sel = []; commit(b); if (opts.onSelect) opts.onSelect(ed, []); };
+    ed.recolorSelection = c => { const l = act(); if (!l || !ed.sel.length) return; const b = snap(); l.items = l.items.map(it => ed.sel.includes(it.id) && it.t !== 'hide' ? Object.assign({}, it, { color: c }) : it); commit(b); };
+    ed.moveSelectionTo = lid => { const from = act(), to = layerOf(lid); if (!from || !to || from === to || to.kind === 'image') return; const b = snap(); const xs = selItems(); from.items = from.items.filter(it => !ed.sel.includes(it.id)); to.items = to.items.concat(xs); ed.active = to.id; commit(b); };
+    ed.duplicateSelection = () => { const l = act(); if (!l || !ed.sel.length) return; const b = snap(); const d = 16 * ed.k; const xs = selItems().map(it => Object.assign(moved(it, d, d), { id: uidx() })); l.items = l.items.concat(xs); ed.sel = xs.map(x => x.id); commit(b); };
+
+    /* ---------- layers API ---------- */
+    ed.addLayer = (name, kind) => { const b = snap(); const l = mkLayer(name || (L('طبقة', 'Layer') + ' ' + (ed.layers.filter(x => x.kind !== 'image').length + 1)), kind || 'ink'); const i = ed.layers.findIndex(x => x.id === ed.active); ed.layers.splice(i + 1, 0, l); ed.active = l.id; commit(b); return l; };
+    ed.setActive = id => { if (layerOf(id) && layerOf(id).kind !== 'image') { ed.active = id; ed.sel = []; changed(); } };
+    ed.toggleLayer = id => { const l = layerOf(id); if (!l) return; const b = snap(); l.visible = !l.visible; commit(b); };
+    ed.lockLayer = id => { const l = layerOf(id); if (!l || l.kind === 'image' && !l.img) return; const b = snap(); l.locked = !l.locked; commit(b); };
+    ed.setLayerOpacity = (id, v, live) => { const l = layerOf(id); if (!l) return; if (live) { if (l._op0 == null) l._op0 = l.opacity; l.opacity = v; render(); return; } if (l._op0 != null) { l.opacity = l._op0; delete l._op0; } const b = snap(); l.opacity = v; commit(b); };
+    ed.clearAll = () => { if (!ed.layers.some(l => l.kind !== 'image' && l.items.length)) return; const b = snap(); ed.layers.forEach(l => { if (l.kind !== 'image') l.items = []; }); ed.sel = []; commit(b); };
+    ed.renameLayer = (id, n) => { const l = layerOf(id); if (!l || !n) return; const b = snap(); l.name = String(n).slice(0, 40); commit(b); };
+    ed.moveLayer = (id, dir) => { const i = ed.layers.findIndex(x => x.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= ed.layers.length) return; const b = snap(); const [l] = ed.layers.splice(i, 1); ed.layers.splice(j, 0, l); commit(b); };
+    ed.removeLayer = id => { const l = layerOf(id); if (!l || ed.layers.filter(x => x.kind !== 'image').length < 2 && l.kind !== 'image') return; const b = snap(); ed.layers = ed.layers.filter(x => x.id !== id); if (ed.active === id) ed.active = (ed.layers.filter(x => x.kind !== 'image').slice(-1)[0] || {}).id; commit(b); };
+    ed.mergeDown = id => { const i = ed.layers.findIndex(x => x.id === id); const lo = ed.layers[i - 1]; if (i < 1 || !lo || lo.kind === 'image') return; const b = snap(); lo.items = lo.items.concat(ed.layers[i].items); ed.layers.splice(i, 1); ed.active = lo.id; commit(b); };
+    ed.duplicateLayer = id => { const l = layerOf(id); if (!l || l.kind === 'image') return; const b = snap(); const c = mkLayer(l.name + ' ' + L('نسخة', 'copy'), l.kind, { opacity: l.opacity }); c.items = l.items.map(it => Object.assign({}, it, { id: uidx() })); const i = ed.layers.indexOf(l); ed.layers.splice(i + 1, 0, c); ed.active = c.id; commit(b); };
+    ed.ensureLayer = (kind, name) => { let l = ed.layers.find(x => x.kind === kind); if (!l) { l = mkLayer(name, kind); if (kind === 'hide') { const i = ed.layers.map(x => x.kind).lastIndexOf('image'); ed.layers.splice(i + 1, 0, l); } else ed.layers.push(l); render(); } return l; };
+    /* pins are numbered in layer order, bottom to top: ① ② ③ */
+    function numberPins() { let n = 0; const out = []; ed.layers.forEach(l => l.items.forEach(it => { if (it.t === 'pin') { it.n = ++n; out.push(it); } })); return out; }
+    ed.pins = numberPins;
+    ed.items = () => numberPins() && ed.layers.flatMap(l => l.items.map(it => Object.assign({ layer: l.name, lkind: l.kind }, it)));
+    ed.clearLayer = id => { const l = layerOf(id || ed.active); if (!l || !l.items.length) return; const b = snap(); l.items = []; ed.sel = []; commit(b); };
+    ed.setTool = t => { ed.tool = t; if (t !== 'select' && t !== 'lasso' && ed.sel.length) { ed.sel = []; if (opts.onSelect) opts.onSelect(ed, []); } G.eraserAt = null; renderLive(); };
+    ed.setColor = c => { ed.color = c; if (ed.sel.length) ed.recolorSelection(c); };
+    ed.addItem = (it, layerId) => { const l = layerOf(layerId || ed.active); if (!l) return; const b = snap(); l.items = l.items.concat([Object.assign({ id: uidx() }, it)]); commit(b); };
+    ed.updateItem = (id, patch) => { for (const l of ed.layers) { const i = l.items.findIndex(x => x.id === id); if (i >= 0) { const b = snap(); l.items = l.items.slice(); l.items[i] = Object.assign({}, l.items[i], patch); commit(b); return; } } };
+
+    /* ---------- input ---------- */
+    const G = { target: '', snapAngle: false, ptrs: new Map(), cur: null, mode: '', start: null, pinch: null, lasso: null, drag: null, hold: 0, lastMove: 0, still: null, eraserAt: null, space: false };
+    const pos = e => { const r = base.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const pressOf = e => e.pointerType === 'pen' ? clamp(e.pressure || 0.5, 0.05, 1) : null;
+    const fingerDraws = () => ed.fingerDraws === true || (ed.fingerDraws === 'auto' && !ed.penSeen);
+    const lockedActive = () => { const l = act(); return !l || l.locked || !l.visible; };
+    function begin(e, p) {
+      const w = toWorld(p[0], p[1]); const t = ed.tool; const l = act();
+      if (t === 'pan') { G.mode = 'pan'; G.start = { p, v: Object.assign({}, ed.view) }; return; }
+      if (t === 'select' || t === 'lasso') {
+        const sb = selBox(); const hs = 14 / ed.view.z;
+        if (sb && Math.abs(w[0] - (sb.x + sb.w)) < hs && Math.abs(w[1] - (sb.y + sb.h)) < hs) { G.mode = 'scale'; G.drag = { o: [sb.x, sb.y], d0: Math.hypot(sb.w, sb.h), b: snap(), items: selItems() }; return; }
+        if (sb && w[0] >= sb.x && w[0] <= sb.x + sb.w && w[1] >= sb.y && w[1] <= sb.y + sb.h) { G.mode = 'move'; G.drag = { w0: w, b: snap(), items: selItems() }; return; }
+        const tol = 8 / ed.view.z; let hitIt = l && !l.locked && l.visible && l.items.slice().reverse().find(it => hit(it, w, tol));
+        /* a tap on something in another layer picks that layer (the top one first) */
+        if (!hitIt) for (const ly of ed.layers.slice().reverse()) { if (ly === l || ly.kind === 'image' || !ly.visible || ly.locked) continue; const h2 = ly.items.slice().reverse().find(it => hit(it, w, tol)); if (h2) { ed.active = ly.id; hitIt = h2; break; } }
+        if (hitIt) { ed.sel = [hitIt.id]; G.mode = 'move'; G.drag = { w0: w, b: snap(), items: [hitIt] }; if (opts.onSelect) opts.onSelect(ed, ed.sel); renderLive(); return; }
+        ed.sel = []; G.mode = 'lasso'; G.lasso = [w]; if (opts.onSelect) opts.onSelect(ed, []); return;
+      }
+      if (t === 'hide') { const hl = ed.ensureLayer('hide', L('الإخفاء', 'Hidden')); G.target = hl.id; G.mode = 'shape'; G.cur = { id: uidx(), t, a: w, b: w }; return; }
+      inkLayer();
+      if (lockedActive()) { G.mode = 'none'; if (opts.onLocked) opts.onLocked(ed); return; }
+      if (t === 'pin') { ed.addItem({ t: 'pin', x: w[0], y: w[1], color: ed.color }); G.mode = 'none'; return; }
+      if (t === 'text') { G.mode = 'none'; if (opts.onTextRequest) opts.onTextRequest(ed, w, p); else textBox(w, p); return; }
+      if (t === 'erasestroke') { G.mode = 'erasestroke'; G.drag = { b: snap(), hitAny: false }; eraseAt(w); return; }
+      if (SHAPES.includes(t)) {
+        G.target = '';
+        G.mode = 'shape'; G.cur = { id: uidx(), t, a: w, b: w, color: ed.color, w: 3 * ed.k * ed.size }; return;
+      }
+      const br = BRUSHES[t] || BRUSHES.ink;
+      G.mode = 'stroke'; G.cur = { id: uidx(), t: 'stroke', brush: BRUSHES[t] ? t : 'ink', color: ed.color, alpha: ed.opacity, w: br.w * ed.k * ed.size, pts: [[w[0], w[1], pressOf(e)]] };
+      G.still = { p, at: performance.now() }; G.sm = w;
+    }
+    /* pens and shapes never land on the «hide» layer: back to the top drawing layer */
+    function inkLayer() { const a = act(); if (a && a.kind === 'hide') { const k = ed.layers.filter(x => x.kind === 'ink').slice(-1)[0]; if (k) ed.active = k.id; } }
+    function textBox(w, p) {
+      const old = host.querySelector('.nfd-txt'); if (old) old.blur();
+      const size = 18 * ed.k * ed.size; const ta = document.createElement('textarea'); ta.className = 'nfd-txt'; ta.rows = 1; ta.dir = 'auto';
+      ta.placeholder = L('اكتب هنا', 'Type here');
+      Object.assign(ta.style, { left: p[0] + 'px', top: p[1] + 'px', color: ed.color, fontSize: Math.max(12, size * ed.view.z) + 'px' });
+      host.appendChild(ta); setTimeout(() => ta.focus(), 0); let done = false;
+      const fin = keep => { if (done) return; done = true; const s = ta.value.trim(); ta.remove(); if (keep && s) ed.addItem({ t: 'text', x: w[0], y: w[1] + size * 0.9, s, size, color: ed.color }); };
+      ta.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fin(true); } if (e.key === 'Escape') { e.preventDefault(); fin(false); } });
+      ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
+      ta.addEventListener('blur', () => fin(true));
+    }
+    ed.textBox = textBox;
+    function eraseAt(w) {
+      const tol = (BRUSHES.eraser.w * ed.k * ed.size) / 2; const l = act(); if (!l) return; const n = l.items.length;
+      l.items = l.items.filter(it => it.t === 'stroke' && BRUSHES[it.brush] && BRUSHES[it.brush].erase ? true : !hit(it, w, tol));
+      if (l.items.length !== n) { G.drag.hitAny = true; render(); }
+    }
+    function moveTo(e, p) {
+      const w = toWorld(p[0], p[1]);
+      if (G.mode === 'pan') { ed.view.x = G.start.v.x + p[0] - G.start.p[0]; ed.view.y = G.start.v.y + p[1] - G.start.p[1]; render(); return; }
+      if (G.mode === 'stroke' && G.cur) {
+        let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null; if (!evs || !evs.length) evs = [e]; const r = base.getBoundingClientRect();
+        evs.forEach(ev => { const q = toWorld(ev.clientX - r.left, ev.clientY - r.top); const sm = 0.38; G.sm = [G.sm[0] + (q[0] - G.sm[0]) * (1 - sm), G.sm[1] + (q[1] - G.sm[1]) * (1 - sm)]; const last = G.cur.pts[G.cur.pts.length - 1]; if (Math.hypot(G.sm[0] - last[0], G.sm[1] - last[1]) * ed.view.z >= 0.8) G.cur.pts.push([G.sm[0], G.sm[1], pressOf(ev)]); });
+        if (BRUSHES[G.cur.brush] && BRUSHES[G.cur.brush].erase) G.eraserAt = w;
+        if (G.still && Math.hypot(p[0] - G.still.p[0], p[1] - G.still.p[1]) > 4) G.still = { p, at: performance.now() };
+        renderLive(); return;
+      }
+      if (G.mode === 'shape' && G.cur) {
+        let b = w; if (e.shiftKey || G.cur.t === 'line' || G.cur.t === 'dim') { const a = G.cur.a; if (e.shiftKey || G.snapAngle) { const ang = Math.atan2(b[1] - a[1], b[0] - a[0]); const st = Math.PI / 12; const sa = Math.round(ang / st) * st; const len = Math.hypot(b[0] - a[0], b[1] - a[1]); if (Math.abs(sa - ang) < 0.06 || e.shiftKey) b = [a[0] + Math.cos(sa) * len, a[1] + Math.sin(sa) * len]; } }
+        G.cur.b = b; renderLive(); return;
+      }
+      if (G.mode === 'erasestroke') { eraseAt(w); return; }
+      if (G.mode === 'lasso') { G.lasso.push(w); renderLive(); return; }
+      if (G.mode === 'move' && G.drag) {
+        const dx = w[0] - G.drag.w0[0], dy = w[1] - G.drag.w0[1]; const l = act(); const ids = G.drag.items.map(x => x.id);
+        l.items = l.items.map(it => { const o = G.drag.items.find(x => x.id === it.id); return o ? moved(o, dx, dy) : it; }); render(); return;
+      }
+      if (G.mode === 'scale' && G.drag) {
+        const d = Math.hypot(w[0] - G.drag.o[0], w[1] - G.drag.o[1]); const f = clamp(d / Math.max(1, G.drag.d0), 0.05, 40); const l = act();
+        l.items = l.items.map(it => { const o = G.drag.items.find(x => x.id === it.id); return o ? scaled(o, G.drag.o[0], G.drag.o[1], f) : it; }); render(); return;
+      }
+    }
+    function end() {
+      const m = G.mode; G.mode = '';
+      if (m === 'stroke' && G.cur) { const c = G.cur; G.cur = null; G.still = null; G.eraserAt = null; const l = act(); if (l && c.pts.length) { const b = snap(); l.items = l.items.concat([c]); commit(b); } else renderLive(); return; }
+      if (m === 'shape' && G.cur) { const c = G.cur; G.cur = null; const l = G.target ? layerOf(G.target) : act(); G.target = ''; G.snapAngle = false; if (l && Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) * ed.view.z > 4) { const b = snap(); l.items = l.items.concat([c]); commit(b); } else renderLive(); return; }
+      if (m === 'erasestroke' && G.drag) { const b = G.drag.b; const had = G.drag.hitAny; G.drag = null; if (had) commit(b); return; }
+      if (m === 'lasso' && G.lasso) {
+        const poly = G.lasso; G.lasso = null; const l = act();
+        if (l && poly.length > 2) { const inside = q => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > q[1]) !== (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / ((b[1] - a[1]) || 1e-9) + a[0]) c = !c; } return c; };
+          ed.sel = l.items.filter(it => { const pts = it.t === 'stroke' ? it.pts : it.t === 'pin' || it.t === 'text' ? [[it.x, it.y]] : [it.a, it.b]; const n = pts.filter(inside).length; return n > 0 && n >= pts.length * 0.5; }).map(it => it.id); }
+        if (opts.onSelect) opts.onSelect(ed, ed.sel); renderLive(); return;
+      }
+      if ((m === 'move' || m === 'scale') && G.drag) { const b = G.drag.b; G.drag = null; commit(b); return; }
+      if (m === 'pan') { viewed(); return; }
+      renderLive();
+    }
+    /* hold still at the end of a line → it becomes straight (and follows the pen from there) */
+    const holdTimer = setInterval(() => {
+      if (G.mode !== 'stroke' || !G.cur || !G.still || G.cur.straight) return;
+      if (performance.now() - G.still.at < 520 || G.cur.pts.length < 3) return;
+      const a = G.cur.pts[0], z = G.cur.pts[G.cur.pts.length - 1]; if (Math.hypot(z[0] - a[0], z[1] - a[1]) * ed.view.z < 24) return;
+      G.mode = 'shape'; G.target = ''; G.cur = { id: G.cur.id, t: 'line', a: [a[0], a[1]], b: [z[0], z[1]], color: G.cur.color, w: G.cur.w }; G.snapAngle = true; renderLive();
+    }, 90);
+
+    base.style.touchAction = live.style.touchAction = 'none';
+    live.addEventListener('pointerdown', e => {
+      e.preventDefault(); try { live.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      if (e.pointerType === 'pen') ed.penSeen = true;
+      const p = pos(e); G.ptrs.set(e.pointerId, { p, type: e.pointerType });
+      const touches = [...G.ptrs.values()].filter(x => x.type === 'touch');
+      if (touches.length >= 2) {
+        /* a second finger: drop the line the first finger just started and zoom / move instead */
+        if (G.mode === 'stroke' || G.mode === 'shape' || G.mode === 'lasso') { G.cur = null; G.lasso = null; }
+        if (G.mode === 'move' || G.mode === 'scale') { if (G.drag) restore(G.drag.b); G.drag = null; }
+        const [a, b] = touches; G.mode = 'pinch'; G.pinch = { d: Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]), c: [(a.p[0] + b.p[0]) / 2, (a.p[1] + b.p[1]) / 2], v: Object.assign({}, ed.view) }; renderLive(); return;
+      }
+      if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || G.space)) { G.mode = 'pan'; G.start = { p, v: Object.assign({}, ed.view) }; return; }
+      if (e.pointerType === 'touch' && !fingerDraws() && !['select', 'lasso'].includes(ed.tool)) { G.mode = 'pan'; G.start = { p, v: Object.assign({}, ed.view) }; return; }
+      begin(e, p);
+    });
+    live.addEventListener('pointermove', e => {
+      const p = pos(e); const g = G.ptrs.get(e.pointerId); if (g) g.p = p;
+      if (G.mode === 'pinch') {
+        const ts = [...G.ptrs.values()].filter(x => x.type === 'touch'); if (ts.length < 2) return; const [a, b] = ts;
+        const d = Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]); const c = [(a.p[0] + b.p[0]) / 2, (a.p[1] + b.p[1]) / 2];
+        const z = clamp(G.pinch.v.z * d / Math.max(1, G.pinch.d), fitZoom() * 0.5, opts.maxZoom);
+        const wx = (G.pinch.c[0] - G.pinch.v.x) / G.pinch.v.z, wy = (G.pinch.c[1] - G.pinch.v.y) / G.pinch.v.z;
+        ed.view = { z, x: c[0] - wx * z, y: c[1] - wy * z }; render(); viewed(); return;
+      }
+      if (!G.mode && ed.tool === 'eraser' && e.pointerType !== 'touch') { G.eraserAt = toWorld(p[0], p[1]); renderLive(); }
+      if (G.mode) moveTo(e, p);
+    });
+    const up = e => {
+      G.ptrs.delete(e.pointerId);
+      if (G.mode === 'pinch') { if (![...G.ptrs.values()].some(x => x.type === 'touch')) { G.mode = ''; viewed(); } return; }
+      end();
+    };
+    live.addEventListener('pointerup', up); live.addEventListener('pointercancel', up);
+    live.addEventListener('pointerleave', () => { if (!G.mode && G.eraserAt) { G.eraserAt = null; renderLive(); } });
+    live.addEventListener('contextmenu', e => e.preventDefault());
+    live.addEventListener('wheel', e => {
+      e.preventDefault(); const p = pos(e);
+      if (e.ctrlKey || e.metaKey) ed.zoomBy(Math.exp(-e.deltaY * 0.01), p[0], p[1]);
+      else if (e.deltaMode === 1 && !e.shiftKey) ed.zoomBy(Math.exp(-e.deltaY * 0.1), p[0], p[1]);
+      else { ed.view.x -= e.shiftKey ? e.deltaY : e.deltaX; ed.view.y -= e.shiftKey ? 0 : e.deltaY; render(); viewed(); }
+    }, { passive: false });
+    const kd = e => { if (e.code === 'Space' && !/input|textarea/i.test((e.target || {}).tagName || '')) { G.space = true; } };
+    const ku = e => { if (e.code === 'Space') G.space = false; };
+    window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { if (resize()) render(); }) : null; if (ro) ro.observe(host);
+
+    /* ---------- export / save ---------- */
+    ed.export = o => {
+      o = Object.assign({ scale: 1, background: true, maxW: 0, pad: 24 }, o || {});
+      const bb = bounded ? { x: 0, y: 0, w: opts.width, h: opts.height } : (contentBox() || { x: 0, y: 0, w: 400, h: 300 });
+      const pad = bounded ? 0 : o.pad; let sc = o.scale; if (o.maxW && (bb.w + pad * 2) * sc > o.maxW) sc = o.maxW / (bb.w + pad * 2);
+      const out = document.createElement('canvas'); out.width = Math.max(1, Math.round((bb.w + pad * 2) * sc)); out.height = Math.max(1, Math.round((bb.h + pad * 2) * sc));
+      const c = out.getContext('2d'); if (o.background) { c.fillStyle = o.bgColor || '#ffffff'; c.fillRect(0, 0, out.width, out.height); }
+      numberPins(); const keepV = ed.view; exporting = true; ed.view = { z: sc, x: (pad - bb.x) * sc, y: (pad - bb.y) * sc };
+      const lc = document.createElement('canvas'); lc.width = out.width; lc.height = out.height; const lcx = lc.getContext('2d');
+      const tb = { w: tmpB.width, h: tmpB.height }; tmpB.width = out.width; tmpB.height = out.height;
+      ed.layers.forEach(l => {
+        if (!l.visible) return; lcx.setTransform(1, 0, 0, 1, 0, 0); lcx.clearRect(0, 0, lc.width, lc.height); lcx.setTransform(sc, 0, 0, sc, (pad - bb.x) * sc, (pad - bb.y) * sc);
+        if (l.kind === 'image' && l.img) lcx.drawImage(l.img, 0, 0);
+        drawLayerItems(lcx, l);
+        c.globalAlpha = l.opacity == null ? 1 : l.opacity; c.drawImage(lc, 0, 0); c.globalAlpha = 1;
+      });
+      exporting = false; tmpB.width = tb.w; tmpB.height = tb.h; ed.view = keepV; render();
+      return out;
+    };
+    ed.toJSON = () => ({ v: 1, w: opts.width || 0, h: opts.height || 0, k: ed.k, paper: ed.paper, scale: ed.scaleRatio || 0, unit: ed.scaleUnit, active: ed.active, layers: ed.layers.map(l => ({ id: l.id, name: l.name, kind: l.kind, visible: l.visible, locked: l.locked, opacity: l.opacity, src: l.src || null, items: l.items.map(it => { const o = Object.assign({}, it); if (o.pts) o.pts = o.pts.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10, p[2] == null ? null : Math.round(p[2] * 100) / 100]); return o; }) })) });
+    ed.load = (j, images) => {
+      if (!j || !Array.isArray(j.layers)) return;
+      ed.k = j.k || ed.k; ed.paper = j.paper || ed.paper; ed.scaleRatio = j.scale || 0; ed.scaleUnit = j.unit || 'm';
+      ed.layers = j.layers.map(l => Object.assign(mkLayer(l.name, l.kind), l, { items: (l.items || []).slice(), img: l.kind === 'image' ? ((images || {})[l.id] || null) : undefined }));
+      ed.active = layerOf(j.active) && layerOf(j.active).kind !== 'image' ? j.active : ((ed.layers.filter(x => x.kind !== 'image').slice(-1)[0]) || {}).id;
+      if (!ed.active) { ed.layers.push(mkLayer(L('الرسم', 'Drawing'))); ed.active = ed.layers[ed.layers.length - 1].id; }
+      undo.length = 0; redo.length = 0; render();
+    };
+    ed.addImageLayer = (img, name, src) => { const b = snap(); const l = mkLayer(name || L('صورة', 'Picture'), 'image', { img, locked: true, src: src || null, opacity: 1 }); const i = ed.layers.findIndex(x => x.id === ed.active); ed.layers.splice(Math.max(0, i), 0, l); commit(b); return l; };
+    ed.setPaper = p => { ed.paper = p; render(); };
+    ed.destroy = () => { clearInterval(holdTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); if (ro) ro.disconnect(); host.innerHTML = ''; };
+    ed.bounded = bounded; ed.opts = opts; ed.hostEl = host; ed.toWorld = toWorld; ed.toScreen = toScreen;
+    resize(); setTimeout(() => ed.fit(), 0);
+    return ed;
+  }
+
+  /* ---------- colour picker: hue ring + shade square + swatches + recent ---------- */
+  const SWATCHES = ['#1c1c1e', '#636366', '#aeaeb2', '#ffffff', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#0a84ff', '#5e5ce6', '#af52de', '#ff2d55', '#a2845e', '#8e6b4f', '#2c3e50'];
+  const hex2hsv = h => { const n = parseInt(h.replace('#', ''), 16); const r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let hh = 0; if (d) { hh = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; hh *= 60; if (hh < 0) hh += 360; } return [hh, mx ? d / mx : 0, mx]; };
+  const hsv2hex = (h, s, v) => { const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return '#' + [f(5), f(3), f(1)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); };
+  function colorPicker(box, value, onChange) {
+    let hsv = hex2hsv(value || '#ff3b30'); const recent = (() => { try { return JSON.parse(localStorage.getItem('nf.draw.recent') || '[]'); } catch (e) { return []; } })();
+    box.innerHTML = `<div class="nfc-pk"><canvas class="nfc-ring" width="220" height="220"></canvas><div class="nfc-sw">${SWATCHES.map(c => `<button type="button" style="--c:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')}</div>${recent.length ? `<div class="nfc-rc"><small>${esc(L('آخر ألوان', 'Recent'))}</small>${recent.map(c => `<button type="button" style="--c:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')}</div>` : ''}</div>`;
+    const cv = box.querySelector('.nfc-ring'); const c = cv.getContext('2d'); const R = 110, r0 = 88, sq = 112;
+    function draw() {
+      c.clearRect(0, 0, 220, 220);
+      for (let a = 0; a < 360; a += 1) { c.beginPath(); c.strokeStyle = `hsl(${a},100%,50%)`; c.lineWidth = R - r0; c.arc(110, 110, (R + r0) / 2, (a - 1) * Math.PI / 180, (a + 1) * Math.PI / 180); c.stroke(); }
+      const x0 = 110 - sq / 2, y0 = 110 - sq / 2; const g1 = c.createLinearGradient(x0, 0, x0 + sq, 0); g1.addColorStop(0, '#fff'); g1.addColorStop(1, `hsl(${hsv[0]},100%,50%)`); c.fillStyle = g1; c.fillRect(x0, y0, sq, sq);
+      const g2 = c.createLinearGradient(0, y0, 0, y0 + sq); g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(1, '#000'); c.fillStyle = g2; c.fillRect(x0, y0, sq, sq);
+      const ha = hsv[0] * Math.PI / 180; c.lineWidth = 3; c.strokeStyle = '#fff'; c.beginPath(); c.arc(110 + Math.cos(ha) * (R + r0) / 2, 110 + Math.sin(ha) * (R + r0) / 2, 9, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.arc(x0 + hsv[1] * sq, y0 + (1 - hsv[2]) * sq, 7, 0, Math.PI * 2); c.strokeStyle = hsv[2] > 0.5 ? '#000' : '#fff'; c.stroke();
+    }
+    draw(); let mode = '';
+    const pick = e => {
+      const rc = cv.getBoundingClientRect(); const x = (e.clientX - rc.left) * 220 / rc.width, y = (e.clientY - rc.top) * 220 / rc.height; const d = Math.hypot(x - 110, y - 110);
+      if (!mode) mode = d > r0 - 4 ? 'ring' : 'sq';
+      if (mode === 'ring') { hsv[0] = (Math.atan2(y - 110, x - 110) * 180 / Math.PI + 360) % 360; } else { hsv[1] = clamp((x - (110 - sq / 2)) / sq, 0, 1); hsv[2] = clamp(1 - (y - (110 - sq / 2)) / sq, 0, 1); }
+      draw(); onChange(hsv2hex(hsv[0], hsv[1], hsv[2]), false);
+    };
+    cv.style.touchAction = 'none';
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); mode = ''; try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ } pick(e); });
+    cv.addEventListener('pointermove', e => { if (e.buttons || e.pressure) pick(e); });
+    cv.addEventListener('pointerup', () => { mode = ''; const h = hsv2hex(hsv[0], hsv[1], hsv[2]); remember(h); onChange(h, true); });
+    box.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => { hsv = hex2hsv(b.dataset.c); draw(); remember(b.dataset.c); onChange(b.dataset.c, true); }));
+    function remember(h) { try { const r = JSON.parse(localStorage.getItem('nf.draw.recent') || '[]').filter(x => x !== h); r.unshift(h); localStorage.setItem('nf.draw.recent', JSON.stringify(r.slice(0, 8))); } catch (e) { /* ignore */ } }
+  }
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nfd-host{position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+    .nfd-host canvas{position:absolute;inset:0;display:block}
+    .nfd-host .nfd-live{cursor:crosshair}
+    .nfd-host .nfd-txt{position:absolute;z-index:3;min-width:120px;max-width:70%;padding:2px 4px;border:1.5px dashed #0a84ff;border-radius:6px;background:rgba(255,255,255,.85);font-weight:600;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.25;resize:none;outline:none;overflow:hidden}
+    .nfc-pk{display:flex;flex-direction:column;align-items:center;gap:10px;padding:6px}
+    .nfc-ring{width:200px;height:200px;touch-action:none;cursor:pointer}
+    .nfc-sw,.nfc-rc{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;max-width:240px}
+    .nfc-sw button,.nfc-rc button{width:26px;height:26px;border-radius:50%;border:2px solid rgba(127,127,127,.35);background:var(--c);padding:0;cursor:pointer}
+    .nfc-rc small{width:100%;text-align:center;font-size:11px;opacity:.7}
+  </style>`);
+  window.NFDraw = { create, BRUSHES, colorPicker, hex2hsv, hsv2hex, SWATCHES };
+})();
+/* =====================================================================
    v7.37 - «Screenshot» in the «+» (Mahmoud, 11 Oct: «a print-screen in the plus, with the sketch tools showing in full, so when I
    open something I take a screenshot and put it straight into the task that is there»; brief claude/screenshot-sketch-brief.md).
    · a fifth circle in the «+»: «Screenshot» - it shows wherever the «+» already shows, for everybody who can write;
@@ -42715,6 +43235,9 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
      chat path, so the task's people are notified as for any message; in the chat the picture opens full size and
      «taken on: <page>» opens that page.
    Works the same in the three systems, Arabic and English, phone and desktop.
+   v7.38 - the sketch tools are the shared drawing engine NFDraw (part 99zzZzZZzcd-draw.js, also behind «Concept Drawing» in
+   Ninety Studioz): layers (the picture locked at the bottom, «Hidden», «Drawing», add more), pen / marker / highlighter / eraser
+   that follow pen pressure, line / arrow / box / circle, numbers, text, hide, a colour wheel, two-finger zoom, select / move / delete.
    ===================================================================== */
 (function () {
   if (window.__NF_SNAP__) return; window.__NF_SNAP__ = 1;
@@ -42724,9 +43247,9 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
   if (typeof VENDORS === 'object' && VENDORS) VENDORS.snap = { ok: () => !!(window.modernScreenshot && window.modernScreenshot.domToCanvas), src: ['vendor/modern-screenshot.js'] };
 
-  const COLORS = ['#ff3b30', '#ffcc00', '#ffffff'];
+  const COLORS = ['#ff3b30', '#ffcc00', '#ffffff', '#1c1c1e'];
   const PIN = n => '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'.charAt(n - 1) || `(${n})`;
-  const E = { img: null, shapes: [], cur: null, tool: 'pen', color: COLORS[0], size: 1, from: '', page: '', step: 'draw', task: '', q: '', busy: false };
+  const E = { img: null, ed: null, notes: {}, pop: '', tool: 'ink', color: COLORS[0], size: 1, from: '', page: '', step: 'draw', task: '', q: '', note: '', busy: false };
   const canWrite = () => !!(S && S.session) && (typeof writable !== 'function' || writable()) && typeof taskPost === 'function';
   const pageTitle = () => { const h = document.querySelector('.topbar h1, .topbar .title, #pageTitle, header h1'); return ((h && h.textContent) || document.title || '').replace(/\s+/g, ' ').trim().slice(0, 80); };
   const curTaskId = () => (S.route && S.route.view === 'tasks' && S.route.id && byId('tasks', S.route.id)) ? S.route.id : '';
@@ -42752,6 +43275,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   /* ---------- 1) take the picture of what is on the screen ---------- */
   async function capture() {
     await vendorLoad('snap');
+    if (!window.NFDraw) throw new Error('no drawing engine');
     const ms = window.modernScreenshot;
     const W = document.documentElement.clientWidth || innerWidth, H = innerHeight, sx = scrollX || 0, sy = scrollY || 0;
     /* the page scroll is redone by moving the body up (margin, not transform): fixed bars stay where they are and sticky bars stick by themselves */
@@ -42785,7 +43309,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       E.from = location.hash || '#/'; E.page = pageTitle(); E.order = (S.route && S.route.view === 'orders' && S.route.id) || '';
       const cv = await capture();
       if (!cv || !cv.width) throw new Error('empty');
-      E.k = cv.width / (document.documentElement.clientWidth || innerWidth); E.img = cv; E.shapes = []; E.cur = null; E.step = 'draw'; E.task = curTaskId(); E.q = '';
+      E.k = cv.width / (document.documentElement.clientWidth || innerWidth); E.img = cv; E.notes = {}; E.note = ''; E.pop = ''; E.step = 'draw'; E.task = curTaskId(); E.q = '';
       openEditor();
     } catch (e) {
       console.warn('snap', e);
@@ -42793,99 +43317,120 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     } finally { E.busy = false; document.documentElement.classList.remove('nfsnap-taking'); }
   }
 
-  /* ---------- 2) the sketch tools ---------- */
+  /* ---------- 2) the sketch tools - v7.38: on the shared drawing engine (NFDraw): layers «Picture» (locked, at the bottom) +
+     «Hidden» + «Drawing» (and more), brushes that follow pen pressure, colour wheel, two-finger zoom, select / move / delete ---------- */
   const G = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const IC = {
+    select: G('<path d="M6.5 4.5l11 6.4-5 1.4-2.6 4.9z"/><path d="M13.5 13.5l4 4"/>'),
+    ink: G('<path d="M4 20l4.2-1 10.4-10.4a2 2 0 0 0-2.8-2.8L5.4 16.2z"/><path d="M14.4 7.2l2.8 2.8"/>'),
+    marker: G('<path d="M6.5 17.5L5 20h4.5l1.2-1.2"/><path d="M8 16l8.4-9.6a2.1 2.1 0 0 1 3.1 2.8L11.2 19z"/>'),
+    highlighter: G('<path d="M4 20.5h8"/><path d="M8.6 16.4l-2-2 8.8-8.8a1.4 1.4 0 0 1 2 0l2 2a1.4 1.4 0 0 1 0 2z"/><path d="M6.6 14.4L5 18l3.6-1.6"/>'),
+    eraser: G('<path d="M9 19.5h11"/><path d="M5.4 14.8l8.7-8.7a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8l-7.6 7.6a2.4 2.4 0 0 1-1.7.7H9.4a2.4 2.4 0 0 1-1.7-.7l-2.3-2.3a1.2 1.2 0 0 1 0-1.6z"/><path d="M9.6 10.6l4.8 4.8"/>'),
+    arrow: G('<path d="M5 19L19 5M10 5h9v9"/>'),
+    line: G('<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.2"/><circle cx="19" cy="5" r="1.2"/>'),
+    rect: G('<rect x="4.5" y="6" width="15" height="12" rx="1.5"/>'),
+    oval: G('<ellipse cx="12" cy="12" rx="8" ry="6.5"/>'),
+    pin: G('<circle cx="12" cy="12" r="8"/><path d="M11 9.2l1.6-1v8"/>'),
+    text: G('<path d="M6 7V5.2h12V7M12 5.2v13.6M9.5 18.8h5"/>'),
+    hide: G('<rect x="4" y="7" width="16" height="10" rx="1.5"/><path d="M4 12l5-5M9 17l11-10M14 17l6-6"/>'),
+    undo: G('<path d="M9 7L4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/>'),
+    redo: G('<path d="M15 7l4.5 4.5L15 16"/><path d="M19 11.5h-9a5 5 0 0 0 0 10h2"/>'),
+    layers: G('<path d="M12 4l8.5 4.5L12 13 3.5 8.5z"/><path d="M3.5 12.5L12 17l8.5-4.5"/><path d="M3.5 16.5L12 21l8.5-4.5"/>'),
+    trash: G('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>'),
+    copy: G('<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+    eye: G('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),
+    eyeoff: G('<path d="M3.5 3.5l17 17"/><path d="M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.7M6.6 6.6C3.9 8.4 2.5 12 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.2-1"/>'),
+    lock: G('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+    plus: G('<path d="M12 5v14M5 12h14"/>'),
+    minus: G('<path d="M5 12h14"/>'),
+    fit: G('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
+    broom: G('<path d="M14.5 4.5l5 5M12 7l5 5-5.5 5.5c-1.8 1.8-5.2 2.6-7.5 2.5-.1-2.3.7-5.7 2.5-7.5z"/><path d="M8 14l2 2"/>')
+  };
   const TOOLS = () => [
-    ['pen', L('قلم', 'Pen'), G('<path d="M4 20l4.2-1 10.4-10.4a2 2 0 0 0-2.8-2.8L5.4 16.2z"/><path d="M14.4 7.2l2.8 2.8"/>')],
-    ['arrow', L('سهم', 'Arrow'), G('<path d="M5 19L19 5M10 5h9v9"/>')],
-    ['box', L('مربع', 'Box'), G('<rect x="4.5" y="6" width="15" height="12" rx="1.5"/>')],
-    ['oval', L('دايرة', 'Circle'), G('<ellipse cx="12" cy="12" rx="8" ry="6.5"/>')],
-    ['pin', L('رقم', 'Number'), G('<circle cx="12" cy="12" r="8"/><path d="M11 9.2l1.6-1v8"/>')],
-    ['hide', L('إخفاء', 'Hide'), G('<rect x="4" y="7" width="16" height="10" rx="1.5"/><path d="M4 12l5-5M9 17l11-10M14 17l6-6"/>')]
+    ['select', L('تحديد', 'Select')], ['ink', L('قلم', 'Pen')], ['marker', L('ماركر', 'Marker')], ['highlighter', L('هايلايتر', 'Highlighter')], ['eraser', L('أستيكة', 'Eraser')],
+    ['arrow', L('سهم', 'Arrow')], ['line', L('خط', 'Line')], ['rect', L('مربع', 'Box')], ['oval', L('دايرة', 'Circle')], ['pin', L('رقم', 'Number')], ['text', L('كتابة', 'Text')], ['hide', L('إخفاء', 'Hide')]
   ];
+  const SIZES = [0.6, 1, 2.2];
+  const SIZE_T = () => [L('رفيع', 'Thin'), L('وسط', 'Medium'), L('تخين', 'Thick')];
+  const $ = q => document.querySelector('#nfsnap ' + q);
   function openEditor() {
     const el = document.createElement('div'); el.id = 'nfsnap'; el.className = 'nfsnap'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    el.innerHTML = `<div class="sn-draw"><div class="sn-top"><button type="button" class="sn-x" data-sn="cancel" aria-label="${esc(L('إلغاء', 'Cancel'))}">✕</button><b>${esc(L('ارسم على الصورة', 'Draw on the picture'))}</b>
+        <button type="button" class="sn-u" data-sn="undo" title="${esc(L('رجوع خطوة', 'Undo'))}">${IC.undo}</button><button type="button" class="sn-u" data-sn="redo" title="${esc(L('إعادة', 'Redo'))}">${IC.redo}</button>
+        <button type="button" class="btn p sm" data-sn="next">${esc(L('التالي', 'Next'))}</button></div>
+      <div class="sn-stage"><div id="sn-ed" class="sn-ed"></div>
+        <div class="sn-sel" hidden><button type="button" data-sn="sdel">${IC.trash}<span>${esc(L('امسح', 'Delete'))}</span></button><button type="button" data-sn="sdup">${IC.copy}<span>${esc(L('نسخة', 'Duplicate'))}</span></button></div>
+        <div class="sn-zoom"><button type="button" data-sn="zout" aria-label="${esc(L('تصغير', 'Zoom out'))}">${IC.minus}</button><button type="button" class="sn-zl" data-sn="fit" title="${esc(L('الصورة كلها', 'Whole picture'))}">100%</button><button type="button" data-sn="zin" aria-label="${esc(L('تكبير', 'Zoom in'))}">${IC.plus}</button></div>
+        <div class="sn-pop" hidden></div></div>
+      <div class="sn-tools"></div></div>
+      <div class="sn-send" hidden></div>`;
     document.body.appendChild(el); document.documentElement.classList.add('nfsnap-open');
-    paint();
-  }
-  function closeEditor() { const el = document.getElementById('nfsnap'); if (el) el.remove(); document.documentElement.classList.remove('nfsnap-open'); E.img = null; E.shapes = []; E.cur = null; syncSrc(); }
-  function paint() {
-    const el = document.getElementById('nfsnap'); if (!el) return;
-    if (E.step === 'draw') {
-      el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x" data-sn="cancel" aria-label="${esc(L('إلغاء', 'Cancel'))}">✕</button><b>${esc(L('ارسم على الصورة', 'Draw on the picture'))}</b><button type="button" class="btn p sm" data-sn="next">${esc(L('التالي', 'Next'))}</button></div>
-        <div class="sn-stage"><canvas id="sn-cv"></canvas></div>
-        <div class="sn-tools"><div class="sn-row">${TOOLS().map(([k, t, ic]) => `<button type="button" class="sn-t ${E.tool === k ? 'on' : ''}" data-sn="tool" data-k="${k}" title="${esc(t)}">${ic}<span>${esc(t)}</span></button>`).join('')}</div>
-          <div class="sn-row sn-row2">${COLORS.map(c => `<button type="button" class="sn-c ${E.color === c ? 'on' : ''}" data-sn="color" data-k="${c}" style="--c:${c}" aria-label="${esc(c)}"></button>`).join('')}
-            <button type="button" class="sn-s ${E.size === 1 ? 'on' : ''}" data-sn="size" data-k="1" title="${esc(L('رفيع', 'Thin'))}"><i style="width:4px;height:4px"></i></button><button type="button" class="sn-s ${E.size === 2 ? 'on' : ''}" data-sn="size" data-k="2" title="${esc(L('تخين', 'Thick'))}"><i style="width:9px;height:9px"></i></button>
-            <span class="sn-sp"></span><button type="button" class="sn-u" data-sn="undo" title="${esc(L('رجوع خطوة', 'Undo'))}">${G('<path d="M9 7L4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/>')}</button><button type="button" class="sn-u" data-sn="clear" title="${esc(L('مسح الكل', 'Clear all'))}">${G('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}</button></div></div>`;
-      const cv = el.querySelector('#sn-cv'); cv.width = E.img.width; cv.height = E.img.height; bindCanvas(cv); redraw();
-    } else {
-      el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x sn-back" data-sn="back">‹ ${esc(L('رجوع للرسم', 'Back to drawing'))}</button><b>${esc(L('ابعت على مهمة', 'Send to a task'))}</b><span style="width:40px"></span></div>
-        <div class="sn-body"><img class="sn-prev" alt="" src="${final(560).toDataURL('image/jpeg', 0.8)}">
-          <div class="sn-lbl">${esc(L('المهمة', 'The task'))}</div>
-          <input type="search" id="sn-q" class="sn-q" placeholder="${esc(L('ابحث باسم المهمة…', 'Search by task name…'))}" value="${esc(E.q)}" autocomplete="off">
-          <div class="sn-list" id="sn-list">${listHTML()}</div>
-          ${pins().length ? `<div class="sn-lbl">${esc(L('تعليق كل رقم', 'A comment for each number'))}</div>${pins().map(p => `<div class="sn-pin"><b style="background:${esc(p.color === '#ffffff' ? '#1c1c1e' : p.color)}">${p.n}</b><input type="text" data-pin="${p.n}" value="${esc(p.note || '')}" placeholder="${esc(L('اكتب الملاحظة على الرقم ده', 'Write the note for this number'))}"></div>`).join('')}` : ''}
-          <div class="sn-lbl">${esc(L('ملاحظة', 'Note'))}</div><textarea id="sn-note" rows="2" placeholder="${esc(L('اختياري', 'Optional'))}">${esc(E.note || '')}</textarea>
-          <div class="sn-warn">${esc(L('كل اللي في المهمة هيشوفوا الصورة — استخدم «إخفاء» لأي حاجة خاصة.', 'Everyone on the task will see the picture — use «Hide» for anything private.'))}</div></div>
-        <div class="sn-foot"><button type="button" class="btn p" data-sn="send" ${E.busy ? 'disabled' : ''}>${esc(E.busy ? L('بيبعت…', 'Sending…') : L('ابعت على المهمة', 'Send to the task'))}</button></div>`;
-    }
-  }
-
-  /* drawing */
-  const px = n => n * (E.k || 1);   /* sizes are in screen points, the picture may be 2x */
-  const lw = () => Math.max(2, Math.round(px(E.size === 2 ? 5.5 : 3)));
-  function pins() { let n = 0; return E.shapes.filter(s => s.t === 'pin').map(s => { s.n = ++n; return s; }); }
-  function drawShape(c, s) {
-    const w = s.w || lw(); c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = s.color; c.fillStyle = s.color; c.lineWidth = w;
-    c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = w * 1.2;
-    if (s.t === 'pen' && s.pts.length) {
-      c.beginPath(); c.moveTo(s.pts[0][0], s.pts[0][1]);
-      for (let i = 1; i < s.pts.length - 1; i++) { const mx = (s.pts[i][0] + s.pts[i + 1][0]) / 2, my = (s.pts[i][1] + s.pts[i + 1][1]) / 2; c.quadraticCurveTo(s.pts[i][0], s.pts[i][1], mx, my); }
-      const l = s.pts[s.pts.length - 1]; c.lineTo(l[0], l[1]); c.stroke();
-    } else if (s.t === 'arrow') {
-      const [x1, y1] = s.a, [x2, y2] = s.b; const ang = Math.atan2(y2 - y1, x2 - x1); const hl = Math.max(w * 4.5, 14);
-      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2 - Math.cos(ang) * hl * 0.6, y2 - Math.sin(ang) * hl * 0.6); c.stroke();
-      c.beginPath(); c.moveTo(x2, y2); c.lineTo(x2 - hl * Math.cos(ang - 0.45), y2 - hl * Math.sin(ang - 0.45)); c.lineTo(x2 - hl * Math.cos(ang + 0.45), y2 - hl * Math.sin(ang + 0.45)); c.closePath(); c.fill();
-    } else if (s.t === 'box') {
-      const x = Math.min(s.a[0], s.b[0]), y = Math.min(s.a[1], s.b[1]); c.strokeRect(x, y, Math.abs(s.b[0] - s.a[0]), Math.abs(s.b[1] - s.a[1]));
-    } else if (s.t === 'oval') {
-      const cx = (s.a[0] + s.b[0]) / 2, cy = (s.a[1] + s.b[1]) / 2; c.beginPath(); c.ellipse(cx, cy, Math.max(1, Math.abs(s.b[0] - s.a[0]) / 2), Math.max(1, Math.abs(s.b[1] - s.a[1]) / 2), 0, 0, Math.PI * 2); c.stroke();
-    } else if (s.t === 'hide') {
-      const x = Math.round(Math.min(s.a[0], s.b[0])), y = Math.round(Math.min(s.a[1], s.b[1])), ww = Math.round(Math.abs(s.b[0] - s.a[0])), hh = Math.round(Math.abs(s.b[1] - s.a[1]));
-      if (ww > 2 && hh > 2) {
-        c.shadowBlur = 0; const blk = Math.max(8, Math.round(px(9)));
-        const sm = document.createElement('canvas'); sm.width = Math.max(1, Math.ceil(ww / blk)); sm.height = Math.max(1, Math.ceil(hh / blk));
-        sm.getContext('2d').drawImage(E.img, x, y, ww, hh, 0, 0, sm.width, sm.height);
-        c.imageSmoothingEnabled = false; c.drawImage(sm, 0, 0, sm.width, sm.height, x, y, ww, hh);
-        c.fillStyle = 'rgba(60,60,67,.55)'; c.fillRect(x, y, ww, hh);
-      }
-    } else if (s.t === 'pin') {
-      const r = Math.round(px(14)); const fill = s.color === '#ffffff' ? '#1c1c1e' : s.color;
-      c.beginPath(); c.arc(s.x, s.y, r, 0, Math.PI * 2); c.fillStyle = fill; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(2, r / 6); c.strokeStyle = '#fff'; c.stroke();
-      c.fillStyle = fill === '#ffcc00' ? '#1c1c1e' : '#fff'; c.font = `700 ${Math.round(r * 1.15)}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(s.n || ''), s.x, s.y + r * 0.04);
-    }
-    c.restore();
-  }
-  function render2(c) { c.drawImage(E.img, 0, 0); pins(); E.shapes.filter(s => s.t === 'hide').forEach(s => drawShape(c, s)); E.shapes.filter(s => s.t !== 'hide').forEach(s => drawShape(c, s)); if (E.cur) drawShape(c, E.cur); }
-  function redraw() { const cv = document.getElementById('sn-cv'); if (cv) render2(cv.getContext('2d')); }
-  function final(maxW) { const k = Math.min(1, (maxW || 1600) / E.img.width); const out = document.createElement('canvas'); out.width = Math.round(E.img.width * k); out.height = Math.round(E.img.height * k); const full = document.createElement('canvas'); full.width = E.img.width; full.height = E.img.height; render2(full.getContext('2d')); out.getContext('2d').drawImage(full, 0, 0, out.width, out.height); return out; }
-  function bindCanvas(cv) {
-    const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
-    cv.addEventListener('pointerdown', e => {
-      e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
-      const p = pt(e);
-      if (E.tool === 'pin') { E.shapes.push({ t: 'pin', x: p[0], y: p[1], color: E.color }); redraw(); return; }
-      E.cur = E.tool === 'pen' ? { t: 'pen', pts: [p], color: E.color, w: lw() } : { t: E.tool, a: p, b: p, color: E.color, w: lw() };
+    const host = el.querySelector('#sn-ed');
+    E.ed = NFDraw.create(host, {
+      width: E.img.width, height: E.img.height, k: E.k || 1, background: E.img, fingerDraws: 'auto',
+      onChange: () => { refreshTop(); if (E.pop === 'layers') paintLayers(); },
+      onSelect: () => refreshSel(), onView: () => refreshZoom(),
+      onLocked: () => toast(L('الطبقة دي مقفولة أو مخفية — اختار طبقة تانية من «الطبقات»', 'This layer is locked or hidden — pick another one in «Layers»'), 'err')
     });
-    cv.addEventListener('pointermove', e => { if (!E.cur) return; e.preventDefault(); const p = pt(e); if (E.cur.t === 'pen') E.cur.pts.push(p); else E.cur.b = p; redraw(); });
-    const up = () => {
-      if (!E.cur) return; const s = E.cur; E.cur = null;
-      const big = s.t === 'pen' ? s.pts.length > 1 : Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) > 6;
-      if (big) E.shapes.push(s); redraw();
-    };
-    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    E.ed.ensureLayer('hide', L('الإخفاء', 'Hidden'));
+    E.ed.setTool(E.tool); E.ed.color = E.color; E.ed.size = SIZES[E.size] || 1;
+    host.addEventListener('pointerdown', () => { if (E.pop) closePop(); }, true);
+    paintTools(); refreshTop(); refreshSel();
   }
+  function closeEditor() { const el = document.getElementById('nfsnap'); try { if (E.ed) E.ed.destroy(); } catch (e) { /* ignore */ } E.ed = null; E.pop = ''; if (el) el.remove(); document.documentElement.classList.remove('nfsnap-open'); E.img = null; E.notes = {}; syncSrc(); }
+  function paintTools() {
+    const el = $('.sn-tools'); if (!el) return;
+    el.innerHTML = `<div class="sn-row sn-row1">${TOOLS().map(([k, t]) => `<button type="button" class="sn-t ${E.tool === k ? 'on' : ''}" data-sn="tool" data-k="${k}" title="${esc(t)}">${IC[k]}<span>${esc(t)}</span></button>`).join('')}</div>
+      <div class="sn-row sn-row2"><button type="button" class="sn-cw" data-sn="wheel" style="--c:${esc(E.color)}" title="${esc(L('كل الألوان', 'All colours'))}"><i></i></button>${COLORS.map(c => `<button type="button" class="sn-c ${E.color === c ? 'on' : ''}" data-sn="color" data-k="${c}" style="--c:${c}" aria-label="${esc(c)}"></button>`).join('')}
+        <span class="sn-sp"></span>${SIZES.map((v, i) => `<button type="button" class="sn-s ${E.size === i ? 'on' : ''}" data-sn="size" data-k="${i}" title="${esc(SIZE_T()[i])}"><i style="width:${[3, 6, 11][i]}px;height:${[3, 6, 11][i]}px"></i></button>`).join('')}
+        <span class="sn-sp"></span><button type="button" class="sn-u sn-lay ${E.pop === 'layers' ? 'on' : ''}" data-sn="layers" title="${esc(L('الطبقات', 'Layers'))}">${IC.layers}</button></div>`;
+  }
+  function refreshTop() { const ed = E.ed; if (!ed) return; const u = $('[data-sn="undo"]'), r = $('[data-sn="redo"]'); if (u) u.disabled = !ed.canUndo(); if (r) r.disabled = !ed.canRedo(); }
+  function refreshSel() { const b = $('.sn-sel'); if (b && E.ed) b.hidden = !E.ed.sel.length; }
+  function refreshZoom() { const b = $('.sn-zl'); if (!b || !E.ed) return; const f = E.ed.fitZoom(); b.textContent = Math.round(E.ed.view.z / (f > 0 ? f : 1) * 100) + '%'; }
+  function closePop() { E.pop = ''; const p = $('.sn-pop'); if (p) { p.hidden = true; p.innerHTML = ''; } const b = $('.sn-lay'); if (b) b.classList.remove('on'); }
+  function openPop(kind) {
+    const p = $('.sn-pop'); if (!p) return; if (E.pop === kind) return closePop();
+    E.pop = kind; p.hidden = false; const b = $('.sn-lay'); if (b) b.classList.toggle('on', kind === 'layers');
+    if (kind === 'layers') return paintLayers();
+    p.innerHTML = `<div class="sn-pophd"><b>${esc(L('الألوان', 'Colours'))}</b><button type="button" class="sn-px" data-sn="popx" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div><div class="sn-wheel"></div>`;
+    NFDraw.colorPicker(p.querySelector('.sn-wheel'), E.color, (hex, fin) => {
+      E.color = hex; if (fin) E.ed.setColor(hex); else E.ed.color = hex;
+      const cw = $('.sn-cw'); if (cw) cw.style.setProperty('--c', hex);
+      document.querySelectorAll('#nfsnap .sn-c').forEach(x => x.classList.toggle('on', x.dataset.k === hex));
+    });
+  }
+  function paintLayers() {
+    const p = $('.sn-pop'); const ed = E.ed; if (!p || !ed) return;
+    const rows = ed.layers.slice().reverse().map(l => {
+      const img = l.kind === 'image', hid = l.kind === 'hide'; const n = l.items.length;
+      const nm = img ? L('الصورة', 'Picture') : hid ? L('الإخفاء', 'Hidden') : l.name;
+      const sub = img ? L('مقفولة — الرسم بيبقى فوقها', 'Locked — the drawing goes on top') : hid ? L('بيغطي الحاجات الخاصة', 'Covers private things') : n ? L(`فيها ${n}`, `${n} items`) : L('فاضية', 'Empty');
+      return `<div class="sn-ly ${ed.active === l.id ? 'sn-lyon' : ''}">${hid ? `<span class="sn-lyb">${IC.hide}</span>` : `<button type="button" class="sn-lyb" data-sn="lvis" data-k="${l.id}" title="${esc(l.visible ? L('اخفي الطبقة', 'Hide the layer') : L('اظهر الطبقة', 'Show the layer'))}">${l.visible ? IC.eye : IC.eyeoff}</button>`}
+        <button type="button" class="sn-lyn" data-sn="lact" data-k="${l.id}" ${img ? 'disabled' : ''}><b>${esc(nm)}</b><small>${esc(sub)}</small></button>${img ? `<span class="sn-lyb">${IC.lock}</span>` : ''}</div>
+        ${img ? `<label class="sn-lyo"><span>${esc(L('شفافية الصورة', 'Picture opacity'))}</span><input type="range" min="10" max="100" step="5" value="${Math.round((l.opacity == null ? 1 : l.opacity) * 100)}" data-lop="${l.id}"></label>` : ''}`;
+    }).join('');
+    const a = ed.layers.find(x => x.id === ed.active); const inks = ed.layers.filter(x => x.kind === 'ink').length;
+    p.innerHTML = `<div class="sn-pophd"><b>${esc(L('الطبقات', 'Layers'))}</b><button type="button" class="sn-px" data-sn="popx" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div><div class="sn-lys">${rows}</div>
+      <div class="sn-lyact"><button type="button" data-sn="ladd">${IC.plus}<span>${esc(L('طبقة جديدة', 'New layer'))}</span></button>${a && a.kind === 'ink' && inks > 1 ? `<button type="button" data-sn="ldel">${IC.trash}<span>${esc(L('امسح الطبقة', 'Delete layer'))}</span></button>` : ''}<button type="button" data-sn="clear">${IC.broom}<span>${esc(L('امسح الرسم كله', 'Clear all drawing'))}</span></button></div>`;
+  }
+  function paintSend() {
+    const el = $('.sn-send'); if (!el) return; const ps = E.ed.pins();
+    el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x sn-back" data-sn="back">‹ ${esc(L('رجوع للرسم', 'Back to drawing'))}</button><b>${esc(L('ابعت على مهمة', 'Send to a task'))}</b><span style="width:40px"></span></div>
+      <div class="sn-body"><img class="sn-prev" alt="" src="${final(560).toDataURL('image/jpeg', 0.8)}">
+        <div class="sn-lbl">${esc(L('المهمة', 'The task'))}</div>
+        <input type="search" id="sn-q" class="sn-q" placeholder="${esc(L('ابحث باسم المهمة…', 'Search by task name…'))}" value="${esc(E.q)}" autocomplete="off">
+        <div class="sn-list" id="sn-list">${listHTML()}</div>
+        ${ps.length ? `<div class="sn-lbl">${esc(L('تعليق كل رقم', 'A comment for each number'))}</div>${ps.map(p => `<div class="sn-pin"><b style="background:${esc(pinBg(p.color))};color:${light(pinBg(p.color)) ? '#1c1c1e' : '#fff'}">${p.n}</b><input type="text" data-pin="${p.n}" data-pid="${esc(p.id)}" value="${esc(E.notes[p.id] || '')}" placeholder="${esc(L('اكتب الملاحظة على الرقم ده', 'Write the note for this number'))}"></div>`).join('')}` : ''}
+        <div class="sn-lbl">${esc(L('ملاحظة', 'Note'))}</div><textarea id="sn-note" rows="2" placeholder="${esc(L('اختياري', 'Optional'))}">${esc(E.note || '')}</textarea>
+        <div class="sn-warn">${esc(L('كل اللي في المهمة هيشوفوا الصورة — استخدم «إخفاء» لأي حاجة خاصة.', 'Everyone on the task will see the picture — use «Hide» for anything private.'))}</div></div>
+      <div class="sn-foot"><button type="button" class="btn p" data-sn="send" ${E.busy ? 'disabled' : ''}>${esc(E.busy ? L('بيبعت…', 'Sending…') : L('ابعت على المهمة', 'Send to the task'))}</button></div>`;
+  }
+  function paint() { const d = $('.sn-draw'), s = $('.sn-send'); if (!d || !s) return; d.hidden = E.step !== 'draw'; s.hidden = E.step === 'draw'; if (E.step === 'draw') { s.innerHTML = ''; requestAnimationFrame(() => { if (E.ed) E.ed.render(); }); } else paintSend(); }
+  const pinBg = c => c === '#ffffff' ? '#1c1c1e' : (c || '#ff3b30');
+  const light = h => { const n = parseInt(String(h || '#000').replace('#', '').slice(0, 6), 16); return !isNaN(n) && (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) > 170; };
+  function pins() { return E.ed ? E.ed.pins() : []; }
+  function final(maxW) { return E.ed.export({ maxW: maxW || 1600, background: true }); }
 
   /* ---------- 3) pick the task ---------- */
   function choices() {
@@ -42916,7 +43461,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     E.busy = true; paint();
     try {
       const lines = []; if (E.note) lines.push(E.note.trim());
-      pins().forEach(p => { if ((p.note || '').trim()) lines.push(`${PIN(p.n)} ${p.note.trim()}`); });
+      pins().forEach(p => { const n = String(E.notes[p.id] || '').trim(); if (n) lines.push(`${PIN(p.n)} ${n}`); });
       lines.push(`📍 ${L('اتصوّرت من', 'Taken on')}: ${E.page || E.from}`);
       const blob = await new Promise(res => final(1600).toBlob(res, 'image/jpeg', 0.86));
       const file = new File([blob], `snap-${Date.now()}.jpg`, { type: 'image/jpeg' });
@@ -42938,26 +43483,53 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const el = document.getElementById('nfsnap'); if (!el || E.step !== 'send') return;
     const n = el.querySelector('#sn-note'); if (n) E.note = n.value;
     const q = el.querySelector('#sn-q'); if (q) E.q = q.value;
-    el.querySelectorAll('[data-pin]').forEach(i => { const p = pins().find(x => x.n === +i.dataset.pin); if (p) p.note = i.value; });
+    el.querySelectorAll('[data-pid]').forEach(i => { E.notes[i.dataset.pid] = i.value; });
   }
 
   /* ---------- events ---------- */
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('#nfsnap [data-sn]'); if (!b) return; e.preventDefault();
-    const a = b.dataset.sn;
+    const a = b.dataset.sn; const ed = E.ed;
     if (a === 'cancel') return closeEditor();
-    if (a === 'tool') { E.tool = b.dataset.k; return paint(); }
-    if (a === 'color') { E.color = b.dataset.k; return paint(); }
-    if (a === 'size') { E.size = +b.dataset.k; return paint(); }
-    if (a === 'undo') { E.shapes.pop(); return redraw(); }
-    if (a === 'clear') { E.shapes = []; return redraw(); }
-    if (a === 'next') { E.step = 'send'; E.note = E.note || ''; return paint(); }
+    if (a === 'send') return send();
     if (a === 'back') { collect(); E.step = 'draw'; return paint(); }
     if (a === 'task') { collect(); E.task = b.dataset.k; document.querySelectorAll('#nfsnap .sn-task').forEach(x => x.classList.toggle('on', x.dataset.k === E.task)); return; }
-    if (a === 'send') return send();
+    if (!ed) return;
+    if (a === 'next') { closePop(); ed.clearSelection(); E.step = 'send'; E.note = E.note || ''; return paint(); }
+    if (a === 'tool') { E.tool = b.dataset.k; ed.setTool(E.tool); closePop(); document.querySelectorAll('#nfsnap .sn-t').forEach(x => x.classList.toggle('on', x.dataset.k === E.tool)); refreshSel(); return; }
+    if (a === 'color') { E.color = b.dataset.k; ed.setColor(E.color); closePop(); document.querySelectorAll('#nfsnap .sn-c').forEach(x => x.classList.toggle('on', x.dataset.k === E.color)); const cw = $('.sn-cw'); if (cw) cw.style.setProperty('--c', E.color); return; }
+    if (a === 'size') { E.size = +b.dataset.k; ed.size = SIZES[E.size] || 1; document.querySelectorAll('#nfsnap .sn-s').forEach(x => x.classList.toggle('on', +x.dataset.k === E.size)); return; }
+    if (a === 'undo') return ed.undo();
+    if (a === 'redo') return ed.redo();
+    if (a === 'wheel') return openPop('wheel');
+    if (a === 'layers') return openPop('layers');
+    if (a === 'popx') return closePop();
+    if (a === 'lvis') { ed.toggleLayer(b.dataset.k); return paintLayers(); }
+    if (a === 'lact') { ed.setActive(b.dataset.k); return paintLayers(); }
+    if (a === 'ladd') { ed.addLayer(); return paintLayers(); }
+    if (a === 'ldel') { ed.removeLayer(ed.active); return paintLayers(); }
+    if (a === 'clear') { ed.clearAll(); return paintLayers(); }
+    if (a === 'zin') return ed.zoomBy(1.5);
+    if (a === 'zout') return ed.zoomBy(1 / 1.5);
+    if (a === 'fit') return ed.fit();
+    if (a === 'sdel') return ed.deleteSelection();
+    if (a === 'sdup') return ed.duplicateSelection();
   });
-  document.addEventListener('input', e => { if (e.target && e.target.id === 'sn-q') { collect(); const box = document.getElementById('sn-list'); if (box) box.innerHTML = listHTML(); } });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('nfsnap')) closeEditor(); });
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'sn-q') { collect(); const box = document.getElementById('sn-list'); if (box) box.innerHTML = listHTML(); }
+    if (e.target && e.target.dataset && e.target.dataset.lop && E.ed) E.ed.setLayerOpacity(e.target.dataset.lop, +e.target.value / 100, true);
+  });
+  document.addEventListener('change', e => { if (e.target && e.target.dataset && e.target.dataset.lop && E.ed) E.ed.setLayerOpacity(e.target.dataset.lop, +e.target.value / 100, false); });
+  document.addEventListener('keydown', e => {
+    if (!document.getElementById('nfsnap')) return;
+    const typing = /input|textarea|select/i.test((e.target && e.target.tagName) || '');
+    if (e.key === 'Escape') { if (typing) return; if (E.pop) return closePop(); return closeEditor(); }
+    if (typing || E.step !== 'draw' || !E.ed) return;
+    const mod = e.ctrlKey || e.metaKey; const k = (e.key || '').toLowerCase();
+    if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? E.ed.redo() : E.ed.undo(); }
+    if (mod && k === 'y') { e.preventDefault(); return E.ed.redo(); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && E.ed.sel.length) { e.preventDefault(); return E.ed.deleteSelection(); }
+  });
   window.addEventListener('hashchange', () => { if (document.getElementById('nfsnap') && !E.busy) closeEditor(); });
 
   /* ---------- in the task chat: the picture opens full size, «taken on» opens the page ---------- */
@@ -42984,21 +43556,46 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     html.nfsnap-taking #nfdial{visibility:hidden}
     html.nfsnap-open,html.nfsnap-open body{overflow:hidden}
     .nfsnap{position:fixed;inset:0;z-index:9800;background:#0b0b0d;color:#fff;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
-    .nfsnap .sn-top{display:flex;align-items:center;gap:10px;padding:10px 12px;min-height:52px}
-    .nfsnap .sn-top b{flex:1;text-align:center;font-size:16px;font-weight:600}
+    .nfsnap [hidden]{display:none!important}
+    .nfsnap .sn-draw,.nfsnap .sn-send{flex:1;min-height:0;display:flex;flex-direction:column}
+    .nfsnap .sn-top{display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:52px}
+    .nfsnap .sn-top b{flex:1;min-width:0;text-align:center;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .nfsnap .sn-x{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:999px;min-width:40px;height:40px;font-size:16px;padding:0 12px;cursor:pointer}
-    .nfsnap .sn-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 10px}
-    .nfsnap #sn-cv{max-width:100%;max-height:100%;width:auto;height:auto;border-radius:10px;box-shadow:0 10px 40px -10px rgba(0,0,0,.8);touch-action:none;cursor:crosshair;background:#fff}
-    .nfsnap .sn-tools{padding:8px 10px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.04)}
-    .nfsnap .sn-row{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap}
-    .nfsnap .sn-t{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:54px;padding:7px 6px;border-radius:14px;border:0;background:transparent;color:rgba(255,255,255,.75);cursor:pointer;font-size:11.5px}
-    .nfsnap .sn-t.on{background:rgba(255,255,255,.16);color:#fff}
-    .nfsnap .sn-c{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:var(--c);cursor:pointer;padding:0}
+    .nfsnap .sn-u{flex:none;width:40px;height:40px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
+    .nfsnap .sn-u:disabled{opacity:.3;cursor:default}.nfsnap .sn-u.on{background:rgba(255,255,255,.3)}
+    .nfsnap .sn-stage{flex:1;min-height:0;position:relative}
+    .nfsnap .sn-ed{position:absolute;inset:0}
+    .nfsnap .sn-zoom{position:absolute;inset-inline-start:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;border-radius:999px;background:rgba(28,28,30,.82);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);z-index:2}
+    .nfsnap .sn-zoom button{height:34px;min-width:34px;border:0;border-radius:999px;background:transparent;color:#fff;display:grid;place-items:center;cursor:pointer;font:600 12.5px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 6px}
+    .nfsnap .sn-zoom svg{width:18px;height:18px}
+    .nfsnap .sn-sel{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border-radius:999px;background:rgba(28,28,30,.92);z-index:2;box-shadow:0 6px 20px -6px rgba(0,0,0,.6)}
+    .nfsnap .sn-sel button{display:flex;align-items:center;gap:6px;height:38px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:#fff;cursor:pointer;font-size:13.5px}
+    .nfsnap .sn-sel button:first-child{color:#ff6961}.nfsnap .sn-sel svg{width:19px;height:19px}
+    .nfsnap .sn-pop{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:min(340px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;padding:10px 12px 12px;border-radius:18px;background:rgba(28,28,30,.97);box-shadow:0 14px 40px -10px rgba(0,0,0,.8);z-index:4}
+    .nfsnap .sn-pophd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}.nfsnap .sn-pophd b{font-size:15px}
+    .nfsnap .sn-px{width:32px;height:32px;border-radius:50%;border:0;background:rgba(255,255,255,.12);color:#fff;cursor:pointer}
+    .nfsnap .sn-ly{display:flex;align-items:center;gap:6px;padding:4px;border-radius:12px}.nfsnap .sn-ly.sn-lyon{background:rgba(10,132,255,.28)}
+    .nfsnap .sn-lyb{flex:none;width:36px;height:36px;border:0;border-radius:10px;background:transparent;color:rgba(255,255,255,.85);display:grid;place-items:center;cursor:pointer;padding:0}
+    .nfsnap .sn-lyn{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:0;background:transparent;color:#fff;text-align:start;cursor:pointer;padding:4px 2px;font:inherit}
+    .nfsnap .sn-lyn:disabled{cursor:default}.nfsnap .sn-lyn b{font-size:14px;font-weight:600}.nfsnap .sn-lyn small{font-size:11.5px;color:rgba(255,255,255,.6)}
+    .nfsnap .sn-lyo{display:flex;align-items:center;gap:10px;padding:2px 8px 8px 46px;font-size:12px;color:rgba(255,255,255,.7)}.nfsnap .sn-lyo input{flex:1}
+    [dir=rtl] .nfsnap .sn-lyo{padding:2px 46px 8px 8px}
+    .nfsnap .sn-lyact{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,.1);padding-top:8px}
+    .nfsnap .sn-lyact button{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#fff;cursor:pointer;font-size:13px}.nfsnap .sn-lyact svg{width:17px;height:17px}
+    .nfsnap .sn-wheel{display:flex;justify-content:center}
+    .nfsnap .sn-tools{padding:6px 8px calc(8px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.05)}
+    .nfsnap .sn-row{display:flex;gap:5px;justify-content:center;align-items:center;flex-wrap:wrap}
+    .nfsnap .sn-row1{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .nfsnap .sn-row1::-webkit-scrollbar{display:none}.nfsnap .sn-row1>:first-child{margin-inline-start:auto}.nfsnap .sn-row1>:last-child{margin-inline-end:auto}
+    .nfsnap .sn-t{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px;padding:6px 5px;border-radius:14px;border:0;background:transparent;color:rgba(255,255,255,.72);cursor:pointer;font-size:11px}
+    .nfsnap .sn-t.on{background:rgba(255,255,255,.17);color:#fff}
+    .nfsnap .sn-cw{width:34px;height:34px;border-radius:50%;border:0;padding:0;cursor:pointer;display:grid;place-items:center;background:conic-gradient(#ff3b30,#ffcc00,#34c759,#00c7be,#0a84ff,#af52de,#ff2d55,#ff3b30)}
+    .nfsnap .sn-cw i{width:18px;height:18px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+    .nfsnap .sn-c{width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:var(--c);cursor:pointer;padding:0}
     .nfsnap .sn-c.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25)}
-    .nfsnap .sn-s{width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.1);display:grid;place-items:center;cursor:pointer}.nfsnap .sn-s i{display:block;border-radius:50%;background:#fff}
-    .nfsnap .sn-s.on{background:rgba(255,255,255,.28)}
-    .nfsnap .sn-sp{width:12px}
-    .nfsnap .sn-u{width:40px;height:40px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;cursor:pointer}
+    .nfsnap .sn-s{width:32px;height:32px;border-radius:50%;border:0;background:rgba(255,255,255,.1);display:grid;place-items:center;cursor:pointer;padding:0}.nfsnap .sn-s i{display:block;border-radius:50%;background:#fff}
+    .nfsnap .sn-s.on{background:rgba(255,255,255,.3)}
+    .nfsnap .sn-sp{width:8px}
     .nfsnap .sn-body>*{flex:none}
     .nfsnap .sn-body{flex:1;min-height:0;overflow:auto;padding:4px 16px 12px;display:flex;flex-direction:column;gap:8px;background:var(--bg,#f2f2f7);color:var(--ink,#111);border-radius:18px 18px 0 0}
     .nfsnap .sn-prev{align-self:center;max-height:28vh;max-width:100%;border-radius:10px;margin-top:10px;box-shadow:0 6px 20px -8px rgba(0,0,0,.35)}
@@ -43016,6 +43613,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     .nfsnap .sn-foot .btn{width:100%;min-height:48px;justify-content:center;font-size:16px}
     .snapfrom{display:inline-flex;align-items:center;gap:4px;margin-top:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--accent);font-size:12.5px;cursor:pointer}
     @media (min-width:900px){.nfsnap .sn-body{max-width:640px;width:100%;margin:0 auto}.nfsnap .sn-foot{max-width:640px;width:100%;margin:0 auto}}
+    @media (max-width:380px){.nfsnap .sn-top .btn{padding-inline:10px}.nfsnap .sn-u{width:36px}}
   </style>`);
   Object.assign(window, { nfSnap: { start, state: E } });
 })();
