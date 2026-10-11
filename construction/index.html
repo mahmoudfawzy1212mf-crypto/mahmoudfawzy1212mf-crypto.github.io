@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261010-2120-9c7ec1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-0244-5ca31c";</script>
 
 <script>
 'use strict';
@@ -41430,15 +41430,34 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   if (typeof homeView === 'function') homeView = (base => function () { const b = base.apply(this, arguments); try { if (homeOn() && b !== 'csite') return 'home'; } catch (e) { /* ignore */ } return b; })(homeView);
   /* the bar puts «More» first (right) and moves the first tab to its old place (v4.39) — so Home goes second here and lands next to «More» */
   if (typeof tabbarItems === 'function') tabbarItems = (base => function () { const arr = base.apply(this, arguments); if (!homeOn()) return arr; const want = ['home'].concat(arr.filter(x => x !== 'home' && x !== 'dashboard')).slice(0, 4); return want.length > 1 ? [want[want.length - 1]].concat(want.slice(0, -1)) : want; })(tabbarItems);
-  /* the switch under the name: Home = dashboard / new */
-  ACTIONS.homeMode = () => { const on = homeOn(); ls(prefKey(), on ? 'classic' : 'new'); toast(on ? L('الرئيسية بقت لوحة المتابعة', 'Home is now the dashboard') : L('الرئيسية بقت الشكل الجديد', 'Home is now the new look')); const h = homeView(); location.hash = '#/' + h; try { parseRoute(); } catch (e) { /* ignore */ } render(true); };
+  /* the switch under the name.
+     v7.35 (Mahmoud, 11 Oct: «two kinds — Advanced, and I want to see its name, and the second the icons like the iPhone; when I
+     press it, it flips from this to that»): ONE tile in place of the look tile — it shows the kind that is on («Advanced» or
+     «iPhone») and a tap flips to the other. Advanced = the usual pages (the dashboard for the owner) in the Advanced look;
+     iPhone = the home screen with the icons. Classic stays for weak phones (by itself) and in Settings → System look. */
+  const SPARK = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 4.6 4.6 1.9-4.6 1.9L12 16.5l-1.9-4.6L5.5 10l4.6-1.9z"/><path d="M18.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></svg>';
+  const lookNow = () => { try { return window.nfLook && typeof window.nfLook.want === 'function' ? window.nfLook.want() : 'apple'; } catch (e) { return 'apple'; } };
+  ACTIONS.homeMode = () => {
+    const on = homeOn(); ls(prefKey(), on ? 'classic' : 'new');
+    /* a person who had picked Classic on this device moves to the Advanced look with the switch */
+    try { if (localStorage.getItem('nf.look.device') === 'classic') localStorage.setItem('nf.look.device', 'apple'); } catch (e) { /* ignore */ }
+    toast(on ? L('الشكل بقى Advanced', 'The look is now Advanced') : L('الشكل بقى آيفون', 'The look is now iPhone'));
+    const h = homeView(); location.hash = '#/' + h; try { parseRoute(); } catch (e) { /* ignore */ } render(true);
+  };
   RENDER_HOOKS.push(() => setTimeout(() => {
     try {
       if (!S.session || role() === 'kiosk') return;
       document.querySelectorAll('.side .nftogs').forEach(row => {
-        const on = homeOn(); const html = `${glyph('grid', 17).replace('fill="#fff"', 'fill="currentColor"')}<span>${esc(on ? L('الرئيسية الجديدة', 'New home') : L('لوحة المتابعة', 'Dashboard'))}</span>`;
-        let b = row.querySelector('.nfhome'); if (!b) { b = document.createElement('button'); b.type = 'button'; b.className = 'nfst nftg nfhome'; b.dataset.action = 'homeMode'; row.appendChild(b); row.hidden = false; }
-        if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.title = on ? L('التحويل للوحة المتابعة', 'Switch to the dashboard') : L('التحويل للرئيسية الجديدة', 'Switch to the new home'); }
+        const on = homeOn(); const name = on ? L('آيفون', 'iPhone') : (lookNow() === 'classic' ? 'Classic' : 'Advanced');
+        const html = `${on ? glyph('grid', 17).replace('fill="#fff"', 'fill="currentColor"') : SPARK}<span>${esc(name)}</span>`;
+        let b = row.querySelector('.nfhome');
+        if (!b) {
+          const lk = row.querySelector('[data-action="lookMine"]');
+          b = document.createElement('button'); b.type = 'button'; b.className = 'nfst nftg nfhome'; b.dataset.action = 'homeMode';
+          if (lk) lk.replaceWith(b); else row.appendChild(b);
+          row.hidden = false;
+        }
+        if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.title = on ? L('التحويل لـ Advanced', 'Switch to Advanced') : L('التحويل لشكل الآيفون (أيقونات)', 'Switch to the iPhone look (icons)'); }
       });
     } catch (e) { /* ignore */ }
   }, 30));
