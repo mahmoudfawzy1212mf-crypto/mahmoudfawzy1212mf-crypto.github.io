@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-0701-3ee445";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-0835-efdc1a";</script>
 
 <script>
 'use strict';
@@ -39987,6 +39987,7 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
   const G = (d, w) => `<svg viewBox="0 0 24 24" width="${w || 24}" height="${w || 24}" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const PLUS = G('<path d="M12 5.5v13M5.5 12h13"/>', 26);
   const ICONS = {
+    snap: G('<path d="M4.2 8.6a2.2 2.2 0 0 1 2.2-2.2h1.7l1.3-1.9h5.2l1.3 1.9h1.7a2.2 2.2 0 0 1 2.2 2.2v8.2a2.2 2.2 0 0 1-2.2 2.2H6.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.3"/>'),
     add: G('<path d="M11.2 4.6H7.6a3 3 0 0 0-3 3v8.8a3 3 0 0 0 3 3h8.8a3 3 0 0 0 3-3v-3.6"/><path d="M17.7 3.9a1.85 1.85 0 0 1 2.6 2.6l-7.4 7.4-3.4.8.8-3.4z"/>'),
     ai: G('<path d="M10 3.6c.55 3.75 2.45 5.65 6.2 6.2-3.75.55-5.65 2.45-6.2 6.2-.55-3.75-2.45-5.65-6.2-6.2 3.75-.55 5.65-2.45 6.2-6.2z"/><path d="M18.2 14.6c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5z"/>'),
     memo: G('<rect x="5.2" y="3.4" width="13.6" height="17.2" rx="2.6"/><path d="M8.8 8.2h6.4M8.8 12h6.4M8.8 15.8h3.8"/>'),
@@ -39999,10 +40000,12 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     { k: 'ai', sel: '.aifab', label: () => L('المساعد', 'Assistant'), cls: 'ai' },
     { k: 'memo', sel: '.memofab', label: () => L('المذكرة', 'Memo'), cls: 'memo' },
     { k: 'call', sel: '.callfab', label: () => L('المكالمات', 'Calls'), cls: 'call' },
+    { k: 'snap', sel: '.snapfab', label: () => L('صوّر الشاشة', 'Screenshot'), cls: 'snap' },   /* v7.37: screenshot + sketch onto a task */
   ];
   const D = { root: null, open: false, sig: '' };
   const shown = el => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
-  const avail = () => SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el));
+  /* v7.37: «Screenshot» rides along with the other actions - it never keeps the «+» on screen by itself (forms, side menu, chats hide it as before) */
+  const avail = () => { const xs = SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el)); return xs.some(x => x.k !== 'snap') ? xs : []; };
   const badge = el => { const n = el && el.querySelector('.n'); const v = n ? parseInt(n.textContent, 10) : 0; return v > 0 ? v : 0; };
   const iconOf = x => ICONS[x.k] || (x.el && (x.el.querySelector('svg') || {}).outerHTML) || PLUS;
 
@@ -40025,7 +40028,7 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
   function openDial() {
     const root = build(); const xs = avail(); if (xs.length < 2) return;
     const main = root.querySelector('.nfd-main').getBoundingClientRect(); const cx = main.left + main.width / 2; const cy = main.top + main.height / 2;
-    const right = cx < innerWidth / 2; const small = innerWidth <= 900; const r = small ? 138 : 144;
+    const right = cx < innerWidth / 2; const small = innerWidth <= 900; const r = (small ? 138 : 144) + (xs.length >= 5 ? 22 : 0);   /* v7.37: five circles need a wider arc so they do not touch */
     const box = root.querySelector('.nfd-items'); box.style.left = cx + 'px'; box.style.top = cy + 'px';
     const a0 = 90, a1 = 8; const step = xs.length > 1 ? (a0 - a1) / (xs.length - 1) : 0;
     box.innerHTML = xs.map((x, i) => {
@@ -42697,6 +42700,324 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     @media (max-width:520px){.nf-permwarn{flex-wrap:wrap}.nf-permwarn .btn{width:100%;justify-content:center;min-height:42px}}
   </style>`);
   Object.assign(window, { nfCallPermCheck: check });
+})();
+/* =====================================================================
+   v7.37 - «Screenshot» in the «+» (Mahmoud, 11 Oct: «a print-screen in the plus, with the sketch tools showing in full, so when I
+   open something I take a screenshot and put it straight into the task that is there»; brief claude/screenshot-sketch-brief.md).
+   · a fifth circle in the «+»: «Screenshot» - it shows wherever the «+» already shows, for everybody who can write;
+   · the page on the screen is drawn into a picture by the browser itself (vendor/modern-screenshot.js, loaded on first use only -
+     no permission prompt), without the «+» and the toasts; sticky bars, fixed bars and scrolled boxes keep their place;
+   · the sketch tools open straight away on top of it: pen (3 colours, 2 sizes), arrow, box, circle, numbered pins (each with its
+     own comment line), «hide» (covers money / phone numbers / anything private), undo, clear;
+   · «send to a task»: the task you are on is picked by itself; otherwise my tasks and the tasks I opened lately, with search -
+     only tasks this person can already see and talk in; a note; a reminder that everyone on the task will see the picture;
+   · it lands in the task chat as one message (picture + note + the pins' comments + the page it was taken on) through the normal
+     chat path, so the task's people are notified as for any message; in the chat the picture opens full size and
+     «taken on: <page>» opens that page.
+   Works the same in the three systems, Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SNAP__) return; window.__NF_SNAP__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  if (typeof VENDORS === 'object' && VENDORS) VENDORS.snap = { ok: () => !!(window.modernScreenshot && window.modernScreenshot.domToCanvas), src: ['vendor/modern-screenshot.js'] };
+
+  const COLORS = ['#ff3b30', '#ffcc00', '#ffffff'];
+  const PIN = n => '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'.charAt(n - 1) || `(${n})`;
+  const E = { img: null, shapes: [], cur: null, tool: 'pen', color: COLORS[0], size: 1, from: '', page: '', step: 'draw', task: '', q: '', busy: false };
+  const canWrite = () => !!(S && S.session) && (typeof writable !== 'function' || writable()) && typeof taskPost === 'function';
+  const pageTitle = () => { const h = document.querySelector('.topbar h1, .topbar .title, #pageTitle, header h1'); return ((h && h.textContent) || document.title || '').replace(/\s+/g, ' ').trim().slice(0, 80); };
+  const curTaskId = () => (S.route && S.route.view === 'tasks' && S.route.id && byId('tasks', S.route.id)) ? S.route.id : '';
+  /* the tasks opened lately, newest first: [{ id, at }] */
+  const recentAt = () => { try { return JSON.parse(lsGet('nf.snap.recent') || '[]').map(x => typeof x === 'string' ? { id: x, at: 0 } : x).filter(x => x && x.id); } catch (e) { return []; } };
+  const recent = () => recentAt().map(x => x.id);
+  const remember = id => { if (!id) return; const r = recentAt().filter(x => x.id !== id); r.unshift({ id, at: Date.now() }); lsSet('nf.snap.recent', JSON.stringify(r.slice(0, 12))); };
+
+  /* ---------- the hidden source button the «+» reads ---------- */
+  function syncSrc() {
+    let b = document.querySelector('.snapfab');
+    if (!canWrite()) { if (b) b.style.display = 'none'; return; }
+    if (!b) {
+      b = document.createElement('button'); b.type = 'button'; b.className = 'snapfab'; b.tabIndex = -1;
+      b.addEventListener('click', () => { start(); });
+      document.body.appendChild(b);
+    }
+    b.setAttribute('aria-label', L('صوّر الشاشة', 'Screenshot'));
+    const want = !document.getElementById('nfsnap') ? '' : 'none';   /* the «+» itself drops it when no other action shows */
+    if (b.style.display !== want) b.style.display = want;
+  }
+
+  /* ---------- 1) take the picture of what is on the screen ---------- */
+  async function capture() {
+    await vendorLoad('snap');
+    const ms = window.modernScreenshot;
+    const W = document.documentElement.clientWidth || innerWidth, H = innerHeight, sx = scrollX || 0, sy = scrollY || 0;
+    /* the page scroll is redone by moving the body up (margin, not transform): fixed bars stay where they are and sticky bars stick by themselves */
+    const bodyBg = getComputedStyle(document.body).backgroundColor;
+    const bg = bodyBg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bodyBg) ? bodyBg : (getComputedStyle(document.documentElement).backgroundColor || '#ffffff');
+    const scale = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, 1800 / W));
+    /* boxes scrolled inside the page (side menu, chat, a long form) keep their scroll: their children are moved in the copy only.
+       The page itself is not one of them - the library would move the whole body for it and the fixed bars would follow. */
+    const tagged = [];
+    document.querySelectorAll('body *').forEach(el => { if ((el.scrollTop || el.scrollLeft) && !el.closest('#nfdial, #nfsnap')) { el.setAttribute('data-nfsnap-s', el.scrollLeft + ',' + el.scrollTop); tagged.push(el); } });
+    try {
+      return await ms.domToCanvas(document.body, {
+        width: W, height: H, scale, backgroundColor: bg, timeout: 25000,
+        style: { marginTop: (-sy) + 'px', marginLeft: (sx > 0 ? -sx : 0) + 'px' },
+        filter: n => !(n.nodeType === 1 && (n.id === 'nfdial' || n.id === 'nfsnap' || n.id === 'toasts' || (n.classList && (n.classList.contains('nfd-src') || n.classList.contains('snapfab') || n.classList.contains('toast') || n.classList.contains('toasts'))))),
+        onCloneEachNode: c => {
+          if (!c || c.nodeType !== 1 || !c.hasAttribute || !c.hasAttribute('data-nfsnap-s')) return;
+          const [l, t] = c.getAttribute('data-nfsnap-s').split(',').map(Number); c.removeAttribute('data-nfsnap-s'); c.style.overflow = 'hidden';
+          [...c.children].forEach(k => { k.style.transform = `translate(${-l}px, ${-t}px)` + (k.style.transform && k.style.transform !== 'none' ? ' ' + k.style.transform : ''); });
+        }
+      });
+    } finally { tagged.forEach(el => el.removeAttribute('data-nfsnap-s')); }
+  }
+  async function start() {
+    if (E.busy || document.getElementById('nfsnap')) return;
+    E.busy = true; document.documentElement.classList.add('nfsnap-taking');
+    try { if (window.nfFabDial) window.nfFabDial.close(); } catch (e) { /* ignore */ }
+    toast(L('بيصوّر الشاشة…', 'Taking the screenshot…'));
+    try {
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      E.from = location.hash || '#/'; E.page = pageTitle(); E.order = (S.route && S.route.view === 'orders' && S.route.id) || '';
+      const cv = await capture();
+      if (!cv || !cv.width) throw new Error('empty');
+      E.k = cv.width / (document.documentElement.clientWidth || innerWidth); E.img = cv; E.shapes = []; E.cur = null; E.step = 'draw'; E.task = curTaskId(); E.q = '';
+      openEditor();
+    } catch (e) {
+      console.warn('snap', e);
+      toast(L('مقدرتش آخد صورة للشاشة — جرّب تاني', 'Could not take the screenshot — try again'), 'err');
+    } finally { E.busy = false; document.documentElement.classList.remove('nfsnap-taking'); }
+  }
+
+  /* ---------- 2) the sketch tools ---------- */
+  const G = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const TOOLS = () => [
+    ['pen', L('قلم', 'Pen'), G('<path d="M4 20l4.2-1 10.4-10.4a2 2 0 0 0-2.8-2.8L5.4 16.2z"/><path d="M14.4 7.2l2.8 2.8"/>')],
+    ['arrow', L('سهم', 'Arrow'), G('<path d="M5 19L19 5M10 5h9v9"/>')],
+    ['box', L('مربع', 'Box'), G('<rect x="4.5" y="6" width="15" height="12" rx="1.5"/>')],
+    ['oval', L('دايرة', 'Circle'), G('<ellipse cx="12" cy="12" rx="8" ry="6.5"/>')],
+    ['pin', L('رقم', 'Number'), G('<circle cx="12" cy="12" r="8"/><path d="M11 9.2l1.6-1v8"/>')],
+    ['hide', L('إخفاء', 'Hide'), G('<rect x="4" y="7" width="16" height="10" rx="1.5"/><path d="M4 12l5-5M9 17l11-10M14 17l6-6"/>')]
+  ];
+  function openEditor() {
+    const el = document.createElement('div'); el.id = 'nfsnap'; el.className = 'nfsnap'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    document.body.appendChild(el); document.documentElement.classList.add('nfsnap-open');
+    paint();
+  }
+  function closeEditor() { const el = document.getElementById('nfsnap'); if (el) el.remove(); document.documentElement.classList.remove('nfsnap-open'); E.img = null; E.shapes = []; E.cur = null; syncSrc(); }
+  function paint() {
+    const el = document.getElementById('nfsnap'); if (!el) return;
+    if (E.step === 'draw') {
+      el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x" data-sn="cancel" aria-label="${esc(L('إلغاء', 'Cancel'))}">✕</button><b>${esc(L('ارسم على الصورة', 'Draw on the picture'))}</b><button type="button" class="btn p sm" data-sn="next">${esc(L('التالي', 'Next'))}</button></div>
+        <div class="sn-stage"><canvas id="sn-cv"></canvas></div>
+        <div class="sn-tools"><div class="sn-row">${TOOLS().map(([k, t, ic]) => `<button type="button" class="sn-t ${E.tool === k ? 'on' : ''}" data-sn="tool" data-k="${k}" title="${esc(t)}">${ic}<span>${esc(t)}</span></button>`).join('')}</div>
+          <div class="sn-row sn-row2">${COLORS.map(c => `<button type="button" class="sn-c ${E.color === c ? 'on' : ''}" data-sn="color" data-k="${c}" style="--c:${c}" aria-label="${esc(c)}"></button>`).join('')}
+            <button type="button" class="sn-s ${E.size === 1 ? 'on' : ''}" data-sn="size" data-k="1" title="${esc(L('رفيع', 'Thin'))}"><i style="width:4px;height:4px"></i></button><button type="button" class="sn-s ${E.size === 2 ? 'on' : ''}" data-sn="size" data-k="2" title="${esc(L('تخين', 'Thick'))}"><i style="width:9px;height:9px"></i></button>
+            <span class="sn-sp"></span><button type="button" class="sn-u" data-sn="undo" title="${esc(L('رجوع خطوة', 'Undo'))}">${G('<path d="M9 7L4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/>')}</button><button type="button" class="sn-u" data-sn="clear" title="${esc(L('مسح الكل', 'Clear all'))}">${G('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}</button></div></div>`;
+      const cv = el.querySelector('#sn-cv'); cv.width = E.img.width; cv.height = E.img.height; bindCanvas(cv); redraw();
+    } else {
+      el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x sn-back" data-sn="back">‹ ${esc(L('رجوع للرسم', 'Back to drawing'))}</button><b>${esc(L('ابعت على مهمة', 'Send to a task'))}</b><span style="width:40px"></span></div>
+        <div class="sn-body"><img class="sn-prev" alt="" src="${final(560).toDataURL('image/jpeg', 0.8)}">
+          <div class="sn-lbl">${esc(L('المهمة', 'The task'))}</div>
+          <input type="search" id="sn-q" class="sn-q" placeholder="${esc(L('ابحث باسم المهمة…', 'Search by task name…'))}" value="${esc(E.q)}" autocomplete="off">
+          <div class="sn-list" id="sn-list">${listHTML()}</div>
+          ${pins().length ? `<div class="sn-lbl">${esc(L('تعليق كل رقم', 'A comment for each number'))}</div>${pins().map(p => `<div class="sn-pin"><b style="background:${esc(p.color === '#ffffff' ? '#1c1c1e' : p.color)}">${p.n}</b><input type="text" data-pin="${p.n}" value="${esc(p.note || '')}" placeholder="${esc(L('اكتب الملاحظة على الرقم ده', 'Write the note for this number'))}"></div>`).join('')}` : ''}
+          <div class="sn-lbl">${esc(L('ملاحظة', 'Note'))}</div><textarea id="sn-note" rows="2" placeholder="${esc(L('اختياري', 'Optional'))}">${esc(E.note || '')}</textarea>
+          <div class="sn-warn">${esc(L('كل اللي في المهمة هيشوفوا الصورة — استخدم «إخفاء» لأي حاجة خاصة.', 'Everyone on the task will see the picture — use «Hide» for anything private.'))}</div></div>
+        <div class="sn-foot"><button type="button" class="btn p" data-sn="send" ${E.busy ? 'disabled' : ''}>${esc(E.busy ? L('بيبعت…', 'Sending…') : L('ابعت على المهمة', 'Send to the task'))}</button></div>`;
+    }
+  }
+
+  /* drawing */
+  const px = n => n * (E.k || 1);   /* sizes are in screen points, the picture may be 2x */
+  const lw = () => Math.max(2, Math.round(px(E.size === 2 ? 5.5 : 3)));
+  function pins() { let n = 0; return E.shapes.filter(s => s.t === 'pin').map(s => { s.n = ++n; return s; }); }
+  function drawShape(c, s) {
+    const w = s.w || lw(); c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = s.color; c.fillStyle = s.color; c.lineWidth = w;
+    c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = w * 1.2;
+    if (s.t === 'pen' && s.pts.length) {
+      c.beginPath(); c.moveTo(s.pts[0][0], s.pts[0][1]);
+      for (let i = 1; i < s.pts.length - 1; i++) { const mx = (s.pts[i][0] + s.pts[i + 1][0]) / 2, my = (s.pts[i][1] + s.pts[i + 1][1]) / 2; c.quadraticCurveTo(s.pts[i][0], s.pts[i][1], mx, my); }
+      const l = s.pts[s.pts.length - 1]; c.lineTo(l[0], l[1]); c.stroke();
+    } else if (s.t === 'arrow') {
+      const [x1, y1] = s.a, [x2, y2] = s.b; const ang = Math.atan2(y2 - y1, x2 - x1); const hl = Math.max(w * 4.5, 14);
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2 - Math.cos(ang) * hl * 0.6, y2 - Math.sin(ang) * hl * 0.6); c.stroke();
+      c.beginPath(); c.moveTo(x2, y2); c.lineTo(x2 - hl * Math.cos(ang - 0.45), y2 - hl * Math.sin(ang - 0.45)); c.lineTo(x2 - hl * Math.cos(ang + 0.45), y2 - hl * Math.sin(ang + 0.45)); c.closePath(); c.fill();
+    } else if (s.t === 'box') {
+      const x = Math.min(s.a[0], s.b[0]), y = Math.min(s.a[1], s.b[1]); c.strokeRect(x, y, Math.abs(s.b[0] - s.a[0]), Math.abs(s.b[1] - s.a[1]));
+    } else if (s.t === 'oval') {
+      const cx = (s.a[0] + s.b[0]) / 2, cy = (s.a[1] + s.b[1]) / 2; c.beginPath(); c.ellipse(cx, cy, Math.max(1, Math.abs(s.b[0] - s.a[0]) / 2), Math.max(1, Math.abs(s.b[1] - s.a[1]) / 2), 0, 0, Math.PI * 2); c.stroke();
+    } else if (s.t === 'hide') {
+      const x = Math.round(Math.min(s.a[0], s.b[0])), y = Math.round(Math.min(s.a[1], s.b[1])), ww = Math.round(Math.abs(s.b[0] - s.a[0])), hh = Math.round(Math.abs(s.b[1] - s.a[1]));
+      if (ww > 2 && hh > 2) {
+        c.shadowBlur = 0; const blk = Math.max(8, Math.round(px(9)));
+        const sm = document.createElement('canvas'); sm.width = Math.max(1, Math.ceil(ww / blk)); sm.height = Math.max(1, Math.ceil(hh / blk));
+        sm.getContext('2d').drawImage(E.img, x, y, ww, hh, 0, 0, sm.width, sm.height);
+        c.imageSmoothingEnabled = false; c.drawImage(sm, 0, 0, sm.width, sm.height, x, y, ww, hh);
+        c.fillStyle = 'rgba(60,60,67,.55)'; c.fillRect(x, y, ww, hh);
+      }
+    } else if (s.t === 'pin') {
+      const r = Math.round(px(14)); const fill = s.color === '#ffffff' ? '#1c1c1e' : s.color;
+      c.beginPath(); c.arc(s.x, s.y, r, 0, Math.PI * 2); c.fillStyle = fill; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(2, r / 6); c.strokeStyle = '#fff'; c.stroke();
+      c.fillStyle = fill === '#ffcc00' ? '#1c1c1e' : '#fff'; c.font = `700 ${Math.round(r * 1.15)}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(s.n || ''), s.x, s.y + r * 0.04);
+    }
+    c.restore();
+  }
+  function render2(c) { c.drawImage(E.img, 0, 0); pins(); E.shapes.filter(s => s.t === 'hide').forEach(s => drawShape(c, s)); E.shapes.filter(s => s.t !== 'hide').forEach(s => drawShape(c, s)); if (E.cur) drawShape(c, E.cur); }
+  function redraw() { const cv = document.getElementById('sn-cv'); if (cv) render2(cv.getContext('2d')); }
+  function final(maxW) { const k = Math.min(1, (maxW || 1600) / E.img.width); const out = document.createElement('canvas'); out.width = Math.round(E.img.width * k); out.height = Math.round(E.img.height * k); const full = document.createElement('canvas'); full.width = E.img.width; full.height = E.img.height; render2(full.getContext('2d')); out.getContext('2d').drawImage(full, 0, 0, out.width, out.height); return out; }
+  function bindCanvas(cv) {
+    const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+    cv.addEventListener('pointerdown', e => {
+      e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      const p = pt(e);
+      if (E.tool === 'pin') { E.shapes.push({ t: 'pin', x: p[0], y: p[1], color: E.color }); redraw(); return; }
+      E.cur = E.tool === 'pen' ? { t: 'pen', pts: [p], color: E.color, w: lw() } : { t: E.tool, a: p, b: p, color: E.color, w: lw() };
+    });
+    cv.addEventListener('pointermove', e => { if (!E.cur) return; e.preventDefault(); const p = pt(e); if (E.cur.t === 'pen') E.cur.pts.push(p); else E.cur.b = p; redraw(); });
+    const up = () => {
+      if (!E.cur) return; const s = E.cur; E.cur = null;
+      const big = s.t === 'pen' ? s.pts.length > 1 : Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) > 6;
+      if (big) E.shapes.push(s); redraw();
+    };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  }
+
+  /* ---------- 3) pick the task ---------- */
+  function choices() {
+    const me = typeof myIds === 'function' ? myIds() : []; const cur = curTaskId(); const rc = recent(); const q = String(E.q || '').trim().toLowerCase();
+    const party = t => (typeof taskVisible !== 'function' || taskVisible(t)) && (typeof taskIsParty !== 'function' || taskIsParty(t));
+    const mine = t => me.includes(t.assigneeId) || me.includes(t.createdBy) || (t.participants || []).some(p => me.includes(p.id));
+    let ts = list('tasks').filter(t => t && t.title && party(t));
+    if (q) ts = ts.filter(t => [t.title, t.code, t.number, typeof assigneeName === 'function' ? assigneeName(t.assigneeId) : ''].some(v => String(v || '').toLowerCase().includes(q)));
+    const onOrder = t => !!E.order && t.orderId === E.order && t.status !== 'done';
+    const score = t => t.id === cur ? 0 : onOrder(t) ? 0.5 : rc.includes(t.id) ? 1 + rc.indexOf(t.id) : (t.status !== 'done' && mine(t)) ? 100 : t.status !== 'done' ? 1000 : 5000;
+    ts.sort((a, b) => score(a) - score(b) || String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+    return ts.slice(0, 40);
+  }
+  function listHTML() {
+    const ts = choices();
+    if (!E.task && ts.length) { const r0 = recentAt()[0]; if (ts[0].id === curTaskId()) E.task = ts[0].id; else if (r0 && Date.now() - (r0.at || 0) < 20 * 60e3 && ts.some(t => t.id === r0.id) && !E.order) E.task = r0.id; }
+    if (!ts.length) return `<div class="sn-empty">${esc(L('مفيش مهام بالاسم ده', 'No task by that name'))}</div>`;
+    const cur = curTaskId(); const rc = recent();
+    return ts.map(t => { const who = typeof assigneeName === 'function' && t.assigneeId ? assigneeName(t.assigneeId) : ''; const tag = t.id === cur ? L('المهمة اللي إنت فيها', 'The task you are on') : (E.order && t.orderId === E.order) ? L('على أمر التشغيل ده', 'On this work order') : rc.includes(t.id) ? L('فتحتها قريب', 'Opened lately') : t.status === 'done' ? L('خلصت', 'Done') : '';
+      return `<button type="button" class="sn-task ${E.task === t.id ? 'on' : ''}" data-sn="task" data-k="${esc(t.id)}"><i class="sn-rd"></i><span class="sn-tt"><b>${esc(t.title)}</b><small>${esc([who, tag].filter(Boolean).join(' · '))}</small></span></button>`; }).join('');
+  }
+
+  /* ---------- 4) send it into the task chat ---------- */
+  async function send() {
+    const el = document.getElementById('nfsnap'); if (!el || E.busy) return;
+    collect();
+    const t = byId('tasks', E.task); if (!t) { toast(L('اختار المهمة الأول', 'Pick the task first'), 'err'); return; }
+    E.busy = true; paint();
+    try {
+      const lines = []; if (E.note) lines.push(E.note.trim());
+      pins().forEach(p => { if ((p.note || '').trim()) lines.push(`${PIN(p.n)} ${p.note.trim()}`); });
+      lines.push(`📍 ${L('اتصوّرت من', 'Taken on')}: ${E.page || E.from}`);
+      const blob = await new Promise(res => final(1600).toBlob(res, 'image/jpeg', 0.86));
+      const file = new File([blob], `snap-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      if (S.ui) S.ui.chatReply = null;
+      const ok = await taskPost(t, lines.join('\n'), file);
+      if (!ok) throw new Error('not posted');
+      try {
+        const c = byId('tasks', t.id) || t; const th = taskThread(c).slice(); const me = myIds();
+        for (let i = th.length - 1; i >= 0; i--) { if (me.includes(th[i].by) && th[i].fileId) { th[i] = Object.assign({}, th[i], { snap: { from: E.from, page: E.page, pins: pins().length } }); await Store.update('tasks', t.id, { thread: th }, { silent: true }); break; } }
+      } catch (e) { /* ignore */ }
+      remember(t.id); E.busy = false; closeEditor();
+      toast(L(`اتبعتت على «${t.title}» ✓`, `Sent to «${t.title}» ✓`));
+    } catch (e) {
+      console.warn('snap send', e); E.busy = false; paint();
+      toast(L('مابعتتش — جرّب تاني', 'Not sent — try again'), 'err');
+    }
+  }
+  function collect() {
+    const el = document.getElementById('nfsnap'); if (!el || E.step !== 'send') return;
+    const n = el.querySelector('#sn-note'); if (n) E.note = n.value;
+    const q = el.querySelector('#sn-q'); if (q) E.q = q.value;
+    el.querySelectorAll('[data-pin]').forEach(i => { const p = pins().find(x => x.n === +i.dataset.pin); if (p) p.note = i.value; });
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('#nfsnap [data-sn]'); if (!b) return; e.preventDefault();
+    const a = b.dataset.sn;
+    if (a === 'cancel') return closeEditor();
+    if (a === 'tool') { E.tool = b.dataset.k; return paint(); }
+    if (a === 'color') { E.color = b.dataset.k; return paint(); }
+    if (a === 'size') { E.size = +b.dataset.k; return paint(); }
+    if (a === 'undo') { E.shapes.pop(); return redraw(); }
+    if (a === 'clear') { E.shapes = []; return redraw(); }
+    if (a === 'next') { E.step = 'send'; E.note = E.note || ''; return paint(); }
+    if (a === 'back') { collect(); E.step = 'draw'; return paint(); }
+    if (a === 'task') { collect(); E.task = b.dataset.k; document.querySelectorAll('#nfsnap .sn-task').forEach(x => x.classList.toggle('on', x.dataset.k === E.task)); return; }
+    if (a === 'send') return send();
+  });
+  document.addEventListener('input', e => { if (e.target && e.target.id === 'sn-q') { collect(); const box = document.getElementById('sn-list'); if (box) box.innerHTML = listHTML(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('nfsnap')) closeEditor(); });
+  window.addEventListener('hashchange', () => { if (document.getElementById('nfsnap') && !E.busy) closeEditor(); });
+
+  /* ---------- in the task chat: the picture opens full size, «taken on» opens the page ---------- */
+  if (typeof chatHTML === 'function') chatHTML = (base => t => {
+    let h = base(t); if (!t || !h) return h;
+    taskThread(t).forEach((m, mi) => {
+      if (!m || !m.snap || !m.fileId) return;
+      const mid = m.id || ('i' + mi); const k = h.indexOf(`data-mid="${esc(mid)}"`); if (k < 0) return;
+      const nxt = h.indexOf('data-mid="', k + 10); const end = nxt > 0 ? nxt : h.length; let seg = h.slice(k, end);
+      const f = byId('files', m.fileId); if (f && f.store !== 'thumb') seg = seg.replace(/data-action="lightboxSrc" data-arg="[^"]*"/, `data-action="fileOpen" data-arg="${esc(m.fileId)}"`);
+      seg = seg.replace(/(<img [^>]*>)/, `$1<button type="button" class="snapfrom" data-action="snapFrom" data-arg="${esc(m.snap.from || '#/')}">📍 ${esc(m.snap.page || L('افتح الصفحة', 'Open the page'))}</button>`);
+      h = h.slice(0, k) + seg + h.slice(end);
+    });
+    return h;
+  })(chatHTML);
+  ACTIONS.snapFrom = h => { if (h && /^#\//.test(h)) location.hash = h; };
+  ACTIONS.snapStart = () => start();
+
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { syncSrc(); const c = curTaskId(); if (c) remember(c); } catch (e) { /* ignore */ } });
+  setInterval(() => { try { syncSrc(); } catch (e) { /* ignore */ } }, 2500);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .snapfab{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;transform:translateX(-300vw)}
+    html.nfsnap-taking #nfdial{visibility:hidden}
+    html.nfsnap-open,html.nfsnap-open body{overflow:hidden}
+    .nfsnap{position:fixed;inset:0;z-index:9800;background:#0b0b0d;color:#fff;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+    .nfsnap .sn-top{display:flex;align-items:center;gap:10px;padding:10px 12px;min-height:52px}
+    .nfsnap .sn-top b{flex:1;text-align:center;font-size:16px;font-weight:600}
+    .nfsnap .sn-x{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:999px;min-width:40px;height:40px;font-size:16px;padding:0 12px;cursor:pointer}
+    .nfsnap .sn-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 10px}
+    .nfsnap #sn-cv{max-width:100%;max-height:100%;width:auto;height:auto;border-radius:10px;box-shadow:0 10px 40px -10px rgba(0,0,0,.8);touch-action:none;cursor:crosshair;background:#fff}
+    .nfsnap .sn-tools{padding:8px 10px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.04)}
+    .nfsnap .sn-row{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap}
+    .nfsnap .sn-t{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:54px;padding:7px 6px;border-radius:14px;border:0;background:transparent;color:rgba(255,255,255,.75);cursor:pointer;font-size:11.5px}
+    .nfsnap .sn-t.on{background:rgba(255,255,255,.16);color:#fff}
+    .nfsnap .sn-c{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:var(--c);cursor:pointer;padding:0}
+    .nfsnap .sn-c.on{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25)}
+    .nfsnap .sn-s{width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.1);display:grid;place-items:center;cursor:pointer}.nfsnap .sn-s i{display:block;border-radius:50%;background:#fff}
+    .nfsnap .sn-s.on{background:rgba(255,255,255,.28)}
+    .nfsnap .sn-sp{width:12px}
+    .nfsnap .sn-u{width:40px;height:40px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;cursor:pointer}
+    .nfsnap .sn-body>*{flex:none}
+    .nfsnap .sn-body{flex:1;min-height:0;overflow:auto;padding:4px 16px 12px;display:flex;flex-direction:column;gap:8px;background:var(--bg,#f2f2f7);color:var(--ink,#111);border-radius:18px 18px 0 0}
+    .nfsnap .sn-prev{align-self:center;max-height:28vh;max-width:100%;border-radius:10px;margin-top:10px;box-shadow:0 6px 20px -8px rgba(0,0,0,.35)}
+    .nfsnap .sn-lbl{font-size:12.5px;font-weight:600;color:var(--ink-2,#555);margin-top:6px}
+    .nfsnap .sn-q,.nfsnap #sn-note,.nfsnap .sn-pin input{width:100%;border:1px solid var(--line,#ddd);border-radius:12px;padding:10px 12px;font-size:15px;background:var(--surface,#fff);color:var(--ink,#111)}
+    .nfsnap .sn-list{display:flex;flex-direction:column;max-height:34vh;overflow:auto;border:1px solid var(--line,#ddd);border-radius:12px;background:var(--surface,#fff)}
+    .nfsnap .sn-task{display:flex;align-items:center;gap:10px;text-align:start;padding:10px 12px;border:0;border-top:1px solid var(--line,#eee);background:transparent;color:inherit;cursor:pointer;font:inherit}
+    .nfsnap .sn-task:first-child{border-top:0}.nfsnap .sn-task.on{background:var(--accent-soft,rgba(0,122,255,.1))}
+    .nfsnap .sn-rd{flex:none;width:18px;height:18px;border-radius:50%;border:2px solid var(--ink-3,#aaa)}.nfsnap .sn-task.on .sn-rd{border:6px solid var(--accent,#007aff)}
+    .nfsnap .sn-tt{min-width:0;display:flex;flex-direction:column}.nfsnap .sn-tt b{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfsnap .sn-tt small{font-size:12px;color:var(--ink-2,#666)}
+    .nfsnap .sn-empty{padding:14px;text-align:center;color:var(--ink-2,#666);font-size:13px}
+    .nfsnap .sn-pin{display:flex;align-items:center;gap:8px}.nfsnap .sn-pin b{flex:none;width:28px;height:28px;border-radius:50%;color:#fff;display:grid;place-items:center;font-size:14px}
+    .nfsnap .sn-warn{font-size:12.5px;color:var(--warn,#b25000);background:rgba(255,149,0,.12);border-radius:10px;padding:8px 10px}
+    .nfsnap .sn-foot{padding:10px 16px calc(12px + env(safe-area-inset-bottom,0px));background:var(--bg,#f2f2f7)}
+    .nfsnap .sn-foot .btn{width:100%;min-height:48px;justify-content:center;font-size:16px}
+    .snapfrom{display:inline-flex;align-items:center;gap:4px;margin-top:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--accent);font-size:12.5px;cursor:pointer}
+    @media (min-width:900px){.nfsnap .sn-body{max-width:640px;width:100%;margin:0 auto}.nfsnap .sn-foot{max-width:640px;width:100%;margin:0 auto}}
+  </style>`);
+  Object.assign(window, { nfSnap: { start, state: E } });
 })();
 </script>
 
