@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1824-913a00";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-2000-8f1493";</script>
 
 <script>
 'use strict';
@@ -5981,41 +5981,120 @@ const sbErrText = e => { const m = String(e && (e.message || e.error_description
 
 /* ---------------- adapter: the subset of the artifact-db API that Store uses, over Supabase ---------------- */
 const PRIV_WORKER_ROLES = ['admin', 'hr', 'office', 'kiosk'];
+/* v7.46: the lists live on the device (IndexedDB «nf-cache», one record per user + list) — the app opens from them at once and then asks the
+   server only for what changed since the last pull (one request for all lists: rpc nf_sync, by the server's own clock). Every 10 minutes the
+   same request also brings the ids the user may still see, so deleted / hidden docs leave the device too. Logging out wipes the cache. */
+const DC_VER = 1, DC_ID_EVERY = 10 * 60 * 1000, DC_MAX_AGE = 7 * 24 * 3600 * 1000, DC_NOCACHE = new Set(['workers']);
+const _dc = { p: null, gen: 0, ready: null };
+function dcOpen() {
+  if (_dc.p) return _dc.p;
+  _dc.p = new Promise(res => { try { if (typeof indexedDB === 'undefined') return res(null); const r = indexedDB.open('nf-cache', 1); r.onupgradeneeded = () => { try { r.result.createObjectStore('cols'); } catch (e) { /* exists */ } }; r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); } catch (e) { res(null); } });
+  return _dc.p;
+}
+async function dcGet(key) { const db = await dcOpen(); if (!db) return null; return new Promise(res => { try { const rq = db.transaction('cols', 'readonly').objectStore('cols').get(key); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); } catch (e) { res(null); } }); }
+async function dcPut(key, val, gen) { const db = await dcOpen(); if (!db || gen !== _dc.gen) return; return new Promise(res => { try { const tx = db.transaction('cols', 'readwrite'); tx.objectStore('cols').put(val, key); tx.oncomplete = () => res(); tx.onerror = () => res(); tx.onabort = () => res(); } catch (e) { res(); } }); }
+async function dcClear() { _dc.gen++; const db = await dcOpen(); if (!db) return; await new Promise(res => { try { const tx = db.transaction('cols', 'readwrite'); tx.objectStore('cols').clear(); tx.oncomplete = () => res(); tx.onerror = () => res(); tx.onabort = () => res(); } catch (e) { res(); } }); }
+/* another person signs in on this device → the previous person's lists go first */
+function dcReady(uid) { if (_dc.ready && _dc.ready.uid === uid) return _dc.ready.p; const p = (async () => { let prev = null; try { prev = lsGet('nf.dc.uid'); } catch (e) { /* ignore */ } if (prev && prev !== uid) await dcClear(); try { lsSet('nf.dc.uid', uid); } catch (e) { /* ignore */ } })(); _dc.ready = { uid, p }; return p; }
+function dcWipe() { try { lsSet('nf.dc.uid', null); } catch (e) { /* ignore */ } _dc.ready = null; _dc.gen++; setTimeout(() => { dcClear(); }, 300); }
+
 function sbBackend(client) {
-  const cache = {}; const subs = {}; let channel = null; let safeTimer = null;
+  const cache = {}; const subs = {}; const meta = {}; const loads = {}; let channel = null; let safeTimer = null; let disposed = false; const gen = _dc.gen;
+  const uid = () => (S.sbUser && S.sbUser.id) || '';
+  const dcOn = () => !disposed && !!uid() && typeof indexedDB !== 'undefined';
   const mapErr = e => { const err = new Error(e && e.message || 'db'); err.code = (e && (e.code === '42501' || /row-level security|permission denied/i.test(e.message || ''))) ? 'invalid_argument' : (e && e.code === 'PGRST301') ? 'revoked' : (e && e.code); err.raw = e; return err; };
   const snapOf = (col, changes = [], filter = null) => { const m = cache[col] || new Map(); const docs = Array.from(m.entries()).filter(([, d]) => !filter || (d && d.month >= filter.v)).map(([id, data]) => ({ id, data: () => data })); return { docs, docChanges: () => changes }; };
   const emit = (col, changes) => (subs[col] || []).forEach(s => { try { s.cb(snapOf(col, changes, s.filter)); } catch (e) { console.error(e); } });
+  /* ---- save to the device (debounced, only lists that were synced whole and are not filtered) ---- */
+  const dirty = new Set(); let saveT = null;
+  const cacheable = col => !DC_NOCACHE.has(col) && !!meta[col] && !(subs[col] || []).some(s => s.filter);
+  function markDirty(col, soon) { if (!dcOn() || !cacheable(col)) return; dirty.add(col); if (soon && saveT) { clearTimeout(saveT); saveT = null; } if (!saveT) saveT = setTimeout(flushSave, soon ? 300 : 2500); }
+  const onHide = () => { if (document.hidden && saveT) { clearTimeout(saveT); flushSave(); } }; document.addEventListener('visibilitychange', onHide); window.addEventListener('pagehide', onHide);
+  function flushSave() { saveT = null; if (!dcOn()) { dirty.clear(); return; } const u = uid(); Array.from(dirty).forEach(col => { dirty.delete(col); const m = cache[col]; if (!m || !meta[col]) return; dcPut(u + '|' + col, { v: DC_VER, uid: u, col, top: meta[col].top || '', idAt: meta[col].idAt || 0, at: Date.now(), rows: Array.from(m.entries()) }, gen); }); }
+  /* ---- open a list from the device ---- */
+  function loadCol(col) {
+    if (loads[col]) return loads[col];
+    loads[col] = (async () => {
+      if (DC_NOCACHE.has(col) || !dcOn()) return false; const u = uid(); await dcReady(u); if (!dcOn()) return false;
+      const rec = await dcGet(u + '|' + col);
+      if (!rec || rec.v !== DC_VER || rec.uid !== u || !Array.isArray(rec.rows) || !(Date.now() - (rec.at || 0) < DC_MAX_AGE)) return false;
+      const m = cache[col] || (cache[col] = new Map()); rec.rows.forEach(([id, d]) => { if (!m.has(id)) m.set(id, d); }); /* a live message that came first is newer */
+      meta[col] = { top: rec.top || '', idAt: rec.idAt || 0 }; return true;
+    })().catch(() => false);
+    return loads[col];
+  }
+  /* ---- the whole list from the server (first time, a list that is not kept, or a filtered one) ---- */
   async function fetchCol(col, filter) {
     const m = cache[col] || (cache[col] = new Map()); const rows = [];
     if (col === 'workers') { const r0 = await client.from('docs_safe').select('id,data').eq('col', 'workers'); if (!r0.error) rows.push(...(r0.data || [])); }
     /* v4.12: page through the collection — PostgREST caps one request at 1000 rows, so a busy table (tasks / requests / changes) silently lost rows beyond that */
-    const data = []; for (let from = 0; ; from += 1000) { let q = client.from('docs').select('id,data').eq('col', col).range(from, from + 999); if (filter) q = q.gte('month', filter.v); const r = await q; if (r.error) throw mapErr(r.error); data.push(...(r.data || [])); if (!r.data || r.data.length < 1000) break; }
-    if (!filter) { const keep = new Set(); rows.concat(data || []).forEach(r => { keep.add(r.id); m.set(r.id, r.data); }); Array.from(m.keys()).forEach(k => { if (!keep.has(k)) m.delete(k); }); }
-    else (data || []).forEach(r => m.set(r.id, r.data));
+    const data = []; for (let from = 0; ; from += 1000) { let q = client.from('docs').select('id,data,updated_at').eq('col', col).range(from, from + 999); if (filter) q = q.gte('month', filter.v); const r = await q; if (r.error) throw mapErr(r.error); data.push(...(r.data || [])); if (!r.data || r.data.length < 1000) break; }
+    if (!filter) {
+      const keep = new Set(); let top = ''; rows.concat(data || []).forEach(r => { keep.add(r.id); m.set(r.id, r.data); if (r.updated_at && r.updated_at > top) top = r.updated_at; }); Array.from(m.keys()).forEach(k => { if (!keep.has(k)) m.delete(k); });
+      if (!DC_NOCACHE.has(col)) { meta[col] = { top: top || (meta[col] && meta[col].top) || '', idAt: Date.now() }; markDirty(col, true); }
+    } else (data || []).forEach(r => m.set(r.id, r.data));
     return m;
+  }
+  /* ---- what changed, for many lists in one request ---- */
+  let _q = new Set(), _qp = null;
+  function syncCols(cols) { cols.forEach(c => _q.add(c)); if (!_qp) _qp = new Promise((res, rej) => setTimeout(() => { const list = Array.from(_q); _q = new Set(); _qp = null; runSync(list).then(res, rej); }, 40)); return _qp; }
+  async function runSync(list) {
+    if (!list.length) return; const req = {}; list.forEach(c => { meta[c] ||= { top: '', idAt: 0 }; req[c] = meta[c].top || ''; });
+    const wantIds = list.some(c => Date.now() - (meta[c].idAt || 0) > DC_ID_EVERY);
+    let res = null;
+    try { const r = await client.rpc('nf_sync', { p_req: req, p_ids: wantIds }); if (r.error) throw r.error; res = r.data || {}; }
+    catch (e) { let bad = 0; for (const c of list) { try { await fetchCol(c); } catch (er) { if (++bad >= 2) throw er; } } return; } /* an older server / a failure: the old way, list by list */
+    for (const c of list) {
+      const x = res[c]; if (!x) continue; const m = cache[c] || (cache[c] = new Map());
+      (x.rows || []).forEach(r => { if (Array.isArray(r)) m.set(r[0], r[1]); });
+      if (x.top) meta[c].top = x.top;
+      if (Array.isArray(x.ids)) {
+        const keep = new Set(x.ids); Array.from(m.keys()).forEach(k => { if (!keep.has(k)) m.delete(k); });
+        const miss = x.ids.filter(id => !m.has(id));
+        for (let i = 0; i < miss.length; i += 150) { const r = await client.from('docs').select('id,data').eq('col', c).in('id', miss.slice(i, i + 150)); if (!r.error) (r.data || []).forEach(d => m.set(d.id, d.data)); }
+        meta[c].idAt = Date.now();
+      }
+      markDirty(c, true);
+    }
+  }
+  /* ---- a subscriber: show what the device has right away, then what changed ---- */
+  function watchCol(col, done, fail) {
+    if (DC_NOCACHE.has(col)) { fetchCol(col).then(done).catch(fail); return; }
+    loadCol(col).then(warm => {
+      /* the device copy is shown at once, but the list counts as «loaded» only after the server answered: automatic jobs that create or
+         close things when something is missing (tasks, reconciliations...) must never act on an old copy */
+      if (warm) { const was = !!(S.loaded && S.loaded[col]); try { done(); } catch (e) { console.error(e); } if (!was && S.loaded) S.loaded[col] = false; return syncCols([col]); }
+      if (meta[col]) return syncCols([col]); /* already pulled once in this session */
+      return fetchCol(col);
+    }).then(done).catch(fail);
   }
   let wasLive = false, _refetchT = 0, _refetchFail = 0, _refetchBusy = false;
   /* v4.12: after the socket comes back (phone slept / app in background) every realtime message in between is gone — reload the subscribed collections from the server and push them to the app
-     v7.45: at most one reload every 30 s; when the server answers with errors, stop at the second failing collection and wait longer each time (1, 2, 4 ... up to 10 min) — a slow server made the socket reconnect over and over and every reconnect reloaded everything */
+     v7.45: at most one reload every 30 s; when the server answers with errors, stop at the second failing collection and wait longer each time (1, 2, 4 ... up to 10 min) — a slow server made the socket reconnect over and over and every reconnect reloaded everything
+     v7.46: lists already pulled ask only for what changed (one request); filtered lists (attendance / movements) reload their own window, not the whole history */
   async function refetchAll(why) {
     const gap = _refetchFail ? Math.min(600000, 30000 * Math.pow(2, _refetchFail)) : 30000;
     if (_refetchBusy || Date.now() - _refetchT < gap) return; _refetchBusy = true; _refetchT = Date.now(); let bad = 0;
-    try { for (const col of Object.keys(subs)) { if (!(subs[col] || []).length) continue; try { await fetchCol(col); emit(col, []); } catch (e) { console.warn('refetch', col, why, e && e.message); if (++bad >= 2) break; } } }
-    finally { _refetchBusy = false; _refetchFail = bad ? _refetchFail + 1 : 0; _refetchT = Date.now(); }
+    try {
+      const cols = Object.keys(subs).filter(c => (subs[c] || []).length);
+      const warm = cols.filter(c => !DC_NOCACHE.has(c) && meta[c] && subs[c].every(s => !s.filter)); const rest = cols.filter(c => !warm.includes(c));
+      if (warm.length) { try { await syncCols(warm); warm.forEach(c => emit(c, [])); } catch (e) { console.warn('refetch sync', why, e && e.message); bad++; } }
+      for (const col of rest) { const f = ((subs[col] || []).find(s => s.filter) || {}).filter || null; try { await fetchCol(col, f); emit(col, []); } catch (e) { console.warn('refetch', col, why, e && e.message); if (++bad >= 2) break; } }
+    } finally { _refetchBusy = false; _refetchFail = bad ? _refetchFail + 1 : 0; _refetchT = Date.now(); }
   }
   function ensureChannel() {
     if (channel) return;
     channel = client.channel('nf-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, payload => {
       const row = (payload.new && payload.new.col) ? payload.new : payload.old; if (!row || !row.col) return; const col = row.col; const m = cache[col] || (cache[col] = new Map());
       if (payload.eventType === 'DELETE') { m.delete(row.id); emit(col, [{ type: 'removed', doc: { id: row.id, data: () => null } }]); }
-      else { m.set(row.id, payload.new.data); emit(col, [{ type: payload.eventType === 'INSERT' ? 'added' : 'modified', doc: { id: row.id, data: () => payload.new.data } }]); }
+      else { m.set(row.id, payload.new.data); emit(col, [{ type: payload.eventType === 'INSERT' ? 'added' : 'modified', doc: { id: row.id, data: () => payload.new.data } }]); if (meta[col] && payload.new.updated_at && payload.new.updated_at > (meta[col].top || '')) meta[col].top = payload.new.updated_at; }
+      markDirty(col);
     }).subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('realtime', status); if (status === 'SUBSCRIBED') { if (wasLive) refetchAll('reconnect'); wasLive = true; } });
     /* non-privileged roles only get realtime for their own worker doc — refresh the safe directory periodically */
     safeTimer = setInterval(() => { if (subs.workers && !PRIV_WORKER_ROLES.includes(role())) fetchCol('workers').then(() => emit('workers', [])).catch(() => { }); }, 120000);
   }
   const collection = (col) => ({
-    onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb, filter: null }); fetchCol(col).then(() => cb(snapOf(col))).catch(e => onErr && onErr(e)); return () => { subs[col] = (subs[col] || []).filter(s => s.cb !== cb); }; },
+    onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb, filter: null }); watchCol(col, () => cb(snapOf(col)), e => onErr && onErr(e)); return () => { subs[col] = (subs[col] || []).filter(s => s.cb !== cb); }; },
     where(field, op, v) { const filter = { field, op, v }; return { async get() { await fetchCol(col, filter); return snapOf(col, [], filter); }, onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb, filter }); fetchCol(col, filter).then(() => cb(snapOf(col, [], filter))).catch(e => onErr && onErr(e)); return () => { subs[col] = (subs[col] || []).filter(s => s.cb !== cb); }; } }; },
   });
   const doc = (path) => { const [col, id] = path.split('/'); return {
@@ -6028,20 +6107,20 @@ function sbBackend(client) {
         Object.keys(data).forEach(k => { if (!prev || JSON.stringify(prev[k]) !== JSON.stringify(data[k])) patch[k] = data[k]; });
         if (prev && !Object.keys(patch).length) return;
         const { data: merged, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: prev ? patch : data }); if (error) throw mapErr(error);
-        if (merged) { (cache[col] ||= new Map()).set(id, merged); if (id === 'general' && typeof mergeSettings === 'function') S.settings = mergeSettings(merged); }
+        if (merged) { (cache[col] ||= new Map()).set(id, merged); markDirty(col); if (id === 'general' && typeof mergeSettings === 'function') S.settings = mergeSettings(merged); }
         return;
       }
-      const { error } = await client.from('docs').upsert({ col, id, data }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, data); },
+      const { error } = await client.from('docs').upsert({ col, id, data }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, data); markDirty(col); },
     async update(patch) {
       /* v4.6.2: shared docs (attendance month sheets) are merged ON THE SERVER under lock — a punch from the Android app and one from the web never overwrite each other */
-      if (col === 'attendance' && patch && typeof patch === 'object') { const { data, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: patch }); if (error) throw mapErr(error); if (data) { (cache[col] ||= new Map()).set(id, data); if (S.data[col]) { S.data[col].set(id, data); } } return; }
-      const cur = (S.data[col] && S.data[col].get(id)) || deepMerge((cache[col] && cache[col].get(id)) || { id }, patch); const { error } = await client.from('docs').upsert({ col, id, data: cur }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, cur); },
-    async delete() { const { error } = await client.from('docs').delete().eq('col', col).eq('id', id); if (error) throw mapErr(error); if (cache[col]) cache[col].delete(id); },
-    onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb: () => { const d = cache[col] && cache[col].get(id); cb({ exists: !!d, data: () => d }); }, filter: null }); fetchCol(col).then(() => { const d = cache[col].get(id); cb({ exists: !!d, data: () => d }); }).catch(e => onErr && onErr(e)); return () => { }; },
+      if (col === 'attendance' && patch && typeof patch === 'object') { const { data, error } = await client.rpc('nf_patch_doc', { p_col: col, p_id: id, p_patch: patch }); if (error) throw mapErr(error); if (data) { (cache[col] ||= new Map()).set(id, data); markDirty(col); if (S.data[col]) { S.data[col].set(id, data); } } return; }
+      const cur = (S.data[col] && S.data[col].get(id)) || deepMerge((cache[col] && cache[col].get(id)) || { id }, patch); const { error } = await client.from('docs').upsert({ col, id, data: cur }, { onConflict: 'col,id' }); if (error) throw mapErr(error); (cache[col] ||= new Map()).set(id, cur); markDirty(col); },
+    async delete() { const { error } = await client.from('docs').delete().eq('col', col).eq('id', id); if (error) throw mapErr(error); if (cache[col]) { cache[col].delete(id); markDirty(col); } },
+    onSnapshot(cb, onErr) { ensureChannel(); (subs[col] ||= []).push({ cb: () => { const d = cache[col] && cache[col].get(id); cb({ exists: !!d, data: () => d }); }, filter: null }); watchCol(col, () => { const d = cache[col] && cache[col].get(id); cb({ exists: !!d, data: () => d }); }, e => onErr && onErr(e)); return () => { }; },
   }; };
   /* v4.12: let the app push a doc it fetched itself (sbRefreshShared) into the realtime cache — otherwise the next realtime message rebuilt S.data from the cache and the doc vanished from the lists */
-  const prime = (col, id, data) => { (cache[col] ||= new Map()).set(id, data); };
-  return { collection, doc, prime, refetch: refetchAll, dispose() { if (channel) { try { client.removeChannel(channel); } catch (e) { /* ignore */ } channel = null; } clearInterval(safeTimer); Object.keys(subs).forEach(k => delete subs[k]); Object.keys(cache).forEach(k => delete cache[k]); } };
+  const prime = (col, id, data) => { (cache[col] ||= new Map()).set(id, data); markDirty(col); };
+  return { collection, doc, prime, refetch: refetchAll, dispose() { disposed = true; clearTimeout(saveT); saveT = null; dirty.clear(); document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', onHide); if (channel) { try { client.removeChannel(channel); } catch (e) { /* ignore */ } channel = null; } clearInterval(safeTimer); Object.keys(subs).forEach(k => delete subs[k]); Object.keys(cache).forEach(k => delete cache[k]); } };
 }
 
 /* ---------------- boot / session ---------------- */
@@ -6124,7 +6203,7 @@ async function authenticateSb(identifier, password) {
 }
 /* v4.6.2: no "user without a record" — a login whose worker/staff record is missing, stopped or without a role is signed out at once (the server bans it too) */
 let _sbKick = 0;
-function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
+function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) return; _sbKick = Date.now(); S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); dcWipe(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; setTimeout(() => { render(true); if (msg) toast(msg, 'err'); }, 0); }
 /* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
 async function sbAccessCheckBase() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
 /* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
@@ -6133,7 +6212,7 @@ let _sbLastRefresh = 0, _sbShSince = null, _sbShFail = 0;
 async function sbRefreshShared() { const gap = _sbShFail ? Math.min(300000, 15000 * Math.pow(2, _sbShFail)) : 15000; if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < gap) return; _sbLastRefresh = Date.now(); try { const since = _sbShSince || new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data,updated_at').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) { _sbShFail++; return; } _sbShFail = 0; let top = ''; data.forEach(r => { if (r.updated_at && r.updated_at > top) top = r.updated_at; }); if (top) { const t = Date.parse(top); _sbShSince = isNaN(t) ? top : new Date(t - 60000).toISOString(); } let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); }); if (changed) render(false); } catch (e) { _sbShFail++; /* offline */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
-document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
+document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); dcWipe(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
 
 /* ---------------- login screen (shared build; backend-aware) ---------------- */
 function loginScreenSb() {
@@ -6291,7 +6370,7 @@ function settingsBackendTab() {
   </div>`;
 }
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'sbform') return; ev.preventDefault(); const d = formData(ev.target); if (!/^https:\/\/.+supabase\.(co|in)/.test(d.supabaseUrl) && !/^https?:\/\//.test(d.supabaseUrl)) { toast('اكتب Project URL صحيحًا', 'err'); return; } if (!d.supabaseAnonKey) { toast('اكتب الـ anon key', 'err'); return; } lsSet('nf.sb', JSON.stringify({ supabaseUrl: d.supabaseUrl.replace(/\/$/, ''), supabaseAnonKey: d.supabaseAnonKey })); toast('تم الحفظ — جارٍ إعادة التحميل'); setTimeout(() => location.reload(), 600); });
-ACTIONS.sbDisconnect = async () => { if (!(await confirmDlg('فصل هذا الجهاز عن قاعدة البيانات المشتركة؟ (البيانات على السيرفر لا تُمس)', 'فصل'))) return; lsSet('nf.sb', null); try { if (S.sb) await S.sb.auth.signOut({ scope: 'local' }); } catch (e) { /* ignore */ } location.reload(); };
+ACTIONS.sbDisconnect = async () => { if (!(await confirmDlg('فصل هذا الجهاز عن قاعدة البيانات المشتركة؟ (البيانات على السيرفر لا تُمس)', 'فصل'))) return; lsSet('nf.sb', null); try { if (S.sb) await S.sb.auth.signOut({ scope: 'local' }); } catch (e) { /* ignore */ } try { lsSet('nf.dc.uid', null); await dcClear(); } catch (e) { /* ignore */ } location.reload(); };
 
 /* ---------------- installable app: service worker + update notice ---------------- */
 function pwaInit() {
@@ -44226,7 +44305,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ======================================================================
      the editor (an overlay over the page while the route is #/concept/<id>)
      ====================================================================== */
-  const CD = { id: '', ed: null, rec: null, rev: 0, outRev: 0, dirty: false, saving: false, again: false, saveT: 0, pop: '', layers: false, tool: 'pencil', color: '#1c1c1e', size: 1, opacity: 1, smooth: 0.38, loading: false, err: '', readOnly: false };
+  const CD = { id: '', ed: null, rec: null, rev: 0, outRev: 0, dirty: false, saving: false, again: false, saveT: 0, pop: '', tool: 'pencil', color: '#1c1c1e', size: 1, opacity: 1, smooth: 0.38, loading: false, err: '', readOnly: false, lyTap: { id: '', t: 0 }, lyT: 0 };
   const G = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const IC = {
     select: G('<path d="M6 4.5l11 6.4-5 1.4-2.6 4.9z"/><path d="M4 19c3-2 5 1 8-1s5-3 8-1" stroke-dasharray="2 2.4"/>'),
@@ -44263,7 +44342,17 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     image: G('<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/>'),
     fit: G('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
     edit: G('<path d="M4 20h4L19 9l-4-4L4 16z"/>'),
-    check: G('<path d="M5 12.5l4.5 4.5L19 7.5"/>')
+    check: G('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    help: G('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8"/><circle cx="12" cy="17.2" r=".6"/>'),
+    imp: G('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4.5 15.5v3a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-3"/>'),
+    expo: G('<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4.5 15.5v3a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-3"/>'),
+    gear: G('<circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.3 1a7.4 7.4 0 0 0-2.6-1.5L14 2.6h-4l-.5 2.5A7.4 7.4 0 0 0 6.9 6.6l-2.3-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a7.4 7.4 0 0 0 2.6 1.5l.5 2.5h4l.5-2.5a7.4 7.4 0 0 0 2.6-1.5l2.3 1 2-3.4z"/>'),
+    grip: G('<circle cx="9" cy="7" r=".9"/><circle cx="15" cy="7" r=".9"/><circle cx="9" cy="12" r=".9"/><circle cx="15" cy="12" r=".9"/><circle cx="9" cy="17" r=".9"/><circle cx="15" cy="17" r=".9"/>'),
+    sort: G('<path d="M7 5v14M4 16l3 3 3-3M14 7h6M14 12h4M14 17h2"/>'),
+    focus: G('<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5"/>'),
+    ruler: G('<path d="M3.5 15.5L15.5 3.5l5 5-12 12z"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2"/>'),
+    side: G('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15"/>'),
+    rot: G('<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4.5h-4.5"/>')
   };
   const TOOLS = () => [
     ['select', L('تحديد', 'Select')], ['pencil', L('رصاص', 'Pencil')], ['liner', L('لاينر', 'Fine liner')], ['ink', L('حبر', 'Ink')], ['marker', L('ماركر', 'Marker')], ['highlighter', L('هايلايتر', 'Highlighter')], ['soft', L('سوفت', 'Soft')],
@@ -44271,47 +44360,134 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     ['text', L('كتابة', 'Text')], ['eyedrop', L('قطّارة', 'Eyedropper')], ['pan', L('تحريك', 'Move view')]
   ];
   const BRUSH_TOOLS = ['pencil', 'liner', 'ink', 'marker', 'highlighter', 'soft', 'eraser'];
+  const PENS = ['pencil', 'liner', 'ink', 'marker', 'highlighter', 'soft'];
+  /* v7.42 workspace: the brushes live in the wheel; the rest of the tools sit in a small grid under it */
+  const SIDE_TOOLS = ['select', 'eraser', 'erasestroke', 'line', 'arrow', 'rect', 'oval', 'dim', 'text', 'eyedrop', 'pan'];
   const prefs = (() => { try { return JSON.parse(localStorage.getItem('nf.concept.prefs') || '{}'); } catch (e) { return {}; } })();
   const savePrefs = () => { try { localStorage.setItem('nf.concept.prefs', JSON.stringify(prefs)); } catch (e) { /* ignore */ } };
   const $c = q => document.querySelector('#nfcd ' + q);
   const narrow = () => innerWidth < 760;
+  const side = () => (prefs.side === 'right' ? 'r' : 'l');
+  const popHd = t => `<div class="cd-pophd"><b>${esc(t)}</b><button type="button" class="cd-px" data-cd="popx" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div>`;
+  const onMark = b => (b ? `<i class="cd-on">${IC.check}</i>` : '');
+  const mi = (cd, ic, t, extra) => `<button type="button" class="cd-mi" data-cd="${cd}" ${extra || ''}>${ic}<span>${esc(t)}</span></button>`;
+
+  /* ---------- the tool wheel: brush in the middle, size / opacity / smoothing on three arcs around it ----------
+     its geometry is physical in both languages (the English mirror of the style sheet must not move the middle or the colour button),
+     so the centre uses translate, the colour button sits by inline style and the legend runs left → right like the arcs: smoothing · size · opacity */
+  const WC = 90, WR = 62;
+  const ARCS = { size: [-142, -38], opacity: [-22, 82], smooth: [98, 202] }; /* three 104° arcs with 16° gaps: top, lower right, lower left */
+  const tOf = { size: v => Math.sqrt(Math.max(0, (v - 0.2) / 5.8)), opacity: v => (v - 0.1) / 0.9, smooth: v => v / 0.85 };
+  const vOf = { size: t => Math.round((0.2 + 5.8 * t * t) * 20) / 20, opacity: t => Math.round((0.1 + 0.9 * t) * 20) / 20, smooth: t => Math.round(0.85 * t * 20) / 20 };
+  const curV = k => (k === 'size' ? CD.size : k === 'opacity' ? CD.opacity : CD.smooth);
+  const wpt = (a, r) => [WC + r * Math.cos(a * Math.PI / 180), WC + r * Math.sin(a * Math.PI / 180)];
+  const arcD = (a0, a1, r) => { const [x0, y0] = wpt(a0, r), [x1, y1] = wpt(a1, r); return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  const ARCLBL = () => ({ size: L('الحجم', 'Size'), opacity: L('الشفافية', 'Opacity'), smooth: L('النعومة', 'Smoothing') });
+  const fmtV = (k, v) => (k === 'size' ? (Math.round(v * 10) / 10).toFixed(1) : Math.round(v * 100) + '%');
+  function arcT(k, a) { const [a0, a1] = ARCS[k]; const mid = (a0 + a1) / 2; let x = a; while (x < mid - 180) x += 360; while (x > mid + 180) x -= 360; return { near: x >= a0 - 14 && x <= a1 + 14, t: Math.max(0, Math.min(1, (x - a0) / (a1 - a0))) }; }
+  function wheelHTML() {
+    const lb = ARCLBL(); const cur = BRUSH_TOOLS.includes(CD.tool) ? CD.tool : (prefs.lastDraw || 'pencil');
+    const arcs = Object.keys(ARCS).map(k => { const [a0, a1] = ARCS[k]; return `<g class="cd-arc" data-arc="${k}" tabindex="0" role="slider" aria-label="${esc(lb[k])}" aria-valuemin="0" aria-valuemax="100"><title>${esc(lb[k])}</title><path class="cd-atr" d="${arcD(a0, a1, WR)}"/><path class="cd-ava" d=""/><circle class="cd-akn" r="9"/></g>`; }).join('');
+    return `<div class="cd-wheel2"><svg class="cd-wsvg" viewBox="0 0 180 180">${arcs}</svg>
+        <button type="button" class="cd-wc ${BRUSH_TOOLS.includes(CD.tool) ? 'on' : ''}" data-cd="brushes" title="${esc(L('الفرش — دوسة ترجّعك للفرشة، ودوسة كمان تفتح كل الفرش', 'Brushes — tap to go back to the brush, tap again for all brushes'))}" aria-label="${esc(L('الفرش', 'Brushes'))}">${IC[cur]}<i class="cd-szdot"></i></button>
+        <button type="button" class="cd-wcol" data-cd="color" title="${esc(L('الألوان', 'Colours'))}" aria-label="${esc(L('الألوان', 'Colours'))}" style="--c:${esc(CD.color)};right:0;bottom:0"><i></i></button></div>
+      <div class="cd-wlg" style="direction:ltr">${['smooth', 'size', 'opacity'].map(k => `<span data-lg="${k}">${esc(lb[k])} <b class="ltr"></b></span>`).join('')}</div>`;
+  }
+  function updWheel() {
+    document.querySelectorAll('#nfcd .cd-arc').forEach(g => {
+      const k = g.dataset.arc; const [a0, a1] = ARCS[k]; const t = Math.max(0, Math.min(1, tOf[k](curV(k)))); const a = a0 + (a1 - a0) * t;
+      const va = g.querySelector('.cd-ava'); if (va) va.setAttribute('d', t > 0.004 ? arcD(a0, a, WR) : ''); const [x, y] = wpt(a, WR); const kn = g.querySelector('.cd-akn'); if (kn) { kn.setAttribute('cx', x.toFixed(1)); kn.setAttribute('cy', y.toFixed(1)); }
+      g.setAttribute('aria-valuenow', String(Math.round(t * 100))); g.setAttribute('aria-valuetext', fmtV(k, curV(k)));
+    });
+    document.querySelectorAll('#nfcd [data-lg]').forEach(s => { const b = s.querySelector('b'); if (b) b.textContent = fmtV(s.dataset.lg, curV(s.dataset.lg)); });
+    document.querySelectorAll('#nfcd .cd-wcol,#nfcd .cd-mcol').forEach(b => b.style.setProperty('--c', CD.color));
+    const cur = BRUSH_TOOLS.includes(CD.tool) ? CD.tool : (prefs.lastDraw || 'pencil');
+    document.querySelectorAll('#nfcd .cd-wc,#nfcd [data-cd="mwheel"]').forEach(b => { b.classList.toggle('on', BRUSH_TOOLS.includes(CD.tool)); if (b.dataset.ic !== cur) { b.dataset.ic = cur; const dot = b.querySelector('.cd-szdot'); b.innerHTML = IC[cur]; if (dot) b.appendChild(dot); else b.insertAdjacentHTML('beforeend', '<i class="cd-szdot"></i>'); } });
+  }
+
+  /* ---------- the other column sections ---------- */
+  function toolsHTML() { return `<div class="cd-tools2">${SIDE_TOOLS.map(k => `<button type="button" class="cd-t ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}" title="${esc(toolName(k))}" aria-label="${esc(toolName(k))}">${IC[k]}</button>`).join('')}</div>`; }
+  function projPal() { const s = byId(COL, CD.id) || CD.rec; const pr = s && s.projectId ? byId('projects', s.projectId) : null; return { pr, pal: (pr && Array.isArray(pr.palette) ? pr.palette : []).slice(0, 16) }; }
+  function stripHTML() {
+    const { pr, pal } = projPal(); const rec = (prefs.recent || []).filter(c => !pal.includes(c)).slice(0, 8); const cur = String(CD.color).toLowerCase();
+    const sw = c => `<button type="button" class="cd-sw ${String(c).toLowerCase() === cur ? 'on' : ''}" data-cd="paluse" data-k="${esc(c)}" style="--c:${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"></button>`;
+    return `<div class="cd-sech"><b>${esc(L('الألوان', 'Colours'))}</b><button type="button" class="cd-ib sm" data-cd="color" title="${esc(L('كل الألوان', 'All colours'))}" aria-label="${esc(L('كل الألوان', 'All colours'))}">${IC.plus}</button></div>
+      <div class="cd-strip">${rec.length ? rec.map(sw).join('') : `<span class="cd-hint">${esc(L('آخر الألوان اللي استخدمتها هتظهر هنا', 'The colours you use show up here'))}</span>`}</div>
+      ${pr ? `<div class="cd-mlbl">${esc(L('ألوان المشروع', 'Project colours'))}</div><div class="cd-strip">${pal.length ? pal.map(sw).join('') : `<span class="cd-hint">${esc(L('ضيفها من «كل الألوان»', 'Add them from «All colours»'))}</span>`}</div>` : ''}`;
+  }
+  function precHTML(inPop) {
+    const ed = CD.ed; if (!ed || CD.readOnly) return ''; const open = !!inPop || prefs.precOpen !== false; const persp = /^persp/.test(ed.paper);
+    const body = `<div class="cd-precb">
+        <div class="cd-mlbl">${esc(L('الورق', 'Paper'))}</div><div class="cd-chips">${PAPERS().map(([k, t]) => `<button type="button" class="cd-chip ${ed.paper === k ? 'on' : ''}" data-cd="paper" data-k="${k}">${esc(t)}</button>`).join('')}</div>
+        <button type="button" class="cd-mi" data-cd="grid">${IC.rect}<span>${esc(L('مغناطيس على الشبكة', 'Snap to the grid'))}</span>${onMark(ed.gridSnap)}</button>
+        <button type="button" class="cd-mi" data-cd="angle">${IC.line}<span>${esc(L('زوايا كل 15°', 'Angles every 15°'))}</span>${onMark(ed.angleSnap)}</button>
+        ${persp ? `<button type="button" class="cd-mi" data-cd="vpedit">${IC.fit}<span>${esc(L('حرّك نقط التلاشي', 'Move the vanishing points'))}</span>${onMark(ed.perspEdit)}</button><button type="button" class="cd-mi" data-cd="vpsnap">${IC.line}<span>${esc(L('الخطوط تروح لنقط التلاشي', 'Lines head to the vanishing points'))}</span>${onMark(ed.perspSnap)}</button>` : ''}
+        <div class="cd-mlbl">${esc(L('مقياس الرسم', 'Drawing scale'))}</div>
+        <div class="cd-srow"><select data-cds="scale" aria-label="${esc(L('مقياس الرسم', 'Drawing scale'))}">${SCALES.map(n => `<option value="${n}" ${(ed.scaleRatio || 0) === n ? 'selected' : ''}>${n ? '1:' + n : esc(L('بدون', 'None'))}</option>`).join('')}</select>
+          <span class="cd-seg"><button type="button" class="cd-chip ${ed.scaleUnit === 'cm' ? 'on' : ''}" data-cd="unit" data-k="cm">${esc(L('سم', 'cm'))}</button><button type="button" class="cd-chip ${ed.scaleUnit !== 'cm' ? 'on' : ''}" data-cd="unit" data-k="m">${esc(L('متر', 'm'))}</button></span></div>
+        <p class="cd-hint">${esc(L('أداة «أبعاد» بتكتب الطول بالمقياس ده. خليك ماسك في آخر الخط ثانية فيتعدل لوحده.', 'The «Dimension» tool writes the length at this scale. Hold still at the end of a line and it straightens.'))}</p></div>`;
+    if (inPop) return body;
+    return `<button type="button" class="cd-sech cd-fold" data-cd="prec" aria-expanded="${open}">${IC.ruler}<b>${esc(L('الدقة', 'Precision'))}</b><i class="cd-chev" aria-hidden="true">${open ? '−' : '+'}</i></button>${open ? body : ''}`;
+  }
+  function layersHTML() {
+    const ed = CD.ed; if (!ed) return ''; const act = ed.layers.find(l => l.id === ed.active); const ro = CD.readOnly;
+    const row = l => { const op = l.opacity == null ? 1 : l.opacity; const sub = l.kind === 'image' ? L('صورة', 'Picture') : l.items.length ? L(`فيها ${l.items.length}`, l.items.length === 1 ? '1 item' : `${l.items.length} items`) : L('فاضية', 'Empty');
+      return `<div class="cd-ly ${ed.active === l.id ? 'cd-lyon' : ''} ${ed.focus && ed.active === l.id ? 'cd-lyfo' : ''} ${l.visible ? '' : 'cd-lyhid'}" data-lid="${esc(l.id)}">
+        ${!ro ? `<span class="cd-lydrag" data-lyd="${esc(l.id)}" title="${esc(L('اسحب لترتيب الطبقة', 'Drag to reorder the layer'))}" aria-hidden="true">${IC.grip}</span>` : ''}
+        <canvas class="cd-lyth" width="56" height="42" data-th="${esc(l.id)}"></canvas>
+        <button type="button" class="cd-lyn" data-cd="lact" data-k="${esc(l.id)}" title="${esc(L('دوسة = تشتغل عليها · دوستين = وضع التركيز', 'Tap = work on it · double-tap = focus mode'))}"><b class="notr">${esc(l.kind === 'image' ? (l.name || L('صورة', 'Picture')) : l.name)}</b><small>${esc(sub)}${l.locked ? ' · ' + esc(L('مقفولة', 'Locked')) : ''}</small></button>
+        ${op < 0.995 ? `<span class="cd-lyop ltr">${Math.round(op * 100)}%</span>` : ''}
+        <button type="button" class="cd-ib sm" data-cd="lvis" data-k="${esc(l.id)}" title="${esc(l.visible ? L('اخفي', 'Hide') : L('اظهر', 'Show'))}" aria-label="${esc(l.visible ? L('اخفي', 'Hide') : L('اظهر', 'Show'))}">${l.visible ? IC.eye : IC.eyeoff}</button></div>`; };
+    return `<div class="cd-sech"><b>${esc(L('الطبقات', 'Layers'))}</b>${!ro ? `<button type="button" class="cd-ib sm" data-cd="ladd" title="${esc(L('طبقة جديدة', 'New layer'))}" aria-label="${esc(L('طبقة جديدة', 'New layer'))}">${IC.plus}</button><button type="button" class="cd-ib sm" data-cd="addimg" title="${esc(L('ضيف صورة', 'Add a picture'))}" aria-label="${esc(L('ضيف صورة', 'Add a picture'))}">${IC.image}</button><button type="button" class="cd-ib sm" data-cd="lsort" title="${esc(L('رتّب حسب النوع: الصور تحت والرسم فوق', 'Sort by kind: pictures below, drawing above'))}" aria-label="${esc(L('رتّب حسب النوع', 'Sort by kind'))}">${IC.sort}</button>` : ''}</div>
+      <div class="cd-lys">${ed.layers.slice().reverse().map(row).join('')}</div>
+      ${act && !ro ? `<div class="cd-lyact"><label class="cd-rng"><span>${esc(L('شفافية الطبقة', 'Layer opacity'))}</span><input type="range" min="0.05" max="1" step="0.05" value="${act.opacity == null ? 1 : act.opacity}" data-cdl="${esc(act.id)}"></label>
+        <div class="cd-chips"><button type="button" class="cd-chip ${ed.focus ? 'on' : ''}" data-cd="lfocus" title="${esc(L('الطبقات التانية تبهت', 'The other layers fade'))}">${IC.focus}${esc(L('تركيز', 'Focus'))}</button><button type="button" class="cd-chip" data-cd="llock" data-k="${esc(act.id)}">${act.locked ? IC.lock : IC.unlock}${esc(act.locked ? L('افتحها', 'Unlock') : L('اقفلها', 'Lock'))}</button><button type="button" class="cd-chip" data-cd="lren">${IC.edit}${esc(L('اسم', 'Rename'))}</button><button type="button" class="cd-chip" data-cd="lup" aria-label="${esc(L('لفوق', 'Up'))}">${IC.up}</button><button type="button" class="cd-chip" data-cd="ldown" aria-label="${esc(L('لتحت', 'Down'))}">${IC.down}</button><button type="button" class="cd-chip" data-cd="ldup">${IC.copy}${esc(L('نسخة', 'Copy'))}</button><button type="button" class="cd-chip" data-cd="lmerge">${IC.merge}${esc(L('دمج لتحت', 'Merge down'))}</button><button type="button" class="cd-chip d" data-cd="ldel" aria-label="${esc(L('امسح الطبقة', 'Delete the layer'))}">${IC.trash}</button></div></div>` : ''}
+      <p class="cd-hint">${esc(L('دوستين على طبقة = وضع التركيز (الباقي يبهت). اسحب ⋮⋮ عشان ترتّب.', 'Double-tap a layer = focus mode (the rest fades). Drag ⋮⋮ to reorder.'))}</p>`;
+  }
+  function thumbs(root) { const ed = CD.ed; if (!ed || !root) return; requestAnimationFrame(() => root.querySelectorAll('canvas[data-th]').forEach(c => { try { const t = ed.layerThumb(c.dataset.th, 56, 42); const x = c.getContext('2d'); x.clearRect(0, 0, 56, 42); x.drawImage(t, 0, 0); } catch (e) { /* ignore */ } })); }
 
   function shell() {
     return `<div class="cd-top">
-        <button type="button" class="cd-ib" data-cd="back" aria-label="${esc(L('رجوع للكراسة', 'Back to the sketchbook'))}">${IC.back}</button>
+        <button type="button" class="cd-ib" data-cd="back" aria-label="${esc(L('رجوع للكراسة', 'Back to the sketchbook'))}" title="${esc(L('الكراسة', 'Sketchbook'))}">${IC.back}</button>
         <button type="button" class="cd-title" data-cd="rename"><b class="notr"></b>${IC.edit}</button>
         <span class="cd-saved" aria-live="polite"></span><span class="cd-grow"></span>
-        <button type="button" class="cd-ib" data-cd="undo" title="${esc(L('رجوع', 'Undo'))}">${IC.undo}</button><button type="button" class="cd-ib" data-cd="redo" title="${esc(L('إعادة', 'Redo'))}">${IC.redo}</button>
-        <button type="button" class="cd-ib cd-lay" data-cd="layers" title="${esc(L('الطبقات', 'Layers'))}">${IC.layers}</button>
-        <button type="button" class="cd-ib" data-cd="more" title="${esc(L('المزيد', 'More'))}">${IC.more}</button></div>
-      <div class="cd-main"><div class="cd-rail"></div>
+        <button type="button" class="cd-zb cd-zl" data-cd="zpop" title="${esc(L('الزوم — دوسة: 100% / الرسمة كلها / رقم', 'Zoom — tap: 100% / whole drawing / a number'))}">100%</button>
+        <button type="button" class="cd-zb cd-rot" data-cd="apop" title="${esc(L('زاوية الورقة — لفّ بصباعين أو Alt + العجلة', 'Paper angle — turn with two fingers or Alt + wheel'))}">0°</button>
+        <span class="cd-tsep"></span>
+        <button type="button" class="cd-ib" data-cd="undo" title="${esc(L('رجوع', 'Undo'))}" aria-label="${esc(L('رجوع', 'Undo'))}">${IC.undo}</button><button type="button" class="cd-ib" data-cd="redo" title="${esc(L('إعادة', 'Redo'))}" aria-label="${esc(L('إعادة', 'Redo'))}">${IC.redo}</button>
+        <span class="cd-tsep"></span>
+        <button type="button" class="cd-ib cd-wide" data-cd="import" title="${esc(L('استيراد', 'Import'))}" aria-label="${esc(L('استيراد', 'Import'))}">${IC.imp}</button>
+        <button type="button" class="cd-ib cd-wide" data-cd="export" title="${esc(L('تصدير', 'Export'))}" aria-label="${esc(L('تصدير', 'Export'))}">${IC.expo}</button>
+        <button type="button" class="cd-ib" data-cd="more" title="${esc(L('الإعدادات', 'Settings'))}" aria-label="${esc(L('الإعدادات', 'Settings'))}">${IC.gear}</button>
+        <button type="button" class="cd-ib cd-wide" data-cd="help" title="${esc(L('مساعدة', 'Help'))}" aria-label="${esc(L('مساعدة', 'Help'))}">${IC.help}</button></div>
+      <div class="cd-main">
         <div class="cd-stage"><div id="cd-ed" class="cd-ed"></div><div class="cd-load"></div>
-          <div class="cd-sliders"><label title="${esc(L('الحجم', 'Size'))}"><input type="range" orient="vertical" min="0.2" max="6" step="0.05" data-cdr="size"><i class="cd-szdot"></i></label><label title="${esc(L('الشفافية', 'Opacity'))}"><input type="range" orient="vertical" min="0.1" max="1" step="0.05" data-cdr="opacity"><small>%</small></label></div>
+          <aside class="cd-col ${side()}" aria-label="${esc(L('الأدوات', 'Tools'))}"></aside>
           <div class="cd-sel" hidden><button type="button" data-cd="sdel">${IC.trash}<span>${esc(L('امسح', 'Delete'))}</span></button><button type="button" data-cd="sdup">${IC.copy}<span>${esc(L('نسخة', 'Duplicate'))}</span></button><button type="button" data-cd="scolor"><i class="cd-dot"></i><span>${esc(L('اللون', 'Colour'))}</span></button><button type="button" data-cd="smove">${IC.layers}<span>${esc(L('طبقة تانية', 'Other layer'))}</span></button></div>
-          <div class="cd-zoom"><button type="button" data-cd="zout" aria-label="${esc(L('تصغير', 'Zoom out'))}">${IC.minus}</button><button type="button" class="cd-zl" data-cd="fit" title="${esc(L('الرسمة كلها', 'Whole drawing'))}">100%</button><button type="button" data-cd="zin" aria-label="${esc(L('تكبير', 'Zoom in'))}">${IC.plus}</button><button type="button" class="cd-rot" data-cd="rot0" title="${esc(L('لفّ الورقة بصباعين — دوسة ترجّعها مستقيمة', 'Turn the paper with two fingers — tap to straighten'))}" hidden>0°</button></div>
+          <div class="cd-focus" hidden>${IC.focus}<span></span><button type="button" data-cd="unfocus">${esc(L('رجّع الكل', 'Show all'))}</button></div>
           <div class="cd-pop" hidden></div></div>
-        <aside class="cd-layers" hidden></aside></div>`;
+        <nav class="cd-mbar" aria-label="${esc(L('الأدوات', 'Tools'))}"></nav></div>`;
   }
   async function openEditor(id) {
     const s = byId(COL, id);
     if (!s) { if (!S.loaded[COL]) return; toast(L('الرسمة دي مش موجودة أو مش متاحة ليك', 'This drawing is not there or not shared with you'), 'err'); go('concept'); return; }
     if (CD.id === id && document.getElementById('nfcd')) return;
     closeEditor(true);
-    CD.id = id; CD.rec = s; CD.rev = s.rev || 0; CD.outRev = s.rev || 0; CD.dirty = false; CD.pop = ''; CD.layers = !narrow() && prefs.layers === true; CD.readOnly = !canEditS(s);
+    CD.id = id; CD.rec = s; CD.rev = s.rev || 0; CD.outRev = s.rev || 0; CD.dirty = false; CD.pop = ''; CD.readOnly = !canEditS(s);
     CD.tool = prefs.tool || 'pencil'; CD.color = prefs.color || '#1c1c1e'; const bp = (prefs.brush || {})[CD.tool] || {}; CD.size = bp.size || 1; CD.opacity = bp.opacity || 1; CD.smooth = prefs.smooth == null ? 0.38 : prefs.smooth;
     const el = document.createElement('div'); el.id = 'nfcd'; el.className = 'nfcd' + (CD.readOnly ? ' ro' : ''); el.innerHTML = shell(); document.body.appendChild(el); document.documentElement.classList.add('nfcd-open');
-    title(); setSaved(CD.readOnly ? 'ro' : 'ok'); paintRail(); syncSliders(); el.querySelector('.cd-load').textContent = L('بيحمّل الرسمة…', 'Loading the drawing…');
+    title(); setSaved(CD.readOnly ? 'ro' : 'ok'); el.querySelector('.cd-load').textContent = L('بيحمّل الرسمة…', 'Loading the drawing…');
     try {
       const j = await getJSON(s.doc); const imgs = await loadImages(j);
       if (CD.id !== id) return;
       const host = el.querySelector('#cd-ed');
       CD.ed = NFDraw.create(host, { k: j.k || 1, paper: j.paper || s.paper || 'plain', fingerDraws: 'auto', maxZoom: 24, rotate: true,
-        onChange: () => { if (!CD.readOnly) dirty(); refreshTop(); if (CD.layers) paintLayers(); },
+        onChange: () => { if (!CD.readOnly) dirty(); refreshTop(); layersSoon(); },
         onSelect: () => refreshSel(), onView: () => refreshZoom(), onPick: (ed, hex) => { setColor(hex); setTool(prefs.lastDraw || 'pencil'); },
         onLocked: () => toast(L('الطبقة دي مقفولة أو مخفية — اختار طبقة تانية من «الطبقات»', 'This layer is locked or hidden — pick another one in «Layers»'), 'err') });
       CD.ed.load(j, imgs); if (prefs.finger) CD.ed.fingerDraws = true; CD.ed.angleSnap = !!prefs.angle; CD.ed.gridSnap = !!prefs.grid; CD.ed.smooth = CD.smooth; CD.ed.perspSnap = prefs.vpsnap !== false;
       applyTool(); CD.ed.color = CD.color; setTimeout(() => { if (CD.ed) { CD.ed.fit(); if (/^persp/.test(CD.ed.paper) && !CD.ed.persp) CD.ed.setPaper(CD.ed.paper); refreshZoom(); } }, 30);
-      el.querySelector('.cd-load').remove(); refreshTop(); if (CD.layers) { el.querySelector('.cd-layers').hidden = false; paintLayers(); }
+      el.querySelector('.cd-load').remove(); paintCol(); refreshTop();
       if (CD.readOnly) CD.ed.setTool('pan');
     } catch (e) {
       console.warn('concept open', e); const ld = el.querySelector('.cd-load'); if (ld) ld.innerHTML = `${esc(L('مقدرتش أفتح الرسمة', 'Could not open the drawing'))} <button type="button" class="btn sm" data-cd="retry">${esc(L('جرّب تاني', 'Try again'))}</button>`;
@@ -44322,7 +44498,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const id = CD.id, ed = CD.ed, changedOut = CD.rev !== CD.outRev;
     if (ed && CD.dirty && !CD.readOnly) { clearTimeout(CD.saveT); save(true).finally(() => afterClose(id, ed, changedOut || true)); }
     else afterClose(id, ed, changedOut);
-    CD.ed = null; CD.id = ''; CD.rec = null; CD.pop = ''; if (el) el.remove(); document.documentElement.classList.remove('nfcd-open');
+    CD.ed = null; CD.id = ''; CD.rec = null; CD.pop = ''; clearTimeout(CD.lyT); if (el) el.remove(); document.documentElement.classList.remove('nfcd-open');
     if (!silent && S.route.view === 'concept' && S.route.id) go('concept');
   }
   function afterClose(id, ed, changedOut) {
@@ -44342,18 +44518,50 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function refreshTop() { const ed = CD.ed; const u = $c('[data-cd="undo"]'), r = $c('[data-cd="redo"]'); if (u) u.disabled = !ed || !ed.canUndo() || CD.readOnly; if (r) r.disabled = !ed || !ed.canRedo() || CD.readOnly; }
   function refreshSel() { const b = $c('.cd-sel'); if (b && CD.ed) { b.hidden = !CD.ed.sel.length; const d = b.querySelector('.cd-dot'); if (d) d.style.background = CD.color; } }
+  const angleDeg = () => { if (!CD.ed || !CD.ed.rotation) return 0; let d = Math.round(CD.ed.rotation() * 180 / Math.PI) % 360; if (d > 180) d -= 360; return d; };
   function refreshZoom() {
     const b = $c('.cd-zl'); if (b && CD.ed) b.textContent = Math.round(CD.ed.view.z * 100) + '%';
-    const r = $c('.cd-rot'); if (r && CD.ed && CD.ed.rotation) { let d = Math.round(CD.ed.rotation() * 180 / Math.PI) % 360; if (d > 180) d -= 360; r.textContent = d + '°'; r.hidden = d === 0; }
+    const r = $c('.cd-rot'); if (r && CD.ed) { const d = angleDeg(); r.textContent = d + '°'; r.classList.toggle('tilt', d !== 0); }
+    if (CD.pop === 'zoom') { const i = $c('[data-cdz]'); if (i && document.activeElement !== i && CD.ed) i.value = Math.round(CD.ed.view.z * 100); }
+  }
+  function refreshFocus() {
+    const f = $c('.cd-focus'); const ed = CD.ed; if (!f || !ed) return; const l = ed.layers.find(x => x.id === ed.active);
+    f.hidden = !ed.focus; if (ed.focus) f.querySelector('span').textContent = L(`وضع التركيز: «${l ? l.name : ''}» — دوستين على الطبقة ترجّع الكل`, `Focus mode: «${l ? l.name : ''}» — double-tap the layer to show all`);
   }
 
-  /* ---------- tools ---------- */
-  function paintRail() {
-    const el = $c('.cd-rail'); if (!el) return;
-    el.innerHTML = `${TOOLS().map(([k, t]) => `<button type="button" class="cd-t ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}" title="${esc(t)}" aria-label="${esc(t)}">${IC[k]}<span>${esc(t)}</span></button>`).join('')}
-      <span class="cd-sep"></span><button type="button" class="cd-cw" data-cd="color" title="${esc(L('الألوان', 'Colours'))}" style="--c:${esc(CD.color)}"><i></i></button>
-      <button type="button" class="cd-t cd-brush" data-cd="brush" title="${esc(L('إعدادات الفرشة', 'Brush settings'))}"><i class="cd-szdot"></i><span>${esc(L('الفرشة', 'Brush'))}</span></button>`;
+  /* ---------- painting the column / the phone bar ---------- */
+  function paintCol() {
+    const el = $c('.cd-col'); if (el) {
+      el.className = 'cd-col ' + side();
+      /* physical side in both languages: inline, so the English mirror of the style sheet never swaps it */
+      el.style.left = side() === 'l' ? '12px' : 'auto'; el.style.right = side() === 'r' ? '12px' : 'auto';
+      el.innerHTML = CD.readOnly ? `<div class="cd-colsec">${toolsHTML()}</div><div class="cd-colsec cd-lyw">${layersHTML()}</div>`
+        : `<div class="cd-colsec cd-wsec">${wheelHTML()}</div><div class="cd-colsec">${toolsHTML()}</div><div class="cd-colsec cd-stripw">${stripHTML()}</div><div class="cd-colsec cd-precw">${precHTML()}</div><div class="cd-colsec cd-lyw">${layersHTML()}</div>`;
+      if (!narrow()) thumbs(el);
+    }
+    paintMbar(); updWheel(); syncSliders(); refreshFocus();
   }
+  function paintMbar() {
+    const el = $c('.cd-mbar'); if (!el) return; const cur = BRUSH_TOOLS.includes(CD.tool) ? CD.tool : (prefs.lastDraw || 'pencil');
+    const tb = k => `<button type="button" class="cd-t ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}" aria-label="${esc(toolName(k))}">${IC[k]}</button>`;
+    el.innerHTML = CD.readOnly ? `<div class="cd-mtools">${tb('select')}${tb('pan')}</div><button type="button" class="cd-mb" data-cd="mlayers" aria-label="${esc(L('الطبقات', 'Layers'))}">${IC.layers}</button>`
+      : `<button type="button" class="cd-mb cd-mw ${BRUSH_TOOLS.includes(CD.tool) ? 'on' : ''}" data-cd="mwheel" data-ic="${cur}" aria-label="${esc(L('الفرشة', 'Brush'))}">${IC[cur]}<i class="cd-szdot"></i></button>
+        <div class="cd-mtools">${SIDE_TOOLS.map(tb).join('')}</div>
+        <button type="button" class="cd-mb cd-mcol" data-cd="color" aria-label="${esc(L('الألوان', 'Colours'))}" style="--c:${esc(CD.color)}"><i></i></button>
+        <button type="button" class="cd-mb" data-cd="mprec" aria-label="${esc(L('الدقة', 'Precision'))}">${IC.ruler}</button>
+        <button type="button" class="cd-mb" data-cd="mlayers" aria-label="${esc(L('الطبقات', 'Layers'))}">${IC.layers}</button>`;
+  }
+  function paintStrip() { const w = $c('.cd-stripw'); if (w) w.innerHTML = stripHTML(); }
+  function paintPrec() { const w = $c('.cd-precw'); if (w) w.innerHTML = precHTML(); if (CD.pop === 'prec') { const p = $c('.cd-pop'); if (p) p.innerHTML = popHd(L('الدقة', 'Precision')) + precHTML(true); } }
+  function paintLayers() {
+    clearTimeout(CD.lyT); const w = $c('.cd-col .cd-lyw'); if (w) { w.innerHTML = layersHTML(); if (!narrow()) thumbs(w); }
+    if (CD.pop === 'layers') { const p = $c('.cd-pop'); if (p) { p.innerHTML = popHd(L('الطبقات', 'Layers')) + `<div class="cd-lyw cd-lywp">${layersHTML()}</div>`; thumbs(p); } }
+    refreshFocus();
+  }
+  /* strokes call onChange often: the layer list (with its small pictures) is repainted a moment after the hand stops */
+  function layersSoon() { clearTimeout(CD.lyT); CD.lyT = setTimeout(() => { if (CD.ed && !CD.lyDrag) paintLayers(); }, 450); }
+
+  /* ---------- tools ---------- */
   function applyTool() {
     if (!CD.ed) return; CD.ed.setTool(CD.tool);
     if (BRUSH_TOOLS.includes(CD.tool)) { const bp = (prefs.brush || {})[CD.tool] || {}; CD.size = bp.size || 1; CD.opacity = bp.opacity || 1; }
@@ -44361,17 +44569,18 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function setTool(k) {
     if (CD.readOnly && k !== 'pan' && k !== 'select') return;
-    CD.tool = k; prefs.tool = k; if (BRUSH_TOOLS.includes(k) && k !== 'eraser') prefs.lastDraw = k; savePrefs(); applyTool();
-    document.querySelectorAll('#nfcd .cd-t[data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === k)); refreshSel();
+    CD.tool = k; prefs.tool = k; if (PENS.includes(k)) prefs.lastDraw = k; savePrefs(); applyTool();
+    document.querySelectorAll('#nfcd .cd-t[data-k],#nfcd .cd-bt[data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === k)); refreshSel(); updWheel();
   }
   function setColor(hex, final) {
-    CD.color = hex; prefs.color = hex; savePrefs(); if (CD.ed) { if (final === false) CD.ed.color = hex; else CD.ed.setColor(hex); }
-    const cw = $c('.cd-cw'); if (cw) cw.style.setProperty('--c', hex); refreshSel();
+    CD.color = hex; prefs.color = hex; if (final !== false) { prefs.recent = [hex].concat((prefs.recent || []).filter(c => String(c).toLowerCase() !== String(hex).toLowerCase())).slice(0, 10); }
+    savePrefs(); if (CD.ed) { if (final === false) CD.ed.color = hex; else CD.ed.setColor(hex); }
+    updWheel(); syncSliders(); refreshSel(); if (final !== false) paintStrip();
   }
   function syncSliders() {
-    const s = $c('[data-cdr="size"]'), o = $c('[data-cdr="opacity"]'); if (s) s.value = CD.size; if (o) o.value = CD.opacity;
-    document.querySelectorAll('#nfcd .cd-szdot').forEach(d => { const px = Math.max(3, Math.min(22, 4 * CD.size)); d.style.width = d.style.height = px + 'px'; d.style.background = CD.color; d.style.opacity = CD.opacity; });
-    const pc = $c('.cd-sliders small'); if (pc) pc.textContent = Math.round(CD.opacity * 100) + '%';
+    document.querySelectorAll('#nfcd [data-cdr="size"]').forEach(s => { s.value = CD.size; }); document.querySelectorAll('#nfcd [data-cdr="opacity"]').forEach(o => { o.value = CD.opacity; });
+    document.querySelectorAll('#nfcd .cd-szdot').forEach(d => { const px = Math.max(3, Math.min(20, 4 * CD.size)); d.style.width = d.style.height = px + 'px'; d.style.background = CD.color; d.style.opacity = CD.opacity; });
+    updWheel();
   }
   function setBrush(k, v) {
     if (k === 'size') CD.size = v; if (k === 'opacity') CD.opacity = v; if (k === 'smooth') { CD.smooth = v; prefs.smooth = v; if (CD.ed) CD.ed.smooth = v; }
@@ -44380,70 +44589,70 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     savePrefs(); syncSliders();
   }
 
-  /* ---------- popovers ---------- */
-  function closePop() { CD.pop = ''; const p = $c('.cd-pop'); if (p) { p.hidden = true; p.innerHTML = ''; } }
+  /* ---------- popovers / phone drawers ---------- */
+  function closePop() { CD.pop = ''; const p = $c('.cd-pop'); if (p) { p.hidden = true; p.innerHTML = ''; p.className = 'cd-pop'; } }
   function openPop(kind) {
     const p = $c('.cd-pop'); if (!p) return; if (CD.pop === kind) return closePop(); CD.pop = kind; p.hidden = false; p.dataset.k = kind;
-    const hd = t => `<div class="cd-pophd"><b>${esc(t)}</b><button type="button" class="cd-px" data-cd="popx" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div>`;
+    const near = ['color', 'brush', 'move'].includes(kind) && !narrow(); p.className = 'cd-pop' + (near ? ' near' + side() : '');
+    p.style.left = near ? (side() === 'l' ? '260px' : 'auto') : ''; p.style.right = near ? (side() === 'r' ? '260px' : 'auto') : '';
+    const hd = popHd;
     if (kind === 'color') {
-      const s = byId(COL, CD.id) || CD.rec; const pr = s && s.projectId ? byId('projects', s.projectId) : null; const pal = (pr && Array.isArray(pr.palette) ? pr.palette : []).slice(0, 16); const canPal = !!pr && !CD.readOnly && writable();
+      const { pr, pal } = projPal(); const canPal = !!pr && !CD.readOnly && writable();
       p.innerHTML = hd(L('الألوان', 'Colours')) + `<div class="cd-wheel"></div>${pr ? `<div class="cd-mlbl">${esc(L('ألوان المشروع', 'Project colours'))} · <span class="notr">${esc(pr.name || '')}</span></div><div class="cd-pal">${pal.map((c, i) => `<span class="cd-pre"><button type="button" class="cd-sw" data-cd="paluse" data-k="${esc(c)}" style="--c:${esc(c)}" aria-label="${esc(c)}"></button>${canPal ? `<button type="button" class="cd-prex" data-cd="paldel" data-k="${i}" aria-label="${esc(L('شيل', 'Remove'))}">✕</button>` : ''}</span>`).join('')}${canPal && pal.length < 16 ? `<button type="button" class="cd-chip" data-cd="paladd">${IC.plus}${esc(L('ضيف اللون ده', 'Add this colour'))}</button>` : ''}</div>${!pal.length ? `<p class="cd-hint">${esc(L('ألوان المشروع بيشوفها كل فريق المشروع في كل رسوماته.', 'The project colours are shared with the whole project team in all its drawings.'))}</p>` : ''}` : ''}<button type="button" class="cd-mi" data-cd="tool" data-k="eyedrop">${IC.eyedrop}<span>${esc(L('خد لون من الرسمة', 'Pick a colour from the drawing'))}</span></button>`;
       NFDraw.colorPicker(p.querySelector('.cd-wheel'), CD.color, (hex, fin) => setColor(hex, fin)); return;
     }
-    if (kind === 'brush') {
-      p.innerHTML = hd(L('الفرشة', 'Brush')) + `<label class="cd-rng"><span>${esc(L('الحجم', 'Size'))}</span><input type="range" min="0.2" max="6" step="0.05" value="${CD.size}" data-cdr="size"></label>
+    if (kind === 'brush' || kind === 'wheel') {
+      p.innerHTML = hd(L('الفرش', 'Brushes')) + (kind === 'wheel' ? `<div class="cd-wsec">${wheelHTML()}</div>` : '') + `<div class="cd-bgrid">${PENS.map(k => `<button type="button" class="cd-bt ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}">${IC[k]}<span>${esc(toolName(k))}</span></button>`).join('')}</div>
+        <label class="cd-rng"><span>${esc(L('الحجم', 'Size'))}</span><input type="range" min="0.2" max="6" step="0.05" value="${CD.size}" data-cdr="size"></label>
         <label class="cd-rng"><span>${esc(L('الشفافية', 'Opacity'))}</span><input type="range" min="0.1" max="1" step="0.05" value="${CD.opacity}" data-cdr="opacity"></label>
         <label class="cd-rng"><span>${esc(L('نعومة الخط', 'Smoothing'))}</span><input type="range" min="0" max="0.85" step="0.05" value="${CD.smooth}" data-cdr="smooth"></label>
         <p class="cd-hint">${esc(L('الحجم والشفافية بيتحفظوا لكل فرشة لوحدها. ضغط القلم بيغيّر التخانة لوحده.', 'Size and opacity are kept per brush. Pen pressure changes the width by itself.'))}</p>
-        <div class="cd-mlbl">${esc(L('فرشي', 'My brushes'))}</div><div class="cd-presets">${(prefs.presets || []).map((q, i) => `<span class="cd-pre"><button type="button" class="cd-chip" data-cd="preuse" data-k="${i}"><i class="cd-pdot" style="background:${esc(q.color)};opacity:${q.opacity};width:${Math.max(6, Math.min(16, 4 * q.size))}px;height:${Math.max(6, Math.min(16, 4 * q.size))}px"></i>${esc(toolName(q.tool))}</button><button type="button" class="cd-prex" data-cd="predel" data-k="${i}" aria-label="${esc(L('امسح', 'Delete'))}">✕</button></span>`).join('')}${BRUSH_TOOLS.includes(CD.tool) && CD.tool !== 'eraser' ? `<button type="button" class="cd-chip" data-cd="presave">${IC.plus}${esc(L('احفظ الفرشة دي', 'Save this brush'))}</button>` : ''}</div>`; return;
+        <div class="cd-mlbl">${esc(L('فرشي', 'My brushes'))}</div><div class="cd-presets">${(prefs.presets || []).map((q, i) => `<span class="cd-pre"><button type="button" class="cd-chip" data-cd="preuse" data-k="${i}"><i class="cd-pdot" style="background:${esc(q.color)};opacity:${q.opacity};width:${Math.max(6, Math.min(16, 4 * q.size))}px;height:${Math.max(6, Math.min(16, 4 * q.size))}px"></i>${esc(toolName(q.tool))}</button><button type="button" class="cd-prex" data-cd="predel" data-k="${i}" aria-label="${esc(L('امسح', 'Delete'))}">✕</button></span>`).join('')}${PENS.includes(CD.tool) ? `<button type="button" class="cd-chip" data-cd="presave">${IC.plus}${esc(L('احفظ الفرشة دي', 'Save this brush'))}</button>` : ''}</div>`;
+      updWheel(); syncSliders(); return;
     }
     if (kind === 'more') { paintMore(p, hd); return; }
     if (kind === 'move') { const ed = CD.ed; p.innerHTML = hd(L('انقل المحدد لطبقة', 'Move the selection to a layer')) + ed.layers.slice().reverse().filter(l => l.kind === 'ink' && l.id !== ed.active).map(l => `<button type="button" class="cd-mi" data-cd="movesel" data-k="${esc(l.id)}">${IC.layers}<span>${esc(l.name)}</span></button>`).join('') + `<button type="button" class="cd-mi" data-cd="movesel" data-k="__new">${IC.plus}<span>${esc(L('طبقة جديدة', 'New layer'))}</span></button>`; return; }
     if (kind === 'versions') { paintVersions(p, hd); return; }
+    if (kind === 'zoom') { p.innerHTML = hd(L('الزوم', 'Zoom')) + zoomHTML(); return; }
+    if (kind === 'angle') { p.innerHTML = hd(L('زاوية الورقة', 'Paper angle')) + angleHTML(); return; }
+    if (kind === 'import') { p.innerHTML = hd(L('استيراد', 'Import')) + importHTML(); return; }
+    if (kind === 'export') { p.innerHTML = hd(L('تصدير', 'Export')) + exportHTML(); return; }
+    if (kind === 'help') { p.innerHTML = hd(L('مساعدة', 'Help')) + helpHTML(); return; }
+    if (kind === 'prec') { p.innerHTML = hd(L('الدقة', 'Precision')) + precHTML(true); return; }
+    if (kind === 'layers') { p.innerHTML = hd(L('الطبقات', 'Layers')) + `<div class="cd-lyw cd-lywp">${layersHTML()}</div>`; thumbs(p); return; }
+  }
+  const zoomHTML = () => `<div class="cd-chips"><button type="button" class="cd-chip" data-cd="z100">100%</button><button type="button" class="cd-chip" data-cd="fit">${IC.fit}${esc(L('الرسمة كلها', 'Whole drawing'))}</button><button type="button" class="cd-chip" data-cd="zout" aria-label="${esc(L('تصغير', 'Zoom out'))}">${IC.minus}</button><button type="button" class="cd-chip" data-cd="zin" aria-label="${esc(L('تكبير', 'Zoom in'))}">${IC.plus}</button></div>
+    <div class="cd-srow"><input type="number" class="ltr" min="5" max="2400" step="5" value="${CD.ed ? Math.round(CD.ed.view.z * 100) : 100}" data-cdz aria-label="${esc(L('الزوم بالـ%', 'Zoom in %'))}"><span>%</span><button type="button" class="cd-chip" data-cd="zset">${esc(L('روح', 'Go'))}</button></div>
+    <p class="cd-hint">${esc(L('بصباعين تكبّر وتصغّر وتحرّك. على الكمبيوتر: عجلة الماوس، و0 = الرسمة كلها.', 'Two fingers zoom and move. On a computer: the mouse wheel, and 0 = whole drawing.'))}</p>`;
+  const angleHTML = () => `<div class="cd-chips"><button type="button" class="cd-chip" data-cd="rot" data-k="-90">⟲ 90°</button><button type="button" class="cd-chip" data-cd="rot" data-k="90">⟳ 90°</button><button type="button" class="cd-chip" data-cd="rot" data-k="-15">⟲ 15°</button><button type="button" class="cd-chip" data-cd="rot" data-k="15">⟳ 15°</button><button type="button" class="cd-chip" data-cd="rot0">${esc(L('مستقيمة 0°', 'Straight 0°'))}</button></div>
+    <p class="cd-hint">${esc(L('لفّ الورقة بصباعين (بيبدأ بعد 8° وبيقف لوحده على 0° و90°). على الكمبيوتر: Alt + عجلة الماوس.', 'Turn the paper with two fingers (starts after 8° and rests on 0° and 90°). On a computer: Alt + mouse wheel.'))}</p>`;
+  const importHTML = () => { const s = byId(COL, CD.id) || CD.rec; return CD.readOnly ? `<p class="cd-hint">${esc(L('الرسمة دي للعرض بس.', 'This drawing is view only.'))}</p>` : mi('addimg', IC.image, L('صورة (طبقة جديدة)', 'A picture (new layer)')) + mi('addpdf', IC.copy, L('صفحة PDF (طبقة جديدة)', 'A PDF page (new layer)')) + (s && s.projectId ? mi('addpf', IC.layers, L('ملف من المشروع (طبقة جديدة)', 'A project file (new layer)')) : '') + `<p class="cd-hint">${esc(L('الصورة بتدخل طبقة مقفولة تحت الرسم — تقدر تخفيها أو تغيّر شفافيتها من «الطبقات».', 'The picture comes in as a locked layer under the drawing — hide it or change its opacity in «Layers».'))}</p>`; };
+  const exportHTML = () => `<div class="cd-chips"><button type="button" class="cd-chip" data-cd="exp" data-k="png">PNG</button><button type="button" class="cd-chip" data-cd="exp" data-k="pngt">${esc(L('PNG شفاف', 'PNG transparent'))}</button><button type="button" class="cd-chip" data-cd="exp" data-k="jpg">JPG</button><button type="button" class="cd-chip" data-cd="exp" data-k="pdf">PDF</button><button type="button" class="cd-chip" data-cd="exp" data-k="svg">SVG</button></div>
+    <p class="cd-hint">${esc(L('الـSVG فيكتور: الخطوط فاضلة خطوط في أي مقاس. الطبقات المخفية مابتطلعش.', 'SVG is vector: lines stay lines at any size. Hidden layers are left out.'))}</p>`;
+  function helpHTML() {
+    const rows = [[L('صباعين', 'Two fingers'), L('زوم وتحريك ولفّ الورقة', 'Zoom, move and turn the paper')], [L('القلم', 'The pen'), L('بيرسم، والصباع بيحرّك (أول ما القلم يتشاف)', 'Draws, and the finger moves the view (once a pen is seen)')], [L('اثبت في آخر الخط', 'Hold at the end of a line'), L('يتعدل لوحده', 'It straightens')],
+      [L('العجلة', 'The wheel'), L('اسحب على القوس: الحجم · الشفافية · النعومة — والنص = الفرش', 'Drag an arc: size · opacity · smoothing — the middle = brushes')], [L('دوستين على طبقة', 'Double-tap a layer'), L('وضع التركيز', 'Focus mode')]];
+    const keys = [['B', L('رصاص', 'Pencil')], ['P', L('حبر', 'Ink')], ['M', L('ماركر', 'Marker')], ['E', L('أستيكة', 'Eraser')], ['V', L('تحديد', 'Select')], ['L', L('خط', 'Line')], ['R', L('مربع', 'Box')], ['O', L('دايرة', 'Circle')], ['D', L('أبعاد', 'Dimension')], ['T', L('كتابة', 'Text')], ['I', L('قطّارة', 'Eyedropper')], ['H', L('تحريك', 'Move view')], ['[ ]', L('الحجم', 'Size')], ['F', L('وضع التركيز', 'Focus mode')], ['0', L('الرسمة كلها', 'Whole drawing')], ['Ctrl Z', L('رجوع', 'Undo')], ['Ctrl ⇧ Z', L('إعادة', 'Redo')], ['Ctrl S', L('حفظ', 'Save')], ['Alt + ⚙︎', L('لفّ (عجلة الماوس)', 'Turn (mouse wheel)')]];
+    return `<div class="cd-help">${rows.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join('')}</div><div class="cd-mlbl">${esc(L('الكيبورد', 'Keyboard'))}</div><div class="cd-keys">${keys.map(([k, t]) => `<span><kbd class="ltr">${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div>`;
   }
   function paintMore(p, hd) {
-    const s = byId(COL, CD.id) || CD.rec; const ed = CD.ed; const mine = isMine(s); const linked = !!s.projectId;
-    const mi = (cd, ic, t, extra) => `<button type="button" class="cd-mi" data-cd="${cd}" ${extra || ''}>${ic}<span>${esc(t)}</span></button>`;
-    const on = b => b ? `<i class="cd-on">${IC.check}</i>` : '';
+    const s = byId(COL, CD.id) || CD.rec; const ed = CD.ed; const mine = isMine(s); const linked = !!s.projectId; const nw = narrow();
     p.innerHTML = hd(s.title || L('رسمة', 'Drawing')) + `<div class="cd-mgrp">
         ${mine ? mi('link', IC.layers, linked ? L(`مربوطة بـ «${projName(s.projectId)}» — غيّر`, `Linked to «${projName(s.projectId)}» — change`) : L('اربطها بمشروع', 'Link to a project')) : ''}
-        ${mine && linked ? `<button type="button" class="cd-mi" data-cd="share">${IC.edit}<span>${esc(L('فريق المشروع يعدّل فيها', 'The project team can edit'))}</span>${on(s.shareEdit)}</button>` : ''}
+        ${mine && linked ? `<button type="button" class="cd-mi" data-cd="share">${IC.edit}<span>${esc(L('فريق المشروع يعدّل فيها', 'The project team can edit'))}</span>${onMark(s.shareEdit)}</button>` : ''}
         ${linked && typeof stuEnsureBoards === 'function' ? mi('board', IC.image, L('حطها على لوحة المشروع', 'Put it on the project board')) : ''}
         ${window.nfSnap && window.nfSnap.open ? mi('task', IC.check, L('ابعت على مهمة', 'Send to a task')) : ''}</div>
-      ${!CD.readOnly ? `<div class="cd-mgrp"><div class="cd-mlbl">${esc(L('الورق', 'Paper'))}</div><div class="cd-chips">${PAPERS().map(([k, t]) => `<button type="button" class="cd-chip ${ed.paper === k ? 'on' : ''}" data-cd="paper" data-k="${k}">${esc(t)}</button>`).join('')}</div>
-        <div class="cd-mlbl">${esc(L('الدقة', 'Precision'))}</div>
-        <button type="button" class="cd-mi" data-cd="angle">${IC.line}<span>${esc(L('زوايا كل 15°', 'Angles every 15°'))}</span>${on(ed.angleSnap)}</button>
-        <button type="button" class="cd-mi" data-cd="grid">${IC.rect}<span>${esc(L('مغناطيس على الشبكة', 'Snap to the grid'))}</span>${on(ed.gridSnap)}</button>
-        <button type="button" class="cd-mi" data-cd="finger">${IC.pan}<span>${esc(L('ارسم بالصباع (حتى لو فيه قلم)', 'Draw with the finger (even with a pen)'))}</span>${on(ed.fingerDraws === true)}</button>
-        ${/^persp/.test(ed.paper) ? `<button type="button" class="cd-mi" data-cd="vpedit">${IC.fit}<span>${esc(L('حرّك نقط التلاشي', 'Move the vanishing points'))}</span>${on(ed.perspEdit)}</button><button type="button" class="cd-mi" data-cd="vpsnap">${IC.line}<span>${esc(L('الخطوط تروح لنقط التلاشي', 'Lines head to the vanishing points'))}</span>${on(ed.perspSnap)}</button>` : ''}
-        <div class="cd-chips"><button type="button" class="cd-chip" data-cd="rot" data-k="-90">⟲ 90°</button><button type="button" class="cd-chip" data-cd="rot" data-k="90">⟳ 90°</button><button type="button" class="cd-chip" data-cd="rot0">${esc(L('مستقيمة 0°', 'Straight 0°'))}</button></div>
-        <p class="cd-hint">${esc(L('خليك ماسك في آخر الخط ثانية فيتعدل لوحده. لما القلم يتشاف، الصباع بيحرّك والقلم بيرسم.', 'Hold still at the end of a line and it straightens. Once a pen is used, the finger moves the view and the pen draws.'))}</p>
-        <div class="cd-mlbl">${esc(L('مقياس الرسم', 'Drawing scale'))}</div><div class="cd-chips">${SCALES.map(n => `<button type="button" class="cd-chip ${(ed.scaleRatio || 0) === n ? 'on' : ''}" data-cd="scale" data-k="${n}">${n ? '1:' + n : esc(L('بدون', 'None'))}</button>`).join('')}</div>
-        <div class="cd-chips"><button type="button" class="cd-chip ${ed.scaleUnit === 'cm' ? 'on' : ''}" data-cd="unit" data-k="cm">${esc(L('سم', 'cm'))}</button><button type="button" class="cd-chip ${ed.scaleUnit !== 'cm' ? 'on' : ''}" data-cd="unit" data-k="m">${esc(L('متر', 'm'))}</button></div>
-        <p class="cd-hint">${esc(L('أداة «أبعاد» بتكتب الطول بالمقياس ده.', 'The «Dimension» tool writes the length at this scale.'))}</p></div>
-      <div class="cd-mgrp">${mi('addimg', IC.image, L('ضيف صورة (طبقة)', 'Add a picture (layer)'))}${mi('addpdf', IC.image, L('ضيف صفحة PDF (طبقة)', 'Add a PDF page (layer)'))}</div>` : ''}
-      <div class="cd-mgrp"><div class="cd-mlbl">${esc(L('تصدير', 'Export'))}</div><div class="cd-chips"><button type="button" class="cd-chip" data-cd="exp" data-k="png">PNG</button><button type="button" class="cd-chip" data-cd="exp" data-k="pngt">${esc(L('PNG شفاف', 'PNG transparent'))}</button><button type="button" class="cd-chip" data-cd="exp" data-k="jpg">JPG</button><button type="button" class="cd-chip" data-cd="exp" data-k="pdf">PDF</button><button type="button" class="cd-chip" data-cd="exp" data-k="svg">SVG</button></div></div>
-      <div class="cd-mgrp">${(s.versions || []).length ? mi('versions', IC.undo, L(`النسخ القديمة (${s.versions.length})`, `Older versions (${s.versions.length})`)) : ''}${mine ? mi('del', IC.trash, L('امسح الرسمة', 'Delete the drawing'), 'data-danger="1"') : ''}</div>`;
+      ${nw ? `<div class="cd-mgrp"><div class="cd-mlbl">${esc(L('الزوم', 'Zoom'))} · <span class="ltr">${ed ? Math.round(ed.view.z * 100) : 100}%</span> · ${angleDeg()}°</div>${zoomHTML()}${angleHTML()}</div><div class="cd-mgrp"><div class="cd-mlbl">${esc(L('استيراد', 'Import'))}</div>${importHTML()}</div><div class="cd-mgrp"><div class="cd-mlbl">${esc(L('تصدير', 'Export'))}</div>${exportHTML()}</div>` : ''}
+      <div class="cd-mgrp"><div class="cd-mlbl">${esc(L('مكان الأدوات', 'Tools position'))}</div><div class="cd-chips"><button type="button" class="cd-chip ${side() === 'l' ? 'on' : ''}" data-cd="side" data-k="left">${IC.side}${esc(L('شمال', 'Left'))}</button><button type="button" class="cd-chip ${side() === 'r' ? 'on' : ''}" data-cd="side" data-k="right">${esc(L('يمين', 'Right'))}</button></div>
+        ${!CD.readOnly ? `<button type="button" class="cd-mi" data-cd="finger">${IC.pan}<span>${esc(L('ارسم بالصباع (حتى لو فيه قلم)', 'Draw with the finger (even with a pen)'))}</span>${onMark(ed.fingerDraws === true)}</button>` : ''}</div>
+      <div class="cd-mgrp">${nw ? mi('help', IC.help, L('مساعدة واختصارات', 'Help and shortcuts')) : ''}${(s.versions || []).length ? mi('versions', IC.undo, L(`النسخ القديمة (${s.versions.length})`, `Older versions (${s.versions.length})`)) : ''}${mine ? mi('del', IC.trash, L('امسح الرسمة', 'Delete the drawing'), 'data-danger="1"') : ''}</div>`;
   }
   function paintVersions(p, hd) {
     const s = byId(COL, CD.id) || CD.rec; const vs = s.versions || [];
     p.innerHTML = hd(L('النسخ القديمة', 'Older versions')) + (vs.length ? vs.map((v, i) => `<button type="button" class="cd-mi" data-cd="vload" data-k="${i}">${IC.undo}<span>${esc(fmtDate(String(v.at || '').slice(0, 10)))} ${esc(String(v.at || '').slice(11, 16))} · ${esc(ago(v.at))}</span></button>`).join('') : `<p class="cd-hint">${esc(L('مفيش نسخ قديمة لسه.', 'No older versions yet.'))}</p>`) + `<p class="cd-hint">${esc(L('الرجوع لنسخة بيحفظ الحالية كنسخة قديمة الأول.', 'Going back saves the current one as an older version first.'))}</p>`;
   }
-
-  /* ---------- layers panel ---------- */
-  function paintLayers() {
-    const el = $c('.cd-layers'); const ed = CD.ed; if (!el || !ed) return;
-    const act = ed.layers.find(l => l.id === ed.active);
-    el.innerHTML = `<div class="cd-lyhd"><b>${esc(L('الطبقات', 'Layers'))}</b>${!CD.readOnly ? `<button type="button" class="cd-ib" data-cd="ladd" title="${esc(L('طبقة جديدة', 'New layer'))}">${IC.plus}</button><button type="button" class="cd-ib" data-cd="addimg" title="${esc(L('ضيف صورة', 'Add a picture'))}">${IC.image}</button>` : ''}<button type="button" class="cd-ib cd-lyx" data-cd="layers" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div>
-      <div class="cd-lys">${ed.layers.slice().reverse().map(l => `<div class="cd-ly ${ed.active === l.id ? 'cd-lyon' : ''}" data-lid="${esc(l.id)}"><canvas class="cd-lyth" width="64" height="48" data-th="${esc(l.id)}"></canvas>
-        <button type="button" class="cd-lyn" data-cd="lact" data-k="${esc(l.id)}"><b class="notr">${esc(l.kind === 'image' ? (l.name || L('صورة', 'Picture')) : l.name)}</b><small>${esc(l.kind === 'image' ? L('صورة', 'Picture') : l.items.length ? L(`فيها ${l.items.length}`, l.items.length === 1 ? '1 item' : `${l.items.length} items`) : L('فاضية', 'Empty'))}${l.opacity < 1 ? ' · ' + Math.round(l.opacity * 100) + '%' : ''}</small></button>
-        <button type="button" class="cd-ib sm" data-cd="lvis" data-k="${esc(l.id)}" title="${esc(l.visible ? L('اخفي', 'Hide') : L('اظهر', 'Show'))}">${l.visible ? IC.eye : IC.eyeoff}</button>
-        <button type="button" class="cd-ib sm" data-cd="llock" data-k="${esc(l.id)}" title="${esc(l.locked ? L('افتح', 'Unlock') : L('اقفل', 'Lock'))}">${l.locked ? IC.lock : IC.unlock}</button></div>`).join('')}</div>
-      ${act && !CD.readOnly ? `<div class="cd-lyact"><label class="cd-rng"><span>${esc(L('شفافية الطبقة', 'Layer opacity'))}</span><input type="range" min="0.05" max="1" step="0.05" value="${act.opacity == null ? 1 : act.opacity}" data-cdl="${esc(act.id)}"></label>
-        <div class="cd-chips"><button type="button" class="cd-chip" data-cd="lren">${IC.edit}${esc(L('اسم', 'Rename'))}</button><button type="button" class="cd-chip" data-cd="lup">${IC.up}</button><button type="button" class="cd-chip" data-cd="ldown">${IC.down}</button><button type="button" class="cd-chip" data-cd="ldup">${IC.copy}${esc(L('نسخة', 'Copy'))}</button><button type="button" class="cd-chip" data-cd="lmerge">${IC.merge}${esc(L('دمج لتحت', 'Merge down'))}</button><button type="button" class="cd-chip d" data-cd="ldel">${IC.trash}</button></div></div>` : ''}`;
-    requestAnimationFrame(() => el.querySelectorAll('canvas[data-th]').forEach(c => { try { const t = ed.layerThumb(c.dataset.th, 64, 48); const x = c.getContext('2d'); x.clearRect(0, 0, 64, 48); x.drawImage(t, 0, 0); } catch (e) { /* ignore */ } }));
-  }
-  function toggleLayers() { CD.layers = !CD.layers; prefs.layers = CD.layers; savePrefs(); const el = $c('.cd-layers'); if (el) el.hidden = !CD.layers; const b = $c('.cd-lay'); if (b) b.classList.toggle('on', CD.layers); if (CD.layers) paintLayers(); setTimeout(() => { if (CD.ed) CD.ed.render(); }, 30); }
+  function toggleLayers() { if (narrow()) return openPop('layers'); const w = $c('.cd-col .cd-lyw'); if (w) w.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  function setFocus(on) { const ed = CD.ed; if (!ed) return; ed.setFocus(on); paintLayers(); }
 
   /* ---------- saving ---------- */
   function dirty() { CD.dirty = true; setSaved('dirty'); clearTimeout(CD.saveT); CD.saveT = setTimeout(() => save(), 1800); }
@@ -44468,9 +44677,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   async function remoteCheck() {
     if (!CD.ed || !CD.id || CD.saving || CD.dirty) return; const s = byId(COL, CD.id); if (!s) return;
     if ((s.rev || 0) > CD.rev && s.editedBy && !meIds().includes(s.editedBy)) {
-      CD.rev = s.rev || 0; try { const j = await getJSON(s.doc); const imgs = await loadImages(j); if (!CD.ed || CD.dirty) return; const v = Object.assign({}, CD.ed.view); CD.ed.load(j, imgs); CD.ed.view = v; CD.ed.render(); refreshTop(); if (CD.layers) paintLayers(); toast(L(`${ownerNameOf(s.editedBy)} عدّل الرسمة — اتحدّثت`, `${ownerNameOf(s.editedBy)} edited the drawing — updated`)); } catch (e) { console.warn(e); }
+      CD.rev = s.rev || 0; try { const j = await getJSON(s.doc); const imgs = await loadImages(j); if (!CD.ed || CD.dirty) return; const v = Object.assign({}, CD.ed.view); CD.ed.load(j, imgs); CD.ed.view = v; CD.ed.render(); refreshTop(); paintLayers(); toast(L(`${ownerNameOf(s.editedBy)} عدّل الرسمة — اتحدّثت`, `${ownerNameOf(s.editedBy)} edited the drawing — updated`)); } catch (e) { console.warn(e); }
     }
-    title(); CD.readOnly = !canEditS(s); const el = document.getElementById('nfcd'); if (el) el.classList.toggle('ro', CD.readOnly);
+    title(); const ro0 = CD.readOnly; CD.readOnly = !canEditS(s); const el = document.getElementById('nfcd'); if (el) el.classList.toggle('ro', CD.readOnly); if (ro0 !== CD.readOnly) paintCol();
   }
   const ownerNameOf = id => { const p = typeof stuPerson === 'function' ? stuPerson(id) : null; return (p && p.name) || L('حد من الفريق', 'Someone on the team'); };
 
@@ -44480,7 +44689,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     try {
       const pic = await putPicture(srcOrCanvas, alpha); const img = await loadImg(pic.canvas.toDataURL(alpha ? 'image/png' : 'image/jpeg', 0.92));
       const l = CD.ed.addImageLayer(img, name || L('صورة', 'Picture'), pic.ref); const s = byId(COL, CD.id); if (s && isMine(s)) Store.update(COL, CD.id, { assets: (s.assets || []).concat([pic.ref]) }).catch(() => {});
-      void l; CD.ed.fit(); if (CD.layers) paintLayers();
+      void l; CD.ed.fit(); paintLayers();
     } catch (e) { console.warn(e); toast(L('مقدرتش أضيف الصورة', 'Could not add the picture'), 'err'); }
   }
   function pickFile(accept, cb) { const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.onchange = () => { const f = i.files && i.files[0]; if (f) cb(f); }; i.click(); }
@@ -44545,25 +44754,36 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (a === 'tool') { closePop(); return setTool(k); }
     if (a === 'color') return openPop('color');
     if (a === 'brush') return openPop('brush');
+    /* the middle of the wheel: back to the last brush first, then all the brushes */
+    if (a === 'brushes' || a === 'mwheel') { if (!BRUSH_TOOLS.includes(CD.tool)) { closePop(); return setTool(prefs.lastDraw || 'pencil'); } return openPop(a === 'mwheel' ? 'wheel' : 'brush'); }
     if (a === 'more') return openPop('more');
     if (a === 'layers') return toggleLayers();
+    if (a === 'zpop') return openPop('zoom'); if (a === 'apop') return openPop('angle'); if (a === 'import') return openPop('import'); if (a === 'export') return openPop('export');
+    if (a === 'help') { CD.pop = ''; return openPop('help'); } if (a === 'mprec') return openPop('prec'); if (a === 'mlayers') return openPop('layers');
+    if (a === 'z100') { ed.zoomTo(1); return refreshZoom(); }
+    if (a === 'zset') { const i = $c('[data-cdz]'); const v = i ? +i.value : 0; if (v >= 5) { ed.zoomTo(Math.min(24, v / 100)); refreshZoom(); } return; }
+    if (a === 'prec') { prefs.precOpen = prefs.precOpen === false; savePrefs(); return paintPrec(); }
+    if (a === 'side') { prefs.side = k === 'right' ? 'right' : 'left'; savePrefs(); paintCol(); CD.pop = ''; return openPop('more'); }
+    if (a === 'lfocus') return setFocus(!ed.focus); if (a === 'unfocus') return setFocus(false);
+    if (a === 'lsort') { if (ed.sortLayersByKind()) { paintLayers(); toast(L('اترتبت: الصور تحت والرسم فوق', 'Sorted: pictures below, drawing above')); } else toast(L('مترتبة خلاص', 'Already in order')); return; }
     if (a === 'undo') return ed.undo(); if (a === 'redo') return ed.redo();
     if (a === 'zin') return ed.zoomBy(1.5); if (a === 'zout') return ed.zoomBy(1 / 1.5); if (a === 'fit') return ed.fit();
     if (a === 'rot0') { ed.rotateTo(0); return refreshZoom(); } if (a === 'rot') { ed.rotateBy((+k || 0) * Math.PI / 180); return refreshZoom(); }
-    if (a === 'vpedit') { ed.setPerspEdit(!ed.perspEdit); CD.pop = ''; return openPop('more'); }
-    if (a === 'vpsnap') { ed.perspSnap = !ed.perspSnap; prefs.vpsnap = ed.perspSnap; savePrefs(); CD.pop = ''; return openPop('more'); }
-    if (a === 'presave') { prefs.presets = (prefs.presets || []).concat([{ tool: CD.tool, size: CD.size, opacity: CD.opacity, color: CD.color }]).slice(-12); savePrefs(); CD.pop = ''; return openPop('brush'); }
-    if (a === 'preuse') { const q = (prefs.presets || [])[+k]; if (!q) return; setTool(q.tool); setColor(q.color); setBrush('size', q.size); setBrush('opacity', q.opacity); CD.pop = ''; return openPop('brush'); }
-    if (a === 'predel') { prefs.presets = (prefs.presets || []).filter((_, i) => i !== +k); savePrefs(); CD.pop = ''; return openPop('brush'); }
+    if (a === 'vpedit') { ed.setPerspEdit(!ed.perspEdit); return paintPrec(); }
+    if (a === 'vpsnap') { ed.perspSnap = !ed.perspSnap; prefs.vpsnap = ed.perspSnap; savePrefs(); return paintPrec(); }
+    const bpk = () => (CD.pop === 'wheel' ? 'wheel' : 'brush');
+    if (a === 'presave') { const pk = bpk(); prefs.presets = (prefs.presets || []).concat([{ tool: CD.tool, size: CD.size, opacity: CD.opacity, color: CD.color }]).slice(-12); savePrefs(); CD.pop = ''; return openPop(pk); }
+    if (a === 'preuse') { const pk = bpk(); const q = (prefs.presets || [])[+k]; if (!q) return; setTool(q.tool); setColor(q.color); setBrush('size', q.size); setBrush('opacity', q.opacity); CD.pop = ''; return openPop(pk); }
+    if (a === 'predel') { const pk = bpk(); prefs.presets = (prefs.presets || []).filter((_, i) => i !== +k); savePrefs(); CD.pop = ''; return openPop(pk); }
     if (a === 'paluse') { setColor(k); return; }
-    if (a === 'paladd' || a === 'paldel') { const pr = s && s.projectId ? byId('projects', s.projectId) : null; if (!pr) return; let pal = Array.isArray(pr.palette) ? pr.palette.slice() : []; if (a === 'paladd') { if (!pal.includes(CD.color)) pal.push(CD.color); } else pal = pal.filter((_, i) => i !== +k); try { await Store.update('projects', pr.id, { palette: pal.slice(0, 16) }); } catch (x) { console.warn(x); toast(L('مقدرتش أحفظ ألوان المشروع', 'Could not save the project colours'), 'err'); } CD.pop = ''; return openPop('color'); }
+    if (a === 'paladd' || a === 'paldel') { const pr = s && s.projectId ? byId('projects', s.projectId) : null; if (!pr) return; let pal = Array.isArray(pr.palette) ? pr.palette.slice() : []; if (a === 'paladd') { if (!pal.includes(CD.color)) pal.push(CD.color); } else pal = pal.filter((_, i) => i !== +k); try { await Store.update('projects', pr.id, { palette: pal.slice(0, 16) }); } catch (x) { console.warn(x); toast(L('مقدرتش أحفظ ألوان المشروع', 'Could not save the project colours'), 'err'); } CD.pop = ''; openPop('color'); return paintStrip(); }
     if (a === 'sdel') return ed.deleteSelection(); if (a === 'sdup') return ed.duplicateSelection(); if (a === 'scolor') return ed.recolorSelection(CD.color);
     if (a === 'smove') return openPop('move');
-    if (a === 'movesel') { if (k === '__new') { const sel = ed.sel.slice(); const from = ed.active; const nl = ed.addLayer(); ed.active = from; ed.sel = sel; ed.moveSelectionTo(nl.id); } else ed.moveSelectionTo(k); closePop(); if (CD.layers) paintLayers(); return; }
+    if (a === 'movesel') { if (k === '__new') { const sel = ed.sel.slice(); const from = ed.active; const nl = ed.addLayer(); ed.active = from; ed.sel = sel; ed.moveSelectionTo(nl.id); } else ed.moveSelectionTo(k); closePop(); paintLayers(); return; }
     if (a === 'rename') { if (!isMine(s)) return; openModal({ title: L('اسم الرسمة', 'Drawing name'), body: `<div class="form">${field(L('الاسم', 'Name'), `<input name="title" value="${esc(s.title || '')}" maxlength="80" required>`, 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!d.title) return false; await Store.update(COL, s.id, { title: d.title }); title(); } }); return; }
     /* layers */
     if (a === 'ladd') { ed.addLayer(); return paintLayers(); }
-    if (a === 'lact') { ed.setActive(k); return paintLayers(); }
+    if (a === 'lact') { const now = Date.now(); const dbl = CD.lyTap.id === k && now - CD.lyTap.t < 400; CD.lyTap = { id: k, t: dbl ? 0 : now }; ed.setActive(k); if (dbl && ed.active === k) return setFocus(!ed.focus); return paintLayers(); }
     if (a === 'lvis') { ed.toggleLayer(k); return paintLayers(); }
     if (a === 'llock') { ed.lockLayer(k); return paintLayers(); }
     if (a === 'lup') { ed.moveLayer(ed.active, 1); return paintLayers(); }
@@ -44577,14 +44797,22 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (a === 'share') { if (!isMine(s) || !s.projectId) return; await Store.update(COL, s.id, { shareEdit: !s.shareEdit }); toast(!s.shareEdit ? L('فريق المشروع يقدر يعدّل دلوقتي', 'The project team can edit now') : L('فريق المشروع بيشوف بس', 'The project team can only view now')); CD.pop = ''; return openPop('more'); }
     if (a === 'board') { closePop(); return toBoard(); }
     if (a === 'task') return toTask();
-    if (a === 'paper') { ed.setPaper(k); if (!/^persp/.test(k)) ed.setPerspEdit(false); dirty(); CD.pop = ''; return openPop('more'); }
-    if (a === 'angle') { ed.angleSnap = !ed.angleSnap; prefs.angle = ed.angleSnap; savePrefs(); CD.pop = ''; return openPop('more'); }
+    if (a === 'paper') { ed.setPaper(k); if (!/^persp/.test(k)) ed.setPerspEdit(false); dirty(); return paintPrec(); }
+    if (a === 'angle') { ed.angleSnap = !ed.angleSnap; prefs.angle = ed.angleSnap; savePrefs(); return paintPrec(); }
     if (a === 'finger') { ed.fingerDraws = ed.fingerDraws === true ? 'auto' : true; prefs.finger = ed.fingerDraws === true; savePrefs(); CD.pop = ''; return openPop('more'); }
-    if (a === 'grid') { ed.gridSnap = !ed.gridSnap; prefs.grid = ed.gridSnap; savePrefs(); if (ed.gridSnap && ed.paper === 'plain') { ed.setPaper('grid'); dirty(); } CD.pop = ''; return openPop('more'); }
-    if (a === 'scale') { ed.scaleRatio = +k || 0; ed.render(); dirty(); CD.pop = ''; return openPop('more'); }
-    if (a === 'unit') { ed.scaleUnit = k === 'cm' ? 'cm' : 'm'; ed.render(); dirty(); CD.pop = ''; return openPop('more'); }
+    if (a === 'grid') { ed.gridSnap = !ed.gridSnap; prefs.grid = ed.gridSnap; savePrefs(); if (ed.gridSnap && ed.paper === 'plain') { ed.setPaper('grid'); dirty(); } return paintPrec(); }
+    if (a === 'scale') { ed.scaleRatio = +k || 0; ed.render(); dirty(); return paintPrec(); }
+    if (a === 'unit') { ed.scaleUnit = k === 'cm' ? 'cm' : 'm'; ed.render(); dirty(); return paintPrec(); }
     if (a === 'addimg') { closePop(); return pickFile('image/*', f => addPictureLayer(URL.createObjectURL(f), f.name.replace(/\.[^.]+$/, ''), /png|webp|gif/i.test(f.type))); }
     if (a === 'addpdf') { closePop(); return pickFile('application/pdf', async f => { try { const n = +(prompt(L('رقم الصفحة', 'Page number'), '1') || 1); const c = await pdfPage(f, Math.max(1, n)); addPictureLayer(c, f.name.replace(/\.[^.]+$/, '') + ' · ' + n, false); } catch (x) { console.warn(x); toast(L('مقدرتش أفتح الـPDF', 'Could not open the PDF'), 'err'); } }); }
+    if (a === 'addpf') {
+      closePop(); const xs = list('files').filter(x => s && x.projectId === s.projectId && /^image\//.test(x.mime || '') && x.store !== 'thumb').slice(0, 80);
+      if (!xs.length) { toast(L('مفيش صور في ملفات المشروع ده', 'No pictures in this project\'s files'), 'err'); return; }
+      openModal({ title: L('ملف من المشروع', 'A project file'), body: `<div class="form"><div class="cdpfiles full">${xs.map(x => `<button type="button" class="cdpf" data-cdpf="${esc(x.id)}" title="${esc(x.name || '')}"><img src="${esc(x.thumb || '')}" alt=""></button>`).join('')}</div><input type="hidden" name="pfile" id="f-cdpf2"></div>`, submitLabel: L('ضيفها', 'Add it'),
+        onOpen: f => f.addEventListener('click', ev => { const bb = ev.target.closest('[data-cdpf]'); if (!bb) return; ev.preventDefault(); f.querySelector('#f-cdpf2').value = bb.dataset.cdpf; f.querySelectorAll('[data-cdpf]').forEach(x => x.classList.toggle('on', x === bb)); }),
+        onSubmit: async f => { const fr = byId('files', formData(f).pfile); if (!fr) { toast(L('اختار صورة', 'Pick a picture'), 'err'); return false; } try { const u = URL.createObjectURL(await Files.blob(fr)); addPictureLayer(u, String(fr.name || '').replace(/\.[^.]+$/, ''), /png/i.test(fr.mime || '')); } catch (x) { console.warn(x); toast(L('مقدرتش أفتح الملف', 'Could not open the file'), 'err'); return false; } } });
+      return;
+    }
     if (a === 'exp') { closePop(); return exportAs(k).catch(x => { console.warn('concept export', x); toast(L('مقدرتش أصدّر الرسمة', 'Could not export the drawing'), 'err'); }); }
     if (a === 'versions') { CD.pop = ''; return openPop('versions'); }
     if (a === 'vload') { const v = (s.versions || [])[+k]; if (!v) return; try { await save(true); const j = await getJSON(v.ref); const imgs = await loadImages(j); ed.load(j, imgs); ed.fit(); dirty(); closePop(); toast(L('رجعت للنسخة دي — والحالية اتحفظت كنسخة قديمة', 'Back to that version — the current one is kept as an older version')); } catch (x) { console.warn(x); toast(L('مقدرتش أفتح النسخة دي', 'Could not open that version'), 'err'); } return; }
@@ -44595,7 +44823,44 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (t.dataset.cdr) { setBrush(t.dataset.cdr, +t.value); document.querySelectorAll(`#nfcd [data-cdr="${t.dataset.cdr}"]`).forEach(x => { if (x !== t) x.value = t.value; }); }
     if (t.dataset.cdl && CD.ed) CD.ed.setLayerOpacity(t.dataset.cdl, +t.value, true);
   });
-  document.addEventListener('change', e => { const t = e.target; if (t && t.dataset && t.dataset.cdl && CD.ed) { CD.ed.setLayerOpacity(t.dataset.cdl, +t.value, false); paintLayers(); } });
+  document.addEventListener('change', e => { const t = e.target; if (!t || !t.dataset || !CD.ed) return; if (t.dataset.cdl) { CD.ed.setLayerOpacity(t.dataset.cdl, +t.value, false); paintLayers(); } if (t.dataset.cds === 'scale' && t.closest('#nfcd')) { CD.ed.scaleRatio = +t.value || 0; CD.ed.render(); dirty(); } });
+  /* the wheel arcs: drag along an arc (pointer) or use the arrow keys (keyboard) */
+  const arcAt = (e, svg) => { const r = svg.getBoundingClientRect(); const x = (e.clientX - r.left) * 180 / r.width - WC, y = (e.clientY - r.top) * 180 / r.height - WC; return { d: Math.hypot(x, y), a: Math.atan2(y, x) * 180 / Math.PI }; };
+  document.addEventListener('pointerdown', e => {
+    const svg = e.target.closest && e.target.closest('#nfcd .cd-wsvg'); if (!svg || CD.readOnly || !CD.ed) return;
+    const q = arcAt(e, svg); if (q.d < 44 || q.d > 90) return; const k = Object.keys(ARCS).find(n => arcT(n, q.a).near); if (!k) return;
+    e.preventDefault(); try { svg.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    const set = ev => { setBrush(k, vOf[k](arcT(k, arcAt(ev, svg).a).t)); arcTip(svg, k); };
+    const up = () => { svg.removeEventListener('pointermove', set); svg.removeEventListener('pointerup', up); svg.removeEventListener('pointercancel', up); arcTip(svg, ''); };
+    set(e); svg.addEventListener('pointermove', set); svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+  });
+  /* while an arc moves, the middle of the wheel shows its name and value */
+  function arcTip(svg, k) {
+    const c = svg && svg.parentNode && svg.parentNode.querySelector('.cd-wc'); if (!c) return;
+    if (!k) { c.classList.remove('tip'); c.dataset.ic = ''; updWheel(); return; }
+    c.classList.add('tip'); c.dataset.ic = '~'; c.innerHTML = `<b class="ltr">${esc(fmtV(k, curV(k)))}</b><small>${esc(ARCLBL()[k])}</small>`;
+  }
+  document.addEventListener('focusout', e => { const g = e.target && e.target.closest && e.target.closest('#nfcd .cd-arc'); if (g) arcTip(g.closest('svg'), ''); });
+  document.addEventListener('keydown', e => {
+    const g = e.target && e.target.closest && e.target.closest('#nfcd .cd-arc'); if (!g || CD.readOnly) return; const k = g.dataset.arc; setTimeout(() => arcTip(g.closest('svg'), k), 0);
+    const d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 5, PageDown: -5 }[e.key]; if (!d) return;
+    e.preventDefault(); e.stopPropagation();
+    /* small steps near the bottom of the size arc round back to the same value — then move by one 0.05 step */
+    let nv = vOf[k](Math.max(0, Math.min(1, tOf[k](curV(k)) + d * 0.04))); const lo = vOf[k](0), hi = vOf[k](1);
+    if (nv === curV(k)) nv = Math.max(lo, Math.min(hi, Math.round((curV(k) + Math.sign(d) * 0.05) * 20) / 20));
+    setBrush(k, nv);
+  }, true);
+  /* reorder layers: drag the ⋮⋮ handle onto the place you want */
+  document.addEventListener('pointerdown', e => {
+    const h = e.target.closest && e.target.closest('#nfcd [data-lyd]'); if (!h || !CD.ed || CD.readOnly) return;
+    const list = h.closest('.cd-lys'); const row = h.closest('.cd-ly'); if (!list || !row) return; const rows = [...list.querySelectorAll('.cd-ly')]; const from = rows.indexOf(row); if (from < 0) return;
+    e.preventDefault(); const id = h.dataset.lyd; let to = from; CD.lyDrag = true; row.classList.add('cd-lydrag-on'); try { h.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    const mv = ev => { let t = 0; rows.forEach((r, i) => { if (ev.clientY >= r.getBoundingClientRect().top) t = i; }); to = t; rows.forEach((r, i) => r.classList.toggle('cd-lydrop', i === to && to !== from)); };
+    const up = () => { h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); CD.lyDrag = false; if (CD.ed && to !== from) CD.ed.moveLayerTo(id, rows.length - 1 - to); paintLayers(); };
+    h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.dataset && e.target.dataset.cdz != null && CD.ed) { e.preventDefault(); const v = +e.target.value; if (v >= 5) { CD.ed.zoomTo(Math.min(24, v / 100)); refreshZoom(); } } });
+  addEventListener('resize', () => { if (!CD.ed) return; clearTimeout(CD.rzT); CD.rzT = setTimeout(() => { if (CD.ed) { paintCol(); if (CD.pop && !['color'].includes(CD.pop)) closePop(); } }, 250); });
   document.addEventListener('pointerdown', e => { if (CD.pop && e.target.closest && e.target.closest('#cd-ed')) closePop(); }, true);
   document.addEventListener('keydown', e => {
     if (!document.getElementById('nfcd') || !CD.ed || document.getElementById('overlay')) return;
@@ -44611,6 +44876,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (map[k]) { e.preventDefault(); return setTool(map[k]); }
     if (k === '[' || k === ']') { e.preventDefault(); return setBrush('size', Math.max(0.2, Math.min(6, CD.size * (k === ']' ? 1.2 : 1 / 1.2)))); }
     if (k === '0') { e.preventDefault(); return CD.ed.fit(); }
+    if (k === 'f') { e.preventDefault(); return setFocus(!CD.ed.focus); }
   });
   window.addEventListener('beforeunload', () => { if (CD.dirty) save(true); });
   document.addEventListener('visibilitychange', () => { if (document.hidden && CD.dirty) save(true); });
@@ -44654,12 +44920,6 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     .cdpaper i.pp-grid{background-image:linear-gradient(#d4d4da 1px,transparent 1px),linear-gradient(90deg,#d4d4da 1px,transparent 1px);background-size:8px 8px}
     .cdpaper i.pp-persp1{background:repeating-conic-gradient(from 0deg at 50% 45%,#d4d4da 0 1.2deg,transparent 1.2deg 15deg),#fff}
     .cdpaper i.pp-persp2{background:repeating-conic-gradient(from 0deg at 8% 45%,#d4d4da 0 1deg,transparent 1deg 12deg),repeating-conic-gradient(from 0deg at 92% 45%,#d4d4da 0 1deg,transparent 1deg 12deg),#fff}
-    .nfcd .cd-rot{color:#0a84ff!important}
-    .nfcd .cd-presets,.nfcd .cd-pal{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 6px}
-    .nfcd .cd-pre{position:relative;display:inline-flex}
-    .nfcd .cd-prex{position:absolute;top:-6px;inset-inline-end:-6px;width:18px;height:18px;border-radius:50%;border:0;background:var(--surface-2,#eee);color:var(--muted,#666);font-size:10px;line-height:18px;padding:0;cursor:pointer}
-    .nfcd .cd-pdot{display:inline-block;border-radius:50%;margin-inline-end:4px;vertical-align:middle}
-    .nfcd .cd-sw{width:28px;height:28px;border-radius:50%;border:2px solid rgba(127,127,127,.35);background:var(--c);padding:0;cursor:pointer}
     .cdpaper i.pp-iso{background-image:linear-gradient(30deg,transparent 47%,#d4d4da 48%,#d4d4da 52%,transparent 53%),linear-gradient(150deg,transparent 47%,#d4d4da 48%,#d4d4da 52%,transparent 53%);background-size:14px 8px}
     .cdpfiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;max-height:220px;overflow:auto}
     .cdpf{padding:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#fff;aspect-ratio:1;cursor:pointer}.cdpf.on{border-color:var(--accent)}.cdpf img{width:100%;height:100%;object-fit:cover}
@@ -44668,71 +44928,111 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     html.nfcd-open .overlay{z-index:9760}html.nfcd-open .toasts{z-index:9900}
     .nfcd{position:fixed;inset:0;z-index:9700;background:var(--bg,#f2f2f7);color:var(--ink,#111);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
     .nfcd [hidden]{display:none!important}
-    .nfcd .cd-top{display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:52px;background:var(--surface,#fff);border-bottom:1px solid var(--line)}
-    .nfcd .cd-grow{flex:1}
+    .nfcd .cd-top{display:flex;align-items:center;gap:4px;padding:6px 10px;min-height:52px;background:var(--surface,#fff);border-bottom:1px solid var(--line)}
+    .nfcd .cd-grow{flex:1}.nfcd .cd-tsep{flex:none;width:1px;height:24px;background:var(--line);margin:0 4px}
     .nfcd .cd-ib{flex:none;width:40px;height:40px;border-radius:12px;border:0;background:transparent;color:inherit;display:grid;place-items:center;cursor:pointer;padding:0}
     .nfcd .cd-ib:hover{background:var(--line)}.nfcd .cd-ib:disabled{opacity:.3;cursor:default}.nfcd .cd-ib.on{background:var(--accent-soft,rgba(0,122,255,.12));color:var(--accent)}
-    .nfcd .cd-ib.sm{width:32px;height:32px}.nfcd .cd-ib.sm svg{width:18px;height:18px}
-    .nfcd .cd-title{display:flex;align-items:center;gap:6px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;min-width:0;max-width:42vw;padding:6px 8px;border-radius:10px}
+    .nfcd .cd-ib.sm{width:30px;height:30px;border-radius:9px}.nfcd .cd-ib.sm svg{width:17px;height:17px}
+    .nfcd .cd-zb{flex:none;height:34px;min-width:54px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:inherit;font:600 13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-variant-numeric:tabular-nums;cursor:pointer;direction:ltr}
+    .nfcd .cd-zb:hover{background:var(--line)}.nfcd .cd-zb.tilt{color:var(--accent);border-color:var(--accent)}
+    .nfcd .cd-title{display:flex;align-items:center;gap:6px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;min-width:0;max-width:34vw;padding:6px 8px;border-radius:10px}
     .nfcd .cd-title b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfcd .cd-title svg{width:15px;height:15px;opacity:.5;flex:none}.nfcd .cd-title:disabled svg{display:none}
     .nfcd .cd-saved{font-size:12px;color:var(--ink-2);white-space:nowrap}.nfcd .cd-saved[data-st=err]{color:var(--bad,#d33)}.nfcd .cd-saved[data-st=dirty]{color:var(--warn,#b25000)}
-    .nfcd .cd-main{flex:1;min-height:0;display:flex}
-    .nfcd .cd-rail{flex:none;width:64px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;overflow-y:auto;background:var(--surface,#fff);border-inline-end:1px solid var(--line);scrollbar-width:none}
-    .nfcd .cd-rail::-webkit-scrollbar{display:none}
-    .nfcd .cd-t{flex:none;width:52px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px;border:0;border-radius:12px;background:transparent;color:var(--ink-2);cursor:pointer;font-size:10px;line-height:1.2}
-    .nfcd .cd-t.on{background:var(--accent-soft,rgba(0,122,255,.12));color:var(--accent)}
-    .nfcd .cd-t span{max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .nfcd .cd-sep{flex:none;width:32px;height:1px;background:var(--line);margin:6px 0}
-    .nfcd .cd-cw{flex:none;width:38px;height:38px;border-radius:50%;border:0;padding:0;cursor:pointer;display:grid;place-items:center;background:conic-gradient(#ff3b30,#ffcc00,#34c759,#00c7be,#0a84ff,#af52de,#ff2d55,#ff3b30)}
-    .nfcd .cd-cw i{width:22px;height:22px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.2)}
-    .nfcd .cd-szdot{display:block;border-radius:50%;background:#1c1c1e;margin:6px auto}
-    .nfcd .cd-stage{flex:1;min-width:0;position:relative;background:#fff}
+    .nfcd .cd-main{flex:1;min-height:0;display:flex;flex-direction:column}
+    .nfcd .cd-stage{flex:1;min-height:0;position:relative;background:#fff;overflow:hidden}
     .nfcd .cd-ed{position:absolute;inset:0;background:#fff}
-    .nfcd.ro .cd-rail .cd-t:not([data-k=select]):not([data-k=pan]),.nfcd.ro .cd-cw,.nfcd.ro .cd-brush,.nfcd.ro .cd-sliders{display:none}
-    .nfcd .cd-load{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink-2);background:#fff;z-index:3}
-    .nfcd .cd-sliders{position:absolute;inset-inline-start:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:14px;padding:10px 6px;border-radius:999px;background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--line);box-shadow:0 6px 20px -8px rgba(0,0,0,.35);z-index:2;align-items:center}
-    .nfcd .cd-sliders label{display:flex;flex-direction:column;align-items:center;gap:4px}
-    .nfcd .cd-sliders input{writing-mode:vertical-lr;direction:rtl;width:22px;height:130px;margin:0;accent-color:var(--accent,#0a84ff)}
-    .nfcd .cd-sliders small{font-size:10px;color:var(--ink-2)}
-    .nfcd .cd-zoom{position:absolute;inset-inline-end:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;border-radius:999px;background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--line);box-shadow:0 6px 20px -8px rgba(0,0,0,.35);z-index:2}
-    .nfcd .cd-zoom button{height:34px;min-width:34px;border:0;border-radius:999px;background:transparent;color:inherit;display:grid;place-items:center;cursor:pointer;font:600 12.5px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 6px}.nfcd .cd-zoom svg{width:18px;height:18px}
-    .nfcd .cd-sel{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(28,28,30,.92);color:#fff;z-index:3;box-shadow:0 6px 20px -6px rgba(0,0,0,.5)}
+    .nfcd .cd-load{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink-2);background:#fff;z-index:7}
+    .nfcd .cd-col{position:absolute;top:12px;bottom:12px;width:236px;z-index:4;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--line);border-radius:22px;box-shadow:0 16px 44px -18px rgba(0,0,0,.45);scrollbar-width:thin}
+    .nfcd .cd-col.l{left:12px}.nfcd .cd-col.r{right:12px}.nfcd .cd-col:empty{display:none}
+    .nfcd .cd-colsec{padding:10px 12px;border-top:1px solid var(--line)}.nfcd .cd-colsec:first-child{border-top:0}.nfcd .cd-colsec.cd-lyw{flex:1 0 auto}
+    .nfcd .cd-wsec{padding-bottom:8px}
+    .nfcd .cd-wheel2{position:relative;width:180px;height:180px;margin:0 auto}
+    .nfcd .cd-wsvg{width:180px;height:180px;display:block;touch-action:none;user-select:none;-webkit-user-select:none;overflow:visible}
+    .nfcd .cd-atr{fill:none;stroke:var(--line,#e5e5ea);stroke-width:15;stroke-linecap:round}
+    .nfcd .cd-ava{fill:none;stroke:var(--accent,#0a84ff);stroke-width:15;stroke-linecap:round;opacity:.9}
+    .nfcd .cd-akn{fill:var(--surface,#fff);stroke:var(--accent,#0a84ff);stroke-width:3}
+    .nfcd .cd-arc{cursor:pointer;outline:none}.nfcd .cd-arc:focus-visible .cd-atr{stroke:var(--accent-soft,rgba(10,132,255,.35))}
+    .nfcd .cd-wc.tip{background:var(--surface,#fff);color:var(--accent);border-color:var(--accent)}.nfcd .cd-wc.tip b{font:700 15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-variant-numeric:tabular-nums}.nfcd .cd-wc.tip small{font-size:9.5px;color:var(--ink-2)}
+    .nfcd .cd-wlg i{font-style:normal;display:block;color:var(--accent);font-size:13px;line-height:1}
+    .nfcd .cd-wc{position:absolute;left:50%;top:50%;width:62px;height:62px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid var(--line);background:var(--bg,#f2f2f7);color:var(--ink,#111);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;padding:0}
+    .nfcd .cd-wc.on{background:var(--accent-soft,rgba(10,132,255,.12));color:var(--accent);border-color:var(--accent)}.nfcd .cd-wc svg{width:24px;height:24px}
+    .nfcd .cd-wc .cd-szdot{margin:2px auto 0;max-width:14px;max-height:14px;box-shadow:0 0 0 1.5px var(--surface,#fff),0 0 0 2.5px rgba(127,127,127,.5)}
+    .nfcd .cd-wcol{position:absolute;width:40px;height:40px;border-radius:50%;border:0;padding:0;cursor:pointer;display:grid;place-items:center;background:conic-gradient(#ff3b30,#ffcc00,#34c759,#00c7be,#0a84ff,#af52de,#ff2d55,#ff3b30);box-shadow:0 4px 12px -4px rgba(0,0,0,.45)}
+    .nfcd .cd-wcol i,.nfcd .cd-mcol i{width:24px;height:24px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.2)}
+    .nfcd .cd-wlg{display:flex;justify-content:space-between;gap:4px;margin-top:2px;font-size:10.5px;color:var(--ink-2)}.nfcd .cd-wlg span{flex:1;text-align:center}
+    .nfcd .cd-wlg b{display:block;color:var(--ink,#111);font-size:12.5px;font-variant-numeric:tabular-nums}
+    .nfcd .cd-szdot{display:block;border-radius:50%;background:#1c1c1e;margin:6px auto}
+    .nfcd .cd-tools2{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+    .nfcd .cd-t{height:40px;min-width:0;border:0;border-radius:12px;background:transparent;color:var(--ink-2);display:grid;place-items:center;cursor:pointer;padding:0}
+    .nfcd .cd-t:hover{background:var(--line)}.nfcd .cd-t.on{background:var(--accent-soft,rgba(0,122,255,.12));color:var(--accent)}.nfcd .cd-t svg{width:21px;height:21px}
+    .nfcd.ro .cd-tools2 .cd-t:not([data-k=select]):not([data-k=pan]){display:none}
+    .nfcd .cd-sech{display:flex;align-items:center;gap:4px;margin-bottom:6px;width:100%;border:0;background:transparent;color:inherit;font:inherit;padding:0;text-align:start}
+    .nfcd .cd-sech b{flex:1;font-size:13px}.nfcd .cd-fold{cursor:pointer;margin:0;min-height:30px;border-radius:8px}.nfcd .cd-fold svg{width:18px;height:18px;opacity:.7}
+    .nfcd .cd-chev{font-style:normal;width:22px;text-align:center;color:var(--ink-2);font-size:17px;line-height:1}
+    .nfcd .cd-precb{margin-top:6px}.nfcd .cd-precb .cd-mi{padding:7px 4px;font-size:13px}.nfcd .cd-precb .cd-chips{padding:2px 0 6px}.nfcd .cd-precb .cd-chip{height:28px;padding:0 9px;font-size:12px}
+    .nfcd .cd-strip{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+    .nfcd .cd-presets,.nfcd .cd-pal{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 6px}
+    .nfcd .cd-pre{position:relative;display:inline-flex}
+    .nfcd .cd-prex{position:absolute;top:-6px;inset-inline-end:-6px;width:18px;height:18px;border-radius:50%;border:0;background:var(--surface-2,#eee);color:var(--muted,#666);font-size:10px;line-height:18px;padding:0;cursor:pointer}
+    .nfcd .cd-pdot{display:inline-block;border-radius:50%;margin-inline-end:4px;vertical-align:middle}
+    .nfcd .cd-sw{display:inline-block;width:26px;height:26px;border-radius:50%;border:2px solid rgba(127,127,127,.35);background:var(--c);padding:0;cursor:pointer}
+    .nfcd .cd-sw.on{box-shadow:0 0 0 2px var(--surface,#fff),0 0 0 4px var(--accent,#0a84ff)}
+    .nfcd .cd-srow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:2px 0 6px}
+    .nfcd .cd-srow select,.nfcd .cd-srow input{height:32px;border-radius:10px;border:1px solid var(--line);background:var(--surface,#fff);color:inherit;padding:0 8px;font:inherit;font-size:13px}
+    .nfcd .cd-srow input{width:88px}.nfcd .cd-seg{display:inline-flex;gap:4px}.nfcd .cd-seg .cd-chip{height:30px;padding:0 10px}
+    .nfcd .cd-lys{display:flex;flex-direction:column;gap:2px}
+    .nfcd .cd-ly{display:flex;align-items:center;gap:6px;padding:4px;border-radius:12px;border:1.5px solid transparent}
+    .nfcd .cd-ly.cd-lyon{background:var(--accent-soft,rgba(0,122,255,.12))}.nfcd .cd-ly.cd-lyfo{border-color:var(--accent)}.nfcd .cd-ly.cd-lyhid .cd-lyth{opacity:.35}
+    .nfcd .cd-ly.cd-lydrop{border-color:var(--accent);border-style:dashed}.nfcd .cd-ly.cd-lydrag-on{opacity:.55}
+    .nfcd .cd-lydrag{flex:none;width:16px;align-self:stretch;display:grid;place-items:center;color:var(--ink-2);cursor:grab;touch-action:none}.nfcd .cd-lydrag svg{width:16px;height:16px}
+    .nfcd .cd-lyth{flex:none;width:40px;height:30px;border-radius:7px;background:#fff repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/10px 10px;border:1px solid var(--line)}
+    .nfcd .cd-lyn{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:0;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer;padding:2px}
+    .nfcd .cd-lyn b{font-size:12.5px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfcd .cd-lyn small{font-size:11px;color:var(--ink-2)}
+    .nfcd .cd-lyop{flex:none;font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+    .nfcd .cd-lyact{border-top:1px dashed var(--line);margin-top:6px;padding-top:2px}.nfcd .cd-lyact .cd-rng{padding:6px 2px}
+    .nfcd .cd-lyact .cd-chips{padding:2px 0 4px;gap:4px}.nfcd .cd-lyact .cd-chip{height:30px;padding:0 8px;font-size:12px}
+    .nfcd .cd-focus{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;flex-direction:row;align-items:center;gap:8px;max-width:min(560px,calc(100% - 280px));padding:5px 5px 5px 12px;border-radius:999px;background:rgba(28,28,30,.92);color:#fff;font-size:12.5px;z-index:5;box-shadow:0 6px 20px -6px rgba(0,0,0,.5)}
+    .nfcd .cd-focus svg{width:18px;height:18px;flex:none}.nfcd .cd-focus span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .nfcd .cd-focus button{flex:none;height:30px;padding:0 12px;border-radius:999px;border:0;background:#fff;color:#1c1c1e;font:inherit;font-size:12.5px;cursor:pointer}
+    .nfcd .cd-sel{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(28,28,30,.92);color:#fff;z-index:5;box-shadow:0 6px 20px -6px rgba(0,0,0,.5)}
     .nfcd .cd-sel button{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:0;border-radius:999px;background:transparent;color:#fff;cursor:pointer;font-size:13px}.nfcd .cd-sel svg{width:18px;height:18px}
     .nfcd .cd-sel button:first-child{color:#ff6961}.nfcd .cd-dot{width:14px;height:14px;border-radius:50%;border:1.5px solid #fff;display:inline-block}
-    .nfcd .cd-pop{position:absolute;top:10px;inset-inline-end:10px;width:min(340px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;padding:10px 12px 12px;border-radius:18px;background:var(--surface,#fff);box-shadow:0 18px 50px -12px rgba(0,0,0,.45);border:1px solid var(--line);z-index:5}
-    .nfcd .cd-pop[data-k=color],.nfcd .cd-pop[data-k=brush]{inset-inline-end:auto;inset-inline-start:84px;top:auto;bottom:10px}
+    .nfcd .cd-pop{position:absolute;top:10px;inset-inline-end:10px;width:min(340px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;padding:10px 12px 12px;border-radius:18px;background:var(--surface,#fff);color:var(--ink,#111);box-shadow:0 18px 50px -12px rgba(0,0,0,.45);border:1px solid var(--line);z-index:6}
+    .nfcd .cd-pop.nearl{left:260px;right:auto}.nfcd .cd-pop.nearr{right:260px;left:auto}
     .nfcd .cd-pophd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.nfcd .cd-pophd b{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .nfcd .cd-px{flex:none;width:32px;height:32px;border-radius:50%;border:0;background:var(--line);color:inherit;cursor:pointer}
     .nfcd .cd-wheel{display:flex;justify-content:center}
+    .nfcd .cd-bgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 8px}
+    .nfcd .cd-bt{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border:1px solid var(--line);border-radius:14px;background:var(--surface,#fff);color:inherit;font:inherit;font-size:12px;cursor:pointer}
+    .nfcd .cd-bt.on{border-color:var(--accent);background:var(--accent-soft,rgba(0,122,255,.1));color:var(--accent)}.nfcd .cd-bt svg{width:24px;height:24px}
     .nfcd .cd-mi{display:flex;align-items:center;gap:10px;width:100%;padding:9px 8px;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:14px;text-align:start;cursor:pointer}
     .nfcd .cd-mi:hover{background:var(--line)}.nfcd .cd-mi svg{width:20px;height:20px;flex:none;opacity:.8}.nfcd .cd-mi span{flex:1}.nfcd .cd-mi[data-danger]{color:var(--bad,#d33)}
     .nfcd .cd-on{color:var(--accent);display:grid}.nfcd .cd-on svg{opacity:1}
     .nfcd .cd-mgrp{border-top:1px solid var(--line);padding:6px 0}.nfcd .cd-mgrp:first-of-type{border-top:0}
-    .nfcd .cd-mlbl{font-size:12px;font-weight:600;color:var(--ink-2);margin:6px 8px 4px}
-    .nfcd .cd-chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 6px 6px}
-    .nfcd .cd-chip{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
+    .nfcd .cd-mlbl{font-size:12px;font-weight:600;color:var(--ink-2);margin:6px 2px 4px}
+    .nfcd .cd-chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
+    .nfcd .cd-chip{display:inline-flex;flex-direction:row;align-items:center;gap:4px;height:32px;line-height:1;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface,#fff);color:inherit;font:inherit;font-size:13px;cursor:pointer}
     .nfcd .cd-chip.on{border-color:var(--accent);background:var(--accent-soft,rgba(0,122,255,.1));color:var(--accent)}.nfcd .cd-chip svg{width:16px;height:16px}.nfcd .cd-chip.d{color:var(--bad,#d33)}
-    .nfcd .cd-hint{font-size:12px;color:var(--ink-2);margin:4px 8px}
-    .nfcd .cd-rng{display:flex;flex-direction:column;gap:4px;padding:6px 8px;font-size:12.5px;color:var(--ink-2)}.nfcd .cd-rng input{width:100%;accent-color:var(--accent,#0a84ff)}
-    .nfcd .cd-layers{flex:none;width:280px;display:flex;flex-direction:column;background:var(--surface,#fff);border-inline-start:1px solid var(--line);min-height:0}
-    .nfcd .cd-lyhd{display:flex;align-items:center;gap:2px;padding:8px 10px;border-bottom:1px solid var(--line)}.nfcd .cd-lyhd b{flex:1;font-size:15px}
-    .nfcd .cd-lys{flex:1;overflow:auto;padding:6px}
-    .nfcd .cd-ly{display:flex;align-items:center;gap:6px;padding:5px;border-radius:12px}.nfcd .cd-ly.cd-lyon{background:var(--accent-soft,rgba(0,122,255,.12))}
-    .nfcd .cd-lyth{flex:none;width:64px;height:48px;border-radius:8px;background:#fff repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/12px 12px;border:1px solid var(--line)}
-    .nfcd .cd-lyn{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:0;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer;padding:2px}
-    .nfcd .cd-lyn b{font-size:13.5px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfcd .cd-lyn small{font-size:11.5px;color:var(--ink-2)}
-    .nfcd .cd-lyact{border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px))}
-    .nfcd .cd-lyx{display:none}
+    .nfcd .cd-hint{font-size:11.5px;line-height:1.5;color:var(--ink-2);margin:4px 2px}
+    .nfcd .cd-rng{display:flex;flex-direction:column;gap:4px;padding:6px 4px;font-size:12.5px;color:var(--ink-2)}.nfcd .cd-rng input{width:100%;accent-color:var(--accent,#0a84ff)}
+    .nfcd .cd-help{display:grid;gap:7px;margin:2px 2px 8px}.nfcd .cd-help div{display:flex;flex-direction:column;gap:1px}.nfcd .cd-help b{font-size:13px}.nfcd .cd-help span{color:var(--ink-2);font-size:12.5px}
+    .nfcd .cd-keys{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;margin:2px}.nfcd .cd-keys span{display:flex;align-items:center;gap:6px;font-size:12.5px}
+    .nfcd kbd{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);border-bottom-width:2px;background:var(--bg,#f2f2f7);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;white-space:nowrap}
+    .nfcd .cd-mbar{display:none;align-items:center;gap:6px;padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));background:var(--surface,#fff);border-top:1px solid var(--line)}
+    .nfcd .cd-mtools{flex:1;min-width:0;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}.nfcd .cd-mtools::-webkit-scrollbar{display:none}.nfcd .cd-mtools .cd-t{flex:none;width:42px;height:42px}
+    .nfcd .cd-mb{flex:none;width:44px;height:44px;border-radius:14px;border:1px solid var(--line);background:transparent;color:var(--ink,#111);display:grid;place-items:center;cursor:pointer;padding:0;position:relative}
+    .nfcd .cd-mb.on{background:var(--accent-soft,rgba(0,122,255,.12));color:var(--accent);border-color:var(--accent)}
+    .nfcd .cd-mw .cd-szdot{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);margin:0;max-width:7px;max-height:7px}
+    .nfcd .cd-mcol{border:0;background:conic-gradient(#ff3b30,#ffcc00,#34c759,#00c7be,#0a84ff,#af52de,#ff2d55,#ff3b30);border-radius:50%}
+    .nfcd .cd-pop .cd-wsec{padding:2px 0 6px}
+    .nfcd .cd-pop .cd-lywp>.cd-sech b{opacity:0}
     @media (max-width:759px){
-      .nfcd .cd-main{flex-direction:column-reverse}
-      .nfcd .cd-rail{width:auto;flex-direction:row;overflow-x:auto;overflow-y:hidden;border-inline-end:0;border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
-      .nfcd .cd-sep{width:1px;height:32px;margin:0 4px}
-      .nfcd .cd-sliders{display:none}
-      .nfcd .cd-layers{position:absolute;left:0;right:0;bottom:0;width:auto;max-height:62%;border:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;box-shadow:0 -12px 40px -12px rgba(0,0,0,.4);z-index:6}
-      .nfcd .cd-lyx{display:grid}
-      .nfcd .cd-pop,.nfcd .cd-pop[data-k=color],.nfcd .cd-pop[data-k=brush]{inset-inline-start:10px;inset-inline-end:10px;width:auto;top:auto;bottom:10px;max-height:70%}
-      .nfcd .cd-title{max-width:34vw}.nfcd .cd-saved{display:none}
-      .nfcd .cd-zoom{bottom:auto;top:10px}
+      .nfcd .cd-col{display:none}
+      .nfcd .cd-zb,.nfcd .cd-wide,.nfcd .cd-tsep{display:none}
+      .nfcd .cd-title{max-width:40vw}.nfcd .cd-saved{display:none}
+      .nfcd .cd-mbar{display:flex}
+      .nfcd .cd-pop,.nfcd .cd-pop.nearl,.nfcd .cd-pop.nearr{left:8px;right:8px;width:auto;top:auto;bottom:8px;max-height:74%;border-radius:20px}
+      .nfcd .cd-focus{max-width:calc(100% - 24px);bottom:10px}
     }
   </style>`);
 })();
