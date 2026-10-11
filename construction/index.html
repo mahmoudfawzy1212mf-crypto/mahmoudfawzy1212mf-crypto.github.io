@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1159-5f72ec";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1319-45363e";</script>
 
 <script>
 'use strict';
@@ -43298,7 +43298,29 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     if (b.style.display !== want) b.style.display = want;
   }
 
-  /* ---------- 1) take the picture of what is on the screen ---------- */
+  /* ---------- 1) take the picture of what is on the screen ----------
+     v7.40 speed (Mahmoud, 11 Oct: «it takes time — I want it instant»): only the screen is copied. A box that is wholly outside
+     the screen becomes an empty box of the same size (so whatever follows keeps its place) and its insides are skipped, hidden
+     boxes (display:none) are not copied at all; the
+     library copies a short list of visual CSS properties instead of every computed one; images wait 5 s at most; the library is
+     loaded in the background after sign-in. A long page went from 3-5 s to about half a second on a laptop. */
+  const SNAP_PROPS = ['display', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'box-sizing', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+    'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+    'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius',
+    'background-color', 'background-image', 'background-size', 'background-position', 'background-position-x', 'background-position-y', 'background-repeat', 'background-clip', '-webkit-background-clip', 'background-origin',
+    'color', 'opacity', 'visibility', 'overflow', 'overflow-x', 'overflow-y', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant', 'font-variant-numeric', 'font-stretch',
+    'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-align-last', 'text-indent', 'text-decoration-line', 'text-decoration-color', 'text-decoration-style', 'text-underline-offset', 'text-transform', 'text-overflow', 'text-shadow',
+    'white-space', 'white-space-collapse', 'text-wrap-mode', 'text-wrap', 'word-break', 'overflow-wrap', 'hyphens', 'direction', 'unicode-bidi', 'vertical-align', 'writing-mode',
+    'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis', 'justify-content', 'justify-items', 'justify-self', 'align-items', 'align-self', 'align-content', 'order', 'row-gap', 'column-gap',
+    'grid-template-columns', 'grid-template-rows', 'grid-template-areas', 'grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end', 'grid-auto-flow', 'grid-auto-rows', 'grid-auto-columns',
+    'box-shadow', 'transform', 'transform-origin', 'translate', 'rotate', 'scale', 'zoom', 'filter', 'backdrop-filter', 'clip-path', 'mix-blend-mode', 'isolation',
+    'mask-image', '-webkit-mask-image', 'mask-size', '-webkit-mask-size', 'mask-position', '-webkit-mask-position', 'mask-repeat', '-webkit-mask-repeat',
+    'outline-width', 'outline-style', 'outline-color', 'outline-offset', 'list-style-type', 'list-style-position', 'object-fit', 'object-position', 'aspect-ratio',
+    'table-layout', 'border-collapse', 'border-spacing', 'float', 'clear', 'content', '-webkit-line-clamp', '-webkit-box-orient', '-webkit-text-fill-color', 'color-scheme', 'accent-color', 'appearance', '-webkit-appearance', 'caret-color',
+    'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-opacity', 'stop-color', 'stop-opacity', 'text-anchor', 'dominant-baseline', 'paint-order', 'vector-effect', 'shape-rendering', 'image-rendering'];
+  const SNAP_SKIP = n => n.nodeType === 1 && (n.id === 'nfdial' || n.id === 'nfsnap' || n.id === 'toasts' || (n.classList && (n.classList.contains('nfd-src') || n.classList.contains('snapfab') || n.classList.contains('toast') || n.classList.contains('toasts'))));
+  const LEAF = /^(img|canvas|video|svg|iframe|picture|object|embed|input|textarea|select)$/i;
   async function capture() {
     await vendorLoad('snap');
     if (!window.NFDraw) throw new Error('no drawing engine');
@@ -43311,34 +43333,60 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     /* boxes scrolled inside the page (side menu, chat, a long form) keep their scroll: their children are moved in the copy only.
        The page itself is not one of them - the library would move the whole body for it and the fixed bars would follow. */
     const tagged = [];
-    document.querySelectorAll('body *').forEach(el => { if ((el.scrollTop || el.scrollLeft) && !el.closest('#nfdial, #nfsnap')) { el.setAttribute('data-nfsnap-s', el.scrollLeft + ',' + el.scrollTop); tagged.push(el); } });
+    const M = 48; const off = r => (r.width || r.height) && (r.bottom < -M || r.top > H + M || r.right < -M || r.left > W + M);
+    (function walk(el) {
+      for (const k of el.children) {
+        if (SNAP_SKIP(k)) continue;
+        if (!k.getClientRects().length && getComputedStyle(k).display === 'none') { k.setAttribute('data-nfsnap-x', ''); tagged.push(k); continue; }
+        if (k.scrollTop || k.scrollLeft) { k.setAttribute('data-nfsnap-s', k.scrollLeft + ',' + k.scrollTop); tagged.push(k); }
+        if (!LEAF.test(k.tagName) && k.offsetParent !== undefined) {
+          const r = k.getBoundingClientRect();
+          if (off(r)) { const d = getComputedStyle(k).display; if (d !== 'inline' && d !== 'contents' && d !== 'none') { k.setAttribute('data-nfsnap-ph', (k.offsetWidth || r.width) + ',' + (k.offsetHeight || r.height)); tagged.push(k); continue; } }
+        }
+        if (k.namespaceURI === 'http://www.w3.org/1999/xhtml') walk(k);
+      }
+    })(document.body);
     try {
       return await ms.domToCanvas(document.body, {
-        width: W, height: H, scale, backgroundColor: bg, timeout: 25000,
+        width: W, height: H, scale, backgroundColor: bg, timeout: 5000, font: false, drawImageInterval: 16, includeStyleProperties: SNAP_PROPS, features: { copyScrollbar: false },
         style: { marginTop: (-sy) + 'px', marginLeft: (sx > 0 ? -sx : 0) + 'px' },
-        filter: n => !(n.nodeType === 1 && (n.id === 'nfdial' || n.id === 'nfsnap' || n.id === 'toasts' || (n.classList && (n.classList.contains('nfd-src') || n.classList.contains('snapfab') || n.classList.contains('toast') || n.classList.contains('toasts'))))),
+        filter: n => { if (SNAP_SKIP(n) || (n.nodeType === 1 && n.hasAttribute('data-nfsnap-x'))) return false; const p = n.parentNode; return !(p && p.nodeType === 1 && p.hasAttribute('data-nfsnap-ph')); },
         onCloneEachNode: c => {
-          if (!c || c.nodeType !== 1 || !c.hasAttribute || !c.hasAttribute('data-nfsnap-s')) return;
+          if (!c || c.nodeType !== 1 || !c.hasAttribute) return;
+          if (c.hasAttribute('data-nfsnap-ph')) {
+            const [w, h] = c.getAttribute('data-nfsnap-ph').split(',').map(Number); c.removeAttribute('data-nfsnap-ph');
+            Object.assign(c.style, { width: w + 'px', height: h + 'px', minWidth: '0', minHeight: '0', maxWidth: 'none', maxHeight: 'none', boxSizing: 'border-box', overflow: 'hidden', backgroundImage: 'none', flex: 'none' });
+            return;
+          }
+          if (!c.hasAttribute('data-nfsnap-s')) return;
           const [l, t] = c.getAttribute('data-nfsnap-s').split(',').map(Number); c.removeAttribute('data-nfsnap-s'); c.style.overflow = 'hidden';
           [...c.children].forEach(k => { k.style.transform = `translate(${-l}px, ${-t}px)` + (k.style.transform && k.style.transform !== 'none' ? ' ' + k.style.transform : ''); });
         }
       });
-    } finally { tagged.forEach(el => el.removeAttribute('data-nfsnap-s')); }
+    } finally { tagged.forEach(el => { el.removeAttribute('data-nfsnap-s'); el.removeAttribute('data-nfsnap-ph'); el.removeAttribute('data-nfsnap-x'); }); }
   }
+  /* the library is ready before the first tap */
+  (() => { let done = false; const warm = () => { if (done || !canWrite()) return; done = true; try { vendorLoad('snap').catch(() => { done = false; }); } catch (e) { done = false; } };
+    RENDER_HOOKS.push(() => { if (done || !canWrite()) return; (window.requestIdleCallback || (f => setTimeout(f, 2500)))(warm, { timeout: 6000 }); }); })();
+  /* v7.40: the tap opens the sketch screen at once (a camera flash + «taking…»), the picture of the page fills it a moment later -
+     the copy skips #nfsnap, so the screen on top does not get into the picture and the page under it does not move */
   async function start() {
     if (E.busy || document.getElementById('nfsnap')) return;
     E.busy = true; document.documentElement.classList.add('nfsnap-taking');
     try { if (window.nfFabDial) window.nfFabDial.close(); } catch (e) { /* ignore */ }
-    toast(L('بيصوّر الشاشة…', 'Taking the screenshot…'));
+    E.from = location.hash || '#/'; E.page = pageTitle(); E.order = (S.route && S.route.view === 'orders' && S.route.id) || '';
     try {
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      E.from = location.hash || '#/'; E.page = pageTitle(); E.order = (S.route && S.route.view === 'orders' && S.route.id) || '';
+      const sh = shellEl(); sh.classList.add('sn-loading', 'sn-flash'); setTimeout(() => sh.classList.remove('sn-flash'), 400);
+      const st = sh.querySelector('.sn-stage'); if (st && !st.querySelector('.sn-wait')) st.insertAdjacentHTML('beforeend', `<div class="sn-wait"><i></i><span>${esc(L('بيصوّر الشاشة…', 'Taking the screenshot…'))}</span></div>`);
+      paintTools();
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
       const cv = await capture();
       if (!cv || !cv.width) throw new Error('empty');
+      if (!document.getElementById('nfsnap')) return;   /* cancelled while it was taking */
       E.k = cv.width / (document.documentElement.clientWidth || innerWidth); E.img = cv; E.notes = {}; E.note = ''; E.pop = ''; E.step = 'draw'; E.task = curTaskId(); E.q = '';
       openEditor();
     } catch (e) {
-      console.warn('snap', e);
+      console.warn('snap', e); const el = document.getElementById('nfsnap'); if (el && !E.ed) el.remove();
       toast(L('مقدرتش آخد صورة للشاشة — جرّب تاني', 'Could not take the screenshot — try again'), 'err');
     } finally { E.busy = false; document.documentElement.classList.remove('nfsnap-taking'); }
   }
@@ -43380,9 +43428,10 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   const SIZES = [0.6, 1, 2.2];
   const SIZE_T = () => [L('رفيع', 'Thin'), L('وسط', 'Medium'), L('تخين', 'Thick')];
   const $ = q => document.querySelector('#nfsnap ' + q);
-  function openEditor() {
-    const el = document.createElement('div'); el.id = 'nfsnap'; el.className = 'nfsnap'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
-    el.innerHTML = `<div class="sn-draw"><div class="sn-top"><button type="button" class="sn-x" data-sn="cancel" aria-label="${esc(L('إلغاء', 'Cancel'))}">✕</button><b>${esc(L('ارسم على الصورة', 'Draw on the picture'))}</b>
+  function shellEl() {
+    let el = document.getElementById('nfsnap'); if (el) return el;
+    el = document.createElement('div'); el.id = 'nfsnap'; el.className = 'nfsnap'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    el.innerHTML = `<div class="sn-draw"><div class="sn-top"><button type="button" class="sn-x" data-sn="cancel" aria-label="${esc(L('إلغاء', 'Cancel'))}">✕</button><b><span class="sn-tl">${esc(L('ارسم على الصورة', 'Draw on the picture'))}</span><span class="sn-ts">${esc(L('ارسم', 'Draw'))}</span></b>
         <button type="button" class="sn-u" data-sn="undo" title="${esc(L('رجوع خطوة', 'Undo'))}">${IC.undo}</button><button type="button" class="sn-u" data-sn="redo" title="${esc(L('إعادة', 'Redo'))}">${IC.redo}</button>
         ${window.nfConceptOk && window.nfConceptOk() ? `<button type="button" class="sn-u sn-cd" data-sn="concept" title="${esc(L('كمّلها في كونسبت درووينج', 'Continue in Concept Drawing'))}" aria-label="${esc(L('كمّلها في كونسبت درووينج', 'Continue in Concept Drawing'))}">${IC.concept}</button>` : ''}
         <button type="button" class="btn p sm" data-sn="next">${esc(L('التالي', 'Next'))}</button></div>
@@ -43392,7 +43441,11 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         <div class="sn-pop" hidden></div></div>
       <div class="sn-tools"></div></div>
       <div class="sn-send" hidden></div>`;
-    document.body.appendChild(el); document.documentElement.classList.add('nfsnap-open');
+    document.body.appendChild(el); return el;
+  }
+  function openEditor() {
+    const el = shellEl(); el.classList.remove('sn-loading'); const w = el.querySelector('.sn-wait'); if (w) w.remove();
+    document.documentElement.classList.add('nfsnap-open');
     const host = el.querySelector('#sn-ed');
     E.ed = NFDraw.create(host, {
       width: E.img.width, height: E.img.height, k: E.k || 1, background: E.img, fingerDraws: 'auto',
@@ -43585,11 +43638,18 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     html.nfsnap-taking #nfdial{visibility:hidden}
     html.nfsnap-open,html.nfsnap-open body{overflow:hidden}
     html.nfsnap-open .toasts{z-index:9900}
+    .nfsnap.sn-flash::after{content:'';position:absolute;inset:0;background:#fff;pointer-events:none;z-index:30;animation:snflash .34s ease-out forwards}
+    @keyframes snflash{0%{opacity:.92}100%{opacity:0;visibility:hidden}}
+    .nfsnap .sn-wait{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:rgba(255,255,255,.78);font-size:14px;z-index:4}
+    .nfsnap .sn-wait i{width:30px;height:30px;border-radius:50%;border:3px solid rgba(255,255,255,.22);border-top-color:#fff;animation:snspin .75s linear infinite}
+    @keyframes snspin{to{transform:rotate(360deg)}}
+    .nfsnap.sn-loading .sn-tools,.nfsnap.sn-loading .sn-u,.nfsnap.sn-loading [data-sn=next],.nfsnap.sn-loading .sn-zoom{opacity:.4;pointer-events:none}
+    @media (prefers-reduced-motion:reduce){.nfsnap.sn-flash::after{display:none}.nfsnap .sn-wait i{animation-duration:2s}}
     .nfsnap{position:fixed;inset:0;z-index:9800;background:#0b0b0d;color:#fff;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
     .nfsnap [hidden]{display:none!important}
     .nfsnap .sn-draw,.nfsnap .sn-send{flex:1;min-height:0;display:flex;flex-direction:column}
     .nfsnap .sn-top{display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:52px}
-    .nfsnap .sn-top b{flex:1;min-width:0;text-align:center;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .nfsnap .sn-top b{flex:1;min-width:0;text-align:center;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfsnap .sn-top .sn-ts{display:none}@media (max-width:440px){.nfsnap .sn-top .sn-tl{display:none}.nfsnap .sn-top .sn-ts{display:inline}}
     .nfsnap .sn-x{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:999px;min-width:40px;height:40px;font-size:16px;padding:0 12px;cursor:pointer}
     .nfsnap .sn-u{flex:none;width:40px;height:40px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
     .nfsnap .sn-u:disabled{opacity:.3;cursor:default}.nfsnap .sn-u.on{background:rgba(255,255,255,.3)}
@@ -44337,6 +44397,173 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       .nfcd .cd-title{max-width:34vw}.nfcd .cd-saved{display:none}
       .nfcd .cd-zoom{bottom:auto;top:10px}
     }
+  </style>`);
+})();
+/* =====================================================================
+   v7.40 — Ninety Studioz tasks (Mahmoud, 11 Oct, approved with the PIN; brief claude/task-forward-depts-brief.md):
+   1) A task belongs to a «Project» (studio projects the person can see) instead of a job order, and the brand field is
+      gone (one brand). The project shows on the task card and the task page (tap → the project page, which already lists
+      its tasks), and the tasks page gets a project filter.
+   2) «Forward»: the same task (chat, files, history) moves to another person — or a whole department — as it is or
+      after edits. A line goes into its chat, the new person is notified like any new task (Store.save hook in
+      94-reminders-chat), the forwarder stays a follower (participants) unless unticked, and the path is kept (t.fwd).
+   3) Departments: ArchViz (architecture + 3D merged; the hidden departments' people were moved in by the data change)
+      · Film & Motion Artist (new) · Interior Design. The other departments are hidden, never deleted: they live in
+      settings.deptHidden, leave every list and picker, and old records still show their names (dept() finds them).
+   Studio build only.
+   ===================================================================== */
+(function () {
+  if (!(typeof isStudioz === 'function' && isStudioz())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const working = () => !!S.session && !['viewer', 'kiosk', 'none'].includes(role());
+
+  /* ---------- 3) departments: visible list + hidden ones that names still resolve to ---------- */
+  const HIDE_DEFAULT = ['viz', 'draw', 'mgmt', 'acct', 'svc'];
+  const ARCH_NAME = 'الأركيفز (ArchViz)'; const FILM_NAME = 'فيلم وموشن آرتست';
+  function fixDefaults(arr) {
+    if (!Array.isArray(arr)) return; const a = arr.find(d => d.id === 'arch'); if (a) a.name = ARCH_NAME;
+    if (!arr.some(d => d.id === 'film')) arr.splice(Math.max(0, arr.findIndex(d => d.id === 'arch') + 1), 0, { id: 'film', name: FILM_NAME });
+    arr.forEach(d => { if (HIDE_DEFAULT.includes(d.id)) d.hidden = true; });
+  }
+  fixDefaults(STU_DEFAULTS.departments); if (DEFAULT_SETTINGS && DEFAULT_SETTINGS !== STU_DEFAULTS) fixDefaults(DEFAULT_SETTINGS.departments);
+  function splitDepts(s, saved) {
+    if (!s || !Array.isArray(s.departments)) return s;
+    const hid = new Map(); ((saved && saved.deptHidden) || s.deptHidden || []).forEach(d => { if (d && d.id) hid.set(d.id, Object.assign({}, d, { hidden: true })); });
+    const vis = [];
+    s.departments.forEach(d => { if (!d) return; if (d.hidden || hid.has(d.id)) { if (!hid.has(d.id)) hid.set(d.id, Object.assign({}, d, { hidden: true })); } else vis.push(d); });
+    const hidden = [...hid.values()];
+    /* lists, pickers and filters iterate the visible ones; dept(id) / deptName(id) use .find, which also sees the hidden ones */
+    Object.defineProperty(vis, 'find', { configurable: true, writable: true, enumerable: false, value: function (fn, th) { const r = Array.prototype.find.call(this, fn, th); return r !== undefined ? r : hidden.find(fn, th); } });
+    s.departments = vis; s.deptHidden = hidden; return s;
+  }
+  mergeSettings = (base => function (saved) { return splitDepts(base.apply(this, arguments), saved); })(mergeSettings);
+  try { S.settings = mergeSettings(S.settings && Array.isArray(S.settings.departments) && S.loaded && S.loaded.settings ? S.settings : null); } catch (e) { console.warn('stu depts', e); }
+
+  /* ---------- 1) project on the task ---------- */
+  const projOf = t => (t && t.projectId && byId('projects', t.projectId)) || null;
+  const pname = p => (p ? (p.name || p.code || '') : '');
+  const projList = () => list('projects').filter(p => p.status !== 'archived' && (typeof stuProjectVisible !== 'function' || stuProjectVisible(p))).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ar'));
+  const projChip = p => `<a class="tprj notr" href="#/projects/${esc(p.id)}">${icon('layers')}<span>${esc(pname(p))}</span></a>`;
+  const BRAND_LBL = 'البراند', ORDER_LBL = 'أمر التشغيل', DUE_LBL = 'الموعد';
+  const fieldRe = (lbl, id) => new RegExp(`<div class="field[^"]*"><label>${lbl}</label><select id="${id}"[\\s\\S]*?</select></div>`);
+  if (typeof taskForm === 'function') taskForm = (base => function (t) {
+    let html = base.apply(this, arguments); t = t || {};
+    html = html.replace(fieldRe(BRAND_LBL, 'f-brandId'), '');
+    const def = t.projectId || (S.route && S.route.view === 'projects' && S.route.id) || '';
+    const ps = projList(); const cur = projOf(t); if (cur && !ps.includes(cur)) ps.unshift(cur);
+    const sel = field(L('المشروع', 'Project'), `<select id="f-projectId" name="projectId"><option value="">${esc(L('— من غير مشروع —', '— No project —'))}</option>${ps.map(p => `<option class="notr" value="${esc(p.id)}" ${p.id === def ? 'selected' : ''}>${esc(pname(p))}</option>`).join('')}</select>`);
+    const re = fieldRe(ORDER_LBL, 'f-orderId');
+    if (re.test(html)) html = html.replace(re, sel);
+    else { const i = html.indexOf('<div class="field "><label>' + DUE_LBL); if (i > 0) html = html.slice(0, i) + sel + html.slice(i); }
+    return html;
+  })(taskForm);
+  if (typeof saveTask === 'function') saveTask = (base => async function (f, t) {
+    const had = !!(f && f.querySelector && f.querySelector('#f-projectId')); const d = had ? formData(f) : {}; const want = d.projectId || null;
+    const r = await base.apply(this, arguments); if (r === false || !had) return r;
+    const doc = t && t.id ? byId('tasks', t.id) : sortBy(list('tasks').filter(x => x.title === d.title && x.createdBy === (S.session?.id || null)), x => x.createdAt || '', true)[0];
+    if (doc && (doc.projectId || null) !== want) await Store.update('tasks', doc.id, { projectId: want }, { silent: true });
+    return r;
+  })(saveTask);
+  if (typeof taskItem === 'function') taskItem = (base => function (t, o) {
+    const h = base.apply(this, arguments); const p = projOf(t); if (!p || typeof h !== 'string') return h;
+    return h.replace('<div class="meta">', '<div class="meta">' + projChip(p));
+  })(taskItem);
+
+  /* project filter on the tasks page: «all» · «no project» · each visible project */
+  let PF = '';
+  if (typeof taskVisible === 'function') taskVisible = (base => function (t) { const r = base.apply(this, arguments); if (!r || !PF || !t) return r; return PF === '-' ? !t.projectId : t.projectId === PF; })(taskVisible);
+  if (typeof vTasksBase === 'function') vTasksBase = (base => function () {
+    const f = S.ui.filter.tasks || {}; PF = f.proj || ''; let h; try { h = base.apply(this, arguments); } finally { PF = ''; }
+    const ps = projList(); if ((!ps.length && !f.proj) || typeof h !== 'string') return h;
+    const sel = `<select class="sel" id="fl-taskproj" data-filter="tasks:proj"><option value="">${esc(L('كل المشاريع', 'All projects'))}</option><option value="-" ${f.proj === '-' ? 'selected' : ''}>${esc(L('من غير مشروع', 'No project'))}</option>${ps.map(p => `<option class="notr" value="${esc(p.id)}" ${f.proj === p.id ? 'selected' : ''}>${esc(pname(p))}</option>`).join('')}</select>`;
+    const k = h.indexOf('data-action="taskFilter" data-arg="mine:'); const i = k > 0 ? h.lastIndexOf('<button', k) : -1;
+    return i > 0 ? h.slice(0, i) + sel + h.slice(i) : h.replace('<div class="toolbar">', '<div class="toolbar">' + sel);
+  })(vTasksBase);
+
+  /* ---------- 2) forward ---------- */
+  const personName = id => { if (!id) return ''; if (String(id).startsWith('dept:')) return deptName(String(id).slice(5)); const p = typeof stuPerson === 'function' ? stuPerson(id) : null; return (p && p.name) || (typeof assigneeName === 'function' ? assigneeName(id) : '') || ''; };
+  const canFwd = t => !!t && working() && writable() && ['open', 'doing'].includes(t.status) && t.kind !== 'notice' && (taskMine(t) || myIds().includes(t.createdBy) || isAdmin() || role() === 'manager');
+  window.nfTaskCanForward = canFwd;
+  function fwdPath(t) {
+    const fw = Array.isArray(t.fwd) ? t.fwd : []; if (!fw.length) return '';
+    const names = [personName(fw[0].from) || fw[0].fromName || t.createdByName || ''].concat(fw.map(x => personName(x.to) || x.toName || '')).filter(Boolean);
+    return `<div class="tfwdpath small">${icon('send')}<span>${esc(L('مسار المهمة', 'Task path'))}:</span> <b class="notr">${names.map(esc).join(en() ? ' → ' : ' ← ')}</b></div>`;
+  }
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    let h = base.apply(this, arguments); if (!t || typeof h !== 'string') return h;
+    const meta = '<div class="row small muted" style="gap:12px;flex-wrap:wrap;margin-top:8px">'; const btnRow = '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">';
+    const p = projOf(t); if (p && h.includes(meta)) h = h.replace(meta, meta + projChip(p));
+    const path = fwdPath(t); const btn = canFwd(t) ? `<button class="btn sm" data-action="taskFwd" data-arg="${esc(t.id)}">${icon('send')}${esc(L('حوّل', 'Forward'))}</button>` : '';
+    if ((path || btn) && h.includes(btnRow)) h = h.replace(btnRow, path + btnRow + btn);
+    return h;
+  })(vTaskDetail);
+
+  ACTIONS.taskFwd = id => {
+    const t = byId('tasks', id); if (!canFwd(t)) return;
+    const me = myIds(); const people = (typeof stuPeople === 'function' ? stuPeople() : []).filter(p => p.id !== t.assigneeId && !me.includes(p.id)).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ar'));
+    const depts = S.settings.departments || []; const mask = s => (typeof nfMaskMoney === 'function' ? nfMaskMoney(s || '', t) : (s || ''));
+    const pri = Object.keys(TASK_PRIORITY);
+    openModal({
+      title: L('حوّل المهمة', 'Forward the task'), submitLabel: L('حوّل', 'Forward'),
+      body: `<p class="small ink2" style="margin:0 0 10px">${esc(L('نفس المهمة بتتنقل بشاتها ومرفقاتها وتاريخها — مش مهمة جديدة.', 'The same task moves with its chat, files and history — not a new task.'))}</p>
+      <div class="form">${field(L('حوّلها لـ', 'Forward to'), `<select id="f-fwto" name="to" required><option value="">—</option><optgroup label="${esc(L('شخص', 'A person'))}">${people.map(p => `<option class="notr" value="${esc(p.id)}">${esc(p.name)}${p.deptId ? ' — ' + esc(deptName(p.deptId)) : ''}</option>`).join('')}</optgroup><optgroup label="${esc(L('القسم كله', 'A whole department'))}">${depts.map(d => `<option value="dept:${esc(d.id)}">${esc(L('القسم كله', 'Whole department'))} — ${esc(d.name)}</option>`).join('')}</optgroup></select>`, 'full')}
+        ${field(L('ملاحظة (اختياري)', 'Note (optional)'), `<textarea id="f-fwnote" name="note" rows="2" maxlength="500" placeholder="${esc(L('مثلًا: كمّل من عند المساقط', 'e.g. carry on from the plans'))}"></textarea>`, 'full')}
+        <details class="field full tfwded"><summary>${esc(L('عدّل قبل ما تحوّل (اختياري)', 'Edit before forwarding (optional)'))}</summary><div class="form" style="margin-top:8px">
+          ${field(L('المهمة', 'Task'), inp('title', t.title || '', 'required maxlength="160"'), 'full')}
+          ${field(L('التفاصيل', 'Details'), `<textarea id="f-desc" name="desc" rows="3">${esc(mask(t.desc))}</textarea>`, 'full')}
+          ${field(L('الموعد', 'Due date'), inp('dueDate', t.dueDate || '', 'type="date"'))}
+          ${field(L('الأولوية', 'Priority'), `<select id="f-priority" name="priority">${pri.map(k => `<option value="${k}" ${(t.priority || 'normal') === k ? 'selected' : ''}>${esc(TASK_PRIORITY[k][0])}</option>`).join('')}</select>`)}
+        </div></details>
+        <div class="field full"><label class="check"><input type="checkbox" name="follow" checked> ${esc(L('أفضل متابع — يوصلني كل جديد فيها', 'Stay a follower — I get every update'))}</label></div></div>`,
+      onSubmit: async f => doFwd(id, formData(f))
+    });
+  };
+  async function doFwd(id, d) {
+    const t = byId('tasks', id); if (!canFwd(t)) return false;
+    const to = String(d.to || ''); if (!to) { toast(L('اختار هتحوّلها لمين', 'Pick who gets it'), 'err'); return false; }
+    const isDept = to.startsWith('dept:'); const deptId = isDept ? to.slice(5) : null; const person = isDept ? null : (typeof stuPerson === 'function' ? stuPerson(to) : null);
+    if (!isDept && !person) { toast(L('الشخص ده مش موجود', 'This person is not there'), 'err'); return false; }
+    const now = nowISO(); const ids = myIds(); const meId = (typeof stuMe === 'function' && stuMe()) || S.session?.id || null; const myName = S.session?.name || '';
+    const toName = isDept ? deptName(deptId) : person.name;
+    const fromId = t.assigneeId || (t.deptId ? 'dept:' + t.deptId : null); const fromName = personName(fromId);
+    const title = String(d.title == null ? t.title : d.title).trim() || t.title;
+    const desc = d.desc == null ? (t.desc || '') : (typeof nfUnmaskMoney === 'function' ? nfUnmaskMoney(d.desc || '', t.desc, t) : d.desc);
+    const due = d.dueDate == null ? (t.dueDate || null) : (d.dueDate || null); const prio = d.priority || t.priority || 'normal';
+    const edited = title !== t.title || (desc || '') !== (t.desc || '') || due !== (t.dueDate || null) || prio !== (t.priority || 'normal');
+    const note = String(d.note || '').trim().slice(0, 500);
+    const w = person ? byId('workers', String(person.id).replace(/^w:/, '')) : null;
+    let parts = (t.participants || []).slice();
+    const party = parts.some(p => ids.includes(p.id)) || ids.includes(t.createdBy);
+    if (d.follow && !party && meId) parts.push({ id: meId, name: myName, addedBy: meId, at: now, why: 'fwd' });
+    if (!d.follow) parts = parts.filter(p => !ids.includes(p.id));
+    const line = `${myName} حوّل المهمة لـ${toName}${edited ? ' (بعد تعديل)' : ''}${note ? ' — ' + note : ''}`;
+    const msg = { id: uid(), at: now, by: meId, byName: myName, text: line, sys: true, fwd: true };
+    const seen = Object.assign({}, t.threadSeen || {}); ids.forEach(x => { seen[x] = now; });
+    const hop = { at: now, by: meId, byName: myName, from: fromId, fromName, to: isDept ? 'dept:' + deptId : person.id, toName, note, edited };
+    const doc = Object.assign({}, t, {
+      title, desc, dueDate: due, priority: prio, status: 'open',
+      assigneeId: isDept ? null : person.id, deptId: isDept ? deptId : ((w && w.deptId) || t.deptId || null),
+      participants: parts, fwd: (Array.isArray(t.fwd) ? t.fwd : []).concat([hop]),
+      thread: (typeof taskThread === 'function' ? taskThread(t) : (t.thread || [])).concat([msg]), threadSeen: seen, lastMsgAt: now, updatedAt: now
+    });
+    try { await Store.save('tasks', doc); } catch (e) { console.warn('task fwd', e); toast(L('مقدرتش أحوّلها — جرّب تاني', 'Could not forward it — try again'), 'err'); return false; }
+    if (isDept && typeof pushSend === 'function' && typeof deptHeads === 'function') { const hs = deptHeads(deptId).map(h => h.id).filter(x => x && !ids.includes(x)); if (hs.length) pushSend(hs, `${L('مهمة جديدة', 'New task')}: ${title}`.slice(0, 100), `${myName} — ${note || toName}`.slice(0, 140), `/#/tasks/${t.id}`, 'task-' + t.id).catch(() => { }); }
+    toast(L(`اتحوّلت لـ${toName} ✓`, `Forwarded to ${toName} ✓`));
+    const stillSee = d.follow || ids.includes(t.createdBy) || isAdmin() || ['manager', 'hr', 'office'].includes(role());
+    if (!stillSee) setTimeout(() => go('tasks'), 30);
+    return true;
+  }
+  /* the chat shows sys:true messages as a centred system line (.sysl) */
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .tprj{display:inline-flex;align-items:center;gap:4px;color:var(--accent);text-decoration:none;font-weight:600;max-width:100%;min-width:0}
+    .tprj span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tprj svg{width:14px;height:14px;flex:none}
+    .item .meta .tprj{font-size:12px}
+    .tfwdpath{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;color:var(--ink-2,var(--muted));line-height:1.6}
+    .tfwdpath svg{width:14px;height:14px;flex:none}.tfwdpath b{color:var(--ink,inherit);font-weight:600}
+    .tfwded summary{cursor:pointer;color:var(--accent);font-size:13px;padding:4px 0;list-style:revert}
+    .tfwded .form{grid-column:1/-1}
   </style>`);
 })();
 </script>
