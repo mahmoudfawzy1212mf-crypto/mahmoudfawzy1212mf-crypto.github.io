@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1638-fe249a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1653-13178c";</script>
 
 <script>
 'use strict';
@@ -6057,20 +6057,28 @@ async function sbBoot() {
    'local'), so leaving one device no longer closes the others. */
 let _sbHealing = null;
 function sbHealInvoke(client) {
-  const fx = client && client.functions; if (!fx || typeof fx.invoke !== 'function' || fx._nfHeal) return; fx._nfInner = fx.invoke.bind(fx); fx._nfHeal = true; const inv = (n, o) => fx._nfInner(n, o);
-  fx.invoke = async (name, opts) => {
-    let r = await inv(name, opts);
-    const st = r && r.error && r.error.context && r.error.context.status;
-    if (st !== 401 || name === 'sso' || !S.sbUser) return r;
-    if (!_sbHealing) _sbHealing = (async () => {
-      try { const { data, error } = await client.auth.refreshSession(); if (!error && data && data.session) return true; if (error && !(error.status >= 400 && error.status < 500)) return false; } catch (e) { return false; }
-      try { const was = S.sbUser; S.sbUser = null; if (typeof ssoTry === 'function' && await ssoTry()) return true; S.sbUser = was; } catch (e) { /* ignore */ }
-      if (typeof sbForceSignOut === 'function') sbForceSignOut('انتهت جلسة الدخول على الجهاز ده — سجّل دخول تاني');
-      return false;
-    })().finally(() => { setTimeout(() => { _sbHealing = null; }, 2000); });
-    if (await _sbHealing) r = await inv(name, opts);
-    return r;
+  if (!client || client._nfHealOn) return; client._nfHealOn = true;
+  /* supabase-js builds a NEW FunctionsClient on every «client.functions» read (a getter): wrap each one it hands out */
+  const wrap = fx => {
+    if (!fx || typeof fx.invoke !== 'function' || fx._nfHeal) return fx; fx._nfInner = fx.invoke.bind(fx); fx._nfHeal = true; const inv = (n, o) => fx._nfInner(n, o);
+    fx.invoke = async (name, opts) => {
+      let r = await inv(name, opts);
+      const st = r && r.error && r.error.context && r.error.context.status;
+      if (st !== 401 || name === 'sso' || !S.sbUser) return r;
+      if (!_sbHealing) _sbHealing = (async () => {
+        try { const { data, error } = await client.auth.refreshSession(); if (!error && data && data.session) return true; if (error && !(error.status >= 400 && error.status < 500)) return false; } catch (e) { return false; }
+        try { const was = S.sbUser; S.sbUser = null; if (typeof ssoTry === 'function' && await ssoTry()) return true; S.sbUser = was; } catch (e) { /* ignore */ }
+        if (typeof sbForceSignOut === 'function') sbForceSignOut('انتهت جلسة الدخول على الجهاز ده — سجّل دخول تاني');
+        return false;
+      })().finally(() => { setTimeout(() => { _sbHealing = null; }, 2000); });
+      if (await _sbHealing) r = await inv(name, opts);
+      return r;
+    };
+    return fx;
   };
+  let d = null; for (let o = client; o && !d; o = Object.getPrototypeOf(o)) d = Object.getOwnPropertyDescriptor(o, 'functions');
+  if (d && typeof d.get === 'function') { const g = d.get; try { Object.defineProperty(client, 'functions', { configurable: true, get() { return wrap(g.call(client)); } }); } catch (e) { /* ignore */ } }
+  else wrap(client.functions);
 }
 function sbStartData() { if (S._sbSubscribed) return; S._sbSubscribed = true; S.staffReady = false; Store.subscribeAll(); }
 function sbWaitLoaded(cols, ms = 15000) { return new Promise(res => { const t0 = Date.now(); const tick = () => { if (cols.every(c => S.loaded[c])) return res(true); if (Date.now() - t0 > ms) return res(false); setTimeout(tick, 80); }; tick(); }); }
