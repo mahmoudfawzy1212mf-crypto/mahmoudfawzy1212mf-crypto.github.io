@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-0244-5ca31c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-0528-531e8a";</script>
 
 <script>
 'use strict';
@@ -15929,6 +15929,8 @@ function moneyDue() {
   list('requests').filter(r => r.type === 'opex' && r.status === 'approved' && !r.paidAt).forEach(r => out.push({ kind: 'opex', id: r.id, label: `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, sub: `${fmtMonth(r.month)} · ${r.payee || ''}`, amount: +r.amount || 0, action: 'opexPay' }));
   return out;
 }
+/* v7.36: the «due to transfer» card is its own function so the pay-batch part can replace it (grouping per supplier, «تجميع») */
+function moneyDueCard(due) { return `<div class="card"><div class="cardhead"><h3>مستحق عليك تحويله</h3><span class="muted small">${due.length}</span></div>${due.length ? `<div class="list">${due.map(x => `<div class="item" style="padding:10px 12px"><div class="main"><div class="title"><span class="badge ${x.kind === 'po' ? 'acc' : x.kind === 'fund' ? 'warn' : ''}" style="padding:0 6px">${x.kind === 'po' ? 'مورد' : x.kind === 'fund' ? 'عهدة' : 'تشغيل'}</span> ${esc(x.label)}</div><div class="meta"><span>${esc(x.sub || '')}</span></div></div><b class="num" style="margin-inline-end:8px">${fmtMoney(x.amount)}</b><button class="btn sm p" data-action="${x.action}" data-arg="${x.id}" data-stop="1">حوّلت</button></div>`).join('')}</div>` : '<div class="muted small">مفيش حاجة مستنية تحويل</div>'}</div>`; }
 function walletRows(ids) { return ids.map(id => { const w = walletOf(id); const b = walletBalance(id); const ym = monthOf(todayISO()); const mSpent = sum(list('expenses').filter(e => e.account === id && e.month === ym), e => +e.amount || 0); return `<tr class="click" data-action="go" data-arg="money/${id}"><td><b>${esc(w.name)}</b><div class="tiny muted">${esc(assigneeName(w.holder) || '')}${w.note ? ' · ' + esc(w.note) : ''}</div></td><td class="n">${fmtMoney(b.in)}</td><td class="n">${fmtMoney(mSpent)}</td><td class="n"><b style="color:${b.balance < 0 ? 'var(--crit-ink)' : 'inherit'}">${fmtMoney(b.balance)}</b></td></tr>`; }).join(''); }
 function opexSummary(ym) {
   const prev = monthOf(addDays(ym + '-01', -1)); const cats = OPEX_CATS.filter(c => c !== 'other').concat(['fuel_cash', 'oil', 'car_maint']);
@@ -15949,7 +15951,7 @@ function vMoney(r) {
   if (isAdmin()) {
     const bal = acctBalances().filter(a => ownerAccts().some(o => o.id === a.id)); const due = moneyDue();
     h += `<div class="kpis">${bal.map(a => `<div class="kpi acc" style="cursor:default"><span class="stripe"></span><div class="l">${esc(a.name)}</div><div class="v num">${fmtMoney(a.balance)}</div><div class="s">دخل ${fmtMoney(a.in)} · طلع ${fmtMoney(a.out)}</div></div>`).join('')}<div class="kpi ${due.length ? 'warn' : ''}" style="cursor:default"><span class="stripe"></span><div class="l">مستحق عليك تحويله</div><div class="v num">${fmtMoney(sum(due, x => x.amount))}</div><div class="s">${due.length} بند</div></div></div>
-    <div class="card"><div class="cardhead"><h3>مستحق عليك تحويله</h3><span class="muted small">${due.length}</span></div>${due.length ? `<div class="list">${due.map(x => `<div class="item" style="padding:10px 12px"><div class="main"><div class="title"><span class="badge ${x.kind === 'po' ? 'acc' : x.kind === 'fund' ? 'warn' : ''}" style="padding:0 6px">${x.kind === 'po' ? 'مورد' : x.kind === 'fund' ? 'عهدة' : 'تشغيل'}</span> ${esc(x.label)}</div><div class="meta"><span>${esc(x.sub || '')}</span></div></div><b class="num" style="margin-inline-end:8px">${fmtMoney(x.amount)}</b><button class="btn sm p" data-action="${x.action}" data-arg="${x.id}" data-stop="1">حوّلت</button></div>`).join('')}</div>` : '<div class="muted small">مفيش حاجة مستنية تحويل</div>'}</div>`;
+    ${moneyDueCard(due)}`;
   }
   if (seesAllWallets() || myWalletIds().length) {
     const ids = seesAllWallets() ? wallets().map(w => w.id) : myWalletIds();
@@ -27664,8 +27666,8 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
         rep.forEach(r => { if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio') { inB += r.bytesReceived || 0; } if (r.type === 'outbound-rtp' && (r.kind || r.mediaType) === 'audio') outB += r.bytesSent || 0; if ((r.type === 'track' || r.type === 'media-source' || r.type === 'inbound-rtp') && r.audioLevel != null && r.type !== 'media-source') lvl = Math.max(lvl, r.audioLevel || 0); if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded') { pair = r.id; lc = (byId[r.localCandidateId] || {}).candidateType || ''; rc = (byId[r.remoteCandidateId] || {}).candidateType || ''; } });
         stale = inB <= lastIn ? stale + 1 : 0; lastIn = inB;
         const mic = c.local && c.local.getAudioTracks()[0];
-        c.diag = { inAudioBytes: inB, outAudioBytes: outB, maxInLevel: Math.max((c.diag && c.diag.maxInLevel) || 0, lvl), path: `${lc}/${rc}`, micMuted: !!(mic && mic.muted), micEnabled: !!(mic && mic.enabled), micLabel: mic ? String(mic.label || '').slice(0, 40) : '', ua: navigator.userAgent.slice(0, 80), secs: c.secs || 0 };
-        const w = c.recon ? 'بيرجّع الاتصال…' : stale >= 2 ? '⚠️ صوت الطرف التاني مش واصل' : (mic && mic.muted) ? '⚠️ الميكروفون بتاعك مش شغال (تطبيق تاني ماسكه؟)' : '';
+        c.diag = { q: c.diag && c.diag.q, inAudioBytes: inB, outAudioBytes: outB, maxInLevel: Math.max((c.diag && c.diag.maxInLevel) || 0, lvl), path: `${lc}/${rc}`, micMuted: !!(mic && mic.muted), micEnabled: !!(mic && mic.enabled), micLabel: mic ? String(mic.label || '').slice(0, 40) : '', ua: navigator.userAgent.slice(0, 80), secs: c.secs || 0 };
+        const w = c.recon ? 'بيرجّع الاتصال…' : stale >= 2 ? '⚠️ صوت الطرف التاني مش واصل' : (mic && mic.muted) ? '⚠️ الميكروفون بتاعك مش شغال (تطبيق تاني ماسكه؟)' : (c.qWarn || '');   /* v7.36: the call quality note */
         if (w !== (c.warn || '')) { c.warn = w; paint(); }
       } catch (e) { /* ignore */ }
     }, 2000);
@@ -27703,7 +27705,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   }
   /* ---------- WebRTC ---------- */
   async function media(video) {
-    try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, channelCount: { ideal: 1 } }, video: video ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false }); }
+    try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, channelCount: { ideal: 1 } }, video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } } : false });   /* v7.36: sharper picture when the network allows — it steps down by itself */ }
     catch (e) { if (video) { toast('الكاميرا مش متاحة — المكالمة هتبقى صوت بس', 'err'); return navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } throw e; }
   }
   async function makePc(c) {
@@ -36815,8 +36817,11 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const BG = () => { try { const c = window.Capacitor; return c && c.Plugins && c.Plugins.BackgroundGeolocation; } catch (e) { return null; } };
   const native = () => !!(window.nfIsNative && window.nfIsNative()) && !!BG();
   const dist = (a, b) => (typeof haversine === 'function' ? haversine(a, b) : 1e9);
-  const drv = () => typeof isDriver === 'function' && isDriver();
+  /* v7.36 (Mahmoud, 11 Oct — PIN): people who sometimes drive (settings.fleet.extraDrivers — the fleet manager, the purchasing
+     officer) send their place while punched in exactly like the drivers, so the server can tell who is in a moving vehicle */
+  window.nfDrivesToo = wid => !!wid && Array.isArray(((S.settings || {}).fleet || {}).extraDrivers) && S.settings.fleet.extraDrivers.includes(wid);
   const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const drv = () => (typeof isDriver === 'function' && isDriver()) || window.nfDrivesToo(meId());
   const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const ago = iso => { if (!iso) return '—'; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return s < 60 ? L(`منذ ${s} ث`, `${s} s ago`) : s < 3600 ? L(`منذ ${Math.round(s / 60)} د`, `${Math.round(s / 60)} min ago`) : L(`منذ ${Math.round(s / 3600)} س`, `${Math.round(s / 3600)} h ago`); };
   if (typeof COLS !== 'undefined' && !COLS.includes('driverpos')) COLS.push('driverpos');
@@ -36948,7 +36953,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   if (typeof vFleet === 'function') vFleet = (base => function () {
     const html = base.apply(this, arguments); const f = S.ui.filter.fleet || {};
     if (f.tab !== 'drivers' || !S.session || !(isAdmin() || (typeof role === 'function' && role() === 'manager') || (typeof canFleet === 'function' && canFleet()))) return html;
-    const ds = typeof drivers === 'function' ? drivers() : [];
+    const ds = (typeof drivers === 'function' ? drivers() : []).concat(list('workers').filter(w => w && w.status !== 'inactive' && window.nfDrivesToo(w.id) && !['driver', 'fleet'].includes(w.role)));
     const rows = ds.map(w => { const r = byId('driverpos', w.id); const on = punchedIn(w.id); let st, col; if (!on) { st = L('مش في الشغل', 'Off shift'); col = 'var(--muted)'; } else if (r && r.denied) { st = L('الموقع متقفل على موبايله', 'Location is off on his phone'); col = 'var(--crit-ink)'; } else if (r && fresh(r) && r.lat == null && r.locErr) { st = L('الأبلكيشن مفتوح بس الموقع مش واصل — الإذن أو الـGPS مقفول', 'App open but no location — permission or GPS off'); col = 'var(--crit-ink)'; } else if (r && fresh(r)) { st = L('بيبعت مكانه ✓', 'Sending ✓'); col = 'var(--good-ink, #1b7f4b)'; } else if (r && r.at && (Date.now() - new Date(r.at).getTime()) < 3600000) { st = L('الأبليكيشن مقفول من', 'App closed since') + ' ' + ago(r.at); col = '#d98a00'; } else { st = L('مفيش مكان النهارده — الأبليكيشن مش مفتوح أو الموقع متقفل', 'No place today — the app is not open or location is off'); col = 'var(--crit-ink)'; } const v = r && r.vehicleId && fresh(r) ? byId('vehicles', r.vehicleId) : null; return { w, r, st, col, v }; });
     const card = `<div class="card" style="margin-bottom:12px"><div class="cardhead"><h3>${icon('map')}${L('موقع السواقين', 'Where the drivers are')}</h3><span class="tiny muted">${L('من موبايل كل سواق أثناء دوامه بس', 'from each driver phone, during his shift only')}</span></div><div class="list">${rows.map(x => `<div class="item" style="cursor:default"><div class="main"><div class="title">${esc(x.w.name)}</div><div class="meta"><span style="color:${x.col};font-weight:700">${x.st}</span>${x.v ? `<span class="badge warn">${L('راكب', 'riding')} ${esc(x.v.name.split('—')[0].trim())} · ${L('تلقائي', 'auto')}</span>` : ''}${x.r && x.r.tripId ? `<span class="badge acc">${L('في مشوار', 'on a trip')}</span>` : ''}${x.r && x.r.posAt ? `<span class="tiny muted">${ago(x.r.posAt)}</span>` : ''}</div></div>${x.r && x.r.lat != null && fresh(x.r) ? `<div class="end"><a class="btn xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${x.r.lat},${x.r.lng}">${icon('map')}${L('الخريطة', 'Map')}</a></div>` : ''}</div>`).join('') || `<div class="muted small">${L('مفيش سواقين', 'No drivers')}</div>`}</div></div>`;
     const cut = html.indexOf('</div>', html.indexOf('<div class="tabs">')) + 6;
@@ -37061,6 +37066,15 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const FA = { st: null, at: 0, busy: false };
   async function loadStatus() { if (Date.now() - FA.at < 60000) return; FA.at = Date.now(); try { const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'status' } }); FA.st = r.data && r.data.ok ? r.data : null; } catch (e) { FA.st = null; } rerender(); }
   const mm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  /* v7.36 (Mahmoud, 11 Oct — PIN): people who sometimes drive — their phone place counts for «who is in the moving vehicle» */
+  function poolField(d) {
+    const cur = ((S.settings || {}).fleet || {}).extraDrivers || [];
+    const ws = sortBy(list('workers').filter(w => w && w.status !== 'inactive' && w.role !== 'driver' && w.role !== 'kiosk'), w => (cur.includes(w.id) ? '0' : '1') + (w.name || ''));
+    if (!ws.length) return '';
+    const sel = ws.filter(w => cur.includes(w.id)).map(w => w.name).join('، ');
+    return `<div class="field full"><label>${esc(L('بيسوقوا أحيانًا (غير السواقين)', 'Sometimes drive (besides the drivers)'))}</label><div class="tiny muted" style="margin-bottom:6px">${esc(L('موبايلهم بيبعت مكانهم وقت الحضور بس زي السواقين، وأول ما عربية تتحرك السيستم بيشوف مين فيهم ماشي معاها', 'Their phone sends its place while they are punched in, like the drivers; when a vehicle moves the system sees who is moving with it'))}${sel ? ' — ' + esc(sel) : ''}</div>
+      <details class="fa-pool"><summary class="btn sm" style="list-style:none;display:inline-flex;cursor:pointer">${esc(L('اختيار الأشخاص', 'Choose people'))} (${cur.length})</summary><div class="fa-pool-l" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:240px;overflow:auto">${ws.map(w => `<label class="check ${cur.includes(w.id) ? 'on' : ''}"><input type="checkbox" name="pool" value="${esc(w.id)}" ${cur.includes(w.id) ? 'checked' : ''} ${d}> ${esc(w.name || w.id)}</label>`).join('')}</div></details></div>`;
+  }
   function settingsCard() {
     const c = cfg(); const st = FA.st; const ro = !owner(); const d = ro ? 'disabled' : '';
     if (!st && Date.now() - FA.at >= 60000 && typeof sbOn === 'function' && sbOn() && S.sb) setTimeout(loadStatus, 20);
@@ -37083,6 +37097,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
         ${field(L('إشعاراتي أنا: حركة العربيات بعد الساعة', 'My own notifications: vehicles moving after'), inp('ownerNight', c.ownerNight || '21:00', `type="time" ${d}`))}<div class="tiny muted" style="align-self:end">${L('المالك بيوصله إشعار العربيات بس لو عربية اتحركت بعد الساعة دي أو يوم إجازة — مدير الحركة ومدير المصنع بيوصلهم كله.', 'The owner is notified only when a vehicle moves after this time or on a day off — the fleet manager and the factory manager get everything.')}</div>
         ${field(L('ساعات الشغل من (اختياري)', 'Working hours from (optional)'), inp('workFrom', c.workFrom || '', `type="time" ${d}`))}
         ${field(L('إلى (اختياري)', 'to (optional)'), inp('workTo', c.workTo || '', `type="time" ${d}`))}
+        ${poolField(d)}
         ${st ? `<div class="full tiny muted">${L('النافذة الحالية', 'Current window')}: ${mm(st.window[0])} – ${mm(st.window[1])} · ${L('أيام الإجازة', 'Days off')}: ${(st.offDays || []).map(x => ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][x] || x).join('، ') || '—'}</div>` : ''}
         ${owner() ? `<div class="full row" style="justify-content:flex-end"><button type="submit" class="btn p">${icon('check')}${L('حفظ', 'Save')}</button></div>` : ''}
       </form></div>`;
@@ -37093,7 +37108,9 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     const f = ev.target; const d = formData(f); const c = cfg();
     ['afterHours', 'overspeed', 'offline', 'idle', 'deviation', 'returnPrompt', 'autoClose'].forEach(k => { c[k] = !!f.querySelector(`[name="${k}"]`).checked; });
     c.speedLimit = num(d.speedLimit) || 100; c.offlineH = num(d.offlineH) || 1; c.idleMin = num(d.idleMin) || 10; c.autoCloseH = num(d.autoCloseH) || 24; c.homeRadius = num(d.homeRadius) || 300; c.workFrom = d.workFrom || ''; c.workTo = d.workTo || ''; c.ownerNight = d.ownerNight || '21:00';
-    await Store.saveSettings(Object.assign({}, S.settings, { fleet: Object.assign({}, S.settings.fleet || {}, { alerts: c }) })); FA.st = null; FA.at = 0; toast(L('تم حفظ إعدادات التنبيهات', 'Alert settings saved'));
+    const poolBoxes = Array.from(f.querySelectorAll('input[name="pool"]'));
+    const extra = poolBoxes.length ? poolBoxes.filter(x => x.checked).map(x => x.value) : (((S.settings || {}).fleet || {}).extraDrivers || []);
+    await Store.saveSettings(Object.assign({}, S.settings, { fleet: Object.assign({}, S.settings.fleet || {}, { alerts: c, extraDrivers: extra }) })); FA.st = null; FA.at = 0; toast(L('تم حفظ إعدادات التنبيهات', 'Alert settings saved'));
   });
   ACTIONS.faRun = async () => {
     if (!owner() || FA.busy) return; FA.busy = true; rerender();
@@ -38747,8 +38764,9 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   const R = () => (typeof role === 'function' ? role() : '');
   const W = () => typeof writable === 'function' && writable();
   const owner = () => typeof isAdmin === 'function' && isAdmin();
-  const drv = () => typeof isDriver === 'function' && isDriver();
   const me = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  /* v7.36: the people who sometimes drive confirm their automatic trips like the drivers */
+  const drv = () => (typeof isDriver === 'function' && isDriver()) || (typeof window.nfDrivesToo === 'function' && window.nfDrivesToo(me()));
   const fleetOk = () => typeof canFleet === 'function' && canFleet();
   const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet'].includes(R()));
   const FA = () => window.nfFleetAlerts || null;
@@ -38791,10 +38809,10 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
     not_auto: ['ده مش مشوار تلقائي', 'This is not an automatic trip'],
     forbidden: ['سجّل دخول الأول', 'Log in first'],
   };
-  async function claim(tripId, mine, purpose, to) {
+  async function claim(tripId, mine, purpose, to, orderId) {
     if (!S.sb || !S.sb.functions) { toast(L('محتاج نت — جرّب تاني', 'Needs the internet — try again'), 'err'); return false; }
     try {
-      const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'tripclaim', tripId, mine: !!mine, purpose: purpose || '', to: to || '' } });
+      const r = await S.sb.functions.invoke('fleet-alerts', { body: { action: 'tripclaim', tripId, mine: !!mine, purpose: purpose || '', to: to || '', orderId: orderId || '' } });
       const j = (r && r.data) || {}; if (j.ok) return true;
       let e = j.error; if (!e && r && r.error && r.error.context && typeof r.error.context.json === 'function') { try { e = ((await r.error.context.json()) || {}).error; } catch (x) { /* no body */ } }
       toast(ERR[e] ? L(ERR[e][0], ERR[e][1]) : L('ماقدرناش نسجّل ده — جرّب تاني', 'Could not save that — try again'), 'err'); return false;
@@ -38803,13 +38821,20 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   /* the server writes the trip; show the answer right away until the realtime copy arrives */
   const local = (id, patch) => { const t = byId('trips', id); if (t && S.data.trips) { S.data.trips.set(id, Object.assign({}, t, patch)); if (typeof render === 'function') render(false); } };
 
+  /* v7.36 (Mahmoud: «… sends him a notification to record the project»): for which project — the open work orders he can see */
+  function orderField(t) {
+    let os = []; try { os = sortBy(list('orders').filter(o => o && (typeof isOpen === 'function' ? isOpen(o) : o.status !== 'done')), o => o.code || ''); } catch (e) { os = []; }
+    if (!os.length) return '';
+    return field(L('لأي مشروع (أمر التشغيل)', 'For which project (work order)'), `<select id="f-atOrder" name="atOrder"><option value="">${esc(L('— مش لمشروع معيّن —', '— no particular project —'))}</option>${os.map(o => `<option value="${esc(o.id)}" ${o.id === t.orderId ? 'selected' : ''}>${esc([o.code, o.name || o.title].filter(Boolean).join(' — '))}</option>`).join('')}</select>`, 'full');
+  }
   ACTIONS.atYes = id => {
     const t = byId('trips', id); if (!t || !drv() || !W()) return;
     openModal({ title: L('أكّد المشوار', 'Confirm the trip'), submitLabel: L('أيوه أنا اللي سايق', 'Yes, I am driving'),
       body: `<div class="form"><div class="small full">${esc(L(`${t.number || ''} — ${vShort(t.vehicleId)} · بدأ الساعة ${hm(t.startedAt)}${t.from ? ' من ' + t.from : ''}`, `${t.number || ''} — ${vShort(t.vehicleId)} · started at ${hm(t.startedAt)}${t.from ? ' from ' + t.from : ''}`))}</div>
         ${field(L('رايح فين', 'Going to'), inp('atTo', t.to || '', `placeholder="${esc(L('مثال: مخزن الخشب — العبور', 'e.g. the wood store'))}"`), 'full')}
+        ${orderField(t)}
         ${field(L('ليه (الغرض)', 'Why (purpose)'), inp('atPurpose', t.purpose && !t.gpsAuto ? t.purpose : '', `placeholder="${esc(L('مثال: استلام خامات من المورد', 'e.g. picking up materials'))}"`), 'full')}</div>`,
-      onSubmit: async f => { const d = formData(f); const ok = await claim(id, true, d.atPurpose, d.atTo); if (!ok) return false; local(id, { driverId: me(), driverName: (S.session && S.session.name) || '', driverConfirmed: true, driverGuess: 'confirmed', to: d.atTo || t.to || '', purpose: d.atPurpose || t.purpose }); toast(L('تمام — المشوار بقى باسمك', 'Done — the trip is in your name')); }
+      onSubmit: async f => { const d = formData(f); const ok = await claim(id, true, d.atPurpose, d.atTo, d.atOrder); if (!ok) return false; const o = d.atOrder ? byId('orders', d.atOrder) : null; local(id, { driverId: me(), driverName: (S.session && S.session.name) || '', driverConfirmed: true, driverGuess: 'confirmed', to: d.atTo || t.to || '', purpose: d.atPurpose || t.purpose, ...(o ? { orderId: o.id, orderCode: o.code || '' } : {}) }); toast(L('تمام — المشوار بقى باسمك', 'Done — the trip is in your name')); }
     });
   };
   ACTIONS.atNo = async id => {
@@ -38822,7 +38847,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   };
   ACTIONS.atAssign = id => {
     const t = byId('trips', id); if (!t || !fleetOk()) return;
-    const ids = Array.from(new Set([...(typeof drivers === 'function' ? drivers().map(w => w.id) : []), ...(t.driverCands || []), ...(t.driverId ? [t.driverId] : [])]));
+    const ids = Array.from(new Set([...(typeof drivers === 'function' ? drivers().map(w => w.id) : []), ...((((S.settings || {}).fleet || {}).extraDrivers) || []), ...(t.driverCands || []), ...(t.driverId ? [t.driverId] : [])]));
     const opt = ids.map(w => `<option value="${esc(w)}" ${w === t.driverId ? 'selected' : ''}>${esc(nameIn(t, w) || w)}</option>`).join('');
     openModal({ title: L(`مين كان سايق — ${t.number || ''}`, `Who was driving — ${t.number || ''}`), submitLabel: L('حفظ', 'Save'),
       body: `<div class="form">${field(L('السواق', 'Driver'), `<select id="f-atDrv" name="atDrv" required><option value="">—</option>${opt}</select>`, 'full')}
@@ -41126,6 +41151,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
    · v7.33 (Mahmoud, 10 Oct: «when Saeed approves a group of advances tell me the group, who they are and their total, so I transfer
      that number to Bahaa once»): the card shows each line's amount and the total (owner only — money items for the owner), and an
      advance batch line carries its code, the names with their amounts and the batch total. The bell keeps no amounts.
+   · v7.36: a pay batch («Group» by Saeed / Ahmed) is one line (code, number of items, to whom, total), and a supplier with more than
+     one PO waiting is one line with the sum (pay him once).
    · Owner only; every system that has these pages.
    ===================================================================== */
 (function () {
@@ -41133,7 +41160,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   if (typeof RENDER_HOOKS === 'undefined') return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const KIND = () => ({ adv: [L('سلف', 'Advances'), 'warn'], fund: [L('عهدة', 'Custody'), 'warn'], po: [L('مورد', 'Supplier'), 'acc'], opex: [L('تشغيل', 'Running cost'), ''], chq: [L('شيك', 'Cheque'), 'acc'], money: [L('فلوس', 'Money'), ''] });
+  const KIND = () => ({ adv: [L('سلف', 'Advances'), 'warn'], fund: [L('عهدة', 'Custody'), 'warn'], po: [L('مورد', 'Supplier'), 'acc'], opex: [L('تشغيل', 'Running cost'), ''], chq: [L('شيك', 'Cheque'), 'acc'], money: [L('فلوس', 'Money'), ''], pb: [L('دفعة تحويل', 'Pay batch'), 'warn'], sup: [L('مورد', 'Supplier'), 'acc'] });
   const SRC = new Set(['advbatch', 'advpay', 'money', 'opex', 'suppay', 'cheque', 'chq', 'podue', 'fund']);
   const RE = /سلف|عهد|تحويل|شيك|مصروف تشغيل|دفعة|سداد|مستحق/;
   const isMoneyTask = t => !!t && (SRC.has(t.source) || /^(podue|fund|abt|opx|chq)_/.test(String(t.id)) || RE.test(String(t.title || '')));
@@ -41151,8 +41178,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     try {
       if (typeof moneyDue === 'function') moneyDue().forEach(x => {
         if (x.action === 'poPayLater') { const p = byId('purchases', x.id); const due = p && p.deferred && p.deferred.due; if (!due || due > addDays(today, 3)) return; }
-        seen.add('fund_' + x.id); seen.add(x.id);
-        out.push({ k: x.kind === 'fund' ? 'fund' : x.kind === 'opex' ? 'opex' : 'po', id: x.kind + ':' + x.id, label: x.label, sub: x.sub || '', amount: +x.amount || 0, href: x.href ? '#/' + x.href : '#/money' });
+        seen.add('fund_' + x.id); seen.add('pbt_' + x.id); seen.add(x.id);
+        out.push({ k: ['fund', 'opex', 'pb', 'sup'].includes(x.kind) ? x.kind : 'po', id: x.kind + ':' + x.id, label: x.label, sub: x.sub || '', subNo: x.subNo, amount: +x.amount || 0, href: x.href ? '#/' + x.href : '#/money' });
       });
     } catch (e) { /* ignore */ }
     try {
@@ -41433,22 +41460,22 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   /* the switch under the name.
      v7.35 (Mahmoud, 11 Oct: «two kinds — Advanced, and I want to see its name, and the second the icons like the iPhone; when I
      press it, it flips from this to that»): ONE tile in place of the look tile — it shows the kind that is on («Advanced» or
-     «iPhone») and a tap flips to the other. Advanced = the usual pages (the dashboard for the owner) in the Advanced look;
-     iPhone = the home screen with the icons. Classic stays for weak phones (by itself) and in Settings → System look. */
+     «Icons» — Mahmoud did not want it called «iPhone») and a tap flips to the other. Advanced = the usual pages (the dashboard
+     for the owner) in the Advanced look; Icons = the home screen with the icons. Classic stays for weak phones (by itself) and in Settings → System look. */
   const SPARK = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 4.6 4.6 1.9-4.6 1.9L12 16.5l-1.9-4.6L5.5 10l4.6-1.9z"/><path d="M18.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></svg>';
   const lookNow = () => { try { return window.nfLook && typeof window.nfLook.want === 'function' ? window.nfLook.want() : 'apple'; } catch (e) { return 'apple'; } };
   ACTIONS.homeMode = () => {
     const on = homeOn(); ls(prefKey(), on ? 'classic' : 'new');
     /* a person who had picked Classic on this device moves to the Advanced look with the switch */
     try { if (localStorage.getItem('nf.look.device') === 'classic') localStorage.setItem('nf.look.device', 'apple'); } catch (e) { /* ignore */ }
-    toast(on ? L('الشكل بقى Advanced', 'The look is now Advanced') : L('الشكل بقى آيفون', 'The look is now iPhone'));
+    toast(on ? L('الشكل بقى Advanced', 'The look is now Advanced') : L('الشكل بقى Icons', 'The look is now Icons'));
     const h = homeView(); location.hash = '#/' + h; try { parseRoute(); } catch (e) { /* ignore */ } render(true);
   };
   RENDER_HOOKS.push(() => setTimeout(() => {
     try {
       if (!S.session || role() === 'kiosk') return;
       document.querySelectorAll('.side .nftogs').forEach(row => {
-        const on = homeOn(); const name = on ? L('آيفون', 'iPhone') : (lookNow() === 'classic' ? 'Classic' : 'Advanced');
+        const on = homeOn(); const name = on ? 'Icons' : (lookNow() === 'classic' ? 'Classic' : 'Advanced');
         const html = `${on ? glyph('grid', 17).replace('fill="#fff"', 'fill="currentColor"') : SPARK}<span>${esc(name)}</span>`;
         let b = row.querySelector('.nfhome');
         if (!b) {
@@ -41457,7 +41484,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
           if (lk) lk.replaceWith(b); else row.appendChild(b);
           row.hidden = false;
         }
-        if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.title = on ? L('التحويل لـ Advanced', 'Switch to Advanced') : L('التحويل لشكل الآيفون (أيقونات)', 'Switch to the iPhone look (icons)'); }
+        if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.title = on ? L('التحويل لـ Advanced', 'Switch to Advanced') : L('التحويل لـ Icons', 'Switch to Icons'); }
       });
     } catch (e) { /* ignore */ }
   }, 30));
@@ -41707,6 +41734,876 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       #view table.a2-att td:nth-child(2)>div:not(.sbtn){margin-top:6px}
     }
   </style>`);
+})();
+/* =====================================================================
+   v7.36 — the «Icons» look for the whole system (Mahmoud, 11 Oct: «did you set up everything in the system — when the system is
+   flipped to the icons — and the colours I want calm and sleek»).
+   When the switch under the name says «Icons» (Mahmoud: not «iPhone» — «Icons»), every page takes the same calm look, not only the home screen:
+   · plain grouped background (no coloured wallpaper), white cards with no borders and a soft shadow, hairline lines;
+   · one calm accent (steel blue) for buttons, links and the chosen tab; status colours toned down (sage, sand, clay);
+   · tinted buttons instead of black pills; the main button filled with the accent;
+   · a light menu like the phone's Settings (the dark glass menu stays for «Advanced»);
+   · the home icons, notification icons and request tiles in softer colours;
+   · night mode in the same calm tones.
+   «Advanced» stays exactly as it is. Content, permissions and buttons are the same in both.
+   ===================================================================== */
+(function () {
+  if (window.__NF_IPH__) return; window.__NF_IPH__ = 1;
+  const on = () => { try { return !!(window.nfHomeOn && window.nfHomeOn()) && document.documentElement.classList.contains('apple'); } catch (e) { return false; } };
+  const sync = () => { try { document.documentElement.classList.toggle('iph', on()); } catch (e) { /* ignore */ } };
+  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); sync(); return r; })(render);
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.unshift(sync);
+  sync();
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { if (!S.route || S.route.view !== 'home') return; const ah = document.querySelector('#view .ah'); const lh = document.getElementById('lateheads'); if (ah && lh && ah.lastElementChild !== lh) ah.appendChild(lh); } catch (e) { /* ignore */ } });
+
+  const I = 'html.apple.iph';
+  const LIGHT = `
+  --bg:#f2f2f4; --surface:#ffffff; --surface-2:#f5f5f7; --surface-3:rgba(116,116,128,.10);
+  --ink:#1c1c1e; --ink-2:#3c3c43; --muted:#8a8a8f; --line:rgba(60,60,67,.09); --line-2:rgba(60,60,67,.16);
+  --primary:#4f6e8e; --primary-ink:#fff; --accent:#4f6e8e; --accent-ink:#fff; --accent-soft:rgba(79,110,142,.11); --accent-2:#6f8aa6;
+  --good:#5c8a6b; --warn:#c0914c; --serious:#bd7a55; --crit:#b5655b;
+  --good-soft:rgba(92,138,107,.13); --warn-soft:rgba(192,145,76,.15); --serious-soft:rgba(189,122,85,.14); --crit-soft:rgba(181,101,91,.12);
+  --good-ink:#3f6a4e; --warn-ink:#83602a; --serious-ink:#8c4f2f; --crit-ink:#8f4239;
+  --glass:#ffffff; --glass-solid:#ffffff; --glass-brd:transparent;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px -8px rgba(20,30,50,.10); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.22);
+  --wall:#f2f2f4; --radius:18px; --radius-sm:12px;
+  --side-bg:#f5f5f7; --side-ink:#1c1c1e; --side-muted:#8a8a8f; --side-line:rgba(60,60,67,.09); --side-hover:rgba(116,116,128,.10); --side-on:#4f6e8e; --side-on-bg:#ffffff; --nf-side:#f5f5f7;`;
+  const DARK = `
+  --bg:#0f0f11; --surface:#1b1b1e; --surface-2:#232327; --surface-3:rgba(140,140,150,.14);
+  --ink:#ececef; --ink-2:#c9c9cf; --muted:#8e8e94; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12);
+  --primary:#8eaacb; --primary-ink:#0f0f11; --accent:#8eaacb; --accent-ink:#0f0f11; --accent-soft:rgba(142,170,203,.14); --accent-2:#a7bdd6;
+  --good:#7fae8e; --warn:#d2ac6e; --serious:#cf9875; --crit:#cf8a80;
+  --good-soft:rgba(127,174,142,.15); --warn-soft:rgba(210,172,110,.15); --serious-soft:rgba(207,152,117,.15); --crit-soft:rgba(207,138,128,.15);
+  --good-ink:#9cc8aa; --warn-ink:#e0c08a; --serious-ink:#e0b090; --crit-ink:#e3a59c;
+  --glass:#1b1b1e; --glass-solid:#1b1b1e; --glass-brd:transparent;
+  --shadow:0 1px 2px rgba(0,0,0,.4); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
+  --wall:#0f0f11;
+  --side-bg:#141416; --side-ink:#ececef; --side-muted:#8e8e94; --side-line:rgba(255,255,255,.07); --side-hover:rgba(140,140,150,.14); --side-on:#8eaacb; --side-on-bg:#1b1b1e; --nf-side:#141416;`;
+  document.head.insertAdjacentHTML('beforeend', `<style id="iphone-look">
+${I}{${LIGHT}}
+@media (prefers-color-scheme: dark){ ${I}:not([data-theme="light"]){${DARK}} }
+${I}[data-theme="dark"]{${DARK}}
+${I} body{background:var(--bg)!important;background-attachment:scroll!important}
+${I} .nhome,${I} .login{background:var(--bg)!important}
+${I} ::selection{background:var(--accent-soft)}
+${I} input[type=checkbox],${I} input[type=radio]{accent-color:var(--accent)}
+${I} a{color:var(--accent)}
+${I} .item,${I} .card a,${I} .aha,${I} .ahn,${I} .ahm,${I} .ahw-i,${I} .omf-r,${I} .nav a{color:inherit}
+
+/* cards and lists: flat white, no borders, soft shadow */
+${I} .card,${I} .kpi,${I} .item,${I} .vehcard,${I} .vcard,${I} .orgnode,${I} .set-tile,${I} .lhcard,${I} .tcard,${I} .col{background:var(--surface)!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+${I} .card{border-radius:18px}${I} .item{border-radius:14px}${I} .kpi{border-radius:16px}
+${I} .col{background:transparent!important;box-shadow:none!important}
+${I} .lhcard{background:var(--surface-2)!important;box-shadow:none!important}
+/* a list inside a card reads as one grouped list with thin lines, like the phone's Settings */
+${I} .card .list{gap:0!important}
+${I} .card .list>.item{box-shadow:none!important;border-radius:0!important;background:transparent!important;border-bottom:.5px solid var(--line)!important;margin:0!important}
+${I} .card .list>.item:last-child{border-bottom:0!important}
+${I} .banner{background:var(--surface-2)!important;color:var(--ink-2)}
+${I} .banner.info{background:var(--accent-soft)!important}
+${I} .banner.warn{background:var(--warn-soft)!important}
+
+/* buttons: tinted, the main one filled with the calm accent */
+${I} .btn{background:var(--surface-3)!important;color:var(--ink)!important}
+${I} .btn.p,${I} .btn.a{background:var(--accent)!important;color:var(--accent-ink)!important;box-shadow:none!important}
+${I} .btn.d{background:var(--crit-soft)!important;color:var(--crit-ink)!important}
+${I} .btn.ghost{background:transparent!important;color:var(--accent)!important}
+${I} .fab{background:var(--accent)!important;color:var(--accent-ink)!important;box-shadow:0 10px 24px -12px rgba(30,45,70,.55)!important}
+${I} .iconbtn{color:var(--ink-2)}
+${I} .seg{background:var(--surface-3)!important}
+${I} .seg button.on,${I} .tabs button.on{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}
+${I} .badge{font-weight:600}
+${I} .badge.ink{background:var(--surface-3);color:var(--ink)}
+${I} .kpi .v{color:var(--ink)}${I} .kpi.acc .v{color:var(--accent)}
+
+/* forms */
+${I} .field input,${I} .field select,${I} .field textarea,${I} .inp,${I} .sel{background:var(--surface-2)!important;border:1px solid transparent!important;box-shadow:none!important}
+${I} .field input:focus,${I} .field select:focus,${I} .field textarea:focus,${I} .inp:focus{border-color:var(--accent)!important;background:var(--surface)!important}
+${I} .nft-tiles .nft-i span{background:var(--surface-2);border-color:transparent}
+${I} .nft-i input:checked+span{border-color:var(--accent);background:var(--accent-soft)}
+${I} .modal{background:var(--surface)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+${I} .modal .mh,${I} .modal .mf{background:var(--surface)!important;border-color:var(--line)!important}
+${I} .overlay{background:rgba(20,20,24,.32)!important}
+
+/* tables */
+${I} th{background:var(--surface-2)!important;color:var(--muted)!important;font-weight:600}
+${I} td{border-color:var(--line)!important}
+${I} tbody tr:nth-child(even) td{background:transparent!important}
+${I} .tablewrap{background:var(--surface);border:0!important}
+
+/* top bar and tab bar: calm, frosted white */
+${I} .topbar{background:color-mix(in srgb,var(--bg) 88%,transparent)!important;border-bottom:.5px solid var(--line)!important;-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
+${I} .tabbar{background:color-mix(in srgb,var(--surface) 90%,transparent)!important;border:0!important;box-shadow:0 10px 30px -14px rgba(20,30,50,.28)!important;-webkit-backdrop-filter:blur(24px) saturate(160%)!important;backdrop-filter:blur(24px) saturate(160%)!important}
+${I} .tabbar a{color:var(--muted)!important}
+${I} .tabbar a.on{color:var(--accent)!important;background:var(--accent-soft)!important}
+${I} .bellpop{background:var(--surface-2)!important;border:0!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+
+/* the menu: light, like the phone's Settings */
+${I} .side,${I}.apple-blur .side,${I} .nhome .nside{background:var(--surface-2)!important;color:var(--ink)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;border-inline-end:.5px solid var(--line)!important}
+${I} .side .brand .wordmark,${I} .side .brand img{filter:none}
+${I}[data-theme="dark"] .side .brand .wordmark,${I}[data-theme="dark"] .side .brand img{filter:invert(1)}
+@media (prefers-color-scheme: dark){ ${I}:not([data-theme="light"]) .side .brand .wordmark,${I}:not([data-theme="light"]) .side .brand img{filter:invert(1)} }
+${I} .side .userchip,${I} .side .viewbtn,${I} .side .acct a,${I} .side .mobextra button,${I} .side .nfback,${I} .side .nfst{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 2px rgba(0,0,0,.04)!important}
+${I} .side .userchip *{color:inherit}
+${I} .side .userchip .muted,${I} .side .userchip small{color:var(--muted)!important}
+${I} .side .acct a.logout,${I} .side .nfst[data-action="logout"]{color:var(--crit-ink)!important}
+${I} .side .nav .grp{color:var(--muted)!important}
+${I} .side .acct.nfstrip>.nfst,${I} .side .nftogs>.nfst{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 2px rgba(0,0,0,.04)!important}
+${I} .side .acct.nfstrip>.nfst.logout,${I} .side .acct.nfstrip>a.logout{color:var(--crit-ink)!important}
+${I} .side .nav .ngh{color:var(--ink)!important}
+${I} .side .nav .ngh:hover{background:var(--surface-3)!important}
+${I} .side .nav .ngh > svg:first-child{color:var(--accent)!important}
+${I} .side .nav .ngh svg{color:var(--muted)}
+${I} .side .nav .ngh .ngc{background:var(--accent-soft)!important;color:var(--accent)!important}
+${I} .side .nav a{color:var(--ink)!important}
+${I} .side .nav a svg{color:var(--accent)!important}
+${I} .side .nav a:hover{background:var(--surface-3)!important}
+${I} .side .nav a.on{background:var(--surface)!important;color:var(--accent)!important;box-shadow:0 1px 2px rgba(0,0,0,.05)!important}
+${I} .side .nav a.on svg{color:var(--accent)!important}
+${I} .side .nav a .cnt{background:var(--accent-soft)!important;color:var(--accent)!important}
+${I} .side .foot{color:var(--muted)!important;border-top:.5px solid var(--line)!important}
+${I} .side .avatar{background:var(--accent-soft)!important;color:var(--accent)!important}
+
+/* home screen, notifications, request tiles: softer colours */
+${I} .aha-ic,${I} .ahn-ic,${I} .rq-ic{filter:saturate(.55) brightness(1.04)}
+${I} .aha-ic{box-shadow:0 2px 8px rgba(20,30,50,.12)}
+${I} .aha-ic i,${I} .ahm-n{background:#c7584c}
+${I} .ahw,${I} .ahn,${I} .ahm{background:var(--surface)!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+${I} .ahw-d small{color:var(--crit)}
+${I} .ahw-p{background:var(--accent)!important;color:var(--accent-ink)!important}
+${I} .ahw-i,${I} .ahw-k div{background:var(--surface-2)!important}
+${I} .ahn-ic i{background:var(--surface-3);color:var(--ink)}
+${I} .rq-t{background:var(--surface)!important;border-color:transparent!important;box-shadow:var(--shadow)}
+${I} .pf-pick{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+${I} .pf-pick.on{border-color:var(--good-ink);color:var(--good-ink);background:var(--good-soft)}
+${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
+</style>`);
+})();
+/* =====================================================================
+   v7.36 — a «back» button on every page (Mahmoud, 11 Oct: «when you go into any tab or icon there should be a back button»).
+   · Every page except the home page itself (the icons home, or the dashboard / the person's first page) has «‹ Back» at the
+     start of the top bar, where the small logo was. A tap goes back to the page you came from; if you opened the page
+     directly (a link, a notification) a detail page goes up to its list and any other page to the home page.
+   · On detail pages it replaces the old «back» on the other side, so there is only one.
+   · Both looks (Advanced and Icons), phone and computer, Arabic and English, all three systems.
+   ===================================================================== */
+(function () {
+  if (window.__NF_BACKALL__) return; window.__NF_BACKALL__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const home = () => { try { return homeView(); } catch (e) { return 'dashboard'; } };
+  const atHome = () => !S.route || (!S.route.id && S.route.view === home());
+  ACTIONS.a2Back = () => {
+    let prev = ''; try { prev = typeof navPrev === 'function' ? navPrev() : ''; } catch (e) { prev = ''; }
+    if (prev && prev !== location.hash) { history.back(); return; }
+    /* opened directly: a detail page goes up to its list, any other page to the home page */
+    const up = document.querySelector('#topbar .tb-actions a[data-navback][href^="#/"]');
+    location.hash = up ? up.getAttribute('href') : (S.route && S.route.id ? '#/' + S.route.view : '#/' + home());
+    try { parseRoute(); } catch (e) { /* ignore */ } render(true);
+  };
+  RENDER_HOOKS.push(() => {
+    try {
+      const tb = document.getElementById('topbar'); if (!tb) return;
+      const show = !!S.session && role() !== 'kiosk' && !atHome();
+      tb.classList.toggle('a2b', show);
+      let b = tb.querySelector('.tb-back');
+      if (!show) { if (b) b.remove(); return; }
+      if (!b) {
+        b = document.createElement('button'); b.type = 'button'; b.className = 'tb-back'; b.dataset.action = 'a2Back'; b.dataset.navback = '1';   /* the old «back» click (history) handles it first when there is a page to go back to */
+        const anchor = tb.querySelector('.tb-logo') || tb.querySelector('.menubtn');
+        if (anchor) anchor.after(b); else tb.insertBefore(b, tb.firstChild);
+      }
+      const html = `${typeof icon === 'function' ? icon('back') : '‹'}<span>${esc(L('رجوع', 'Back'))}</span>`;
+      if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.setAttribute('aria-label', L('رجوع', 'Back')); }
+    } catch (e) { /* ignore */ }
+  });
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .tb-back{display:inline-flex;align-items:center;gap:3px;flex:none;height:36px;padding:0 12px 0 8px;margin-inline-end:4px;border:0;border-radius:999px;background:var(--surface-3,rgba(127,127,127,.14));color:var(--accent);font:inherit;font-size:14.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+    .tb-back svg{width:18px;height:18px}
+    .tb-back:active{opacity:.7}
+    .topbar.a2b .tb-logo{display:none!important}
+    .topbar.a2b .tb-actions [data-navback]:not(.setback){display:none!important}
+    @media (max-width:420px){.tb-back{padding:0 10px 0 6px;font-size:14px}}
+  </style>`);
+})();
+/* =====================================================================
+   v7.36 — calls, the next step (Mahmoud, 11 Oct: «the call should show at once even when the app is closed», «can people update the
+   version they have automatically», «a better quality of the calls inside the system»; brief claude/calls-v3-brief.md).
+   · Android app (old and new): a notification channel «Ninety calls» with the highest importance is made on the phone from here
+     (the app loads this code from the server) — the server sends a ringing call on it, so it pops up on the screen with sound and
+     vibration even when the app is closed, and every re-ring alerts again.
+   · «Update the app» screen on the old Android app — over every page, once the new version (with the call screen and the
+     self-update) is on the site (apk-version.json); «later» once a day only.
+   · the new app (versionCode 104+) updates itself: on opening, when the site has a newer Ninety.apk, it downloads it with a progress
+    card and installs it over itself (Android asks once the first time; later updates go through by themselves on Android 12+).
+  · the owner: «who still has to update» list in the calls readiness card with «remind them» (a notification + a task each).
+   · before calling someone whose phone will not ring like a phone call: «it will not ring — call his mobile» (when the number is
+     visible to this account) or «call through the system anyway».
+   · «make calls ring» guide on Android: the settings to turn on for this phone's make (notifications, battery, auto-start), with
+     direct buttons on the new app.
+   · during the call: the real quality (lost sound, jitter, delay) as signal bars on the call screen, «your network is weak» /
+     «X's network is weak», sound first (priority + bitrate), the picture steps down and turns off by itself on a very weak network
+     and comes back when it improves. The numbers are kept with each call.
+   ===================================================================== */
+(function () {
+  if (window.__NF_CALLS3__) return; window.__NF_CALLS3__ = 1;
+  if (typeof isStudioz === 'function' && isStudioz() || typeof isConstruction === 'function' && isConstruction()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  const cap = () => { try { return window.Capacitor || null; } catch (e) { return null; } };
+  const android = () => { const c = cap(); try { return !!c && c.isNativePlatform && c.isNativePlatform() && c.getPlatform && c.getPlatform() === 'android'; } catch (e) { return false; } };
+  const NC = () => { const c = cap(); return (c && c.Plugins && c.Plugins.NinetyCalls) || null; };
+  const ncMethods = () => { const c = cap(); try { const h = ((c && c.PluginHeaders) || []).find(x => x && x.name === 'NinetyCalls'); return (h && Array.isArray(h.methods) ? h.methods : []).map(m => m && m.name); } catch (e) { return []; } };
+  const hasUpdater = () => !!NC() && ncMethods().includes('update');
+  const today = () => (typeof todayISO === 'function' ? todayISO() : new Date().toISOString().slice(0, 10));
+  const NFC = () => window.nfCalls || {};
+
+  /* ---------- 1) the «calls» notification channel on Android ---------- */
+  function makeChannel() {
+    try {
+      const c = cap(); const P = c && c.Plugins && c.Plugins.PushNotifications; if (!android() || !P || typeof P.createChannel !== 'function') return;
+      P.createChannel({ id: 'nf_calls', name: L('مكالمات Ninety', 'Ninety calls'), description: L('المكالمات من السيستم — بتطلع على الشاشة بصوت', 'Calls from the system — they pop up with sound'), importance: 5, visibility: 1, vibration: true, lights: true, lightColor: '#34C759' }).catch(() => { });
+    } catch (e) { /* ignore */ }
+  }
+  setTimeout(makeChannel, 1500);
+
+  /* ---------- 2) «update the app» (old Android app) ---------- */
+  const A = { info: null, at: 0 };
+  async function apkInfo() {
+    if (A.info !== null && Date.now() - A.at < 3600e3) return A.info;
+    A.at = Date.now();
+    try { const r = await fetch('./apk-version.json?t=' + Date.now(), { cache: 'no-store' }); A.info = r.ok ? await r.json() : false; } catch (e) { A.info = false; }
+    return A.info;
+  }
+  const needUpdate = () => android() && !hasUpdater() && A.info && +A.info.versionCode >= 104;
+  function updateHTML() {
+    const url = (A.info && A.info.url) || 'https://raw.githubusercontent.com/mahmoudfawzy1212mf-crypto/mahmoudfawzy1212mf-crypto.github.io/HEAD/Ninety.apk';
+    const can = lsGet('nf.apkup.later') !== today();
+    return `<div id="nf-apkgate" role="dialog" aria-modal="true"><div class="ag">
+      <div class="agi">⬇</div><h2>${esc(L('حدّث أبلكيشن Ninety', 'Update the Ninety app'))}</h2>
+      <p>${esc(L('النسخة الجديدة فيها شاشة المكالمة (بترن زي التليفون حتى والموبايل مقفول) وبتحدّث نفسها لوحدها بعد كده. بتتسطّب فوق القديمة — الحساب والبيانات زي ما هم. دقيقة واحدة.', 'The new version has the call screen (it rings like a phone even when the phone is locked) and updates itself from now on. It installs over the old one — your account and data stay. One minute.'))}</p>
+      <ol><li>${esc(L('دوس «تنزيل التحديث» واستنى لحد ما الملف يخلص، وافتحه.', 'Tap «Download the update», wait for the file and open it.'))}</li><li>${esc(L('دوس «تحديث» — لو سألك اسمح بالتثبيت من المصدر ده.', 'Tap «Update» — if asked, allow installing from this source.'))}</li><li>${esc(L('افتح Ninety واسمح بالإشعارات و«إشعارات ملء الشاشة».', 'Open Ninety and allow notifications and «full-screen notifications».'))}</li></ol>
+      <a class="btn p agb" href="${esc(url)}" target="_blank" rel="noopener">${esc(L('تنزيل التحديث', 'Download the update'))}</a>
+      ${can ? `<button type="button" class="btn ghost" data-nfag="later">${esc(L('بعدين (مرة واحدة النهارده)', 'Later (once today)'))}</button>` : `<div class="tiny muted">${esc(L('«بعدين» اتستخدمت النهارده — حدّث علشان المكالمات توصلك.', '«Later» was used today — update so calls reach you.'))}</div>`}
+    </div></div>`;
+  }
+  function gate() {
+    const old = document.getElementById('nf-apkgate');
+    const show = !!S.session && needUpdate() && lsGet('nf.apkup.later') !== today();
+    if (!show) { if (old) old.remove(); return; }
+    if (!old) document.body.insertAdjacentHTML('beforeend', updateHTML());
+  }
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-nfag]'); if (!b) return; e.preventDefault(); lsSet('nf.apkup.later', today()); const g = document.getElementById('nf-apkgate'); if (g) g.remove(); });
+  if (android()) { apkInfo().then(gate); setInterval(() => { apkInfo().then(gate); }, 10 * 60000); }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (android() && A.info !== null) gate(); });
+
+  /* ---------- 2b) the new app (104+) updates itself ---------- */
+  const U = { busy: false, st: '', done: 0, total: 0, want: 0, lis: false };
+  const inCall = () => { try { return typeof NFC().current === 'function' && !!NFC().current(); } catch (e) { return false; } };
+  function upPaint() {
+    const old = document.getElementById('nf-selfup');
+    if (!U.st) { if (old) old.remove(); return; }
+    const pct = U.total > 0 ? Math.min(100, Math.round((U.done * 100) / U.total)) : 0;
+    const msg = U.st === 'down' ? L('بنزّل النسخة الجديدة — خليك على النت…', 'Downloading the new version — stay online…')
+      : U.st === 'perm' ? L('مرة واحدة: اسمح لـ Ninety يحدّث نفسه — «السماح من هذا المصدر» ← شغّلها، وارجع هنا.', 'Once: let Ninety update itself — «Allow from this source» → on, then come back here.')
+      : U.st === 'confirm' ? L('دوس «تحديث» في الرسالة اللي ظهرت.', 'Tap «Update» in the message that appeared.')
+      : U.st === 'installing' ? L('بيتسطّب… الأبلكيشن هيقفل لحظة — افتحه تاني من الإشعار «Ninety اتحدّث».', 'Installing… the app closes for a moment — reopen it from the «Ninety updated» notification.')
+      : L('التحديث ما كملش — جرّب تاني.', 'The update did not finish — try again.');
+    const html = `<div class="au"><b>⬇ ${esc(L('تحديث أبلكيشن Ninety', 'Ninety app update'))}</b><span>${esc(msg)}</span>
+      ${U.st === 'down' ? `<div class="aubar"><i style="width:${pct}%"></i></div><small>${pct}%</small>` : ''}
+      ${U.st === 'perm' ? `<button type="button" class="btn sm p" data-nfup="perm">${esc(L('افتح الإذن', 'Open the permission'))}</button>` : ''}
+      ${U.st === 'fail' ? `<div class="aua"><button type="button" class="btn sm p" data-nfup="go">${esc(L('جرّب تاني', 'Try again'))}</button><button type="button" class="btn sm ghost" data-nfup="x">${esc(L('بعدين', 'Later'))}</button></div>` : ''}</div>`;
+    let el = old; if (!el) { document.body.insertAdjacentHTML('beforeend', `<div id="nf-selfup" role="status" aria-live="polite"></div>`); el = document.getElementById('nf-selfup'); }
+    if (el.dataset.h !== html) { el.innerHTML = html; el.dataset.h = html; }
+  }
+  function upListen() {
+    if (U.lis || !NC() || typeof NC().addListener !== 'function') return; U.lis = true;
+    try { NC().addListener('updateProgress', p => { U.done = +p.done || 0; U.total = +p.total || 0; if (U.st === 'down') upPaint(); }); } catch (e) { /* ignore */ }
+    try {
+      NC().addListener('updateStatus', r => {
+        const st = r && r.status;
+        if (st === 'confirm') U.st = 'confirm';
+        else if (st === 'aborted' || st === 'failed') { U.st = 'fail'; U.busy = false; }
+        upPaint();
+      });
+    } catch (e) { /* ignore */ }
+  }
+  async function selfUpdate(byHand) {
+    if (!android() || !hasUpdater() || !S.session || U.busy) return;
+    const info = await apkInfo(); if (!info || !info.url || !(+info.versionCode > 0)) return;
+    let me = null; try { me = await NC().info(); } catch (e) { return; }
+    if (!me || !me.selfUpdate || +me.versionCode >= +info.versionCode) { if (U.st && U.st !== 'installing') { U.st = ''; upPaint(); } return; }
+    if (inCall()) return;
+    U.want = +info.versionCode;
+    /* by itself: twice a day per version at most (a failed download does not loop) */
+    const key = 'nf.apkup.auto'; const [v, d, n] = lsGet(key).split('|');
+    const tries = v === String(U.want) && d === today() ? +n || 0 : 0;
+    if (!byHand && tries >= 2) { if (!U.st) { U.st = 'fail'; upPaint(); } return; }
+    lsSet(key, `${U.want}|${today()}|${tries + 1}`);
+    upListen();
+    if (!me.canInstall) { U.st = 'perm'; upPaint(); if (byHand) { try { await NC().openSettings({ kind: 'install' }); } catch (e) { /* ignore */ } } return; }
+    U.busy = true; U.st = 'down'; U.done = 0; U.total = 0; upPaint();
+    try {
+      const r = await NC().update({ url: info.url });
+      const st = r && r.status;
+      if (st === 'permission') { U.busy = false; U.st = 'perm'; }
+      else if (st === 'installing') { if (U.st === 'down') U.st = 'installing'; }
+      else if (st !== 'busy') { U.busy = false; U.st = 'fail'; }
+    } catch (e) { U.busy = false; U.st = 'fail'; }
+    upPaint();
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-nfup]'); if (!b) return; e.preventDefault();
+    const k = b.dataset.nfup;
+    if (k === 'perm') { try { NC().openSettings({ kind: 'install' }).catch(() => { }); } catch (x) { /* ignore */ } }
+    else if (k === 'go') { U.st = ''; selfUpdate(true); }
+    else { U.st = ''; upPaint(); }
+  });
+  if (android()) {
+    setTimeout(() => { selfUpdate(false).catch(() => { }); }, 6000);
+    setInterval(() => { selfUpdate(false).catch(() => { }); }, 30 * 60000);
+    /* back from the «allow» screen → go on by itself */
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && U.st === 'perm') setTimeout(() => { U.st = ''; selfUpdate(true).catch(() => { }); }, 600); });
+  }
+
+  /* ---------- 3) the owner: remind the people still on the old app ---------- */
+  const isOwner = () => typeof isAdmin === 'function' && isAdmin();
+  function oldOnes() {
+    const C = NFC().C; if (!C || !C.reach) return [];
+    return [...C.reach.values()].filter(r => r && r.why === 'android-old' && (C.dir || []).some(x => x.uid === r.uid));
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      if (!isOwner() || !S.route || S.route.view !== 'calls') return;
+      const rl = document.querySelector('#view .nfc-reach .rl'); if (!rl || rl.querySelector('[data-nfremind]')) return;
+      const n = oldOnes().length; if (!n) return;
+      rl.insertAdjacentHTML('afterbegin', `<div class="nfr-rem"><span>${esc(L(`${n} لسه على الأبلكيشن القديم`, `${n} still on the old app`))}</span><button type="button" class="btn sm p" data-nfremind="1">${esc(L('فكّرهم يحدّثوا', 'Remind them to update'))}</button></div>`);
+    } catch (e) { /* ignore */ }
+  });
+  document.addEventListener('click', async e => {
+    const b = e.target.closest && e.target.closest('[data-nfremind]'); if (!b || !isOwner()) return; e.preventDefault();
+    const C = NFC().C || {}; const ppl = oldOnes(); if (!ppl.length) return;
+    b.disabled = true;
+    const title = L('حدّث أبلكيشن Ninety', 'Update the Ninety app');
+    const body = L('افتح Ninety ودوس «تنزيل التحديث» — علشان المكالمات ترن عندك زي التليفون حتى والموبايل مقفول. دقيقة واحدة.', 'Open Ninety and tap «Download the update» — so calls ring like a phone even when the phone is locked. One minute.');
+    let n = 0;
+    for (const r of ppl) {
+      const d = (C.dir || []).find(x => x.uid === r.uid) || {}; const pid = String(d.person_id || '');
+      try { if (S.sb && S.sb.functions) S.sb.functions.invoke('push', { body: { action: 'send', to: ['uid:' + r.uid], title, body, url: '/#/me', tag: 'nf-apkup', sms: false } }).catch(() => { }); } catch (x) { /* ignore */ }
+      if (pid.startsWith('w:')) {
+        const wid = pid.slice(2); const id = 'apkup_' + wid;
+        try { await Store.save('tasks', { id, title, desc: body, assigneeId: wid, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'apkup', createdBy: S.session && S.session.id, createdByName: (S.session && S.session.name) || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); n++; } catch (x) { /* ignore */ }
+      }
+    }
+    toast(L(`اتبعت لـ ${ppl.length} — ومهمة لكل واحد`, `Sent to ${ppl.length} — and a task each`)); b.disabled = false;
+  });
+  /* the task closes itself once the phone runs the new app */
+  if (android() && hasUpdater()) setTimeout(async () => { try { const wid = S.session && S.session.workerId; const t = wid && typeof byId === 'function' ? byId('tasks', 'apkup_' + wid) : null; if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), updatedAt: nowISO() }); } catch (e) { /* ignore */ } }, 8000);
+
+  /* ---------- 4) before calling someone whose phone will not ring ---------- */
+  function phoneOf(uid) {
+    try { const d = ((NFC().C || {}).dir || []).find(x => x.uid === uid); const pid = String((d && d.person_id) || ''); const rec = pid.startsWith('w:') ? byId('workers', pid.slice(2)) : (pid ? byId('staff', pid) : null); const ph = rec && !rec.safe ? String(rec.phone || rec.workPhone || '') : ''; return ph.replace(/[^\d+]/g, ''); } catch (e) { return ''; }
+  }
+  document.addEventListener('click', e => {
+    const k = e.target.closest && e.target.closest('[data-nfcall]'); if (!k || k.dataset.nfgo) return;
+    const uid = k.dataset.nfcall; const r = typeof NFC().reachOf === 'function' ? NFC().reachOf(uid) : null;
+    if (!r || r.lvl === 'ring' || r.lvl === 'online') return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const d = typeof NFC().dirOf === 'function' ? NFC().dirOf(uid) : {}; const ph = phoneOf(uid); const video = k.dataset.v === '1';
+    const why = r.lvl === 'notify' ? L('هيوصله إشعار بس — مش هيرن زي التليفون (الأبلكيشن عنده قديم أو مقفول)', 'He will only get a notification — it will not ring like a phone (old or closed app)') : L('مش هيوصله حاجة دلوقتي — مفيش موبايل متسجّل للإشعارات', 'Nothing will reach him now — no phone registered for notifications');
+    const old = document.getElementById('nfc-pre'); if (old) old.remove();
+    document.body.insertAdjacentHTML('beforeend', `<div id="nfc-pre"><div class="pp"><b>${esc((d && d.name) || '')}</b><span>${esc(why)}</span>
+      ${ph ? `<a class="btn p" href="tel:${esc(ph)}">${esc(L('اتصل على موبايله', 'Call his mobile'))}</a>` : ''}
+      <button type="button" class="btn ${ph ? '' : 'p'}" data-nfcall="${esc(uid)}" data-v="${video ? '1' : '0'}" data-nfgo="1">${esc(L('اتصل من السيستم برضه', 'Call through the system anyway'))}</button>
+      <button type="button" class="btn ghost" data-nfpre="x">${esc(L('إلغاء', 'Cancel'))}</button></div></div>`);
+  }, true);
+  document.addEventListener('click', e => {
+    const p = document.getElementById('nfc-pre'); if (!p) return;
+    if (e.target === p || (e.target.closest && (e.target.closest('[data-nfpre]') || e.target.closest('#nfc-pre [data-nfgo]') || e.target.closest('#nfc-pre a')))) setTimeout(() => p.remove(), 0);
+  });
+
+  /* ---------- 5) «make calls ring» guide (Android app) ---------- */
+  function make() {
+    const u = navigator.userAgent || '';
+    if (/HONOR|HUAWEI|VKJ-|BRP-|JDY-|LGN-|ANY-|NTH-|ELI-|CMA-|RKY-/i.test(u)) return 'honor';
+    if (/RMX\d|realme/i.test(u)) return 'realme';
+    if (/CPH\d|OPPO|PH[A-Z]\d/i.test(u)) return 'oppo';
+    if (/Redmi|POCO|Xiaomi|\bMI \d|M2\d{3}[A-Z]/i.test(u)) return 'xiaomi';
+    if (/vivo|\bV2\d{3}/i.test(u)) return 'vivo';
+    if (/SM-[A-Z]\d/i.test(u)) return 'samsung';
+    return 'other';
+  }
+  const STEPS = () => ({
+    honor: [L('الإعدادات ← البطارية ← تشغيل التطبيقات ← Ninety', 'Settings → Battery → App launch → Ninety'), L('اقفل «إدارة تلقائية» وشغّل التلاتة: التشغيل التلقائي · التشغيل الثانوي · التشغيل في الخلفية', 'Turn off «Manage automatically» and turn on all three: auto-launch · secondary launch · run in background')],
+    xiaomi: [L('الإعدادات ← التطبيقات ← إدارة التطبيقات ← Ninety', 'Settings → Apps → Manage apps → Ninety'), L('شغّل «التشغيل التلقائي»، وفي «توفير البطارية» اختار «بلا قيود»', 'Turn on «Autostart», and in «Battery saver» choose «No restrictions»')],
+    oppo: [L('الإعدادات ← البطارية ← استخدام البطارية للتطبيقات ← Ninety', 'Settings → Battery → App battery usage → Ninety'), L('شغّل «السماح بالنشاط في الخلفية» و«السماح بالتشغيل التلقائي»', 'Turn on «Allow background activity» and «Allow auto launch»')],
+    realme: [L('الإعدادات ← البطارية ← استخدام البطارية للتطبيقات ← Ninety', 'Settings → Battery → App battery usage → Ninety'), L('شغّل «السماح بالنشاط في الخلفية» و«السماح بالتشغيل التلقائي»', 'Turn on «Allow background activity» and «Allow auto launch»')],
+    vivo: [L('الإعدادات ← البطارية ← استهلاك الطاقة في الخلفية ← Ninety ← «السماح»', 'Settings → Battery → Background power consumption → Ninety → «Allow»'), L('ومن i Manager ← إدارة التطبيقات ← التشغيل التلقائي ← شغّل Ninety', 'And i Manager → App manager → Autostart → turn on Ninety')],
+    samsung: [L('الإعدادات ← التطبيقات ← Ninety ← البطارية ← «غير مقيّد»', 'Settings → Apps → Ninety → Battery → «Unrestricted»')],
+    other: [L('الإعدادات ← التطبيقات ← Ninety ← البطارية ← «بدون قيود» / «غير مقيّد»', 'Settings → Apps → Ninety → Battery → «No restrictions» / «Unrestricted»')]
+  });
+  ACTIONS.callSetup = () => {
+    const m = make(); const st = STEPS()[m] || STEPS().other; const nat = !!NC() && (ncMethods().includes('openSettings') || ncMethods().includes('openFullScreenSettings'));
+    const btn = (k, t) => nat ? `<button type="button" class="btn sm" data-nfset="${k}">${esc(t)}</button>` : '';
+    openModal({ title: L('خلّي المكالمات ترن عندك', 'Make calls ring on this phone'), submitLabel: L('تمام — عملتها', 'Done'),
+      body: `<div class="form"><p class="small full" style="margin:0">${esc(L('مرة واحدة على الموبايل ده — علشان المكالمة تطلع على الشاشة حتى والأبلكيشن مقفول.', 'Once on this phone — so a call shows on the screen even when the app is closed.'))}</p>
+        <div class="full nfset"><b>1 · ${esc(L('الإشعارات', 'Notifications'))}</b><span>${esc(L('الإعدادات ← التطبيقات ← Ninety ← الإشعارات ← شغّلها، وافتح «مكالمات Ninety» وخليها تظهر على الشاشة بصوت.', 'Settings → Apps → Ninety → Notifications → on, open «Ninety calls» and let it pop up with sound.'))}</span>${btn('notifications', L('افتح الإشعارات', 'Open notifications'))}</div>
+        <div class="full nfset"><b>2 · ${esc(L('إشعارات ملء الشاشة', 'Full-screen notifications'))}</b><span>${esc(L('لو موجودة: الإعدادات ← التطبيقات ← Ninety ← «إشعارات ملء الشاشة» ← اسمح.', 'If present: Settings → Apps → Ninety → «Full-screen notifications» → allow.'))}</span>${btn('fullscreen', L('افتحها', 'Open it'))}</div>
+        <div class="full nfset"><b>3 · ${esc(L('البطارية والتشغيل التلقائي', 'Battery and auto-start'))}</b>${st.map(x => `<span>${esc(x)}</span>`).join('')}${btn('battery', L('افتح البطارية', 'Open battery'))}</div>
+        ${typeof ACTIONS.pushTest === 'function' ? `<div class="full"><button type="button" class="btn sm ghost" data-action="pushTest">${esc(L('ابعتلي إشعار تجريبي', 'Send me a test notification'))}</button></div>` : ''}</div>`,
+      onSubmit: () => { lsSet('nf.callsetup.done', today()); paintSetup(); }
+    });
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-nfset]'); if (!b) return; e.preventDefault();
+    const k = b.dataset.nfset; const fail = () => toast(L('افتحها من الإعدادات', 'Open it from the settings'), 'err');
+    try {
+      if (ncMethods().includes('openSettings')) NC().openSettings({ kind: k }).catch(fail);
+      else if (k === 'battery') NC().requestIgnoreBattery().catch(fail);   /* the first app with the call screen (103) */
+      else NC().openFullScreenSettings().catch(fail);
+    } catch (x) { fail(); }
+  });
+  function paintSetup() {
+    const old = document.getElementById('nf-callsetup'); const v = document.getElementById('view');
+    const homeish = S.route && ['calls', 'me', 'home', 'dashboard'].includes(S.route.view) && !S.route.id;
+    const show = android() && !!S.session && homeish && !lsGet('nf.callsetup.done') && !document.getElementById('nf-apkgate');
+    if (!show || !v) { if (old) old.remove(); return; }
+    if (old && v.contains(old)) return; if (old) old.remove();
+    v.insertAdjacentHTML('afterbegin', `<div class="nf-cready" id="nf-callsetup"><div class="ci">📞</div><div class="cb"><b>${esc(L('خلّي المكالمات ترن عندك', 'Make calls ring on this phone'))}</b><span>${esc(L('دقيقة واحدة في إعدادات الموبايل — علشان المكالمة تطلع على الشاشة حتى والأبلكيشن مقفول.', 'One minute in the phone settings — so a call shows even when the app is closed.'))}</span><div class="ca"><button type="button" class="btn sm p" data-action="callSetup">${esc(L('ورّيني إزاي', 'Show me'))}</button></div></div></div>`);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { paintSetup(); } catch (e) { /* ignore */ } });
+
+  /* ---------- 6) call quality ---------- */
+  const Q = { c: null, prev: null, poor: 0, good: 0, lvl: '' };
+  async function qTick() {
+    const c = typeof NFC().current === 'function' ? NFC().current() : null;
+    if (!c || !c.pc || c.state !== 'active') { if (Q.c && (!c || Q.c !== c)) { Q.c = null; Q.prev = null; } paintBars(); return; }
+    if (Q.c !== c) { Q.c = c; Q.prev = null; Q.poor = 0; Q.good = 0; Q.lvl = ''; tune(c); }
+    let rep; try { rep = await c.pc.getStats(); } catch (e) { return; }
+    let recv = 0, lost = 0, jit = 0, outLoss = null, rtt = null;
+    rep.forEach(r => {
+      const kind = r.kind || r.mediaType;
+      if (r.type === 'inbound-rtp' && kind === 'audio') { recv += r.packetsReceived || 0; lost += Math.max(0, r.packetsLost || 0); jit = Math.max(jit, r.jitter || 0); }
+      if (r.type === 'remote-inbound-rtp' && kind === 'audio') { if (r.fractionLost != null) outLoss = Math.max(outLoss || 0, +r.fractionLost * 100); if (r.roundTripTime != null) rtt = Math.max(rtt || 0, r.roundTripTime * 1000); }
+      if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded' && r.currentRoundTripTime != null) rtt = Math.max(rtt || 0, r.currentRoundTripTime * 1000);
+    });
+    const p = Q.prev; Q.prev = { recv, lost };
+    if (!p) return;
+    const dR = Math.max(0, recv - p.recv), dL = Math.max(0, lost - p.lost);
+    const inLoss = dR + dL > 0 ? (dL * 100) / (dR + dL) : (dR === 0 ? 100 : 0);
+    const oLoss = outLoss == null ? 0 : outLoss; const jms = jit * 1000; const r = rtt == null ? 0 : rtt;
+    const worst = Math.max(inLoss, oLoss);
+    const lvl = worst < 3 && r < 350 && jms < 40 ? 'good' : worst < 10 && r < 700 && jms < 90 ? 'mid' : 'poor';
+    if (lvl === 'poor') { Q.poor++; Q.good = 0; } else if (lvl === 'good') { Q.good++; Q.poor = 0; } else { Q.poor = 0; Q.good = 0; }
+    if (lvl !== Q.lvl && (lvl !== 'poor' || Q.poor >= 2)) Q.lvl = lvl;
+    /* kept with the call (diag) */
+    c.diag = c.diag || {}; const q = c.diag.q || (c.diag.q = { n: 0, poorS: 0, lossInMax: 0, lossOutMax: 0, rttMax: 0, rttSum: 0, jitMax: 0, camAuto: 0 });
+    q.n++; q.rttSum += r; q.rttMax = Math.max(q.rttMax, Math.round(r)); q.lossInMax = Math.max(q.lossInMax, Math.round(inLoss)); q.lossOutMax = Math.max(q.lossOutMax, Math.round(oLoss)); q.jitMax = Math.max(q.jitMax, Math.round(jms)); if (lvl === 'poor') q.poorS += 2; q.rttAvg = Math.round(q.rttSum / q.n);
+    /* the note on the screen */
+    const peer = c.dir === 'out' ? c.callee : c.caller; const name = String((typeof NFC().dirOf === 'function' && peer ? (NFC().dirOf(peer) || {}).name : '') || '').split(' ')[0];
+    let w = '';
+    if (Q.poor >= 2) w = oLoss >= 8 && inLoss < 3 ? L('⚠️ النت عندك ضعيف — صوتك مش واصل كويس', '⚠️ Your network is weak — your voice is not getting through well') : inLoss >= 8 && oLoss < 3 ? L(`⚠️ النت عند ${name || 'الطرف التاني'} ضعيف`, `⚠️ ${name || 'The other side'}'s network is weak`) : L('⚠️ الاتصال ضعيف', '⚠️ Weak connection');
+    /* the picture: off on a very weak network, back when it is good again (not if the person turned it off himself) */
+    if (c.video && c.local) {
+      if (Q.poor >= 3 && !c.camOff && !c.autoCamOff) { c.autoCamOff = true; q.camAuto++; c.local.getVideoTracks().forEach(t => { t.enabled = false; }); }
+      else if (c.autoCamOff && Q.good >= 8) { c.autoCamOff = false; if (!c.camOff) c.local.getVideoTracks().forEach(t => { t.enabled = true; }); }
+      if (c.autoCamOff) w = L('📶 النت ضعيف — قفلنا الصورة علشان الصوت يفضل واضح', '📶 Weak network — the picture is off so the sound stays clear');
+    }
+    c.qWarn = w;
+    paintBars();
+  }
+  /* sound first: the voice gets the network priority and a clear bitrate; the picture steps down instead of freezing */
+  function tune(c) {
+    try {
+      (c.pc.getSenders() || []).forEach(s => {
+        if (!s.track || typeof s.getParameters !== 'function') return; const p = s.getParameters(); if (!p) return; p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
+        if (s.track.kind === 'audio') { p.encodings[0].priority = 'high'; p.encodings[0].networkPriority = 'high'; p.encodings[0].maxBitrate = 40000; }
+        if (s.track.kind === 'video') { p.encodings[0].maxBitrate = 1200000; p.degradationPreference = 'balanced'; }
+        s.setParameters(p).catch(() => { });
+      });
+    } catch (e) { /* ignore */ }
+  }
+  function paintBars() {
+    const el = document.getElementById('nfcall'); let b = el && el.querySelector('.nfq');
+    if (!el || !Q.c || Q.c.state !== 'active' || !Q.lvl) { if (b) b.remove(); return; }
+    const n = Q.lvl === 'good' ? 4 : Q.lvl === 'mid' ? 2 : 1; const t = Q.lvl === 'good' ? L('قوي', 'Strong') : Q.lvl === 'mid' ? L('متوسط', 'Fair') : L('ضعيف', 'Weak');
+    const html = `<span class="bars">${[1, 2, 3, 4].map(i => `<i class="${i <= n ? 'on' : ''}" style="height:${4 + i * 3}px"></i>`).join('')}</span><span>${esc(t)}</span>`;
+    if (!b) { el.insertAdjacentHTML('beforeend', `<div class="nfq ${Q.lvl}" aria-live="polite"></div>`); b = el.querySelector('.nfq'); }
+    if (b.dataset.h !== html) { b.innerHTML = html; b.dataset.h = html; b.className = 'nfq ' + Q.lvl; }
+  }
+  setInterval(() => { qTick().catch(() => { }); }, 2000);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    #nf-apkgate{position:fixed;inset:0;z-index:9000;background:rgba(10,10,14,.55);display:flex;align-items:flex-end;justify-content:center;padding:12px;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+    #nf-apkgate .ag{width:100%;max-width:440px;background:var(--surface);color:var(--ink);border-radius:24px;padding:22px 18px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 60px -20px rgba(0,0,0,.5)}
+    #nf-apkgate .agi{width:52px;height:52px;border-radius:16px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:26px}
+    #nf-apkgate h2{margin:0;font-size:20px}#nf-apkgate p{margin:0;font-size:14px;color:var(--ink-2)}
+    #nf-apkgate ol{margin:0;padding-inline-start:20px;font-size:13.5px;display:flex;flex-direction:column;gap:4px}
+    #nf-apkgate .agb{min-height:48px;justify-content:center;font-size:16px}
+    #nf-selfup{position:fixed;inset-inline:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:8900;display:flex;justify-content:center;pointer-events:none}
+    #nf-selfup .au{pointer-events:auto;width:100%;max-width:440px;background:var(--surface);color:var(--ink);border-radius:18px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:0 14px 40px -12px rgba(0,0,0,.45);border:.5px solid var(--line)}
+    #nf-selfup b{font-size:15px}#nf-selfup span{font-size:13px;color:var(--ink-2)}#nf-selfup small{font-size:12px;color:var(--ink-3,var(--ink-2))}
+    #nf-selfup .aubar{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden}#nf-selfup .aubar i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .3s}
+    #nf-selfup .aua{display:flex;gap:8px}#nf-selfup .btn{align-self:flex-start}
+    .nfr-rem{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 2px 10px;border-bottom:.5px solid var(--line);margin-bottom:6px;font-size:13px;font-weight:600}
+    #nfc-pre{position:fixed;inset:0;z-index:9500;background:rgba(10,10,14,.4);display:flex;align-items:flex-end;justify-content:center;padding:12px}
+    #nfc-pre .pp{width:100%;max-width:420px;background:var(--surface);color:var(--ink);border-radius:22px;padding:18px;display:flex;flex-direction:column;gap:9px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+    #nfc-pre .pp b{font-size:17px}#nfc-pre .pp span{font-size:13.5px;color:var(--ink-2)}#nfc-pre .btn{min-height:46px;justify-content:center}
+    .nfset{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:14px;background:var(--surface-2)}
+    .nfset span{font-size:13px;color:var(--ink-2)}.nfset .btn{align-self:flex-start;margin-top:4px}
+    .nfq{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));inset-inline-start:14px;display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.35);color:#fff;font-size:12px;font-weight:600;z-index:5}
+    .nfq .bars{display:inline-flex;align-items:flex-end;gap:2px}.nfq .bars i{width:3px;border-radius:1px;background:rgba(255,255,255,.35)}
+    .nfq.good .bars i.on{background:#34c759}.nfq.mid .bars i.on{background:#ffcc00}.nfq.poor .bars i.on{background:#ff453a}
+  </style>`);
+})();
+/* =====================================================================
+   v7.36 — pay batches «Group» + one transfer per supplier (Mahmoud, 10 Oct; brief claude/pay-batch-brief.md, «start» 11 Oct):
+   «when a group of things is approved at once, give the approver a «group» option — the total comes to me once with who it goes
+   to, and I transfer once»; «supplier payments can be grouped per supplier … then counted on Bahaa or Ahmed Abdelzaher's custody».
+   · «Due to transfer» (money page) for the owner, Saeed (hr) and Ahmed (acc): tick several items → «Group» → the items, the total
+     and how it is paid → a pay batch PB-26-001 goes to the owner (a line in «Money waiting for you», a task and a notification).
+       – «Bahaa pays them»: the owner transfers the total once into Bahaa's custody (Ahmed when Bahaa is away today), with the
+         screenshot; then Bahaa pays every item from his custody with its own screenshot (supplier POs, running costs, custody
+         requests) — like the advance batches.
+       – «Straight to the suppliers» (POs only): one line per supplier with the sum of his POs and his transfer numbers.
+   · A supplier with more than one PO waiting for the owner's transfer (or a deferred one due today) is one line «supplier — n POs»
+     with the sum: one transfer on his registered number (the screenshot is read and matched with the sum), every PO of his closes
+     «transferred», and the money is counted through the custody of whoever handles the supply (Bahaa; Ahmed when Bahaa is away):
+     owner → custody, custody → supplier, so the supplier's wallet and the custody stay right.
+   · Who approves what and the transfer itself stay as they were; no amounts in tasks or notifications (only on the money pages and
+     the owner's money card). Factory only. iPhone and Android · Advanced and Icons · Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PAYBATCH__) return; window.__NF_PAYBATCH__ = 1;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof moneyDue !== 'function' || typeof EXTRA_VIEWS === 'undefined' || !EXTRA_VIEWS.money) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const pol = () => (S.settings && S.settings.policy) || {};
+  const payerIds = () => [pol().advPayerId, pol().advPayerAltId].filter(Boolean).map(String);
+  const myWid = () => String((S.session && S.session.workerId) || '');
+  const canBatch = () => !!S.session && writable() && (isAdmin() || ['hr', 'acc'].includes(role()));
+  const seesDue = () => !!S.session && (isAdmin() || ['hr', 'acc'].includes(role()));
+  const canMoneyWrite = () => isAdmin() || ['hr', 'acc'].includes(role());
+  const custodyOf = wid => (typeof wallets === 'function' ? wallets().find(w => String(w.holder) === String(wid)) : null) || null;
+  const nameOf = wid => { const w = byId('workers', wid); return w ? String(w.name || '') : ''; };
+  const short = n => String(n || '').split(' ').slice(0, 2).join(' ');
+  const absentToday = wid => { try { const a = attendanceFor(todayISO())[wid]; return !!a && ['A', 'L'].includes(a.s); } catch (e) { return false; } };
+  const defaultPayer = () => { const [a, b] = payerIds(); return a && b && absentToday(a) ? b : (a || b || ''); };
+  const remaining = p => r2(poPayable(p) - (+p.paid || 0));
+  const money = v => `${fmtMoney(v)} ${CUR()}`;
+  const batches = () => list('money').filter(x => x && x.type === 'paybatch');
+  const toWho = b => (b.mode === 'payer' ? L(`لعهدة ${short(nameOf(b.payerId))}`, `to ${short(nameOf(b.payerId))}'s custody`) : L('للموردين', 'to the suppliers'));
+  const live = b => b && ['sent', 'funded'].includes(b.status);
+
+  /* ---------- items ---------- */
+  const keyOf = x => `${x.kind}:${x.id}`;
+  const supKey = p => (p.supplierId ? String(p.supplierId) : 'n:' + String(p.supplier || '').trim());
+  function itemOf(x) {
+    const it = { key: keyOf(x), k: x.kind, id: x.id, amount: r2(+x.amount || 0), label: String(x.label || ''), sub: String(x.sub || '') };
+    if (x.kind === 'po') { const p = byId('purchases', x.id); if (p) { it.no = p.number || ''; it.supplier = p.supplier || ''; it.sk = supKey(p); it.deferred = !!p.deferred; } }
+    if (x.kind === 'opex' || x.kind === 'fund') { const r = byId('requests', x.id); if (r) { it.cat = r.cat || ''; it.homeId = r.homeId || null; it.walletId = r.walletId || null; it.payee = r.payee || ''; it.month = r.month || ''; it.who = r.requesterName || ''; } }
+    return it;
+  }
+  function itemPaid(it, b) {
+    if (it.k === 'po') {
+      const p = byId('purchases', it.id); if (!p || p.status === 'cancelled') return true;
+      if (p.deferred) return remaining(p) <= 0.5 || ((p.deferred.payments || []).some(x => b && x.pbId === b.id));
+      return p.status !== 'transfer';
+    }
+    const r = byId('requests', it.id);
+    if (it.k === 'opex') return r ? !!r.paidAt : list('expenses').some(e => e.reqId === it.id);
+    if (it.k === 'fund') return r ? r.status !== 'pending' : false;
+    return false;
+  }
+  const unpaid = b => (b.items || []).filter(it => !itemPaid(it, b));
+  const inLive = () => { const s = new Set(); batches().filter(live).forEach(b => unpaid(b).forEach(it => s.add(it.key))); return s; };
+  const baseDue = moneyDue;
+  const freeItems = () => { const busy = inLive(); return baseDue().filter(x => !busy.has(keyOf(x))).map(itemOf); };
+  /* a supplier with more than one PO waiting (deferred ones only when their day came) */
+  function groupsOf(items) {
+    const today = todayISO(); const m = new Map();
+    items.filter(it => it.k === 'po' && it.sk).forEach(it => {
+      const p = byId('purchases', it.id); if (!p) return;
+      if (p.deferred && !(p.deferred.due && p.deferred.due <= today)) return;
+      if (!m.has(it.sk)) m.set(it.sk, []); m.get(it.sk).push(it);
+    });
+    return [...m.entries()].filter(([, a]) => a.length > 1).map(([sk, a]) => ({ sk, items: a, supplier: a[0].supplier, total: r2(sum(a, x => x.amount)) }));
+  }
+
+  /* ---------- the owner's due list: batches + supplier groups + the rest ---------- */
+  moneyDue = function () {
+    const out = [];
+    try {
+      sortBy(batches().filter(b => b.status === 'sent'), b => b.sentAt || '').forEach(b => {
+        const left = unpaid(b); if (!left.length) return;
+        const to = b.mode === 'payer' ? L(` — لعهدة ${short(nameOf(b.payerId))}`, ` — to ${short(nameOf(b.payerId))}'s custody`) : L(' — للموردين', ' — to the suppliers');
+        out.push({ kind: 'pb', id: b.id, label: L(`دفعة تحويل ${b.code} — ${left.length} بند${to}`, `Pay batch ${b.code} — ${left.length} items${to}`), sub: left.map(it => `${it.no || short(it.supplier || it.who || it.label)} ${fmtMoney(it.amount)}`).join(' · '), subNo: left.map(it => it.no || short(it.supplier || it.who || it.label)).join('، '), amount: r2(sum(left, it => it.amount)), action: 'pbOpen', href: 'money' });
+      });
+    } catch (e) { /* ignore */ }
+    const items = freeItems(); const gs = groupsOf(items); const grouped = new Set(); gs.forEach(g => g.items.forEach(it => grouped.add(it.key)));
+    gs.forEach(g => out.push({ kind: 'sup', id: g.sk, label: L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), sub: g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · '), subNo: g.items.map(it => it.no).join('، '), amount: g.total, action: 'supGroupPay', href: 'money' }));
+    const busy = inLive();
+    baseDue().filter(x => !busy.has(keyOf(x)) && !grouped.has(keyOf(x))).forEach(x => out.push(x));
+    return out;
+  };
+
+  /* ---------- the «due to transfer» card (owner / Saeed / Ahmed) ---------- */
+  const KB = () => ({ po: [L('مورد', 'Supplier'), 'acc'], fund: [L('عهدة', 'Custody'), 'warn'], opex: [L('تشغيل', 'Running cost'), ''], pb: [L('دفعة تحويل', 'Pay batch'), 'warn'], sup: [L('مورد', 'Supplier'), 'acc'] });
+  const ui = () => (S.ui.pb ||= { pick: false, sel: [] });
+  function dueCard() {
+    const owner = isAdmin(); const u = ui(); const K = KB();
+    const items = freeItems(); const gs = groupsOf(items); const grouped = new Set(); gs.forEach(g => g.items.forEach(it => grouped.add(it.key)));
+    const singles = items.filter(it => !grouped.has(it.key));
+    const sent = sortBy(batches().filter(b => b.status === 'sent' && unpaid(b).length), b => b.sentAt || '');
+    const funded = sortBy(batches().filter(b => b.status === 'funded' && unpaid(b).length), b => b.fundedAt || '');
+    const sel = new Set(u.sel); const pick = u.pick && canBatch();
+    const box = keys => pick ? `<input type="checkbox" class="pbck" data-pbk="${esc(keys.join(','))}" ${keys.every(k => sel.has(k)) ? 'checked' : ''} aria-label="${esc(L('اختار', 'Select'))}">` : '';
+    const row = (k, label, sub, amount, act, arg, btn, keys) => `<div class="item pbrow" style="padding:10px 12px">${keys ? box(keys) : ''}<div class="main"><div class="title"><span class="badge ${K[k][1]}" style="padding:0 6px">${esc(K[k][0])}</span> ${esc(label)}</div>${sub ? `<div class="meta"><span>${esc(sub)}</span></div>` : ''}</div><b class="num" style="margin-inline-end:8px">${fmtMoney(amount)}</b>${act && !pick ? `<button class="btn sm ${btn[1] || ''}" data-action="${act}" data-arg="${esc(arg)}" data-stop="1">${esc(btn[0])}</button>` : ''}</div>`;
+    let rows = '';
+    sent.forEach(b => { const left = unpaid(b); rows += row('pb', `${b.code} — ${L(`${left.length} بند`, `${left.length} items`)} — ${toWho(b)}`, L(`جمّعها ${b.sentByName || ''}: `, `grouped by ${b.sentByName || ''}: `) + left.map(it => it.no || short(it.supplier || it.who || it.label)).join('، '), sum(left, it => it.amount), 'pbOpen', b.id, owner ? [L('حوّل الدفعة', 'Pay the batch'), 'p'] : [L('افتح', 'Open'), ''], null); });
+    funded.forEach(b => { const left = unpaid(b); rows += row('pb', L(`${b.code} — عند ${short(nameOf(b.payerId))} يحوّلها`, `${b.code} — with ${short(nameOf(b.payerId))} to pay out`), L(`لسه ${left.length} من ${(b.items || []).length}`, `${left.length} of ${(b.items || []).length} still to pay`), sum(left, it => it.amount), 'pbOpen', b.id, [L('افتح', 'Open'), ''], null); });
+    gs.forEach(g => { rows += row('sup', L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · '), g.total, owner ? 'supGroupPay' : '', g.sk, [L('حوّل مرة واحدة', 'Pay once'), 'p'], g.items.map(it => it.key)); });
+    const act = { po: 'poTransfer', fund: 'fundPay', opex: 'opexPay' };
+    singles.forEach(it => { const x = baseDue().find(y => keyOf(y) === it.key) || {}; rows += row(it.k, it.label, it.sub, it.amount, owner ? (x.action || act[it.k]) : '', it.id, [L('حوّلت', 'Paid'), 'p'], [it.key]); });
+    const total = r2(sum(sent, b => sum(unpaid(b), it => it.amount)) + sum(items, it => it.amount));
+    const selItems = items.filter(it => sel.has(it.key));
+    const foot = pick ? `<div class="pbfoot"><span>${esc(L(`المحدد ${selItems.length} بند`, `${selItems.length} selected`))} · <b>${esc(money(sum(selItems, it => it.amount)))}</b></span><div class="grow"></div><button class="btn sm p" data-action="pbMake" ${selItems.length < 2 ? 'disabled' : ''}>${esc(L('تجميع', 'Group'))}</button></div>` : '';
+    const n = sent.length + gs.length + singles.length;
+    return `<div class="card" id="pbdue"><div class="cardhead"><h3>${esc(owner ? L('مستحق عليك تحويله', 'Due for you to transfer') : L('مستحق تحويله', 'Due to transfer'))}</h3><span class="muted small">${n}</span><div class="grow"></div>${owner && total ? `<b class="num small">${esc(money(total))}</b>` : ''}${canBatch() && items.length > 1 ? `<button class="btn sm ${pick ? '' : 'ghost'}" data-action="pbPick">${esc(pick ? L('إلغاء', 'Cancel') : L('تجميع', 'Group'))}</button>` : ''}</div>
+      ${pick ? `<div class="tiny muted" style="margin:-2px 0 6px">${esc(L('علّم على البنود اللي هتتحوّل مرة واحدة، وبعدين «تجميع».', 'Tick the items to be paid in one go, then «Group».'))}</div>` : ''}
+      ${rows ? `<div class="list">${rows}</div>` : `<div class="muted small">${esc(L('مفيش حاجة مستنية تحويل', 'Nothing waiting for a transfer'))}</div>`}${foot}</div>`;
+  }
+  moneyDueCard = () => dueCard();
+  /* Saeed / Ahmed: the same card on their money page (the owner already has it in place) */
+  EXTRA_VIEWS.money = (base => r => {
+    let h = base(r); try {
+      if (r && r.id) return h;
+      const mine = payerCard();
+      if (!isAdmin() && seesDue()) { const i = h.indexOf('<div class="stack">'); const add = mine + dueCard(); h = i < 0 ? add + h : h.slice(0, i + 19) + add + h.slice(i + 19); }
+      else if (mine) { const i = h.indexOf('<div class="stack">'); h = i < 0 ? mine + h : h.slice(0, i + 19) + mine + h.slice(i + 19); }
+    } catch (e) { /* ignore */ }
+    return h;
+  })(EXTRA_VIEWS.money);
+  ACTIONS.pbPick = () => { const u = ui(); u.pick = !u.pick; u.sel = []; render(true); };
+  document.addEventListener('change', e => {
+    const c = e.target.closest && e.target.closest('input[data-pbk]'); if (!c) return;
+    const u = ui(); const keys = String(c.dataset.pbk).split(',').filter(Boolean); const s = new Set(u.sel);
+    keys.forEach(k => { if (c.checked) s.add(k); else s.delete(k); }); u.sel = [...s]; render(true);
+  });
+
+  /* ---------- make a batch ---------- */
+  function nextCode() { const yy = todayISO().slice(2, 4); const pre = `PB-${yy}-`; const n = batches().reduce((m, b) => { const c = String(b.code || ''); if (!c.startsWith(pre)) return m; const k = parseInt(c.slice(pre.length), 10); return isNaN(k) ? m : Math.max(m, k); }, 0) + 1; return pre + String(n).padStart(3, '0'); }
+  ACTIONS.pbMake = () => {
+    if (!canBatch()) return; const sel = new Set(ui().sel); const items = freeItems().filter(it => sel.has(it.key)); if (items.length < 2) return;
+    const total = r2(sum(items, it => it.amount)); const allPo = items.every(it => it.k === 'po'); const pays = payerIds(); const def = defaultPayer();
+    const payerOpts = pays.map(id => `<option value="${esc(id)}" ${id === def ? 'selected' : ''}>${esc(nameOf(id) || id)}${absentToday(id) ? esc(L(' — غايب النهارده', ' — away today')) : ''}${custodyOf(id) ? '' : esc(L(' (مالوش عهدة)', ' (no custody)'))}</option>`).join('');
+    openModal({ title: L(`تجميع ${items.length} بند للتحويل`, `Group ${items.length} items for one transfer`), submitLabel: L('ابعت للمالك', 'Send to the owner'),
+      body: `<div class="form"><div class="full pblist">${items.map(it => `<div class="pbli"><span>${esc(it.label)}</span><b class="num">${fmtMoney(it.amount)}</b></div>`).join('')}<div class="pbli tot"><span>${esc(L('المجموع', 'Total'))}</span><b class="num">${esc(money(total))}</b></div></div>
+        <div class="full"><label class="pbmode"><input type="radio" name="mode" value="payer" checked> <span><b>${esc(L('لعهدة المحوِّل — هو يوزّع', 'Into the payer\'s custody — he pays them out'))}</b><small>${esc(L('المالك يحوّل المجموع مرة واحدة، وهو يحوّل كل بند من عهدته بصورة.', 'The owner transfers the total once; he pays every item from his custody with a screenshot.'))}</small></span></label>
+        ${allPo ? `<label class="pbmode"><input type="radio" name="mode" value="direct"> <span><b>${esc(L('مباشر للموردين', 'Straight to the suppliers'))}</b><small>${esc(L('المالك يحوّل لكل مورد مرة واحدة بمجموع أوامره على رقمه المتسجّل.', 'The owner transfers once to each supplier — the sum of his POs, on his registered number.'))}</small></span></label>` : ''}</div>
+        ${pays.length ? field(L('المحوِّل', 'Payer'), `<select name="payer">${payerOpts}</select>`) : `<div class="full banner warn small">${esc(L('مفيش محوِّل متسجّل في الإعدادات (اللي بيحوّل السلف).', 'No payer is set in the settings (the advances payer).'))}</div>`}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const mode = d.mode === 'direct' && allPo ? 'direct' : 'payer'; const payer = String(d.payer || def || '');
+        if (mode === 'payer' && !payer) { toast(L('اختار المحوِّل', 'Choose the payer'), 'err'); return false; }
+        const w = custodyOf(payer); if (mode === 'payer' && !w) { toast(L('المحوِّل ده مالوش عهدة — اعملها من «الفلوس» الأول', 'This payer has no custody — add it on the money page first'), 'err'); return false; }
+        const me = S.session || {}; const now = nowISO(); const id = 'pb_' + uid(); const code = nextCode();
+        const doc = { id, type: 'paybatch', code, mode, payerId: payer || null, walletId: w ? w.id : null, workerId: payer || null, items, total, status: 'sent', sentAt: now, sentBy: me.id || null, sentByName: me.name || '', createdAt: now, month: monthOf(todayISO()) };
+        await Store.save('money', doc, { silent: true });
+        const to = mode === 'payer' ? L(`لعهدة ${short(nameOf(payer))}`, `to ${short(nameOf(payer))}'s custody`) : L('للموردين', 'to the suppliers');
+        if (!isAdmin()) {
+          try { await Store.save('tasks', { id: `pbt_${id}`, title: L(`دفعة تحويل ${code} مستنية تحويلك — ${items.length} بند ${to}`, `Pay batch ${code} waits for your transfer — ${items.length} items ${to}`), desc: L('افتح «الفلوس» ← مستحق عليك تحويله — المجموع والبنود هناك.', 'Open «Money» → due for you to transfer — the total and the items are there.'), link: '/#/money', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'money', createdBy: me.id || null, createdByName: me.name || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+          try { if (typeof pushSend === 'function') pushSend(['role:admin'], L(`${short(me.name)} جمّع ${items.length} بند في تحويل واحد — ${code}`, `${short(me.name)} grouped ${items.length} items into one transfer — ${code}`), to, '/#/money', 'paybatch'); } catch (e) { /* ignore */ }
+        }
+        const u = ui(); u.pick = false; u.sel = [];
+        toast(isAdmin() ? L(`اتعملت ${code}`, `${code} made`) : L(`اتبعتت ${code} للمالك`, `${code} sent to the owner`));
+        if (isAdmin()) setTimeout(() => ACTIONS.pbOpen(id), 450);
+      } });
+  };
+
+  /* ---------- supplier numbers / payer numbers ---------- */
+  const ST = () => ({ vf: L('فودافون كاش', 'Vodafone Cash'), et: L('اتصالات كاش', 'Etisalat Cash'), or: L('أورنج كاش', 'Orange Cash'), we: L('وي كاش', 'WE Pay'), ip: L('إنستاباي', 'InstaPay'), card: L('كارت', 'Card'), bank: L('حساب بنك', 'Bank account') });
+  const mNum = m => !m ? '' : (m.type === 'card' ? String(m.card || '').replace(/(\d{4})(?=\d)/g, '$1 ') : m.type === 'bank' ? `${m.bank || ''} — ${m.account || ''}` : (m.number || m.ipa || ''));
+  const mCopy = m => !m ? '' : (m.type === 'card' ? m.card : m.type === 'bank' ? m.account : (m.number || m.ipa)) || '';
+  const mLine = (m, radio, i) => `<div class="spm">${radio ? `<label><input type="radio" name="mid" value="${esc(m.id || '')}" ${i === 0 ? 'checked' : ''}>` : '<span>'}<span class="muted small">${esc(ST()[m.type] || '')}</span><span class="v">${esc(mNum(m))}</span>${radio ? '</label>' : '</span>'}${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${mCopy(m) ? `<button type="button" class="btn xs" data-action="pbCopy" data-arg="${esc(mCopy(m))}">${esc(L('نسخ', 'Copy'))}</button>` : ''}</div>`;
+  ACTIONS.pbCopy = async v => { try { await navigator.clipboard.writeText(v); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(v); } };
+  const supMethods = sk => { const sid = String(sk).startsWith('n:') ? '' : sk; const sp = (sid && typeof window.nfSupPayOf === 'function' && window.nfSupPayOf(sid)) || null; return ((sp && sp.methods) || []).filter(Boolean); };
+  async function shrink(file) { const src = await fileToDataURL(file); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1800 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.88)); }; im.onerror = rej; im.src = src; }); }
+  async function supRead(poId, amount, file) {
+    try { const body = { action: 'supread', poId, amount, image: await shrink(file) }; const r = typeof window.nfAdvPayCall === 'function' ? await window.nfAdvPayCall(body) : (S.sb && S.sb.functions ? (await S.sb.functions.invoke('advpay', { body })).data : null); return r || { ok: false, issues: [] }; } catch (e) { return { ok: false, issues: [L('مقدرتش أقرأ الصورة', 'Could not read the screenshot') + ' — ' + (e.message || e)] }; }
+  }
+  async function attach(file, ownerKind, ownerId, note) { let fileIds = [], thumb = null; try { const doc = await proofAttach(file, { kind: 'transfer', ownerKind, ownerId, note: note || '' }); if (doc) { fileIds = [doc.id]; thumb = doc.thumb || null; } } catch (e) { /* ignore */ } if (!thumb) { try { thumb = await fileToThumb(file); } catch (e) { /* ignore */ } } return { fileIds, thumb }; }
+  /* resolves only after the modal is gone, so a confirm opened next is not closed by it */
+  function dialog(o) { return new Promise(resolve => { let done = false, val = null; const fin = v => { if (!done) { done = true; clearInterval(iv); setTimeout(() => resolve(v), 30); } }; openModal(Object.assign({}, o, { onSubmit: async f => { const v = await o.onSubmit(f); if (v === false) return false; val = v; return true; } })); const iv = setInterval(() => { if (!document.getElementById('mform')) fin(val); }, 150); }); }
+
+  /* ---------- a PO is paid (owner straight, or the payer from his custody) ---------- */
+  async function poPaid(p, o) {
+    const me = S.session || {}; const now = nowISO(); const amt = r2(o.amount); const w = typeof walletOf === 'function' ? walletOf(o.src) : null;
+    const exp = { id: `pot_${p.id}_${uid().slice(0, 6)}`, date: todayISO(), month: monthOf(todayISO()), amount: amt, cat: 'materials', account: o.src, orderId: null, payee: p.supplier || '', supplierId: p.supplierId || null, ref: p.number, note: `${L('تحويل للمورد', 'Transfer to the supplier')} — ${p.number}${o.ref ? ' · ' + o.ref : ''}${o.pbCode ? ' · ' + o.pbCode : ''}`, src: w ? 'wallet' : 'purchase', purchaseId: p.id, thumb: o.thumb || null, trfRef: o.ref || null, pbId: o.pbId || null, byName: me.name || '', createdAt: now };
+    if (w) exp.holderId = String(w.holder);
+    await Store.save('expenses', exp, { silent: true });
+    const info = { amount: amt, at: now, byName: me.name || '', fileIds: o.fileIds || [], thumb: o.thumb || null, note: o.note || '', source: o.src, sourceName: acctLabel(o.src), methodId: o.methodId || null, methodLabel: o.methodLabel || '', ref: o.ref || '', proofUrl: o.proofUrl || null, proofPath: o.proofPath || null, aiOk: !!o.aiOk, aiIssues: o.aiIssues || [], pbId: o.pbId || null, groupOf: o.groupOf || null };
+    if (p.deferred) {
+      const p1 = byId('purchases', p.id) || p; const paid = r2((+p1.paid || 0) + amt); const left = r2(poPayable(p1) - paid);
+      await Store.update('purchases', p.id, { paid, deferred: Object.assign({}, p1.deferred, { payments: (p1.deferred.payments || []).concat([Object.assign({ id: uid(), src: o.src, srcName: acctLabel(o.src) }, info)]), settledAt: left <= 0.5 ? now : null }) });
+      if (left <= 0.5) { try { const t = byId('tasks', `podue_${p.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }, { silent: true }); } catch (e) { /* ignore */ } }
+      try { notifyRole('purch', L(`اتحوّل للمورد ${p.supplier || ''} — ${p.number}`, `Paid to the supplier ${p.supplier || ''} — ${p.number}`), L('ابعت التحويل للمورد واتساب من صفحة الأمر', 'Send the transfer to the supplier on WhatsApp from the PO page'), { id: `po_pl_${p.id}_${exp.id.slice(-6)}` }); } catch (e) { /* ignore */ }
+      return;
+    }
+    await Store.update('purchases', p.id, { status: 'ordered', transfer: info, paid: r2((+p.paid || 0) + amt) });
+    const s = typeof supplierOf === 'function' ? supplierOf(p) : null;
+    try { await notifyRole('purch', L(`تم تحويل قيمة ${p.number} للمورد — اطلب التوريد`, `${p.number} is paid to the supplier — order the supply`), `${p.supplier || ''}${s && s.phone ? ` · ${s.phone}` : ''}`, { id: `po_ok_${p.id}`, orderId: p.orderId || null, fields: { purchaseId: p.id } }); } catch (e) { /* ignore */ }
+    try { await notifyRole('acc', L(`اتحوّل للمورد — ${p.number}`, `Paid to the supplier — ${p.number}`), L(`${p.supplier || ''} — صورة التحويل على صفحة الأمر`, `${p.supplier || ''} — the screenshot is on the PO page`), { id: `po_trf_acc_${p.id}` }); } catch (e) { /* ignore */ }
+    try { await Store.save('tasks', { id: `po_pickup_${p.id}`, title: L(`مشوار نقل: استلام توريد ${p.number} من ${p.supplier || 'المورد'}`, `Transport trip: collect ${p.number} from ${p.supplier || 'the supplier'}`), desc: `${(p.items || []).map(it => `${it.name || (byId('materials', it.materialId) || {}).name || ''} × ${fmtNum(it.qty)} ${it.unit || ''}`).join('، ')}\n${s && s.location ? s.location : ''}${s && s.lat != null && typeof mapsLink === 'function' ? ' — ' + mapsLink(s.lat, s.lng) : ''}`, deptId: null, assigneeId: null, orderId: p.orderId || null, dueDate: p.expected || todayISO(), priority: 'high', status: 'open', kind: 'task', source: 'fleet', toRole: 'fleet', purchaseId: p.id, createdBy: null, createdByName: L('السيستم', 'System'), createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+    try { const t = byId('tasks', `po_hr_${p.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: L('السيستم', 'System') }, { silent: true }); } catch (e) { /* ignore */ }
+  }
+  const poAmount = p => (p.deferred ? remaining(p) : poPayable(p));
+
+  /* ---------- the owner: one transfer to a supplier for all his POs ---------- */
+  async function supGroupPay(sk, pb) {
+    if (!isAdmin()) return;
+    const pos = (pb ? unpaid(pb).filter(it => it.k === 'po' && it.sk === sk) : (groupsOf(freeItems()).find(g => g.sk === sk) || { items: [] }).items).map(it => byId('purchases', it.id)).filter(p => p && (p.status === 'transfer' || (p.deferred && remaining(p) > 0.5)));
+    if (!pos.length) { toast(L('مفيش أوامر مستنية تحويل للمورد ده', 'No POs waiting for this supplier'), 'err'); return; }
+    const total = r2(sum(pos, poAmount)); const ms = supMethods(sk); const sup = pos[0].supplier || '';
+    const pays = payerIds(); const def = (pb && pb.payerId) || defaultPayer();
+    const custOpts = pays.filter(id => custodyOf(id)).map(id => `<option value="${esc(custodyOf(id).id)}" ${id === def ? 'selected' : ''}>${esc(L(`عهدة ${nameOf(id)}`, `${nameOf(id)}'s custody`))}${absentToday(id) ? esc(L(' — غايب النهارده', ' — away today')) : ''}</option>`).join('') + `<option value="">${esc(L('من غير عهدة — من حسابي على طول', 'No custody — straight from my account'))}</option>`;
+    const r = await dialog({ title: L(`تحويل واحد — ${sup}`, `One transfer — ${sup}`), submitLabel: L('حوّلت — سجّل', 'Transferred — record it'),
+      body: `<div class="form"><div class="full pblist">${pos.map(p => `<div class="pbli"><span>${esc(p.number)}${p.deferred ? esc(L(' (آجل)', ' (deferred)')) : ''}</span><b class="num">${fmtMoney(poAmount(p))}</b></div>`).join('')}<div class="pbli tot"><span>${esc(L('المجموع', 'Total'))}</span><b class="num">${esc(money(total))}</b></div></div>
+        <div class="full"><div class="tiny muted" style="margin-bottom:4px">${esc(L('حوّل المجموع على رقم من دول:', 'Transfer the total to one of these:'))}</div>${ms.length ? ms.map((m, i) => mLine(m, true, i)).join('') : `<div class="banner warn small">${esc(L('المورد مالوش أرقام تحويل مسجّلة — اطلب من المشتريات يسجّلها من صفحة المورد.', 'The supplier has no registered transfer numbers — ask purchasing to add them on his page.'))}</div><input type="hidden" name="mid" value="">`}</div>
+        ${field(L('التحويل من', 'Paid from'), `<select name="from">${srcOptions('personal', false)}</select>`)}
+        ${field(L('يتحسب على', 'Counted on'), `<select name="cust">${custOpts}</select>`)}
+        <div class="field full"><label>${esc(L('صورة التحويل', 'Transfer screenshot'))}</label><input type="file" id="pb-file" accept="image/*"></div>${field(L('ملاحظة', 'Note'), inp('note', ''), 'full')}
+        <div class="full tiny muted">${esc(L('السيستم بيقرأ الصورة ويتأكد إن المستلم رقم المورد والمبلغ = المجموع، وكل الأوامر دي بتتقفل «اتحوّلت».', 'The screenshot is read: the recipient must be the supplier\'s number and the amount the total; all these POs close «transferred».'))}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const file = (f.querySelector('#pb-file') || {}).files?.[0]; if (!file) { toast(L('صورة التحويل مطلوبة', 'The screenshot is needed'), 'err'); return false; }
+        toast(L('بيقرأ صورة التحويل…', 'Reading the screenshot…'));
+        const a = await attach(file, 'purchase', pos[0].id, d.note); const rd = await supRead(pos[0].id, total, file);
+        const m = ms.find(x => x.id === (rd && rd.methodId)) || ms.find(x => x.id === d.mid) || null;
+        return { from: d.from || 'personal', cust: d.cust || '', note: d.note || '', fileIds: a.fileIds, thumb: a.thumb, ref: (rd && rd.ref) || '', proofUrl: (rd && rd.proofUrl) || null, proofPath: (rd && rd.proofPath) || null, aiOk: !!(rd && rd.ok), issues: (rd && rd.issues) || [], methodId: m ? m.id : null, methodLabel: m ? `${ST()[m.type] || ''} ${mNum(m)}`.trim() : '' };
+      } });
+    if (!r) return;
+    if (r.issues.length && !(await confirmDlg(L(`صورة التحويل مش مطابقة:\n${r.issues.join('\n')}\n\nتسجّل التحويل برضه؟`, `The screenshot does not match:\n${r.issues.join('\n')}\n\nRecord it anyway?`), L('أيوه سجّل', 'Yes, record'), false))) return;
+    const groupOf = 'sg_' + uid().slice(0, 8);
+    if (r.cust) { try { await saveXfer({ id: `sgx_${groupOf}`, from: r.from, to: r.cust, amount: total, cat: 'materials', note: L(`تحويل للمورد ${sup} — ${pos.map(p => p.number).join('، ')}`, `Transfer to the supplier ${sup} — ${pos.map(p => p.number).join(', ')}`), thumb: r.thumb, fileIds: r.fileIds, pbId: pb ? pb.id : null, groupOf }); } catch (e) { /* ignore */ } }
+    for (let i = 0; i < pos.length; i++) {
+      const p = byId('purchases', pos[i].id) || pos[i];
+      await poPaid(p, { amount: poAmount(p), src: r.cust || r.from, thumb: r.thumb, fileIds: r.fileIds, note: r.note, ref: i === 0 ? r.ref : '', methodId: r.methodId, methodLabel: r.methodLabel, proofUrl: r.proofUrl, proofPath: r.proofPath, aiOk: r.aiOk, aiIssues: r.issues, pbId: pb ? pb.id : null, pbCode: pb ? pb.code : '', groupOf });
+    }
+    try { const t = pb && byId('tasks', `pbt_${pb.id}`); if (t && t.status !== 'done' && !unpaid(byId('money', pb.id) || pb).length) await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    toast(L(`اتسجّل — ${pos.length} أوامر اتقفلت «اتحوّلت»`, `Recorded — ${pos.length} POs closed «transferred»`));
+  }
+  ACTIONS.supGroupPay = arg => { const s = String(arg || ''); if (s.startsWith('pb|')) { const [, id, sk] = s.split('|'); const b = byId('money', id); if (b) supGroupPay(sk, b); return; } supGroupPay(s, null); };
+
+  /* ---------- open a batch ---------- */
+  const payerNumbers = wid => { const x = byId('wallets', wid); if (!x) return `<div class="banner warn small">${esc(L(`${nameOf(wid)} لسه ماسجّلش رقم تحويلات`, `${nameOf(wid)} has not registered a transfer number yet`))}</div>`; return mLine(x, false) + (x.alt ? mLine(x.alt, false) : ''); };
+  const itemLine = (it, b) => { const paid = itemPaid(it, b); return `<div class="pbli ${paid ? 'done' : ''}"><span>${esc(it.label)}${paid ? ` <span class="badge good">${esc(L('اتحوّلت', 'Paid'))}</span>` : ''}</span><b class="num">${fmtMoney(it.amount)}</b></div>`; };
+  ACTIONS.pbOpen = id => {
+    const b = byId('money', id); if (!b || b.type !== 'paybatch') return; const left = unpaid(b); const leftSum = r2(sum(left, it => it.amount));
+    const head = `<div class="full small muted">${esc(L(`جمّعها ${b.sentByName || ''} · ${fmtDate((b.sentAt || '').slice(0, 10))}`, `Grouped by ${b.sentByName || ''} · ${fmtDate((b.sentAt || '').slice(0, 10))}`))}${b.fundedAt ? esc(L(` · اتحوّلت لعهدة ${nameOf(b.payerId)} ${fmtDate(b.fundedAt.slice(0, 10))}`, ` · paid into ${nameOf(b.payerId)}'s custody ${fmtDate(b.fundedAt.slice(0, 10))}`)) : ''}</div>`;
+    const lines = `<div class="full pblist">${(b.items || []).map(it => itemLine(it, b)).join('')}<div class="pbli tot"><span>${esc(left.length ? L(`الباقي (${left.length} بند)`, `Left (${left.length} items)`) : L('خلصت', 'All paid'))}</span><b class="num">${esc(money(leftSum))}</b></div></div>`;
+    const cancel = b.status === 'sent' && (isAdmin() || b.sentBy === (S.session && S.session.id)) && writable() ? `<div class="full"><button type="button" class="btn sm ghost" data-action="pbCancel" data-arg="${esc(b.id)}">${esc(L('إلغاء الدفعة — البنود ترجع لوحدها', 'Cancel the batch — the items go back one by one'))}</button></div>` : '';
+    if (isAdmin() && b.status === 'sent' && b.mode === 'payer' && left.length) {
+      openModal({ title: L(`${b.code} — حوّل ${money(leftSum)} لعهدة ${short(nameOf(b.payerId))}`, `${b.code} — transfer ${money(leftSum)} to ${short(nameOf(b.payerId))}'s custody`), submitLabel: L('حوّلت — سجّل', 'Transferred — record it'),
+        body: `<div class="form">${head}${lines}<div class="full"><div class="tiny muted" style="margin-bottom:4px">${esc(L(`رقم ${nameOf(b.payerId)}:`, `${nameOf(b.payerId)}'s number:`))}</div>${payerNumbers(b.payerId)}</div>
+          ${field(L('حوّلت من', 'Paid from'), `<select name="from">${srcOptions('personal', false)}</select>`)}<div class="field full"><label>${esc(L('صورة التحويل', 'Transfer screenshot'))}</label><input type="file" id="pbf-file" accept="image/*,application/pdf"></div>${field(L('ملاحظة', 'Note'), inp('note', ''), 'full')}
+          <div class="full tiny muted">${esc(L('المبلغ بيدخل عهدته، وهو يحوّل كل بند من عهدته بصورة — وبتشوف كل بند اتقفل هنا.', 'The money goes into his custody; he pays every item from it with a screenshot — you see each one close here.'))}</div>${cancel}</div>`,
+        onSubmit: async f => {
+          const d = formData(f); const file = (f.querySelector('#pbf-file') || {}).files?.[0]; if (!file) { toast(L('صورة التحويل مطلوبة', 'The screenshot is needed'), 'err'); return false; }
+          const a = await attach(file, 'money', b.id, d.note); const now = nowISO(); const b1 = byId('money', b.id) || b; const amt = r2(sum(unpaid(b1), it => it.amount));
+          await saveXfer({ id: `pbf_${b.id}`, from: d.from || 'personal', to: b.walletId, amount: amt, cat: 'other', note: L(`دفعة تحويل ${b.code} — ${unpaid(b1).length} بند`, `Pay batch ${b.code} — ${unpaid(b1).length} items`) + (d.note ? ' · ' + d.note : ''), thumb: a.thumb, fileIds: a.fileIds, pbId: b.id });
+          await Store.update('money', b.id, { status: 'funded', fundedAt: now, fundedAmount: amt, fundedFrom: d.from || 'personal', fundedByName: (S.session && S.session.name) || '', fundThumb: a.thumb || null }, { silent: true });
+          try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+          try { await Store.save('tasks', { id: `pbf_${b.id}`, title: L(`وصلتك دفعة تحويل ${b.code} — حوّل البنود من عهدتك`, `Pay batch ${b.code} reached you — pay the items from your custody`), desc: L('افتح «الفلوس» — كل بند بزرار «حوّلت» وصورة التحويل.', 'Open «Money» — every item has «Paid» and the screenshot.'), link: '/#/money', assigneeId: b.payerId, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'money', createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+          try { if (typeof pushSend === 'function') pushSend(['w:' + b.payerId], L(`وصلتك دفعة تحويل ${b.code} — حوّلها من عهدتك`, `Pay batch ${b.code} reached you — pay it from your custody`), L(`${unpaid(b1).length} بند — التفاصيل في «الفلوس»`, `${unpaid(b1).length} items — details on «Money»`), '/#/money', 'paybatch'); } catch (e) { /* ignore */ }
+          toast(L('اتسجّل — الدفعة عند المحوِّل', 'Recorded — the batch is with the payer'));
+        } });
+      return;
+    }
+    const groups = b.mode === 'direct' && isAdmin() && b.status === 'sent' ? (() => { const m = new Map(); left.filter(it => it.k === 'po').forEach(it => { if (!m.has(it.sk)) m.set(it.sk, []); m.get(it.sk).push(it); }); return [...m.entries()].map(([sk, a]) => `<div class="pbsup"><div><b>${esc(a[0].supplier || '')}</b><small>${esc(a.map(x => x.no).join('، '))}</small></div><b class="num">${fmtMoney(sum(a, x => x.amount))}</b><button type="button" class="btn sm p" data-action="supGroupPay" data-arg="${esc('pb|' + b.id + '|' + sk)}">${esc(L('حوّل', 'Transfer'))}</button></div>`).join(''); })() : '';
+    openModal({ title: `${b.code} — ${b.mode === 'payer' ? L(`لعهدة ${short(nameOf(b.payerId))}`, `${short(nameOf(b.payerId))}'s custody`) : L('للموردين', 'to the suppliers')}`, submitLabel: L('تمام', 'OK'),
+      body: `<div class="form">${head}${groups ? `<div class="full">${groups}</div>` : ''}${lines}${cancel}</div>`, onSubmit: () => { } });
+  };
+  ACTIONS.pbCancel = async id => {
+    const b = byId('money', id); if (!b || b.status !== 'sent') return; closeModal();
+    if (!(await confirmDlg(L(`تلغي ${b.code}؟ البنود اللي لسه ماتحوّلتش ترجع في القايمة لوحدها.`, `Cancel ${b.code}? The unpaid items go back to the list one by one.`), L('إلغاء الدفعة', 'Cancel the batch'), true))) return;
+    await Store.update('money', b.id, { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '' }, { silent: true });
+    try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    toast(L('اتلغت', 'Cancelled'));
+  };
+
+  /* ---------- the payer (Bahaa / Ahmed): pay every item from the custody ---------- */
+  const myBatches = () => batches().filter(b => b.status === 'funded' && String(b.payerId) === myWid() && unpaid(b).length);
+  function payerCard() {
+    const bs = myBatches(); if (!bs.length) return '';
+    return bs.map(b => { const w = walletOf(b.walletId); const left = unpaid(b);
+      return `<div class="card pbpay" id="pbpay_${esc(b.id)}"><div class="cardhead"><h3>${icon('money')}${esc(L(`دفعة تحويل ${b.code} — حوّل من عهدتك`, `Pay batch ${b.code} — pay from your custody`))}</h3><div class="grow"></div><span class="badge warn">${left.length}</span></div>
+        <div class="tiny muted" style="margin-bottom:6px">${esc(L(`المالك حوّل ${money(+b.fundedAmount || 0)} لعهدة ${w ? w.name : ''} — رصيدها دلوقتي ${money(w ? walletBalance(w.id).balance : 0)}. حوّل كل بند وارفع صورته.`, `The owner paid ${money(+b.fundedAmount || 0)} into ${w ? w.name : ''} — balance now ${money(w ? walletBalance(w.id).balance : 0)}. Pay each item and upload its screenshot.`))}</div>
+        <div class="list">${left.map(it => `<div class="item pbrow" style="padding:10px 12px"><div class="main"><div class="title"><span class="badge ${KB()[it.k] ? KB()[it.k][1] : ''}" style="padding:0 6px">${esc((KB()[it.k] || [''])[0])}</span> ${esc(it.label)}</div>${it.sub ? `<div class="meta"><span>${esc(it.sub)}</span></div>` : ''}</div><b class="num" style="margin-inline-end:8px">${fmtMoney(it.amount)}</b>${writable() ? `<button class="btn sm p" data-action="pbPayItem" data-arg="${esc(b.id + '|' + it.key)}" data-stop="1">${esc(L('حوّلت', 'Paid'))}</button>` : ''}</div>`).join('')}</div></div>`; }).join('');
+  }
+  if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); try { return payerCard() + h; } catch (e) { return h; } })(vMe);
+  ACTIONS.pbPayItem = async arg => {
+    const [bid, key] = String(arg || '').split('|'); const b = byId('money', bid); if (!b || b.status !== 'funded') return;
+    const it = (b.items || []).find(x => x.key === key); if (!it || itemPaid(it, b)) { toast(L('البند ده اتحوّل', 'This item is paid'), 'err'); return; }
+    if (String(b.payerId) !== myWid() && !isAdmin()) return;
+    const w = walletOf(b.walletId); if (!w) { toast(L('العهدة مش موجودة', 'The custody is missing'), 'err'); return; }
+    const bal = walletBalance(w.id).balance;
+    if (it.k === 'po') {
+      const p = byId('purchases', it.id); if (!p) return; const ms = supMethods(it.sk); const amt = r2(it.amount);
+      const r = await dialog({ title: L(`تحويل للمورد ${p.supplier || ''} — ${p.number}`, `Transfer to ${p.supplier || ''} — ${p.number}`), submitLabel: L('حوّلت — سجّل', 'Transferred — record it'),
+        body: `<div class="form"><div class="field"><label>${esc(L('المبلغ', 'Amount'))}</label><b class="num" style="font-size:18px">${esc(money(amt))}</b></div><div class="full">${ms.length ? ms.map((m, i) => mLine(m, true, i)).join('') : `<div class="banner warn small">${esc(L('المورد مالوش أرقام تحويل مسجّلة.', 'The supplier has no registered transfer numbers.'))}</div><input type="hidden" name="mid" value="">`}</div>
+          <div class="field full"><label>${esc(L('صورة التحويل', 'Transfer screenshot'))}</label><input type="file" id="pbi-file" accept="image/*"></div>${field(L('رقم العملية (من الصورة)', 'Reference (from the screenshot)'), inp('ref', '', 'class="ltr"'))}${field(L('ملاحظة', 'Note'), inp('note', ''), 'full')}</div>`,
+        onSubmit: async f => { const d = formData(f); const file = (f.querySelector('#pbi-file') || {}).files?.[0]; if (!file) { toast(L('صورة التحويل مطلوبة', 'The screenshot is needed'), 'err'); return false; } if (amt > bal + 0.5) { toast(L(`رصيد العهدة ${money(bal)} مش كفاية`, `The custody balance ${money(bal)} is not enough`), 'err'); return false; } const a = await attach(file, 'purchase', p.id, d.note); const m = ms.find(x => x.id === d.mid) || null; return { fileIds: a.fileIds, thumb: a.thumb, note: d.note || '', ref: (d.ref || '').trim(), methodId: m ? m.id : null, methodLabel: m ? `${ST()[m.type] || ''} ${mNum(m)}`.trim() : '' }; } });
+      if (!r) return;
+      await poPaid(byId('purchases', p.id) || p, Object.assign({ amount: amt, src: w.id, pbId: b.id, pbCode: b.code }, r));
+    } else {
+      const req = byId('requests', it.id);
+      const res = await moneyDialog({ title: it.label, intro: esc(it.sub || ''), amount: it.amount, submitLabel: L('حوّلت — سجّل', 'Transferred — record it'), ownerKind: 'request', ownerId: it.id });
+      if (!res) return; if (res.amount > bal + 0.5) { toast(L(`رصيد العهدة ${money(bal)} مش كفاية`, `The custody balance ${money(bal)} is not enough`), 'err'); return; }
+      const me = S.session || {}; const now = nowISO();
+      if (it.k === 'opex') {
+        await Store.save('expenses', { id: `opx_${it.id}`, date: todayISO(), month: (req && req.month) || it.month || monthOf(todayISO()), amount: res.amount, cat: (req && req.cat) || it.cat || 'other', account: w.id, holderId: String(w.holder), homeId: (req && req.homeId) || it.homeId || null, orderId: null, payee: (req && req.payee) || it.payee || '', ref: '', note: `${L('مصروف تشغيل', 'Running cost')} — ${(req && req.reason) || it.label}${res.note ? ' · ' + res.note : ''} · ${b.code}`, src: 'wallet', reqId: it.id, pbId: b.id, fileIds: ((req && req.fileIds) || []).concat(res.fileIds || []), thumb: (req && req.thumb) || res.thumb || null, byName: me.name || '', createdAt: now });
+        await Store.update('requests', it.id, { paidAt: now, paidFrom: w.id, paidAmount: res.amount, paidByName: me.name || '', pbId: b.id });
+        try { const t = byId('tasks', `opex_${it.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }, { silent: true }); } catch (e) { /* ignore */ }
+      } else if (it.k === 'fund') {
+        await Store.update('requests', it.id, { status: 'approved', decidedAt: now, decidedByName: me.name || '', payFrom: w.id, paidAmount: res.amount, payThumb: res.thumb || null, payFileIds: res.fileIds || [], payNote: res.note || '', paidAt: now, pbId: b.id });
+        if (canMoneyWrite()) await reconcileFund(byId('requests', it.id));
+        try { const t = byId('tasks', `fund_${it.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }, { silent: true }); } catch (e) { /* ignore */ }
+        const tw = walletOf((req && req.walletId) || it.walletId); if (tw && typeof notifyHolder === 'function') notifyHolder(tw, L('اتحوّل لعهدتك', 'Money reached your custody'), `${tw.name} — ${catLabel((req && req.cat) || it.cat)}`);
+      }
+    }
+    const b2 = byId('money', b.id) || b;
+    if (!unpaid(b2).length) { try { const t = byId('tasks', `pbf_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } toast(L(`${b.code} خلصت ✓`, `${b.code} is done ✓`)); }
+    else toast(L('اتسجّل', 'Recorded'));
+  };
+  /* a custody request paid by Bahaa: the transfer into the other custody is written by an owner / Saeed / Ahmed session (Bahaa can not write money records) */
+  async function reconcileFund(r) {
+    if (!r || r.type !== 'fund' || r.status !== 'approved' || !r.pbId || !r.payFrom || byId('money', `fund_${r.id}`)) return;
+    const to = walletOf(r.walletId); if (!to) return;
+    await saveXfer({ id: `fund_${r.id}`, from: r.payFrom, to: to.id, amount: +r.paidAmount || +r.amount || 0, reqId: r.id, cat: r.cat, note: `${r.reason || ''} · ${(byId('money', r.pbId) || {}).code || ''}`, thumb: r.payThumb || null, fileIds: r.payFileIds || [], pbId: r.pbId });
+  }
+  let recAt = 0;
+  function reconcile() {
+    if (!S.session || !canMoneyWrite() || !writable() || (S.db && !(S.loaded && S.loaded.money && S.loaded.requests))) return;
+    list('requests').filter(r => r.type === 'fund' && r.status === 'approved' && r.pbId && r.payFrom && !byId('money', `fund_${r.id}`)).slice(0, 5).forEach(r => { reconcileFund(r).catch(() => { }); });
+    batches().filter(live).filter(b => !unpaid(b).length).slice(0, 5).forEach(b => { Store.update('money', b.id, { status: 'done', doneAt: nowISO() }, { silent: true }).catch(() => { }); });
+  }
+  RENDER_HOOKS.push(() => { try { if (Date.now() - recAt < 20000) return; recAt = Date.now(); reconcile(); } catch (e) { /* ignore */ } });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .pbrow{display:flex;align-items:center;gap:8px}.pbrow .pbck{flex:none;width:20px;height:20px;accent-color:var(--accent)}
+    .pbfoot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}
+    .pblist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .pbli{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;font-size:13.5px;border-top:1px solid var(--line)}.pbli:first-child{border-top:0}.pbli span{min-width:0}
+    .pbli.tot{background:var(--surface-2);font-weight:700}.pbli.done{opacity:.6}
+    .pbmode{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:6px;cursor:pointer}.pbmode input{margin-top:3px}
+    .pbmode span{display:flex;flex-direction:column;gap:2px}.pbmode small{font-size:12px;color:var(--muted)}
+    .pbsup{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}.pbsup>div{flex:1;min-width:0;display:flex;flex-direction:column}.pbsup small{font-size:12px;color:var(--muted)}
+    .pbpay{border-color:var(--warn,#e5932a)!important}
+  </style>`);
+  Object.assign(window, { nfPayBatches: batches, nfPbUnpaid: unpaid, nfPbReconcile: reconcile });
 })();
 </script>
 
