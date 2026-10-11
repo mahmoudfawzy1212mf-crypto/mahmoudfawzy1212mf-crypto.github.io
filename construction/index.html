@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1653-13178c";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1824-913a00";</script>
 
 <script>
 'use strict';
@@ -5995,9 +5995,15 @@ function sbBackend(client) {
     else (data || []).forEach(r => m.set(r.id, r.data));
     return m;
   }
-  let wasLive = false, _refetchT = 0;
-  /* v4.12: after the socket comes back (phone slept / app in background) every realtime message in between is gone — reload the subscribed collections from the server and push them to the app */
-  async function refetchAll(why) { if (Date.now() - _refetchT < 5000) return; _refetchT = Date.now(); for (const col of Object.keys(subs)) { if (!(subs[col] || []).length) continue; try { await fetchCol(col); emit(col, []); } catch (e) { console.warn('refetch', col, why, e && e.message); } } }
+  let wasLive = false, _refetchT = 0, _refetchFail = 0, _refetchBusy = false;
+  /* v4.12: after the socket comes back (phone slept / app in background) every realtime message in between is gone — reload the subscribed collections from the server and push them to the app
+     v7.45: at most one reload every 30 s; when the server answers with errors, stop at the second failing collection and wait longer each time (1, 2, 4 ... up to 10 min) — a slow server made the socket reconnect over and over and every reconnect reloaded everything */
+  async function refetchAll(why) {
+    const gap = _refetchFail ? Math.min(600000, 30000 * Math.pow(2, _refetchFail)) : 30000;
+    if (_refetchBusy || Date.now() - _refetchT < gap) return; _refetchBusy = true; _refetchT = Date.now(); let bad = 0;
+    try { for (const col of Object.keys(subs)) { if (!(subs[col] || []).length) continue; try { await fetchCol(col); emit(col, []); } catch (e) { console.warn('refetch', col, why, e && e.message); if (++bad >= 2) break; } } }
+    finally { _refetchBusy = false; _refetchFail = bad ? _refetchFail + 1 : 0; _refetchT = Date.now(); }
+  }
   function ensureChannel() {
     if (channel) return;
     channel = client.channel('nf-docs').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, payload => {
@@ -6122,8 +6128,9 @@ function sbForceSignOut(msg) { if (!sbOn() || Date.now() - _sbKick < 3000) retur
 /* live check: a stopped / deleted / role-less record loses access within a minute even with an open session (the server answers nf_role() = null or "banned") */
 async function sbAccessCheckBase() { if (!sbOn() || !S.sbUser || document.hidden) return; try { const r = await S.sb.rpc('nf_role'); if (r.error) { if (/banned|jwt|403|401/i.test(String(r.error.message || ''))) sbForceSignOut('حسابك موقوف — تم إنهاء الدخول. راجع الإدارة'); return; } if (r.data == null) sbForceSignOut('تم إيقاف صلاحية دخولك للسيستم — راجع الإدارة'); } catch (e) { /* offline */ } }
 /* when the app comes back to the foreground, pull today's shared docs again (attendance / tasks / requests) in case a realtime message was missed while the phone slept */
-let _sbLastRefresh = 0;
-async function sbRefreshShared() { if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < 5000) return; _sbLastRefresh = Date.now(); try { const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) return; let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); }); if (changed) render(false); } catch (e) { /* offline */ } }
+/* v7.45: only what changed since the last pull (by the server's own clock), at most every 15 s, longer waits after errors — it used to re-download 12 hours of these four lists on every focus */
+let _sbLastRefresh = 0, _sbShSince = null, _sbShFail = 0;
+async function sbRefreshShared() { const gap = _sbShFail ? Math.min(300000, 15000 * Math.pow(2, _sbShFail)) : 15000; if (!sbOn() || !S.sbUser || !S.session || document.hidden || Date.now() - _sbLastRefresh < gap) return; _sbLastRefresh = Date.now(); try { const since = _sbShSince || new Date(Date.now() - 12 * 3600 * 1000).toISOString(); const { data, error } = await S.sb.from('docs').select('col,id,data,updated_at').in('col', ['attendance', 'tasks', 'requests', 'trips']).gte('updated_at', since); if (error || !data) { _sbShFail++; return; } _sbShFail = 0; let top = ''; data.forEach(r => { if (r.updated_at && r.updated_at > top) top = r.updated_at; }); if (top) { const t = Date.parse(top); _sbShSince = isNaN(t) ? top : new Date(t - 60000).toISOString(); } let changed = 0; data.forEach(r => { const m = S.data[r.col]; if (!m) return; if (typeof docInflight === 'function' && docInflight(r.col, r.id)) return; const cur = m.get(r.id); if (!cur || JSON.stringify(cur) !== JSON.stringify(r.data)) { m.set(r.id, r.data); changed++; } if (S.db && S.db.prime) S.db.prime(r.col, r.id, r.data); }); if (changed) render(false); } catch (e) { _sbShFail++; /* offline */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbRefreshShared, 300); }); window.addEventListener('focus', () => setTimeout(sbRefreshShared, 300)); window.addEventListener('online', () => setTimeout(sbRefreshShared, 1500));
 setInterval(sbAccessCheck, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(sbAccessCheck, 800); });
 document.addEventListener('click', ev => { const a = ev.target.closest('[data-action="logout"]'); if (!a || !sbOn()) return; S.sb.auth.signOut({ scope: 'local' }).catch(() => { }); S.sbUser = null; S.unsub.forEach(u => { try { u(); } catch (e) { /* ignore */ } }); S.unsub = []; S._sbSubscribed = false; if (S.db && S.db.dispose) S.db.dispose(); S.db = sbBackend(S.sb); COLS.forEach(c => { S.data[c] = new Map(); }); S.loaded = {}; S.staffReady = true; S.session = null; render(true); });
@@ -6503,11 +6510,20 @@ const slotLabel = id => (BACKUP_SLOTS.find(s => s.id === id) || {}).label || (id
 function backupSlotDue(slot, now = new Date()) { const t = new Date(now); t.setHours(slot.h, slot.m, 0, 0); return now >= t; }
 
 /* ---------- server list (backend mode) ---------- */
-let _sbBk = { at: 0, rows: [] };
+let _sbBk = { at: 0, rows: [], fail: 0, p: null };
+/* v7.45: one request at a time, and after an error wait (30 s, 60 s, ... up to 5 min) instead of asking again right away — a busy server was hit several times a second */
 async function sbBackupList(force) {
-  if (!sbOn()) return []; if (!force && Date.now() - _sbBk.at < 60000) return _sbBk.rows;
-  const { data, error } = await S.sb.from('backups').select('id,slot,taken_at,docs_count,note').order('taken_at', { ascending: false }).limit(60);
-  if (error) { console.warn('backups list', error); return _sbBk.rows; } _sbBk = { at: Date.now(), rows: data || [] }; return _sbBk.rows;
+  if (!sbOn()) return []; if (_sbBk.p) return _sbBk.p;
+  const wait = _sbBk.fail ? Math.min(300000, 30000 * Math.pow(2, _sbBk.fail - 1)) : 60000;
+  if ((!force || _sbBk.fail) && Date.now() - _sbBk.at < wait) return _sbBk.rows;
+  _sbBk.p = (async () => {
+    try {
+      const { data, error } = await S.sb.from('backups').select('id,slot,taken_at,docs_count,note').order('taken_at', { ascending: false }).limit(60);
+      if (error) { console.warn('backups list', error); _sbBk.fail++; _sbBk.at = Date.now(); return _sbBk.rows; }
+      _sbBk.rows = data || []; _sbBk.fail = 0; _sbBk.at = Date.now(); return _sbBk.rows;
+    } catch (e) { _sbBk.fail++; _sbBk.at = Date.now(); return _sbBk.rows; } finally { _sbBk.p = null; }
+  })();
+  return _sbBk.p;
 }
 const pgDate = s => new Date(String(s || '').replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
 function backupRows() {
@@ -6518,7 +6534,7 @@ function backupRows() {
 /* ---------- take / prune ---------- */
 async function backupTake(slotId, note) {
   const date = todayISO();
-  if (sbOn()) { const { data, error } = await S.sb.rpc('nf_take_backup', { p_slot: slotId, p_note: note || null }); if (error) throw error; _sbBk.at = 0; await sbBackupList(true); await Store.saveSettings(Object.assign({}, S.settings, { lastBackupAt: nowISO() })); return { id: data, server: true }; }
+  if (sbOn()) { const { data, error } = await S.sb.rpc('nf_take_backup', { p_slot: slotId, p_note: note || null }); if (error) throw error; _sbBk.at = 0; _sbBk.fail = 0; await sbBackupList(true); await Store.saveSettings(Object.assign({}, S.settings, { lastBackupAt: nowISO() })); return { id: data, server: true }; }
   const json = backupJson(); const blob = new Blob([json], { type: 'application/json' }); const count = COLS.reduce((a, c) => a + (S.data[c] ? S.data[c].size : 0), 0);
   const doc = { id: slotId === 'manual' ? 'bk_' + nowISO().replace(/[:.]/g, '-') + '_manual' : backupDocId(date, slotId), slot: slotId, date, at: nowISO(), size: blob.size, count, byName: S.session?.name || '', note: note || '' };
   if (S.mode === 'local') { await idbPut('backup:' + doc.id, blob); doc.store = 'idb'; doc.ref = 'backup:' + doc.id; }
@@ -6595,7 +6611,7 @@ ACTIONS.backupRestore = async id => {
   if (!(await confirmDlg(`استعادة نسخة ${fmtDate(b.date)} (${slotLabel(b.slot)})؟ تُعاد السجلات الموجودة فيها فوق البيانات الحالية (لا يُحذف ما أُضيف بعدها). تُؤخذ نسخة من الوضع الحالي أولًا.`, 'استعادة'))) return;
   try {
     toast('جارٍ الاستعادة…');
-    if (b.server) { const { data, error } = await S.sb.rpc('nf_restore_backup', { p_id: +b.id }); if (error) throw error; _sbBk.at = 0; await sbBackupList(true); toast(`تمت استعادة ${fmtNum(data || 0)} سجلًا — قد يلزم إعادة تحميل الصفحة`); render(false); return; }
+    if (b.server) { const { data, error } = await S.sb.rpc('nf_restore_backup', { p_id: +b.id }); if (error) throw error; _sbBk.at = 0; _sbBk.fail = 0; await sbBackupList(true); toast(`تمت استعادة ${fmtNum(data || 0)} سجلًا — قد يلزم إعادة تحميل الصفحة`); render(false); return; }
     await backupTake('pre-restore', `قبل الاستعادة من ${b.date} ${b.slot}`);
     const blob = await backupBlob(b); const j = JSON.parse(await blob.text()); const n = await applyBackupJson(j, true); toast(`تمت استعادة ${fmtNum(n)} سجلًا`); render(false);
   } catch (e) { console.error(e); toast('تعذّرت الاستعادة', 'err'); }
@@ -24850,6 +24866,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      بيحوّلها = مصروف «سلف للعاملين» من عهدته (بدل حساب «تحويلات محمود» — القديم فاضل للسجل). المحوّلين (بهاء/أحمد) ليهم «طريقة استلام تانية» (wallet.alt) — أي واحدة منهم تتقبل في الدفعة.
    ===================================================================== */
 (function () {
+  const L = (a, b) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? b : a);
   if (window.__NF_ADVWALLET__) return; window.__NF_ADVWALLET__ = 1;
   const stu = () => typeof isStuSys === 'function' && isStuSys();
   const WT = { vf: ['فودافون كاش', '010'], et: ['اتصالات كاش', '011'], or: ['أورنج كاش', '012'], we: ['وي باي', '015'], ip: ['إنستاباي', ''], card: ['كارت فوري (إنستاباي ← استخدام كارت)', ''] };
@@ -24881,6 +24898,11 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   try { if (typeof ACCT_DEFAULTS !== 'undefined' && !ACCT_DEFAULTS.accounts.some(a => a.id === ACC.id)) ACCT_DEFAULTS.accounts.push(Object.assign({ opening: 0 }, ACC)); } catch (e) { /* ignore */ }
   render = (base => function () { try { const a = S.settings && S.settings.accounting; if (a && Array.isArray(a.accounts) && a.accounts.length && !a.accounts.some(x => x.id === ACC.id)) a.accounts.push(Object.assign({ opening: 0 }, ACC)); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
   (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
+.apbusy{position:fixed;inset:0;z-index:9800;display:grid;place-items:center;background:rgba(0,0,0,.45);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.apbusy>div{display:flex;flex-direction:column;align-items:center;gap:10px;min-width:220px;max-width:86vw;padding:22px 26px;border-radius:20px;background:var(--surface,#fff);color:var(--ink,#111);box-shadow:0 20px 50px -14px rgba(0,0,0,.5);text-align:center}
+.apbusy b{font-size:15px}.apbusy small{font-size:12.5px;color:var(--ink-2,#666)}
+.apspin{width:34px;height:34px;border-radius:50%;border:3px solid var(--line,#ddd);border-top-color:var(--accent,#0a84ff);animation:apspin .8s linear infinite}
+@keyframes apspin{to{transform:rotate(360deg)}}
 .wlbig{font-size:20px;font-weight:800;letter-spacing:1px;direction:ltr;display:inline-block}
 .apcard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:grid;gap:8px}
 .apcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.approof{max-width:220px;max-height:260px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in}
@@ -25027,12 +25049,24 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   ACTIONS.apShare = async id => { const p = byId('advpay', id); if (!p || !p.proofUrl) return; try { const r = await fetch(p.proofUrl); const blob = await r.blob(); const file = new File([blob], `tahweel-${p.ref || p.id}.jpg`, { type: blob.type || 'image/jpeg' }); const data = { files: [file], text: msgFor(p).replace(/\nصورة التحويل:.*$/m, '') }; if (navigator.canShare && !navigator.canShare(data)) delete data.files; await navigator.share(data); } catch (e) { /* cancelled */ } };
   async function callFn(body) { if (!S.sb || !S.sb.functions) throw new Error('offline'); const r = await S.sb.functions.invoke('advpay', { body }); if (r.error) { let msg = r.error.message; try { const j = await r.error.context.json(); msg = j.error || msg; } catch (e) { /* ignore */ } throw new Error(msg); } return r.data; }
   window.nfAdvPayCall = callFn;
-  async function shrink(fileObj) { const src = await fileToDataURL(fileObj); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1800 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.88)); }; im.onerror = rej; im.src = src; }); }
+  /* v7.45: a lighter picture (1600 px, JPEG 0.82 — still sharp for reading a receipt) = a faster upload on mobile data;
+     createImageBitmap decodes faster on phones and keeps the photo upright; the old path stays as the fallback */
+  async function shrink(fileObj) {
+    const MAX = 1600, Q = 0.82;
+    try { if (window.createImageBitmap) { const bm = await createImageBitmap(fileObj, { imageOrientation: 'from-image' }); const k = Math.min(1, MAX / Math.max(bm.width, bm.height)); const c = document.createElement('canvas'); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k); c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height); if (bm.close) bm.close(); return c.toDataURL('image/jpeg', Q); } } catch (e) { /* the old way below */ }
+    const src = await fileToDataURL(fileObj); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, MAX / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', Q)); }; im.onerror = () => rej(new Error(L('الصورة دي مش مدعومة — جرّب سكرين شوت للتحويل', 'This picture is not supported — try a screenshot of the transfer'))); im.src = src; });
+  }
+  /* a clear «working…» screen while the receipt goes up and gets read (a small toast looked like nothing was happening) */
+  function upBusy(msg) {
+    let el = document.getElementById('apbusy'); if (!msg) { if (el) el.remove(); return; }
+    if (!el) { document.body.insertAdjacentHTML('beforeend', `<div id="apbusy" class="apbusy" role="status" aria-live="polite"><div><i class="apspin" aria-hidden="true"></i><b></b><small>${esc(L('خليك على الصفحة — بياخد ثواني', 'Stay on this page — it takes a few seconds'))}</small></div></div>`); el = document.getElementById('apbusy'); }
+    el.querySelector('b').textContent = msg;
+  }
   document.addEventListener('change', async e => {
     const inp = e.target.closest('[data-apup]'); if (!inp || !inp.files || !inp.files[0]) return; const id = inp.dataset.apup; const p = byId('advpay', id); if (!p) return;
-    toast('بيقرأ صورة التحويل…');
+    upBusy(L('بيجهّز الصورة…', 'Preparing the picture…'));
     try {
-      const image = await shrink(inp.files[0]); const r = await callFn({ action: 'verify', id, image });
+      const image = await shrink(inp.files[0]); upBusy(L('بيرفع الصورة ويقرأ التحويل…', 'Uploading the picture and reading the transfer…')); const r = await callFn({ action: 'verify', id, image }); upBusy('');
       if (r && r.status === 'paid') {
         try { await Store.save('tasks', { id: `apd_${p.advanceId}`, title: 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         try { const t = byId('tasks', `apt_${p.advanceId}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
@@ -25043,7 +25077,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         try { await Store.save('tasks', { id: `apr_${id}_${Date.now().toString(36)}`, title: `تحويل سلفة محتاج مراجعتك — ${p.workerName || ''}`, desc: 'افتح «تحويل السلف» ← مراجعة (التفاصيل هناك)', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         openModal({ title: 'التحويل مش مطابق', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">الطلب راح لمحمود يراجعه. لو الصورة غلط، استنى لما يرجّعه وارفع الصح.</div></div>`, onSubmit: () => { } });
       }
-    } catch (err) { toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { inp.value = ''; }
+    } catch (err) { upBusy(''); toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { upBusy(''); inp.value = ''; }
   });
   ACTIONS.apApprove = id => { const p = byId('advpay', id); if (!p || !isAdmin()) return; openModal({ title: `اعتماد التحويل يدوي — ${p.workerName || ''}`, submitLabel: 'اعتمد', body: `<div class="form"><div class="full small">${(p.issues || []).map(esc).join('<br>')}</div>${field('رقم العملية', inp('ref', (p.ai && p.ai.reference) || '', 'class="ltr"'))}${field(`المبلغ (${CUR()})`, inp('amount', p.amount, 'type="number" step="any"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.ref) { toast('اكتب رقم العملية', 'err'); return false; } try { await callFn({ action: 'approve', id, ref: d.ref, amount: num(d.amount) }); toast('اتعتمد'); } catch (e) { toast(e.message, 'err'); return false; } } }); };
   ACTIONS.apRetry = async id => { try { await callFn({ action: 'retry', id }); toast('رجعت لبهاء يرفع صورة تانية'); } catch (e) { toast(e.message, 'err'); } };
@@ -25087,14 +25121,14 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   };
   document.addEventListener('change', async e => {
     const inp = e.target.closest('[data-abup]'); if (!inp || !inp.files || !inp.files[0]) return; const id = inp.dataset.abup; const b = byId('advbatch', id); if (!b) return;
-    toast('بيقرأ صورة التحويل…');
+    upBusy(L('بيجهّز الصورة…', 'Preparing the picture…'));
     try {
-      const image = await shrink(inp.files[0]); const r = await callFn({ action: 'fund', id, image });
+      const image = await shrink(inp.files[0]); upBusy(L('بيرفع الصورة ويتأكد من التحويل…', 'Uploading the picture and checking the transfer…')); const r = await callFn({ action: 'fund', id, image }); upBusy('');
       if (r && r.status === 'funded') {
         await notifyFunded(b, r.to, r.ref);
         openModal({ title: `اتبعتت لـ${r.toName || 'المحوِّل'} ✓`, submitLabel: 'تمام', body: `<div class="form"><div class="full">التحويل مطابق: <b>${fmtMoney(r.amount)} ${CUR()}</b> لـ <b>${esc(r.toName || '')}</b> — رقم العملية <b class="ltr">${esc(r.ref)}</b>.</div><div class="full banner info small" style="margin:0">${icon('send')}<span>وصله إشعار إن التحويل تم، وهيحوّل لكل واحد على رقمه ويرفع صورة تحويله. هتتابع مين اتحوّل له من كارت الدفعة.</span></div></div>`, onSubmit: () => { } });
       } else openModal({ title: 'التحويل مش مطابق للدفعة', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">تقدر ترفع صورة تانية أو تعتمد يدوي من كارت الدفعة.</div></div>`, onSubmit: () => { } });
-    } catch (err) { toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { inp.value = ''; }
+    } catch (err) { upBusy(''); toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { upBusy(''); inp.value = ''; }
   });
   ACTIONS.abApprove = id => { const b = byId('advbatch', id); if (!b || !isAdmin()) return; const ps = payerIds(); openModal({ title: `اعتماد يدوي وإرسال للمحوِّل — ${b.code}`, submitLabel: 'اعتمد وابعت', body: `<div class="form"><div class="full small">${(b.issues || []).map(esc).join('<br>')}</div>${field('اتحوّلت لمين', `<select name="to">${ps.map(p => `<option value="${esc(p)}">${esc((walletOf(p) || {}).workerName || p)}</option>`).join('')}</select>`)}${field('رقم العملية', inp('ref', (b.ai && b.ai.reference) || '', 'class="ltr"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.ref) { toast('اكتب رقم العملية', 'err'); return false; } try { const r = await callFn({ action: 'fundapprove', id, to: d.to, ref: d.ref }); await notifyFunded(b, (r && r.to) || d.to, d.ref); toast(`اتبعتت لـ${(r && r.toName) || ''} — وصله إشعار`); } catch (e) { toast(e.message, 'err'); return false; } } }); };
   ACTIONS.abRetry = async id => { try { await callFn({ action: 'fundretry', id }); toast('ارفع صورة تانية'); } catch (e) { toast(e.message, 'err'); } };
@@ -44924,6 +44958,13 @@ html body .oxb span{text-overflow:clip;overflow:visible}
   html body .linehead:has(+#mlines){display:none}
   html body .stage{grid-template-columns:28px minmax(0,1fr)}
 }
+/* v7.44: «open for overtime today» on the dashboard — its moon icon had no size, so on a laptop it grew to the whole page
+   and squeezed the text into a thin column. The line keeps a small icon; and any plain icon (icon() with no class) gets a
+   zero-weight default size, so a missing size can never blow an icon up again (every real size rule still wins). */
+:where(svg[class=""]){width:1.25em;height:1.25em;flex:none}
+html body .otn-dash>svg{flex:none;width:20px;height:20px;color:var(--accent)}
+html body .otn-dash{width:100%;box-sizing:border-box;flex-wrap:nowrap}
+html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
 </style>`);
 </script>
 
