@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-0528-531e8a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-0701-3ee445";</script>
 
 <script>
 'use strict';
@@ -42604,6 +42604,99 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     .pbpay{border-color:var(--warn,#e5932a)!important}
   </style>`);
   Object.assign(window, { nfPayBatches: batches, nfPbUnpaid: unpaid, nfPbReconcile: reconcile });
+})();
+/* =====================================================================
+   v7.36c - Android: a call rang on Mahmoud El-Behiry's tablet with the screen locked, yet the call screen never showed
+   (11 Oct). Android 14+ keeps «full-screen notifications» off for apps installed from outside Google Play, so the ring
+   arrives as a plain notification. The app now checks it on every opening / return to the app:
+   · off -> a red card at the top of every page with one button that opens that exact setting; it goes by itself once
+     allowed (checked again when the person comes back to the app) - notifications turned off get the same card;
+   · each phone reports its state once a day and on every change (owner-only table nf_call_diag, step «perm»).
+   Factory only (the calls live there).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CALLPERM__) return; window.__NF_CALLPERM__ = 1;
+  if (typeof isStudioz === 'function' && isStudioz() || typeof isConstruction === 'function' && isConstruction()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+  const cap = () => { try { return window.Capacitor || null; } catch (e) { return null; } };
+  const android = () => { const c = cap(); try { return !!c && c.isNativePlatform && c.isNativePlatform() && c.getPlatform && c.getPlatform() === 'android'; } catch (e) { return false; } };
+  const NC = () => { const c = cap(); return (c && c.Plugins && c.Plugins.NinetyCalls) || null; };
+  const ncMethods = () => { const c = cap(); try { const h = ((c && c.PluginHeaders) || []).find(x => x && x.name === 'NinetyCalls'); return (h && Array.isArray(h.methods) ? h.methods : []).map(m => m && m.name); } catch (e) { return []; } };
+  const can = () => android() && !!NC() && ncMethods().includes('permState');
+  const P = { st: null, busy: false, at: 0, asked: '' };
+
+  async function check(fromResume) {
+    if (!can() || P.busy || !S.session) return;
+    P.busy = true;
+    let st = null; try { st = (await NC().permState()) || null; } catch (e) { st = null; }
+    P.busy = false; P.at = Date.now();
+    if (!st) return;
+    const was = P.st; P.st = st;
+    if (fromResume && was && P.asked && ((P.asked === 'fullscreen' && was.fullScreen === false && st.fullScreen !== false) || (P.asked === 'notifications' && was.notifications === false && st.notifications !== false))) {
+      P.asked = '';
+      toast(L('تمام — المكالمة هتظهر على الشاشة حتى وهي مقفولة ✓', 'Done — a call will show on the screen even when it is locked ✓'));
+    }
+    paint(); report(st);
+  }
+
+  function report(st) {
+    try {
+      if (!S.sb || !S.sbUser || !S.sb.from) return;
+      const sig = JSON.stringify({ f: st.fullScreen !== false, n: st.notifications !== false, b: st.battery !== false });
+      const key = 'nf.permdiag.' + S.sbUser.id; const day = new Date().toISOString().slice(0, 10);
+      if (lsGet(key) === day + '|' + sig) return;
+      lsSet(key, day + '|' + sig);
+      S.sb.from('nf_call_diag').insert({ step: 'perm', plat: 'android', ua: String(navigator.userAgent || '').slice(0, 280), extra: { fullScreen: st.fullScreen !== false, notifications: st.notifications !== false, battery: st.battery !== false, canInstall: !!st.canInstall } })
+        .then(r => { if (r && r.error) lsSet(key, ''); }, () => lsSet(key, ''));
+    } catch (e) { /* ignore */ }
+  }
+
+  function need() {
+    const st = P.st; if (!st || !S.session) return '';
+    if (st.notifications === false) return 'notifications';
+    if (st.fullScreen === false) return 'fullscreen';
+    return '';
+  }
+  function paint() {
+    const v = document.getElementById('view'); const old = document.getElementById('nf-permwarn');
+    const k = can() ? need() : '';
+    if (!k || !v || document.getElementById('nf-apkgate')) { if (old) old.remove(); return; }
+    const t = k === 'notifications'
+      ? [L('الإشعارات مقفولة على الموبايل ده', 'Notifications are off on this phone'), L('المكالمات والطلبات مش هتوصلك. افتح الإشعارات لـ Ninety — دوسة واحدة.', 'Calls and requests will not reach you. Turn on notifications for Ninety — one tap.'), L('افتح الإشعارات', 'Turn on notifications')]
+      : [L('المكالمة مش هتظهر على شاشتك وهي مقفولة', 'A call will not show on your screen while it is locked'), L('هترن بس من غير شاشة الرد. اسمح لـ Ninety بـ«إشعارات ملء الشاشة» — دوسة واحدة وبترجع هنا.', 'It only rings, without the answer screen. Allow Ninety «full-screen notifications» — one tap, then come back here.'), L('افتح الإذن', 'Open the permission')];
+    const html = `<div class="ci">⚠️</div><div class="cb"><b>${esc(t[0])}</b><span>${esc(t[1])}</span></div><button type="button" class="btn sm p" data-nfperm="${k}">${esc(t[2])}</button>`;
+    if (old && v.contains(old)) { if (old.dataset.h !== html) { old.innerHTML = html; old.dataset.h = html; } return; }
+    if (old) old.remove();
+    v.insertAdjacentHTML('afterbegin', `<div class="nf-permwarn" id="nf-permwarn" role="alert" data-h="">${html}</div>`);
+    const n = document.getElementById('nf-permwarn'); if (n) n.dataset.h = html;
+  }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-nfperm]'); if (!b) return; e.preventDefault();
+    const k = b.dataset.nfperm; P.asked = k;
+    const fail = () => toast(k === 'fullscreen' ? L('الإعدادات ← التطبيقات ← Ninety ← «إشعارات ملء الشاشة» ← اسمح', 'Settings → Apps → Ninety → «Full-screen notifications» → allow') : L('الإعدادات ← التطبيقات ← Ninety ← الإشعارات ← شغّلها', 'Settings → Apps → Ninety → Notifications → on'), 'err');
+    try {
+      const m = ncMethods();
+      if (m.includes('openSettings')) NC().openSettings({ kind: k }).catch(fail);
+      else if (k === 'fullscreen' && m.includes('openFullScreenSettings')) NC().openFullScreenSettings().catch(fail);
+      else fail();
+    } catch (x) { fail(); }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => check(true), 600); });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try { if (can() && S.session && Date.now() - P.at > 5 * 60e3) setTimeout(() => check(false), 2500); paint(); } catch (e) { /* ignore */ }
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nf-permwarn{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:12px 14px;border-radius:16px;background:rgba(255,59,48,.10);border:1px solid rgba(255,59,48,.35)}
+    .nf-permwarn .ci{font-size:22px;flex:none}.nf-permwarn .cb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+    .nf-permwarn b{font-size:14px;color:var(--ink)}.nf-permwarn span{font-size:12.5px;color:var(--ink-2)}.nf-permwarn .btn{flex:none}
+    @media (max-width:520px){.nf-permwarn{flex-wrap:wrap}.nf-permwarn .btn{width:100%;justify-content:center;min-height:42px}}
+  </style>`);
+  Object.assign(window, { nfCallPermCheck: check });
 })();
 </script>
 
