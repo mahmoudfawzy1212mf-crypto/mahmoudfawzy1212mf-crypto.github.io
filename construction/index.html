@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261011-1536-29832b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261011-1620-5924fe";</script>
 
 <script>
 'use strict';
@@ -25005,6 +25005,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       if (r && r.status === 'paid') {
         try { await Store.save('tasks', { id: `apd_${p.advanceId}`, title: 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         try { const t = byId('tasks', `apt_${p.advanceId}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+        try { const bb = p.batchId ? byId('advbatch', p.batchId) : null; if (bb && bb.status === 'funded') { const left = (bb.items || []).filter(i => i !== p.id).map(i => byId('advpay', i)).filter(x => x && x.status !== 'paid' && x.status !== 'cancelled'); if (!left.length) { pushTo(['role:admin'], `${S.session?.name || ''} خلّص توزيع دفعة سلف ${bb.code}`.trim(), `${(bb.items || []).length} سلفة اتحوّلت وكل واحدة بصورتها`); try { const t = byId('tasks', `abf_${bb.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e3) { /* ignore */ } } } } catch (e2) { /* ignore */ }
         const q = Object.assign({}, p, { status: 'paid', ref: r.ref, paidAmount: r.amount, proofUrl: r.proofUrl, walletShown: r.walletShown || p.walletShown });
         openModal({ title: 'التحويل مطابق ✓', submitLabel: 'تمام', body: `<div class="form"><div class="full">الرقم والمبلغ مطابقين — السلفة اتقفلت «اتحولت».<br>المبلغ: <b>${fmtMoney(r.amount)} ${CUR()}</b> · رقم العملية: <b class="ltr">${esc(r.ref)}</b></div>${q.waPhone && typeof waLink === 'function' ? `<div class="full"><a class="btn p" target="_blank" rel="noopener" href="${esc(waLink(q.waPhone, msgFor(q)))}">${icon('wa')}ابعت للموظف واتساب</a></div>` : '<div class="full muted small">مفيش رقم واتساب مسجّل للموظف</div>'}</div>`, onSubmit: () => { } });
       } else {
@@ -25028,6 +25029,21 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   window.nfAddToOpenBatch = addToOpenBatch;
   const pushTo = (to, title, body) => { try { if (typeof pushSend === 'function') pushSend(to, title, body, '/#/advpay', 'advbatch'); } catch (e) { /* ignore */ } };
+  /* v7.42: one helper tells the payer the money arrived (task + push, no amounts) — used after the photo AND after manual approve */
+  async function notifyFunded(b, to, ref) {
+    const items = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); const names = items.map(p => p.workerName || '').filter(Boolean).join('، ');
+    try { const t = byId('tasks', `abt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+    try { await Store.save('tasks', { id: `abf_${b.id}`, title: `التحويل وصلك — دفعة سلف ${b.code} — حوّل لكل واحد`, desc: `${items.length} سلفة: ${names}\nحوّل لكل واحد على رقمه من عهدتك وارفع صورة تحويله من «تحويل السلف» ← مستني تحويل${ref ? `\nرقم عملية محمود: ${ref}` : ''}`, link: '/#/advpay', assigneeId: to, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+    /* the task itself pushes «مهمة جديدة: …» to the payer (94-reminders-chat) — no second push here */
+  }
+  ACTIONS.abRemind = async id => {
+    const b = byId('advbatch', id); if (!b || b.status !== 'funded' || !isAdmin() || !b.fundedTo) return;
+    const left = (b.items || []).map(i => byId('advpay', i)).filter(p => p && p.status !== 'paid' && p.status !== 'cancelled');
+    if (!left.length) { toast('كله اتحوّل خلاص'); return; }
+    pushTo(['w:' + b.fundedTo], `فاضل تحويلات في دفعة سلف ${b.code}`, `لسه: ${left.map(p => p.workerName || '').join('، ')}`.slice(0, 300));
+    try { const t = byId('tasks', `abf_${b.id}`); if (t && t.status === 'done') await Store.update('tasks', t.id, { status: 'open', doneAt: null, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    toast(`اتبعت تذكير لـ${b.fundedToName || ''}`);
+  };
   ACTIONS.abSend = async id => {
     const b = byId('advbatch', id); if (!b || b.status !== 'open' || !canWalletAdmin()) return; const items = (b.items || []).map(i => byId('advpay', i)).filter(p => p && p.status === 'await');
     if (!items.length) { toast('الدفعة فاضية', 'err'); return; }
@@ -25044,21 +25060,21 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     try {
       const image = await shrink(inp.files[0]); const r = await callFn({ action: 'fund', id, image });
       if (r && r.status === 'funded') {
-        try { const t = byId('tasks', `abt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
-        try { await Store.save('tasks', { id: `abf_${b.id}`, title: `وصلتك دفعة سلف ${b.code} — وزّعها على الموظفين`, desc: 'افتح «تحويل السلف» ← مستني تحويل', assigneeId: r.to, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
-        pushTo(['w:' + r.to], `وصلتك دفعة سلف ${fmtMoney(r.amount)} ${CUR()} — وزّعها`, `${(b.items || []).length} سلفة · رقم العملية ${r.ref}`);
-        openModal({ title: 'الدفعة اتموّلت ✓', submitLabel: 'تمام', body: `<div class="form"><div class="full">اتحوّل <b>${fmtMoney(r.amount)} ${CUR()}</b> لـ <b>${esc(r.toName || '')}</b> — رقم العملية <b class="ltr">${esc(r.ref)}</b>.<br>السلف دلوقتي عنده يوزّعها، ووصله إشعار.</div></div>`, onSubmit: () => { } });
+        await notifyFunded(b, r.to, r.ref);
+        openModal({ title: `اتبعتت لـ${r.toName || 'المحوِّل'} ✓`, submitLabel: 'تمام', body: `<div class="form"><div class="full">التحويل مطابق: <b>${fmtMoney(r.amount)} ${CUR()}</b> لـ <b>${esc(r.toName || '')}</b> — رقم العملية <b class="ltr">${esc(r.ref)}</b>.</div><div class="full banner info small" style="margin:0">${icon('send')}<span>وصله إشعار إن التحويل تم، وهيحوّل لكل واحد على رقمه ويرفع صورة تحويله. هتتابع مين اتحوّل له من كارت الدفعة.</span></div></div>`, onSubmit: () => { } });
       } else openModal({ title: 'التحويل مش مطابق للدفعة', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">تقدر ترفع صورة تانية أو تعتمد يدوي من كارت الدفعة.</div></div>`, onSubmit: () => { } });
     } catch (err) { toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { inp.value = ''; }
   });
-  ACTIONS.abApprove = id => { const b = byId('advbatch', id); if (!b || !isAdmin()) return; const ps = payerIds(); openModal({ title: `اعتماد تمويل الدفعة يدوي — ${b.code}`, submitLabel: 'اعتمد', body: `<div class="form"><div class="full small">${(b.issues || []).map(esc).join('<br>')}</div>${field('اتحوّلت لمين', `<select name="to">${ps.map(p => `<option value="${esc(p)}">${esc((walletOf(p) || {}).workerName || p)}</option>`).join('')}</select>`)}${field('رقم العملية', inp('ref', (b.ai && b.ai.reference) || '', 'class="ltr"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.ref) { toast('اكتب رقم العملية', 'err'); return false; } try { const r = await callFn({ action: 'fundapprove', id, to: d.to, ref: d.ref }); pushTo(['w:' + d.to], `وصلتك دفعة سلف ${fmtMoney(b.total)} ${CUR()} — وزّعها`, `${(b.items || []).length} سلفة`); toast('اتموّلت'); } catch (e) { toast(e.message, 'err'); return false; } } }); };
+  ACTIONS.abApprove = id => { const b = byId('advbatch', id); if (!b || !isAdmin()) return; const ps = payerIds(); openModal({ title: `اعتماد يدوي وإرسال للمحوِّل — ${b.code}`, submitLabel: 'اعتمد وابعت', body: `<div class="form"><div class="full small">${(b.issues || []).map(esc).join('<br>')}</div>${field('اتحوّلت لمين', `<select name="to">${ps.map(p => `<option value="${esc(p)}">${esc((walletOf(p) || {}).workerName || p)}</option>`).join('')}</select>`)}${field('رقم العملية', inp('ref', (b.ai && b.ai.reference) || '', 'class="ltr"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.ref) { toast('اكتب رقم العملية', 'err'); return false; } try { const r = await callFn({ action: 'fundapprove', id, to: d.to, ref: d.ref }); await notifyFunded(b, (r && r.to) || d.to, d.ref); toast(`اتبعتت لـ${(r && r.toName) || ''} — وصله إشعار`); } catch (e) { toast(e.message, 'err'); return false; } } }); };
   ACTIONS.abRetry = async id => { try { await callFn({ action: 'fundretry', id }); toast('ارفع صورة تانية'); } catch (e) { toast(e.message, 'err'); } };
   function batchCard(b) {
     const items = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); const total = b.status === 'open' ? bTotal(b) : +b.total || bTotal(b);
-    const st = { open: ['مفتوحة — بتتجمع', ''], sent: ['مستنية تحويل محمود', 'warn'], review: ['مراجعة', 'serious'], funded: ['اتموّلت', 'good'] }[b.status] || [b.status, ''];
+    const st = { open: ['مفتوحة — بتتجمع', ''], sent: ['مستنية تحويل محمود', 'warn'], review: ['مراجعة', 'serious'], funded: items.length && items.every(p => p.status === 'paid' || p.status === 'cancelled') ? ['اتوزّعت كلها', 'good'] : ['اتبعتت للمحوِّل — بيوزّع', 'good'] }[b.status] || [b.status, ''];
     const acts = [];
     if (b.status === 'open' && canWalletAdmin() && writable() && items.length) acts.push(`<button class="btn p sm" data-action="abSend" data-arg="${esc(b.id)}">${icon('send')}ابعت الدفعة لمحمود</button>`);
     if (['sent', 'review'].includes(b.status) && isAdmin() && writable()) acts.push(`<label class="btn p sm">${icon('camera')}ارفع صورة تحويلك<input type="file" accept="image/*" hidden data-abup="${esc(b.id)}"></label><button class="btn sm" data-action="abApprove" data-arg="${esc(b.id)}">اعتماد يدوي</button>${b.status === 'review' ? `<button class="btn sm ghost" data-action="abRetry" data-arg="${esc(b.id)}">صورة تانية</button>` : ''}`);
+    const hint = ['sent', 'review'].includes(b.status) && isAdmin() && writable() ? `<div class="tiny muted">بعد الصورة السيستم بيتأكد ويبعت للمحوِّل إشعار على طول إن التحويل تم — وهو يحوّل لكل واحد ويرفع صورة تحويله.</div>` : '';
+    if (b.status === 'funded' && isAdmin() && writable() && items.some(p => p.status !== 'paid' && p.status !== 'cancelled')) acts.push(`<button class="btn sm" data-action="abRemind" data-arg="${esc(b.id)}">${icon('bell')}فكّر ${esc(b.fundedToName || 'المحوِّل')}</button>`);
     const payers = ['sent', 'review'].includes(b.status) && isAdmin() ? `<div class="small" style="display:grid;gap:4px">${payerIds().map((p, i) => { const w = walletOf(p); const mline = (m, lbl) => `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted">${lbl}</span><span class="wlbig" style="font-size:16px">${esc(wFull(m))}</span><span class="muted tiny">${esc((WT[m.type] || [''])[0])}</span>${wCopy(m) ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(wCopy(m))}">نسخ</button>` : ''}${m.type === 'card' ? `<b>${esc(m.holder || '')}</b><button class="btn xs" data-action="apCopy" data-arg="${esc(m.holder || '')}">نسخ الاسم</button>` : ''}</div>`; return w ? `<div><b>${i ? 'البديل' : 'المحوِّل'}: ${esc(w.workerName || '')}</b>${mline(w, 'أساسي:')}${w.alt ? mline(w.alt, 'أو:') : ''}</div>` : `<div><span class="badge crit">${i ? 'البديل' : 'المحوِّل'} لسه ماسجلش رقمه</span></div>`; }).join('')}</div>` : '';
     const dist = b.status === 'funded' ? (() => { const paid = Math.round(sum(items.filter(p => p.status === 'paid'), p => +p.paidAmount || +p.amount || 0) * 100) / 100; const fund = +b.fundedAmount || total; return `<div class="small">اتموّلت لـ <b>${esc(b.fundedToName || '')}</b>${b.custodyId ? ` · دخلت <a href="#/money/${esc(b.custodyId)}">عهدة ${esc(b.custodyName || '')}</a>` : ''} · رقم العملية <b class="ltr">${esc(b.ref || '')}</b> · ${fmtDate((b.fundedAt || '').slice(0, 10))}${b.manual ? ' · <span class="badge warn">يدوي</span>' : ''}<br>العهدة: اتموّل <b>${fmtMoney(fund)}</b> · اتوزّع <b>${fmtMoney(paid)}</b> · باقي معاه <b style="${fund - paid > 0.01 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(Math.round((fund - paid) * 100) / 100)}</b></div>`; })() : '';
     return `<div class="apcard"><div class="t"><b class="ltr">${esc(b.code || '')}</b><span class="badge ${st[1]}">${st[0]}</span><div class="grow"></div><b>${fmtMoney(total)} ${CUR()}</b></div>
@@ -25067,7 +25083,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       ${payers}${dist}
       ${b.status === 'review' ? `<div class="banner warn small" style="margin:0">${(b.issues || []).map(esc).join('<br>')}</div>` : ''}
       ${b.proofUrl ? `<div><img class="approof" src="${esc(b.proofUrl)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')" onerror="this.style.display='none'"></div>` : ''}
-      ${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}</div>`;
+      ${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}${hint}</div>`;
   }
   function batchesHTML() {
     const bs = sortBy(list('advbatch').filter(b => isAdmin() || ['hr', 'acc'].includes(role()) || (b.status === 'funded' && b.fundedTo === myWid())), b => ({ open: 0, sent: 1, review: 1, funded: 2 }[b.status] || 3) + (b.sentAt || b.createdAt || ''));
