@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-2009-146cf1";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-2031-6a05b7";</script>
 
 <script>
 'use strict';
@@ -16125,7 +16125,7 @@ function moneyDue() {
   return out;
 }
 /* v7.36: the «due to transfer» card is its own function so the pay-batch part can replace it (grouping per supplier, «تجميع») */
-function moneyDueCard(due) { return `<div class="card"><div class="cardhead"><h3>مستحق عليك تحويله</h3><span class="muted small">${due.length}</span></div>${due.length ? `<div class="list">${due.map(x => `<div class="item" style="padding:10px 12px"><div class="main"><div class="title"><span class="badge ${x.kind === 'po' ? 'acc' : x.kind === 'fund' ? 'warn' : ''}" style="padding:0 6px">${x.kind === 'po' ? 'مورد' : x.kind === 'fund' ? 'عهدة' : 'تشغيل'}</span> ${esc(x.label)}</div><div class="meta"><span>${esc(x.sub || '')}</span></div></div><b class="num" style="margin-inline-end:8px">${fmtMoney(x.amount)}</b><button class="btn sm p" data-action="${x.action}" data-arg="${x.id}" data-stop="1">حوّلت</button></div>`).join('')}</div>` : '<div class="muted small">مفيش حاجة مستنية تحويل</div>'}</div>`; }
+function moneyDueCard(due) { return `<div class="card"><div class="cardhead"><h3>مستحق عليك تحويله</h3><span class="muted small">${due.length}</span></div>${due.length ? `<div class="list">${due.map(x => `<div class="item" style="padding:10px 12px" data-action="${x.kind === 'po' ? 'go' : 'reqOpen'}" data-arg="${x.kind === 'po' ? 'purchases/' + x.id : x.id}"><div class="main"><div class="title"><span class="badge ${x.kind === 'po' ? 'acc' : x.kind === 'fund' ? 'warn' : ''}" style="padding:0 6px">${x.kind === 'po' ? 'مورد' : x.kind === 'fund' ? 'عهدة' : 'تشغيل'}</span> ${esc(x.label)}</div><div class="meta"><span>${esc(x.sub || '')}</span></div></div><b class="num" style="margin-inline-end:8px">${fmtMoney(x.amount)}</b><button class="btn sm p" data-action="${x.action}" data-arg="${x.id}" data-stop="1">حوّلت</button></div>`).join('')}</div>` : '<div class="muted small">مفيش حاجة مستنية تحويل</div>'}</div>`; }
 function walletRows(ids) { return ids.map(id => { const w = walletOf(id); const b = walletBalance(id); const ym = monthOf(todayISO()); const mSpent = sum(list('expenses').filter(e => e.account === id && e.month === ym), e => +e.amount || 0); return `<tr class="click" data-action="go" data-arg="money/${id}"><td><b>${esc(w.name)}</b><div class="tiny muted">${esc(assigneeName(w.holder) || '')}${w.note ? ' · ' + esc(w.note) : ''}</div></td><td class="n">${fmtMoney(b.in)}</td><td class="n">${fmtMoney(mSpent)}</td><td class="n"><b style="color:${b.balance < 0 ? 'var(--crit-ink)' : 'inherit'}">${fmtMoney(b.balance)}</b></td></tr>`; }).join(''); }
 function opexSummary(ym) {
   const prev = monthOf(addDays(ym + '-01', -1)); const cats = OPEX_CATS.filter(c => c !== 'other').concat(['fuel_cash', 'oil', 'car_maint']);
@@ -33576,13 +33576,37 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const H = { i: 0, t: null, counted: false };
 
   /* ---------- pieces ---------- */
+  /* v7.60 (Mahmoud, from the chat: «I want this to be the projects we finished and whose shots were approved»):
+     the strip shows finished work, not work in progress — a project counts once it is delivered / closed, or all its shots are approved.
+     Each slide is one of its final shots (several per project), at the high-quality display copy when the project has one. */
+  const finTime = p => { const a = p.osStatusAt || {}; let t = a.delivered || a.closed || ''; if (!t) list('shots').forEach(s => { if (s.projectId === p.id && s.doneAt && String(s.doneAt) > t) t = String(s.doneAt); }); return String(t || p.updatedAt || ''); };
+  const shotsOf = p => list('shots').filter(s => s.projectId === p.id && !s.deleted);
+  const isFinished = p => { if (['delivered', 'closed'].includes(p.osStatus) || ['done', 'closed'].includes(p.status)) return true; const sh = shotsOf(p); return sh.length > 0 && sh.every(s => s.state === 'done'); };
+  const finished = () => list('projects').filter(p => visible(p) && isFinished(p) && !(p.status === 'archived' && !['delivered', 'closed'].includes(p.osStatus))).sort((a, b) => finTime(b).localeCompare(finTime(a)));
+  const isImg = f => !f.deleted && (String(f.mime || '').startsWith('image/') || f.store === 'thumb') && (f.thumb || f.store === 'sb');
+  const finalsOf = p => { const fs = list('files').filter(f => f.projectId === p.id && isImg(f)); const fin = fs.filter(f => f.rev === 'Final' || f.kind === 'render'); return (fin.length ? fin : fs).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true })); };
+  const HQ = new Map();   /* file id → the high-quality url once resolved (so a re-render does not drop back to the small preview) */
+  const nShots = n => (en() ? `${n} ${n === 1 ? 'shot' : 'shots'}` : n === 1 ? 'لقطة واحدة' : n === 2 ? 'لقطتين' : n <= 10 ? `${n} لقطات` : `${n} لقطة`);
+  const shotName = f => String(f.name || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
   function heroHTML() {
-    const ps = active().sort((a, b) => (daysTo(a.clientDeadline) ?? 9e9) - (daysTo(b.clientDeadline) ?? 9e9));
-    if (!ps.length) return `<div class="shhero one"><div class="shslide cur"><img src="${esc(stills()[0])}" alt=""><div class="sht"><small>${L('الاستوديو', 'The studio')}</small><h2>${L('لسه مفيش مشاريع شغالة', 'No projects in progress yet')}</h2></div></div></div>`;
-    return `<div class="shhero" id="shhero" data-n="${ps.length}">${ps.map((p, i) => { const c = cover(p, i); const d = daysTo(p.clientDeadline); const team = [...new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean))].slice(0, 6);
-      return `<a class="shslide ${i === H.i % ps.length ? 'cur' : ''}" href="#/projects/${esc(p.id)}" data-i="${i}"><img src="${esc(c.src)}" alt="" ${i ? 'loading="lazy"' : ''}>${c.generic ? '' : ''}<div class="sht"><small class="notr" dir="auto">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}</small><h2 class="notr" dir="auto">${esc(p.name)}</h2><div class="shm"><span class="shst">${esc(stageL(p))}</span>${d !== null ? `<span class="shd ${d < 0 ? 'late' : d <= 3 ? 'soon' : ''}">${d < 0 ? L(`متأخر ${-d} يوم`, `${-d} days late`) : d === 0 ? L('التسليم النهارده', 'Due today') : L(`${d} يوم على التسليم`, `${d} days to delivery`)}</span>` : ''}<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span></div></div></a>`; }).join('')}
-      <div class="shdots">${ps.map((_, i) => `<i class="${i === H.i % ps.length ? 'on' : ''}" data-action="shGo" data-arg="${i}"></i>`).join('')}</div>
+    const ps = finished(); const MAX = 12;
+    const per = ps.length <= 1 ? MAX : Math.max(3, Math.floor(MAX / ps.length));
+    const sl = []; ps.forEach((p, pi) => { const fs = finalsOf(p).slice(0, per); if (fs.length) fs.forEach(f => sl.push({ p, f })); else sl.push({ p, c: cover(p, pi) }); });
+    const slides = sl.slice(0, MAX);
+    if (!slides.length) return `<div class="shhero one"><div class="shslide cur"><img src="${esc(stills()[0])}" alt=""><div class="sht"><small>${L('الاستوديو', 'The studio')}</small><h2>${L('لسه مفيش مشاريع خلصانة', 'No finished projects yet')}</h2><div class="shm"><span class="shd">${L('أول ما لقطات مشروع تتعتمد كلها بيظهر هنا', 'A project shows here once all its shots are approved')}</span></div></div></div></div>`;
+    return `<div class="shhero" id="shhero" data-n="${slides.length}">${slides.map((x, i) => { const p = x.p, f = x.f; const src = f ? (HQ.get(f.id) || f.thumb || '') : x.c.src; const hq = f && f.store === 'sb' && !HQ.has(f.id) ? ` data-hq="${esc(f.id)}"` : '';
+      const n = shotsOf(p).filter(s => s.state === 'done').length || finalsOf(p).length; const deliv = ['delivered', 'closed'].includes(p.osStatus);
+      const team = [...new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean))].slice(0, 6);
+      return `<a class="shslide ${i === H.i % slides.length ? 'cur' : ''}" href="#/projects/${esc(p.id)}" data-i="${i}"><img src="${esc(src)}" alt=""${hq} ${i ? 'loading="lazy"' : ''}><div class="sht"><small class="notr" dir="auto">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}</small><h2 class="notr" dir="auto">${esc(p.name)}</h2><div class="shm"><span class="shst">${esc(deliv ? stageL(p) : L('اللقطات اتعتمدت', 'Shots approved'))}</span>${n ? `<span class="shd">${nShots(n)}</span>` : ''}${f ? `<span class="shd shfn notr" dir="auto">${esc(shotName(f))}</span>` : ''}<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span></div></div></a>`; }).join('')}
+      <div class="shdots">${slides.map((_, i) => `<i class="${i === H.i % slides.length ? 'on' : ''}" data-action="shGo" data-arg="${i}"></i>`).join('')}</div>
       <button type="button" class="shnav prev" data-action="shStep" data-arg="-1" aria-label="prev">‹</button><button type="button" class="shnav next" data-action="shStep" data-arg="1" aria-label="next">›</button></div>`;
+  }
+  /* swap the small preview for the 2560 px display copy (once loaded, so there is no blank flash) */
+  function hqUp() {
+    document.querySelectorAll('#shhero img[data-hq]:not([data-hqd])').forEach(img => {
+      img.setAttribute('data-hqd', '1'); const f = byId('files', img.getAttribute('data-hq')); if (!f || typeof Files === 'undefined') return;
+      Promise.resolve(Files.url(f)).then(u => { if (!u) return; const im = new Image(); im.onload = () => { HQ.set(f.id, u); document.querySelectorAll(`#shhero img[data-hq="${f.id}"]`).forEach(x => { x.src = u; }); }; im.src = u; }).catch(() => { });
+    });
   }
   function todayHTML() {
     const ids = mine(); const t = list('pmtasks').filter(x => ids.includes(x.owner) && x.status !== 'done' && (x.due === day() || x.status === 'work' || (x.due && x.due < day()))).length;
@@ -33627,7 +33651,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       ${top || `<div class="shgreet"><div><small>${esc(date)}</small><h1>${greet}، <b class="notr">${esc(first)}</b></h1></div>${typeof stuAvatar === 'function' ? stuAvatar(me(), 44) : ''}</div>`}
       ${top ? '' : heroHTML()}
       <div class="shsec"><h3>${L('يومك النهارده', 'Your day')}</h3></div>${todayHTML()}
-      ${top ? `<div class="shsec"><h3>${L('المشاريع الشغالة', 'Projects in progress')}</h3></div>${heroHTML()}` : ''}
+      ${top ? `<div class="shsec"><h3>${L('مشاريع خلّصناها', 'Finished projects')}</h3></div>${heroHTML()}` : ''}
       ${SM ? SM.galleryHTML() : ''}
       <div class="shgrid">${noticeHTML()}${spotHTML()}${pulseHTML()}</div>
       ${oldDash ? `<details class="shold"><summary>${L('لوحة المتابعة', 'Tracking board')}</summary><div class="sholdb">${oldDash}</div></details>` : ''}
@@ -33649,7 +33673,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function hydrate() {
     const h = document.getElementById('shhero'); if (h && !h.__w) { h.__w = 1; let x0 = null; h.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true }); h.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 40) { ACTIONS.shStep(dx < 0 ? 1 : -1); e.preventDefault(); } }); arm(); }
-    countUp();
+    countUp(); try { hqUp(); } catch (e) { /* ignore */ }
   }
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (S.route.view === 'dashboard' && document.querySelector('.stuhome')) hydrate(); else clearInterval(H.t); });
 
@@ -33686,6 +33710,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .shdots{position:absolute;top:16px;inset-inline-end:18px;z-index:3;display:flex;gap:6px}.shdots i{width:22px;height:4px;border-radius:2px;background:rgba(255,255,255,.35);cursor:pointer;transition:.3s}.shdots i.on{background:#fff;width:34px}
 .shnav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:38px;height:38px;border-radius:50%;border:0;background:rgba(11,13,16,.45);color:#fff;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;opacity:0;transition:.2s;backdrop-filter:blur(6px)}.shhero:hover .shnav{opacity:1}.shnav.prev{inset-inline-start:12px}.shnav.next{inset-inline-end:12px}
 .shhero.one .shnav,.shhero.one .shdots{display:none}
+.shfn{max-width:46ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shdots{flex-wrap:wrap;max-width:60%;justify-content:flex-end}.shhero[data-n] .shdots i{width:14px}.shhero[data-n] .shdots i.on{width:26px}
 .shsec h3{margin:6px 0 -6px;font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
 .shrow{display:grid;grid-template-columns:repeat(3,1fr) 2fr;gap:10px}
 .shk{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:4px;color:inherit;text-decoration:none;transition:.2s}.shk:hover{transform:translateY(-2px);border-color:var(--line-2)}.shk b{font-size:34px;font-weight:300;line-height:1}.shk span{font-size:12.5px;color:var(--muted)}
@@ -41542,7 +41567,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       if (typeof moneyDue === 'function') moneyDue().forEach(x => {
         if (x.action === 'poPayLater') { const p = byId('purchases', x.id); const due = p && p.deferred && p.deferred.due; if (!due || due > addDays(today, 3)) return; }
         seen.add('fund_' + x.id); seen.add('pbt_' + x.id); seen.add(x.id);
-        out.push({ k: ['fund', 'opex', 'pb', 'sup'].includes(x.kind) ? x.kind : 'po', id: x.kind + ':' + x.id, raw: x.id, kind: x.kind, label: x.label, sub: x.sub || '', subNo: x.subNo, amount: +x.amount || 0, href: x.href ? '#/' + x.href : '#/money' });
+        out.push({ k: ['fund', 'opex', 'pb', 'sup'].includes(x.kind) ? x.kind : 'po', id: x.kind + ':' + x.id, raw: x.id, kind: x.kind, label: x.label, sub: x.sub || '', subNo: x.subNo, amount: +x.amount || 0, href: x.href ? '#/' + x.href : (['fund', 'opex'].includes(x.kind) ? '#/requests/' + x.id : '#/money') });   /* v7.60: a custody / running-cost line opens the request itself */
       });
     } catch (e) { /* ignore */ }
     try {
@@ -41573,7 +41598,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     try {
       if (['hr', 'acc'].includes(role()) && window.nfPb) {
         if (role() === 'hr') list('advbatch').filter(b => b && b.status === 'open' && (b.items || []).length).forEach(b => out.push({ k: 'adv', id: 'abo:' + b.id, raw: b.id, label: L(`دفعة سلف مفتوحة — ${(b.items || []).length} سلفة`, `Open advance batch — ${(b.items || []).length} advances`), sub: L('ابعتها لمحمود من «تحويل السلف»', 'Send it to the owner from «Advance transfers»'), amount: (b.items || []).map(i => byId('advpay', i)).filter(Boolean).reduce((a, p) => a + (+p.amount || 0), 0), href: '#/advpay', sel: '' }));
-        window.nfPb.free().forEach(it => out.push({ k: it.k === 'po' ? 'po' : it.k, id: it.key, raw: it.id, kind: it.k, label: it.label, sub: it.sub, amount: it.amount, href: '#/money', sel: 'grp' }));
+        window.nfPb.free().forEach(it => out.push({ k: it.k === 'po' ? 'po' : it.k, id: it.key, raw: it.id, kind: it.k, label: it.label, sub: it.sub, amount: it.amount, href: ['fund', 'opex'].includes(it.k) ? '#/requests/' + it.id : '#/money', sel: 'grp' }));
       }
       if (isPayerMe()) {
         list('advpay').filter(p => p && p.status === 'topay' && (!p.payerId || String(p.payerId) === myWid())).forEach(p => out.push({ k: 'adv', id: 'ap:' + p.id, raw: p.id, label: L(`سلفة ${p.workerName || ''}`, `Advance — ${p.workerName || ''}`), sub: (window.nfWallet && window.nfWallet.label(window.nfWallet.of(p.workerId))) || '', amount: +p.amount || 0, href: '#/advpay', sel: window.nfTrf && window.nfTrf.reading(p) ? '' : 'pay', to: 'w:' + p.workerId }));
@@ -42790,13 +42815,15 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const funded = sortBy(batches().filter(b => b.status === 'funded' && unpaid(b).length), b => b.fundedAt || '');
     const sel = new Set(u.sel); const pick = u.pick && canBatch();
     const box = keys => pick ? `<input type="checkbox" class="pbck" data-pbk="${esc(keys.join(','))}" ${keys.every(k => sel.has(k)) ? 'checked' : ''} aria-label="${esc(L('اختار', 'Select'))}">` : '';
-    const row = (k, label, sub, amount, act, arg, btn, keys) => `<div class="item pbrow" style="padding:10px 12px">${keys ? box(keys) : ''}<div class="main"><div class="title"><span class="badge ${K[k][1]}" style="padding:0 6px">${esc(K[k][0])}</span> ${esc(label)}</div>${sub ? `<div class="meta"><span>${esc(sub)}</span></div>` : ''}</div><b class="num" style="margin-inline-end:8px">${fmtMoney(amount)}</b>${act && !pick ? `<button class="btn sm ${btn[1] || ''}" data-action="${act}" data-arg="${esc(arg)}" data-stop="1">${esc(btn[0])}</button>` : ''}</div>`;
+    /* v7.60: tapping the row opens the thing itself (the custody / running-cost request, the PO, the batch) — «Paid» stays on the button */
+    const openOf = (k, id) => (k === 'fund' || k === 'opex' ? ['reqOpen', id] : k === 'po' ? ['go', 'purchases/' + id] : k === 'pb' ? ['pbOpen', id] : null);
+    const row = (k, label, sub, amount, act, arg, btn, keys, op) => `<div class="item pbrow${op && !pick ? ' pbopen' : ''}" style="padding:10px 12px"${op && !pick ? ` data-action="${op[0]}" data-arg="${esc(op[1])}"` : ''}>${keys ? box(keys) : ''}<div class="main"><div class="title"><span class="badge ${K[k][1]}" style="padding:0 6px">${esc(K[k][0])}</span> ${esc(label)}</div>${sub ? `<div class="meta"><span>${esc(sub)}</span></div>` : ''}</div><b class="num" style="margin-inline-end:8px">${fmtMoney(amount)}</b>${act && !pick ? `<button class="btn sm ${btn[1] || ''}" data-action="${act}" data-arg="${esc(arg)}" data-stop="1">${esc(btn[0])}</button>` : ''}</div>`;
     let rows = '';
-    sent.forEach(b => { const left = unpaid(b); rows += row('pb', `${b.code} — ${L(`${left.length} بند`, `${left.length} items`)} — ${toWho(b)}`, L(`جمّعها ${b.sentByName || ''}: `, `grouped by ${b.sentByName || ''}: `) + left.map(it => it.no || short(it.supplier || it.who || it.label)).join('، '), sum(left, it => it.amount), 'pbOpen', b.id, owner ? [L('حوّل الدفعة', 'Pay the batch'), 'p'] : [L('افتح', 'Open'), ''], null); });
-    funded.forEach(b => { const left = unpaid(b); rows += row('pb', L(`${b.code} — عند ${short(nameOf(b.payerId))} يحوّلها`, `${b.code} — with ${short(nameOf(b.payerId))} to pay out`), L(`لسه ${left.length} من ${(b.items || []).length}`, `${left.length} of ${(b.items || []).length} still to pay`), sum(left, it => it.amount), 'pbOpen', b.id, [L('افتح', 'Open'), ''], null); });
+    sent.forEach(b => { const left = unpaid(b); rows += row('pb', `${b.code} — ${L(`${left.length} بند`, `${left.length} items`)} — ${toWho(b)}`, L(`جمّعها ${b.sentByName || ''}: `, `grouped by ${b.sentByName || ''}: `) + left.map(it => it.no || short(it.supplier || it.who || it.label)).join('، '), sum(left, it => it.amount), 'pbOpen', b.id, owner ? [L('حوّل الدفعة', 'Pay the batch'), 'p'] : [L('افتح', 'Open'), ''], null, openOf('pb', b.id)); });
+    funded.forEach(b => { const left = unpaid(b); rows += row('pb', L(`${b.code} — عند ${short(nameOf(b.payerId))} يحوّلها`, `${b.code} — with ${short(nameOf(b.payerId))} to pay out`), L(`لسه ${left.length} من ${(b.items || []).length}`, `${left.length} of ${(b.items || []).length} still to pay`), sum(left, it => it.amount), 'pbOpen', b.id, [L('افتح', 'Open'), ''], null, openOf('pb', b.id)); });
     gs.forEach(g => { rows += row('sup', L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · '), g.total, owner ? 'supGroupPay' : '', g.sk, [L('حوّل مرة واحدة', 'Pay once'), 'p'], g.items.map(it => it.key)); });
     const act = { po: 'poTransfer', fund: 'fundPay', opex: 'opexPay' };
-    singles.forEach(it => { const x = baseDue().find(y => keyOf(y) === it.key) || {}; rows += row(it.k, it.label, it.sub, it.amount, owner ? (x.action || act[it.k]) : '', it.id, [L('حوّلت', 'Paid'), 'p'], [it.key]); });
+    singles.forEach(it => { const x = baseDue().find(y => keyOf(y) === it.key) || {}; rows += row(it.k, it.label, it.sub, it.amount, owner ? (x.action || act[it.k]) : '', it.id, [L('حوّلت', 'Paid'), 'p'], [it.key], openOf(it.k, it.id)); });
     const total = r2(sum(sent, b => sum(unpaid(b), it => it.amount)) + sum(items, it => it.amount));
     const selItems = items.filter(it => sel.has(it.key));
     const foot = pick ? `<div class="pbfoot"><span>${esc(L(`المحدد ${selItems.length} بند`, `${selItems.length} selected`))} · <b>${esc(money(sum(selItems, it => it.amount)))}</b></span><div class="grow"></div><button class="btn sm p" data-action="pbMake" ${selItems.length < 2 ? 'disabled' : ''}>${esc(L('تجميع', 'Group'))}</button></div>` : '';
@@ -50274,6 +50301,45 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .fnn{display:flex;flex-direction:column;min-width:0}.fnn b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fns{font-size:11px;border-radius:999px;padding:2px 8px;border:1px solid var(--line)}.fns.rep{color:var(--accent)}.fns.new{color:var(--muted)}
 .fnp{grid-column:1/-1;min-height:0}.fnp.ok{color:var(--ok,#2a9d5c)}.fnp.err{color:var(--crit-ink,#c0392b)}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.60 — «due to transfer»: a line opens its request (Mahmoud, 12 Oct, from the chat, on «meals for the upholsterers»:
+   tap the line → it opens the request and he finishes it there).
+   · the money page card and «Money waiting for you» open the custody / running-cost request itself (the PO page for a PO);
+   · the request window shows, for the owner, a box «waiting for your transfer» with who to transfer to + the number (Copy)
+     and the transfer button — the same dialog as «Paid»; the window closes and the dialog opens.
+   No amounts added anywhere (the request text already carries what it carried).
+   ===================================================================== */
+(() => {
+  if (window.__NF_DUEOPEN__) return; window.__NF_DUEOPEN__ = 1;
+  if (typeof ACTIONS === 'undefined' || typeof ACTIONS.reqOpen !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const payOf = r => {
+    if (!r || typeof isAdmin !== 'function' || !isAdmin()) return null;
+    if (r.type === 'fund' && typeof fundToPay === 'function' && fundToPay(r) && ACTIONS.fundPay) return { act: 'fundPay', label: L('حوّل للعهدة', 'Transfer to the custody') };
+    if (r.type === 'opex' && r.status === 'approved' && !r.paidAt && ACTIONS.opexPay) return { act: 'opexPay', label: L('حوّل مصروف التشغيل', 'Pay the running cost') };
+    return null;
+  };
+  ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); const x = payOf(r); const th = document.getElementById('rq-thread');
+      if (x && th && !document.getElementById('rq-pay')) {
+        const to = r.type === 'fund' && typeof fundToHTML === 'function' ? fundToHTML(r) : '';
+        th.insertAdjacentHTML('beforebegin', `<div id="rq-pay" class="rqpay"><div class="rqpay-h"><b>${esc(L('مستني تحويلك', 'Waiting for your transfer'))}</b><button type="button" class="btn p" data-action="rqPay" data-arg="${esc(r.id)}">${icon('check')}${esc(x.label)}</button></div>${to}</div>`);
+      }
+    } catch (e) { console.warn('rq pay', e); }
+    return out;
+  })(ACTIONS.reqOpen);
+  ACTIONS.rqPay = id => { const x = payOf(byId('requests', id)); if (!x) return; closeModal(); setTimeout(() => { try { ACTIONS[x.act](id); } catch (e) { console.warn('rq pay', e); } }, 60); };
+  window.nfDueOpen = { payOf };
+  const css = document.createElement('style'); css.textContent = `
+.rqpay{border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:10px 0;background:var(--surface-2)}
+.rqpay-h{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.rqpay .fto{margin-top:8px}
+.pbrow.pbopen{cursor:pointer}.pbrow.pbopen:hover{background:var(--surface-2)}`;
   document.head.appendChild(css);
 })();
 </script>
