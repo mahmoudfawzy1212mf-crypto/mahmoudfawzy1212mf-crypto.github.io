@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1555-1f25de";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1626-d60a1b";</script>
 
 <script>
 'use strict';
@@ -25565,8 +25565,25 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       <div class="small">اتسجّل آجل ${fmtDate((d.at || '').slice(0, 10))} · ${esc(d.byName || '')} · المبلغ ${fmtMoney(poPayable(p))}${d.due ? ` · ميعاد الدفع <b style="${over ? 'color:var(--crit-ink)' : ''}">${fmtDate(d.due)}${over ? ' — متأخر' : ''}</b>` : ''}</div>
       ${(d.payments || []).map(x => `<div class="sppay"><div class="small"><b>${fmtMoney(x.amount)} ${CUR()}</b> · ${fmtDate((x.at || '').slice(0, 10))} · ${esc(x.byName || '')} · من ${esc(x.srcName || '')}</div>${infoLine(x)}${x.thumb ? `<img class="trfthumb" src="${esc(x.thumb)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')">` : ''}${waBtns(p, x.id, x)}</div>`).join('')}</div>`;
   }
+  /* v7.55: the line of a PO in «money waiting for you» says where to transfer (type, number, account holder) */
+  const MT_EN = { vf: 'Vodafone Cash', et: 'Etisalat Cash', or: 'Orange Cash', we: 'WE Cash', ip: 'InstaPay', card: 'Instant card', bank: 'Bank account' };
+  const mLine = m => `${L((ST[m.type] || [''])[0], MT_EN[m.type] || '')} ${mShow(m)}${m.holder ? ' — ' + m.holder : ''}`.trim();
+  if (typeof moneyDue === 'function') moneyDue = (base => function () {
+    const out = base.apply(this, arguments);
+    try { if (canSupPay()) out.forEach(x => { if (!x || x.kind !== 'po') return; const p = byId('purchases', x.id); const s0 = p && supplierOf(p); const ms = s0 ? methodsOf(s0.id) : [];
+      const to = ms.length ? `${L('حوّل على', 'Transfer to')}: ${ms.map(mLine).join(' / ')}` : L('المورد مالوش رقم تحويل متسجّل', 'The supplier has no transfer number');
+      x.to = to; x.sub0 = x.sub || ''; const sb = x.sub && L(0, 1) && typeof i18nTr === 'function' ? (i18nTr(x.sub) || x.sub) : x.sub; x.sub = sb ? `${sb} · ${to}` : to; if (x.subNo != null) x.subNo = `${x.subNo} · ${to}`; }); } catch (e) { /* ignore */ }
+    return out;
+  })(moneyDue);
   if (typeof transferCard === 'function') transferCard = (base => p => {
     let h = base(p); if (stu() || !p) return h;
+    /* v7.55 (Mahmoud on RFQ-26-009: «where is the number to transfer to?») — the supplier's transfer numbers on the waiting card itself */
+    if (p.status === 'transfer' && !p.transfer && canSupPay()) {
+      const s = supplierOf(p); const ms = s ? methodsOf(s.id) : [];
+      const add = ms.length ? `<div class="sp-to"><div class="tiny muted" style="margin:8px 0 4px">${esc(L('حوّل على:', 'Transfer to:'))}</div>${ms.map(m => `<div class="spm"><span class="muted small">${esc(L((ST[m.type] || [''])[0], MT_EN[m.type] || ''))}</span><span class="v ltr">${esc(mShow(m))}</span>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}</div>`).join('')}</div>`
+        : `<div class="banner warn small" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${icon('alert')}<span>${esc(L('المورد مالوش رقم تحويل متسجّل لسه — ضيفه من صفحة المورد.', 'The supplier has no transfer number yet — add it on the supplier page.'))}</span>${s ? `<a class="btn xs" href="#/suppliers/${esc(s.id)}">${esc(L('أرقام تحويل المورد', 'Supplier transfer numbers'))}</a>` : ''}</div>`;
+      const i = h.lastIndexOf('</div>'); h = i > 0 ? h.slice(0, i) + add + h.slice(i) : h + add;
+    }
     if (p.transfer && (canWa() || role() === 'hr')) { const add = infoLine(p.transfer) + waBtns(p, 'main', p.transfer); const i = h.lastIndexOf('</div>'); h = i > 0 ? h.slice(0, i) + add + h.slice(i) : h + add; }
     if (p.deferred && (canSupPay())) h += deferredCard(p);
     return h;
@@ -42661,8 +42678,10 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   /* ---------- items ---------- */
   const keyOf = x => `${x.kind}:${x.id}`;
   const supKey = p => (p.supplierId ? String(p.supplierId) : 'n:' + String(p.supplier || '').trim());
+  /* the «transfer to» text (v7.55) is for the screen only — not kept inside a saved batch */
+  const cleanItems = items => (items || []).map(it => { if (!it || !it.to) return it; const c = Object.assign({}, it); c.sub = c.sub0 != null ? c.sub0 : String(c.sub || '').replace(' · ' + c.to, '').replace(c.to, ''); delete c.to; delete c.sub0; return c; });
   function itemOf(x) {
-    const it = { key: keyOf(x), k: x.kind, id: x.id, amount: r2(+x.amount || 0), label: String(x.label || ''), sub: String(x.sub || '') };
+    const it = { key: keyOf(x), k: x.kind, id: x.id, amount: r2(+x.amount || 0), label: String(x.label || ''), sub: String(x.sub || '') }; if (x.to) { it.to = x.to; it.sub0 = x.sub0 || ''; }
     if (x.kind === 'po') { const p = byId('purchases', x.id); if (p) { it.no = p.number || ''; it.supplier = p.supplier || ''; it.sk = supKey(p); it.deferred = !!p.deferred; } }
     if (x.kind === 'opex' || x.kind === 'fund') { const r = byId('requests', x.id); if (r) { it.cat = r.cat || ''; it.homeId = r.homeId || null; it.walletId = r.walletId || null; it.payee = r.payee || ''; it.month = r.month || ''; it.who = r.requesterName || ''; } }
     return it;
@@ -42704,7 +42723,9 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       });
     } catch (e) { /* ignore */ }
     const items = freeItems(); const gs = groupsOf(items); const grouped = new Set(); gs.forEach(g => g.items.forEach(it => grouped.add(it.key)));
-    gs.forEach(g => out.push({ kind: 'sup', id: g.sk, label: L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), sub: g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · '), subNo: g.items.map(it => it.no).join('، '), amount: g.total, action: 'supGroupPay', href: 'money' }));
+    /* v7.55: the supplier line also says where to transfer (type, number, account holder) */
+    const toOf = sk => { const ms = supMethods(sk); return ms.length ? ' · ' + L('حوّل على', 'Transfer to') + ': ' + ms.map(m => `${ST()[m.type] || ''} ${mNum(m)}${m.holder ? ' — ' + m.holder : ''}`.trim()).join(' / ') : ''; };
+    gs.forEach(g => { const to = toOf(g.sk); out.push({ kind: 'sup', id: g.sk, label: L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), sub: g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · ') + to, subNo: g.items.map(it => it.no).join('، ') + to, amount: g.total, action: 'supGroupPay', href: 'money' }); });
     const busy = inLive();
     baseDue().filter(x => !busy.has(keyOf(x)) && !grouped.has(keyOf(x))).forEach(x => out.push(x));
     return out;
@@ -42770,7 +42791,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         if (mode === 'payer' && !payer) { toast(L('اختار المحوِّل', 'Choose the payer'), 'err'); return false; }
         const w = custodyOf(payer); if (mode === 'payer' && !w) { toast(L('المحوِّل ده مالوش عهدة — اعملها من «الفلوس» الأول', 'This payer has no custody — add it on the money page first'), 'err'); return false; }
         const me = S.session || {}; const now = nowISO(); const id = 'pb_' + uid(); const code = nextCode();
-        const doc = { id, type: 'paybatch', code, mode, payerId: payer || null, walletId: w ? w.id : null, workerId: payer || null, items, total, status: 'sent', sentAt: now, sentBy: me.id || null, sentByName: me.name || '', createdAt: now, month: monthOf(todayISO()) };
+        const doc = { id, type: 'paybatch', code, mode, payerId: payer || null, walletId: w ? w.id : null, workerId: payer || null, items: cleanItems(items), total, status: 'sent', sentAt: now, sentBy: me.id || null, sentByName: me.name || '', createdAt: now, month: monthOf(todayISO()) };
         await Store.save('money', doc, { silent: true });
         const to = mode === 'payer' ? L(`لعهدة ${short(nameOf(payer))}`, `to ${short(nameOf(payer))}'s custody`) : L('للموردين', 'to the suppliers');
         if (!isAdmin()) {
@@ -42969,6 +42990,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
 
   /* v7.47: the money card («money waiting for you») reuses all of this for «pick several → one transfer» */
   async function createPb(items, mode, payer, extra) {
+    items = cleanItems(items);
     const w = custodyOf(payer); const me = S.session || {}; const now = nowISO(); const id = 'pb_' + uid(); const code = nextCode();
     const doc = Object.assign({ id, type: 'paybatch', code, mode: mode || 'payer', payerId: payer || null, walletId: w ? w.id : null, workerId: payer || null, items, total: r2(sum(items, it => it.amount)), status: 'sent', sentAt: now, sentBy: me.id || null, sentByName: me.name || '', createdAt: now, month: monthOf(todayISO()) }, extra || {});
     await Store.save('money', doc, { silent: true }); return doc;
@@ -46728,7 +46750,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   const hd = (w, extra) => `<div class="nfw-h">${w.href && !W.edit ? `<a class="nfw-tl" href="${esc(w.href)}">` : '<span class="nfw-tl">'}<span class="nfw-ic" style="background:${w.col}">${gl(w.ic, 12)}</span><b>${esc(w.t())}</b>${w.href && !W.edit ? '</a>' : '</span>'}${extra || ''}</div>`;
   const empty = (k, txt) => `<div class="nfw-empty">${gl(k, 26).replace('fill="#fff"', 'fill="currentColor"')}<span>${esc(txt)}</span></div>`;
   const row = (href, main, sub, end, attrs) => `<a class="nfw-r" href="${esc(href)}" ${attrs || ''}><span class="nfw-rt"><b>${main}</b>${sub ? `<small>${sub}</small>` : ''}</span>${end ? `<span class="nfw-re">${end}</span>` : ''}</a>`;
-  const big = (href, n, lbl, extra) => `<a class="nfw-big" href="${esc(href)}"><b>${esc(String(n))}</b><span>${esc(lbl)}</span>${extra || ''}</a>`;
+  const big = (href, n, lbl, extra, attrs) => `<a class="nfw-big" href="${esc(href)}" ${attrs || ''}><b>${esc(String(n))}</b><span>${esc(lbl)}</span>${extra || ''}</a>`;
   const shortName = id => { const n = typeof assigneeName === 'function' ? assigneeName(id) || '' : ''; return String(n).split(' ').slice(0, 2).join(' '); };
 
   /* ---------- today ---------- */
@@ -46936,12 +46958,20 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   }
   function wMsgs(s) {
     const w = WD.msgs; const rs = msgRows(); const tot = rs.reduce((a, x) => a + x.n, 0);
-    if (s === 'S') return hd(w) + big('#/tasks', tot, L('رسالة جديدة', 'new messages'), rs.length ? `<em>${esc(L(`في ${rs.length} محادثة`, `in ${rs.length} chats`))}</em>` : '');
+    /* v7.55 (Mahmoud: tapping «Messages» opened the tasks page): one chat → that chat; several → the list of chats with news */
+    if (s === 'S') { const one = rs.length === 1 ? rs[0] : null; return hd(w) + big(one ? (one.h || '#') : '#/tasks', tot, L('رسالة جديدة', 'new messages'), rs.length ? `<em>${esc(L(`في ${rs.length} محادثة`, `in ${rs.length} chats`))}</em>` : '', one ? (one.pid ? `data-nfwpc="${esc(one.pid)}"` : '') : rs.length > 1 ? 'data-nfwmsgs="1"' : ''); }
     if (!rs.length) return hd(w) + empty('chat', L('مفيش رسايل جديدة', 'No new messages'));
     const n = s === 'L' ? 7 : 3;
     return hd(w, `<i class="nfw-n">${tot}</i>`) + `<div class="nfw-rows">${rs.slice(0, n).map(x => row(x.h || '#', esc(x.t), esc(x.s), `<i class="nfw-n sm">${x.n}</i>`, x.pid ? `data-nfwpc="${esc(x.pid)}"` : '')).join('')}</div>`;
   }
-  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-nfwpc]'); if (!a || W.edit) return; e.preventDefault(); if (window.nfPChat && window.nfPChat.open) window.nfPChat.open(a.dataset.nfwpc); });
+  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-nfwpc]'); if (!a || W.edit) return; e.preventDefault(); if (a.closest('#mform') && typeof closeModal === 'function') closeModal(); if (window.nfPChat && window.nfPChat.open) window.nfPChat.open(a.dataset.nfwpc); });
+  document.addEventListener('click', e => {
+    const a = e.target.closest && e.target.closest('[data-nfwmsgs]'); if (!a || W.edit) return; e.preventDefault();
+    const rs = msgRows(); if (!rs.length) { location.hash = '#/tasks'; return; }
+    openModal({ title: L('الرسايل الجديدة', 'New messages'), footer: null, cls: 'nfw-msgm', body: `<div class="nfw-rows">${rs.map(x => row(x.h || '#', esc(x.t), esc(x.s), `<i class="nfw-n sm">${x.n}</i>`, x.pid ? `data-nfwpc="${esc(x.pid)}"` : 'data-nfwclose="1"')).join('')}</div>` });
+  });
+  document.head.insertAdjacentHTML('beforeend', '<style>.nfw-msgm .nfw-rows{overflow:visible}.nfw-msgm .nfw-r{padding:10px 4px}</style>');
+  document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('#mform [data-nfwclose]'); if (a && typeof closeModal === 'function') setTimeout(() => closeModal(), 0); });
 
   const RENDER = { today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs };
 
