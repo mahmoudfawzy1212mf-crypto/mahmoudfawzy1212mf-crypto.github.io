@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1649-52d9cd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1805-d61a69";</script>
 
 <script>
 'use strict';
@@ -25192,6 +25192,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   if (window.nfTrf) nfTrf.on('apverify', (r, ctx) => apVerifyDone(ctx.id, r, true));
   window.nfApDone = apVerifyDone;
+  /* v7.57 (Mahmoud on «تحويل سلفة محتاج مراجعتك»: «bring me what you want me to review in the same link / notification») — the
+     task page shows this very card (picture, what did not match, the buttons) instead of «open the advances page» */
+  window.nfAp = { card: p => cardHTML(p), can: () => canAdvPay(), mine: p => mine(p) };
+  ACTIONS.apUpPick = id => { const i = document.querySelector(`input[data-apup="${CSS.escape(String(id || ''))}"]`); if (i) i.click(); else go('advpay'); };
   window.nfWallet = { of: walletOf, label: wLabel, full: wFull };
   document.addEventListener('change', async e => {
     const inp = e.target.closest('[data-apup]'); if (!inp || !inp.files || !inp.files[0]) return; const id = inp.dataset.apup; const p = byId('advpay', id); if (!p) return;
@@ -33925,7 +33929,12 @@ if (STU_ON) {
    ===================================================================== */
 (function () {
   const NOTE_KINDS = new Set(['update', 'notice']);
-  const DECIDED = new Set(['approved', 'rejected', 'paid', 'cancelled', 'done', 'closed']);
+  const DECIDED0 = new Set(['approved', 'rejected', 'paid', 'cancelled', 'done', 'closed']);
+  /* v7.57: an approved custody request / running cost that still waits for the owner's transfer is not «decided» yet —
+     its note stays open (with «Transfer») until the money is sent */
+  const waitsTransfer = r => !!r && r.status === 'approved' && ((r.type === 'fund' && typeof fundToPay === 'function' && fundToPay(r)) || (r.type === 'opex' && !r.paidAt));
+  const DECIDED = { has: s => DECIDED0.has(s) };
+  const decided = r => !!r && DECIDED0.has(r.status) && !waitsTransfer(r);
   const allReq = () => (S.data && S.data.requests) ? Array.from(S.data.requests.values()) : [];
   const allTasks = () => (S.data && S.data.tasks) ? Array.from(S.data.tasks.values()) : [];
   const reqOfTask = (t, reqMap) => {
@@ -33940,7 +33949,7 @@ if (STU_ON) {
     catch (e) { return false; }
   }
   window.nfCloseNotesFor = async function (reqId) {
-    const r = S.data.requests && S.data.requests.get(reqId); if (!r || !DECIDED.has(r.status)) return 0; let n = 0;
+    const r = S.data.requests && S.data.requests.get(reqId); if (!decided(r)) return 0; let n = 0;
     const one = new Map([[reqId, r]]);
     for (const t of allTasks()) if (reqOfTask(t, one)) { if (await closeFor(t, r)) n++; }
     if (n) rerender(); return n;
@@ -33967,7 +33976,7 @@ if (STU_ON) {
   async function sweep() {
     if (!S.session || !writable() || !S.data || !S.data.tasks || !S.data.requests || Date.now() - _sweepAt < 3 * 60000) return; _sweepAt = Date.now();
     if (typeof canSee === 'function' && !canSee('tasks')) return;
-    const reqMap = new Map(allReq().filter(r => r && DECIDED.has(r.status)).map(r => [r.id, r])); let n = 0;
+    const reqMap = new Map(allReq().filter(r => decided(r)).map(r => [r.id, r])); let n = 0;
     const byId_ = id => S.data.tasks.get(id);
     for (const t of allTasks()) {
       const r = reqMap.size ? reqOfTask(t, reqMap) : null; if (r) { if (await closeFor(t, r)) n++; }
@@ -48701,6 +48710,7 @@ function oxFlow(k) {
       if (v === 'materials' && get('materials', x)) return { k: 'mat', mt: get('materials', x) };
       if (v === 'tasks' && x !== id && get('tasks', x)) return { k: 'task', tk: get('tasks', x) };
     }
+    if (/^ap[td]_/.test(id)) { const a0 = list('advpay').find(x => x && x.advanceId === id.slice(4)); if (a0) return { k: 'ap', x: a0 }; }
     const parts = id.split('_');
     for (let i = 0; i < parts.length; i++) for (let j = parts.length; j > i; j--) {
       if (i === 0 && j === parts.length) continue; const c = parts.slice(i, j).join('_'); if (c.length < 8) continue;
@@ -48710,6 +48720,7 @@ function oxFlow(k) {
       const mt = get('materials', c); if (mt) return { k: 'mat', mt };
       const pb = get('money', c); if (pb && pb.type === 'paybatch') return { k: 'pb', x: pb };
       const ab = get('advbatch', c); if (ab) return { k: 'ab', x: ab };
+      const ap = get('advpay', c); if (ap) return { k: 'ap', x: ap };
       const fu = get('fuelfills', c); if (fu) return { k: 'fuel', x: fu };
     }
     if (t.tripId && get('trips', t.tripId)) return { k: 'trip', tr: get('trips', t.tripId) };
@@ -48736,6 +48747,9 @@ function oxFlow(k) {
       const lab = r.type === 'rfqtech' ? T('اعتمد فنيًا', 'Technical approval') : r.type === 'rfqprice' ? T('اختار المورد واعتمد السعر', 'Pick the supplier + approve the price') : r.type === 'po' ? T('اعتمد أمر الشراء', 'Approve the PO') : T('موافقة / رفض', 'Approve / reject');
       return { label: lab, action: 'reqOpen', arg: r.id, pending: true, hint: T('المهمة دي بتتقفل لوحدها بعد ما تقرر', 'This task closes by itself once you decide') };
     }
+    /* v7.57: an approved custody request / running cost still waits for the owner's transfer — the task stays open with «Transfer» */
+    if (r && r.type === 'fund' && r.status === 'approved' && typeof fundToPay === 'function' && fundToPay(r) && isAdmin() && ACTIONS.fundPay) return { label: T('حوّل للعهدة', 'Transfer to the custody'), action: 'fundPay', arg: r.id, pending: true, hint: T('المهمة بتتقفل لوحدها بعد التحويل', 'The task closes by itself after the transfer') };
+    if (r && r.type === 'opex' && r.status === 'approved' && !r.paidAt && isAdmin() && ACTIONS.opexPay) return { label: T('حوّل مصروف التشغيل', 'Pay the running cost'), action: 'opexPay', arg: r.id, pending: true, hint: T('المهمة بتتقفل لوحدها بعد التحويل', 'The task closes by itself after the transfer') };
     if (p) {
       const pg = 'purchases/' + p.id;
       if (['draft', 'need_ok'].includes(p.status) && isPurch()) return { label: p.status === 'draft' ? T('كمّل الأمر وابعته للاعتماد', 'Complete the PO and send it for approval') : T('اعمل أمر الشراء', 'Make the PO'), action: 'go', arg: pg, pending: true, hint: T('المهمة بتتقفل لوحدها لما الأمر يتبعت للاعتماد', 'The task closes by itself once the PO is sent for approval') };
@@ -48752,9 +48766,15 @@ function oxFlow(k) {
     if (L.k === 'pb') return { label: T('افتح دفعة التحويل', 'Open the pay batch'), action: 'go', arg: 'go/pb/' + L.x.id, pending: false };
     if (L.k === 'ab') return { label: T('افتح دفعة السلف', 'Open the advance batch'), action: 'go', arg: 'go/ab/' + L.x.id, pending: false };
     if (L.k === 'fuel') return { label: T('افتح التموين', 'Open the refuel'), action: 'go', arg: 'go/fuel/' + L.x.id, pending: false };
+    if (L.k === 'ap') {
+      const x = L.x; const ap = window.nfAp;
+      if (x.status === 'review' && isAdmin()) return { label: T('اعتمد التحويل', 'Approve the transfer'), action: 'apApprove', arg: x.id, pending: true, hint: T('أو «يرفع صورة تانية» — المهمة بتتقفل لوحدها بعد ما تقرر', 'Or «another picture» — the task closes by itself once you decide') };
+      if (x.status === 'topay' && ap && ap.mine(x) && !isAdmin()) return { label: T('ارفع صورة التحويل', 'Upload the transfer picture'), action: 'apUpPick', arg: x.id, pending: true, hint: T('المهمة بتتقفل لوحدها لما التحويل يتطابق', 'The task closes by itself once the transfer matches') };
+      return { label: T('افتح تحويل السلف', 'Open advance transfers'), action: 'go', arg: 'advpay', pending: false };
+    }
     return null;
   }
-  const actKey = L => { if (!L) return ''; const r = L.r, p = L.p; return [p ? 'p:' + p.id + ':' + p.status : '', r ? 'r:' + r.id + ':' + r.status + ':' + (r.step || 0) : ''].filter(Boolean).join('|'); };
+  const actKey = L => { if (!L) return ''; const r = L.r, p = L.p, x = ['ap', 'ab', 'pb'].includes(L.k) ? L.x : null; return [p ? 'p:' + p.id + ':' + p.status : '', r ? 'r:' + r.id + ':' + r.status + ':' + (r.step || 0) + (r.toPay ? ':t' : '') + (r.paidAt ? ':p' : '') : '', x ? L.k + ':' + x.id + ':' + x.status : ''].filter(Boolean).join('|'); };
   window.nfTaskLink = t => { const L = linkOf(t); return L ? { link: L, act: actOf(L) } : null; };
 
   /* ---------- the card ---------- */
@@ -48802,6 +48822,11 @@ function oxFlow(k) {
       ic = L.k === 'fuel' ? 'map' : 'money'; kind = L.k === 'pb' ? T('دفعة تحويل', 'Pay batch') : L.k === 'ab' ? T('دفعة سلف', 'Advance batch') : T('تموين عربية', 'Refuel'); no = x.code || (x.station && x.station.name) || '';
       st = x.status ? `<span class="badge ${['done', 'paid'].includes(x.status) ? 'good' : ['cancelled', 'rejected'].includes(x.status) ? 'crit' : 'warn'}">${esc(SX[x.status] || x.status)}</span>` : '';
       rows = L.k === 'fuel' ? row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(x.vehicleId) : '') + row(T('السواق', 'Driver'), x.driverId && typeof assigneeName === 'function' ? assigneeName(x.driverId) : '') + row(T('الميعاد', 'When'), fmtD(x.createdAt)) : row(T('البنود', 'Items'), String((x.items || []).length)) + row(T('التاريخ', 'Date'), fmtD(x.sentAt || x.createdAt));
+    } else if (L.k === 'ap') {
+      const x = L.x; ic = 'money'; kind = T('تحويل سلفة', 'Advance transfer'); no = x.workerName || '';
+      const SA = { await: T('مستنية تمويل الدفعة', 'Waiting for the batch'), topay: T('مستني تحويل', 'To transfer'), review: T('مراجعة', 'Review'), paid: T('اتحولت', 'Transferred'), cancelled: T('ملغية', 'Cancelled') };
+      st = `<span class="badge ${x.status === 'paid' ? 'good' : x.status === 'review' ? 'serious' : x.status === 'cancelled' ? '' : 'warn'}">${esc(SA[x.status] || x.status || '')}</span>`;
+      rows = row(T('اتوافق عليها', 'Approved'), `${fmtD(x.createdAt)}${x.createdByName ? ' — ' + x.createdByName : ''}`);
     } else if (L.k === 'task') {
       const k = L.tk; ic = 'board'; kind = T('المهمة الأصلية', 'Original task'); no = ''; st = stBadge(typeof TASK_STATUS !== 'undefined' ? TASK_STATUS : null, k.status);
       rows = row(T('المهمة', 'Task'), k.title || '') + row(T('المكلَّف', 'Assignee'), k.assigneeId && typeof assigneeName === 'function' ? assigneeName(k.assigneeId) : '');
@@ -48825,12 +48850,16 @@ function oxFlow(k) {
         html = html.replace(re, `<button class="btn sm p" data-action="${esc(A.action)}" data-arg="${esc(A.arg)}">${icon('check')}${esc(A.label)}</button>`);
         const k = actKey(L); if (k && t.actKey !== k && writable()) setTimeout(() => { try { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && cur.actKey !== k) Store.update('tasks', t.id, { actKey: k }, { silent: true }); } catch (e) { /* ignore */ } }, 400);
       }
+      if (L.k === 'ap' && window.nfAp && window.nfAp.can()) {
+        const c0 = card(t, L, A); const inner = window.nfAp.card(L.x);
+        return c0.replace('<div class="nflc-rs">', `<div class="nflc-ap">${inner}</div><div class="nflc-rs">`) + html;
+      }
       return card(t, L, A) + html;
     } catch (e) { console.warn('task card', e); return html; }
   })(vTaskDetail);
 
   /* (3) «Start» opens the thing; «Done» runs the action while it waits for you */
-  const runAct = A => { if (!A) return; if (A.action === 'reqOpen' && ACTIONS.reqOpen) ACTIONS.reqOpen(A.arg); else if (A.action === 'go') go(A.arg); };
+  const runAct = A => { if (!A) return; if (A.action === 'reqOpen' && ACTIONS.reqOpen) ACTIONS.reqOpen(A.arg); else if (A.action === 'go') go(A.arg); else if (ACTIONS[A.action]) ACTIONS[A.action](A.arg); };
   if (ACTIONS.taskStatus) ACTIONS.taskStatus = (base => async function (arg) {
     const [id, st] = String(arg || '').split(':'); const t0 = byId('tasks', id); const L = t0 ? linkOf(t0) : null; const A = L ? actOf(L) : null;
     if (st === 'done' && A && A.pending && t0 && OPEN(t0.status)) { toast(A.hint || T('المهمة بتتقفل لوحدها لما الإجراء يخلص', 'The task closes by itself once the action is done')); runAct(A); return; }
@@ -48860,10 +48889,11 @@ function oxFlow(k) {
     return out;
   })(decideRequest);
   Store.update = (base => async function (col, id, patch, opts) {
-    if (col !== 'purchases' || !patch || !patch.status) return base.apply(this, arguments);
-    const p0 = byId('purchases', id); const st0 = p0 && p0.status; const cands = p0 ? candTasks(t => (taskMine(t) || mineIds().includes(t.assigneeId)) && (t.purchaseId === id || String(t.id).includes(id))).filter(pendingNow) : [];
+    /* v7.57: also advance transfers and pay / advance batches */
+    if (!['purchases', 'advpay', 'advbatch', 'money'].includes(col) || !patch || !patch.status) return base.apply(this, arguments);
+    const p0 = byId(col, id); const st0 = p0 && p0.status; const cands = p0 ? candTasks(t => (taskMine(t) || mineIds().includes(t.assigneeId)) && ((col === 'purchases' && t.purchaseId === id) || String(t.id).includes(id) || (col === 'advpay' && p0.advanceId && /^ap[td]_/.test(String(t.id)) && String(t.id).slice(4) === p0.advanceId))).filter(pendingNow) : [];
     const out = await base.apply(this, arguments);
-    try { const p = byId('purchases', id); if (p && p.status !== st0) for (const t of cands) { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && !pendingNow(cur)) await closeT(cur, T('اتقفلت لوحدها — الإجراء خلص', 'Closed by itself — the action is done')); } } catch (e) { /* ignore */ }
+    try { const p = byId(col, id); if (p && p.status !== st0) for (const t of cands) { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && !pendingNow(cur)) await closeT(cur, T('اتقفلت لوحدها — الإجراء خلص', 'Closed by itself — the action is done')); } } catch (e) { /* ignore */ }
     return out;
   })(Store.update);
   let _sw = 0;
@@ -48946,7 +48976,7 @@ function oxFlow(k) {
 .nflc-st{flex:none}
 .nflc-rs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 16px}
 .nflc-r{display:flex;gap:8px;font-size:13px;min-width:0;padding:3px 0}.nflc-r span{flex:none;color:var(--muted);min-width:78px}.nflc-r b{font-weight:600;overflow-wrap:anywhere;min-width:0}
-.nflc-it{margin:8px 0 0;padding:8px 12px;list-style:none;border-radius:10px;background:var(--surface-2,rgba(127,127,127,.07));font-size:13px;display:flex;flex-direction:column;gap:4px}
+.nflc-ap{margin:6px 0 4px}.nflc-ap .apcard{border:0;padding:0;margin:0;background:none;box-shadow:none}.nflc-it{margin:8px 0 0;padding:8px 12px;list-style:none;border-radius:10px;background:var(--surface-2,rgba(127,127,127,.07));font-size:13px;display:flex;flex-direction:column;gap:4px}
 .nflc-it .code{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);border:0;background:none;padding:0;box-shadow:none}.nflc-it .q{color:var(--muted);white-space:nowrap}.nflc-it .more{color:var(--muted)}
 .nflc-w{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--warn,#e0a100) 12%,transparent)}.nflc-w svg{width:16px;height:16px;flex:none}
 .nflc-go{width:100%;justify-content:center;margin-top:12px;min-height:46px;font-size:15px;white-space:normal}
@@ -49543,6 +49573,208 @@ function oxFlow(k) {
   .psec-more summary{cursor:pointer;margin-top:10px}
   @media (max-width:759px){.psec-bar{top:calc(var(--topbar-h,52px) + 2px);border-radius:12px}.psec-bar a{padding:8px 10px;font-size:13px}}
   @media print{#view.psec .gmain [data-psec]{display:block!important}.psec-bar{display:none}}
+  </style>`);
+})();
+/* =====================================================================
+   v7.57 — «Share» a photo / PDF from the phone straight into a task chat, like WhatsApp (Mahmoud, 12 Oct: «when I screenshot
+   a transfer while the task is open on the phone, Share should show the app like WhatsApp and put it in the task I have open»).
+   · iPhone (the Ninety app): a share extension shows the tasks (the last one opened here is ticked) and sends the picture to the
+     server itself (Edge «task-share», device token) — this part keeps the extension's list fresh (keychain, through the
+     NinetyShare plugin) every time a task is opened and when the app goes to the background.
+   · Android (the app and the installed site): Share → the app opens on «#/share» with the files: pick the task, caption, send.
+   · A shared transfer screenshot into a task that waits for a transfer (supplier PO, custody request, running cost, pay batch,
+     advance) → «Record it as the transfer» opens that same dialog with the picture already attached.
+   The three systems, Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SHARE__) return; window.__NF_SHARE__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined' || typeof EXTRA_VIEWS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const ls = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
+  };
+  const OPEN = t => !!t && ['open', 'doing'].includes(t.status || 'open') && !t.deleted;
+  const mineT = t => { try { return typeof taskMine === 'function' ? taskMine(t) : (typeof taskIsParty === 'function' ? taskIsParty(t) : true); } catch (e) { return false; } };
+  const party = t => { try { return typeof taskIsParty === 'function' ? taskIsParty(t) : true; } catch (e) { return false; } };
+
+  /* ---------- the tasks opened on this device (newest first) ---------- */
+  const RK = 'nf.recentTasks';
+  const recent = () => (ls.get(RK) || []).filter(x => x && x.id);
+  function noteTask(id) { const a = recent().filter(x => x.id !== id); a.unshift({ id, at: Date.now() }); ls.set(RK, a.slice(0, 12)); }
+  let noted = '', notedAt = 0;
+  RENDER_HOOKS.push(() => {
+    const m = /^#\/tasks\/([^/?#]+)/.exec(location.hash || ''); if (!m || !S.session) return;
+    const id = decodeURIComponent(m[1]); if (!byId('tasks', id)) return;
+    if (id !== noted || Date.now() - notedAt > 60000) { noted = id; notedAt = Date.now(); noteTask(id); ctxSoon(); }
+  });
+  function shareTasks() {
+    const out = []; const seen = new Set();
+    recent().forEach(x => { const t = byId('tasks', x.id); if (OPEN(t) && party(t) && !seen.has(t.id)) { seen.add(t.id); out.push({ t, at: x.at }); } });
+    const rest = list('tasks').filter(t => OPEN(t) && !seen.has(t.id) && t.kind !== 'notice' && mineT(t));
+    rest.sort((a, b) => String(b.lastMsgAt || b.updatedAt || '').localeCompare(String(a.lastMsgAt || a.updatedAt || '')));
+    rest.slice(0, 40).forEach(t => out.push({ t, at: 0 }));
+    return out;
+  }
+  const subOf = t => { try { const o = t.orderId ? byId('orders', t.orderId) : null; return o ? (o.code || '') : (t.deptId && typeof deptName === 'function' ? deptName(t.deptId) : ''); } catch (e) { return ''; } };
+  const defTo = () => { const r = recent()[0]; const t = r && byId('tasks', r.id); return r && OPEN(t) && Date.now() - r.at < 3600e3 ? t.id : null; };
+
+  /* ---------- does this task wait for a transfer that a picture settles? ---------- */
+  function moneyOf(t) {
+    try {
+      const x = window.nfTaskLink ? window.nfTaskLink(t) : null; const k = x && x.link; if (!k) return null;
+      if (k.r && k.r.type === 'fund' && typeof fundToPay === 'function' && fundToPay(k.r) && isAdmin()) return { act: 'fundPay', id: k.r.id };
+      if (k.r && k.r.type === 'opex' && k.r.status === 'approved' && !k.r.paidAt && isAdmin() && ACTIONS.opexPay) return { act: 'opexPay', id: k.r.id };
+      if (k.p && k.p.status === 'transfer' && !k.p.transfer && isAdmin()) return { act: 'poTransfer', id: k.p.id };
+      if (k.k === 'pb' && k.x.status === 'sent' && isAdmin() && ACTIONS.pbOpen) return { act: 'pbOpen', id: k.x.id };
+      if (k.k === 'ap' && k.x.status === 'topay' && window.nfAp && window.nfAp.mine(k.x)) return { input: `input[data-apup="${CSS.escape(k.x.id)}"]`, page: 'advpay' };
+      if (k.k === 'ab' && ['sent', 'review'].includes(k.x.status) && isAdmin()) return { input: `input[data-abup="${CSS.escape(k.x.id)}"]`, page: 'advpay' };
+    } catch (e) { /* not a money task */ }
+    return null;
+  }
+  async function fillFile(sel, files) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 6000) {
+      const i = document.querySelector(sel);
+      if (i) { try { const dt = new DataTransfer(); files.forEach(f => dt.items.add(f)); i.files = dt.files; i.dispatchEvent(new Event('change', { bubbles: true })); return true; } catch (e) { return false; } }
+      await sleep(120);
+    }
+    return false;
+  }
+  async function runMoney(m, files) {
+    if (!m || !files.length) return false;
+    if (m.act && ACTIONS[m.act]) { ACTIONS[m.act](m.id); return fillFile('#mform input[type=file]', files.slice(0, 1)); }
+    if (m.input) { if (!document.querySelector(m.input)) { go(m.page); await sleep(800); } return fillFile(m.input, files.slice(0, 1)); }
+    return false;
+  }
+
+
+  /* ---------- the share page (Android app / installed site) ---------- */
+  const SH = { files: [], text: '', to: null, q: '', busy: false, urls: [] };
+  const setFiles = (files, text) => { SH.urls.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { /* ignore */ } }); SH.files = files.slice(0, 10); SH.text = text || ''; SH.urls = SH.files.map(f => (/^image\//.test(f.type) ? URL.createObjectURL(f) : '')); SH.to = defTo(); SH.q = ''; };
+  Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !['kiosk', 'viewer'].includes(r) && !ROLE_VIEWS[r].includes('share')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['share']); });
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'share') return !!S.session; return base.apply(this, arguments); })(canSee);
+  if (typeof VIEW_TITLES !== 'undefined') VIEW_TITLES.share = 'ابعت لمهمة';
+  EXTRA_TITLES.share = () => ({ title: L('ابعت لمهمة', 'Send to a task'), sub: L('الصور والملفات اللي عملتلها «مشاركة» من الموبايل', 'The photos and files you shared from the phone') });
+  EXTRA_VIEWS.share = () => {
+    if (!S.session) return '';
+    if (!SH.files.length && !SH.text) return `<div class="card"><div class="empty"><b>${esc(L('مفيش حاجة مستنية', 'Nothing waiting'))}</b><div class="small muted" style="margin-top:6px">${esc(L('من الاستوديو أو أي سكرين شوت: «مشاركة» ← Ninety', 'From the gallery or any screenshot: «Share» → Ninety'))}</div></div></div>`;
+    const all = shareTasks(); const q = SH.q.trim().toLowerCase();
+    const rows = all.filter(({ t }) => !q || String(t.title || '').toLowerCase().includes(q) || String(subOf(t)).toLowerCase().includes(q)).slice(0, 30);
+    const cur = SH.to && byId('tasks', SH.to); const mo = cur ? moneyOf(cur) : null;
+    const th = SH.files.map((f, i) => `<div class="shr-f">${SH.urls[i] ? `<img src="${esc(SH.urls[i])}" alt="">` : `<div class="shr-pdf">${icon('print')}<span>${esc(f.name || 'PDF')}</span></div>`}</div>`).join('');
+    const rowH = ({ t, at }) => `<button type="button" class="shr-t${SH.to === t.id ? ' on' : ''}" data-action="shrPick" data-arg="${esc(t.id)}"><span class="shr-r" aria-hidden="true"></span><span class="shr-tt"><b>${esc(t.title || '')}</b><small>${esc([subOf(t), at ? L('فتحتها', 'opened') + ' ' + new Date(at).toTimeString().slice(0, 5) : ''].filter(Boolean).join(' · '))}</small></span>${moneyOf(t) ? `<span class="badge warn">${esc(L('مستنية تحويل', 'Waits for a transfer'))}</span>` : ''}</button>`;
+    return `<div class="card shr"><div class="shr-fs">${th}</div>
+      <textarea id="shr-cap" class="shr-cap" placeholder="${esc(L('اكتب تعليق (اختياري)', 'Add a caption (optional)'))}">${esc(SH.text)}</textarea>
+      <div class="shr-h"><b>${esc(L('ابعت لـ:', 'Send to:'))}</b><input id="shr-q" class="shr-q" type="search" placeholder="${esc(L('دوّر على مهمة', 'Search a task'))}" value="${esc(SH.q)}"></div>
+      <div class="shr-ts">${rows.length ? rows.map(rowH).join('') : `<div class="muted small" style="padding:10px">${esc(L('مفيش مهام مفتوحة', 'No open tasks'))}</div>`}</div>
+      <div class="shr-go">${mo ? `<button type="button" class="btn p" data-action="shrSend" data-arg="proof" ${SH.busy ? 'disabled' : ''}>${icon('money')}${esc(L('ابعت وسجّلها إثبات التحويل', 'Send + record it as the transfer'))}</button>` : ''}<button type="button" class="btn ${mo ? '' : 'p'}" data-action="shrSend" ${!SH.to || SH.busy ? 'disabled' : ''}>${icon('send')}${esc(SH.busy ? L('بيتبعت…', 'Sending…') : L('ابعت', 'Send'))}</button><button type="button" class="btn ghost" data-action="shrCancel">${esc(L('إلغاء', 'Cancel'))}</button></div></div>`;
+  };
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'shr-q') { SH.q = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('shr-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } } }
+    if (e.target && e.target.id === 'shr-cap') SH.text = e.target.value;
+  });
+  ACTIONS.shrPick = id => { SH.to = id; render(); };
+  ACTIONS.shrCancel = () => { setFiles([], ''); go('dashboard'); };
+  ACTIONS.shrSend = async arg => {
+    const t = SH.to && byId('tasks', SH.to); if (!t || SH.busy) return; const files = SH.files.slice(); const cap = (SH.text || '').trim();
+    SH.busy = true; render();
+    try {
+      if (!files.length) await taskPost(t, cap, null);
+      for (let i = 0; i < files.length; i++) await taskPost(t, i === 0 ? cap : '', files[i]);
+      noteTask(t.id);
+      toast(L('اتبعتت ✓', 'Sent ✓'));
+      const mo = arg === 'proof' ? moneyOf(t) : null;
+      setFiles([], ''); SH.busy = false;
+      location.hash = '#/tasks/' + t.id;
+      if (mo && files.length) setTimeout(() => runMoney(mo, files), 600);
+    } catch (e) { SH.busy = false; render(); toast(L('مقدرتش أبعتها — جرّب تاني', 'Could not send it — try again'), 'err'); }
+  };
+
+  /* files that arrived: Android app (plugin) or the installed site (service worker cache) */
+  const C = () => { try { return window.Capacitor || null; } catch (e) { return null; } };
+  const NS = () => { const c = C(); try { return c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.NinetyShare ? c.Plugins.NinetyShare : null; } catch (e) { return null; } };
+  const plat = () => { try { return C().getPlatform(); } catch (e) { return 'web'; } };
+  const b64File = (x) => { const bin = atob(String(x.data || '')); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new File([u], x.name || 'file', { type: x.mime || 'application/octet-stream' }); };
+  async function pullShared() {
+    const files = []; let text = '';
+    const P = NS();
+    if (P && plat() === 'android' && P.take) { try { const r = await P.take(); ((r && r.files) || []).forEach(x => { try { files.push(b64File(x)); } catch (e) { /* skip */ } }); text = (r && r.text) || ''; } catch (e) { /* none */ } }
+    if (!files.length && /^#\/share\/sw/.test(location.hash || '') && 'caches' in window) {
+      try { const c = await caches.open('nf-share'); for (const k of await c.keys()) { const res = await c.match(k); if (!res) continue; if (/__share\/text$/.test(k.url)) text = await res.text(); else { const b = await res.blob(); files.push(new File([b], decodeURIComponent(res.headers.get('x-name') || 'file'), { type: b.type || res.headers.get('content-type') || '' })); } await c.delete(k); } } catch (e) { /* none */ }
+    }
+    if (files.length || text) { setFiles(files, text); if (S.session) { location.hash = '#/share'; render(); } }
+  }
+  window.addEventListener('nfshare', () => { pullShared(); });
+  window.nfShare = { moneyOf, runMoney, recent, shareTasks, pull: pullShared, state: () => ({ files: SH.files.length, to: SH.to, def: defTo() }) };
+  document.addEventListener('nf:login', () => setTimeout(() => { if (SH.files.length || SH.text) { location.hash = '#/share'; render(); } }, 900));
+
+  /* ---------- iPhone: keep the share extension's list and token fresh ---------- */
+  const comp = () => (typeof NF_COMPANY !== 'undefined' && NF_COMPANY) || 'factory';
+  const tokKey = () => `nf.shareTok.${comp()}.${(S.sbUser && S.sbUser.id) || ''}`;
+  let tokBusy = null;
+  async function token() {
+    const c = ls.get(tokKey()); if (c && c.token) return c.token;
+    if (!S.sb || !S.sbUser) return '';
+    if (!tokBusy) tokBusy = S.sb.functions.invoke('task-share', { body: { action: 'token', device: 'iPhone app' } }).then(r => { const t = r && r.data && r.data.token; if (t) ls.set(tokKey(), { token: t, at: Date.now() }); return t || ''; }).catch(() => '').finally(() => { tokBusy = null; });
+    return tokBusy;
+  }
+  const sysName = () => { try { return (typeof NINETY_COS !== 'undefined' && NINETY_COS[comp() === 'studioz' ? 'studio' : comp()] && NINETY_COS[comp() === 'studioz' ? 'studio' : comp()].name) || document.title || 'Ninety'; } catch (e) { return 'Ninety'; } };
+  let pushed = false;
+  async function pushCtx() {
+    const P = NS(); if (!P || plat() !== 'ios' || !S.session || !S.sbUser || typeof nfConfig !== 'function') return;
+    try {
+      const tk = await token(); if (!tk) return;
+      const items = shareTasks().slice(0, 15).map(({ t, at }) => ({ id: t.id, title: String(t.title || '').slice(0, 90), sub: String(subOf(t) || '').slice(0, 40), money: !!moneyOf(t), at }));
+      const base = String(nfConfig().supabaseUrl || '').replace(/\/$/, ''); if (!base) return;
+      await P.setContext({ ctx: JSON.stringify({ v: 1, endpoint: base + '/functions/v1/task-share', token: tk, lang: en() ? 'en' : 'ar', name: S.session.name || '', sys: sysName(), tasks: items, at: Date.now() }) });
+      pushed = true;
+    } catch (e) { /* the share sheet keeps the last list */ }
+  }
+  let ctxT = 0; function ctxSoon() { clearTimeout(ctxT); ctxT = setTimeout(pushCtx, 1500); }
+  RENDER_HOOKS.push(() => {
+    if (pushed && !S.session) {
+      pushed = false; const P = NS(); if (P && P.clear) P.clear().catch(() => { });
+      const keys = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('nf.shareTok.')) keys.push(k); } } catch (e) { /* ignore */ }
+      keys.forEach(k => { const c = ls.get(k); ls.del(k); if (c && c.token && S.sb) S.sb.functions.invoke('task-share', { body: { action: 'revoke', token: c.token } }).catch(() => { }); });
+    }
+  });
+
+  /* ---------- a transfer screenshot that came in from the share sheet → record it as the transfer ---------- */
+  const asked = new Set(); let pcAt = 0;
+  async function markProof(t, mid) { const cur = byId('tasks', t.id); if (!cur) return; const th = (cur.thread || []).map(x => (x && x.id === mid ? Object.assign({}, x, { proofDone: true }) : x)); try { await Store.update('tasks', t.id, { thread: th }, { silent: true }); } catch (e) { /* read-only */ } }
+  async function fileOf(f, thumb) { let b = null; try { if (f) b = await Files.blob(f); } catch (e) { b = null; } if (!b && (thumb || (f && f.thumb))) { try { b = await (await fetch(thumb || f.thumb)).blob(); } catch (e) { b = null; } } return b ? new File([b], (f && f.name) || 'transfer.jpg', { type: (f && f.mime) || b.type || 'image/jpeg' }) : null; }
+  async function proofCheck() {
+    if (!S.session || !writable() || document.visibilityState !== 'visible' || document.getElementById('mform')) return;
+    const me = myIds(); const since = Date.now() - 12 * 3600e3; let hit = null;
+    list('tasks').forEach(t => { if (!OPEN(t)) return; (t.thread || []).forEach(m => { if (m && m.via === 'share' && m.proof && !m.proofDone && m.fileId && me.includes(m.by) && Date.parse(m.at) > since && !asked.has(m.id)) hit = { t, m }; }); });
+    if (!hit) return; const { t, m } = hit; asked.add(m.id);
+    const mo = moneyOf(t); await markProof(t, m.id); if (!mo) return;
+    const f = byId('files', m.fileId);
+    openModal({ title: L('تسجّل التحويل؟', 'Record the transfer?'), submitLabel: L('سجّل التحويل', 'Record the transfer'), body: `<div class="form"><div class="full">${esc(L('الصورة اللي بعتّها بالمشاركة على', 'The picture you shared to'))} <b>${esc(t.title || '')}</b> — ${esc(L('تتسجّل إثبات التحويل؟', 'record it as the transfer?'))}</div>${m.thumb ? `<div class="full"><img src="${esc(m.thumb)}" alt="" style="max-width:220px;max-height:260px;border-radius:10px"></div>` : ''}</div>`,
+      onSubmit: () => { setTimeout(async () => { const file = await fileOf(f, m.thumb); if (file) runMoney(mo, [file]); else toast(L('الصورة لسه بتتحمّل — افتح المهمة وارفعها من هناك', 'The picture is still loading — open the task and attach it there'), 'err'); }, 350); return true; } });
+  }
+  RENDER_HOOKS.push(() => { if (Date.now() - pcAt < 4000) return; pcAt = Date.now(); setTimeout(proofCheck, 300); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') pushCtx(); else { pcAt = 0; setTimeout(proofCheck, 900); } });
+  document.addEventListener('nf:ready', () => setTimeout(() => { pullShared(); pushCtx(); }, 2000));
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .shr{display:flex;flex-direction:column;gap:10px}
+    .shr-fs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+    .shr-f{flex:none;width:84px;height:84px;border-radius:12px;overflow:hidden;background:var(--surface-2,rgba(127,127,127,.1));border:1px solid var(--line)}
+    .shr-f img{width:100%;height:100%;object-fit:cover;display:block}
+    .shr-pdf{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:4px;font-size:10px;padding:4px;text-align:center;word-break:break-all}
+    .shr-cap{min-height:44px;resize:vertical}
+    .shr-h{display:flex;align-items:center;gap:8px}.shr-q{flex:1;min-width:0}
+    .shr-ts{display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow:auto}
+    .shr-t{display:flex;align-items:center;gap:10px;width:100%;text-align:start;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;cursor:pointer}
+    .shr-t.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+    .shr-r{flex:none;width:18px;height:18px;border-radius:50%;border:2px solid var(--line)}.shr-t.on .shr-r{border-color:var(--accent);background:radial-gradient(circle,var(--accent) 45%,transparent 50%)}
+    .shr-tt{display:flex;flex-direction:column;min-width:0;flex:1}.shr-tt b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shr-tt small{color:var(--muted);font-size:11px}
+    .shr-go{display:flex;gap:8px;flex-wrap:wrap}
   </style>`);
 })();
 </script>

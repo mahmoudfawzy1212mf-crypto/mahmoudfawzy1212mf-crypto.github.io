@@ -53,6 +53,30 @@ if 'xmlns:tools=' not in m:
     m = m.replace('xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"', 1)
 if 'pushnotifications.MessagingService' not in m:
     m = m.replace('</application>', '    <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />\n    </application>', 1)
+# v7.57: «Share» → Ninety (images / PDF) opens the app on «Send to a task» (plugin ninety-share takes the files)
+if 'android.intent.action.SEND' not in m:
+    share = '''
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>'''
+    i = m.find('android.intent.category.LAUNCHER')
+    j = m.find('</intent-filter>', i) if i >= 0 else -1
+    if j >= 0:
+        j += len('</intent-filter>')
+        m = m[:j] + share + m[j:]
+        print('share intents added')
 open(MANIFEST, 'w').write(m)
 
 strings = APP + '/src/main/res/values/strings.xml'

@@ -34,6 +34,9 @@ workflows:
     scripts:
       - name: Install
         script: npm install --no-audit --no-fund
+      # v7.57: provisioning profile for the «Share» extension (App Store Connect API, integration key) — no profile → no extension
+      - name: Share extension signing
+        script: python3 scripts/share-signing.py
       - name: Generate the iOS project
         script: |
           rm -rf ios
@@ -50,7 +53,19 @@ workflows:
           cd ios/App
           agvtool new-version -all $((BUILD_NUMBER + 100))
       - name: Build the app (.ipa)
-        script: xcode-project build-ipa --project "ios/App/App.xcodeproj" --scheme "App"
+        script: |
+          if ! xcode-project build-ipa --project "ios/App/App.xcodeproj" --scheme "App"; then
+            if [ -f /tmp/pbx.noshare ]; then
+              echo "v7.57: the build with the Share extension failed - building the app without it"
+              cp /tmp/pbx.noshare ios/App/App.xcodeproj/project.pbxproj
+              cp /tmp/ent.noshare ios/App/App/App.entitlements
+              xcode-project use-profiles
+              (cd ios/App && agvtool new-version -all $((BUILD_NUMBER + 100)))
+              xcode-project build-ipa --project "ios/App/App.xcodeproj" --scheme "App"
+            else
+              exit 1
+            fi
+          fi
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -86,6 +101,9 @@ workflows:
         excludes:
           - 'ios-app/plugins/ninety-pencil/'
           - 'ios-app/scripts/configure-ios.py'
+          - 'ios-app/share-ext/'
+          - 'ios-app/scripts/add-share-ext.rb'
+          - 'ios-app/scripts/share-signing.py'
     scripts:
       - name: Install
         script: npm install --no-audit --no-fund

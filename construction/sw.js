@@ -1,5 +1,5 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261012-1649-52d9cd';
+const BUILD = '20261012-1805-d61a69';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
@@ -55,6 +55,21 @@ async function mediaFetch(req, url) {
   return new Response(buf.slice(a, b + 1), { status: 206, statusText: 'Partial Content', headers: h });
 }
 self.addEventListener('fetch', e => {
+  /* v7.57: Android «Share» → Ninety (manifest share_target): keep the files for the app, then open it on #/share */
+  if (e.request.method === 'POST' && new URL(e.request.url).pathname === SCOPE + 'share-target') {
+    e.respondWith((async () => {
+      try {
+        const fd = await e.request.formData(); const c = await caches.open('nf-share');
+        for (const k of await c.keys()) await c.delete(k);
+        const files = fd.getAll('files').filter(f => f && typeof f !== 'string' && f.size).slice(0, 10);
+        let i = 0; for (const f of files) await c.put(new Request(SCOPE + '__share/' + (i++)), new Response(f, { headers: { 'content-type': f.type || 'application/octet-stream', 'x-name': encodeURIComponent(f.name || 'file') } }));
+        const text = [fd.get('title'), fd.get('text'), fd.get('url')].filter(x => typeof x === 'string' && x).join('\n');
+        if (text) await c.put(new Request(SCOPE + '__share/text'), new Response(text));
+      } catch (x) { /* open the app anyway */ }
+      return Response.redirect(SCOPE + 'index.html#/share/sw', 303);
+    })());
+    return;
+  }
   const req = e.request; if (req.method !== 'GET') return;
   const url = new URL(req.url);
   const same = url.origin === self.location.origin;

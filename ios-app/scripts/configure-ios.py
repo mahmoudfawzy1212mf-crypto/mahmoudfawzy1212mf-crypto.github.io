@@ -72,4 +72,21 @@ import subprocess, json
 pk = json.load(open('package.json'))
 if 'ninety-pencil' not in pk.get('dependencies', {}):
     subprocess.run(['npm', 'install', '--no-audit', '--no-fund', '--save', 'file:plugins/ninety-pencil'], check=True)
+# v7.57: the «Share» extension — only when scripts/share-signing.py installed its profile. The project and the app entitlements
+# are kept as they were first, so the build can fall back to the app without the extension (codemagic.yaml, «Build the app»).
+import os, shutil
+if os.path.exists('/tmp/share-ext-ok'):
+    shutil.copy(PBX, '/tmp/pbx.noshare'); shutil.copy('ios/App/App/App.entitlements', '/tmp/ent.noshare')
+    if subprocess.run(['ruby', '-e', "require 'xcodeproj'"], capture_output=True).returncode != 0:
+        subprocess.run(['gem', 'install', 'xcodeproj', '--no-document', '--user-install'], check=False)
+    ok = subprocess.run(['ruby', 'scripts/add-share-ext.rb']).returncode == 0
+    if ok:
+        e = open('ios/App/App/App.entitlements').read()
+        if 'keychain-access-groups' not in e:
+            e = e.replace('</dict>\n</plist>', '\t<key>keychain-access-groups</key>\n\t<array>\n\t\t<string>$(AppIdentifierPrefix)app.ninety.shared</string>\n\t</array>\n</dict>\n</plist>')
+            open('ios/App/App/App.entitlements', 'w').write(e)
+        print('share extension added')
+    else:
+        shutil.copy('/tmp/pbx.noshare', PBX); os.remove('/tmp/pbx.noshare'); os.remove('/tmp/ent.noshare')
+        print('share extension NOT added (the app builds without it)')
 print('ios configured')
