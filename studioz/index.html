@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1805-d61a69";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1925-33d97d";</script>
 
 <script>
 'use strict';
@@ -15955,10 +15955,26 @@ ACTIONS.fundAsk = wid => {
    until the owner (or a pay batch) transfers it. The money reaches the custody only with the transfer. */
 function fundToPay(r) { return !!r && r.type === 'fund' && !r.paidAt && (r.status === 'pending' || (r.status === 'approved' && r.toPay === true)); }
 const fundXfer = id => { const m = byId('money', `fund_${id}`); return m && m.type === 'xfer' ? m : null; };
+/* v7.58 (Mahmoud, 12 Oct, on «Transfer to Mahmoud El-Behiry's custody»: «transfer here to whom — Bahaa or El-Behiry — and where is the number to
+   transfer to?»): the money goes to the custody's holder; his receiving number («Advance pay ← Employees' numbers») shows in the transfer
+   dialog (with «Copy») and in the «to transfer» line; no number → says so and where to register it. */
+function fundTo(r) {
+  const w = r && walletOf(r.walletId); if (!w) return null; const hw = w.holder ? byId('workers', w.holder) : null; const W = window.nfWallet;
+  const rw = W && w.holder ? W.of(w.holder) : null; const ms = rw ? [rw].concat(rw.alt && (rw.alt.number || rw.alt.ipa || rw.alt.last4) ? [rw.alt] : []) : [];
+  return { name: (hw && hw.name) || w.name || '', lines: ms.map(m => W.label(m)).filter(Boolean), copy: ms.map(m => m.number || m.ipa || m.card || '') };
+}
+function fundToLine(r) { const t = fundTo(r); if (!t) return ''; const EN = typeof I18N !== 'undefined' && I18N.lang === 'en'; return t.lines.length ? `${EN ? 'Transfer to' : 'حوّل على'}: ${t.lines.join(' / ')} (${t.name})` : (EN ? `${t.name} has no transfer number registered` : `${t.name} مالوش رقم تحويل متسجّل`); }
+function fundToHTML(r) {
+  const t = fundTo(r); if (!t) return ''; const EN = typeof I18N !== 'undefined' && I18N.lang === 'en';
+  if (!t.lines.length) return `<div class="full fto warn">${icon('alert')}<span>${EN ? `${esc(t.name)} has no transfer number registered — add it from «Advance pay ← Employees' numbers»` : `${esc(t.name)} مالوش رقم تحويل متسجّل — سجّله من «تحويل السلف ← أرقام الموظفين»`}</span></div>`;
+  return `<div class="full fto"><div class="ftoh">${EN ? 'Transfer to' : 'حوّل لـ'} <b>${esc(t.name)}</b> ${EN ? 'on' : 'على'}:</div>${t.lines.map((l, i) => `<div class="ftor"><b class="ftonum notr">${esc(l)}</b>${t.copy[i] ? `<button type="button" class="btn xs" data-action="ftoCopy" data-arg="${esc(t.copy[i])}">${EN ? 'Copy' : 'نسخ'}</button>` : ''}</div>`).join('')}</div>`;
+}
+ACTIONS.ftoCopy = async v => { try { await navigator.clipboard.writeText(String(v || '')); toast(typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Copied' : 'اتنسخ'); } catch (e) { toast(String(v || '')); } };
+document.head.insertAdjacentHTML('beforeend', '<style>.fto{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px}.fto.warn{flex-direction:row;align-items:center;gap:8px;color:var(--warn-ink,#9a6700);background:var(--warn-bg,#fff4d6);border-color:transparent}.ftoh{font-size:13px;color:var(--ink-2)}.ftor{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.ftonum{font-size:17px;letter-spacing:.5px;direction:ltr;unicode-bidi:isolate}</style>');
 /* owner pays a custody request */
 ACTIONS.fundPay = async id => {
   const r = byId('requests', id); if (!r || !isAdmin() || !fundToPay(r)) return; const w = walletOf(r.walletId); if (!w) return;
-  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
+  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: fundToHTML(r) + field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
   if (!res) return;
   await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
   if (r.status === 'approved') { await Store.update('requests', r.id, { toPay: false, paidAt: nowISO(), paidByName: S.session?.name || '' }); await applyRequestEffects(byId('requests', r.id)); rerender(); return; }
@@ -16104,7 +16120,7 @@ canSee = (base => view => (view === 'money' ? (moneyOn() && !!S.session && (isAd
 function moneyDue() {
   if (!moneyOn()) return []; const out = [];
   list('purchases').filter(p => p.status === 'transfer').forEach(p => out.push({ kind: 'po', id: p.id, label: `أمر شراء ${p.number} — ${p.supplier || ''}`, sub: 'معتمد من الحسابات', amount: poPayable(p), action: 'poTransfer', href: `purchases/${p.id}` }));
-  list('requests').filter(fundToPay).forEach(r => { const w = walletOf(r.walletId); out.push({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: `${r.status === 'approved' ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Approved · ' : 'موافق عليه · ') : ''}${r.requesterName || ''}: ${r.reason || ''}`, amount: +r.amount || 0, action: 'fundPay' }); });
+  list('requests').filter(fundToPay).forEach(r => { const w = walletOf(r.walletId); const sub0 = `${r.status === 'approved' ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Approved · ' : 'موافق عليه · ') : ''}${r.requesterName || ''}: ${r.reason || ''}`; const to = fundToLine(r); out.push(Object.assign({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: to ? `${sub0} · ${to}` : sub0, amount: +r.amount || 0, action: 'fundPay' }, to ? { to, sub0 } : {})); });
   list('requests').filter(r => r.type === 'opex' && r.status === 'approved' && !r.paidAt).forEach(r => out.push({ kind: 'opex', id: r.id, label: `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, sub: `${fmtMonth(r.month)} · ${r.payee || ''}`, amount: +r.amount || 0, action: 'opexPay' }));
   return out;
 }
@@ -33240,7 +33256,10 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
      saving a changed link in settings bumps mediaVer, so the new film/picture replaces the old copy once. Only our own storage links get the tag. */
   const mediaUrl = u => { u = String(u || ''); if (!/\/storage\/v1\/object\/public\/app\/brand\//.test(u) || /[?&]v=/.test(u)) return u; const v = (S.settings && S.settings.stuLogin && S.settings.stuLogin.mediaVer) || 1; return u + (u.includes('?') ? '&' : '?') + 'v=' + v; };
   window.nfMediaUrl = mediaUrl;
-  const cfg = () => { const c = Object.assign({}, DEF, (S.settings && S.settings.stuLogin) || {}); c.video = mediaUrl(c.video); c.poster = mediaUrl(c.poster); c.logo = mediaUrl(c.logo); c.stills = (c.stills || []).map(mediaUrl); return c; };
+  /* v7.58 (Mahmoud: the login film = the new showreel): the studio's showreel + stills (docs stuhome/media, kept on the device / media.json) come first */
+  const cfg = () => { const c = Object.assign({}, DEF, (S.settings && S.settings.stuLogin) || {}); const md = window.nfStuMedia ? window.nfStuMedia.local() : null;
+    if (md && md.video) { c.video = md.video; c.videoM = md.videoM || ''; if (md.poster) c.poster = md.poster; } if (md && (md.stills || []).length) c.stills = md.stills.slice();
+    c.video = mediaUrl(c.video); c.videoM = c.videoM ? mediaUrl(c.videoM) : ''; c.poster = mediaUrl(c.poster); c.logo = mediaUrl(c.logo); c.stills = (c.stills || []).map(mediaUrl); return c; };
   const cfgRaw = () => Object.assign({}, DEF, (S.settings && S.settings.stuLogin) || {});
   const SOC = {
     site: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-2.95a15.6 15.6 0 0 0-1.3-5.4A8 8 0 0 1 18.9 11zM12 4c.9 1.2 1.7 3.6 1.95 7h-3.9C10.3 7.6 11.1 5.2 12 4zM5.1 11a8 8 0 0 1 4.25-5.4c-.6 1.6-1.05 3.5-1.3 5.4zm0 2h2.95c.25 1.9.7 3.8 1.3 5.4A8 8 0 0 1 5.1 13zM12 20c-.9-1.2-1.7-3.6-1.95-7h3.9c-.25 3.4-1.05 5.8-1.95 7zm2.65-.6c.6-1.6 1.05-3.5 1.3-5.4h2.95a8 8 0 0 1-4.25 5.4z',
@@ -33256,7 +33275,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* ---------- the login screen ---------- */
   function scene(c) {
     const stills = (c.stills || []).filter(Boolean);
-    return `<div class="slscene" id="slscene"><img class="slposter" src="${esc(c.poster)}" alt="">${c.video ? `<video class="slvid" muted loop playsinline preload="none" poster="${esc(c.poster)}" src="${esc(c.video)}"></video>` : ''}${stills.map(u => `<img class="slstill" src="${esc(u)}" alt="" loading="lazy">`).join('')}</div><div class="slgrain"></div>`;
+    return `<div class="slscene" id="slscene"><img class="slposter" src="${esc(c.poster)}" alt="">${c.video ? `<video class="slvid" muted loop playsinline preload="none" poster="${esc(c.poster)}" src="${esc(c.video)}" data-m="${esc(c.videoM || '')}"></video>` : ''}${stills.map(u => `<img class="slstill" src="${esc(u)}" alt="" loading="lazy">`).join('')}</div><div class="slgrain"></div>`;
   }
   function formHTML() {
     const sb = sbOn();
@@ -33287,6 +33306,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   if (typeof loginScreen === 'function') loginScreen = (base => function () {
     if (typeof nfRestoring === 'function' && nfRestoring()) return base.apply(this, arguments);
+    /* v7.58: the login page is painted without afterRender — start the film / the renders right after it is in the page
+       (before this the scene only ever showed its poster) */
+    setTimeout(() => { try { sceneStart(); } catch (e) { /* ignore */ } }, 0);
     return stuLogin();
   })(loginScreen);
   /* the film: play when it can, otherwise cross-fade the renders; never block the first paint */
@@ -33298,7 +33320,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const c = navigator.connection || {}; const slow = c.saveData || /2g|3g/.test(c.effectiveType || '') || c.type === 'cellular';
     const phone = (() => { try { return matchMedia('(pointer:coarse)').matches; } catch (e) { return false; } })();
     /* egress: the 20 MB film plays on desktop Wi-Fi only; phones and metered connections get the renders slideshow */
-    if (!v || slow || phone) { if (v) v.remove(); slideshow(); return; }
+    /* v7.58: a phone plays the light phone version of the showreel when there is one (kept on the device after the first time) */
+    const vm = v && v.dataset.m; if (!v || slow || (phone && !vm)) { if (v) v.remove(); slideshow(); return; }
+    if (phone && vm) v.src = vm;
     let ok = false; v.addEventListener('playing', () => { ok = true; v.classList.add('on'); }, { once: true });
     v.addEventListener('error', () => { if (!ok) slideshow(); }, { once: true });
     v.play().catch(() => slideshow()); setTimeout(() => { if (!ok && !sv) slideshow(); }, 7000);
@@ -33547,7 +33571,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const fs = list('files').filter(f => f.projectId === p.id && f.thumb && String(f.mime || '').startsWith('image/')).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); if (fs.length) return { src: fs[0].thumb, by: fs[0].byId || null };
     const vs = []; list('pmtasks').filter(t => t.projectId === p.id).forEach(t => (t.vers || []).forEach(v => { if (v.thumb) vs.push({ src: v.thumb, at: v.at || 0, by: v.by || t.owner }); })); if (vs.length) { vs.sort((a, b) => b.at - a.at); return vs[0]; }
     const bs = list('boards').filter(b => b.projectId === p.id).map(b => b.id); const bi = list('bitems').filter(x => bs.includes(x.boardId) && x.type === 'image' && x.thumb); if (bi.length) return { src: bi[bi.length - 1].thumb, by: null };
-    const st = stills(); return { src: st[i % st.length], by: null, generic: true };
+    const sm = window.nfStuMedia ? window.nfStuMedia.stills() : []; const st = sm.length ? sm : stills(); return { src: st[i % st.length], by: null, generic: true };   /* v7.58: the studio's own stills first */
   }
   const H = { i: 0, t: null, counted: false };
 
@@ -33596,10 +33620,15 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const h = new Date().getHours(); const greet = h < 12 ? L('صباح الخير', 'Good morning') : L('مساء الخير', 'Good evening'); const first = String((S.session && S.session.name) || '').trim().split(/\s+/)[0];
     /* v6.60: the entrance animation plays once per app open — re-renders (live data, door card) no longer fade the page again */
     const _anim = !window.__stuHomeAnimated; window.__stuHomeAnimated = true;
+    /* v7.58: the studio's showreel on top (greeting on it) → your day → the projects strip → «from the studio's work» */
+    const date = new Date().toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
+    const SM = window.nfStuMedia; const top = SM ? SM.heroHTML({ date, greet, first, av: typeof stuAvatar === 'function' ? stuAvatar(me(), 40) : '' }) : '';
     return `<div class="stuhome${_anim ? ' anim' : ''}">
-      <div class="shgreet"><div><small>${esc(new Date().toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { weekday: 'long', day: 'numeric', month: 'long' }))}</small><h1>${greet}، <b class="notr">${esc(first)}</b></h1></div>${typeof stuAvatar === 'function' ? stuAvatar(me(), 44) : ''}</div>
-      ${heroHTML()}
+      ${top || `<div class="shgreet"><div><small>${esc(date)}</small><h1>${greet}، <b class="notr">${esc(first)}</b></h1></div>${typeof stuAvatar === 'function' ? stuAvatar(me(), 44) : ''}</div>`}
+      ${top ? '' : heroHTML()}
       <div class="shsec"><h3>${L('يومك النهارده', 'Your day')}</h3></div>${todayHTML()}
+      ${top ? `<div class="shsec"><h3>${L('المشاريع الشغالة', 'Projects in progress')}</h3></div>${heroHTML()}` : ''}
+      ${SM ? SM.galleryHTML() : ''}
       <div class="shgrid">${noticeHTML()}${spotHTML()}${pulseHTML()}</div>
       ${oldDash ? `<details class="shold"><summary>${L('لوحة المتابعة', 'Tracking board')}</summary><div class="sholdb">${oldDash}</div></details>` : ''}
     </div>`;
@@ -46720,9 +46749,11 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     ot: { t: () => L('سهر النهارده', 'Overtime tonight'), d: () => L('السهر المتسجّل النهارده وعدد الناس', 'Tonight\'s overtime and how many people'), ic: 'moon', col: '#5e5ce6', sizes: ['S', 'M'], href: '#/otnight', ok: () => can('otnight') },
     trips: { t: () => L('مشاوير النهارده', 'Today\'s trips'), d: () => L('مشاوير النهارده وحالة كل مشوار', 'Today\'s trips and the state of each'), ic: 'route', col: '#64d2ff', sizes: ['S', 'M', 'L'], href: '#/fleet', ok: () => can('fleet') },
     tasks: { t: () => L('مهامي', 'My tasks'), d: () => L('مهامك بالأولوية والميعاد', 'Your tasks by priority and due date'), ic: 'list', col: '#ff9500', sizes: ['S', 'M', 'L'], href: '#/tasks', ok: () => can('tasks') && typeof tasksForMe === 'function' },
-    msgs: { t: () => L('الرسايل', 'Messages'), d: () => L('الرسايل اللي لسه ماقريتهاش', 'Messages you have not read yet'), ic: 'chat', col: '#0a84ff', sizes: ['S', 'M', 'L'], ok: () => !!S.session }
+    msgs: { t: () => L('الرسايل', 'Messages'), d: () => L('الرسايل اللي لسه ماقريتهاش', 'Messages you have not read yet'), ic: 'chat', col: '#0a84ff', sizes: ['S', 'M', 'L'], ok: () => !!S.session },
+    /* v7.58: Ninety Studioz — the showreel / the studio's stills (parts/99zzZzZZzy-stu-media.js) */
+    stuwork: { t: () => L('شغل الاستوديو', 'Studio work'), d: () => L('الشوريل ولقطات من شغل الاستوديو', 'The showreel and stills from the studio\'s work'), ic: 'image', col: '#1c1c1e', sizes: ['S', 'M', 'L'], ok: () => !!(window.nfStuMedia && window.nfStuMedia.ready()) }
   };
-  const ORDER = ['today', 'money', 'fleet', 'fleetmv', 'att', 'ot', 'trips', 'tasks', 'msgs'];
+  const ORDER = ['stuwork', 'today', 'money', 'fleet', 'fleetmv', 'att', 'ot', 'trips', 'tasks', 'msgs'];
   const okW = id => { const w = WD[id]; if (!w) return false; try { return !!w.ok(); } catch (e) { return false; } };
 
   /* ---------- the layout (per person, per phone / computer) ---------- */
@@ -46739,10 +46770,17 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     else if (r === 'driver' || r === 'fleet') d = [['today', 'M'], ['trips', 'M'], ['fleet', 'L'], ['tasks', 'M']];
     else d = [['today', 'M'], ['tasks', 'M'], ['msgs', 'S']];
     if (!d.some(x => x[0] === 'money') && moneyItems().length) d.splice(1, 0, ['money', 'L']);
+    if (okW('stuwork')) d.unshift(['stuwork', 'M']);
     return d.map(([id, s]) => ({ id, s }));
   }
   const saved = () => { const a = lay()[dev()]; return Array.isArray(a) ? a : null; };
-  const current = () => clean(saved() || defaults()).filter(x => okW(x.id));
+  /* v7.58: the studio's «Studio work» widget goes on top once for everyone who already has a layout (then it is theirs to move / remove) */
+  function stuIns() {
+    if (!okW('stuwork')) return; const l = lay(); if (l.stuw) return; let ch = false;
+    ['phone', 'desk'].forEach(k => { if (Array.isArray(l[k]) && !l[k].some(x => x && x.id === 'stuwork')) { l[k] = [{ id: 'stuwork', s: 'M' }].concat(l[k]); ch = true; } });
+    l.stuw = 1; if (ch) { l.at = Date.now(); W.dirty = true; clearTimeout(W.saveT); W.saveT = setTimeout(push, 700); } lsSet(l);
+  }
+  const current = () => { stuIns(); return clean(saved() || defaults()).filter(x => okW(x.id)); };
   window.nfHomeHasW = id => { try { return !!S.session && (window.nfHomeOn ? window.nfHomeOn() : true) && current().some(x => x.id === id); } catch (e) { return false; } };
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
   function setLayout(arr) {
@@ -46751,14 +46789,14 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   }
   async function push() {
     if (!W.dirty || !hosted()) return; const l = lay();
-    try { const r = await S.sb.rpc('nf_uprefs_set', { p_key: KEY, p_val: { at: l.at, phone: l.phone || null, desk: l.desk || null } }); if (!r || !r.error) W.dirty = false; } catch (e) { /* offline: sent again when the network is back */ }
+    try { const r = await S.sb.rpc('nf_uprefs_set', { p_key: KEY, p_val: { at: l.at, phone: l.phone || null, desk: l.desk || null, stuw: l.stuw || 0 } }); if (!r || !r.error) W.dirty = false; } catch (e) { /* offline: sent again when the network is back */ }
   }
   async function pull() {
     if (!hosted() || W.pulled === sid()) return; W.pulled = sid();
     try {
       const r = await S.sb.rpc('nf_uprefs_get'); if (!r || r.error || !r.data || typeof r.data !== 'object') return;
       const srv = r.data[KEY]; const l = lay();
-      if (srv && (+srv.at || 0) > (+l.at || 0)) { W.lay = { at: +srv.at, phone: srv.phone || null, desk: srv.desk || null }; W.laySid = sid(); lsSet(W.lay); if (S.route && S.route.view === 'home' && !W.drag) rerender(); }
+      if (srv && (+srv.at || 0) > (+l.at || 0)) { W.lay = { at: +srv.at, phone: srv.phone || null, desk: srv.desk || null, stuw: srv.stuw || l.stuw || 0 }; W.laySid = sid(); lsSet(W.lay); if (S.route && S.route.view === 'home' && !W.drag) rerender(); }
       else if ((+l.at || 0) > (srv ? (+srv.at || 0) : 0)) { W.dirty = true; push(); }
     } catch (e) { W.pulled = ''; }
   }
@@ -46992,7 +47030,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   document.head.insertAdjacentHTML('beforeend', '<style>.nfw-msgm .nfw-rows{overflow:visible}.nfw-msgm .nfw-r{padding:10px 4px}</style>');
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('#mform [data-nfwclose]'); if (a && typeof closeModal === 'function') setTimeout(() => closeModal(), 0); });
 
-  const RENDER = { today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs };
+  const RENDER = { today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs, stuwork: s => (window.nfStuMedia ? window.nfStuMedia.widget(s) : '') };
 
   /* ---------- the grid ---------- */
   const SZ = () => ({ S: L('صغير', 'Small'), M: L('متوسط', 'Medium'), L: L('كبير', 'Large') });
@@ -49776,6 +49814,300 @@ function oxFlow(k) {
     .shr-tt{display:flex;flex-direction:column;min-width:0;flex:1}.shr-tt b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shr-tt small{color:var(--muted);font-size:11px}
     .shr-go{display:flex;gap:8px;flex-wrap:wrap}
   </style>`);
+})();
+/* =====================================================================
+   v7.58 — Ninety Studioz: the studio showreel + work stills on the home and the login screen (Mahmoud, 12 Oct: «I want to
+   upload the stills and the video that go on the home of the Ninety Studioz system» — 8 square stills + a 19 s showreel;
+   «start»; brief claude/studio-home-media-brief.md; the login film becomes the new showreel too — Mahmoud answered so).
+   · Home (the studio dashboard): the showreel full width on top (muted, looping) with the greeting, «A story in every frame»
+     and the white wordmark; «Your day»; the projects strip (was on top); «From the studio work» — the stills as squares
+     (4×2 on the computer, a two-row swipe on the phone), a tap opens the picture viewer.
+   · Icons home (employees): a «Studio work» widget — large / medium = the showreel, small = the stills changing; put on top
+     once for everyone in the studio, then it can be moved, resized or removed like any widget.
+   · The owner and the art director (the people who already write col stuhome) change the video, the phone version, the
+     stills, their order and captions — from «Edit» on the home, or Settings → «Home pictures and video» (owner).
+     Pictures are made smaller on the device before upload; the poster is taken from the video first second.
+     Files go to the public bucket app/brand/stu/home/ through signed upload links from the Edge function stu-media
+     (it checks the role); docs stuhome/media holds the list; app/stuhome/media.json lets the login screen of a new device
+     know the film before anyone signs in.
+   · Speed: phones play the phone version (or the stills when the connection is slow / data saver); the video pauses when
+     the page is hidden or it scrolls out of view; one <video> per place survives the page re-renders (no restart / flash);
+     the service worker keeps one copy of every file on the device (brand media cache, range requests served from it).
+   · Who sees what does not change (everyone in the studio sees it). Studio only; Arabic and English; iPhone, Android, computer.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_STUMEDIA__) return; window.__NF_STUMEDIA__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const SB = 'https://rekmppawmxerlqxqpqni.supabase.co';
+  const BRAND = SB + '/storage/v1/object/public/app/brand/stu/';
+  const PUBJSON = SB + '/storage/v1/object/public/app/stuhome/media.json';
+  const LS = 'nf.stuMedia.v1';
+  const me = () => (typeof stuMe === 'function' ? stuMe() : (S.session && S.session.id)) || '';
+  const R = () => (typeof role === 'function' ? role() : '');
+  const canEdit = () => !!S.session && (isAdmin() || R() === 'manager');
+  const phone = () => { try { return matchMedia('(pointer:coarse)').matches || window.innerWidth < 700; } catch (e) { return window.innerWidth < 700; } };
+  const slowNet = () => { const c = navigator.connection || {}; return !!(c.saveData || /(^|-)2g|3g/.test(c.effectiveType || '')); };
+  const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+
+  /* ---------- the media list ---------- */
+  const docM = () => { try { return byId('stuhome', 'media') || null; } catch (e) { return null; } };
+  const local = () => { try { const j = JSON.parse(localStorage.getItem(LS) || 'null'); return j && typeof j === 'object' ? j : null; } catch (e) { return null; } };
+  const flat = d => ({ v: d.ver || 0, video: (d.video && d.video.url) || '', videoM: (d.videoM && d.videoM.url) || '', poster: d.poster || '', stills: (d.items || []).map(x => x && x.src).filter(Boolean) });
+  const saveLocal = o => { try { localStorage.setItem(LS, JSON.stringify(o)); } catch (e) { /* private window */ } };
+  /* what the page shows: the server doc when signed in, otherwise the copy kept on this device */
+  function cur() {
+    const d = docM();
+    if (d) return { video: (d.video && d.video.url) || '', videoM: (d.videoM && d.videoM.url) || '', poster: d.poster || '', items: (d.items || []).filter(x => x && x.src) };
+    const l = local() || {}; return { video: l.video || '', videoM: l.videoM || '', poster: l.poster || '', items: (l.stills || []).map(s => ({ src: s, thumb: s })) };
+  }
+  const ready = () => { const c = cur(); return !!(c.video || c.items.length); };
+  const logo = () => { const c = (S.settings && S.settings.stuLogin) || {}; const u = c.logo || (BRAND + 'wordmark-white.png'); return window.nfMediaUrl ? window.nfMediaUrl(u) : u; };
+  const slogan = () => { const c = (S.settings && S.settings.stuLogin) || {}; return c.slogan || 'A story in every frame'; };
+  /* the video this device plays: phone → the phone version (or the stills); slow connection → the stills */
+  function vsrc() { const c = cur(); if (!c.video || slowNet()) return ''; if (phone()) return c.videoM || (c.video && !/\.mov(\?|$)/i.test(c.video) ? c.video : ''); return c.video; }
+
+  /* ---------- one <video> per place, kept across re-renders ---------- */
+  const RV = { els: {}, io: null, ssi: 0, sst: null, cleaned: false };
+  const tryPlay = v => { if (document.hidden || !v.isConnected || v.__off) return; const p = v.play(); if (p && p.catch) p.catch(() => { /* low power mode / autoplay blocked: the poster stays */ }); };
+  function io() {
+    if (RV.io || typeof IntersectionObserver === 'undefined') return RV.io;
+    RV.io = new IntersectionObserver(es => es.forEach(e => { const v = e.target.querySelector('video.smvid'); if (!v) return; v.__off = !e.isIntersecting; if (e.isIntersecting) tryPlay(v); else v.pause(); }), { threshold: 0.15 });
+    return RV.io;
+  }
+  function attach() {
+    const s = vsrc();
+    document.querySelectorAll('[data-smreel]').forEach(slot => {
+      if (!s) return;
+      const key = slot.dataset.smreel; let v = RV.els[key];
+      if (!v || v.dataset.src !== s) {
+        v = document.createElement('video'); v.className = 'smvid'; v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true;
+        ['muted', 'playsinline', 'webkit-playsinline', 'loop'].forEach(a => v.setAttribute(a, '')); v.preload = 'auto'; v.dataset.src = s; v.src = s;
+        v.addEventListener('playing', () => v.classList.add('on'));
+        RV.els[key] = v;
+      }
+      if (v.parentNode !== slot) slot.appendChild(v);
+      const o = io(); if (o && !slot.__io) { slot.__io = 1; o.observe(slot); }
+      tryPlay(v);
+    });
+    if (!RV.sst) RV.sst = setInterval(stillsTick, 5000);
+    cleanCache();
+  }
+  function stillsTick() {
+    if (document.hidden) return; const boxes = document.querySelectorAll('[data-smss]'); if (!boxes.length) return; RV.ssi++;
+    boxes.forEach(b => { const im = b.querySelectorAll('img'); if (im.length < 2) return; im.forEach((x, k) => x.classList.toggle('on', k === RV.ssi % im.length)); });
+  }
+  document.addEventListener('visibilitychange', () => { Object.values(RV.els).forEach(v => { if (document.hidden) v.pause(); else tryPlay(v); }); });
+  /* the device keeps one copy of each file (service worker «nf-media»); files no longer in the list are dropped once a session */
+  function cleanCache() {
+    if (RV.cleaned || !docM() || typeof caches === 'undefined') return; RV.cleaned = true;
+    const c = cur(); const keep = new Set([c.video, c.videoM, c.poster].concat(c.items.flatMap(x => [x.src, x.thumb])).filter(Boolean).map(u => String(u).split('?')[0]));
+    caches.open('nf-media').then(ch => ch.keys().then(ks => ks.forEach(k => { const u = String(k.url).split('?')[0]; if (u.includes('/brand/stu/home/') && !keep.has(u)) ch.delete(k); }))).catch(() => { });
+  }
+
+  /* ---------- pieces ---------- */
+  function reelHTML(key, big, stillsOnly) {
+    const c = cur(); const s = stillsOnly ? '' : vsrc();
+    if (s) return `<div class="smreel" data-smreel="${key}">${c.poster ? `<img class="smposter" src="${esc(c.poster)}" alt="">` : ''}</div>`;
+    const pics = c.items.map(x => (big ? x.src : (x.thumb || x.src))); if (!pics.length && c.poster) pics.push(c.poster);
+    return `<div class="smreel" data-smss="${key}">${pics.map((u, i) => `<img src="${esc(u)}" alt="" class="${i === RV.ssi % (pics.length || 1) ? 'on' : ''}" ${i > 1 ? 'loading="lazy"' : ''}>`).join('')}</div>`;
+  }
+  function heroHTML(g) {
+    if (!ready()) return '';
+    return `<section class="smhero">${reelHTML('home', true)}<img class="smmark" src="${esc(logo())}" alt="NINETY">${g.av ? `<span class="smav">${g.av}</span>` : ''}
+      <div class="smhov"><small>${esc(g.date)}</small><h1>${esc(g.greet)}، <b class="notr">${esc(g.first)}</b></h1><p class="smslg notr">${esc(slogan())}</p></div>
+      ${cur().video ? `<button type="button" class="smfull" data-action="smWatch" aria-label="${esc(L('شوف الفيديو كبير', 'Watch full screen'))}" title="${esc(L('شوف الفيديو كبير', 'Watch full screen'))}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></button>` : ''}</section>`;
+  }
+  function galleryHTML() {
+    const c = cur(); const ed = canEdit() ? `<button type="button" class="btn xs" data-action="smEdit">${icon('edit')}${esc(L('تعديل', 'Edit'))}</button>` : '';
+    if (!c.items.length) return canEdit() ? `<section class="shcard smempty"><div class="shh"><h3>${esc(L('من شغل الاستوديو', 'From the studio\'s work'))}</h3><div class="grow"></div>${ed}</div><p class="muted small">${esc(L('ارفع الشوريل ولقطات من شغل الاستوديو — هيظهروا لكل الفريق هنا وفي شاشة الدخول.', 'Upload the showreel and stills from the studio\'s work — the whole team sees them here and on the login screen.'))}</p><button type="button" class="btn p sm" data-action="smEdit">${esc(L('ارفع الصور والفيديو', 'Upload the pictures and video'))}</button></section>` : '';
+    return `<section class="smgal"><div class="shsec smsec"><h3>${esc(L('من شغل الاستوديو', 'From the studio\'s work'))}</h3>${ed}</div>
+      <div class="smgrid${reduced() ? '' : ' kb'}">${c.items.map((x, i) => `<button type="button" class="smt" data-action="smOpen" data-arg="${i}"><img src="${esc(x.thumb || x.src)}" alt="" loading="lazy">${x.cap ? `<span class="notr" dir="auto">${esc(x.cap)}</span>` : ''}</button>`).join('')}</div></section>`;
+  }
+  function widget(s) {
+    const lbl = `<span class="smwl"><b>${esc(L('شغل الاستوديو', 'Studio work'))}</b></span>`;
+    if (s === 'S' || !cur().video) return `<div class="smw" data-action="smOpen" data-arg="0">${reelHTML('w', false, true)}${lbl}</div>`;
+    return `<div class="smw" data-action="smWatch">${reelHTML('w' + s, s === 'L')}${lbl}</div>`;
+  }
+  const editing = () => !!document.querySelector('#nfwg.edit');
+  ACTIONS.smOpen = i => {
+    if (editing()) return; const c = cur(); if (!c.items.length) { if (c.video) ACTIONS.smWatch(); return; }
+    const set = c.items.map(x => ({ src: x.src, thumb: x.thumb || x.src, caption: x.cap || '', name: x.cap || 'Ninety Studioz' }));
+    if (window.nfView) window.nfView.open(set, Math.max(0, Math.min(set.length - 1, +i || 0))); else if (typeof lightbox === 'function') lightbox(set[+i || 0].src, set[+i || 0].caption);
+  };
+  ACTIONS.smWatch = () => {
+    if (editing()) return; const c = cur(); const s = phone() && c.videoM ? c.videoM : c.video; if (!s) { ACTIONS.smOpen(0); return; }
+    const el = document.createElement('div'); el.className = 'smwatch'; el.setAttribute('role', 'dialog');
+    el.innerHTML = `<video src="${esc(s)}" ${c.poster ? `poster="${esc(c.poster)}"` : ''} autoplay muted loop playsinline webkit-playsinline controls></video><button type="button" class="smwx" aria-label="${esc(L('إغلاق', 'Close'))}">✕</button>`;
+    const close = () => { document.removeEventListener('keydown', key); el.remove(); };
+    const key = e => { if (e.key === 'Escape') close(); };
+    el.addEventListener('click', e => { if (e.target === el || e.target.closest('.smwx')) close(); });
+    document.addEventListener('keydown', key); document.body.appendChild(el);
+    const v = el.querySelector('video'); const p = v.play(); if (p && p.catch) p.catch(() => { });
+  };
+
+  /* ---------- the editor (owner / art director) ---------- */
+  const ED = { video: null, videoM: null, poster: '', items: [], busy: false };
+  const fmtMB = n => (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + ' MB';
+  const extOf = (f, def) => { const m = /\.([a-z0-9]{2,5})$/i.exec(f.name || ''); const e = (m ? m[1] : '').toLowerCase(); if (e) return e === 'jpeg' ? 'jpg' : e; const t = String(f.type || ''); return t.includes('mp4') ? 'mp4' : t.includes('quicktime') ? 'mov' : t.includes('webm') ? 'webm' : t.includes('png') ? 'png' : t.includes('webp') ? 'webp' : def; };
+  let webpOK = null; const canWebp = () => { if (webpOK === null) { try { const c = document.createElement('canvas'); c.width = c.height = 2; webpOK = c.toDataURL('image/webp').startsWith('data:image/webp'); } catch (e) { webpOK = false; } } return webpOK; };
+  const toBlob = (c, q) => new Promise(res => { const t = canWebp() ? 'image/webp' : 'image/jpeg'; c.toBlob(b => res({ blob: b, ext: t === 'image/webp' ? 'webp' : 'jpg', type: t }), t, q); });
+  function loadImg(file) { return new Promise((res, rej) => { const u = URL.createObjectURL(file); const im = new Image(); im.onload = () => res({ im, w: im.naturalWidth, h: im.naturalHeight, u }); im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('img')); }; im.src = u; }); }
+  async function shrink(src, w, h, max, q) { const k = Math.min(1, max / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); const r = await toBlob(c, q); r.w = c.width; r.h = c.height; return r; }
+  function videoMeta(file) {
+    return new Promise(res => {
+      const u = URL.createObjectURL(file); const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('playsinline', '');
+      let done = false; const fin = r => { if (done) return; done = true; URL.revokeObjectURL(u); res(r); };
+      v.onloadedmetadata = () => { try { v.currentTime = Math.min(0.5, (v.duration || 1) / 2); } catch (e) { fin({ w: v.videoWidth, h: v.videoHeight, dur: v.duration || 0 }); } };
+      v.onseeked = async () => { const meta = { w: v.videoWidth, h: v.videoHeight, dur: Math.round((v.duration || 0) * 10) / 10 }; try { meta.poster = await shrink(v, v.videoWidth, v.videoHeight, 1280, 0.82); } catch (e) { /* no poster: the video shows from its first frame */ } fin(meta); };
+      v.onerror = () => fin({ w: 0, h: 0, dur: 0, bad: true }); setTimeout(() => fin({ w: v.videoWidth || 0, h: v.videoHeight || 0, dur: v.duration || 0 }), 15000);
+      v.src = u;
+    });
+  }
+  async function upload(kind, blob, ext) {
+    if (!S.sb || !S.sb.functions || !S.sb.storage) throw new Error('offline');
+    const r = await S.sb.functions.invoke('stu-media', { body: { action: 'sign', kind, ext } });
+    if (!r || r.error || !r.data || !r.data.token) throw new Error((r && r.data && r.data.error) || 'sign');
+    const u = await S.sb.storage.from('app').uploadToSignedUrl(r.data.path, r.data.token, blob, { contentType: r.data.type || blob.type, cacheControl: '31536000' });
+    if (u && u.error) throw u.error; return r.data.url;
+  }
+  const st = t => { const el = document.getElementById('smedst'); if (el) el.textContent = t || ''; };
+  function edBody() {
+    const vrow = (k, title, hint) => { const v = ED[k]; const has = v && (v.url || v.file);
+      return `<div class="smedb"><div class="smedh"><b>${esc(title)}</b><small class="muted">${esc(hint)}</small></div><div class="smedv">${has ? `<span class="smedvp">${k === 'video' && (ED.poster || (v.poster && v.poster.u)) ? `<img src="${esc((v.poster && v.poster.u) || ED.poster)}" alt="">` : `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>`}</span><span class="smedvn notr" dir="auto">${esc(v.file ? v.file.name : L('الفيديو الحالي', 'The current video'))}${v.file ? ` · <bdi dir="ltr">${fmtMB(v.file.size)}</bdi>` : v.size ? ` · <bdi dir="ltr">${fmtMB(v.size)}</bdi>` : ''}${v.file ? ` · <b>${esc(L('جديد', 'new'))}</b>` : ''}</span><button type="button" class="btn xs ghost" data-action="smVDel" data-arg="${k}">${esc(L('شيل', 'Remove'))}</button>` : `<span class="muted small">${esc(L('مفيش', 'None'))}</span>`}<label class="btn sm">${esc(has ? L('غيّر', 'Replace') : L('اختار فيديو', 'Choose a video'))}<input type="file" accept="video/mp4,video/quicktime,video/webm,video/*" data-smfile="${k}" hidden></label></div></div>`; };
+    return `<div class="smed" id="smed">
+      ${vrow('video', L('الشوريل', 'The showreel'), L('MP4 بالعرض (1080p)، من غير صوت — بيشتغل لوحده ومتكرر فوق الرئيسية وفي شاشة الدخول.', 'A landscape MP4 (1080p), no sound — it plays by itself, looping, on top of the home and on the login screen.'))}
+      ${vrow('videoM', L('نسخة الموبايل (اختياري)', 'Phone version (optional)'), L('نفس الفيديو بجودة أقل (720p) — الموبايل بياخدها بدل الكبيرة.', 'The same video at a lower quality (720p) — phones play it instead of the big one.'))}
+      <div class="smedb"><div class="smedh"><b>${esc(L('اللقطات', 'The stills'))}</b><small class="muted">${esc(L('بتتصغّر لوحدها قبل الرفع. رتّبها بالأسهم واكتب اسم المشروع لو حابب.', 'They are made smaller before upload. Order them with the arrows and add the project name if you like.'))}</small></div>
+        <div class="smedg">${ED.items.map((x, i) => `<div class="smedi"><img src="${esc(x.prev || x.thumb || x.src)}" alt=""><input class="notr" dir="auto" data-smcap="${i}" value="${esc(x.cap || '')}" maxlength="60" placeholder="${esc(L('اسم المشروع (اختياري)', 'Project name (optional)'))}"><div class="smeda"><button type="button" class="btn xs ghost" data-action="smMv" data-arg="${i}:-1" aria-label="${esc(L('قبل', 'Earlier'))}" ${i === 0 ? 'disabled' : ''}>${en() ? '‹' : '›'}</button><button type="button" class="btn xs ghost" data-action="smMv" data-arg="${i}:1" aria-label="${esc(L('بعد', 'Later'))}" ${i === ED.items.length - 1 ? 'disabled' : ''}>${en() ? '›' : '‹'}</button>${x.file ? `<i class="smnew">${esc(L('جديدة', 'new'))}</i>` : ''}<button type="button" class="btn xs ghost d" data-action="smIDel" data-arg="${i}" aria-label="${esc(L('شيل', 'Remove'))}">✕</button></div></div>`).join('')}
+          <label class="smedadd"><span>+</span><small>${esc(L('ضيف لقطات', 'Add stills'))}</small><input type="file" accept="image/*" multiple data-smfile="stills" hidden></label></div></div>
+      <div class="smedst small" id="smedst" aria-live="polite"></div></div>`;
+  }
+  const paint = () => { const el = document.getElementById('smed'); if (el) el.outerHTML = edBody(); };
+  ACTIONS.smEdit = () => {
+    if (!canEdit()) return; const d = docM() || {};
+    ED.video = d.video ? Object.assign({}, d.video) : null; ED.videoM = d.videoM ? Object.assign({}, d.videoM) : null; ED.poster = d.poster || ''; ED.busy = false;
+    ED.items = (d.items || []).filter(x => x && x.src).map(x => Object.assign({}, x));
+    openModal({ title: L('صور وفيديو الرئيسية', 'Home pictures and video'), wide: true, cls: 'smedm', submitLabel: L('احفظ وانشر', 'Save and publish'), body: edBody(), onSubmit: () => save() });
+  };
+  ACTIONS.smMv = a => { const [i, d] = String(a).split(':').map(Number); const j = i + d; if (j < 0 || j >= ED.items.length) return; const t = ED.items[i]; ED.items[i] = ED.items[j]; ED.items[j] = t; paint(); };
+  ACTIONS.smIDel = i => { ED.items.splice(+i, 1); paint(); };
+  ACTIONS.smVDel = k => { if (k === 'video') ED.poster = ''; ED[k] = null; paint(); };
+  document.addEventListener('input', e => { const t = e.target; if (t && t.dataset && t.dataset.smcap !== undefined) { const x = ED.items[+t.dataset.smcap]; if (x) x.cap = t.value; } });
+  document.addEventListener('change', async e => {
+    const t = e.target; if (!t || !t.dataset || !t.dataset.smfile || !document.getElementById('smed')) return;
+    const k = t.dataset.smfile; const files = [...(t.files || [])]; t.value = ''; if (!files.length) return;
+    if (k === 'stills') {
+      const imgs = files.filter(f => /^image\//.test(f.type || '') || /\.(jpe?g|png|webp|heic)$/i.test(f.name || '')); if (imgs.length < files.length) toast(L('في ملفات مش صور اتسابت', 'Some files were not pictures and were skipped'), 'err');
+      imgs.forEach(f => ED.items.push({ file: f, prev: URL.createObjectURL(f), cap: '' })); paint(); return;
+    }
+    const f = files[0];
+    if (!/^video\//.test(f.type || '') && !/\.(mp4|mov|m4v|webm)$/i.test(f.name || '')) { toast(L('اختار ملف فيديو (MP4)', 'Choose a video file (MP4)'), 'err'); return; }
+    if (f.size > 50 * 1048576) { toast(L('الفيديو أكبر من 50 ميجا — صغّره الأول', 'The video is over 50 MB — make it smaller first'), 'err'); return; }
+    if (k === 'video' && f.size > 15 * 1048576) toast(L('الفيديو تقيل شوية على الموبايل — ارفع نسخة موبايل خفيفة كمان', 'The video is a bit heavy for phones — add a light phone version too'));
+    if (/\.mov$/i.test(f.name || '') || f.type === 'video/quicktime') toast(L('ملفات MOV مش بتشتغل على كل الأجهزة — الأحسن MP4', 'MOV files do not play everywhere — MP4 is better'), 'err');
+    ED[k] = { file: f };
+    if (k === 'video') { st(L('بيجهّز صورة البداية…', 'Preparing the poster…')); const m = await videoMeta(f); ED.video.meta = m; if (m.poster && m.poster.blob) ED.video.poster = { blob: m.poster.blob, ext: m.poster.ext, u: URL.createObjectURL(m.poster.blob) }; if (m.bad) toast(L('الجهاز ده مش قادر يشغّل الفيديو ده — جرّب MP4', 'This device cannot play this video — try an MP4'), 'err'); }
+    paint();
+  });
+  async function save() {
+    if (ED.busy) return false; ED.busy = true;
+    const d0 = docM() || {}; const out = { id: 'media', ver: Date.now(), by: me(), at: nowISO(), video: null, videoM: null, poster: '', items: [] };
+    try {
+      const total = (ED.video && ED.video.file ? 1 : 0) + (ED.videoM && ED.videoM.file ? 1 : 0) + ED.items.filter(x => x.file).length; let n = 0;
+      const step = what => { n++; st(L(`بيرفع ${n} من ${total} — ${what}…`, `Uploading ${n} of ${total} — ${what}…`)); };
+      if (ED.video && ED.video.file) {
+        step(L('الشوريل', 'the showreel')); const f = ED.video.file; const m = ED.video.meta || {};
+        out.video = { url: await upload('video', f, extOf(f, 'mp4')), size: f.size, w: m.w || 0, h: m.h || 0, dur: m.dur || 0, name: String(f.name || '').slice(0, 80) };
+        out.poster = ED.video.poster ? await upload('poster', ED.video.poster.blob, ED.video.poster.ext) : '';
+      } else if (ED.video) { out.video = { url: ED.video.url, size: ED.video.size || 0, w: ED.video.w || 0, h: ED.video.h || 0, dur: ED.video.dur || 0, name: ED.video.name || '' }; out.poster = ED.poster || d0.poster || ''; }
+      if (ED.videoM && ED.videoM.file) { step(L('نسخة الموبايل', 'the phone version')); const f = ED.videoM.file; out.videoM = { url: await upload('videom', f, extOf(f, 'mp4')), size: f.size, name: String(f.name || '').slice(0, 80) }; }
+      else if (ED.videoM) out.videoM = { url: ED.videoM.url, size: ED.videoM.size || 0, name: ED.videoM.name || '' };
+      if (!out.video) out.videoM = null;
+      for (const x of ED.items) {
+        if (!x.file) { out.items.push({ id: x.id, src: x.src, thumb: x.thumb || x.src, cap: String(x.cap || '').trim(), w: x.w || 0, h: x.h || 0 }); continue; }
+        step(L('لقطة', 'a still'));
+        const im = await loadImg(x.file); const big = await shrink(im.im, im.w, im.h, 1600, 0.84); const sm = await shrink(im.im, im.w, im.h, 720, 0.8); URL.revokeObjectURL(im.u);
+        const src = await upload('still', big.blob, big.ext); const thumb = await upload('thumb', sm.blob, sm.ext);
+        out.items.push({ id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), src, thumb, cap: String(x.cap || '').trim(), w: big.w, h: big.h });
+      }
+      st(L('بيحفظ…', 'Saving…'));
+      await Store.save('stuhome', out, { silent: true });
+      try { await S.sb.functions.invoke('stu-media', { body: { action: 'publish' } }); } catch (e) { /* the home works without it; the login screen of a new device keeps the old film until the next save */ }
+      saveLocal(flat(out)); RV.cleaned = false;
+      toast(L('اتنشرت — الفريق كله هيشوفها', 'Published — the whole team sees it now')); ED.busy = false; if (typeof rerender === 'function') rerender(); return true;
+    } catch (e) {
+      console.warn('stu-media', e); ED.busy = false;
+      st(''); toast(String(e && e.message) === 'forbidden' ? L('مش مسموحلك تغيّر صور الرئيسية', 'You may not change the home pictures') : L('الرفع ماكملش — اتأكد من النت وجرّب تاني', 'The upload did not finish — check the connection and try again'), 'err'); return false;
+    }
+  }
+
+  /* ---------- the copy for the login screen + a new device ---------- */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    const d = docM(); if (S.session && d) { const l = local(); if (!l || l.v !== (d.ver || 0)) saveLocal(flat(d)); }
+    if (document.querySelector('[data-smreel],[data-smss]')) attach();
+  });
+  (async () => {
+    if (local() || typeof fetch !== 'function') return;
+    try {
+      const r = await fetch(PUBJSON, { cache: 'no-cache' }); if (!r.ok) return; const j = await r.json(); if (!j || (!j.video && !(j.stills || []).length)) return;
+      saveLocal({ v: j.v || 0, video: j.video || '', videoM: j.videoM || '', poster: j.poster || '', stills: j.stills || [] });
+      /* still on the login screen and nothing typed yet → show the studio's film now */
+      if (!S.session && document.querySelector('.slscene') && ![...document.querySelectorAll('input')].some(i => i.value) && typeof rerender === 'function') rerender();
+    } catch (e) { /* offline: the default film */ }
+  })();
+
+  /* ---------- settings (owner) ---------- */
+  if (typeof EXTRA_SETTINGS !== 'undefined') EXTRA_SETTINGS.stumedia = { label: 'صور وفيديو الرئيسية', render: () => { const c = cur();
+    return `<div class="card"><h3>${esc(L('صور وفيديو الرئيسية', 'Home pictures and video'))}</h3><p class="small muted">${esc(L('الشوريل ولقطات شغل الاستوديو اللي بتظهر فوق الرئيسية وفي ويدجت «شغل الاستوديو» وشاشة الدخول. المالك والآرت دايركتور بيغيّروها (كمان من «تعديل» في الرئيسية).', 'The showreel and the studio\'s stills shown on top of the home, in the «Studio work» widget and on the login screen. The owner and the art director change them (also from «Edit» on the home).'))}</p>
+      <div class="smset">${c.poster ? `<img src="${esc(c.poster)}" alt="">` : ''}${c.items.slice(0, 8).map(x => `<img src="${esc(x.thumb || x.src)}" alt="">`).join('')}</div>
+      <div class="small muted" style="margin:8px 0">${esc(c.video ? L('فيه شوريل', 'Showreel: yes') : L('مفيش شوريل لسه', 'No showreel yet'))} · ${esc(L(`${c.items.length} لقطة`, `${c.items.length} stills`))}</div>
+      <button type="button" class="btn p" data-action="smEdit">${esc(L('غيّر الصور والفيديو', 'Change the pictures and video'))}</button></div>`; } };
+
+  window.nfStuMedia = { cur, ready, local, heroHTML, galleryHTML, widget, stills: () => cur().items.map(x => x.src), thumbs: () => cur().items.map(x => x.thumb || x.src), vsrc, _ED: ED, _save: save, _attach: attach };
+
+  const css = document.createElement('style'); css.textContent = `
+.smhero{position:relative;height:min(64vh,560px);min-height:320px;border-radius:22px;overflow:hidden;background:#0b0d10;color:#fff;box-shadow:var(--shadow)}
+.smreel{position:absolute;inset:0}.smreel img,.smreel video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.smreel video{opacity:0;transition:opacity 1.2s ease}.smreel video.on{opacity:1}
+[data-smss] img{opacity:0;transition:opacity 1.6s ease}[data-smss] img.on{opacity:1}
+.smhero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,13,16,.42) 0%,rgba(11,13,16,0) 26%,rgba(11,13,16,0) 48%,rgba(11,13,16,.86) 100%);pointer-events:none;z-index:1}
+.smmark{position:absolute;top:22px;inset-inline-start:26px;height:16px;width:auto;z-index:2;opacity:.92;object-fit:contain}
+.smav{position:absolute;top:16px;inset-inline-end:18px;z-index:2}.smav .stuav{border-color:rgba(255,255,255,.7)}
+.smhov{position:absolute;inset-inline:30px;bottom:28px;z-index:2;display:flex;flex-direction:column;gap:6px;max-width:min(720px,80%)}
+.smhov small{color:#d3d9de;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase}.smhov h1{margin:0;font-size:clamp(28px,4vw,48px);font-weight:300;line-height:1.08}.smhov h1 b{font-weight:600}
+.smslg{margin:2px 0 0;font-size:clamp(14px,1.5vw,18px);letter-spacing:.14em;text-transform:uppercase;color:#e9edf0;font-weight:300}
+.smfull{position:absolute;bottom:24px;inset-inline-end:22px;z-index:2;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(11,13,16,.38);color:#fff;display:grid;place-items:center;cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.smsec{display:flex;align-items:center;gap:8px;margin-bottom:10px}.smsec h3{flex:1;margin:0!important}
+.smgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.smt{position:relative;aspect-ratio:1;border:0;padding:0;margin:0;border-radius:16px;overflow:hidden;cursor:pointer;background:#0b0d10;display:block;width:100%}
+.smt img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease}
+.smgrid.kb .smt img{animation:smkb 16s ease-in-out infinite alternate}.smgrid.kb .smt:nth-child(2n) img{animation-delay:-5s}.smgrid.kb .smt:nth-child(3n) img{animation-delay:-9s}
+@keyframes smkb{from{transform:scale(1)}to{transform:scale(1.08)}}
+.smt:hover img{transform:scale(1.06)}
+.smt span{position:absolute;inset-inline:0;bottom:0;padding:22px 12px 10px;color:#fff;font-size:12.5px;text-align:start;background:linear-gradient(180deg,transparent,rgba(11,13,16,.8))}
+.smempty .btn{margin-top:8px}
+.nfw.w-stuwork{padding:0;background:#0b0d10;border-color:transparent}
+.smw{position:absolute;inset:0;cursor:pointer;color:#fff}.smw::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(11,13,16,.7));pointer-events:none}
+.smwl{position:absolute;inset-inline-start:12px;bottom:10px;z-index:1;font-size:12.5px;letter-spacing:.02em}
+.smwatch{position:fixed;inset:0;z-index:10050;background:#000;display:grid;place-items:center}.smwatch video{width:100%;height:100%;object-fit:contain;background:#000}
+.smwx{position:absolute;top:max(14px,env(safe-area-inset-top));inset-inline-end:14px;width:42px;height:42px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:20px;cursor:pointer}
+html.ios-app .smwx{top:max(54px,env(safe-area-inset-top))}
+.smed{display:flex;flex-direction:column;gap:16px}.smedb{display:flex;flex-direction:column;gap:8px}.smedh{display:flex;flex-direction:column;gap:2px}
+.smedv{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
+.smedvp{width:96px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#0b0d10;color:#fff;display:grid;place-items:center;flex:none}.smedvp img{width:100%;height:100%;object-fit:cover}
+.smedvn{flex:1;min-width:140px;font-size:13px;word-break:break-all}
+.smedg{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.smedi{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:14px;padding:6px;background:var(--surface)}.smedi img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block}
+.smedi input{width:100%;box-sizing:border-box;font-size:12.5px}.smeda{display:flex;align-items:center;gap:4px}.smeda .d{margin-inline-start:auto}.smnew{font-style:normal;font-size:11px;color:var(--accent)}
+.smedadd{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:2px dashed var(--line);border-radius:14px;min-height:150px;cursor:pointer;color:var(--muted)}.smedadd span{font-size:30px;line-height:1}
+.smedst{min-height:18px;color:var(--accent)}
+.smset{display:flex;gap:6px;flex-wrap:wrap}.smset img{width:64px;height:64px;object-fit:cover;border-radius:10px}.smset img:first-child{width:114px}
+@media (max-width:600px){.smhero{height:min(60vh,440px);border-radius:18px}.smhov{inset-inline:18px;bottom:20px;max-width:none}.smmark{top:18px;inset-inline-start:18px;height:14px}
+  .smgrid{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:43vw;grid-template-rows:repeat(2,43vw);overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding-bottom:4px;scrollbar-width:none}.smgrid::-webkit-scrollbar{display:none}.smt{scroll-snap-align:start;border-radius:14px}
+  .smfull{bottom:18px;inset-inline-end:16px}}
+@media (prefers-reduced-motion:reduce){.smreel video,[data-smss] img{transition:none}}`;
+  document.head.appendChild(css);
 })();
 </script>
 
