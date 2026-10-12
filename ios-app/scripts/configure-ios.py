@@ -18,6 +18,8 @@ d.update({
     'UIBackgroundModes': ['remote-notification', 'location', 'voip', 'audio'],
     'UIRequiredDeviceCapabilities': ['arm64'],
     'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait'],
+    # v7.48: the app runs natively on iPad too (Apple Pencil in Concept) — the iPad turns every way, the iPhone stays upright
+    'UISupportedInterfaceOrientations~ipad': ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
 })
 plistlib.dump(d, open(INFO, 'wb'))
 open('ios/App/App/App.entitlements', 'w').write('''<?xml version="1.0" encoding="UTF-8"?>
@@ -34,7 +36,8 @@ open('ios/App/App/App.entitlements', 'w').write('''<?xml version="1.0" encoding=
 </plist>
 ''')
 s = open(PBX).read()
-s = s.replace('TARGETED_DEVICE_FAMILY = "1,2";', 'TARGETED_DEVICE_FAMILY = 1;')
+# v7.48: iPhone + iPad (was iPhone only: TARGETED_DEVICE_FAMILY = 1)
+s = s.replace('TARGETED_DEVICE_FAMILY = 1;', 'TARGETED_DEVICE_FAMILY = "1,2";')
 if 'CODE_SIGN_ENTITLEMENTS' not in s:
     s = s.replace('PRODUCT_BUNDLE_IDENTIFIER = app.ninety.fabrication;', 'PRODUCT_BUNDLE_IDENTIFIER = app.ninety.fabrication;\n\t\t\t\tCODE_SIGN_ENTITLEMENTS = App/App.entitlements;\n\t\t\t\tDEVELOPMENT_TEAM = %s;' % TEAM)
 open(PBX, 'w').write(s)
@@ -63,4 +66,10 @@ if 'NinetyCallBoot' not in a:
     boot = '(NSClassFromString("NinetyCallsPlugin.NinetyCallBoot") as AnyObject?)?.perform(NSSelectorFromString("boot"))\n        '
     a = a[:j] + boot + a[j:]
     open(DELEGATE, 'w').write(a)
+# v7.48 (note 5): the Apple Pencil plugin (double-tap / squeeze) is an iOS-only package — added here, on the build Mac, so the
+# Android build (same package.json) never changes because of it; `npx cap sync ios` (next step) picks it up
+import subprocess, json
+pk = json.load(open('package.json'))
+if 'ninety-pencil' not in pk.get('dependencies', {}):
+    subprocess.run(['npm', 'install', '--no-audit', '--no-fund', '--save', 'file:plugins/ninety-pencil'], check=True)
 print('ios configured')
