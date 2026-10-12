@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-0102-aed228";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-0543-6b51b0";</script>
 
 <script>
 'use strict';
@@ -9540,6 +9540,18 @@ function taskItem(t, o = {}) {
 /* ---------------- task page: #/tasks/<id> ---------------- */
 VIEW_TITLES.tasks = VIEW_TITLES.tasks || 'المهام';
 function vTasks() { const id = S.route.id; if (id) { const t = byId('tasks', id); if (t) return vTaskDetail(t); } return vTasksBase(); }
+/* v7.49 (12 Oct — Mahmoud: «كل تاسك فيه أتاتش لي صور لما تخش جوه التاسك تظبط رصّة الصورة»): inside the task the pictures sit like a chat
+   album — one large, two side by side, three, two by two, «+N» — a tap opens them all in the viewer (zoom, swipe, download); the
+   old tiles with the delete button stay under «إدارة الصور» for whoever may delete */
+function taskPhotosBlock(t) {
+  const ps = taskPhotos(t); const tiles = ps.map(p => ({ thumb: photoSrc(p), action: 'taskPhotoOpen', arg: `${t.id}:${p.id}` }));
+  const grid = typeof nfGridHTML === 'function' ? nfGridHTML(tiles, { cls: 'big tdet' }) : '';
+  const mine = ps.filter(p => isAdmin() || p.by === S.session?.id);
+  const tilesHTML = list => `<div class="tgal big">${list.map(p => `<div class="ph" data-action="taskPhotoOpen" data-arg="${t.id}:${p.id}">${photoSrc(p) ? `<img src="${esc(photoSrc(p))}" alt="">` : ''}<div class="who">${esc(p.byName || '')} · ${fmtDate((p.at || '').slice(0, 10))}</div>${isAdmin() || p.by === S.session?.id ? `<button class="iconbtn" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.5);color:#fff" data-action="taskPhotoDel" data-arg="${t.id}:${p.id}">${icon('x')}</button>` : ''}</div>`).join('')}</div>`;
+  if (!grid) return tilesHTML(ps);
+  const last = ps[ps.length - 1]; const meta = last ? `<div class="tiny muted tph-meta">${esc(last.byName || '')} · ${fmtDate((last.at || '').slice(0, 10))}${ps.length > 1 ? ' · ' + ps.length + ' صور' : ''}</div>` : '';
+  return grid + meta + (mine.length ? `<details class="tph-man"><summary class="tiny">إدارة الصور</summary>${tilesHTML(mine)}</details>` : '');
+}
 function vTaskDetail(t) {
   if (!taskVisible(t) && !taskIsParty(t)) return '<div class="card muted">ليست لك صلاحية على هذه المهمة</div>';
   const ord = t.orderId ? byId('orders', t.orderId) : null; const parties = taskParties(t); setTimeout(() => taskMarkSeen(t), 300);
@@ -9552,7 +9564,7 @@ function vTaskDetail(t) {
         ${typeof taskProofChip === 'function' ? taskProofChip(t) : ''}
         <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${canTasks() && taskVisible(t) && ['open', 'doing'].includes(t.status) ? `${t.status === 'open' ? `<button class="btn sm" data-action="taskStatus" data-arg="${t.id}:doing">بدء</button>` : ''}<button class="btn sm p" data-action="taskStatus" data-arg="${t.id}:done">${icon('check')}تم</button>` : ''}${canTasks() && (isAdmin() || ['hr', 'office', 'manager'].includes(role()) || t.createdBy === S.session?.id) ? `<button class="btn sm ghost" data-action="taskEdit" data-arg="${t.id}">${icon('edit')}تعديل</button>` : ''}<a class="btn sm ghost" href="#/tasks">${icon('back')}كل المهام</a></div></div>
       <div class="card"><div class="cardhead"><h3>صور التوثيق (${taskPhotos(t).length})</h3><div class="grow"></div>${writable() && taskVisible(t) ? `<button class="btn sm p" data-action="taskPhoto" data-arg="${t.id}">${icon('camera')}تصوير / رفع صورة</button>` : ''}</div>
-        ${taskPhotos(t).length ? `<div class="tgal big">${taskPhotos(t).map(p => `<div class="ph" data-action="taskPhotoOpen" data-arg="${t.id}:${p.id}">${photoSrc(p) ? `<img src="${esc(photoSrc(p))}" alt="">` : ''}<div class="who">${esc(p.byName || '')} · ${fmtDate((p.at || '').slice(0, 10))}</div>${isAdmin() || p.by === S.session?.id ? `<button class="iconbtn" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.5);color:#fff" data-action="taskPhotoDel" data-arg="${t.id}:${p.id}">${icon('x')}</button>` : ''}</div>`).join('')}</div>` : '<div class="muted small">لا توجد صور بعد — صوّر مراحل الشغل من الكاميرا مباشرة أو ارفع صورة</div>'}</div>
+        ${taskPhotos(t).length ? taskPhotosBlock(t) : '<div class="muted small">لا توجد صور بعد — صوّر مراحل الشغل من الكاميرا مباشرة أو ارفع صورة</div>'}</div>
     </div>
     <div class="card"><div class="cardhead"><h3>المحادثة</h3><div class="grow"></div>${writable() && taskIsParty(t) ? `<button class="btn xs ghost" data-action="taskAddParty" data-arg="${t.id}">${icon('plus')}طرف</button>` : ''}</div>
       <div class="tparties small" style="margin-bottom:8px">${parties.map(p => `<span class="badge" title="${esc(p.why)}">${esc(p.name.split(' — ')[0])}</span>`).join('')}</div>
@@ -16053,10 +16065,20 @@ ACTIONS.walletNew = () => { if (!isAdmin()) return; const ws = sortBy(list('work
 
 /* ---------- 9) monthly tea & sugar quota ---------- */
 const quotaDoc = ym => byId('money', `quota_${ym}`);
+/* v7.49 (12 Oct — Mahmoud: «آلاء ده المدير التجاري لـLOF متخشش في أي جملة مفيضة للسيستم بتاع المصنع… شيلها وشيل أي مهندس من المكتب الفني وسعيد أشرف كمان»):
+   the list = every active employee of the factory (any workplace — the old filter kept only the head-office people by mistake) except the
+   technical office (dept «tech» / role «tech»), the commercial director, the head of accounts, the kiosk and viewer accounts. The month's list
+   follows the staff (new hires join, people who left or were excluded drop out) — anyone already ticked as «received» stays. */
+const QUOTA_SKIP = ['mub8c2kbztptdo', 'mu8nxl81mlu6dg'];   /* آلاء إسماعيل (المدير التجاري — LOF) · سعيد أشرف (مدير الحسابات) */
+const quotaEligible = () => sortBy(list('workers').filter(w => w && w.id && w.status !== 'inactive' && !['kiosk', 'viewer', 'tech', 'bdd'].includes(w.role) && w.deptId !== 'tech' && !QUOTA_SKIP.includes(w.id) && !(((S.settings.money || {}).quotaSkip) || []).includes(w.id)), w => w.name).map(w => ({ id: w.id, name: w.name, dept: typeof deptName === 'function' ? deptName(w.deptId) : '' }));
 async function quotaEnsure(ym) {
-  if (!moneyOn() || quotaDoc(ym) || !(isAdmin() || role() === 'hr') || !writable()) return;
-  const people = sortBy(list('workers').filter(w => w.status !== 'inactive' && w.workplace !== 'office' && w.role !== 'kiosk'), w => w.name).map(w => ({ id: w.id, name: w.name, dept: typeof deptName === 'function' ? deptName(w.deptId) : '' }));
-  if (!people.length) return; await Store.save('money', { id: `quota_${ym}`, type: 'quota', month: ym, people, got: {}, createdAt: nowISO() }, { silent: true });
+  if (!moneyOn() || !(isAdmin() || role() === 'hr') || !writable()) return;
+  const people = quotaEligible(); const q = quotaDoc(ym);
+  if (!q) { if (!people.length) return; await Store.save('money', { id: `quota_${ym}`, type: 'quota', month: ym, people, got: {}, rule: 2, createdAt: nowISO() }, { silent: true }); return; }
+  if (ym !== monthOf(todayISO())) return;   /* past months stay as they were */
+  const got = q.got || {}; const keep = (q.people || []).filter(p => got[p.id] && !people.some(x => x.id === p.id));
+  const next = people.concat(keep); const same = next.length === (q.people || []).length && next.every(p => (q.people || []).some(x => x.id === p.id));
+  if (!same || q.rule !== 2) await Store.update('money', q.id, { people: next, rule: 2 }, { silent: true });
 }
 ACTIONS.quotaTick = async arg => { const [ym, wid] = arg.split(':'); const q = quotaDoc(ym); if (!q || !seesMoneyOps() || !writable()) return; const got = Object.assign({}, q.got || {}); if (got[wid]) delete got[wid]; else got[wid] = { at: nowISO(), byName: S.session?.name || '' }; await Store.update('money', q.id, { got }, { silent: true }); rerender(); };
 function quotaCard(ym) {
@@ -40244,6 +40266,7 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     add: G('<path d="M11.2 4.6H7.6a3 3 0 0 0-3 3v8.8a3 3 0 0 0 3 3h8.8a3 3 0 0 0 3-3v-3.6"/><path d="M17.7 3.9a1.85 1.85 0 0 1 2.6 2.6l-7.4 7.4-3.4.8.8-3.4z"/>'),
     ai: G('<path d="M10 3.6c.55 3.75 2.45 5.65 6.2 6.2-3.75.55-5.65 2.45-6.2 6.2-.55-3.75-2.45-5.65-6.2-6.2 3.75-.55 5.65-2.45 6.2-6.2z"/><path d="M18.2 14.6c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5z"/>'),
     memo: G('<rect x="5.2" y="3.4" width="13.6" height="17.2" rx="2.6"/><path d="M8.8 8.2h6.4M8.8 12h6.4M8.8 15.8h3.8"/>'),
+    concept: G('<path d="M4.6 19.4c2.3-.4 3.6-1.2 4.6-2.9"/><path d="M14.9 4.6l4.5 4.5-8.6 8.6-4.9 1.1 1.1-4.9z"/><path d="M13.1 6.4l4.5 4.5"/>'),
     call: G('<path d="M20.6 16.3v2.6a1.75 1.75 0 0 1-1.9 1.75 17.3 17.3 0 0 1-7.55-2.7 17 17 0 0 1-5.25-5.25 17.3 17.3 0 0 1-2.7-7.6A1.75 1.75 0 0 1 4.95 3.2h2.6a1.75 1.75 0 0 1 1.75 1.5c.11.85.32 1.67.61 2.46a1.75 1.75 0 0 1-.39 1.85l-1.1 1.1a14 14 0 0 0 5.25 5.25l1.1-1.1a1.75 1.75 0 0 1 1.85-.39c.79.29 1.61.5 2.46.61a1.75 1.75 0 0 1 1.5 1.77z"/>'),
   };
   const addLabel = el => { const a = el.dataset.action || ''; return a === 'materialNew' ? L('خامة جديدة', 'New material') : a === 'drvTripNew' ? L('مشوار جديد', 'New trip') : a === 'fabMenu' ? (typeof role === 'function' && role() === 'driver' ? L('مشوار جديد', 'New trip') : L('إضافة', 'Add')) : L('مهمة جديدة', 'New task'); };
@@ -40254,11 +40277,12 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     { k: 'memo', sel: '.memofab', label: () => L('المذكرة', 'Memo'), cls: 'memo' },
     { k: 'call', sel: '.callfab', label: () => L('المكالمات', 'Calls'), cls: 'call' },
     { k: 'snap', sel: '.snapfab', label: () => L('صوّر الشاشة', 'Screenshot'), cls: 'snap' },   /* v7.37: screenshot + sketch onto a task */
+    { k: 'concept', sel: '.conceptfab', label: () => L('كونسبت', 'Concept'), cls: 'concept' },   /* v7.49: a new blank Concept drawing */
   ];
   const D = { root: null, open: false, sig: '' };
   const shown = el => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
   /* v7.37: «Screenshot» rides along with the other actions - it never keeps the «+» on screen by itself (forms, side menu, chats hide it as before) */
-  const avail = () => { const xs = SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el)); return xs.some(x => x.k !== 'snap') ? xs : []; };
+  const avail = () => { const xs = SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el)); return xs.some(x => x.k !== 'snap' && x.k !== 'concept') ? xs : []; };
   const badge = el => { const n = el && el.querySelector('.n'); const v = n ? parseInt(n.textContent, 10) : 0; return v > 0 ? v : 0; };
   const iconOf = x => ICONS[x.k] || (x.el && (x.el.querySelector('svg') || {}).outerHTML) || PLUS;
 
@@ -40278,21 +40302,21 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     return D.root;
   }
   function press(x) { const el = x.el; if (!el) return; if (el.tagName === 'A' && el.getAttribute('href')) { location.hash = el.getAttribute('href').replace(/^#/, ''); return; } el.click(); }
+  /* v7.49 (12 Oct — Mahmoud: «لما أدوس على الـ+ الشريط يبقى بالطول»): the actions stand in one vertical strip above the «+», the
+     first one nearest to it, each name beside its circle on the inner side of the screen; a short screen squeezes the gaps */
   function openDial() {
     const root = build(); const xs = avail(); if (xs.length < 2) return;
     const main = root.querySelector('.nfd-main').getBoundingClientRect(); const cx = main.left + main.width / 2; const cy = main.top + main.height / 2;
-    const right = cx < innerWidth / 2; const small = innerWidth <= 900; const r = (small ? 138 : 144) + (xs.length >= 5 ? 22 : 0);   /* v7.37: five circles need a wider arc so they do not touch */
+    const right = cx < innerWidth / 2; const n = xs.length;
+    const room = Math.max(120, cy - main.height / 2 - 18); const gap = Math.max(46, Math.min(62, room / n));
     const box = root.querySelector('.nfd-items'); box.style.left = cx + 'px'; box.style.top = cy + 'px';
-    const a0 = 90, a1 = 8; const step = xs.length > 1 ? (a0 - a1) / (xs.length - 1) : 0;
-    box.innerHTML = xs.map((x, i) => {
-      const th = (a0 - step * i) * Math.PI / 180; const dx = Math.cos(th) * r * (right ? 1 : -1); const dy = -Math.sin(th) * r; const n = badge(x.el);
-      return `<button type="button" class="nfd-it ${x.cls}" role="menuitem" data-nfd="${x.k}" data-th="${(a0 - step * i).toFixed(2)}" style="--dx:${dx.toFixed(1)}px;--dy:${dy.toFixed(1)}px;--i:${i}"><span class="nfd-c">${iconOf(x)}${n ? `<b class="n">${n}</b>` : ''}</span><span class="nfd-l">${esc(x.label(x.el))}</span></button>`;
+    box.innerHTML = `<i class="nfd-rail" style="--h:${(gap * n + 14).toFixed(1)}px;--top:${(-(gap * n) - 34).toFixed(1)}px"></i>` + xs.map((x, i) => {
+      const dy = -gap * (i + 1); const nb = badge(x.el);
+      return `<button type="button" class="nfd-it ${x.cls}" role="menuitem" data-nfd="${x.k}" style="--dx:0px;--dy:${dy.toFixed(1)}px;--i:${i}"><span class="nfd-c">${iconOf(x)}${nb ? `<b class="n">${nb}</b>` : ''}</span><span class="nfd-l">${esc(x.label(x.el))}</span></button>`;
     }).join('');
-    /* each name sits just outside its circle, away from the «+», so the names never overlap */
-    box.querySelectorAll('.nfd-it').forEach(b => {
-      const lb = b.querySelector('.nfd-l'); const th = +b.dataset.th * Math.PI / 180; const w = lb.offsetWidth, h = lb.offsetHeight; const c = b.querySelector('.nfd-c').offsetWidth / 2;
-      const d = c + 9 + Math.abs(Math.cos(th)) * w / 2 + Math.abs(Math.sin(th)) * h / 2;
-      lb.style.left = (c + Math.cos(th) * d * (right ? 1 : -1) - w / 2) + 'px'; lb.style.top = (c - Math.sin(th) * d - h / 2) + 'px';
+    box.querySelectorAll('.nfd-it').forEach(bt => {
+      const lb = bt.querySelector('.nfd-l'); const w = lb.offsetWidth, h = lb.offsetHeight; const c = bt.querySelector('.nfd-c').offsetWidth;
+      lb.style.left = (right ? c + 12 : -w - 12) + 'px'; lb.style.top = ((c - h) / 2) + 'px';
     });
     D.open = true; root.classList.add('open'); root.querySelector('.nfd-main').setAttribute('aria-expanded', 'true');
     root.querySelector('.nfd-main').setAttribute('aria-label', L('إغلاق', 'Close'));
@@ -40344,6 +40368,8 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
 .nfdial.open .nfd-bg{opacity:1;pointer-events:auto}
 html.apple-blur .nfdial .nfd-bg{-webkit-backdrop-filter:blur(14px) saturate(120%);backdrop-filter:blur(14px) saturate(120%)}
 .nfdial .nfd-items{position:fixed;width:0;height:0;z-index:65}
+.nfdial .nfd-rail{position:absolute;left:-33px;top:var(--top);width:66px;height:var(--h);border-radius:33px;background:var(--lx-pill);border:1px solid var(--lx-pill-line);box-shadow:0 14px 34px -18px rgba(0,0,0,.55);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);opacity:0;transform:scaleY(.6);transform-origin:50% 100%;transition:opacity .2s,transform .28s cubic-bezier(.2,.85,.25,1.05);pointer-events:none}
+.nfdial.open .nfd-rail{opacity:1;transform:scaleY(1)}
 .nfdial .nfd-it{position:absolute;left:-26px;top:-26px;width:52px;height:52px;border:0;padding:0;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent;transform:translate(0,0) scale(.4);opacity:0;pointer-events:none;transition:transform .3s cubic-bezier(.2,.85,.25,1.12),opacity .2s;transition-delay:calc(var(--i) * 30ms)}
 .nfdial.open .nfd-it{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1;pointer-events:auto}
 .nfdial .nfd-c{position:absolute;left:0;top:0;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;border:1px solid transparent;background:var(--lx-face) padding-box,var(--lx-ring) border-box;color:var(--lx-ink);box-shadow:var(--lx-shadow);transition:transform .15s ease}
@@ -43101,24 +43127,53 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
   const applyCurve = (lut, p) => { if (!lut) return p; const f = clamp(p, 0, 1) * 64; const i = Math.floor(f); return i >= 64 ? lut[64] : lut[i] + (lut[i + 1] - lut[i]) * (f - i); };
 
-  /* ---------- the sound of the line on paper (Web Audio: filtered noise that follows speed and pressure) ---------- */
-  const SND = { ctx: null, src: null, bp: null, g: null, on: false, kind: '' };
+  /* ---------- the sound of the line on paper (Web Audio: filtered noise that follows speed and pressure) ----------
+     v7.49 (12 Oct — Mahmoud: the sound kept getting louder and sounded artificial): one chain for the whole session —
+     noise → band-pass → stroke gain → master level (the «sound level» slider in Pen settings) → a soft limiter, so a stroke never comes
+     out louder than the one before it; every new stroke and every stop clears the queued volume changes (they used to pile up on
+     every pen move), volume changes are spaced (≥ 16 ms), and the noise is grainy paper (4 s, random grains, no tones) instead of a
+     short tonal loop. */
+  const SND = { ctx: null, src: null, bp: null, g: null, m: null, lim: null, on: false, kind: '', vol: 0.6, last: 0 };
   const SOUNDS = { pencil: [3600, 0.9, 0.16], charcoal: [1900, 0.7, 0.2], ink: [5200, 1.4, 0.06], liner: [5600, 1.6, 0.05], marker: [1100, 0.8, 0.13], highlighter: [950, 0.8, 0.1], soft: [700, 0.6, 0.05], eraser: [1500, 0.7, 0.14] };
+  function paperNoise(c) {
+    const len = Math.floor(c.sampleRate * 4); const b = c.createBuffer(1, len, c.sampleRate); const d = b.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, grain = 1, left = 0; let peak = 0;
+    for (let i = 0; i < len; i++) {
+      if (left <= 0) { grain = 0.55 + Math.random() * 0.45; left = Math.floor(c.sampleRate * (0.006 + Math.random() * 0.02)); } left--;
+      const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913;
+      const v = (b0 + b1 + b2 + w * 0.1848) * grain; d[i] = v; if (Math.abs(v) > peak) peak = Math.abs(v);
+    }
+    const k = peak ? 0.9 / peak : 1; const fade = Math.floor(c.sampleRate * 0.05);
+    for (let i = 0; i < len; i++) { let f = 1; if (i < fade) f = i / fade; else if (i > len - fade) f = (len - i) / fade; d[i] *= k * f; }
+    return b;
+  }
+  const hold = (prm, t) => { try { prm.cancelScheduledValues(t); prm.setValueAtTime(prm.value, t); } catch (e) { /* older WebKit */ } };
   const sound = {
     start(kind) {
       try {
-        if (!SND.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; SND.ctx = new AC(); const len = SND.ctx.sampleRate * 2; const b = SND.ctx.createBuffer(1, len, SND.ctx.sampleRate); const d = b.getChannelData(0); let last = 0; for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = last * 0.55 + w * 0.45; d[i] = last * (0.7 + 0.3 * Math.sin(i / 37) * Math.sin(i / 11)); } SND.buf = b; }
+        if (!SND.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; SND.ctx = new AC(); SND.buf = paperNoise(SND.ctx); }
         const c = SND.ctx; if (c.state === 'suspended') c.resume();
-        if (!SND.src) { SND.src = c.createBufferSource(); SND.src.buffer = SND.buf; SND.src.loop = true; SND.bp = c.createBiquadFilter(); SND.bp.type = 'bandpass'; SND.g = c.createGain(); SND.g.gain.value = 0; SND.src.connect(SND.bp); SND.bp.connect(SND.g); SND.g.connect(c.destination); SND.src.start(); }
-        const s = SOUNDS[kind] || SOUNDS.pencil; SND.kind = kind; SND.bp.frequency.setTargetAtTime(s[0], c.currentTime, 0.01); SND.bp.Q.value = s[1]; SND.on = true;
+        if (!SND.src) {
+          SND.src = c.createBufferSource(); SND.src.buffer = SND.buf; SND.src.loop = true;
+          SND.bp = c.createBiquadFilter(); SND.bp.type = 'bandpass'; SND.g = c.createGain(); SND.g.gain.value = 0;
+          SND.m = c.createGain(); SND.m.gain.value = SND.vol * 1.6;
+          SND.lim = c.createDynamicsCompressor(); try { SND.lim.threshold.value = -24; SND.lim.knee.value = 12; SND.lim.ratio.value = 8; SND.lim.attack.value = 0.004; SND.lim.release.value = 0.12; } catch (e) { /* defaults */ }
+          SND.src.connect(SND.bp); SND.bp.connect(SND.g); SND.g.connect(SND.m); SND.m.connect(SND.lim); SND.lim.connect(c.destination); SND.src.start();
+        }
+        const t = c.currentTime; hold(SND.g.gain, t); hold(SND.bp.frequency, t); SND.g.gain.setTargetAtTime(0, t, 0.01);
+        const s = SOUNDS[kind] || SOUNDS.pencil; SND.kind = kind; SND.bp.frequency.setTargetAtTime(s[0], t, 0.01); SND.bp.Q.value = s[1]; SND.on = true; SND.last = 0;
       } catch (e) { /* no audio here */ }
     },
     move(v, p) {
-      if (!SND.on || !SND.ctx || !SND.g) return; const s = SOUNDS[SND.kind] || SOUNDS.pencil; const c = SND.ctx;
-      const lvl = s[2] * clamp(v / 1.1, 0, 1.3) * (0.45 + 0.55 * (p == null ? 0.6 : p)); SND.g.gain.setTargetAtTime(lvl, c.currentTime, 0.025);
-      SND.bp.frequency.setTargetAtTime(s[0] * (0.85 + 0.3 * clamp(v / 2, 0, 1)), c.currentTime, 0.03);
+      if (!SND.on || !SND.ctx || !SND.g) return; const c = SND.ctx; const now = performance.now(); if (now - SND.last < 16) return; SND.last = now;
+      const s = SOUNDS[SND.kind] || SOUNDS.pencil; const t = c.currentTime;
+      const lvl = s[2] * clamp(v / 1.1, 0, 1) * (0.5 + 0.5 * (p == null ? 0.6 : clamp(p, 0, 1)));
+      hold(SND.g.gain, t); SND.g.gain.setTargetAtTime(lvl, t, 0.03);
+      hold(SND.bp.frequency, t); SND.bp.frequency.setTargetAtTime(s[0] * (0.88 + 0.24 * clamp(v / 2, 0, 1)) * (0.97 + Math.random() * 0.06), t, 0.04);
     },
-    stop() { if (!SND.ctx || !SND.g) return; SND.on = false; try { SND.g.gain.setTargetAtTime(0, SND.ctx.currentTime, 0.04); } catch (e) { /* ignore */ } }
+    stop() { if (!SND.ctx || !SND.g) return; SND.on = false; try { const t = SND.ctx.currentTime; hold(SND.g.gain, t); SND.g.gain.setTargetAtTime(0, t, 0.04); } catch (e) { /* ignore */ } },
+    setVol(v) { SND.vol = clamp(+v || 0, 0, 1); if (SND.m && SND.ctx) { const t = SND.ctx.currentTime; hold(SND.m.gain, t); SND.m.gain.setTargetAtTime(SND.vol * 1.6, t, 0.05); } },
+    getVol() { return SND.vol; }
   };
   const SHAPES = ['line', 'arrow', 'rect', 'oval', 'dim'];
 
@@ -45035,14 +45090,14 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
 
   /* ---------- v7.48 pen settings: one curve for the hand (per person, per device) + per brush what the pressure changes ---------- */
-  const PEN_DEF = { curve: 'normal', sound: true, paper: true, hover: true, action: 'wheel', brushes: {} };
+  const PEN_DEF = { curve: 'normal', sound: true, vol: 0.6, paper: true, hover: true, action: 'wheel', brushes: {} };
   const penKey = () => 'nf.pen.' + ((S.session && (S.session.id || S.session.workerId)) || 'x');
   function penPrefs() { try { return Object.assign({}, PEN_DEF, JSON.parse(localStorage.getItem(penKey()) || '{}')); } catch (e) { return Object.assign({}, PEN_DEF); } }
   function savePen(p) { try { localStorage.setItem(penKey(), JSON.stringify(p)); } catch (e) { /* ignore */ } }
   const curveArr = c => (Array.isArray(c) && c.length === 4 ? c : (NFDraw.CURVES[c] || NFDraw.CURVES.normal));
   function brushPress(k) { const br = NFDraw.BRUSHES[k] || {}; const u = (penPrefs().brushes || {})[k] || {}; const pm = br.pm || [1 - (br.press || 0), 1]; return { mode: u.mode || (br.po ? 'both' : 'size'), min: u.min != null ? u.min : pm[0], max: u.max != null ? u.max : pm[1] }; }
   function brushCfg() { const out = {}; Object.keys(NFDraw.BRUSHES).forEach(k => { const br = NFDraw.BRUSHES[k]; if (!br.press || br.erase) return; const b = brushPress(k); out[k] = { pm: b.mode === 'opacity' ? [b.max, b.max] : [Math.min(b.min, b.max), b.max], po: b.mode !== 'size' ? 1 : 0 }; }); return out; }
-  function applyPen(ed) { if (!ed) return; const p = penPrefs(); ed.setCurve(curveArr(p.curve)); ed.sound = p.sound !== false; ed.paperTex = p.paper !== false; ed.hoverDot = p.hover !== false; ed.brushCfg = brushCfg(); ed.feel = true; }
+  function applyPen(ed) { if (!ed) return; const p = penPrefs(); try { NFDraw.sound.setVol(p.vol != null ? p.vol : 0.6); } catch (e) { /* older draw part */ } ed.setCurve(curveArr(p.curve)); ed.sound = p.sound !== false; ed.paperTex = p.paper !== false; ed.hoverDot = p.hover !== false; ed.brushCfg = brushCfg(); ed.feel = true; }
   const pct = v => Math.round(v * 100) + '%';
   function pressHTML() {
     const k = CD.tool; const br = NFDraw.BRUSHES[k]; if (!br || !br.press || br.erase || !PENS.includes(k)) return ''; const b = brushPress(k);
@@ -45062,6 +45117,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       <div class="cd-chips">${[['wheel', L('العجلة عند السن', 'The wheel at the tip')], ['eraser', L('أستيكة', 'Eraser')], ['last', L('آخر أداة', 'Last tool')], ['undo', L('رجوع', 'Undo')]].map(([k, t]) => `<button type="button" class="cd-chip ${(p.action || 'wheel') === k ? 'on' : ''}" data-cd="paction" data-k="${k}">${esc(t)}</button>`).join('')}</div>
       <p class="cd-hint">${esc(L('ضغطة قلم آبل والدبل تاب في أبليكيشن Ninety للآيباد، وزرار قلم سامسونج في أندرويد. في أي متصفح: اضغط بالقلم مطوّل في مكانك، أو دوسة سريعة بصباعين = العجلة.', 'The Apple Pencil squeeze and double-tap work in the Ninety iPad app, and the Samsung pen button on Android. In any browser: hold the pen still, or a quick two-finger tap = the wheel.'))}</p>
       <div class="cd-mgrp">${tg('psound', IC.pen2, L('صوت القلم على الورق', 'The sound of the pen on paper'), p.sound !== false)}${tg('ppaper', IC.rect, L('ملمس الورق', 'Paper texture'), p.paper !== false)}${tg('phover', IC.focus, L('نقطة قبل ما القلم يلمس', 'A dot before the pen touches'), p.hover !== false)}${ed ? tg('finger2', IC.pan, L('ارسم بالصباع (حتى لو فيه قلم)', 'Draw with the finger (even with a pen)'), ed.fingerDraws === true) : ''}</div>
+      ${p.sound !== false ? `<label class="cd-rng cd-vol"><span>${esc(L('مستوى صوت القلم', 'Pen sound level'))} <b class="ltr" data-cdpv="vol">${pct(p.vol != null ? p.vol : 0.6)}</b></span><input type="range" min="0.05" max="1" step="0.05" value="${p.vol != null ? p.vol : 0.6}" data-cdp="vol"></label><p class="cd-hint">${esc(L('الصوت ثابت: مابيعلاش مع كل خط، وبيتغير بس مع سرعة الخط وضغطه.', 'The level is steady: it does not grow with every line, only the speed and pressure of the line change it.'))}</p>` : ''}
       <p class="cd-hint">${esc(L('أول ما القلم يتعرف: الكف والصباع مابيرسموش — الصباع بيحرّك ويزووم بس. الصوت مش هيطلع والآيفون صامت.', 'Once the pen is seen, the palm and the finger do not draw — the finger only moves and zooms. No sound while the iPhone is on silent.'))}</p>`;
   }
   function mountTest() {
@@ -45357,6 +45413,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const t = e.target; if (!t || !t.closest || !t.closest('#nfcd')) return;
     if (t.dataset.cdr) { setBrush(t.dataset.cdr, +t.value); document.querySelectorAll(`#nfcd [data-cdr="${t.dataset.cdr}"]`).forEach(x => { if (x !== t) x.value = t.value; }); }
     if (t.dataset.cdl && CD.ed) CD.ed.setLayerOpacity(t.dataset.cdl, +t.value, true);
+    if (t.dataset.cdp === 'vol') { const pp = penPrefs(); pp.vol = Math.round(+t.value * 100) / 100; savePen(pp); try { NFDraw.sound.setVol(pp.vol); } catch (er) { /* ignore */ } const v = $c('[data-cdpv="vol"]'); if (v) v.textContent = pct(+t.value); return; }
     if (t.dataset.cdp) { const pp = penPrefs(); pp.brushes = pp.brushes || {}; const cur = brushPress(CD.tool); const o = Object.assign({ mode: cur.mode, min: cur.min, max: cur.max }, pp.brushes[CD.tool] || {}); o[t.dataset.cdp] = Math.round(+t.value * 100) / 100; pp.brushes[CD.tool] = o; savePen(pp); penChanged(); const v = $c(`[data-cdpv="${t.dataset.cdp}"]`); if (v) v.textContent = pct(+t.value); }
   });
   /* the pressure curve: drag its two handles (the line follows; the test sheet and the drawing feel it at once) */
@@ -45434,6 +45491,26 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
 
   /* «Screenshot» in the studio: «continue in Concept Drawing» */
   window.nfConceptOk = () => working() && writable();
+  /* v7.49 (12 Oct — Mahmoud: «عايز أضيف هنا كونسبت»): «Concept» in the floating «+» — a hidden source button the «+» reads (shown only to
+     whoever may draw, and not while a drawing is open); a tap opens a new blank drawing in my sketchbook straight away */
+  let cfBusy = false;
+  function conceptFab() {
+    let b = document.querySelector('.conceptfab'); const ok = !!(S && S.session) && working() && (typeof writable !== 'function' || writable());
+    if (!ok) { if (b) b.style.display = 'none'; return; }
+    if (!b) {
+      b = document.createElement('button'); b.type = 'button'; b.className = 'conceptfab'; b.tabIndex = -1;
+      b.addEventListener('click', async () => {
+        if (cfBusy) return; cfBusy = true;
+        try { toast(L('بيجهّز رسمة جديدة…', 'Preparing a new drawing…')); const rec = await createSketch({ paper: 'plain' }); if (rec) setTimeout(() => go('concept/' + rec.id), 30); }
+        catch (e) { console.warn('concept fab', e); toast(L('مقدرتش أبدأ الرسمة — جرّب تاني', 'Could not start the drawing — try again'), 'err'); }
+        finally { cfBusy = false; }
+      });
+      document.body.appendChild(b);
+    }
+    b.setAttribute('aria-label', L('كونسبت', 'Concept'));
+    const want = document.getElementById('nfcd') ? 'none' : ''; if (b.style.display !== want) b.style.display = want;
+  }
+  RENDER_HOOKS.push(() => { setTimeout(conceptFab, 0); }); setInterval(conceptFab, 3000);
   /* for the tests and the other studio parts */
   window.nfConceptEd = () => CD.ed; window.nfConceptVis = canSeeS; window.nfConceptEditable = canEditS;
 
@@ -46022,11 +46099,20 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
     next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
   };
   const norm = it => (typeof it === 'string' ? { src: it } : Object.assign({}, it));
+  /* v7.49 (12 Oct — Mahmoud's screenshot: the ✕ sat on the phone's clock / battery): the top bar starts below the status bar — the
+     safe-area inset when the phone reports it, and in the iPhone app (the page runs under the status bar) at least 47 px when it does not */
+  let SAT = null;
+  function safeTopPx() {
+    if (!SAT) { SAT = document.createElement('div'); SAT.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none'; document.body.appendChild(SAT); }
+    const v = SAT.offsetHeight || 0; let ios = false;
+    try { ios = !!(window.Capacitor && typeof window.Capacitor.getPlatform === 'function' && window.Capacitor.getPlatform() === 'ios'); } catch (e) { ios = false; }
+    return ios && v < 20 ? 47 : v;
+  }
   function open(list, index) {
     const items = (list || []).map(norm).filter(x => x.src || x.thumb || x.load); if (!items.length) { toast(L('مفيش صورة محفوظة', 'No picture saved'), 'err'); return; }
     if (!V.el) build();
     V.items = items; V.i = Math.max(0, Math.min(items.length - 1, index | 0));
-    V.el.hidden = false; document.documentElement.classList.add('nfv-open');
+    V.el.hidden = false; document.documentElement.classList.add('nfv-open'); V.el.style.setProperty('--nfv-sat', safeTopPx() + 'px');
     V.el.classList.toggle('multi', items.length > 1);
     try { if (!V.hist) { history.pushState(Object.assign({}, history.state || {}, { nfv: 1 }), '', location.href); V.hist = true; } } catch (e) { /* ignore */ }
     strip(); show(); setTimeout(() => { try { V.el.querySelector('.nfv-x').focus({ preventScroll: true }); } catch (e) { /* ignore */ } }, 30);
@@ -46037,7 +46123,7 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
     if (V.hist && !fromPop) { V.hist = false; try { if (history.state && history.state.nfv) history.back(); } catch (e) { /* ignore */ } } else V.hist = false;
   }
   function build() {
-    const el = document.createElement('div'); el.className = 'nfv'; el.hidden = true; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    const el = document.createElement('div'); el.className = 'nfv nfiv'; el.hidden = true; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
     el.innerHTML = `<div class="nfv-top"><button type="button" class="nfv-b nfv-x" aria-label="${esc(L('اقفل', 'Close'))}">${IC.x}</button><div class="nfv-ttl"><b class="nfv-n"></b><span class="nfv-cap" dir="auto"></span></div><button type="button" class="nfv-b nfv-sh" aria-label="${esc(L('مشاركة', 'Share'))}">${IC.sh}</button><button type="button" class="nfv-b nfv-dl" aria-label="${esc(L('تنزيل', 'Download'))}">${IC.dl}</button></div>
       <div class="nfv-stage"><img class="nfv-img" alt="" draggable="false"><i class="nfv-spin" aria-hidden="true"></i><button type="button" class="nfv-nav nfv-pv" aria-label="${esc(L('اللي قبلها', 'Previous'))}">${IC.prev}</button><button type="button" class="nfv-nav nfv-nx" aria-label="${esc(L('اللي بعدها', 'Next'))}">${IC.next}</button></div>
       <div class="nfv-strip"></div>`;
@@ -46201,21 +46287,21 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
 
   const css = document.createElement('style');
   css.textContent = `
-.nfv{position:fixed;inset:0;z-index:9900;display:flex;flex-direction:column;background:rgba(0,0,0,calc(.94 * var(--nfv-bg,1)));color:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
-.nfv[hidden]{display:none}
+.nfv.nfiv{position:fixed;inset:0;z-index:9900;display:flex;flex-direction:column;background:rgba(0,0,0,calc(.94 * var(--nfv-bg,1)));color:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+.nfv.nfiv[hidden]{display:none}
 html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
-.nfv-top{display:flex;align-items:center;gap:6px;padding:calc(8px + env(safe-area-inset-top,0px)) 10px 8px;min-height:56px;background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0));position:relative;z-index:2}
-.nfv-ttl{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:1px}.nfv-n{font-size:14px;font-variant-numeric:tabular-nums}.nfv-cap{font-size:12.5px;opacity:.85;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nfv-b{flex:none;width:42px;height:42px;border-radius:50%;border:0;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}.nfv-b:hover{background:rgba(255,255,255,.22)}.nfv-b svg{width:22px;height:22px}
-.nfv-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px}
-.nfv-img{max-width:100%;max-height:100%;object-fit:contain;display:block;transform-origin:center center;will-change:transform;cursor:zoom-in;-webkit-user-drag:none}
-.nfv.zoomed .nfv-img{cursor:grab}
-.nfv-spin{position:absolute;width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:apspin .8s linear infinite;display:none}.nfv.loading .nfv-spin{display:block}
-.nfv-nav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;display:none;place-items:center;cursor:pointer;padding:0}.nfv-nav svg{width:24px;height:24px}.nfv-nav:disabled{opacity:.25;cursor:default}
-.nfv-pv{inset-inline-start:14px}.nfv-nx{inset-inline-end:14px}[dir=rtl] .nfv-nav svg{transform:scaleX(-1)}
-@media (hover:hover) and (pointer:fine){.nfv.multi .nfv-nav{display:grid}}
-.nfv-strip{display:flex;gap:6px;justify-content:center;overflow-x:auto;padding:8px 10px calc(10px + env(safe-area-inset-bottom,0px));scrollbar-width:none}.nfv-strip:empty{display:none}.nfv-strip::-webkit-scrollbar{display:none}
-.nfv-strip button{flex:none;width:52px;height:52px;border-radius:9px;overflow:hidden;border:2px solid transparent;padding:0;background:#222;opacity:.6;cursor:pointer}.nfv-strip button.on{border-color:#fff;opacity:1}.nfv-strip img{width:100%;height:100%;object-fit:cover;display:block}
+.nfiv .nfv-top{display:flex;align-items:center;gap:6px;padding:calc(10px + var(--nfv-sat, env(safe-area-inset-top,0px))) 12px 10px;min-height:60px;box-sizing:border-box;border:0;flex-wrap:nowrap;direction:inherit;background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0));position:relative;z-index:2}
+.nfiv .nfv-ttl{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:1px}.nfiv .nfv-n{font-size:14px;font-variant-numeric:tabular-nums}.nfiv .nfv-cap{font-size:12.5px;opacity:.85;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nfiv .nfv-b{flex:none;width:42px;height:42px;border-radius:50%;border:0;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}.nfiv .nfv-b:hover{background:rgba(255,255,255,.22)}.nfiv .nfv-b svg{width:22px;height:22px}
+.nfiv .nfv-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px}
+.nfiv .nfv-img{max-width:100%;max-height:100%;object-fit:contain;display:block;transform-origin:center center;will-change:transform;cursor:zoom-in;-webkit-user-drag:none}
+.nfiv.zoomed .nfv-img{cursor:grab}
+.nfiv .nfv-spin{position:absolute;width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:apspin .8s linear infinite;display:none}.nfv.loading .nfv-spin{display:block}
+.nfiv .nfv-nav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;display:none;place-items:center;cursor:pointer;padding:0}.nfiv .nfv-nav svg{width:24px;height:24px}.nfiv .nfv-nav:disabled{opacity:.25;cursor:default}
+.nfiv .nfv-pv{inset-inline-start:14px}.nfiv .nfv-nx{inset-inline-end:14px}[dir=rtl] .nfiv .nfv-nav svg{transform:scaleX(-1)}
+@media (hover:hover) and (pointer:fine){.nfiv.multi .nfv-nav{display:grid}}
+.nfiv .nfv-strip{display:flex;gap:6px;justify-content:center;overflow-x:auto;padding:8px 10px calc(10px + env(safe-area-inset-bottom,0px));scrollbar-width:none}.nfiv .nfv-strip:empty{display:none}.nfiv .nfv-strip::-webkit-scrollbar{display:none}
+.nfiv .nfv-strip button{flex:none;width:52px;height:52px;border-radius:9px;overflow:hidden;border:2px solid transparent;padding:0;background:#222;opacity:.6;cursor:pointer}.nfiv .nfv-strip button.on{border-color:#fff;opacity:1}.nfiv .nfv-strip img{width:100%;height:100%;object-fit:cover;display:block}
 .nfgrid{display:grid;gap:3px;border-radius:12px;overflow:hidden;width:min(330px,100%);margin-top:6px}
 .nfgrid .nfg{position:relative;border:0;padding:0;margin:0;background:var(--surface-2,rgba(127,127,127,.15));cursor:zoom-in;overflow:hidden;min-height:0}
 .nfgrid .nfg img{width:100%;height:100%;object-fit:cover;display:block}.nfgrid .nfg .ph{display:block;width:100%;height:100%}
@@ -46427,14 +46513,15 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     today: { t: () => L('النهارده', 'Today'), d: () => L('اليوم وبصمتك واللي جاي عليك', 'The day, your punch and what is next'), ic: 'calendar', col: '#ff453a', sizes: ['S', 'M', 'L'], ok: () => true },
     money: { t: () => L('فلوس مستنياك', 'Money waiting for you'), d: () => L('التحويلات اللي مستنياك — وتختار كذا بند وتحوّل مرة واحدة', 'Transfers waiting for you — pick several and pay once'), ic: 'money', col: '#30d158', sizes: ['S', 'M', 'L'], href: '#/money', ok: () => isAdmin() || ['hr', 'acc'].includes(R()) || moneyItems().length > 0 },
     fleet: { t: () => L('العربيات لايف', 'Vehicles live'), d: () => L('خريطة العربيات بمكانها وحالتها دلوقتي', 'The vehicles on the map, where they are now'), ic: 'map', col: '#0a84ff', sizes: ['S', 'M', 'L'], href: '#/fleetmap', ok: () => { const f = FW(); try { return !!(f && f.mayView()); } catch (e) { return false; } } },
-    photos: { t: () => L('معرض الصور', 'Photo gallery'), d: () => L('آخر صور الأوامر والمشاريع والمواقع اللي بتشوفها', 'The latest photos of the orders, projects and sites you see'), ic: 'image', col: '#ff9f0a', sizes: ['S', 'M', 'L'], ok: () => !!S.session },
+    photos: { t: () => L('معرض الصور', 'Photo gallery'), d: () => L('آخر صور الأوامر والمشاريع والمواقع اللي بتشوفها', 'The latest photos of the orders, projects and sites you see'), ic: 'image', col: '#ff9f0a', sizes: ['S', 'M', 'L'], ok: () => false },   /* v7.49 (12 Oct — Mahmoud, PIN): no gallery in the system — the pictures live inside their task / project */
+    fleetmv: { t: () => L('حركة الأسطول', 'Fleet movement'), d: () => L('كل عربية: مين سايقها ورايحة فين ووصلت ولا راجعة — لايف', 'Every vehicle: who drives it, where it is going, arrived or on the way back — live'), ic: 'route', col: '#32ade6', sizes: ['S', 'M', 'L'], href: '#/fleetmap', ok: () => { const f = FW(); try { return !!(f && f.mayView()); } catch (e) { return false; } } },
     att: { t: () => L('الحضور', 'Attendance'), d: () => L('مين حاضر ومين لسه ومين اتأخر النهارده', 'Who is in, who is not and who was late today'), ic: 'clock', col: '#ff3b30', sizes: ['S', 'M', 'L'], href: '#/attendance', ok: () => can('attendance') },
     ot: { t: () => L('سهر النهارده', 'Overtime tonight'), d: () => L('السهر المتسجّل النهارده وعدد الناس', 'Tonight\'s overtime and how many people'), ic: 'moon', col: '#5e5ce6', sizes: ['S', 'M'], href: '#/otnight', ok: () => can('otnight') },
     trips: { t: () => L('مشاوير النهارده', 'Today\'s trips'), d: () => L('مشاوير النهارده وحالة كل مشوار', 'Today\'s trips and the state of each'), ic: 'route', col: '#64d2ff', sizes: ['S', 'M', 'L'], href: '#/fleet', ok: () => can('fleet') },
     tasks: { t: () => L('مهامي', 'My tasks'), d: () => L('مهامك بالأولوية والميعاد', 'Your tasks by priority and due date'), ic: 'list', col: '#ff9500', sizes: ['S', 'M', 'L'], href: '#/tasks', ok: () => can('tasks') && typeof tasksForMe === 'function' },
     msgs: { t: () => L('الرسايل', 'Messages'), d: () => L('الرسايل اللي لسه ماقريتهاش', 'Messages you have not read yet'), ic: 'chat', col: '#0a84ff', sizes: ['S', 'M', 'L'], ok: () => !!S.session }
   };
-  const ORDER = ['today', 'money', 'fleet', 'photos', 'att', 'ot', 'trips', 'tasks', 'msgs'];
+  const ORDER = ['today', 'money', 'fleet', 'fleetmv', 'att', 'ot', 'trips', 'tasks', 'msgs'];
   const okW = id => { const w = WD[id]; if (!w) return false; try { return !!w.ok(); } catch (e) { return false; } };
 
   /* ---------- the layout (per person, per phone / computer) ---------- */
@@ -46445,11 +46532,11 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   const clean = arr => { const seen = new Set(); return (Array.isArray(arr) ? arr : []).filter(x => x && WD[x.id] && !seen.has(x.id) && seen.add(x.id)).map(x => ({ id: x.id, s: WD[x.id].sizes.includes(x.s) ? x.s : (WD[x.id].sizes.includes('M') ? 'M' : WD[x.id].sizes[0]) })); };
   function defaults() {
     const r = R(); const desk = dev() === 'desk'; let d;
-    if (isAdmin()) d = desk ? [['today', 'M'], ['money', 'M'], ['fleet', 'L'], ['photos', 'L'], ['ot', 'S'], ['trips', 'S'], ['att', 'S'], ['msgs', 'S']] : [['today', 'M'], ['money', 'L'], ['fleet', 'L'], ['photos', 'S'], ['ot', 'S']];
+    if (isAdmin()) d = desk ? [['today', 'M'], ['money', 'M'], ['fleet', 'L'], ['fleetmv', 'L'], ['ot', 'S'], ['trips', 'S'], ['att', 'S'], ['msgs', 'S']] : [['today', 'M'], ['money', 'L'], ['fleet', 'L'], ['fleetmv', 'M'], ['ot', 'S']];
     else if (['manager', 'vice', 'hr'].includes(r)) d = [['today', 'M'], ['att', 'S'], ['ot', 'S'], ['fleet', 'L'], ['money', 'L'], ['tasks', 'M']];
     else if (r === 'head') d = [['today', 'M'], ['att', 'S'], ['ot', 'S'], ['tasks', 'M'], ['msgs', 'M']];
     else if (r === 'driver' || r === 'fleet') d = [['today', 'M'], ['trips', 'M'], ['fleet', 'L'], ['tasks', 'M']];
-    else d = [['today', 'M'], ['tasks', 'M'], ['msgs', 'S'], ['photos', 'S']];
+    else d = [['today', 'M'], ['tasks', 'M'], ['msgs', 'S']];
     if (!d.some(x => x[0] === 'money') && moneyItems().length) d.splice(1, 0, ['money', 'L']);
     return d.map(([id, s]) => ({ id, s }));
   }
@@ -46529,6 +46616,38 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     if (s === 'M') return hd(w, cnt + loc) + map;
     const lst = rows.slice(0, 4).map(r => row('#/fleetmap', `<i class="nfw-dot" style="background:${f.ST[r.st][0]}"></i>${esc(String(r.name || '').split('—')[0].trim())}`, `${esc(f.ST[r.st][1])}${r.st === 'mv' && r.speed != null ? ` · ${esc(fmtNum(Math.round(r.speed)))} ${esc(L('كم/س', 'km/h'))}` : ''}${r.driverId ? ` · ${esc(shortName(r.driverId))}` : ''}`, `<small>${esc(f.ago(r.at))}</small>`, `data-fmd="${esc(r.id)}"`)).join('');
     return hd(w, cnt + loc) + map + `<div class="nfw-rows nfw-fl">${lst}</div>`;
+  }
+
+  /* ---------- v7.49 (12 Oct — Mahmoud: «عايز أضيف ويدجت لمتابع حركة الأسطول»): fleet movement — each vehicle with its driver and where
+     its trip stands (going to … · arrived … since … · on the way back), from the live tracker and the trips; S = the counts,
+     M = the list, L = the map + the list (its own map, the «vehicles live» widget keeps «nfw-map») ---------- */
+  function mvState(v, trips) {
+    const t = trips.find(x => x.vehicleId === v.id) || null; const legs = t && Array.isArray(t.legs) ? t.legs : [];
+    const has = k => legs.some(l => l && l.key === k); const dest = t ? String(t.to || (t.toLoc && t.toLoc.name) || '').split('—')[0].trim() : '';
+    if (!t) return { k: 'free', txt: '', t: null };
+    if (has('depart') || t.returning) return { k: 'back', txt: L('راجعة للمصنع', 'On the way back'), t };
+    if (t.arrivedAt || has('arrive')) return { k: 'arr', txt: L('وصلت', 'Arrived') + (dest ? ' ' + dest : '') + (t.arrivedAt ? ' · ' + L('من', 'for') + ' ' + mvDur(t.arrivedAt) : ''), t };
+    return { k: 'go', txt: L('رايحة', 'Going to') + ' ' + (dest || L('وجهة المشوار', 'the trip destination')), t };
+  }
+  const mvDur = iso => { const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return m < 60 ? `${fmtNum(m)} ${L('د', 'min')}` : `${fmtNum(Math.floor(m / 60))} ${L('س', 'h')} ${m % 60 ? fmtNum(m % 60) + ' ' + L('د', 'min') : ''}`.trim(); };
+  const MVC = { go: '#0a84ff', arr: '#30d158', back: '#ff9f0a', free: '#8e8e93' };
+  function wFleetMv(s) {
+    const f = FW(); const w = WD.fleetmv; if (!f) return hd(w);
+    let rows = []; try { rows = f.rows(); } catch (e) { rows = []; }
+    const trips = list('trips').filter(t => t && t.status === 'started');
+    const items = rows.map(r => Object.assign({ r }, mvState(r, trips))).sort((a, b) => ['go', 'back', 'arr', 'free'].indexOf(a.k) - ['go', 'back', 'arr', 'free'].indexOf(b.k));
+    const c = { go: 0, arr: 0, back: 0, free: 0 }; items.forEach(x => { c[x.k]++; });
+    const tiles = [['go', L('في الطريق', 'On the road')], ['arr', L('وصلت', 'Arrived')], ['back', L('راجعة', 'Coming back')]];
+    if (s === 'S') return hd(w) + `<a class="nfw-fs" href="#/fleetmap">${tiles.map(([k, t]) => `<span><b style="color:${MVC[k]}">${c[k]}</b><small>${esc(t)}</small></span>`).join('')}</a>`;
+    const lst = items.slice(0, s === 'L' ? 5 : 4).map(x => {
+      const r = x.r; const drv = (x.t && x.t.driverId) || r.driverId; const nm = esc(String(r.name || '').split('—')[0].trim());
+      const sub = x.k === 'free' ? `${esc(f.ST[r.st][1])}${r.st === 'mv' && r.speed != null ? ` · ${esc(fmtNum(Math.round(r.speed)))} ${esc(L('كم/س', 'km/h'))}` : ''} · ${esc(L('من غير مشوار', 'no trip'))}` : `${esc(x.txt)}${x.t && x.t.number ? ` · <span class="notr">${esc(x.t.number)}</span>` : ''}`;
+      return row(x.t ? '#/fleet/' + x.t.id : '#/fleetmap', `<i class="nfw-dot" style="background:${MVC[x.k]}"></i>${nm}${drv ? ` <small class="nfw-mvd">${esc(shortName(drv))}</small>` : ''}`, sub, `<small>${esc(f.ago(r.at))}</small>`, `data-fmd="${esc(r.id)}"`);
+    }).join('') || `<div class="muted small" style="padding:8px">${esc(L('مفيش عربيات على جهاز تتبع', 'No vehicles on a tracker'))}</div>`;
+    const cnt = `<span class="nfw-fc">${tiles.map(([k]) => `<i style="background:${MVC[k]}"></i>${c[k]}`).join('')}</span>`;
+    if (s === 'M') { if (!W.edit) setTimeout(() => { try { f.pollStart(document.getElementById('fm-map') ? 3000 : 10000); } catch (e) { /* keeps the last rows */ } }, 40); return hd(w, cnt) + `<div class="nfw-rows nfw-fl">${lst}</div>`; }
+    if (!W.edit) setTimeout(() => { if (document.getElementById('nfw-mapt')) { try { f.ensureMap('nfw-mapt', false, { zoom: true, pick: true }); f.pollStart(document.getElementById('fm-map') ? 3000 : 10000); } catch (e) { /* the map shows its own message */ } } }, 40);
+    return hd(w, cnt) + `<div id="nfw-mapt" class="nfw-map"><div class="muted small" style="padding:12px">${esc(L('جارٍ تحميل الخريطة…', 'Loading the map…'))}</div></div><div class="nfw-rows nfw-fl">${lst}</div>`;
   }
 
   /* ---------- photo gallery ---------- */
@@ -46664,7 +46783,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   }
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-nfwpc]'); if (!a || W.edit) return; e.preventDefault(); if (window.nfPChat && window.nfPChat.open) window.nfPChat.open(a.dataset.nfwpc); });
 
-  const RENDER = { today: wToday, money: wMoney, fleet: wFleet, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs };
+  const RENDER = { today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs };
 
   /* ---------- the grid ---------- */
   const SZ = () => ({ S: L('صغير', 'Small'), M: L('متوسط', 'Medium'), L: L('كبير', 'Large') });
@@ -46798,6 +46917,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     .nfw-td .ahw-st{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nfw-pb{margin-top:auto!important;min-height:38px!important;font-size:14px!important;padding:0 10px!important}
     .nfw.w-money.s-L{padding:0}.nfw-sc{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 13px}.nfw-sc .omf{border:0!important;padding:0;margin:0;background:transparent;box-shadow:none}
     .nfw.w-fleet.s-M,.nfw.w-fleet.s-L{padding:10px 10px 0}
+    .nfw.w-fleetmv.s-L{padding:10px 10px 0}.nfw.w-fleetmv.s-L .nfw-map{flex:1.2}.nfw-mvd{font-weight:400;opacity:.7;font-size:11px}
     .nfw-map{flex:1;min-height:90px;margin:0 -10px;border-top:1px solid var(--line);background:var(--surface-2)}.nfw.w-fleet.s-L .nfw-map{flex:1.6}
     .nfwg.edit .nfw-map{pointer-events:none}
     .nfw-fl{flex:1;padding:4px 2px 6px}
@@ -47605,6 +47725,421 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     #mtlive{position:fixed;z-index:45;inset-inline:12px;top:calc(8px + env(safe-area-inset-top,0px));margin:auto;max-width:520px;display:flex;align-items:center;gap:8px;padding:8px 10px 8px 14px;border-radius:999px;background:#0f1114;color:#fff;box-shadow:0 10px 30px -10px rgba(0,0,0,.6);font-size:13.5px}
     #mtlive b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
   </style>`);
+})();
+/* =====================================================================
+   v7.49 — the 12 October batch (Mahmoud, «ابدأ» + PIN): small layout pieces shared by the batch.
+   · (2) the task's pictures inside the task: the chat-album grid at full card width, the «manage» drawer under it
+   · (4) the file viewer's top bar starts below the phone's status bar too (the picture viewer has its own fix in its part)
+   ===================================================================== */
+(function () {
+  if (window.__NF_V749__) return; window.__NF_V749__ = 1;
+  /* (11) Mahmoud: «لو ما داسش الحركة من الموقع للمصنع تسجّل إنت تلقائي» — installation / delivery / other trips get the step
+     «التوجه للمصنع» (pickup trips have it already) before «arrived at the factory»; the driver may press it, and the server records
+     it from the vehicle tracker when he does not. Trips finished before this keep their steps (the new one shows as done). */
+  if (typeof LEG_DEFS !== 'undefined' && typeof legsWithState === 'function') {
+    ['install', 'delivery', 'other'].forEach(k => { const d = LEG_DEFS[k]; if (!Array.isArray(d) || d.some(x => x[0] === 'depart')) return; const i = d.findIndex(x => x[0] === 'back'); if (i > 0) d.splice(i, 0, ['depart', 'التوجه للمصنع']); });
+    legsWithState = (base => t => { const st = base(t); if (t && t.status === 'done') st.forEach(x => { if (x.key === 'depart' && !x.done) { x.done = true; x.next = false; } }); return st; })(legsWithState);
+  }
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-v749">
+.nfgrid.tdet{width:min(560px,100%);margin-top:4px}
+.nfgrid.tdet.n1 .nfg{max-height:440px}
+.conceptfab{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;transform:translateX(-300vw);border:0;padding:0}
+.tph-meta{margin-top:6px}
+.tph-man{margin-top:8px}
+.tph-man>summary{cursor:pointer;color:var(--muted);list-style:none;display:inline-flex;align-items:center;gap:4px;padding:4px 0}
+.tph-man>summary::-webkit-details-marker{display:none}
+.tph-man>summary::before{content:'›';display:inline-block;transition:transform .15s}
+[dir=rtl] .tph-man>summary::before{transform:scaleX(-1)}
+.tph-man[open]>summary::before{transform:rotate(90deg)}
+.tph-man .tgal.big{margin-top:6px}
+#nfviewer.nfv{z-index:9900}
+#nfviewer .nfv-top{padding-top:calc(8px + env(safe-area-inset-top,0px))}
+@media (max-width:1100px){#nfviewer .nfv-top{padding-top:calc(6px + env(safe-area-inset-top,0px))}}
+</style>`);
+})();
+/* =====================================================================
+   v7.49 — the 12 October batch, items 9 + 10 (Mahmoud, «ابدأ» + PIN; «قبل ← بعد» shown in the chat):
+   (9) a punch outside the shift (factory):
+       · a check-in outside the shift (a day off, more than an hour before it starts, after it ends, the middle of the night) first
+         asks «are you coming in or leaving?» — leaving = the punch-in was forgotten: a request with the real arrival time (or, in the
+         night, the check-out of yesterday's shift) goes to the department head, then the factory manager; nothing is punched now;
+       · coming in / a check-out after the shift: the employee picks the project; the punch is saved «waiting for approval» (its
+         hours do not count) and the same request goes head → factory manager; once approved the hours count (on that project);
+       · a check-out up to 21:00 needs no approval when the evening is already covered: an approved overtime task for him today, or
+         an open overtime on his project («المشروع في أوفر تايم»);
+       · a check-out less than two minutes after the check-in asks «you checked in a minute ago — leaving?».
+   (10) a punch is confirmed several ways (all three systems):
+       · «done» only after the server has really saved it (the old path showed «done» and kept the punch in the phone's outbox, which
+         later re-sent the whole month sheet); no network → the punch waits in the phone with its own time and place, the screen
+         says «waiting for the network», and it is sent by itself;
+       · the confirmation screen shows the time and a receipt number (made from the employee and the saved time, so anyone can
+         check it later), and a notification with the same receipt reaches the employee's phone;
+       · «my punches today» on «بوابتي»: every punch with its server time and receipt, the ones waiting, the failed tries;
+       · every try is logged — also the failed ones (outside the allowed place, the face/fingerprint did not match, no network,
+         not saved): «سجل محاولات البصمة» for the department head (his department), the factory manager, HR and the owner.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PUNCH749__) return; window.__NF_PUNCH749__ = 1;
+  if (typeof kioskPunchBase !== 'function' || typeof kioskPunch !== 'function' || typeof setAtt !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const FAB = !((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction()));
+  const PQ = { active: false, netFail: false, oos: null };
+  const pad = n => String(n).padStart(2, '0');
+  const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+  const tm = t => (typeof tmToMin === 'function' ? tmToMin(t) : null);
+  const lsg = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } };
+  const lss = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* full / private */ } };
+  const attDocKey = (date, w) => `${monthOf(date)}_${w.deptId || 'none'}`;
+
+  /* ---------- the receipt: FNV-1a of «worker|saved time» → 6 characters ---------- */
+  function rc(wid, iso) {
+    if (!wid || !iso) return ''; let h = 0x811c9dc5; const s = `${wid}|${iso}`;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return ('P' + h.toString(36).toUpperCase().padStart(7, '0')).slice(0, 7);
+  }
+  window.nfPunchRc = rc;
+
+  /* ---------- the phone's outbox must never take a punch (it re-sends the whole sheet later): we keep it ourselves ---------- */
+  if (typeof outboxPush === 'function') outboxPush = (base => function (op) {
+    if (PQ.active && op && op.col === 'attendance') { PQ.netFail = true; const e = new Error('nf-punch-offline'); e.nfPunchOffline = true; throw e; }
+    return base.apply(this, arguments);
+  })(outboxPush);
+
+  /* ---------- the tries log: attendance doc .tries[date][workerId] = [{ at, k, ok, why, rc, msg, dist, dev }] ---------- */
+  const TRY_KEY = 'nf.punchtry.v1';
+  function logTry(w, date, k, ok, why, extra) {
+    try {
+      const it = Object.assign({ at: new Date().toISOString(), k, ok: !!ok, why: why || (ok ? 'ok' : 'fail') }, extra || {});
+      const q = lsg(TRY_KEY, []); q.push({ wid: w.id, dept: w.deptId || 'none', date, it }); lss(TRY_KEY, q.slice(-200)); flushTries();
+    } catch (e) { /* the log never stops a punch */ }
+  }
+  let flushing = false;
+  async function flushTries() {
+    if (flushing || navigator.onLine === false) return; const q = lsg(TRY_KEY, []); if (!q.length) return; flushing = true;
+    try {
+      const groups = {}; q.forEach(x => { const k = `${x.date}|${x.wid}|${x.dept}`; (groups[k] ||= []).push(x.it); });
+      for (const [k, items] of Object.entries(groups)) {
+        const [date, wid, dept] = k.split('|'); const key = `${monthOf(date)}_${dept}`; const doc = S.data.attendance && S.data.attendance.get(key);
+        const prev = (((doc || {}).tries || {})[date] || {})[wid] || []; const seen = new Set(prev.map(x => x.at + x.k));
+        const next = prev.concat(items.filter(x => !seen.has(x.at + x.k))).slice(-40);
+        PQ.active = true; PQ.netFail = false;
+        try { await Store.update('attendance', key, { id: key, month: monthOf(date), deptId: dept, tries: { [date]: { [wid]: next } } }); }
+        finally { PQ.active = false; }
+        if (PQ.netFail) throw new Error('offline');
+        const rest = lsg(TRY_KEY, []).filter(x => !(x.date === date && x.wid === wid && x.dept === dept)); lss(TRY_KEY, rest);
+      }
+    } catch (e) { /* stays in the phone; tried again later */ } finally { flushing = false; }
+  }
+
+  /* ---------- the punch queue (no network): { wid, date, k, row, at } ---------- */
+  const PQ_KEY = 'nf.punchq.v1';
+  const queued = wid => lsg(PQ_KEY, []).filter(x => !wid || x.wid === wid);
+  function enqueue(w, date, k, row) {
+    const q = lsg(PQ_KEY, []).filter(x => !(x.wid === w.id && x.date === date && x.k === k)); q.push({ wid: w.id, date, k, row, at: new Date().toISOString() }); lss(PQ_KEY, q);
+  }
+  let replaying = false;
+  async function replay() {
+    if (replaying || !S.db || navigator.onLine === false || !S.session) return; const q = lsg(PQ_KEY, []); if (!q.length) return; replaying = true;
+    try {
+      for (const x of q) {
+        const w = byId('workers', x.wid); if (!w) continue;
+        const cur = (attendanceFor(x.date) || {})[w.id] || {}; const r = x.row || {}; let patch;
+        if (x.k === 'in') { if (cur.in && cur.in !== r.in) { drop(x); continue; } patch = computeAttRow(Object.assign({}, cur, pick(r, ['in', 's', 'src', 'kioskIn', 'method', 'device', 'geo', 'verify', 'faceScore']), { queuedAt: x.at }), w); }
+        else { patch = computeAttRow(Object.assign({}, cur, pick(r, ['out', 'kioskOut', 'outMethod', 'geoOut', 'verifyOut']), { queuedOutAt: x.at }), w); if (patch.in && patch.out && typeof autoAllocRow === 'function') patch = autoAllocRow(w, patch); }
+        PQ.active = true; PQ.netFail = false;
+        try { await setAtt(x.date, w, patch); } catch (e) { PQ.active = false; if (PQ.netFail) break; drop(x); logTry(w, x.date, x.k, false, 'save', { msg: String(e && e.message || e).slice(0, 80) }); continue; }
+        PQ.active = false; if (PQ.netFail) break;
+        drop(x); const iso = x.k === 'in' ? r.kioskIn : r.kioskOut; const code = rc(w.id, iso);
+        const po = lsg('nf.punchq.oos', []); const hit = po.find(y => y.wid === w.id && y.date === x.date && y.oos && y.oos.k === x.k);
+        if (hit) {
+          lss('nf.punchq.oos', po.filter(y => y !== hit && !(y.wid === hit.wid && y.date === hit.date && y.oos && y.oos.k === hit.oos.k)));
+          try { const o = byId('orders', hit.oos.orderId); const t2 = x.k === 'in' ? r.in : r.out; const rq = await sendReq(w, { from: x.date, to: x.date, punchKind: x.k, [x.k === 'in' ? 'timeIn' : 'timeOut']: t2, oos: hit.oos.why, orderId: hit.oos.orderId, reason: hit.oos.note || '', held: true, rc: code });
+            const now = (attendanceFor(x.date) || {})[w.id] || {}; await setAtt(x.date, w, computeAttRow(Object.assign({}, now, { oos: { k: x.k, why: hit.oos.why, reqId: rq.id, st: 'pending', orderId: hit.oos.orderId, orderCode: o ? o.code || '' : '', t: t2 } }), w)); } catch (e) { console.warn('oos replay', e); }
+        }
+        logTry(w, x.date, x.k, true, 'ok', { rc: code, late: true });
+        receipt(w, x.k, x.k === 'in' ? r.in : r.out, code, x.date, true);
+      }
+    } finally { PQ.active = false; replaying = false; }
+    if (typeof rerender === 'function') rerender();
+  }
+  const pick = (o, ks) => { const out = {}; ks.forEach(k => { if (o[k] !== undefined) out[k] = o[k]; }); return out; };
+  const drop = x => lss(PQ_KEY, lsg(PQ_KEY, []).filter(y => !(y.wid === x.wid && y.date === x.date && y.k === x.k)));
+  window.addEventListener('online', () => setTimeout(() => { replay(); flushTries(); }, 1500));
+  document.addEventListener('nf:ready', () => setTimeout(() => { replay(); flushTries(); }, 5000));
+  setInterval(() => { replay(); flushTries(); }, 45000);
+
+  /* ---------- the receipt notification (to the employee's own phone, through the server) ---------- */
+  function receipt(w, k, t, code, date, late) {
+    try {
+      if (typeof pushSend !== 'function' || !code) return;
+      const title = k === 'in' ? L(`✓ اتسجّل حضورك ${t}`, `✓ Check-in saved ${t}`) : L(`✓ اتسجّل انصرافك ${t}`, `✓ Check-out saved ${t}`);
+      const body = `${L('رقم الإيصال', 'Receipt')} ${code} · ${fmtDate(date)}${late ? ' · ' + L('اتبعتت بعد ما النت رجع', 'sent when the network came back') : ''}`;
+      pushSend(['w:' + w.id], title, body, '/#/me', 'nf-punch-' + code);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ---------- (9) outside the shift ---------- */
+  const WHY = { off: () => L('يوم إجازتك', 'your day off'), early: () => L('قبل ورديتك بأكتر من ساعة', 'more than an hour before your shift'), after: () => L('بعد ما ورديتك خلصت', 'after your shift ended'), night: () => L('بالليل برّه ورديتك', 'at night, outside your shift'), late: () => L('بعد ما ورديتك خلصت', 'after your shift ended'), late9: () => L('بعد الساعة 9 بالليل', 'after 9 pm') };
+  function oosWhy(w, k, date) {
+    if (!FAB) return null; const sh = shiftFor(w) || {}; if (sh.remote) return null;
+    const st = tm(sh.start || '09:00'), en0 = tm(sh.end || '17:00'); if (st == null || en0 == null) return null; const m = nowMin();
+    if (en0 <= st) return null;   /* a shift past midnight: its own rules */
+    if (k === 'in') { if (typeof isOffDay === 'function' && isOffDay(w, date)) return 'off'; if (m < st - 60) return m < 5 * 60 ? 'night' : 'early'; if (m > en0) return 'after'; return null; }
+    if (m >= 21 * 60) return 'late9'; if (m > en0 + 15) return 'late'; if (m < st - 60) return 'night'; return null;
+  }
+  /* the evening is already approved: an approved overtime task for him today, or an open overtime on a project he works on */
+  function otCover(w, date) {
+    try { const t = typeof window.nfOtTaskFor === 'function' ? window.nfOtTaskFor(date, w.id) : null; if (t) return { orderId: t.orderId || '', how: 'task' }; } catch (e) { /* ignore */ }
+    try {
+      const os = (typeof todayOrdersFor === 'function' ? (todayOrdersFor(w).orders || []) : []);
+      const o = os.find(x => x && x.otOpen && x.otOpen.on && (!x.otOpen.until || String(x.otOpen.until).slice(0, 10) >= date)); if (o) return { orderId: o.id, how: 'order' };
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function orderChoices(w) {
+    let mine = []; try { mine = typeof todayOrdersFor === 'function' ? (todayOrdersFor(w).orders || []) : []; } catch (e) { mine = []; }
+    const ids = new Set(mine.map(o => o.id));
+    const rest = list('orders').filter(o => o && !ids.has(o.id) && !['done', 'cancelled', 'archived', 'closed'].includes(o.status)).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))).slice(0, 60);
+    return { mine, rest };
+  }
+  const oName = o => `${o.code || ''} — ${o.title || o.name || ''}`.trim();
+  /* openModal has no «closed» callback: the ✕ / outside tap resolve the waiting dialog as «cancel» */
+  const onX = cb => { const ov = document.getElementById('overlay'); if (ov) ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-action=closemodal]')) cb(); }); };
+  function ask(title, body, buttons) {
+    return new Promise(res => {
+      let done = false; const fin = v => { if (done) return; done = true; res(v); };
+      openModal({ title, footer: null, body: `<div class="oos-ask">${body}<div class="oos-btns">${buttons.map(([v, t, cls]) => `<button type="button" class="btn ${cls || ''}" data-oos="${esc(v)}">${esc(t)}</button>`).join('')}</div></div>`,
+        onOpen: f => { onX(() => fin(null)); f.addEventListener('click', e => { const b = e.target.closest('[data-oos]'); if (!b) return; e.preventDefault(); const v = b.dataset.oos; fin(v === '_x' ? null : v); closeModal(); }); } });
+    });
+  }
+  function projectDialog(w, k, why, def) {
+    return new Promise(res => {
+      let done = false; const fin = v => { if (done) return; done = true; res(v); };
+      const { mine, rest } = orderChoices(w); const sel = def || (mine[0] && mine[0].id) || '';
+      const opt = o => `<option value="${esc(o.id)}" ${o.id === sel ? 'selected' : ''}>${esc(oName(o))}</option>`;
+      openModal({ title: k === 'in' ? L('حضور برّه ورديتك', 'Check-in outside your shift') : L('انصراف برّه ورديتك', 'Check-out outside your shift'),
+        body: `<div class="form"><div class="banner warn full">${icon('alert')}<span>${esc(L(`البصمة دي ${WHY[why]()} — بتتسجّل «مستنية اعتماد» من رئيس القسم ثم مدير المصنع، ومش هتتحسب ساعاتها غير بعد الاعتماد. اختار المشروع اللي شغال عليه.`, `This punch is ${WHY[why]()} — it is saved «waiting for approval» by your department head, then the factory manager, and its hours count only once approved. Pick the project you are working on.`))}</span></div>
+          ${field(L('المشروع', 'Project'), `<select name="orderId" required><option value="">${esc(L('— اختار المشروع —', '— pick the project —'))}</option>${mine.length ? `<optgroup label="${esc(L('شغلك النهارده', 'Your work today'))}">${mine.map(opt).join('')}</optgroup>` : ''}${rest.length ? `<optgroup label="${esc(L('مشاريع تانية', 'Other projects'))}">${rest.map(opt).join('')}</optgroup>` : ''}</select>`, 'full')}
+          ${field(L('ملاحظة (اختياري)', 'Note (optional)'), `<input name="note" maxlength="140" placeholder="${esc(L('مثال: تسليم مستعجل', 'e.g. an urgent delivery'))}">`, 'full')}</div>`,
+        submitLabel: k === 'in' ? L('سجّل الحضور', 'Check in') : L('سجّل الانصراف', 'Check out'), onOpen: () => onX(() => fin(null)),
+        onSubmit: async f => { const d = formData(f); if (!d.orderId) { toast(L('اختار المشروع', 'Pick the project'), 'err'); return false; } fin({ orderId: d.orderId, note: (d.note || '').trim() }); return true; } });
+    });
+  }
+  /* «leaving» on a check-in = the punch-in was forgotten (today), or — in the night — yesterday's shift is ending now */
+  function forgotDialog(w, date, why) {
+    return new Promise(res => {
+      let done = false; const fin = v => { if (done) return; done = true; res(v); };
+      const sh = shiftFor(w) || {}; const t = nowTm(); const y = isoDay(new Date(Date.now() - 864e5)); const yRow = (attendanceFor(y) || {})[w.id] || {};
+      const night = why === 'night' || why === 'early'; const { mine, rest } = orderChoices(w);
+      const opt = o => `<option value="${esc(o.id)}">${esc(oName(o))}</option>`;
+      openModal({ title: L('نسيت تبصم؟', 'Forgot to punch?'),
+        body: `<div class="form"><div class="banner warn full">${icon('alert')}<span>${esc(night
+          ? L(`هيتبعت طلب «انصراف ${t}» لوردية امبارح (${fmtDate(y)}${yRow.in ? ' — حضور ' + yRow.in : ''}) لرئيس القسم ثم مدير المصنع. مفيش بصمة هتتسجل دلوقتي.`, `A request «check-out ${t}» for yesterday's shift (${fmtDate(y)}${yRow.in ? ' — in ' + yRow.in : ''}) goes to your department head, then the factory manager. Nothing is punched now.`)
+          : L(`هيتبعت طلب «حضور + انصراف ${t}» للنهارده لرئيس القسم ثم مدير المصنع. اكتب الساعة اللي جيت فيها فعلًا.`, `A request «check-in + check-out ${t}» for today goes to your department head, then the factory manager. Write the time you really came in.`))}</span></div>
+          ${night ? '' : field(L('جيت الساعة كام؟', 'What time did you come in?'), inp('timeIn', sh.start || '09:00', 'type="time" required'))}
+          ${field(L('المشروع', 'Project'), `<select name="orderId" required><option value="">${esc(L('— اختار المشروع —', '— pick the project —'))}</option>${mine.map(opt).join('')}${rest.map(opt).join('')}</select>`, 'full')}
+          ${field(L('السبب', 'Reason'), `<input name="reason" maxlength="140" required placeholder="${esc(L('مثال: نسيت أبصم الصبح', 'e.g. I forgot to punch in the morning'))}">`, 'full')}</div>`,
+        submitLabel: L('ابعت الطلب', 'Send the request'), onOpen: () => onX(() => fin(null)),
+        onSubmit: async f => {
+          const d = formData(f); if (!d.orderId) { toast(L('اختار المشروع', 'Pick the project'), 'err'); return false; } if (!(d.reason || '').trim()) { toast(L('اكتب السبب', 'Write the reason'), 'err'); return false; }
+          const r = night ? { from: y, to: y, punchKind: 'out', timeOut: t } : { from: date, to: date, punchKind: 'both', timeIn: d.timeIn || sh.start || '09:00', timeOut: t };
+          await sendReq(w, Object.assign(r, { oos: night ? 'night' : 'forgot', orderId: d.orderId, reason: d.reason.trim(), leaving: true }));
+          fin(true); return true;
+        } });
+    });
+  }
+  async function sendReq(w, x) {
+    const me = S.session || {}; const o = x.orderId ? byId('orders', x.orderId) : null;
+    const r = Object.assign({ id: uid(), type: 'punch', workerId: w.id, deptId: w.deptId || null, status: 'pending', requesterId: me.workerId || w.id, requesterName: me.name || w.name, createdBy: me.id || ('w:' + w.id), createdByName: me.name || w.name, createdAt: nowISO(), chain: ['head', 'manager'], step: 0, stepAt: nowISO(), orderCode: o ? o.code || '' : '' }, x);
+    r.thread = [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || w.name, role: role(), kind: 'system', text: oosDesc(r) }];
+    await Store.save('requests', r, { silent: true });
+    try { pushSend(reqStepTargets(r), L(`بصمة برّه الوردية — ${w.name}`, `A punch outside the shift — ${w.name}`), oosDesc(r).slice(0, 140), '/#/requests', 'req-' + r.id); } catch (e) { /* ignore */ }
+    return r;
+  }
+  function oosDesc(r) {
+    const k = r.punchKind === 'in' ? L(`حضور ${r.timeIn || ''}`, `in ${r.timeIn || ''}`) : r.punchKind === 'out' ? L(`انصراف ${r.timeOut || ''}`, `out ${r.timeOut || ''}`) : L(`حضور ${r.timeIn || ''} + انصراف ${r.timeOut || ''}`, `in ${r.timeIn || ''} + out ${r.timeOut || ''}`);
+    const why = r.oos === 'forgot' ? L('نسي يبصم حضور', 'forgot to punch in') : r.oos === 'night' && r.leaving ? L('انصراف وردية امبارح بعد نص الليل', 'yesterday\'s shift ending after midnight') : (WHY[r.oos] ? WHY[r.oos]() : '');
+    return `${L('بصمة برّه الوردية', 'Punch outside the shift')} — ${fmtDate(r.from)} · ${k}${why ? ' · ' + why : ''}${r.orderCode ? ' · ' + L('مشروع', 'project') + ' ' + r.orderCode : ''}${r.reason ? ' · ' + r.reason : ''}`;
+  }
+  if (typeof reqDesc === 'function') reqDesc = (base => r => (r && r.type === 'punch' && r.oos ? oosDesc(r) : base(r)))(reqDesc);
+  /* approval: the held punch counts (hours back, on the project); the old «forgot» requests still set the times */
+  if (typeof applyRequestEffects === 'function') applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
+    if (!(r && r.type === 'punch' && r.oos && r.held)) return base(r, w, patch, opts);
+    const wk = byId('workers', r.workerId); if (!wk) return; const row = (attendanceFor(r.from) || {})[wk.id] || {};
+    let next = computeAttRow(Object.assign({}, row, { oos: Object.assign({}, row.oos || {}, { st: 'ok', okAt: nowISO(), okBy: (S.session && S.session.name) || '' }) }), wk);
+    if (next.in && next.out) { if (typeof autoAllocRow === 'function') next = autoAllocRow(wk, next); if (r.orderId && !(next.alloc || []).some(a => a && !a.auto)) next.alloc = [{ orderId: r.orderId, h: next.hrs || 0, oos: true }]; }
+    await setAtt(r.from, wk, next);
+  })(applyRequestEffects);
+  if (typeof decideRequest === 'function') decideRequest = (base => async (id, status, note, opts = {}) => {
+    const r0 = await base(id, status, note, opts);
+    try { const r = byId('requests', id); if (r && r.type === 'punch' && r.oos && r.held && r.status === 'rejected') { const wk = byId('workers', r.workerId); if (wk) { const row = (attendanceFor(r.from) || {})[wk.id] || {}; await setAtt(r.from, wk, computeAttRow(Object.assign({}, row, { oos: Object.assign({}, row.oos || {}, { st: 'rejected', note: note || '' }) }), wk)); } } } catch (e) { /* ignore */ }
+    return r0;
+  })(decideRequest);
+  /* a held punch keeps its hours aside (0 in the sheet and the payroll) until it is approved */
+  if (typeof computeAttRow === 'function') computeAttRow = (base => function (row, w) {
+    const r = base.apply(this, arguments);
+    if (r && r.oos && r.oos.st !== 'ok') { r.oosCalc = { hrs: r.hrs || 0, ot: r.ot || 0 }; r.hrs = 0; r.ot = 0; }
+    else if (r && r.oosCalc && (!r.oos || r.oos.st === 'ok')) { delete r.oosCalc; }
+    return r;
+  })(computeAttRow);
+
+  /* ---------- the questions come before the punch ---------- */
+  kioskPunch = (base => async function (w, opts = {}) {
+    if (!w || opts.silent || opts.skipOos) return base.apply(this, arguments);
+    const date = todayISO(); const cur = (attendanceFor(date) || {})[w.id] || {}; const k = cur.in ? 'out' : 'in';
+    if (k === 'out' && !cur.out && cur.kioskIn && Date.now() - Date.parse(cur.kioskIn) < 120000) {
+      const ok = await ask(L('انصراف؟', 'Check out?'), `<p class="oos-q">${esc(L(`إنت لسه مسجّل حضور من دقيقة (${cur.in}). متأكد إنك ماشي؟`, `You checked in a minute ago (${cur.in}). Are you sure you are leaving?`))}</p>`, [['go', L('أيوه، سجّل انصراف', 'Yes, check out'), 'p'], ['_x', L('لأ، رجوع', 'No, back'), 'ghost']]);
+      if (ok !== 'go') { logTry(w, date, k, false, 'cancel', { msg: 'two-minute guard' }); return { blocked: true, msg: L('اتلغت', 'Cancelled') }; }
+    }
+    const why = oosWhy(w, k, date); if (!why) return base.apply(this, arguments);
+    if (k === 'in') {
+      const ans = await ask(L('إنت لسه جاي ولا ماشي؟', 'Coming in or leaving?'), `<p class="oos-q">${esc(L(`الساعة ${nowTm()} ${WHY[why]()}.`, `It is ${nowTm()}, ${WHY[why]()}.`))}</p>`, [['in', L('لسه جاي — سجّل حضور', 'Coming in — check in'), 'p'], ['out', L('أنا ماشي (نسيت أبصم)', 'Leaving (I forgot to punch)'), ''], ['_x', L('رجوع', 'Back'), 'ghost']]);
+      if (!ans) return { blocked: true, msg: L('اتلغت', 'Cancelled') };
+      if (ans === 'out') { const sent = await forgotDialog(w, date, why); if (sent) { logTry(w, date, 'in', false, 'request', { msg: why }); openOk(w, { kind: 'req' }); } return { blocked: true, request: !!sent, msg: L('اتبعت طلب', 'Request sent') }; }
+    }
+    let cover = null; if (k === 'out' && why === 'late') cover = otCover(w, date); if (cover) return base.apply(this, arguments);
+    const p = await projectDialog(w, k, why, cover && cover.orderId); if (!p) return { blocked: true, msg: L('اتلغت', 'Cancelled') };
+    PQ.oos = { wid: w.id, why, orderId: p.orderId, note: p.note, k };
+    try { return await base.call(this, w, Object.assign({}, opts, { skipOos: true })); } finally { PQ.oos = null; }
+  })(kioskPunch);
+
+  /* ---------- the save is checked with the server; the confirmation screen ---------- */
+  kioskPunchBase = (base => async function (w, opts = {}) {
+    const date = todayISO(); const cur = (attendanceFor(date) || {})[w.id] || {}; const k = cur.in ? 'out' : 'in';
+    PQ.active = true; PQ.netFail = false; let res;
+    try { res = await base.call(this, w, Object.assign({}, opts, { silent: true })); } finally { PQ.active = false; }
+    const oos = PQ.oos && PQ.oos.wid === w.id ? PQ.oos : null;
+    if (res && res.blocked) {
+      if (PQ.netFail) {
+        const row = (attendanceFor(date) || {})[w.id] || res.row || {}; enqueue(w, date, k, row);
+        const iso = k === 'in' ? row.kioskIn : row.kioskOut; const code = rc(w.id, iso);
+        logTry(w, date, k, false, 'net', { rc: code });
+        if (oos) { try { const pend = lsg('nf.punchq.oos', []); pend.push({ wid: w.id, date, oos, t: k === 'in' ? row.in : row.out }); lss('nf.punchq.oos', pend); } catch (e) { /* ignore */ } }
+        if (!opts.silent) openOk(w, { kind: 'queued', k, t: k === 'in' ? row.in : row.out, code });
+        return { queued: true, msg: L('البصمة مستنية النت', 'The punch is waiting for the network'), row };
+      }
+      const why = res.msg === 'تعذّر الحفظ' ? 'save' : 'geo';
+      logTry(w, date, k, false, why, { msg: String(res.msg || '').slice(0, 90) });
+      if (!opts.silent) { if (why === 'save') openOk(w, { kind: 'fail', k }); else toast(res.msg, 'err'); }
+      return res;
+    }
+    let row = (attendanceFor(date) || {})[w.id] || (res && res.row) || {};
+    const iso = k === 'in' ? row.kioskIn : row.kioskOut; const code = rc(w.id, iso); const t = k === 'in' ? row.in : row.out;
+    let held = null;
+    if (oos) {
+      try {
+        const o = byId('orders', oos.orderId);
+        const r = await sendReq(w, { from: date, to: date, punchKind: k, [k === 'in' ? 'timeIn' : 'timeOut']: t, oos: oos.why, orderId: oos.orderId, reason: oos.note || '', held: true, rc: code });
+        row = computeAttRow(Object.assign({}, row, { oos: { k, why: oos.why, reqId: r.id, st: 'pending', orderId: oos.orderId, orderCode: o ? o.code || '' : '', t } }), w);
+        await setAtt(date, w, row); held = r;
+      } catch (e) { console.warn('oos hold', e); }
+    }
+    logTry(w, date, k, true, 'ok', Object.assign({ rc: code }, held ? { held: oos.why } : {}));
+    receipt(w, k, t, code, date, false);
+    if (!opts.silent) openOk(w, { kind: 'ok', k, t, code, res, held });
+    return Object.assign({}, res, { rc: code, held: !!held });
+  })(kioskPunchBase);
+
+  /* a failed fingerprint / face check is a try too */
+  if (typeof punchFailBox === 'function') punchFailBox = (base => function (w) {
+    try { const ww = w && w.id ? w : (S.session && byId('workers', S.session.workerId)); if (ww) logTry(ww, todayISO(), ((attendanceFor(todayISO()) || {})[ww.id] || {}).in ? 'out' : 'in', false, 'bio'); } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(punchFailBox);
+
+  function openOk(w, o) {
+    const kin = o.k === 'in'; let ic, cls, main, sub = '', extra = '';
+    if (o.kind === 'ok') {
+      cls = o.held ? 'warn' : 'good'; ic = o.held ? icon('attendance') : icon('check');
+      main = kin ? L(`اتسجّل حضورك ${o.t}`, `Check-in saved ${o.t}`) : L(`اتسجّل انصرافك ${o.t}`, `Check-out saved ${o.t}`);
+      sub = (o.res && o.res.sub) || '';
+      extra = `<div class="pok-srv">${icon('check')}${esc(L('اتأكد على السيرفر', 'Confirmed by the server'))}</div><div class="pok-rc">${esc(L('رقم الإيصال', 'Receipt'))} <b class="ltr">${esc(o.code)}</b></div>${o.held ? `<div class="banner warn" style="margin-top:10px;text-align:start">${esc(L('مستنية اعتماد رئيس القسم ثم مدير المصنع — ساعاتها هتتحسب بعد الاعتماد.', 'Waiting for your department head, then the factory manager — its hours count once approved.'))}</div>` : ''}`;
+      if (kin) { try { const tw = todayOrdersFor(w); if (tw.orders && tw.orders.length) extra += `<div class="small" style="margin-top:12px"><div class="tiny muted">${esc(L('شغلك النهارده', 'Your work today'))}</div>${tw.orders.slice(0, 4).map(x => `<div><span class="code">${esc(x.code)}</span> ${esc(x.title || '')}</div>`).join('')}</div>`; } catch (e) { /* ignore */ } }
+    } else if (o.kind === 'queued') {
+      cls = 'warn'; ic = icon('attendance'); main = kin ? L(`الحضور ${o.t} اتحفظ على الموبايل`, `Check-in ${o.t} kept on the phone`) : L(`الانصراف ${o.t} اتحفظ على الموبايل`, `Check-out ${o.t} kept on the phone`);
+      sub = L('مستنية النت — هتتبعت لوحدها أول ما النت يرجع، ومش هتتحسب غير لما توصل السيرفر.', 'Waiting for the network — it is sent by itself as soon as the network is back, and counts only once it reaches the server.');
+      extra = `<div class="pok-rc">${esc(L('رقم الإيصال', 'Receipt'))} <b class="ltr">${esc(o.code)}</b></div>`;
+    } else if (o.kind === 'req') {
+      cls = 'warn'; ic = icon('attendance'); main = L('اتبعت الطلب لرئيس القسم', 'The request went to your department head'); sub = L('بعده مدير المصنع. هتلاقيه في «طلباتي».', 'Then the factory manager. You will find it under «my requests».');
+    } else {
+      cls = 'bad'; ic = icon('x'); main = L('البصمة ماتسجلتش', 'The punch was not saved'); sub = L('جرّب تاني، ولو فضلت كده كلّم رئيس القسم — المحاولة اتسجلت.', 'Try again; if it keeps failing tell your department head — the try was logged.');
+    }
+    openModal({ title: '', footer: null, sticky: true, body: `<div class="kok pok ${cls}"><div class="kokic">${ic}</div><div class="kokn">${esc(w.name)}</div><div class="kokm">${esc(main)}</div>${sub ? `<div class="koks">${esc(sub)}</div>` : ''}${extra}<div class="row" style="justify-content:center;margin-top:18px"><button type="button" class="btn" data-action="kioskSelf" data-arg="${w.id}">${icon('user')}${esc(L('بياناتي وطلباتي', 'My data and requests'))}</button><button type="button" class="btn ghost" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button></div></div>` });
+    const m = typeof _modal !== 'undefined' ? _modal : null; setTimeout(() => { try { if (typeof _modal !== 'undefined' && _modal === m) closeModal(); } catch (e) { /* ignore */ } }, o.kind === 'ok' && !o.held ? 6000 : 12000);
+  }
+
+  /* ---------- «my punches today» on «بوابتي» ---------- */
+  const WHY_TRY = { ok: () => L('اتسجلت', 'saved'), net: () => L('النت فاصل — مستنية', 'no network — waiting'), geo: () => L('برّه المكان المسموح', 'outside the allowed place'), bio: () => L('الوش / البصمة مش مطابقة', 'face / fingerprint did not match'), save: () => L('ماتحفظتش', 'not saved'), cancel: () => L('اتلغت', 'cancelled'), request: () => L('طلب نسيان بصمة', 'forgot-to-punch request') };
+  function myToday(w) {
+    const date = todayISO(); const row = (attendanceFor(date) || {})[w.id] || {}; const key = attDocKey(date, w); const doc = S.data.attendance && S.data.attendance.get(key);
+    const tries = ((((doc || {}).tries || {})[date] || {})[w.id] || []).concat(lsg(TRY_KEY, []).filter(x => x.wid === w.id && x.date === date).map(x => x.it));
+    const q = queued(w.id).filter(x => x.date === date);
+    const line = (lab, t, iso, srv) => `<div class="mpt-r"><b>${esc(lab)}</b><span class="ltr">${esc(t || '—')}</span>${iso ? `<span class="tiny muted ltr">${esc(rc(w.id, iso))}</span>` : ''}${srv === true ? `<span class="badge good">${esc(L('على السيرفر', 'on the server'))}</span>` : srv === false ? `<span class="badge warn">${esc(L('مستنية النت', 'waiting for the network'))}</span>` : ''}</div>`;
+    let h = '';
+    const qIn = q.find(x => x.k === 'in'), qOut = q.find(x => x.k === 'out');
+    if (row.in) h += line(L('حضور', 'In'), row.in, row.kioskIn, !qIn);
+    if (row.out) h += line(L('انصراف', 'Out'), row.out, row.kioskOut, !qOut);
+    if (row.oos && row.oos.st !== 'ok') h += `<div class="mpt-r"><span class="badge ${row.oos.st === 'rejected' ? 'bad' : 'warn'}">${esc(row.oos.st === 'rejected' ? L('البصمة برّه الوردية اترفضت', 'The punch outside the shift was rejected') : L('مستنية اعتماد (برّه الوردية)', 'Waiting for approval (outside the shift)'))}</span></div>`;
+    const bad = tries.filter(x => x && !x.ok && !['net', 'cancel'].includes(x.why));
+    if (bad.length) h += `<div class="tiny muted" style="margin-top:6px">${esc(L('محاولات ماتسجلتش', 'Tries that did not save'))}: ${bad.slice(-4).map(x => `${new Date(x.at).toTimeString().slice(0, 5)} ${WHY_TRY[x.why] ? WHY_TRY[x.why]() : x.why}`).map(esc).join(' · ')}</div>`;
+    if (!h) h = `<div class="muted small">${esc(L('لسه مفيش بصمة النهارده', 'No punch yet today'))}</div>`;
+    return `<div class="card mpt" id="nf-mpt"><div class="cardhead"><h3>${icon('attendance')}${esc(L('بصماتي النهارده', 'My punches today'))}</h3></div>${h}</div>`;
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'me' || !S.session) return; const w = byId('workers', S.session.workerId); if (!w) return;
+      const old = document.getElementById('nf-mpt'); const html = myToday(w);
+      if (old) { if (old.outerHTML !== html) old.outerHTML = html; return; }
+      const b = document.querySelector('#view [data-action="selfPunch"]'); const card = b && b.closest('.card'); if (!card) return;
+      card.insertAdjacentHTML('afterend', html);
+    } catch (e) { /* the page stays as it is */ }
+  });
+
+  /* ---------- «سجل محاولات البصمة» (department head: his department · factory manager · HR · owner) ---------- */
+  const canLog = () => !!S.session && (isAdmin() || ['manager', 'hr', 'head'].includes(role()));
+  const PL = { date: '', only: 'bad' };
+  function logRows(date) {
+    const ym = monthOf(date); const out = []; const mine = role() === 'head' && !isAdmin() ? (typeof myDepts === 'function' ? myDepts() : []) : null;
+    list('attendance').forEach(doc => {
+      if (!doc || doc.month !== ym) return; if (mine && !mine.includes(doc.deptId)) return;
+      const t = ((doc.tries || {})[date]) || {}; Object.entries(t).forEach(([wid, arr]) => (Array.isArray(arr) ? arr : []).forEach(x => out.push(Object.assign({ wid, dept: doc.deptId }, x))));
+      const rows = (doc.rows || {})[date] || {};
+      Object.entries(rows).forEach(([wid, r]) => { if (r && r.oos && r.oos.st !== 'ok') out.push({ wid, dept: doc.deptId, at: r.kioskIn || r.kioskOut || '', k: r.oos.k, ok: true, why: 'held', held: r.oos.why, rc: rc(wid, r.oos.k === 'in' ? r.kioskIn : r.kioskOut) }); });
+    });
+    return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  }
+  function logHTML() {
+    const date = PL.date || todayISO(); let rows = logRows(date); const nBad = rows.filter(x => (!x.ok && x.why !== 'cancel') || x.why === 'held').length;
+    if (PL.only === 'bad') rows = rows.filter(x => (!x.ok && x.why !== 'cancel') || x.why === 'held' || x.late);
+    const nm = wid => { const w = byId('workers', wid); return w ? w.name : wid; };
+    const why = x => x.why === 'held' ? L('مستنية اعتماد (برّه الوردية)', 'Waiting for approval (outside the shift)') : x.ok ? (x.late ? L('اتسجلت بعد ما النت رجع', 'saved after the network came back') : L('اتسجلت', 'saved')) : (WHY_TRY[x.why] ? WHY_TRY[x.why]() : x.why);
+    return `<div class="card"><div class="cardhead"><h3>${icon('attendance')}${esc(L('سجل محاولات البصمة', 'Punch tries log'))}</h3><div class="grow"></div><input type="date" class="ltr" id="pl-date" value="${esc(date)}" style="max-width:160px"></div>
+      <div class="row" style="gap:6px;margin-bottom:8px"><button type="button" class="btn xs ${PL.only === 'bad' ? 'p' : ''}" data-action="plOnly" data-arg="bad">${esc(L('اللي ماتسجلتش / مستنية', 'Not saved / waiting'))} (${nBad})</button><button type="button" class="btn xs ${PL.only === 'all' ? 'p' : ''}" data-action="plOnly" data-arg="all">${esc(L('كل المحاولات', 'All tries'))}</button></div>
+      ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(L('الوقت', 'Time'))}</th><th>${esc(L('الموظف', 'Employee'))}</th><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('النوع', 'Kind'))}</th><th>${esc(L('النتيجة', 'Result'))}</th><th>${esc(L('الإيصال', 'Receipt'))}</th></tr></thead><tbody>${rows.map(x => `<tr><td class="ltr">${esc(x.at ? new Date(x.at).toTimeString().slice(0, 5) : '')}</td><td>${esc(nm(x.wid))}</td><td>${esc(typeof deptName === 'function' ? deptName(x.dept) : x.dept)}</td><td>${esc(x.k === 'out' ? L('انصراف', 'Out') : L('حضور', 'In'))}</td><td><span class="badge ${x.ok && x.why !== 'held' ? 'good' : x.why === 'held' || x.why === 'net' ? 'warn' : 'bad'}">${esc(why(x))}</span>${x.msg && !x.ok ? `<div class="tiny muted">${esc(x.msg)}</div>` : ''}</td><td class="ltr tiny">${esc(x.rc || '')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="muted small">${esc(L('مفيش محاولات في اليوم ده', 'No tries on this day'))}</div>`}
+      <p class="tiny muted" style="margin-top:8px">${esc(L('الإيصال بيتعمل من الموظف ووقت البصمة اللي اتحفظ على السيرفر — لو موظف قال «بصمت ومااتسجلش» قارن رقم الإيصال اللي معاه.', 'The receipt is made from the employee and the time saved on the server — when someone says «I punched and it did not save», compare the receipt he has.'))}</p></div>`;
+  }
+  ACTIONS.plOnly = a => { PL.only = a === 'all' ? 'all' : 'bad'; if (typeof render === 'function') render(false); else rerender(); };
+  document.addEventListener('change', e => { if (e.target && e.target.id === 'pl-date') { PL.date = e.target.value; if (typeof render === 'function') render(false); else rerender(); } });
+  if (typeof VIEW_TITLES !== 'undefined' && typeof EXTRA_VIEWS !== 'undefined') {
+    Object.assign(VIEW_TITLES, { punchlog: 'سجل محاولات البصمة' });
+    EXTRA_VIEWS.punchlog = () => (canLog() ? logHTML() : `<div class="muted">${esc(L('مش متاح', 'Not available'))}</div>`);
+    if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.punchlog = () => ({ title: 'سجل محاولات البصمة', sub: L('كل محاولة بصمة — حتى اللي ماتسجلتش', 'Every punch try — also the ones that did not save'), actions: `<a class="btn ghost" href="#/attendance">${icon('back')}<span>${esc(L('الحضور', 'Attendance'))}</span></a>` });
+    if (typeof ROLE_VIEWS !== 'undefined') ['manager', 'hr', 'head'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('punchlog')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['punchlog']); });
+  }
+  if (typeof vAttendance === 'function') vAttendance = (base => function () {
+    const html = base.apply(this, arguments); if (!canLog()) return html;
+    let n = 0; try { n = logRows(todayISO()).filter(x => (!x.ok && x.why !== 'cancel') || x.why === 'held').length; } catch (e) { n = 0; }
+    return `<div class="row" style="justify-content:flex-end;margin-bottom:8px"><a class="btn sm ${n ? 'warn' : 'ghost'}" href="#/punchlog">${icon('attendance')}<span>${esc(L('سجل محاولات البصمة', 'Punch tries log'))}${n ? ` (${n})` : ''}</span></a></div>` + html;
+  })(vAttendance);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-punch749">
+.oos-ask{padding:4px 2px}.oos-q{font-size:15px;line-height:1.6;margin:4px 0 14px}.oos-btns{display:flex;flex-direction:column;gap:8px}.oos-btns .btn{justify-content:center;min-height:44px}
+.pok .pok-srv{display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;color:var(--good-ink,#1d7a3a)}.pok .pok-srv svg{width:16px;height:16px}
+.pok .pok-rc{margin-top:6px;font-size:13px;color:var(--muted)}.pok .pok-rc b{font-size:16px;letter-spacing:.08em;color:var(--ink)}
+.pok.warn .kokic{background:var(--warn,#d98a00)}.pok.bad .kokic{background:var(--crit,#c4413c)}
+.mpt .mpt-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)}.mpt .mpt-r:last-of-type{border-bottom:0}.mpt .mpt-r b{min-width:64px}
+</style>`);
 })();
 </script>
 
