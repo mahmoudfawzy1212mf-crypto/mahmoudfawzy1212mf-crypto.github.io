@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-0543-6b51b0";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-0811-9d749a";</script>
 
 <script>
 'use strict';
@@ -48139,6 +48139,243 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
 .pok .pok-rc{margin-top:6px;font-size:13px;color:var(--muted)}.pok .pok-rc b{font-size:16px;letter-spacing:.08em;color:var(--ink)}
 .pok.warn .kokic{background:var(--warn,#d98a00)}.pok.bad .kokic{background:var(--crit,#c4413c)}
 .mpt .mpt-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)}.mpt .mpt-r:last-of-type{border-bottom:0}.mpt .mpt-r b{min-width:64px}
+</style>`);
+})();
+/* =====================================================================
+   v7.50 — 12 October, two small fixes from the factory floor (Mahmoud):
+   (a) «أصناف الأكواد عايزها بالكاتيجوري ويبقى في سيرش على اسم الخامة» — every coded-item picker (the material issue for a project,
+       the purchase-order lines, the stock movement) opens one picker: a search box (name / code / description, Arabic spelling
+       forgiving), the categories as chips with counts, and the list grouped under each category with the code, the unit and the
+       stock. The phone's own drop-down list never opens for these any more. «+ خامة جديدة» stays on top, and when the search finds
+       nothing it offers «+ خامة جديدة» with the typed name filled in.
+   (b) «خالد خميس يعتمد ده منين» — a new-item request (RFQ) shows its own steps (offers → technical approval by the department head
+       → supplier + price approval → coded + purchase order → …) with who it is waiting for, and a big «approve» button for the person
+       whose turn it is. The «technical approval» / «price approval» tasks open the approval instead of closing, and they close by
+       themselves once the request is decided.
+   ===================================================================== */
+(function () {
+  if (window.__NF_V750__) return; window.__NF_V750__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+
+  /* ---------------------------------------------------------------- (a) the item picker */
+  const SEL = 'select[name="i-mat"], select[name="l-mat"], select#f-materialId, select[data-matpick]';
+  const norm = s => String(s == null ? '' : s).toLowerCase()
+    .replace(/[ً-ْٰـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[-_/.,()]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const catList = () => { try { if (window.nfSyncCats) window.nfSyncCats(); } catch (e) { /* keep the list as it is */ } return typeof ITEM_CATS !== 'undefined' ? ITEM_CATS : []; };
+  const OTHER = '~other';
+
+  function wrap(sel) {
+    if (!sel || sel.dataset.mpw || !sel.parentNode) return; sel.dataset.mpw = '1';
+    const w = document.createElement('span'); w.className = 'mpw'; sel.parentNode.insertBefore(w, sel); w.appendChild(sel);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'mpw-hit'; b.tabIndex = -1;
+    b.setAttribute('aria-label', L('اختار الخامة — بحث', 'Pick a material — search')); w.appendChild(b);
+  }
+  let queued = false;
+  const scan = () => { queued = false; document.querySelectorAll(SEL).forEach(s => { if (!s.dataset.mpw) wrap(s); }); };
+  const queue = () => { if (queued) return; queued = true; requestAnimationFrame(scan); };
+  new MutationObserver(muts => { for (const m of muts) if (m.addedNodes && m.addedNodes.length) { queue(); return; } }).observe(document.documentElement, { childList: true, subtree: true });
+  queue();
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.mpw-hit'); if (!b) return; const s = b.parentNode.querySelector('select'); if (!s || s.disabled) return; e.preventDefault(); e.stopPropagation(); open(s); }, true);
+  document.addEventListener('keydown', e => { const s = e.target; if (!s || s.tagName !== 'SELECT' || !s.matches(SEL) || s.disabled) return; if (e.key === 'Enter' || e.key === ' ' || (e.key === 'ArrowDown' && e.altKey) || e.key === 'F4') { e.preventDefault(); open(s); } }, true);
+
+  const P = { sel: null, items: [], extra: [], cat: '', q: '' };
+  function itemsOf(sel) {
+    const items = [], extra = [];
+    [...sel.options].forEach(o => {
+      const v = o.value; if (!v) return;
+      if (v.startsWith('__')) { extra.push({ v, t: o.textContent.trim() }); return; }
+      const m = typeof byId === 'function' ? byId('materials', v) : null;
+      const cat = m && m.itemCat ? m.itemCat : OTHER;
+      const name = m ? String(m.name || '') : o.textContent.trim();
+      const code = m ? String(m.code || '') : '';
+      items.push({ v, m, cat, name, code, unit: m ? String(m.unit || '') : '', qty: m ? +m.qty || 0 : null, hay: norm([name, code, m && m.desc, m && m.category, m && m.spec].filter(Boolean).join(' ')), sort: norm(name) });
+    });
+    return { items, extra };
+  }
+  const catName = c => { if (c === OTHER) return L('أخرى', 'Other'); const x = catList().find(k => k[0] === c); return x ? x[1] : c; };
+  const catOrder = c => { const i = catList().findIndex(k => k[0] === c); return c === OTHER ? 9999 : i < 0 ? 5000 : i; };
+  function matches(it) { const toks = norm(P.q).split(' ').filter(Boolean); if (!toks.length) return true; const h = it.hay + ' ' + norm(catName(it.cat)); return toks.every(t => h.includes(t)); }
+
+  function open(sel) {
+    close();
+    const { items, extra } = itemsOf(sel); Object.assign(P, { sel, items, extra, cat: '', q: '' });
+    const ttl = sel.name === 'l-mat' ? L('اختار الصنف', 'Pick the item') : L('اختار الخامة', 'Pick the material');
+    document.body.insertAdjacentHTML('beforeend', `<div id="nfmp" class="nfmp" role="dialog" aria-modal="true" aria-label="${esc(ttl)}"><div class="nfmp-sh">
+      <div class="nfmp-hd"><b>${esc(ttl)}</b><span class="nfmp-n"></span><button type="button" class="iconbtn" data-mp="x" aria-label="${esc(L('قفل', 'Close'))}">${icon('x')}</button></div>
+      <label class="nfmp-sr">${icon('search')}<input type="search" id="nfmp-q" placeholder="${esc(L('ابحث باسم الخامة أو الكود…', 'Search by material name or code…'))}" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search"></label>
+      <div class="nfmp-cats" id="nfmp-cats"></div>
+      <div class="nfmp-ls" id="nfmp-ls"></div></div></div>`);
+    document.documentElement.classList.add('nfmp-open');
+    draw();
+    const q = document.getElementById('nfmp-q');
+    if (q && window.matchMedia && matchMedia('(pointer:fine)').matches) setTimeout(() => q.focus(), 30);
+    const cur = document.querySelector('#nfmp .nfmp-it.on'); if (cur) cur.scrollIntoView({ block: 'center' });
+  }
+  function close() { const el = document.getElementById('nfmp'); if (el) el.remove(); document.documentElement.classList.remove('nfmp-open'); }
+
+  function draw() {
+    const cur = P.sel ? P.sel.value : '';
+    const found = P.items.filter(matches);
+    const counts = {}; found.forEach(it => { counts[it.cat] = (counts[it.cat] || 0) + 1; });
+    const cats = [...new Set(P.items.map(it => it.cat))].sort((a, b) => catOrder(a) - catOrder(b));
+    if (P.cat && !cats.includes(P.cat)) P.cat = '';
+    const ce = document.getElementById('nfmp-cats');
+    if (ce) ce.innerHTML = `<button type="button" class="nfmp-c ${P.cat ? '' : 'on'}" data-mpc="">${esc(L('الكل', 'All'))} <i>${found.length}</i></button>${cats.map(c => `<button type="button" class="nfmp-c ${P.cat === c ? 'on' : ''} ${counts[c] ? '' : 'z'}" data-mpc="${esc(c)}">${esc(catName(c))} <i>${counts[c] || 0}</i></button>`).join('')}`;
+    const shown = found.filter(it => !P.cat || it.cat === P.cat);
+    const groups = {}; shown.forEach(it => { (groups[it.cat] ||= []).push(it); });
+    const keys = Object.keys(groups).sort((a, b) => catOrder(a) - catOrder(b));
+    const LIMIT = 400; let n = 0;
+    const row = it => { n++; const low = it.qty != null && it.qty <= 0; return `<button type="button" class="nfmp-it ${it.v === cur ? 'on' : ''}" data-mpv="${esc(it.v)}"><span class="t">${esc(it.name)}</span><span class="s">${it.code ? `<span class="ltr code">${esc(it.code)}</span>` : ''}${it.qty != null ? `<span class="${low ? 'low' : 'ok'}">${esc(L('رصيد', 'stock'))} ${esc(typeof fmtNum === 'function' ? fmtNum(it.qty) : String(it.qty))}${it.unit ? ' ' + esc(it.unit) : ''}</span>` : ''}</span>${it.v === cur ? `<span class="ck">${icon('check')}</span>` : ''}</button>`; };
+    let body = '';
+    const newOpt = P.extra.find(x => x.v === '__new');
+    if (newOpt && !P.q) body += `<button type="button" class="nfmp-it nfmp-new ${cur === '__new' ? 'on' : ''}" data-mpv="__new">${icon('plus')}<span class="t">${esc(newOpt.t.replace(/^\+\s*/, ''))}</span></button>`;
+    P.extra.filter(x => x.v !== '__new').forEach(x => { body += `<button type="button" class="nfmp-it" data-mpv="${esc(x.v)}"><span class="t">${esc(x.t)}</span></button>`; });
+    for (const k of keys) { if (n >= LIMIT) break; const rows = groups[k].sort((a, b) => a.sort.localeCompare(b.sort, 'ar')); body += `<div class="nfmp-g">${esc(catName(k))} <i>${rows.length}</i></div>${rows.slice(0, Math.max(0, LIMIT - n)).map(row).join('')}`; }
+    if (n >= LIMIT && shown.length > LIMIT) body += `<div class="nfmp-more">${esc(L('اكتب أكتر في البحث عشان تضيّق اللستة', 'Type more to narrow the list'))}</div>`;
+    if (!shown.length) body += `<div class="nfmp-none">${esc(P.q ? L(`مفيش خامة باسم «${P.q}»`, `No material called “${P.q}”`) : L('مفيش أصناف في الفئة دي', 'No items in this category'))}${newOpt && P.q ? `<button type="button" class="btn sm p" data-mpv="__new" data-mpname="1">${icon('plus')}${esc(L('خامة جديدة بالاسم ده', 'New material with this name'))}</button>` : ''}</div>`;
+    else if (newOpt && P.q) body += `<button type="button" class="nfmp-it nfmp-new" data-mpv="__new" data-mpname="1">${icon('plus')}<span class="t">${esc(L(`مش لاقيها؟ خامة جديدة «${P.q}»`, `Not here? New material “${P.q}”`))}</span></button>`;
+    const ls = document.getElementById('nfmp-ls'); if (ls) { ls.innerHTML = body; }
+    const nn = document.querySelector('#nfmp .nfmp-n'); if (nn) nn.textContent = P.items.length ? L(`${P.items.length} صنف`, `${P.items.length} items`) : '';
+  }
+
+  function pick(v, withName) {
+    const sel = P.sel; const q = P.q; close(); if (!sel) return;
+    sel.value = v; sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true }));
+    const row = sel.closest('.isl, .line, .form');
+    if (v === '__new' && withName && q && row) { const nm = row.querySelector('[name=i-name]'); if (nm && !nm.value) nm.value = q; }
+    const qty = row && row.querySelector('[name=i-qty], [name=l-qty]');
+    if (qty && !qty.value && v !== '__new' && window.matchMedia && matchMedia('(pointer:fine)').matches) qty.focus();
+  }
+  document.addEventListener('click', e => {
+    const box = document.getElementById('nfmp'); if (!box || !box.contains(e.target)) return;
+    if (e.target === box) { close(); return; }
+    const x = e.target.closest('[data-mp="x"]'); if (x) { close(); return; }
+    const c = e.target.closest('[data-mpc]'); if (c) { P.cat = c.dataset.mpc; draw(); const ls = document.getElementById('nfmp-ls'); if (ls) ls.scrollTop = 0; return; }
+    const it = e.target.closest('[data-mpv]'); if (it) { pick(it.dataset.mpv, !!it.dataset.mpname); }
+  });
+  document.addEventListener('input', e => { if (e.target && e.target.id === 'nfmp-q') { P.q = e.target.value; draw(); const ls = document.getElementById('nfmp-ls'); if (ls) ls.scrollTop = 0; } });
+  document.addEventListener('keydown', e => {
+    if (!document.getElementById('nfmp')) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key === 'Enter' && e.target && e.target.id === 'nfmp-q') { e.preventDefault(); const first = document.querySelector('#nfmp .nfmp-it:not(.nfmp-new)'); if (first) pick(first.dataset.mpv, false); }
+  }, true);
+  window.addEventListener('hashchange', close);
+  window.nfMatPick = { open, close };
+
+  /* ---------------------------------------------------------------- (b) the RFQ approval: steps, who it waits for, the button */
+  const PRE = ['rfq', 'rfq_tech', 'rfq_price'];
+  const isRfqPre = p => p && p.kind === 'rfq' && PRE.includes(p.status);
+  const reqOf = p => { const id = p.status === 'rfq_tech' ? p.rfqTechReqId : p.status === 'rfq_price' ? p.rfqPriceReqId : null; return id && typeof byId === 'function' ? byId('requests', id) : null; };
+  const lbl = k => (typeof CHAIN_LABEL !== 'undefined' && CHAIN_LABEL[k]) || k;
+  function waitNames(r) {
+    const out = []; const t = typeof reqStepTargets === 'function' ? reqStepTargets(r) : [];
+    t.forEach(x => { if (x.startsWith('w:')) { const w = byId('workers', x.slice(2)); if (w) out.push(w.name); } else if (x.startsWith('role:')) { const rl = x.slice(5); const ws = list('workers').filter(w => w.role === rl && w.status !== 'inactive'); if (ws.length) ws.forEach(w => out.push(w.name)); else out.push(lbl(rl)); } });
+    return [...new Set(out)];
+  }
+  const purchNames = () => { const ws = list('workers').filter(w => w.role === 'purch' && w.status !== 'inactive'); return ws.length ? ws.map(w => w.name) : [lbl('purch')]; };
+  function rfqCard(p) {
+    const offers = (p.rfqOffers || []).length; const r = reqOf(p); const pend = r && r.status === 'pending';
+    const mine = pend && typeof awaitingMe === 'function' && awaitingMe(r);
+    const idx = p.status === 'rfq' ? 0 : p.status === 'rfq_tech' ? 1 : 2;
+    const owner = p.status === 'rfq_price' && r && (r.chain || []).includes('admin');
+    const heads = typeof deptHeads === 'function' && p.deptId ? deptHeads(p.deptId) : [];
+    const steps = [
+      L(`عروض الموردين (${offers} من 3)`, `Supplier offers (${offers} of 3)`),
+      L('اعتماد فني — رئيس القسم', 'Technical approval — department head'),
+      owner ? L('اختيار المورد واعتماد السعر — مدير المصنع ← المالك', 'Supplier + price approval — factory manager → owner') : L('اختيار المورد واعتماد السعر — مدير المصنع', 'Supplier + price approval — factory manager'),
+      L('تكويد الصنف + أمر شراء', 'Item coded + purchase order'),
+      L('مشوار النقل', 'Pickup trip'), L('استلام ثنائي', 'Two-way receipt'), L('في المخزون', 'In stock')];
+    const flow = `<div class="flowline">${steps.map((s, i) => `<span class="fs ${i < idx ? 'done' : i === idx ? 'now' : ''}">${i < idx ? '✓ ' : ''}${esc(s)}</span>${i < steps.length - 1 ? '<span class="fa">←</span>' : ''}`).join('')}</div>`;
+    const who = p.status === 'rfq' ? purchNames() : pend ? waitNames(r) : [];
+    const stLabel = p.status === 'rfq' ? L('عند المشتريات — بتجمع العروض', 'With purchasing — collecting offers') : p.status === 'rfq_tech' ? L('مستني الاعتماد الفني', 'Waiting for the technical approval') : L('مستني اعتماد السعر', 'Waiting for the price approval');
+    const btnTxt = p.status === 'rfq_tech' ? L('اعتمد فنيًا', 'Technical approval') : L('اختار المورد واعتمد السعر', 'Pick the supplier and approve the price');
+    const btnHint = p.status === 'rfq_tech' ? L('شوف صور العروض وعلّم على كل عرض: مطابق من الصورة / بعد المعاينة / مرفوض', 'Look at the offer photos and mark each: matches the photo / after inspection / rejected') : L('من العروض المطابقة فنيًا', 'Among the offers that passed the technical check');
+    return `<div class="card rfqap"><div class="cardhead"><h3>${esc(L('الاعتماد', 'Approval'))}</h3><span class="badge warn">${esc(stLabel)}</span></div>
+      ${flow}
+      <div class="grid g3" style="gap:8px;font-size:13px"><div><div class="tiny muted">${esc(L('القسم الطالب', 'Requesting department'))}</div>${esc(p.deptId && typeof deptName === 'function' ? deptName(p.deptId) : '—')}${heads.length ? `<div class="tiny muted">${esc(L('رئيس القسم', 'Head'))}: ${esc(heads.map(h => h.name).join('، '))}</div>` : ''}</div>
+        <div><div class="tiny muted">${esc(L('عروض الموردين', 'Supplier offers'))}</div><b>${offers}</b> ${esc(L('من 3', 'of 3'))}${p.rfqFewWhy ? `<div class="tiny muted">${esc(L('أقل من 3', 'Fewer than 3'))}: ${esc(p.rfqFewWhy)}</div>` : ''}</div>
+        <div><div class="tiny muted">${esc(L('دلوقتي عند', 'Now with'))}</div><b>${esc(who.join('، ') || '—')}</b></div></div>
+      ${mine ? `<button type="button" class="btn p rfqap-go" data-action="reqOpen" data-arg="${esc(r.id)}">${icon('check')}<span>${esc(btnTxt)}</span></button><div class="tiny muted rfqap-hint">${esc(btnHint)}</div>` : pend ? `<div class="small" style="margin-top:8px">${typeof stageChip === 'function' ? stageChip(r) : ''} <button type="button" class="btn xs ghost" data-action="reqOpen" data-arg="${esc(r.id)}">${esc(L('التفاصيل', 'Details'))}</button></div>` : ''}</div>`;
+  }
+  if (typeof poApprovalCard === 'function') poApprovalCard = (base => function (p) { return isRfqPre(p) ? rfqCard(p) : base.apply(this, arguments); })(poApprovalCard);
+
+  /* the «technical approval» / «price approval» tasks: they open the approval and close by themselves */
+  const taskReq = t => {
+    if (!t || !t.purchaseId) return null; const id = String(t.id || ''); const k = id.startsWith('rfqt_') ? 'rfqTechReqId' : id.startsWith('rfqp_') ? 'rfqPriceReqId' : null; if (!k) return null;
+    const p = byId('purchases', t.purchaseId); const r = p && p[k] ? byId('requests', p[k]) : null; return r || null;
+  };
+  if (typeof ACTIONS !== 'undefined' && ACTIONS.taskStatus) ACTIONS.taskStatus = (base => async function (arg) {
+    const [id, st] = String(arg || '').split(':'); const t = byId('tasks', id); const r = st === 'done' ? taskReq(t) : null;
+    if (r && r.status === 'pending') {
+      if (typeof awaitingMe === 'function' && awaitingMe(r)) { toast(L('الاعتماد بيتعمل من هنا — المهمة هتتقفل لوحدها بعد ما تقرر', 'Decide here — the task closes by itself afterwards')); ACTIONS.reqOpen(r.id); }
+      else toast(L(`المهمة دي بتتقفل لوحدها بعد الاعتماد — مستني: ${waitNames(r).join('، ')}`, `This task closes by itself after the approval — waiting for: ${waitNames(r).join(', ')}`), 'err');
+      return;
+    }
+    return base.apply(this, arguments);
+  })(ACTIONS.taskStatus);
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    const html = base.apply(this, arguments); const r = taskReq(t); if (!r) return html;
+    const p = byId('purchases', t.purchaseId) || {}; const pend = r.status === 'pending'; const mine = pend && typeof awaitingMe === 'function' && awaitingMe(r);
+    const what = r.type === 'rfqtech' ? L('الاعتماد الفني للصنف الجديد', 'Technical approval of the new item') : L('اختيار المورد واعتماد السعر', 'Supplier choice + price approval');
+    const card = `<div class="banner ${pend ? 'warn' : 'info'} rfqtk" style="margin-bottom:12px">${icon(pend ? 'alert' : 'check')}<span><b>${esc(what)}</b> — ${esc(p.number || '')}${(p.rfqItems || []).length ? ' · ' + esc(p.rfqItems.map(x => x.name).join('، ')) : ''}<br>${pend ? (mine ? esc(L('الاعتماد مش بـ«تم» — افتحه وعلّم على العروض واعتمد، والمهمة هتتقفل لوحدها.', 'Not with «Done» — open it, mark the offers and decide; the task closes by itself.')) : esc(L(`مستني: ${waitNames(r).join('، ')}`, `Waiting for: ${waitNames(r).join(', ')}`))) : esc(r.status === 'approved' ? L('اتعمل الاعتماد ✓', 'Decided ✓') : L('اترفض', 'Rejected'))}</span>${mine ? `<button type="button" class="btn sm p" data-action="reqOpen" data-arg="${esc(r.id)}">${icon('check')}${esc(L('افتح الاعتماد', 'Open the approval'))}</button>` : ''}</div>`;
+    return card + html;
+  })(vTaskDetail);
+  if (typeof decideRequest === 'function') decideRequest = (base => async function (id, status) {
+    const before = byId('requests', id); const step0 = before ? before.step : null; const st0 = before ? before.status : null;
+    const out = await base.apply(this, arguments);
+    try {
+      const r = byId('requests', id);
+      if (out !== false && r && before && st0 === 'pending' && ['rfqtech', 'rfqprice'].includes(r.type) && r.purchaseId && (r.status !== 'pending' || r.step !== step0)) {
+        const tid = (r.type === 'rfqtech' ? 'rfqt_' : 'rfqp_') + r.purchaseId; const t = byId('tasks', tid); const now = nowISO(); const by = (S.session && S.session.name) || '';
+        if (t && !['done', 'cancelled'].includes(t.status)) await Store.update('tasks', tid, { status: 'done', doneAt: now, doneByName: by, proof: { note: status === 'approved' ? 'اتقفلت لوحدها بعد الاعتماد' : 'اتقفلت لوحدها بعد القرار', at: now, byName: by }, updatedAt: now }, { silent: true });
+      }
+    } catch (e) { /* the decision itself is saved */ }
+    return out;
+  })(decideRequest);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-v750">
+.mpw{display:block;position:relative;min-width:0}
+.mpw>select{width:100%}
+.mpw-hit{position:absolute;inset:0;width:100%;height:100%;background:transparent;border:0;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.mpw>select:disabled+.mpw-hit{pointer-events:none}
+html.nfmp-open{overflow:hidden}
+.nfmp{position:fixed;inset:0;z-index:9950;background:rgba(0,0,0,.42);display:flex;align-items:center;justify-content:center;padding:16px}
+.nfmp-sh{background:var(--surface,#fff);color:var(--ink,inherit);width:min(600px,100%);max-height:min(82vh,760px);display:flex;flex-direction:column;border-radius:16px;box-shadow:0 18px 60px rgba(0,0,0,.35);overflow:hidden}
+.nfmp-hd{display:flex;align-items:center;gap:8px;padding:12px 14px 6px}
+.nfmp-hd b{font-size:16px}.nfmp-n{flex:1;font-size:12px;color:var(--muted)}
+.nfmp-sr{display:flex;align-items:center;gap:8px;margin:4px 14px 8px;padding:0 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2,var(--surface));min-height:44px}
+.nfmp-sr svg{width:18px;height:18px;opacity:.6;flex:none}
+.nfmp-sr input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:16px;padding:10px 0;color:inherit;font-family:inherit}
+.nfmp-cats{display:flex;gap:6px;overflow-x:auto;padding:0 14px 8px;scrollbar-width:none;flex:none}
+.nfmp-cats::-webkit-scrollbar{display:none}
+.nfmp-c{flex:none;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--surface-2,var(--surface));color:inherit;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.nfmp-c i{display:inline;font-style:normal;opacity:.6;font-size:11px}
+.nfmp-c.on{background:var(--accent,#2f6fed);border-color:var(--accent,#2f6fed);color:#fff}.nfmp-c.on i{opacity:.85}
+.nfmp-c.z{opacity:.45}
+.nfmp-ls{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 6px 10px;flex:1;min-height:120px;overscroll-behavior:contain}
+.nfmp-g{position:sticky;top:0;z-index:1;background:var(--surface,#fff);font-size:12px;font-weight:700;color:var(--muted);padding:10px 10px 4px;border-bottom:1px solid var(--line)}
+.nfmp-g i{font-style:normal;font-weight:400;opacity:.7}
+.nfmp-it{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;width:100%;text-align:start;background:transparent;border:0;border-bottom:1px solid var(--line);padding:10px;cursor:pointer;color:inherit;font-family:inherit;position:relative;min-height:48px}
+.nfmp-it:hover{background:var(--surface-2,rgba(127,127,127,.08))}
+.nfmp-it .t{font-size:15px;font-weight:600;flex:1 1 100%;padding-inline-end:28px}
+.nfmp-it .s{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.nfmp-it .s{align-items:center}.nfmp-it .s>span{white-space:nowrap}
+.nfmp-it .s .code{font-family:ui-monospace,monospace;letter-spacing:.3px;border:0;padding:0;margin:0;background:none;box-shadow:none;font-size:12px;color:var(--muted)}
+.nfmp-it .s .low{color:var(--crit-ink,#b35c5c)}
+.nfmp-it.on{background:color-mix(in srgb,var(--accent,#2f6fed) 12%,transparent)}
+.nfmp-it .ck{position:absolute;inset-inline-end:10px;top:50%;transform:translateY(-50%);color:var(--accent,#2f6fed)}.nfmp-it .ck svg{width:18px;height:18px}
+.nfmp-new{color:var(--accent,#2f6fed);flex-wrap:nowrap}.nfmp-new svg{width:18px;height:18px;flex:none}.nfmp-new .t{flex:1;padding:0}
+.nfmp-none,.nfmp-more{padding:18px 10px;text-align:center;color:var(--muted);font-size:13px;display:grid;gap:10px;justify-items:center}
+.rfqap .rfqap-go{width:100%;justify-content:center;margin-top:12px;min-height:46px;font-size:15px;white-space:normal}
+.rfqap .rfqap-hint{text-align:center;margin-top:6px}
+.rfqtk{align-items:center;flex-wrap:wrap;gap:8px}.rfqtk>span{flex:1;min-width:200px}
+@media (max-width:760px){
+  .nfmp{align-items:flex-end;padding:0}
+  .nfmp-sh{width:100%;max-height:calc(100dvh - 48px);height:calc(100dvh - 48px);border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
+}
 </style>`);
 })();
 </script>
