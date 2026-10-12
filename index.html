@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1455-f12456";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1555-1f25de";</script>
 
 <script>
 'use strict';
@@ -10265,7 +10265,7 @@ const stageKeyOf = deptId => { const d = dept(deptId); return d ? (d.install ? '
 ACTIONS.gStage = (arg, btn) => {
   const [oid, deptId] = arg.split('|'); const o = byId('orders', oid); if (!o) return; const s = ((o.stages || {})[deptId]) || { status: 'pending' }; document.querySelectorAll('.gpop').forEach(x => x.remove());
   const team = (s.team || []).map(id => byId('workers', id)).filter(Boolean); const heads = deptHeads(deptId);
-  const pop = document.createElement('div'); pop.className = 'gpop'; pop.innerHTML = `<div class="row" style="gap:6px;align-items:center"><b>${esc(deptName(deptId))}</b>${badge({ pending: ['لم تبدأ', ''], active: ['جارية', 'acc'], done: ['منتهية', 'good'], skipped: ['متجاوزة', ''] }, s.status || 'pending')}${s.status === 'active' ? `<span class="badge">${+s.progress || 0}%</span>` : ''}</div><div class="tiny muted" style="margin-top:4px">${s.plannedStart || s.start ? `${fmtDate(s.plannedStart || s.start)} ← ${fmtDate(s.plannedEnd || s.end || '')}` : 'بلا مواعيد مخططة'}</div>${heads.length ? `<div class="small" style="margin-top:6px">رئيس القسم: ${heads.map(h => h.href ? `<a href="${h.href}">${esc(h.name.split(' — ')[0])}</a>` : esc(h.name)).join('، ')}</div>` : ''}${team.length ? `<div class="small" style="margin-top:4px">الفريق: ${team.map(w => `<a href="#/workers/${w.id}">${esc(w.name.split(' — ')[0])}</a>`).join('، ')}</div>` : ''}<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn xs p" data-action="pjOpenStage" data-arg="${o.id}|${stageKeyOf(deptId)}|all">${icon('layers')}مهام المرحلة</button><a class="btn xs ghost" href="#/orders/${o.id}#stages">${icon('orders')}أمر التشغيل</a><a class="btn xs ghost" href="#/boards">${icon('board')}لوحة القسم</a></div>`;
+  const pop = document.createElement('div'); pop.className = 'gpop'; pop.innerHTML = `<div class="row" style="gap:6px;align-items:center"><b>${esc(deptName(deptId))}</b>${badge({ pending: ['لم تبدأ', ''], active: ['جارية', 'acc'], done: ['منتهية', 'good'], skipped: ['متجاوزة', ''] }, s.status || 'pending')}${s.status === 'active' ? `<span class="badge">${+s.progress || 0}%</span>` : ''}</div><div class="tiny muted" style="margin-top:4px">${s.plannedStart || s.start ? `${fmtDate(s.plannedStart || s.start)} ← ${fmtDate(s.plannedEnd || s.end || '')}` : 'بلا مواعيد مخططة'}</div>${heads.length ? `<div class="small" style="margin-top:6px">رئيس القسم: ${heads.map(h => h.href ? `<a href="${h.href}">${esc(h.name.split(' — ')[0])}</a>` : esc(h.name)).join('، ')}</div>` : ''}${team.length ? `<div class="small" style="margin-top:4px">الفريق: ${team.map(w => `<a href="#/workers/${w.id}">${esc(w.name.split(' — ')[0])}</a>`).join('، ')}</div>` : ''}<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn xs p" data-action="pjOpenStage" data-arg="${o.id}|${stageKeyOf(deptId)}|all">${icon('layers')}مهام المرحلة</button><a class="btn xs ghost" href="#/orders/${o.id}/make">${icon('orders')}أمر التشغيل</a><a class="btn xs ghost" href="#/boards">${icon('board')}لوحة القسم</a></div>`;
   const r = btn.getBoundingClientRect(); const card = btn.closest('.card') || document.body; const cr = card.getBoundingClientRect(); pop.style.top = (r.bottom - cr.top + 6) + 'px'; pop.style.right = Math.max(0, cr.right - r.right) + 'px'; card.style.position = 'relative'; card.appendChild(pop);
   setTimeout(() => document.addEventListener('click', function h(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', h); } }), 0);
 };
@@ -13065,7 +13065,8 @@ async function escalateTick() {
   if (!S.session || !writable() || !(isAdmin() || ['manager', 'hr', 'head', 'office'].includes(role()))) return; // only a supervisor's open app runs it
   const now = Date.now(); const pol = +(S.settings.policy && S.settings.policy.escalateMinutes) || 10;
   for (const t of list('tasks')) {
-    if (!IMPORTANT(t) || !['open', 'doing'].includes(t.status) || !t.assigneeId || t.kind === 'update') continue;
+    if (!IMPORTANT(t) || t.status !== 'open' || !t.assigneeId || t.kind === 'update') continue;
+    if (taskThread(t).some(m => m && !m.sys && (m.by === t.assigneeId || m.by === 'w:' + t.assigneeId))) continue;   /* v7.54: in progress / answered = seen (the cleanup clears the alert — escalating it again looped every few minutes) */
     if ((t.seenAt || {})[t.assigneeId]) continue; const lvl = (t.escalation && t.escalation.level) || 0; if (lvl >= (t.finConf ? 3 : 2)) continue; /* v7.53 (Mahmoud): «not seen» stops at the factory manager — it never reaches the owner (only financial confirmations do) */
     const since = new Date(lvl ? t.escalation.at : (t.assignedAt || t.createdAt || 0)).getTime(); if (!since || now - since < pol * 60000) continue;
     const next = lvl + 1; const tg = escalationTargets(t, next); const note = `المكلَّف ${assigneeName(t.assigneeId)} لم يشاهد المهمة خلال ${pol} دقيقة — صُعِّدت إلى ${tg.label}`;
@@ -49331,6 +49332,178 @@ function oxFlow(k) {
     } catch (e) { /* ignore */ }
     return out;
   })(preserveFocus);
+})();
+/* =====================================================================
+   v7.54 — the project page is organised in sections (Mahmoud, 12 Oct, on a project page: «when I open a project things
+   should be organised: everything about the drawings on its own, the technical office work on its own, the purchase
+   requests and their approvals on their own — this concept everywhere»; go-ahead 12 Oct night).
+   Factory #/orders/<id>/<section>: the summary card stays on top, then a bar of sections —
+     overview · drawings · technical office · purchasing & approvals · production · transport & installation · money ·
+     workflow (#/projects/<id>)
+   Every card of the page (whichever part draws it, even late ones) goes to its section by its heading; a card nobody
+   knows stays in the overview, so nothing disappears. New cards: the project at a glance (one tile per section), the
+   drawing tasks, the technical-office tasks, and the project's purchases with their approvals (whose turn now, open it).
+   No money amounts on the new cards. The kanban #/projects/<id> gets the same bar. Construction (CX_TABS) and the
+   studio project manager (#/pm) already work in tabs. Every device, Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PSEC__) return; window.__NF_PSEC__ = 1;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof RENDER_HOOKS === 'undefined' || typeof vOrderDetail !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
+  const SECS = [
+    { k: 'over', ar: 'نظرة عامة', en: 'Overview', ic: 'dashboard' },
+    { k: 'draw', ar: 'الرسومات', en: 'Drawings', ic: 'sketch' },
+    { k: 'tech', ar: 'المكتب الفني', en: 'Technical office', ic: 'cube' },
+    { k: 'buy', ar: 'الشراء والاعتمادات', en: 'Purchasing & approvals', ic: 'purchase' },
+    { k: 'make', ar: 'التصنيع', en: 'Production', ic: 'layers' },
+    { k: 'site', ar: 'النقل والتركيب', en: 'Transport & installation', ic: 'map' },
+    { k: 'money', ar: 'الفلوس', en: 'Money', ic: 'money' }
+  ];
+  const KEYS = SECS.map(s => s.k);
+  /* a card's section from its heading (the Arabic source, even after the page was translated) */
+  const RULES = [   /* Arabic headings, and the cards that draw their heading in English themselves */
+    ['over', /(?:اعتماد التشغيل|المشروع في سطور|start approval|production approval|at a glance)/i],
+    ['money', /(?:التعاقد|الدفعات|التكلفة|الحسابات|المحصّل|هامش|للمالك|contract|payment|full cost|\bcost\b|accounts|margin)/i],
+    ['buy', /(?:طلبات الشراء|طلب شراء|الشراء|المشتريات|اعتمادات|الخامات المصروفة|خامات المشروع|صرف خامات|خامات تحت|purchas|approvals|materials issued|project materials|material issue)/i],
+    ['draw', /(?:رسوم|رسومات|المعاينة|كونسبت|شوب|3D|مقاسات الموقع|drawing|concept|sketch|survey)/i],
+    ['tech', /(?:المكتب الفني|خطة التشغيل|المقايسة|منتجات المشروع|منتجات العرض|مسار المنتج|مسار الشغل|مسار التصنيع|أجزاء المنتج|ملاحظات التنفيذ|التوصيف|ملف المشروع|technical office|production plan|bill of quantities|\bBOQ\b|project products|product route|execution notes|project file)/i],
+    ['site', /(?:النقل|التركيب|الموقع|المشوار|التسليم|تأكيد العميل|transport|install|on site|site days|\btrips?\b|delivery|client confirm)/i],
+    ['make', /(?:مراحل|التصنيع|الدهان|التشغيل الخارجي|السهر|مخزن المنتجات|الأجزاء|خط إنتاج|خط الإنتاج|الإنتاج|stage|manufactur|production|paint|outsourc|overtime|finished goods|parts tracking|production line)/i]
+  ];
+  const srcText = el => { if (!el) return ''; let s = ''; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null); let n; while ((n = w.nextNode())) s += (typeof I18N !== 'undefined' && I18N.base && I18N.base.get(n)) || n.nodeValue || ''; return s.trim(); };
+  const secOf = card => { if (card.dataset.psec) return card.dataset.psec; const h = card.querySelector('.cardhead h3, .cardhead h2, h3'); const t = srcText(h); for (const [k, rx] of RULES) if (rx.test(t)) return k; return 'over'; };
+  /* ---------- what belongs to the project ---------- */
+  const TECH = () => { const ds = (S.settings.departments || []); const d = ds.find(x => x.id === 'tech') || ds.find(x => /المكتب الفني/.test(x.name || '')); return d ? d.id : 'tech'; };
+  const DRAW_RX = /(?:رسم|رسوم|شوب|shop|drawing|لوحة|تصميم|3d|موديل|ريندر|render|كونسبت|مقاسات|رفع مقاس)/i;
+  const isDrawTask = t => ['modreq', 'drawreq', 'drawing', 'sketch'].includes(t.source) || (DRAW_RX.test(t.title || '') && (!t.deptId || t.deptId === TECH() || !!t.productId));
+  const projTasks = o => list('tasks').filter(t => t && t.orderId === o.id && !t.deleted && t.status !== 'cancelled' && !/^(esc\d|rqc_|otp_|advinfo_)/.test(t.id || '') && t.kind !== 'update');
+  const drawTasks = o => projTasks(o).filter(isDrawTask);
+  const techTasks = o => projTasks(o).filter(t => !isDrawTask(t) && (t.deptId === TECH() || t.source === 'inquiry'));
+  const openOf = ts => ts.filter(t => ['open', 'doing'].includes(t.status));
+  const projPurchases = o => (typeof canSee === 'function' && !canSee('purchases') && !isAdmin()) ? [] : list('purchases').filter(p => p && p.orderId === o.id && !p.deleted);
+  const reqVis = r => (typeof requestVisible === 'function' ? requestVisible(r) : isAdmin());
+  const projRequests = o => { const pids = new Set(list('purchases').filter(p => p && p.orderId === o.id).map(p => p.id)); return list('requests').filter(r => r && !r.deleted && (r.orderId === o.id || (r.purchaseId && pids.has(r.purchaseId))) && reqVis(r)); };
+  const pendingReqs = o => projRequests(o).filter(r => r.status === 'pending');
+  const counts = o => ({ draw: openOf(drawTasks(o)).length, tech: openOf(techTasks(o)).length, buy: pendingReqs(o).length });
+  /* ---------- new cards ---------- */
+  const late = t => t.dueDate && t.dueDate < todayISO() && ['open', 'doing'].includes(t.status);
+  const taskRow = t => `<a class="item psec-tk ${late(t) ? 'late' : ''}" href="#/tasks/${esc(t.id)}"><div class="main"><div class="title">${t.status === 'done' ? '✓ ' : ''}${esc(t.title || '')}</div><div class="meta">${badge(TASK_STATUS, t.status)}${t.assigneeId ? `<span>${esc(String(assigneeName(t.assigneeId) || '').split(' — ')[0])}</span>` : t.deptId ? `<span>${esc(deptName(t.deptId))}</span>` : ''}${t.dueDate ? `<span class="${late(t) ? 'crit-ink' : ''}">${fmtDate(t.dueDate)}</span>` : ''}</div></div></a>`;
+  function tasksCard(o, k, title, sub, ts, newDept) {
+    const open = sortBy(openOf(ts), t => t.dueDate || '9'); const done = sortBy(ts.filter(t => t.status === 'done'), t => t.doneAt || t.updatedAt || '', true).slice(0, 6);
+    const add = canTasks() && newDept ? `<button class="btn sm" data-action="pjTaskNew" data-arg="${esc(o.id)}:${esc(newDept)}">${icon('plus')}${esc(T('مهمة', 'Task'))}</button>` : '';
+    return `<div class="card psec-new" data-psec="${k}"><div class="cardhead"><h3>${esc(title)}</h3><span class="muted small">${open.length} ${esc(T('مفتوحة', 'open'))}</span><div class="grow"></div>${add}</div>
+      ${open.length || done.length ? `<div class="list">${open.map(taskRow).join('')}${done.length ? `<div class="tiny muted psec-sub">${esc(T('خلصت مؤخرًا', 'Finished lately'))}</div>${done.map(taskRow).join('')}` : ''}</div>` : `<div class="muted small">${esc(sub)}</div>`}</div>`;
+  }
+  const reqTitle = r => { const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; const ty = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || T('طلب', 'Request'); return ty + (p && p.number ? ' — ' + p.number : ''); };
+  function buyCard(o) {
+    const canP = isAdmin() || (typeof canSee === 'function' && canSee('purchases'));
+    const ps = sortBy(projPurchases(o), p => p.createdAt || '', true); const rs = projRequests(o); if (!canP && !rs.length) return ''; const pend = sortBy(rs.filter(r => r.status === 'pending'), r => r.createdAt || '');
+    const done = sortBy(rs.filter(r => r.status !== 'pending'), r => r.decidedAt || r.updatedAt || r.createdAt || '', true).slice(0, 5);
+    const poRow = p => { const items = (p.rfqItems && p.rfqItems.length ? p.rfqItems : (p.items || [])).filter(Boolean); const nm = items.slice(0, 3).map(it => it.name || (it.materialId && (byId('materials', it.materialId) || {}).name) || '').filter(Boolean).join('، ');
+      const wait = rs.filter(r => r.purchaseId === p.id && r.status === 'pending');
+      return `<a class="item" href="#/purchases/${esc(p.id)}"><div class="main"><div class="title"><span class="code">${esc(p.number || '')}</span> ${esc(nm || p.title || '')}${items.length > 3 ? ` <span class="muted">+${items.length - 3}</span>` : ''}</div><div class="meta">${badge(PO_STATUS, p.status)}${p.supplier || p.supplierName ? `<span>${esc(p.supplier || p.supplierName)}</span>` : ''}${p.requestedByName ? `<span>${esc(T('طالبه', 'Asked by'))}: ${esc(p.requestedByName)}</span>` : ''}${wait.length ? `<span class="psec-wait">${esc(T('اعتماد مستني', 'Approval waiting'))}</span>` : ''}</div></div></a>`; };
+    const reqRow = r => `<div class="item"><div class="main"><div class="title">${esc(reqTitle(r))}</div><div class="meta">${typeof stageChip === 'function' ? stageChip(r) : badge(REQ_STATUS, r.status)}${r.requesterName || r.createdByName ? `<span>${esc(r.requesterName || r.createdByName)}</span>` : ''}<span>${fmtDate(String(r.createdAt || '').slice(0, 10))}</span></div></div><div class="end"><button class="btn xs ${r.status === 'pending' ? 'p' : 'ghost'}" data-action="reqOpen" data-arg="${esc(r.id)}">${esc(T('افتح', 'Open'))}</button></div></div>`;
+    const canNew = typeof canSee === 'function' && canSee('purchases');
+    return `<div class="card psec-new" data-psec="buy"><div class="cardhead"><h3>${esc(T('طلبات الشراء والاعتمادات', 'Purchase requests & approvals'))}</h3><span class="muted small">${ps.length} ${esc(T('طلب شراء', 'purchases'))} · ${pend.length} ${esc(T('اعتماد مستني', 'approvals waiting'))}</span><div class="grow"></div>${canNew ? `<a class="btn sm ghost" href="#/purchases">${icon('purchase')}${esc(T('المشتريات', 'Purchasing'))}</a>` : ''}</div>
+      ${pend.length ? `<div class="tiny muted psec-sub">${esc(T('اعتمادات مستنية', 'Approvals waiting'))}</div><div class="list">${pend.map(reqRow).join('')}</div>` : ''}
+      ${ps.length ? `<div class="tiny muted psec-sub">${esc(T('طلبات الشراء وأوامر الشراء', 'Purchase requests and orders'))}</div><div class="list">${ps.map(poRow).join('')}</div>` : canP ? `<div class="muted small">${esc(T('مفيش طلبات شراء على المشروع ده لسه.', 'No purchase requests on this project yet.'))}</div>` : ''}
+      ${done.length ? `<details class="psec-more"><summary class="tiny muted">${esc(T('اعتمادات اتقررت', 'Decided approvals'))} (${done.length})</summary><div class="list">${done.map(reqRow).join('')}</div></details>` : ''}</div>`;
+  }
+  function overCard(o, have) {
+    const c = counts(o); const ps = projPurchases(o); const st = typeof orderStages === 'function' ? orderStages(o) : []; const sd = st.filter(s => s.status === 'done').length, sn = st.filter(s => s.status !== 'skipped').length;
+    const trips = list('trips').filter(t => t && t.orderId === o.id); const tOpen = trips.filter(t => !['done', 'cancelled'].includes(t.status)).length;
+    const files = list('files').filter(f => f && (f.orderId === o.id || (f.ownerKind === 'order' && f.ownerId === o.id)) && ['drawing', 'doc'].includes(f.kind)).length;
+    const tile = (k, n, line, warn) => have.has(k) ? `<a class="psec-tile ${warn ? 'warn' : ''}" href="#/orders/${esc(o.id)}/${k}">${icon(SECS.find(s => s.k === k).ic)}<b>${esc(T(SECS.find(s => s.k === k).ar, SECS.find(s => s.k === k).en))}</b><span>${line}</span>${n ? `<i class="num">${n}</i>` : ''}</a>` : '';
+    return `<div class="card psec-new psec-ov" data-psec="over"><div class="cardhead"><h3>${esc(T('المشروع في سطور', 'The project at a glance'))}</h3></div><div class="psec-tiles">
+      ${tile('draw', c.draw, esc(T(`${c.draw} مهمة مفتوحة · ${files} ملف`, `${c.draw} open tasks · ${files} files`)))}
+      ${tile('tech', c.tech, esc(T(`${c.tech} مهمة مفتوحة`, `${c.tech} open tasks`)))}
+      ${tile('buy', c.buy, esc(T(`${ps.length} طلب شراء · ${c.buy} اعتماد مستني`, `${ps.length} purchases · ${c.buy} approvals waiting`)), c.buy > 0)}
+      ${tile('make', 0, esc(T(`${sd} من ${sn} مرحلة خلصت`, `${sd} of ${sn} stages done`)))}
+      ${tile('site', tOpen, esc(T(`${trips.length} مشوار${tOpen ? ` · ${tOpen} شغال` : ''}`, `${trips.length} trips${tOpen ? ` · ${tOpen} running` : ''}`)))}
+      ${tile('money', 0, esc(T('التعاقد والدفعات والتكلفة', 'Contract, payments and cost')))}
+      <a class="psec-tile" href="#/projects/${esc(o.id)}">${icon('board')}<b>${esc(T('سير العمل', 'Workflow'))}</b><span>${esc(T('مهام كل الأقسام بالمراحل وصورها', 'Every department’s tasks by stage, with photos'))}</span></a></div></div>`;
+  }
+  /* the new cards are added to the page html (before the cost / late cards are appended) */
+  vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const o = byId('orders', id); if (!o || typeof html !== 'string') return html;
+    try {
+      const extra = tasksCard(o, 'draw', T('مهام الرسومات', 'Drawing tasks'), T('مفيش مهام رسومات على المشروع ده.', 'No drawing tasks on this project.'), drawTasks(o), TECH())
+        + tasksCard(o, 'tech', T('مهام المكتب الفني', 'Technical office tasks'), T('مفيش مهام للمكتب الفني على المشروع ده.', 'No technical office tasks on this project.'), techTasks(o), TECH())
+        + buyCard(o) + '<div class="psec-over-slot" data-psec="over"></div>';
+      return html + extra;   /* outside the grid — arrange() puts every loose card in it */
+    } catch (e) { console.warn('psec cards', e); return html; }
+  })(vOrderDetail);
+  /* ---------- the bar + the sorting of the cards ---------- */
+  const cur = id => { const r = S.route || {}; const k = r.sub && KEYS.includes(r.sub) ? r.sub : ((S.ui.psec || {})[id] || 'over'); return KEYS.includes(k) ? k : 'over'; };
+  const barHTML = (o, have, on, kanban) => { const c = counts(o);
+    return `<nav class="psec-bar no-print" aria-label="${esc(T('أقسام المشروع', 'Project sections'))}">${SECS.filter(s => have.has(s.k)).map(s => { const n = c[s.k] || 0; return `<a href="#/orders/${esc(o.id)}/${s.k}" class="${!kanban && on === s.k ? 'on' : ''}" ${!kanban && on === s.k ? 'aria-current="page"' : ''}>${icon(s.ic)}<span>${esc(T(s.ar, s.en))}</span>${n ? `<b class="num ${s.k === 'buy' ? 'warn' : ''}">${n}</b>` : ''}</a>`; }).join('')}<a href="#/projects/${esc(o.id)}" class="${kanban ? 'on' : ''}">${icon('board')}<span>${esc(T('سير العمل', 'Workflow'))}</span></a></nav>`; };
+  let obs = null, obsOn = null, busy = false;
+  function arrange() {
+    const r = S.route || {}; const v = document.getElementById('view'); if (!v) return;
+    if (r.view !== 'orders' || !r.id) { v.classList.remove('psec'); v.removeAttribute('data-psec-on'); if (obs) { obs.disconnect(); obs = null; obsOn = null; } return; }
+    const o = byId('orders', r.id); if (!o) return; const grid = v.querySelector('.gmain'); if (!grid) return;
+    busy = true;
+    try {
+      const head = grid.querySelector('.stack > .card') || grid.querySelector('.card'); if (head) head.dataset.psec = 'top';
+      /* cards drawn after the page (late hooks) join the grid */
+      [...v.children].filter(e => e !== grid && e.classList && e.classList.contains('card')).forEach(e => grid.appendChild(e));
+      const cards = [...grid.querySelectorAll('.card')].filter(c => c !== head && !c.parentElement.closest('.card'));
+      const have = new Set(['over']); cards.forEach(c => { const k = secOf(c); c.dataset.psec = k; have.add(k); });
+      ['draw', 'tech'].forEach(k => have.add(k));
+      const on = have.has(cur(o.id)) ? cur(o.id) : 'over'; (S.ui.psec ||= {})[o.id] = on;
+      v.classList.add('psec'); v.setAttribute('data-psec-on', on);
+      const slot = v.querySelector('.psec-over-slot'); if (slot) { slot.remove(); const ov = grid.querySelector('.psec-ov'); const html = overCard(o, have); if (ov) ov.outerHTML = html; else if (head) head.insertAdjacentHTML('afterend', html); else grid.insertAdjacentHTML('afterbegin', html); }
+      const old = grid.querySelector('.psec-bar'); const bar = barHTML(o, have, on, false);
+      if (old) { if (old.outerHTML !== bar) old.outerHTML = bar; } else if (head) head.insertAdjacentHTML('afterend', bar); else grid.insertAdjacentHTML('afterbegin', bar);
+      const empty = ![...grid.querySelectorAll('[data-psec]')].some(c => c.dataset.psec === on && !c.classList.contains('psec-empty') && !c.classList.contains('psec-over-slot')); let e0 = grid.querySelector('.psec-empty'); if (empty && !e0) grid.insertAdjacentHTML('beforeend', `<div class="card psec-empty" data-psec="${on}"><div class="muted small">${esc(T('مفيش حاجة في القسم ده لسه.', 'Nothing in this section yet.'))}</div></div>`); else if (e0) { if (!empty) e0.remove(); else e0.dataset.psec = on; }
+      try { if (typeof i18nApply === 'function' && en()) i18nApply(grid.querySelector('.psec-bar')); } catch (e) { /* ignore */ }
+      try { const b = grid.querySelector('.psec-bar'); const a = b && b.querySelector('a.on'); if (a && b.scrollWidth > b.clientWidth + 2) { const br = b.getBoundingClientRect(), ar = a.getBoundingClientRect(); if (ar.left < br.left || ar.right > br.right) b.scrollLeft += (ar.left + ar.width / 2) - (br.left + br.width / 2); } } catch (e) { /* ignore */ }
+    } finally { busy = false; }
+    if (obs && obsOn !== v) { obs.disconnect(); obs = null; }
+    if (!obs && typeof MutationObserver === 'function') { obsOn = v; obs = new MutationObserver(() => { if (busy) return; if (arrange._t) return; arrange._t = requestAnimationFrame(() => { arrange._t = 0; const r2 = S.route || {}; if (r2.view === 'orders' && r2.id) { const v2 = document.getElementById('view'); const g = v2 && v2.querySelector('.gmain'); if (!g) return; const loose = [...v2.children].some(e => e !== g && e.classList && e.classList.contains('card')); const raw = [...g.querySelectorAll('.card')].some(c => !c.dataset.psec && !c.parentElement.closest('.card')); if (loose || raw || !g.querySelector('.psec-bar')) arrange(); } }); }); obs.observe(v, { childList: true, subtree: true }); }
+  }
+  RENDER_HOOKS.push(arrange);
+  /* the kanban (#/projects/<id>) wears the same bar, the workflow item lit */
+  RENDER_HOOKS.push(() => {
+    const r = S.route || {}; if (r.view !== 'projects' || !r.id) return; const o = byId('orders', r.id); const v = document.getElementById('view'); if (!o || !v || v.querySelector('.psec-bar')) return;
+    if (typeof canSee === 'function' && !canSee('orders')) return;
+    const have = new Set(['over', 'draw', 'tech', 'buy', 'make', 'site']); if (typeof seesFinance === 'function' && seesFinance()) have.add('money');
+    v.insertAdjacentHTML('afterbegin', barHTML(o, have, '', true));
+  });
+  /* opening a section from the bar keeps the place at the top of the page */
+  window.addEventListener('hashchange', () => { const r = (location.hash || '').replace(/^#\/?/, '').split('/'); if (r[0] === 'orders' && r[1] && KEYS.includes(r[2] || '')) { const b = document.querySelector('#view .psec-bar'); if (b && b.getBoundingClientRect().top < 0) setTimeout(() => { const b2 = document.querySelector('#view .psec-bar'); if (b2) b2.scrollIntoView({ block: 'start' }); }, 30); } });
+  document.head.insertAdjacentHTML('beforeend', `<style>
+  #view.psec .gmain{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,440px),1fr));gap:14px;align-items:start}
+  #view.psec .gmain>.stack{display:contents}
+  #view.psec .gmain>.stack>*,#view.psec .gmain>.card{margin:0}
+  #view.psec .gmain [data-psec="top"],#view.psec .psec-bar{grid-column:1/-1}
+  ${KEYS.map(k => `#view.psec[data-psec-on="${k}"] .gmain [data-psec]:not([data-psec="top"]):not([data-psec="${k}"])`).join(',')}{display:none!important}
+  #view.psec .gmain>.stack>.card:not([data-psec]),#view.psec .gmain>.card:not([data-psec]){display:none}
+  .psec-bar{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:4px;border-radius:14px;background:var(--surface-3,rgba(127,127,127,.12));position:sticky;top:calc(var(--topbar-h,56px) + 4px);z-index:5;-webkit-overflow-scrolling:touch}
+  .psec-bar::-webkit-scrollbar{display:none}
+  #view .psec-bar a,#view .psec-bar a.on{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center;gap:6px;height:auto!important;min-height:0!important;padding:8px 12px;border-radius:10px;color:var(--ink-2,inherit);text-decoration:none;white-space:nowrap;font-size:13.5px;font-weight:600;flex:0 0 auto}
+  .psec-bar a svg{width:16px;height:16px;flex:none;opacity:.8}
+  .psec-bar a:hover{background:color-mix(in srgb,var(--surface,#fff) 60%,transparent)}
+  .psec-bar a.on{background:var(--surface,#fff);color:var(--ink,#111);box-shadow:0 1px 2px rgba(0,0,0,.08),0 3px 10px rgba(0,0,0,.08)}
+  .psec-bar a b{font-size:11px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;display:inline-grid;place-items:center;background:var(--line,#ddd);color:var(--ink,#111)}
+  .psec-bar a b.warn{background:var(--warn,#e5932a);color:#fff}
+  #view>.psec-bar{margin-bottom:12px}
+  .psec-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:10px}
+  .psec-tile{position:relative;display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:inherit;text-decoration:none}
+  .psec-tile:hover{border-color:var(--accent);text-decoration:none}
+  .psec-tile svg{width:18px;height:18px;opacity:.75}.psec-tile b{font-size:14px}.psec-tile span{font-size:12px;color:var(--muted)}
+  .psec-tile i{position:absolute;top:10px;inset-inline-end:10px;font-style:normal;font-size:12px;font-weight:700;min-width:22px;height:22px;border-radius:999px;display:grid;place-items:center;background:var(--accent-soft,#dbeafe);color:var(--accent-ink,#1d4ed8)}
+  .psec-tile.warn{border-color:var(--warn,#e5932a)}.psec-tile.warn i{background:var(--warn,#e5932a);color:#fff}
+  @media (min-width:900px){.psec-bar{flex-wrap:wrap;overflow:visible}}
+  #view.psec .gmain [data-psec="top"]{order:-3}#view.psec .gmain .psec-bar{order:-2}#view.psec .gmain .card[data-psec="buy"].psec-new{order:-1}
+  .psec-new a.item,.psec-new a.item:hover{text-decoration:none;color:inherit}.psec-new a.item .code{text-decoration:none}
+  .psec-sub{margin:10px 0 4px}.psec-wait{color:var(--warn-ink,#9a5b00);font-weight:600}
+  .psec-tk.late .title{color:var(--crit-ink)}.crit-ink{color:var(--crit-ink)}
+  .psec-more summary{cursor:pointer;margin-top:10px}
+  @media (max-width:759px){.psec-bar{top:calc(var(--topbar-h,52px) + 2px);border-radius:12px}.psec-bar a{padding:8px 10px;font-size:13px}}
+  @media print{#view.psec .gmain [data-psec]{display:block!important}.psec-bar{display:none}}
+  </style>`);
 })();
 </script>
 
