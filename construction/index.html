@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1925-33d97d";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-2009-146cf1";</script>
 
 <script>
 'use strict';
@@ -5196,7 +5196,7 @@ document.addEventListener('submit', async ev => { if (ev.target.id !== 'aiform')
    3D models, interactive HTML, video)
    ===================================================================== */
 const FILE_KINDS = { drawing: ['رسومات تنفيذية', 'print'], render: ['صورة / معاينة', 'star'], model: ['موديل 3D', 'inventory'], html: ['معاينة تفاعلية', 'link'], video: ['فيديو', 'play'], other: ['ملف', 'link'] };
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;   /* v7.59: 50 MB (was 20) — bigger originals of studio finals go to R2 */
 const DEMO_PDF = 'lof-c01.pdf';
 const ASSET_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'video/mp4', 'video/webm', 'application/pdf'];
 
@@ -5349,7 +5349,7 @@ ACTIONS.fileUpload = arg => {
   if (!canFiles()) return; const [kind, id] = (arg || '').split(':'); if (!['product', 'order'].includes(kind) || !id) return;
   if (!Files.canUpload()) { toast(Files.uploadHint() || 'الرفع غير متاح', 'err'); return; }
   openModal({ title: kind === 'product' ? 'رفع رسومات / معاينة للمنتج' : 'رفع رسومات خاصة بأمر التشغيل', body: `<div class="form">
-      <div class="field full"><label>الملفات</label><input type="file" id="f-files" multiple accept=".pdf,image/*,.glb,.gltf,.html,.htm,video/mp4,video/webm"><div class="tiny muted" style="margin-top:6px">PDF للرسومات · PNG/JPG للصور والرندر · GLB/glTF للموديل ثلاثي الأبعاد · HTML لمعاينة تفاعلية · حد أقصى 20 ميجا للملف</div></div>
+      <div class="field full"><label>الملفات</label><input type="file" id="f-files" multiple accept=".pdf,image/*,.glb,.gltf,.html,.htm,video/mp4,video/webm"><div class="tiny muted" style="margin-top:6px">PDF للرسومات · PNG/JPG للصور والرندر · GLB/glTF للموديل ثلاثي الأبعاد · HTML لمعاينة تفاعلية · حد أقصى 50 ميجا للملف</div></div>
       ${field('النوع', `<select id="f-kind" name="kind"><option value="">تلقائي حسب الملف</option>${opts(Object.keys(FILE_KINDS), '', k => FILE_KINDS[k][0])}</select>`)}
       ${field('المراجعة / الإصدار', inp('rev', '', 'placeholder="مثال: Rev H"'))}
       ${field('ملاحظة', inp('note', '', 'placeholder="اختياري"'), 'full')}
@@ -5358,7 +5358,7 @@ ACTIONS.fileUpload = arg => {
       const input = $('#f-files', f); const files = Array.from(input.files || []); if (!files.length) { toast('اختر ملفًا واحدًا على الأقل', 'err'); return false; }
       const d = formData(f); const prog = $('#upprog', f); let n = 0;
       for (const file of files) {
-        if (file.size > MAX_FILE_BYTES) { toast(`${file.name}: أكبر من 20 ميجا`, 'err'); continue; }
+        if (file.size > MAX_FILE_BYTES) { toast(`${file.name}: أكبر من 50 ميجا`, 'err'); continue; }
         prog.innerHTML = `<div class="banner info">${icon('info')}<span>جارٍ رفع ${esc(file.name)} (${n + 1} من ${files.length})${/\.html?$/i.test(file.name) ? ' — وتجهيز صورة المعاينة (ثوانٍ)' : ''}…</span></div>`;
         try { await uploadOne(file, { kind: d.kind, rev: d.rev, note: d.note, productId: kind === 'product' ? id : null, orderId: kind === 'order' ? id : null }); n++; }
         catch (e) { console.error(e); toast(`${file.name}: ${uploadErrText(e)}`, 'err'); }
@@ -11500,7 +11500,7 @@ ACTIONS.catalogOpen = brandId => {
       <div class="form" style="margin-top:12px"><div class="field full"><label>رفع كتالوج جديد (PDF)</label><input type="file" id="cat-file" accept="application/pdf,.pdf"></div>${field('القسم', `<select id="f-catcoll">${brandCollections(brandId).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="">— بدون قسم —</option></select>`)}${field('اسم / إصدار الكتالوج', inp('catname', '', 'placeholder="مثال: LOF Catalogue 2026"'), 'full')}<div class="full"><button type="button" class="btn p sm" id="cat-up">${icon('plus')}رفع الكتالوج</button></div></div>
       ${ai ? '' : `<div class="banner warn" style="margin-top:10px">${icon('alert')}<span>استخراج المنتجات تلقائيًا يحتاج مفتاح Anthropic API على السيرفر — بعد ضبطه يظهر الزر مفعّلًا. حتى ذلك الحين أضف المنتجات يدويًا بنفس ترقيم الكتالوج.</span></div>`}
       <div id="catprog" class="catprog"></div></div></div>`,
-    onOpen: f => { $('#cat-up', f).addEventListener('click', async () => { const inp = $('#cat-file', f); const file = inp.files && inp.files[0]; if (!file) { toast('اختر ملف PDF', 'err'); return; } if (file.size > MAX_FILE_BYTES) { toast('الملف أكبر من 20 ميجا', 'err'); return; } const prog = $('#catprog', f); prog.innerHTML = `<div class="banner info">${icon('info')}<span>جارٍ رفع الكتالوج…</span></div>`;
+    onOpen: f => { $('#cat-up', f).addEventListener('click', async () => { const inp = $('#cat-file', f); const file = inp.files && inp.files[0]; if (!file) { toast('اختر ملف PDF', 'err'); return; } if (file.size > MAX_FILE_BYTES) { toast('الملف أكبر من 50 ميجا', 'err'); return; } const prog = $('#catprog', f); prog.innerHTML = `<div class="banner info">${icon('info')}<span>جارٍ رفع الكتالوج…</span></div>`;
       try { const doc = { id: uid(), name: ($('#f-catname', f).value || '').trim() || file.name, kind: 'catalog', mime: 'application/pdf', size: file.size, brandId, collection: ($('#f-catcoll', f) || {}).value || '', productId: null, orderId: null, byName: S.session?.name || '', thumb: null, pages: null, createdAt: nowISO() }; try { const t = await pdfThumb(file); doc.thumb = t.thumb; doc.pages = t.pages; } catch (e) { /* ignore */ } const st = await Files.put(file, 'application/pdf'); Object.assign(doc, st); await Store.save('files', doc, { silent: true }); toast('تم رفع الكتالوج'); ACTIONS.catalogOpen(brandId); } catch (e) { console.error(e); prog.innerHTML = `<div class="banner crit">${icon('alert')}<span>${esc(uploadErrText(e))}</span></div>`; } }); } });
 };
 /* ---------- render pages → ask the model → create products ---------- */
@@ -12258,7 +12258,7 @@ async function saveTask(f, t) {
   const doc = t.id ? byId('tasks', t.id) : sortBy(list('tasks').filter(x => x.title === d.title && x.createdBy === (S.session?.id || null)), x => x.createdAt || '', true)[0];
   if (!doc) return r;
   if ((d.brandId || '') !== (doc.brandId || '')) await Store.update('tasks', doc.id, { brandId: d.brandId || null }, { silent: true });
-  for (const fl of files) { if (fl.size > MAX_FILE_BYTES) { toast(`${fl.name}: أكبر من 20 ميجا — لم يُرفع`, 'err'); continue; } try { if (fl.type.startsWith('video/')) await taskPostVideo(byId('tasks', doc.id), fl); else await taskPost(byId('tasks', doc.id), '', fl); } catch (e) { console.warn('attach', e); toast(`تعذّر رفع ${fl.name}`, 'err'); } }
+  for (const fl of files) { if (fl.size > MAX_FILE_BYTES) { toast(`${fl.name}: أكبر من 50 ميجا — لم يُرفع`, 'err'); continue; } try { if (fl.type.startsWith('video/')) await taskPostVideo(byId('tasks', doc.id), fl); else await taskPost(byId('tasks', doc.id), '', fl); } catch (e) { console.warn('attach', e); toast(`تعذّر رفع ${fl.name}`, 'err'); } }
   return r;
 }
 async function taskPostVideo(t, file) {
@@ -18126,7 +18126,7 @@ body.stuboard .fab{display:none!important}
       </div></div>
       <div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">مهام المشروع (${tasks.length})</h3><div class="grow"></div>${stuCanEdit() ? `<button class="btn sm ghost" data-action="stuTaskNew" data-arg="${p.id}">${icon('plus')}مهمة</button>` : ''}</div>
       ${tasks.length ? tasks.map(t => `<a class="row small" href="#/tasks/${t.id}" style="padding:6px 0;border-bottom:1px solid var(--line);gap:8px"><span class="stagedot ${t.status === 'doing' ? 'active' : ''}"></span><span>${esc(t.title)}</span><div class="grow"></div><span class="muted">${t.assigneeId ? esc(stuPerson(t.assigneeId).name) : ''}${t.dueDate ? ' · ' + fmtDate(t.dueDate) : ''}</span></a>`).join('') : '<p class="small muted">لا توجد مهام مفتوحة</p>'}</div>
-      ${files.length ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3></div><div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div></div>` : ''}`;
+      ${files.length || (window.nfFinals && window.nfFinals.can(p.id)) ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3><div class="grow"></div>${window.nfFinals ? window.nfFinals.btn(p.id) : ''}</div>${files.length ? `<div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div>` : `<p class="small muted">${typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'No files yet — «Upload finals» adds the shots at full quality.' : 'لسه مفيش ملفات — «ارفع الفاينال» بيضيف اللقطات بجودتها الكاملة.'}</p>`}</div>` : ''}`;   /* v7.59: «Upload finals» (99zzZzZZzz-proj-finals) */
   }
   EXTRA_TITLES.projects = () => { if (S.route.id) { const p = byId('projects', S.route.id); return { title: p ? p.name : 'مشروع', sub: p ? `${stuStage(p.stage).ar} · ${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) || ''}` : '', actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>كل المشاريع</span></a>` }; } return { sub: 'مشاريع التصميم بمراحلها وفِرقها وبورداتها' }; };
   viewTitleProjects = t => { const x = EXTRA_TITLES.projects(); return S.route.view === 'projects' ? Object.assign(t, x) : t; };
@@ -50107,6 +50107,173 @@ html.ios-app .smwx{top:max(54px,env(safe-area-inset-top))}
   .smgrid{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:43vw;grid-template-rows:repeat(2,43vw);overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding-bottom:4px;scrollbar-width:none}.smgrid::-webkit-scrollbar{display:none}.smt{scroll-snap-align:start;border-radius:14px}
   .smfull{bottom:18px;inset-inline-end:16px}}
 @media (prefers-reduced-motion:reduce){.smreel video,[data-smss] img{transition:none}}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.59 — Ninety Studioz: final shots at full quality in the project files (Mahmoud, 12 Oct, on Riverfront Residence: «I will send
+   the final shots to replace the ones you have, but I want the picture in high quality — and the files are big; what is the
+   solution?»; «start»; brief claude/project-finals-brief.md).
+   · «Upload finals» on the project files card: pick / drop many pictures at once. Every picture is kept in 3 sizes, made on
+     the device before upload: a small preview (lists, cards, the home), a high-quality display copy (2560 px — the picture
+     viewer, zoom, client links) and the original exactly as it is (download only, «Original»).
+   · Replace by name: RF-S01 … RF-S10 (same name, or the same leading code such as RF-S01 / RF_S01 / RFS01) takes the place of
+     the old preview in the same file record (links, covers and the home keep working); the old one stays as an earlier
+     version. Any other name is added as a new file. A progress line per file.
+   · The original goes to Cloudflare R2 when its keys are saved in Settings → Storage (no 20 MB limit, downloads are free);
+     otherwise to the current storage up to 50 MB (the general upload limit is 50 MB now, was 20). Bigger originals without
+     R2 keep the display copy and say so.
+   · Who uploads: the owner, the art director, team leads and the project people — the same people who already add files.
+   Studio only. Arabic and English; iPhone, Android, computer.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_FINALS__) return; window.__NF_FINALS__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const MAXSB = 50 * 1048576;
+  const DISP = 2560, PREV = 420;
+  const F = { r2off: false, busy: false, plan: [], pid: '' };
+  const me = () => (typeof stuMe === 'function' ? stuMe() : (S.session && S.session.id)) || '';
+  const myIds = () => (typeof stuMeIds === 'function' ? stuMeIds() : [me()]).filter(Boolean);
+  function can(pid) {
+    const p = byId('projects', pid); if (!p || !S.session || typeof Files === 'undefined' || !Files.canUpload()) return false;
+    if (isAdmin() || ['manager', 'head', 'hr'].includes(role())) return true;
+    const ids = myIds(); return [...(p.team || []), p.leadId, p.ownerId].filter(Boolean).some(x => ids.includes(x));
+  }
+  const projFiles = pid => list('files').filter(f => f.projectId === pid && !f.deleted);
+  const norm = s => String(s || '').replace(/\.[a-z0-9]{2,5}$/i, '').toLowerCase().replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const code = s => { const m = /^([a-z]{1,6})[-_ ]?([a-z]?)(\d{1,4})(?!\d)/i.exec(String(s || '').trim()); return m ? (m[1] + m[2] + String(+m[3])).toLowerCase() : ''; };
+  function matchOf(file, existing, taken) {
+    const free = existing.filter(f => !taken.has(f.id)); const n = norm(file.name);
+    const a = free.find(f => norm(f.name) === n); if (a) return a;
+    const c = code(file.name); if (!c) return null; const ms = free.filter(f => code(f.name) === c); return ms.length === 1 ? ms[0] : null;
+  }
+  const isImg = f => /^image\/(png|jpe?g|webp|gif|bmp|avif|heic|heif|tiff?)$/i.test(f.type || '') || /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif|tiff?)$/i.test(f.name || '');
+  const mimeOf = f => f.type || (typeof fileMimeOf === 'function' ? fileMimeOf(f) : 'application/octet-stream');
+  const MB = n => (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB';
+
+  /* ---------- pictures: decode once, make the preview + the display copy ---------- */
+  async function decode(file) {
+    if (typeof createImageBitmap === 'function') { try { const b = await createImageBitmap(file); return { src: b, w: b.width, h: b.height, close: () => { try { b.close(); } catch (e) { /* ignore */ } } }; } catch (e) { /* fall back to <img> */ } }
+    return new Promise((res, rej) => { const u = URL.createObjectURL(file); const im = new Image(); im.decoding = 'async'; im.onload = () => res({ src: im, w: im.naturalWidth, h: im.naturalHeight, close: () => URL.revokeObjectURL(u) }); im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('decode')); }; im.src = u; });
+  }
+  let webpOK = null; const canWebp = () => { if (webpOK === null) { try { const c = document.createElement('canvas'); c.width = c.height = 2; webpOK = c.toDataURL('image/webp').startsWith('data:image/webp'); } catch (e) { webpOK = false; } } return webpOK; };
+  /* step down by halves first (sharper than one big jump), then the last step with high-quality smoothing */
+  function scaled(im, max) {
+    const k = Math.min(1, max / Math.max(im.w, im.h)); const tw = Math.max(1, Math.round(im.w * k)), th = Math.max(1, Math.round(im.h * k));
+    let src = im.src, w = im.w, h = im.h;
+    while (w / 2 >= tw * 1.0001 && w > 2) { const c = document.createElement('canvas'); c.width = Math.round(w / 2); c.height = Math.round(h / 2); const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, c.width, c.height); src = c; w = c.width; h = c.height; }
+    const c = document.createElement('canvas'); c.width = tw; c.height = th; const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, tw, th); return c;
+  }
+  const toBlob = (c, q) => new Promise(res => { const t = canWebp() ? 'image/webp' : 'image/jpeg'; c.toBlob(b => res({ blob: b, type: t, w: c.width, h: c.height }), t, q); });
+
+  /* ---------- the original: R2 when its keys are saved, else the current storage (≤ 50 MB) ---------- */
+  async function putOriginal(file, pid, onP) {
+    if (!F.r2off && window.nfFiles && typeof window.nfFiles.put === 'function') {
+      try { const safe = window.nfFiles.safeName ? window.nfFiles.safeName(file.name) : String(file.name || 'file'); const r = await window.nfFiles.put(file, `studio/projects/${pid}/${Date.now().toString(36)}_${safe}`, onP); return { store: 'r2', path: r.path, size: file.size, mime: mimeOf(file), name: file.name }; }
+      catch (e) { if (/no_r2/.test(String(e && e.message))) F.r2off = true; else console.warn('finals r2', e); }
+    }
+    if (file.size > MAXSB) return null;
+    const o = await Files.put(file, mimeOf(file)); return Object.assign({}, o, { size: file.size, mime: mimeOf(file), name: file.name });
+  }
+
+  /* ---------- the picker → the plan → the upload ---------- */
+  ACTIONS.finalsPick = pid => {
+    if (!can(pid) || F.busy) return; const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = 'image/*';
+    inp.addEventListener('change', () => { const fs = [...(inp.files || [])]; if (fs.length) plan(pid, fs); }, { once: true }); inp.click();
+  };
+  function plan(pid, files) {
+    const imgs = files.filter(isImg); if (imgs.length < files.length) toast(L('في ملفات مش صور اتسابت', 'Some files were not pictures and were skipped'), 'err'); if (!imgs.length) return;
+    const ex = projFiles(pid); const taken = new Set();
+    F.pid = pid; F.plan = imgs.map(f => { const m = matchOf(f, ex, taken); if (m) taken.add(m.id); return { file: f, match: m ? m.id : '', st: '', ok: false }; });
+    const rows = F.plan.map((x, i) => { const m = x.match ? byId('files', x.match) : null;
+      return `<div class="fnr" id="fnr${i}"><div class="fnn"><b class="notr" dir="auto">${esc(x.file.name)}</b><small class="muted"><bdi dir="ltr">${MB(x.file.size)}</bdi> · ${m ? `${esc(L('هيتبدّل مكان', 'replaces'))} <span class="notr" dir="auto">${esc(m.name)}</span>` : esc(L('ملف جديد', 'new file'))}</small></div><span class="fns ${m ? 'rep' : 'new'}">${esc(m ? L('استبدال', 'Replace') : L('جديد', 'New'))}</span><div class="fnp small muted" id="fnp${i}"></div></div>`; }).join('');
+    const big = F.plan.some(x => x.file.size > MAXSB);
+    openModal({ title: L('ارفع الفاينال', 'Upload finals'), wide: true, cls: 'fnm', submitLabel: L(`ارفع ${F.plan.length}`, `Upload ${F.plan.length}`),
+      body: `<div class="fnhint small muted">${esc(L('كل لقطة بتتحفظ بـ3 أحجام: معاينة صغيرة للستات، نسخة عرض بجودة عالية (2560 بكسل) للفتح والزوم، والأصل زي ما هو للتنزيل. الأصل بيروح Cloudflare R2 لو متفعّل في الإعدادات ← التخزين، وإلا التخزين الحالي لحد 50 ميجا.', 'Each shot is kept in 3 sizes: a small preview for lists, a high-quality display copy (2560 px) for opening and zoom, and the original as it is for download. The original goes to Cloudflare R2 when it is set up in Settings → Storage, otherwise to the current storage up to 50 MB.'))}</div>
+        ${big ? `<div class="fnwarn small">${esc(L('في ملفات أكبر من 50 ميجا — أصلها هيترفع بس لو R2 متفعّل؛ غير كده هتترفع نسخة العرض العالية بس.', 'Some files are over 50 MB — their originals upload only when R2 is set up; otherwise only the high-quality display copy is uploaded.'))}</div>` : ''}
+        <div class="fnl">${rows}</div>`,
+      onSubmit: () => run() });
+  }
+  const setP = (i, t, cls) => { const el = document.getElementById('fnp' + i); if (el) { el.textContent = t || ''; el.className = 'fnp small ' + (cls || 'muted'); } };
+  async function run() {
+    if (F.busy) return false; F.busy = true; const pid = F.pid; let done = 0, fail = 0, noOrig = 0;
+    const btn = document.querySelector('#mform button[type=submit]'); if (btn) btn.disabled = true;
+    for (let i = 0; i < F.plan.length; i++) {
+      const x = F.plan[i]; if (x.ok) continue;
+      try { const r = await one(x, pid, t => setP(i, t)); x.ok = true; done++; if (!r.orig) noOrig++; setP(i, r.orig ? L(`اترفعت ✓ — الأصل على ${r.orig.store === 'r2' ? 'R2' : L('التخزين الحالي', 'the current storage')}`, `Uploaded ✓ — original on ${r.orig.store === 'r2' ? 'R2' : 'the current storage'}`) : L('اترفعت ✓ — نسخة العرض بس (الأصل أكبر من 50 ميجا ومفيش R2)', 'Uploaded ✓ — display copy only (the original is over 50 MB and R2 is not set up)'), 'ok'); }
+      catch (e) { console.warn('finals', e); fail++; setP(i, String(e && e.message) === 'decode' ? L('الصيغة دي مش بتتفتح في المتصفح — صدّرها JPG أو PNG', 'This format does not open in the browser — export it as JPG or PNG') : L('ماترفعتش — جرّب تاني', 'Not uploaded — try again'), 'err'); }
+    }
+    F.busy = false; if (btn) btn.disabled = false; if (typeof rerender === 'function') rerender();
+    if (fail) { toast(L(`اترفع ${done} ومعرفتش أرفع ${fail} — اضغط «ارفع» تاني للباقي`, `${done} uploaded, ${fail} failed — press «Upload» again for the rest`), 'err'); return false; }
+    toast(noOrig ? L(`اترفعوا ${done} — ${noOrig} من غير الأصل (فعّل R2 للملفات الكبيرة)`, `${done} uploaded — ${noOrig} without the original (set up R2 for big files)`) : L(`اترفعوا ${done} بجودة عالية ✓`, `${done} uploaded at full quality ✓`));
+    return true;
+  }
+  async function one(x, pid, say) {
+    const f = x.file; say(L('بيجهّز النسخ…', 'Preparing the copies…'));
+    const im = await decode(f);
+    let thumb, disp;
+    try { const pc = scaled(im, PREV); thumb = pc.toDataURL('image/jpeg', 0.8); disp = await toBlob(scaled(im, DISP), 0.88); } finally { im.close(); }
+    if (!disp || !disp.blob) throw new Error('encode');
+    say(L('بيرفع نسخة العرض…', 'Uploading the display copy…'));
+    const d = await Files.put(disp.blob, disp.type);
+    say(L('بيرفع الأصل…', 'Uploading the original…'));
+    const orig = await putOriginal(f, pid, p => say(L(`بيرفع الأصل ${Math.round(p * 100)}%`, `Uploading the original ${Math.round(p * 100)}%`)));
+    const now = nowISO(); const sess = S.session || {};
+    const base = { name: f.name, kind: 'render', mime: disp.type, store: 'sb', ref: d.ref, enc: null, size: f.size, thumb, w: im.w, h: im.h,
+      disp: { ref: d.ref, size: disp.blob.size, w: disp.w, h: disp.h, mime: disp.type }, orig: orig || null, rev: 'Final', projectId: pid, byId: me() || null, byName: sess.name || '', updatedAt: now };
+    if (x.match && byId('files', x.match)) {
+      const old = byId('files', x.match);
+      const v = { name: old.name, store: old.store || '', ref: old.ref || null, thumb: old.store === 'thumb' ? (old.thumb || null) : null, size: old.size || 0, rev: old.rev || '', orig: old.orig || null, at: old.updatedAt || old.createdAt || '' };
+      await Store.update('files', old.id, Object.assign(base, { vers: (old.vers || []).concat([v]).slice(-5) }));
+    } else {
+      await Store.save('files', Object.assign({ id: uid(), note: '', createdAt: now, orderId: null, productId: null }, base), { silent: true });
+    }
+    return { orig };
+  }
+
+  /* ---------- the original: download from the viewer / «Download» ---------- */
+  async function origUrl(f) {
+    const o = f && f.orig; if (!o) return null;
+    if (o.store === 'r2' && window.nfFiles) return window.nfFiles.url(o.path);
+    if (o.store === 'sb') return Files.url({ store: 'sb', ref: o.ref });
+    return null;
+  }
+  ACTIONS.fileOrig = async id => {
+    const f = byId('files', id); if (!f || !f.orig) return;
+    toast(L('بيجهّز الأصل…', 'Preparing the original…'));
+    try {
+      const u = await origUrl(f); if (!u) throw new Error('url');
+      const phone = (() => { try { return matchMedia('(pointer:coarse)').matches; } catch (e) { return false; } })();
+      if (phone || (f.orig.size || 0) > 150 * 1048576) { window.open(u, '_blank', 'noopener'); return; }
+      const r = await fetch(u); if (!r.ok) throw new Error('fetch'); const b = await r.blob();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = f.orig.name || f.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    } catch (e) { console.warn('orig', e); toast(L('مقدرتش أجيب الأصل — جرّب تاني', 'Could not get the original — try again'), 'err'); }
+  };
+  if (typeof fileActs === 'function') fileActs = (base => function (f, o) {
+    const h = base.apply(this, arguments); if (!f || !f.orig) return h;
+    return h + `<button class="btn sm ghost" data-action="fileOrig" data-arg="${esc(f.id)}">${icon('down')}<span>${esc(L('الأصل', 'Original'))} · <bdi dir="ltr">${MB(f.orig.size || f.size || 0)}</bdi></span></button>`;
+  })(fileActs);
+  if (typeof fileTile === 'function') fileTile = (base => function (f) {
+    const h = base.apply(this, arguments); if (!f || !(f.disp || f.orig)) return h;
+    return h.replace('<div class="fthumb">', `<div class="fthumb"><span class="fhq" title="${esc(f.w && f.h ? `${f.w}×${f.h}` : '')}">HQ</span>`);
+  })(fileTile);
+
+  /* ---------- the files card on the studio project page ---------- */
+  window.nfFinals = {
+    can,
+    btn: pid => (can(pid) ? `<button type="button" class="btn sm" data-action="finalsPick" data-arg="${esc(pid)}">${icon('plus')}${esc(L('ارفع الفاينال', 'Upload finals'))}</button>` : ''),
+    _F: F, _run: run, _plan: plan, _code: code, _norm: norm
+  };
+
+  const css = document.createElement('style'); css.textContent = `
+.fhq{position:absolute;top:6px;inset-inline-start:6px;z-index:1;font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:6px;background:rgba(11,13,16,.72);color:#fff}
+.fthumb{position:relative}
+.fnm .fnhint{margin-bottom:10px}.fnwarn{background:var(--warn-bg,#fff4d6);color:var(--warn-ink,#9a6700);border-radius:10px;padding:8px 10px;margin-bottom:10px}
+.fnl{display:flex;flex-direction:column;gap:8px;max-height:56vh;overflow:auto}
+.fnr{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.fnn{display:flex;flex-direction:column;min-width:0}.fnn b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fns{font-size:11px;border-radius:999px;padding:2px 8px;border:1px solid var(--line)}.fns.rep{color:var(--accent)}.fns.new{color:var(--muted)}
+.fnp{grid-column:1/-1;min-height:0}.fnp.ok{color:var(--ok,#2a9d5c)}.fnp.err{color:var(--crit-ink,#c0392b)}`;
   document.head.appendChild(css);
 })();
 </script>
