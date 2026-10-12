@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1626-d60a1b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1649-52d9cd";</script>
 
 <script>
 'use strict';
@@ -15950,18 +15950,25 @@ ACTIONS.fundAsk = wid => {
       toast('الطلب اتبعت للمالك'); rerender();
     } });
 };
+/* v7.56 (Mahmoud, 12 Oct: «I approved the request here — shouldn't it come to me in the amounts to transfer?»): a custody request
+   approved from the request itself (no transfer made with it) is «approved — waiting for the transfer» (toPay) and stays in «to transfer»
+   until the owner (or a pay batch) transfers it. The money reaches the custody only with the transfer. */
+function fundToPay(r) { return !!r && r.type === 'fund' && !r.paidAt && (r.status === 'pending' || (r.status === 'approved' && r.toPay === true)); }
+const fundXfer = id => { const m = byId('money', `fund_${id}`); return m && m.type === 'xfer' ? m : null; };
 /* owner pays a custody request */
 ACTIONS.fundPay = async id => {
-  const r = byId('requests', id); if (!r || !isAdmin() || r.status !== 'pending') return; const w = walletOf(r.walletId); if (!w) return;
+  const r = byId('requests', id); if (!r || !isAdmin() || !fundToPay(r)) return; const w = walletOf(r.walletId); if (!w) return;
   const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
   if (!res) return;
   await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
+  if (r.status === 'approved') { await Store.update('requests', r.id, { toPay: false, paidAt: nowISO(), paidByName: S.session?.name || '' }); await applyRequestEffects(byId('requests', r.id)); rerender(); return; }
   await decideRequest(r.id, 'approved', res.note || '');
 };
 applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   if (r && r.type === 'fund') {
     const r1 = byId('requests', r.id) || r; const wl = walletOf(r1.walletId); if (!wl) return; const xid = `fund_${r1.id}`;
-    if (!byId('money', xid)) await saveXfer({ id: xid, from: r1.payFrom || 'personal', to: wl.id, amount: +r1.paidAmount || +r1.amount || 0, reqId: r1.id, cat: r1.cat, note: r1.reason || '', thumb: r1.payThumb || null, fileIds: r1.payFileIds || [] });
+    if (!r1.payFrom && !r1.pbId && !r1.paidAt && !fundXfer(r1.id)) { await Store.update('requests', r1.id, { toPay: true }); return; }
+    if (!fundXfer(r1.id)) await saveXfer({ id: xid, from: r1.payFrom || 'personal', to: wl.id, amount: +r1.paidAmount || +r1.amount || 0, reqId: r1.id, cat: r1.cat, note: r1.reason || '', thumb: r1.payThumb || null, fileIds: r1.payFileIds || [] });
     const t = byId('tasks', `fund_${r1.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '' });
     notifyHolder(wl, `اتحوّل ${fmtMoney(+r1.paidAmount || +r1.amount)} ${CUR()} لعهدتك`, `${wl.name} — ${catLabel(r1.cat)}. سجّل المصروف بصورة الإيصال من «بوابتي ← عهدتي».`);
     return;
@@ -15973,7 +15980,7 @@ applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   }
   return base(r, w, patch, opts);
 })(applyRequestEffects);
-reqDesc = (base => r => { if (r && r.type === 'fund') { const w = walletOf(r.walletId); return `طلب ${fmtMoney(r.amount)} ${CUR()} لعهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`; } if (r && r.type === 'opex') return `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''} (${fmtMonth(r.month)}): ${fmtMoney(r.amount)} ${CUR()}`; return base(r); })(reqDesc);
+reqDesc = (base => r => { if (r && r.type === 'fund') { const w = walletOf(r.walletId); return `طلب ${fmtMoney(r.amount)} ${CUR()} لعهدة ${w ? w.name : ''} — ${catLabel(r.cat)}${r.status === 'approved' && r.toPay && !r.paidAt ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? ' — waiting for the transfer' : ' — مستني التحويل') : ''}`; } if (r && r.type === 'opex') return `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''} (${fmtMonth(r.month)}): ${fmtMoney(r.amount)} ${CUR()}`; return base(r); })(reqDesc);
 /* owner transfers to a wallet without a request / takes back the rest */
 ACTIONS.walletFund = async wid => {
   if (!isAdmin()) return; const w = walletOf(wid); if (!w) return;
@@ -16097,7 +16104,7 @@ canSee = (base => view => (view === 'money' ? (moneyOn() && !!S.session && (isAd
 function moneyDue() {
   if (!moneyOn()) return []; const out = [];
   list('purchases').filter(p => p.status === 'transfer').forEach(p => out.push({ kind: 'po', id: p.id, label: `أمر شراء ${p.number} — ${p.supplier || ''}`, sub: 'معتمد من الحسابات', amount: poPayable(p), action: 'poTransfer', href: `purchases/${p.id}` }));
-  list('requests').filter(r => r.type === 'fund' && r.status === 'pending').forEach(r => { const w = walletOf(r.walletId); out.push({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: `${r.requesterName || ''}: ${r.reason || ''}`, amount: +r.amount || 0, action: 'fundPay' }); });
+  list('requests').filter(fundToPay).forEach(r => { const w = walletOf(r.walletId); out.push({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: `${r.status === 'approved' ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Approved · ' : 'موافق عليه · ') : ''}${r.requesterName || ''}: ${r.reason || ''}`, amount: +r.amount || 0, action: 'fundPay' }); });
   list('requests').filter(r => r.type === 'opex' && r.status === 'approved' && !r.paidAt).forEach(r => out.push({ kind: 'opex', id: r.id, label: `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, sub: `${fmtMonth(r.month)} · ${r.payee || ''}`, amount: +r.amount || 0, action: 'opexPay' }));
   return out;
 }
@@ -16150,7 +16157,7 @@ function vWallet(id) {
 }
 EXTRA_VIEWS.money = r => vMoney(r);
 /* «بوابتي»: my custody card */
-vMe = (base => function () { const html = base.apply(this, arguments); if (!moneyOn()) return html; const ids = myWalletIds(); if (!ids.length) return html; const pend = list('requests').filter(r => r.type === 'fund' && r.status === 'pending' && ids.includes(r.walletId));
+vMe = (base => function () { const html = base.apply(this, arguments); if (!moneyOn()) return html; const ids = myWalletIds(); if (!ids.length) return html; const pend = list('requests').filter(r => fundToPay(r) && ids.includes(r.walletId));
   return html + `<div class="card" id="mywallet"><div class="cardhead"><h3>${icon('money')}عهدتي</h3><div class="grow"></div><button class="btn sm" data-action="walletSpend">${icon('plus')}مصروف</button><button class="btn sm p" data-action="fundAsk">طلب مبلغ</button></div>
     <div class="grid g${Math.min(ids.length, 3)}" style="gap:10px;margin-bottom:8px">${ids.map(id => `<div class="kpi acc" data-action="go" data-arg="money/${id}"><span class="stripe"></span><div class="l">${esc(walletOf(id).name)}</div><div class="v num">${fmtMoney(walletBalance(id).balance)}</div></div>`).join('')}</div>
     ${pend.length ? `<div class="banner warn">${icon('alert')}<span>${pend.length} طلب مبلغ مستني تحويل المالك (${fmtMoney(sum(pend, r => +r.amount || 0))} ${CUR()})</span></div>` : ''}${walletMovesTable(ids[0], 8)}</div>`; })(vMe);
@@ -16158,7 +16165,7 @@ vMe = (base => function () { const html = base.apply(this, arguments); if (!mone
 vVehicle = (base => function (id) { const h = base.apply(this, arguments); if (!moneyOn() || !(isAdmin() || ['manager', 'fleet', 'hr', 'acc'].includes(role()))) return h; const ex = sortBy(list('expenses').filter(e => e.vehicleId === id), e => e.date || '', true); if (!ex.length) return h;
   return h + `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>مصروفات العربية (كاش / زيت / صيانة)</h3><span class="badge">${fmtMoney(sum(ex, e => +e.amount || 0))} ${CUR()}</span></div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من</th><th class="n">المبلغ</th></tr></thead><tbody>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(catLabel(e.cat))}${e.note ? `<div class="tiny muted">${esc(e.note)}</div>` : ''}</td><td class="small">${esc(acctLabel(e.account))}</td><td class="n">${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody></table></div></div>`; })(vVehicle);
 document.addEventListener('nf:ready', () => setTimeout(() => { try { quotaEnsure(monthOf(todayISO())); } catch (e) { /* ignore */ } }, 4000));
-Object.assign(window, { walletBalance, supplierWallet, moneyDue, acctPurchaseOut });
+Object.assign(window, { walletBalance, supplierWallet, moneyDue, acctPurchaseOut, fundToPay });
 /* =====================================================================
    v4.47 — (المصنع) مخزن المنتجات الجاهزة + التسليمات
    · الأصناف من كتالوج المنتجات (المنتج + اللون/الموديل) — رصيد، محجوز لعملاء، متاح، حد أدنى.
@@ -40026,6 +40033,9 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
    the dashboard (studio: home + open the door) is its own row at the top, and each system's pages are regrouped so a module
    holds pages that belong together (a «Communication» module for tasks / chats / calls / assistant, cameras and the house rules
    under Management, …). Pages only move: whoever saw a page still sees exactly that page and nothing more.
+   v7.56 (Mahmoud, 12 Oct, on the studio «Projects» module: «some things here should not be in the same module»): «Meetings» moves
+   to «Communication» in the three systems, and the studio's drawing tools (Concept Drawing, Studio Boards) are a «Design» module
+   of their own right after «Projects» (Projects = projects and stages, projects & tasks, operations board). Pages only move.
    ===================================================================== */
 (function () {
   if (typeof navHTML !== 'function') return;
@@ -40039,19 +40049,19 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
   const LAYOUTS = {
     factory: {
       top: ['dashboard'],
-      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'calls', 'ai'], before: 'workers' }],
+      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'calls', 'meetings', 'ai'], before: 'workers' }],
       into: [{ near: 'settings', ids: ['reports', 'org', 'cctv', 'audit', 'regulation', 'settings'] }],
       rename: [{ near: 'orders', ar: 'التشغيل والإنتاج', en: 'Production' }],
     },
     studioz: {
       top: ['dashboard', 'door'],
-      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'ai'], before: 'clients' }],
-      into: [{ near: 'projects', ids: ['projects', 'pm', 'concept', 'studioos', 'studio'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
+      add: [{ key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }],
+      into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
       rename: [],
     },
     construction: {
       top: ['dashboard'],
-      add: [{ key: 'supply', ar: 'التوريد', en: 'Supply', ids: ['purchases', 'csubs'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'ai'], before: 'workers' }],
+      add: [{ key: 'supply', ar: 'التوريد', en: 'Supply', ids: ['purchases', 'csubs'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'meetings', 'ai'], before: 'workers' }],
       into: [{ near: 'settings', ids: ['reports', 'org', 'audit', 'regulation', 'settings'] }],
       rename: [{ near: 'clients', ar: 'العملاء', en: 'Clients' }],
     },
@@ -42694,7 +42704,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     }
     const r = byId('requests', it.id);
     if (it.k === 'opex') return r ? !!r.paidAt : list('expenses').some(e => e.reqId === it.id);
-    if (it.k === 'fund') return r ? r.status !== 'pending' : false;
+    if (it.k === 'fund') return r ? !(typeof fundToPay === 'function' ? fundToPay(r) : r.status === 'pending') : false;
     return false;
   }
   const unpaid = b => (b.items || []).filter(it => !itemPaid(it, b));
@@ -42909,8 +42919,8 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
           await Store.update('money', b.id, { status: 'funded', fundedAt: now, fundedAmount: amt, fundedFrom: d.from || 'personal', fundedByName: (S.session && S.session.name) || '', fundThumb: a.thumb || null, fundRef: o.ref || null, fundProofUrl: o.proofUrl || null }, { silent: true });
           /* v7.53: a custody request whose money lands in the very custody this batch just funded is settled here — there is no second
              transfer to make (PB-26-001: the meal requests for Bahaa's custody stayed «at the owner» after he paid them). No payFrom → no extra transfer record. */
-          try { for (const it of unpaid(b1)) { if (it.k !== 'fund') continue; const r = byId('requests', it.id); if (!r || r.status !== 'pending' || String(r.walletId || it.walletId || '') !== String(b.walletId || '')) continue;
-            await Store.update('requests', r.id, { status: 'approved', decidedAt: now, decidedByName: (S.session && S.session.name) || '', paidAt: now, paidAmount: it.amount, pbId: b.id, paidVia: `pbf_${b.id}` });
+          try { for (const it of unpaid(b1)) { if (it.k !== 'fund') continue; const r = byId('requests', it.id); if (!r || !fundToPay(r) || String(r.walletId || it.walletId || '') !== String(b.walletId || '')) continue;
+            await Store.update('requests', r.id, { toPay: false, status: 'approved', decidedAt: now, decidedByName: (S.session && S.session.name) || '', paidAt: now, paidAmount: it.amount, pbId: b.id, paidVia: `pbf_${b.id}` });
             const t = byId('tasks', `fund_${r.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: (S.session && S.session.name) || '' }, { silent: true }); } } catch (e) { console.warn('pb fund settle', e); }
           if (!unpaid(byId('money', b.id) || b1).length) { try { await Store.update('money', b.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* the reconcile closes it */ } try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ } return 'settled'; }
           try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ }
@@ -42964,7 +42974,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         await Store.update('requests', it.id, { paidAt: now, paidFrom: w.id, paidAmount: res.amount, paidByName: me.name || '', pbId: b.id });
         try { const t = byId('tasks', `opex_${it.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }, { silent: true }); } catch (e) { /* ignore */ }
       } else if (it.k === 'fund') {
-        await Store.update('requests', it.id, { status: 'approved', decidedAt: now, decidedByName: me.name || '', payFrom: w.id, paidAmount: res.amount, payThumb: res.thumb || null, payFileIds: res.fileIds || [], payNote: res.note || '', paidAt: now, pbId: b.id });
+        await Store.update('requests', it.id, { toPay: false, status: 'approved', decidedAt: now, decidedByName: me.name || '', payFrom: w.id, paidAmount: res.amount, payThumb: res.thumb || null, payFileIds: res.fileIds || [], payNote: res.note || '', paidAt: now, pbId: b.id });
         if (canMoneyWrite()) await reconcileFund(byId('requests', it.id));
         try { const t = byId('tasks', `fund_${it.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }, { silent: true }); } catch (e) { /* ignore */ }
         const tw = walletOf((req && req.walletId) || it.walletId); if (tw && typeof notifyHolder === 'function') notifyHolder(tw, L('اتحوّل لعهدتك', 'Money reached your custody'), `${tw.name} — ${catLabel((req && req.cat) || it.cat)}`);
@@ -42976,14 +42986,14 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   };
   /* a custody request paid by Bahaa: the transfer into the other custody is written by an owner / Saeed / Ahmed session (Bahaa can not write money records) */
   async function reconcileFund(r) {
-    if (!r || r.type !== 'fund' || r.status !== 'approved' || !r.pbId || !r.payFrom || byId('money', `fund_${r.id}`)) return;
+    if (!r || r.type !== 'fund' || r.status !== 'approved' || !r.pbId || !r.payFrom || (byId('money', `fund_${r.id}`) || {}).type === 'xfer') return;
     const to = walletOf(r.walletId); if (!to) return;
     await saveXfer({ id: `fund_${r.id}`, from: r.payFrom, to: to.id, amount: +r.paidAmount || +r.amount || 0, reqId: r.id, cat: r.cat, note: `${r.reason || ''} · ${(byId('money', r.pbId) || {}).code || ''}`, thumb: r.payThumb || null, fileIds: r.payFileIds || [], pbId: r.pbId });
   }
   let recAt = 0;
   function reconcile() {
     if (!S.session || !canMoneyWrite() || !writable() || (S.db && !(S.loaded && S.loaded.money && S.loaded.requests))) return;
-    list('requests').filter(r => r.type === 'fund' && r.status === 'approved' && r.pbId && r.payFrom && !byId('money', `fund_${r.id}`)).slice(0, 5).forEach(r => { reconcileFund(r).catch(() => { }); });
+    list('requests').filter(r => r.type === 'fund' && r.status === 'approved' && r.pbId && r.payFrom && (byId('money', `fund_${r.id}`) || {}).type !== 'xfer').slice(0, 5).forEach(r => { reconcileFund(r).catch(() => { }); });
     batches().filter(live).filter(b => !unpaid(b).length).slice(0, 5).forEach(b => { Store.update('money', b.id, { status: 'done', doneAt: nowISO() }, { silent: true }).catch(() => { }); });
   }
   RENDER_HOOKS.push(() => { try { if (Date.now() - recAt < 20000) return; recAt = Date.now(); reconcile(); } catch (e) { /* ignore */ } });
