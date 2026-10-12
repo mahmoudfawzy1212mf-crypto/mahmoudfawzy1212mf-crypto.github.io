@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-1213-206d22";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1455-f12456";</script>
 
 <script>
 'use strict';
@@ -11611,7 +11611,7 @@ function nfToast(title, sub, href) { const old = document.querySelector('.nftoas
 RENDER_HOOKS.push(() => {
   if (!S.session) { _notifPrimed = false; _lastMsgSeen = {}; return; }
   const me = myIds(); const cur = {}; const fresh = [];
-  list('tasks').forEach(t => { const th = taskThread(t); if (!th.length) return; const party = taskMine(t) || taskParties(t).some(p => me.includes(p.id)); if (!party) return; const last = th[th.length - 1]; cur[t.id] = last.id; if (_notifPrimed && _lastMsgSeen[t.id] !== last.id && !me.includes(last.by) && !(location.hash === `#/tasks/${t.id}` && !document.hidden)) fresh.push({ t, last }); });
+  list('tasks').forEach(t => { const th = taskThread(t); if (!th.length) return; const party = taskMine(t) || taskParties(t).some(p => me.includes(p.id)); if (!party) return; const last = th.slice().reverse().find(m => !m.sys && m.byName !== 'السيستم'); if (!last) return; cur[t.id] = last.id; /* v7.53: system notes (e.g. «not seen — escalated») never pop up as chat */ if (_notifPrimed && _lastMsgSeen[t.id] !== last.id && !me.includes(last.by) && !(location.hash === `#/tasks/${t.id}` && !document.hidden)) fresh.push({ t, last }); });
   Object.assign(_lastMsgSeen, cur); _notifPrimed = true; // v4.71: merge (a task that briefly drops out of the list and comes back is not a new message)
   /* v4.71: each message pops up once only (remembered on this device) and only if it's recent */
   let shown = {}; try { shown = JSON.parse(localStorage.getItem('nf.toasted') || '{}'); } catch (e) { /* ignore */ }
@@ -12732,7 +12732,7 @@ function requestForm(wid, forKiosk) {
   const extra = `${info}<label class="check full" data-rq="advance"><input type="checkbox" name="overLimit" id="f-overLimit"> طلب استثناء — سلفة أكبر من الحد (اكتب السبب وعدد الشهور)</label>`;
   return html.replace(/(<div class="field" data-rq="advance"><label>عدد أشهر السداد<\/label>[\s\S]*?<\/div>)/, '$1' + extra);
 }
-function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — <b>فوق الحد</b> (الحد ${fmtMoney(r.limit || 0)})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
+function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — فوق الحد (الحد ${fmtMoney(r.limit || 0)})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
 function reqDesc(r) { return reqDescAdv(r) || reqDescCycle(r); }
 /* absence settlement: head raises it from the worker page; both head + manager approve */
 ACTIONS.absSettle = id => {
@@ -13066,7 +13066,7 @@ async function escalateTick() {
   const now = Date.now(); const pol = +(S.settings.policy && S.settings.policy.escalateMinutes) || 10;
   for (const t of list('tasks')) {
     if (!IMPORTANT(t) || !['open', 'doing'].includes(t.status) || !t.assigneeId || t.kind === 'update') continue;
-    if ((t.seenAt || {})[t.assigneeId]) continue; const lvl = (t.escalation && t.escalation.level) || 0; if (lvl >= 3) continue;
+    if ((t.seenAt || {})[t.assigneeId]) continue; const lvl = (t.escalation && t.escalation.level) || 0; if (lvl >= (t.finConf ? 3 : 2)) continue; /* v7.53 (Mahmoud): «not seen» stops at the factory manager — it never reaches the owner (only financial confirmations do) */
     const since = new Date(lvl ? t.escalation.at : (t.assignedAt || t.createdAt || 0)).getTime(); if (!since || now - since < pol * 60000) continue;
     const next = lvl + 1; const tg = escalationTargets(t, next); const note = `المكلَّف ${assigneeName(t.assigneeId)} لم يشاهد المهمة خلال ${pol} دقيقة — صُعِّدت إلى ${tg.label}`;
     try { await Store.update('tasks', t.id, { escalation: { level: next, at: nowISO(), note }, thread: taskThread(t).concat([{ id: uid(), at: nowISO(), by: null, byName: 'السيستم', sys: true, text: `⚠️ ${note}` }]) }, { silent: true }); } catch (e) { continue; }
@@ -13077,7 +13077,7 @@ async function escalateTick() {
 setInterval(escalateTick, 60000);
 /* remember when the assignee changed (escalation clock starts then) */
 Store.save = (base => async function (col, doc, opts) { if (col === 'tasks' && doc && doc.assigneeId) { const was = byId('tasks', doc.id); if (!was || was.assigneeId !== doc.assigneeId) { doc.assignedAt = nowISO(); doc.seenAt = Object.assign({}, doc.seenAt || {}); delete doc.seenAt[doc.assigneeId]; doc.escalation = null; } } return base.call(this, col, doc, opts); })(Store.save);
-EXTRA_SETTINGS.escalation = { label: 'تصعيد المهام المهمة', render: () => `<form class="card" id="escform"><h3>تصعيد المهام المهمة</h3><p class="small ink2">المهمة «مهمة» أو «عاجلة» لو المكلَّف ما فتحهاش خلال المدة دي تتصعّد: المدير المباشر/رئيس القسم ← مدير المصنع ← المالك (نفس المدة بين كل خطوة).</p><div class="form">${field('الدقائق', inp('escalateMinutes', (S.settings.policy && S.settings.policy.escalateMinutes) || 10, 'type="number" min="1"'))}</div><div class="row" style="margin-top:12px"><button type="submit" class="btn p">حفظ</button></div></form>` };
+EXTRA_SETTINGS.escalation = { label: 'تصعيد المهام المهمة', render: () => `<form class="card" id="escform"><h3>تصعيد المهام المهمة</h3><p class="small ink2">المهمة «مهمة» أو «عاجلة» لو المكلَّف ما فتحهاش خلال المدة دي تتصعّد: المدير المباشر/رئيس القسم ← مدير المصنع (نفس المدة بين كل خطوة). مابتوصلش للمالك.</p><div class="form">${field('الدقائق', inp('escalateMinutes', (S.settings.policy && S.settings.policy.escalateMinutes) || 10, 'type="number" min="1"'))}</div><div class="row" style="margin-top:12px"><button type="submit" class="btn p">حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'escform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { escalateMinutes: num(d.escalateMinutes) || 10 }) })); toast('تم الحفظ'); });
 /* =====================================================================
    v4.12 — الموافقات من الموبايل (المصنع):
@@ -25201,14 +25201,26 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   /* ------------ batches (v4.97) ------------ */
   const bTotal = b => Math.round(sum((b.items || []).map(i => byId('advpay', i)).filter(Boolean), p => +p.amount || 0) * 100) / 100;
   function nextBatchCode() { const yy = todayISO().slice(2, 4); const pre = `SB-${yy}-`; const n = list('advbatch').reduce((m, b) => { const c = String(b.code || ''); if (!c.startsWith(pre)) return m; const k = parseInt(c.slice(pre.length), 10); return isNaN(k) ? m : Math.max(m, k); }, 0) + 1; return pre + String(n).padStart(3, '0'); }
+  /* v7.53 (PIN 12 Oct — Mahmoud: where is the grouping, make it automatic): there is no «open» batch waiting for Saeed to send any more.
+     Every approved advance joins the one batch already at the owner (status «sent») until he pays it; a batch whose transfer
+     is being checked (lockAt, 15 min) or that is paid takes no more — the next advance starts a new one. Task + push without amounts. */
+  const locked = b => !!(b && b.lockAt && Date.now() - Date.parse(b.lockAt) < 15 * 60000);
   async function addToOpenBatch(apId) {
-    let b = list('advbatch').find(x => x.status === 'open');
-    if (!b) b = { id: 'sb_' + uid(), code: nextBatchCode(), status: 'open', items: [], total: 0, createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' };
+    let b = list('advbatch').find(x => x.status === 'sent' && !locked(x)) || list('advbatch').find(x => x.status === 'open');
+    const fresh = !b;
+    if (!b) b = { id: 'sb_' + uid(), code: nextBatchCode(), status: 'sent', items: [], total: 0, createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' };
     const items = Array.from(new Set((b.items || []).concat([apId])));
     const total = Math.round(sum(items.map(i => byId('advpay', i)).filter(Boolean), p => +p.amount || 0) * 100) / 100;
-    await Store.save('advbatch', Object.assign({}, b, { items, total, updatedAt: nowISO() }), { silent: true });
+    const auto = { status: 'sent', sentAt: b.sentAt || nowISO(), sentBy: b.sentBy || null, sentByName: b.sentByName || L('السيستم (تلقائي)', 'The system (automatic)'), auto: true };
+    await Store.save('advbatch', Object.assign({}, b, auto, { items, total, updatedAt: nowISO() }), { silent: true });
     const ap = byId('advpay', apId); if (ap) { try { await Store.save('advpay', Object.assign({}, ap, { batchId: b.id }), { silent: true }); } catch (e) { /* ignore */ } }
+    try {
+      const names = items.map(i => byId('advpay', i)).filter(Boolean).map(p => p.workerName || '').filter(Boolean);
+      await Store.save('tasks', Object.assign({}, byId('tasks', `abt_${b.id}`) || {}, { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — ${items.length} سلفة`, desc: `${names.join('، ')}\nحوّل المجموع مرة واحدة لبهاء من «تحويل السلف» أو «فلوس مستنياك» — والدفعة بتفضل تلم السلف الجديدة لحد ما تحوّل.`, link: `/#/go/ab/${b.id}`, toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: (byId('tasks', `abt_${b.id}`) || {}).createdAt || nowISO(), updatedAt: nowISO() }), { silent: true });
+      if (!isAdmin()) pushTo(['role:admin'], `${fresh ? 'دفعة سلف جديدة' : 'سلفة دخلت دفعة السلف'} ${b.code}${ap ? ' — ' + (ap.workerName || '') : ''}`.slice(0, 100), `${items.length} سلفة في الدفعة — مستنية تحويلك`, b.id);
+    } catch (e) { /* ignore */ }
   }
+  window.nfAdvLock = async (id, on) => { try { await Store.update('advbatch', id, { lockAt: on ? nowISO() : null }, { silent: true }); } catch (e) { /* offline: the server still checks the amount */ } };
   window.nfAddToOpenBatch = addToOpenBatch;
   const pushTo = (to, title, body, bid) => { try { if (typeof pushSend === 'function') pushSend(to, title, body, bid ? `/#/go/ab/${bid}` : '/#/advpay', bid ? 'advbatch-' + bid : 'advbatch'); } catch (e) { /* ignore */ } };   /* v7.52: the push opens that batch */
   /* v7.42: one helper tells the payer the money arrived (task + push, no amounts) — used after the photo AND after manual approve */
@@ -25232,23 +25244,23 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const total = Math.round(sum(items, p => +p.amount || 0) * 100) / 100; const names = items.map(p => `${p.workerName} ${fmtMoney(p.amount)}`).join('، ');
     if (!(await confirmDlg(`تبعت دفعة ${b.code} لمحمود؟ ${items.length} سلفة — المجموع ${fmtMoney(total)} ${CUR()}`, 'ابعت', false))) return;
     await Store.save('advbatch', Object.assign({}, b, { items: items.map(p => p.id), total, status: 'sent', sentAt: nowISO(), sentBy: S.session?.id || null, sentByName: S.session?.name || '' }));
-    try { await Store.save('tasks', { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — المجموع ${fmtMoney(total)} ${CUR()}`, desc: `${items.length} سلفة: ${names}\nحوّل المجموع مرة واحدة لبهاء من «تحويل السلف» ← الدفعات`, link: '/#/advpay', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
-    pushTo(['role:admin'], `${S.session?.name || 'سعيد'} وافق على سلف — المجموع ${fmtMoney(total)} ${CUR()}`.slice(0, 100), names.slice(0, 300), b.id);
+    try { await Store.save('tasks', { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — ${items.length} سلفة`, desc: `${items.map(p => p.workerName || '').join('، ')}\nحوّل المجموع مرة واحدة لبهاء من «تحويل السلف» ← الدفعات`, link: '/#/advpay', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    pushTo(['role:admin'], `${S.session?.name || 'سعيد'} وافق على سلف — ${items.length} سلفة`.slice(0, 100), items.map(p => p.workerName || '').join('، ').slice(0, 300), b.id);
     toast('اتبعتت الدفعة لمحمود');
   };
   document.addEventListener('change', async e => {
     const inp = e.target.closest('[data-abup]'); if (!inp || !inp.files || !inp.files[0]) return; const id = inp.dataset.abup; const b = byId('advbatch', id); if (!b) return;
     upBusy(L('بيجهّز الصورة…', 'Preparing the picture…'));
     try {
-      const image = await shrink(inp.files[0]);
+      const image = await shrink(inp.files[0]); await window.nfAdvLock(id, true);
       const r = window.nfTrf ? await nfTrf.call({ action: 'fund', id, image }, { ctx: { kind: 'abfund', id }, onStep: upBusy }) : (upBusy(L('بيرفع الصورة ويتأكد من التحويل…', 'Uploading the picture and checking the transfer…')), await callFn({ action: 'fund', id, image }));
       upBusy('');
       if (r && (r.queued || r.pending)) { nfTrf.notice(r); return; }
       if (r && r.status === 'funded') {
         await notifyFunded(b, r.to, r.ref);
         openModal({ title: `اتبعتت لـ${r.toName || 'المحوِّل'} ✓`, submitLabel: 'تمام', body: `<div class="form"><div class="full">التحويل مطابق: <b>${fmtMoney(r.amount)} ${CUR()}</b> لـ <b>${esc(r.toName || '')}</b> — رقم العملية <b class="ltr">${esc(r.ref)}</b>.</div><div class="full banner info small" style="margin:0">${icon('send')}<span>وصله إشعار إن التحويل تم، وهيحوّل لكل واحد على رقمه ويرفع صورة تحويله. هتتابع مين اتحوّل له من كارت الدفعة.</span></div></div>`, onSubmit: () => { } });
-      } else openModal({ title: 'التحويل مش مطابق للدفعة', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">تقدر ترفع صورة تانية أو تعتمد يدوي من كارت الدفعة.</div></div>`, onSubmit: () => { } });
-    } catch (err) { upBusy(''); toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { upBusy(''); inp.value = ''; }
+      } else { window.nfAdvLock(id, false); openModal({ title: 'التحويل مش مطابق للدفعة', submitLabel: 'تمام', body: `<div class="form"><div class="full banner warn">${((r && r.issues) || ['مش واضح']).map(esc).join('<br>')}</div><div class="full small muted">تقدر ترفع صورة تانية أو تعتمد يدوي من كارت الدفعة.</div></div>`, onSubmit: () => { } }); }
+    } catch (err) { upBusy(''); window.nfAdvLock(id, false); toast('مقدرتش أقرأ الصورة: ' + (err.message || err), 'err'); } finally { upBusy(''); inp.value = ''; }
   });
   window.nfAbFunded = (b, to, ref) => notifyFunded(b, to, ref);
   if (window.nfTrf) nfTrf.on('abfund', async (r, ctx) => { const b = byId('advbatch', ctx.id); if (!b) return; if (r && r.status === 'funded') { await notifyFunded(b, r.to, r.ref); toast(L(`دفعة السلف ${b.code || ''} اتبعتت لـ${r.toName || ''} ✓`, `Advance batch ${b.code || ''} sent to ${r.toName || ''} ✓`)); } else toast(L(`تحويل دفعة السلف ${b.code || ''} مش مطابق — افتح الدفعة`, `The transfer for advance batch ${b.code || ''} does not match — open the batch`), 'err'); });
@@ -26075,7 +26087,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const offTotal = (p, of) => r2((p.rfqItems || []).reduce((a, it, i) => a + (+it.qty || 0) * (+((of.items || [])[i] || {}).price || 0), 0));
   const sortedSups = () => sortBy(list('suppliers').filter(s => s && s.name && !s.deleted), s => s.name);
   (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
-.offtbl td,.offtbl th{vertical-align:middle}.offtbl .cheap{color:var(--good-ink,#4f8a6d);font-weight:700}.offtbl img.rfqthumb{width:44px;height:44px;border-radius:8px;object-fit:cover}
+.offtbl td,.offtbl th{vertical-align:middle}.offtbl td.tiny,.offtbl td.n,.offtbl th{white-space:nowrap}.rqoff{min-width:0}.rqoff .offtbl{width:100%}.offtbl .cheap{color:var(--good-ink,#4f8a6d);font-weight:700}.offtbl img.rfqthumb{width:44px;height:44px;border-radius:8px;object-fit:cover}
 .sugbox{display:grid;gap:6px}.isl{display:grid;grid-template-columns:2fr 90px 1.3fr 28px;gap:6px;align-items:start}.isl .nx{grid-column:1/-1;display:grid;grid-template-columns:1.2fr 2fr 90px 1fr;gap:6px}
 .isl input,.isl select{width:100%}.isl .stock{font-size:11px;color:var(--muted);padding-top:8px}
 @media(max-width:700px){.isl{grid-template-columns:1fr 80px}.isl .nx{grid-template-columns:1fr 1fr}}
@@ -26142,10 +26154,10 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const thumbs = (p, of) => (of.items || []).map((x, i) => x.thumb ? `<img class="rfqthumb" src="${x.thumb}" alt="" data-action="lightboxOffer" data-arg="${p.id}:${of.id}:${i}" style="width:44px;height:44px;cursor:zoom-in" title="${esc((p.rfqItems[i] || {}).name || '')}">` : '').join(' ');
   ACTIONS.lightboxOffer = arg => { const [id, oid, i] = arg.split(':'); const p = byId('purchases', id); const of = p && (p.rfqOffers || []).find(x => x.id === oid); const x = of && of.items[+i]; if (x && x.thumb) lightbox(x.thumb, `${of.supplierName} — ${(p.rfqItems[+i] || {}).name || ''}`); };
   const verdictTable = p => { const v = p.rfqVerdicts || {}; const offers = (p.rfqOffers || []).slice().sort((a, b) => a.total - b.total);
-    return `<div id="rq-offers" class="tablewrap" style="margin:8px 0"><table class="tbl offtbl"><thead><tr><th>المورد</th><th class="n">الإجمالي</th><th>الصور</th><th>الاعتماد الفني</th></tr></thead><tbody>${offers.map(o => `<tr><td>${esc(o.supplierName)}${o.leadDays ? `<div class="tiny muted">توريد ${o.leadDays} يوم</div>` : ''}</td><td class="n">${fmtMoney(o.total)}</td><td>${thumbs(p, o)}</td><td><select class="sel" data-ov="${o.id}">${VERD.map(([k, l]) => `<option value="${k}" ${(v[o.id] || 'photo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>${p.rfqFewWhy ? `<div class="banner warn">${icon('info')}<span>أقل من 3 عروض: ${esc(p.rfqFewWhy)}</span></div>` : ''}</div>`; };
+    return `<div id="rq-offers" class="tablewrap full rqoff" style="margin:8px 0;grid-column:1/-1;width:100%"><table class="tbl offtbl"><thead><tr><th>المورد</th><th class="n">الإجمالي</th><th>الصور</th><th>الاعتماد الفني</th></tr></thead><tbody>${offers.map(o => `<tr><td>${esc(o.supplierName)}${o.leadDays ? `<div class="tiny muted">توريد ${o.leadDays} يوم</div>` : ''}</td><td class="n">${fmtMoney(o.total)}</td><td>${thumbs(p, o)}</td><td><select class="sel" data-ov="${o.id}">${VERD.map(([k, l]) => `<option value="${k}" ${(v[o.id] || 'photo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>${p.rfqFewWhy ? `<div class="banner warn">${icon('info')}<span>أقل من 3 عروض: ${esc(p.rfqFewWhy)}</span></div>` : ''}</div>`; };
   const approvedOffers = p => { const v = p.rfqVerdicts || {}; return (p.rfqOffers || []).filter(o => v[o.id] && v[o.id] !== 'rej'); };
   const choiceTable = p => { const offers = approvedOffers(p).sort((a, b) => a.total - b.total); if (!offers.length) return ''; const cur = p.rfqChosen || offers[0].id; const v = p.rfqVerdicts || {};
-    return `<div id="rq-choice" class="tablewrap" style="margin:8px 0"><table class="tbl offtbl"><thead><tr><th></th><th>المورد</th><th class="n">الإجمالي</th><th>فني</th><th>الصور</th></tr></thead><tbody>${offers.map((o, i) => `<tr><td><input type="radio" name="rfq-choice" value="${o.id}" ${o.id === cur ? 'checked' : ''}></td><td>${esc(o.supplierName)}${i === 0 ? ' <span class="cheap">· الأرخص</span>' : ''}</td><td class="n ${i === 0 ? 'cheap' : ''}">${fmtMoney(o.total)}</td><td class="tiny">${v[o.id] === 'inspected' ? 'بعد المعاينة' : 'من الصورة'}</td><td>${thumbs(p, o)}</td></tr>`).join('')}</tbody></table><div class="hint">اختار المورد اللي هيتكوّد عليه الصنف ويطلع له أمر الشراء. فوق ${fmtMoney(rfqOwnerAbove())} ${CUR()} بيروح للمالك كمان.</div></div>`; };
+    return `<div id="rq-choice" class="tablewrap full rqoff" style="margin:8px 0;grid-column:1/-1;width:100%"><table class="tbl offtbl"><thead><tr><th></th><th>المورد</th><th class="n">الإجمالي</th><th>فني</th><th>الصور</th></tr></thead><tbody>${offers.map((o, i) => `<tr><td><input type="radio" name="rfq-choice" value="${o.id}" ${o.id === cur ? 'checked' : ''}></td><td>${esc(o.supplierName)}${i === 0 ? ' <span class="cheap">· الأرخص</span>' : ''}</td><td class="n ${i === 0 ? 'cheap' : ''}">${fmtMoney(o.total)}</td><td class="tiny">${v[o.id] === 'inspected' ? 'بعد المعاينة' : 'من الصورة'}</td><td>${thumbs(p, o)}</td></tr>`).join('')}</tbody></table><div class="hint">اختار المورد اللي هيتكوّد عليه الصنف ويطلع له أمر الشراء. فوق ${fmtMoney(rfqOwnerAbove())} ${CUR()} بيروح للمالك كمان.</div></div>`; };
   const injectFor = (r, host, where) => { const p = r && r.purchaseId && byId('purchases', r.purchaseId); if (!p || !(p.rfqOffers || []).length || !host) return;
     if (r.type === 'rfqtech' && !document.getElementById('rq-offers')) host.insertAdjacentHTML(where, verdictTable(p));
     if (r.type === 'rfqprice' && !document.getElementById('rq-choice')) host.insertAdjacentHTML(where, choiceTable(p)); };
@@ -40834,6 +40846,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
      the factory manager instead of the head, as before); a department head → the factory manager → HR; the factory
      manager → HR directly
    The first approver also gets a phone notice. Factory only.
+   v7.53 (PIN approved 12 Oct — Mahmoud: within the limit it comes straight to the owner to be paid and Bahaa finishes the task;
+   over the limit it waits for the financial manager — «Saeed only»): within the limit → no approval at all — an owner / Saeed
+   session approves it by itself (99zzZzZZzr-v753-adv) and it lands in the one advance batch at the owner; over the limit →
+   Saeed only (no head, no factory manager); Saeed's own advance → the owner. Phone notice: the owner (within), Saeed (over).
    ===================================================================== */
 (function () {
   if (window.__NF_ADVCHAIN__) return; window.__NF_ADVCHAIN__ = 1;
@@ -40841,12 +40857,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   const chainOf = (doc, w) => {
     const wr = (w && w.role) || '';
     if (wr === 'hr') return ['admin'];
-    if (!doc.overLimit) return ['hr'];
-    if (wr === 'manager') return ['hr'];
-    if (wr === 'head') return ['manager', 'hr'];
-    const base = typeof normalizeChain === 'function' ? normalizeChain(['head', 'hr'], w) : ['head', 'hr'];
-    const c = base.filter(x => x === 'hr' || x !== wr);
-    return c.length ? c : ['hr'];
+    return ['hr'];   /* v7.53: within the limit it is approved by itself (see 99zzZzZZzr); over the limit Saeed only */
   };
   window.nfAdvChainOf = chainOf;
   if (typeof Store === 'undefined' || typeof Store.save !== 'function') return;
@@ -40862,7 +40873,9 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       try {
         if (typeof pushSend !== 'function' || typeof reqStepTargets !== 'function') return;
         const w = byId('workers', doc.workerId);
-        pushSend(reqStepTargets(doc), `طلب بانتظار اعتمادك — ${REQ_TYPES.advance || ''}${w ? ' · ' + w.name : ''}`.slice(0, 100), '', '/#/approvals', 'req-' + doc.id).catch(() => { });
+        const auto = !doc.overLimit && (doc.chain || [])[0] === 'hr';
+        if (auto) pushSend(['role:admin'], `سلفة جديدة جوه الحد${w ? ' — ' + w.name : ''}`.slice(0, 100), 'هتدخل دفعة السلف لوحدها — مستنية تحويلك', '/#/advpay', 'advauto-' + doc.id).catch(() => { });
+        else pushSend(reqStepTargets(doc), `طلب بانتظار اعتمادك — ${REQ_TYPES.advance || ''}${w ? ' · ' + w.name : ''}`.slice(0, 100), '', `/#/requests/${doc.id}`, 'req-' + doc.id).catch(() => { });
       } catch (e) { /* ignore */ }
     }, () => { });
     return out;
@@ -41508,7 +41521,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   const SU = () => (S.ui.omf ||= { on: false, keys: [] });
   function card(items) {
     const K = KIND(); const u = SU(); const pickable = items.filter(x => x.sel); const on = u.on && pickable.length > 0;
-    const shown = on ? items.slice(0, 40) : items.slice(0, 6); const sel = new Set(u.keys);
+    const shown = items;   /* v7.53: every line, always (Mahmoud asked for the whole list) */ const sel = new Set(u.keys);
     const chosen = items.filter(x => sel.has(x.id) && x.sel);
     const kinds = new Set(chosen.map(x => x.sel));
     const tos = new Set(chosen.filter(x => x.sel === 'pay').map(x => x.to));
@@ -41525,7 +41538,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       return `<a class="omf-r" href="${esc(x.href)}">${inner}<span class="omf-go">${icon('back')}</span></a>`;
     };
     const total = items.reduce((a, x) => a + (+x.amount || 0), 0);
-    return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div>${pickable.length >= 1 && writable() ? `<button type="button" class="btn xs ${on ? '' : 'ghost'}" data-action="omfPick">${esc(on ? L('خلاص', 'Done') : L('اختار', 'Pick'))}</button>` : ''}<a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
+    return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div>${pickable.length >= 1 && writable() ? `<button type="button" class="btn xs ${on ? '' : 'ghost'}" data-action="omfPick">${esc(on ? L('إلغاء الاختيار', 'Cancel') : L('اختار', 'Pick'))}</button>` : ''}<a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
       ${on ? `<div class="tiny muted" style="margin:-2px 0 6px">${esc(L('علّم على اللي هيتحوّل مرة واحدة.', 'Tick what goes in one transfer.'))}</div>` : ''}
       <div class="omf-l">${shown.map(row).join('')}</div>
       ${on ? `<div class="omf-foot"><span>${esc(L(`المحدد ${chosen.length}`, `${chosen.length} selected`))} · <b>${esc(fmtMoney(chosen.reduce((a, x) => a + (+x.amount || 0), 0)))} ${esc(CUR())}</b></span><div class="grow"></div>${btn}</div>${hint ? `<div class="tiny omf-hint">${esc(hint)}</div>` : ''}`
@@ -42859,8 +42872,8 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         onSubmit: async f => {
           const d = formData(f); const file = (f.querySelector('#pbf-file') || {}).files?.[0]; if (!file) { toast(L('صورة التحويل مطلوبة', 'The screenshot is needed'), 'err'); return false; }
           const a = await attach(file, 'money', b.id, d.note);
-          await fundBatch(b, { from: d.from || 'personal', note: d.note || '', thumb: a.thumb, fileIds: a.fileIds });
-          toast(L('اتسجّل — الدفعة عند المحوِّل', 'Recorded — the batch is with the payer'));
+          const fr = await fundBatch(b, { from: d.from || 'personal', note: d.note || '', thumb: a.thumb, fileIds: a.fileIds });
+          toast(fr === 'settled' ? L('اتسجّل — الفلوس وصلت العهدة والطلبات اتقفلت', 'Recorded — the money reached the custody and the requests are closed') : L('اتسجّل — الدفعة عند المحوِّل', 'Recorded — the batch is with the payer'));
         } });
       return;
     }
@@ -42872,6 +42885,12 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
           const now = nowISO(); const b1 = byId('money', b.id) || b; const amt = r2(sum(unpaid(b1), it => it.amount));
           await saveXfer({ id: `pbf_${b.id}`, from: d.from || 'personal', to: b.walletId, amount: amt, cat: 'other', note: L(`دفعة تحويل ${b.code} — ${unpaid(b1).length} بند`, `Pay batch ${b.code} — ${unpaid(b1).length} items`) + (o.ref ? ' · ' + o.ref : '') + (d.note ? ' · ' + d.note : ''), thumb: a.thumb, fileIds: a.fileIds, pbId: b.id });
           await Store.update('money', b.id, { status: 'funded', fundedAt: now, fundedAmount: amt, fundedFrom: d.from || 'personal', fundedByName: (S.session && S.session.name) || '', fundThumb: a.thumb || null, fundRef: o.ref || null, fundProofUrl: o.proofUrl || null }, { silent: true });
+          /* v7.53: a custody request whose money lands in the very custody this batch just funded is settled here — there is no second
+             transfer to make (PB-26-001: the meal requests for Bahaa's custody stayed «at the owner» after he paid them). No payFrom → no extra transfer record. */
+          try { for (const it of unpaid(b1)) { if (it.k !== 'fund') continue; const r = byId('requests', it.id); if (!r || r.status !== 'pending' || String(r.walletId || it.walletId || '') !== String(b.walletId || '')) continue;
+            await Store.update('requests', r.id, { status: 'approved', decidedAt: now, decidedByName: (S.session && S.session.name) || '', paidAt: now, paidAmount: it.amount, pbId: b.id, paidVia: `pbf_${b.id}` });
+            const t = byId('tasks', `fund_${r.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: (S.session && S.session.name) || '' }, { silent: true }); } } catch (e) { console.warn('pb fund settle', e); }
+          if (!unpaid(byId('money', b.id) || b1).length) { try { await Store.update('money', b.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* the reconcile closes it */ } try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ } return 'settled'; }
           try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ }
           try { await Store.save('tasks', { id: `pbf_${b.id}`, title: L(`وصلتك دفعة تحويل ${b.code} — حوّل البنود من عهدتك`, `Pay batch ${b.code} reached you — pay the items from your custody`), desc: L('افتح «الفلوس» — كل بند بزرار «حوّلت» وصورة التحويل.', 'Open «Money» — every item has «Paid» and the screenshot.'), link: '/#/money', assigneeId: b.payerId, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'money', createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
           try { if (typeof pushSend === 'function') pushSend(['w:' + b.payerId], L(`وصلتك دفعة تحويل ${b.code} — حوّلها من عهدتك`, `Pay batch ${b.code} reached you — pay it from your custody`), L(`${unpaid(b1).length} بند — التفاصيل في «الفلوس»`, `${unpaid(b1).length} items — details on «Money»`), `/#/go/pb/${b.id}`, 'paybatch-' + b.id); } catch (e) { /* ignore */ }
@@ -43135,7 +43154,10 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
      out louder than the one before it; every new stroke and every stop clears the queued volume changes (they used to pile up on
      every pen move), volume changes are spaced (≥ 16 ms), and the noise is grainy paper (4 s, random grains, no tones) instead of a
      short tonal loop. */
-  const SND = { ctx: null, src: null, bp: null, g: null, m: null, lim: null, on: false, kind: '', vol: 0.6, last: 0 };
+  const SND = { ctx: null, src: null, bp: null, g: null, m: null, lim: null, on: false, kind: '', vol: 0.35, last: 0 };
+  /* v7.53 (Mahmoud: «صوت الاسكتش عالي — عايزه واطي وخفيف»): the level knob now sits AFTER the limiter (its make-up gain used to
+     lift the quiet strokes back up), and the whole range is softer — the old default was ~6× louder than the new one. */
+  const MASTER = v => v * 0.5;
   const SOUNDS = { pencil: [3600, 0.9, 0.16], charcoal: [1900, 0.7, 0.2], ink: [5200, 1.4, 0.06], liner: [5600, 1.6, 0.05], marker: [1100, 0.8, 0.13], highlighter: [950, 0.8, 0.1], soft: [700, 0.6, 0.05], eraser: [1500, 0.7, 0.14] };
   function paperNoise(c) {
     const len = Math.floor(c.sampleRate * 4); const b = c.createBuffer(1, len, c.sampleRate); const d = b.getChannelData(0);
@@ -43158,9 +43180,9 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         if (!SND.src) {
           SND.src = c.createBufferSource(); SND.src.buffer = SND.buf; SND.src.loop = true;
           SND.bp = c.createBiquadFilter(); SND.bp.type = 'bandpass'; SND.g = c.createGain(); SND.g.gain.value = 0;
-          SND.m = c.createGain(); SND.m.gain.value = SND.vol * 1.6;
+          SND.m = c.createGain(); SND.m.gain.value = MASTER(SND.vol);
           SND.lim = c.createDynamicsCompressor(); try { SND.lim.threshold.value = -24; SND.lim.knee.value = 12; SND.lim.ratio.value = 8; SND.lim.attack.value = 0.004; SND.lim.release.value = 0.12; } catch (e) { /* defaults */ }
-          SND.src.connect(SND.bp); SND.bp.connect(SND.g); SND.g.connect(SND.m); SND.m.connect(SND.lim); SND.lim.connect(c.destination); SND.src.start();
+          SND.src.connect(SND.bp); SND.bp.connect(SND.g); SND.g.connect(SND.lim); SND.lim.connect(SND.m); SND.m.connect(c.destination); SND.src.start();
         }
         const t = c.currentTime; hold(SND.g.gain, t); hold(SND.bp.frequency, t); SND.g.gain.setTargetAtTime(0, t, 0.01);
         const s = SOUNDS[kind] || SOUNDS.pencil; SND.kind = kind; SND.bp.frequency.setTargetAtTime(s[0], t, 0.01); SND.bp.Q.value = s[1]; SND.on = true; SND.last = 0;
@@ -43174,7 +43196,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       hold(SND.bp.frequency, t); SND.bp.frequency.setTargetAtTime(s[0] * (0.88 + 0.24 * clamp(v / 2, 0, 1)) * (0.97 + Math.random() * 0.06), t, 0.04);
     },
     stop() { if (!SND.ctx || !SND.g) return; SND.on = false; try { const t = SND.ctx.currentTime; hold(SND.g.gain, t); SND.g.gain.setTargetAtTime(0, t, 0.04); } catch (e) { /* ignore */ } },
-    setVol(v) { SND.vol = clamp(+v || 0, 0, 1); if (SND.m && SND.ctx) { const t = SND.ctx.currentTime; hold(SND.m.gain, t); SND.m.gain.setTargetAtTime(SND.vol * 1.6, t, 0.05); } },
+    setVol(v) { SND.vol = clamp(+v || 0, 0, 1); if (SND.m && SND.ctx) { const t = SND.ctx.currentTime; hold(SND.m.gain, t); SND.m.gain.setTargetAtTime(MASTER(SND.vol), t, 0.05); } },
     getVol() { return SND.vol; }
   };
   const SHAPES = ['line', 'arrow', 'rect', 'oval', 'dim'];
@@ -43201,6 +43223,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const tmpA = document.createElement('canvas'), tmpB = document.createElement('canvas');
     /* v7.41 layer caches for the current view: the layers under the active one, the active one, the ones above it.
        A new line is drawn onto the active cache only; zoom / move / turn moves the last picture until the hand stops. */
+    const fast = { v: null, on: false }; let endT = 0;   /* v7.53: a view moved on the graphics card (see fastStart) */
     const LC = { below: document.createElement('canvas'), act: document.createElement('canvas'), above: document.createElement('canvas'), key: '', refs: [], aRef: null, ms: 0 };
     function resize() {
       const r = host.getBoundingClientRect(); const d = DPR();
@@ -43507,6 +43530,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       });
     }
     function render() {
+      if (fast.on) { fast.on = false; if (endT) { clearTimeout(endT); endT = 0; } base.style.transform = ''; base.style.willChange = ''; }   /* v7.53: any full redraw ends a moved picture */
       resize(); const d = DPR(); const pins = numberPins(); const t0 = performance.now();
       const ai = ed.layers.findIndex(l => l.id === ed.active); const al = ai >= 0 ? ed.layers[ai] : null;
       const key = [W, H, d, ed.view.x, ed.view.y, ed.view.z, vr(), ai, ed.paper, ed.persp ? JSON.stringify(ed.persp.vps) : ''].join('|') + '#' + ed.layers.map((l, i) => l.id + (l.visible ? 'v' : 'h') + (i === ai ? '' : l.opacity) + (l.img ? 'i' : '')).join(',') + '#' + pins.map(q => q.id + ':' + q.n).join(',');
@@ -43571,18 +43595,25 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     }
     ed.render = render;
     /* while the view moves on a big drawing, the last full picture is moved / scaled instead of redrawing every line */
-    const fast = { cv: document.createElement('canvas'), v: null, on: false };
     const itemCount = () => ed.layers.reduce((n, l) => n + l.items.length, 0);
-    function fastStart() { if (fast.on || (LC.ms < 9 && itemCount() < 400)) return; if (fast.cv.width !== base.width || fast.cv.height !== base.height) { fast.cv.width = base.width; fast.cv.height = base.height; } const fx = fast.cv.getContext('2d'); fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fast.cv.width, fast.cv.height); fx.drawImage(base, 0, 0); fast.v = Object.assign({}, ed.view); fast.on = true; }
+    /* v7.53 (Mahmoud: «light, never stuck on zoom in / out»): while the hand moves the view, the last picture is moved by the
+       screen's graphics card (a CSS transform on the canvas) — no line is drawn and nothing is copied on the main thread. The
+       full redraw waits until the hand has been still for a moment (a new pinch / wheel in between keeps going on the same
+       picture); starting a line redraws first so the pen lands exactly. */
+    function fastStart() {
+      if (fast.on) { if (endT) { clearTimeout(endT); endT = 0; } return; }
+      fast.v = Object.assign({}, ed.view); fast.on = true; base.style.transformOrigin = '0 0'; base.style.willChange = 'transform';
+    }
     let viewRAF = 0;
     function viewDraw() { if (viewRAF) return; viewRAF = requestAnimationFrame(() => { viewRAF = 0; viewDrawNow(); }); }
     function viewDrawNow() {
       if (!fast.on) return render();
-      const d = DPR(); bx.setTransform(1, 0, 0, 1, 0, 0); bx.clearRect(0, 0, base.width, base.height);
-      try { const m = new DOMMatrix(VT(d)).multiply(new DOMMatrix(VT(d, fast.v)).inverse()); bx.setTransform(m); bx.drawImage(fast.cv, 0, 0); } catch (e) { /* ignore */ }
-      bx.setTransform(1, 0, 0, 1, 0, 0); renderLive();
+      try { const m = new DOMMatrix(VT(1)).multiply(new DOMMatrix(VT(1, fast.v)).inverse()); base.style.transform = `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`; } catch (e) { /* ignore */ }
+      renderLive();
     }
-    function fastEnd() { if (viewRAF) { cancelAnimationFrame(viewRAF); viewRAF = 0; } if (!fast.on) { render(); return; } fast.on = false; render(); }
+    function flushFast() { if (endT) { clearTimeout(endT); endT = 0; } if (!fast.on) return; render(); }
+    function fastEnd() { if (viewRAF) { cancelAnimationFrame(viewRAF); viewDrawNow(); viewRAF = 0; } if (!fast.on) { render(); return; } if (endT) clearTimeout(endT); endT = setTimeout(() => { endT = 0; flushFast(); }, 140); }
+    ed.flushView = flushFast;
     let wheelT = 0;
     ed.layerThumb = (id, w, h) => {
       const l = layerOf(id); const c = document.createElement('canvas'); c.width = w; c.height = h; if (!l) return c;
@@ -43653,6 +43684,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const fingerDraws = () => ed.fingerDraws === true || (ed.fingerDraws === 'auto' && !ed.penSeen);
     const lockedActive = () => { const l = act(); return !l || l.locked || !l.visible; };
     function begin(e, p) {
+      if (fast.on) flushFast();   /* v7.53: the picture is redrawn before a line starts */
       const w = toWorld(p[0], p[1]); const t = G.eraserEnd ? 'eraser' : ed.tool; const l = act();
       if (ed.perspEdit && ed.persp) { const k = ed.persp.vps.findIndex(v => { const sp = toScreen(v[0], v[1]); return Math.hypot(sp[0] - p[0], sp[1] - p[1]) < 22; }); if (k >= 0) { G.mode = 'vp'; G.drag = { k }; return; } }
       if (t === 'pan') { G.mode = 'pan'; G.start = { p, v: Object.assign({}, ed.view) }; return; }
@@ -44900,8 +44932,72 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     document.querySelectorAll('#nfcd .cd-wcol,#nfcd .cd-mcol').forEach(b => b.style.setProperty('--c', CD.color));
     const cur = BRUSH_TOOLS.includes(CD.tool) ? CD.tool : (prefs.lastDraw || 'pencil');
     document.querySelectorAll('#nfcd .cd-wc,#nfcd [data-cd="mwheel"]').forEach(b => { b.classList.toggle('on', BRUSH_TOOLS.includes(CD.tool)); if (b.dataset.ic !== cur) { b.dataset.ic = cur; const dot = b.querySelector('.cd-szdot'); b.innerHTML = IC[cur]; if (dot) b.appendChild(dot); else b.insertAdjacentHTML('beforeend', '<i class="cd-szdot"></i>'); } });
+    try { updRing(); } catch (e) { /* the ring is not built yet */ }
   }
 
+  /* ---------- v7.53 the floating ring (computer / tablet) — Mahmoud sent the Concepts screenshots: «light and easy»:
+     the column has no panel any more; a ring of the 8 brushes (each with its size in mm) around a hub with the colour, the size,
+     the opacity and the smoothing — each opens a small strip with ready values + a slider. Undo / redo, the tools and «select»
+     sit in the corners of the ring; the layers float under it; «Precision» is a button in the bottom corner. Our own drawing,
+     icons and colours — not a copy of the app's artwork. ---------- */
+  IC.size = G('<path d="M4 7h16" stroke-width="1"/><path d="M4 12h16" stroke-width="2"/><path d="M4 17.5h16" stroke-width="3.4"/>');
+  IC.smooth = G('<path d="M3 15c2.5-6 5-6 7.5 0s5 6 7.5 0c.8-1.8 1.6-3 2.5-3.4"/>');
+  IC.opac = G('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>');
+  IC.shapes = G('<rect x="3.5" y="12.5" width="8" height="8" rx="1"/><circle cx="16.5" cy="7.5" r="4"/><path d="M14 20.5l3.5-6 3.5 6z"/>');
+  const mmOf = (k, v) => { try { const b = NFDraw.BRUSHES[k]; return (b && b.w ? b.w : 2) * v * 0.3528; } catch (e) { return v * 0.7; } };
+  const mmTxt = (k, v) => { const m = mmOf(k, v); return m < 1 ? m.toFixed(2) : m < 10 ? m.toFixed(1) : String(Math.round(m)); };
+  const fmtMm = (k, v) => `${mmTxt(k, v)} ${L('مم', 'mm')}`;
+  const curBrush = () => (BRUSH_TOOLS.includes(CD.tool) ? CD.tool : (prefs.lastDraw || 'pencil'));
+  const HUB = { size: [[0.5, 0.75, 1, 1.5, 2.5, 4], 0.2, 6, 0.05], opacity: [[0.25, 0.5, 0.75, 1], 0.1, 1, 0.05], smooth: [[0, 0.25, 0.5, 0.85], 0, 0.85, 0.05] };
+  const hubTxt = (k, v) => (k === 'size' ? fmtMm(curBrush(), v) : Math.round(v * 100) + '%');
+  function ringHTML() {
+    const cb = curBrush(); const R = 87;
+    const slots = BRUSH_TOOLS.map((k, i) => { const a = (-90 + i * 45) * Math.PI / 180; const x = 110 + R * Math.cos(a), y = 110 + R * Math.sin(a); const sz = ((prefs.brush || {})[k] || {}).size || 1;
+      return `<button type="button" class="cd-slot ${CD.tool === k ? 'on' : cb === k && !BRUSH_TOOLS.includes(CD.tool) ? 'cur' : ''}" data-cd="slot" data-k="${k}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px" title="${esc(toolName(k))}" aria-label="${esc(toolName(k))}">${IC[k]}<small class="ltr" data-slsz="${k}">${esc(mmTxt(k, k === cb ? CD.size : sz))}</small></button>`; }).join('');
+    const other = SIDE_TOOLS.includes(CD.tool) && CD.tool !== 'select' ? CD.tool : '';
+    return `<div class="cd-ring" style="direction:ltr"><div class="cd-ringbg"></div>${slots}
+      <div class="cd-hub">
+        <button type="button" class="cd-hb cd-hsz" style="left:50%;top:9px;transform:translateX(-50%)" data-cd="hub" data-k="size" title="${esc(L('الحجم', 'Size'))}" aria-label="${esc(L('الحجم', 'Size'))}">${IC.size}<b data-hv="size"></b></button>
+        <button type="button" class="cd-hb cd-hsm" style="left:3px;top:52%;transform:translateY(-50%)" data-cd="hub" data-k="smooth" title="${esc(L('النعومة', 'Smoothing'))}" aria-label="${esc(L('النعومة', 'Smoothing'))}">${IC.smooth}<b data-hv="smooth"></b></button>
+        <button type="button" class="cd-hcol" data-cd="color" title="${esc(L('الألوان', 'Colours'))}" aria-label="${esc(L('الألوان', 'Colours'))}" style="--c:${esc(CD.color)}"><i></i></button>
+        <button type="button" class="cd-hb cd-hop" style="right:3px;top:52%;transform:translateY(-50%)" data-cd="hub" data-k="opacity" title="${esc(L('الشفافية', 'Opacity'))}" aria-label="${esc(L('الشفافية', 'Opacity'))}">${IC.opac}<b data-hv="opacity"></b></button></div>
+      <button type="button" class="cd-rc cd-rc1" style="left:0;top:0" data-cd="undo" title="${esc(L('رجوع', 'Undo'))}" aria-label="${esc(L('رجوع', 'Undo'))}">${IC.undo}</button>
+      <button type="button" class="cd-rc cd-rc2" style="left:0;bottom:0" data-cd="redo" title="${esc(L('إعادة', 'Redo'))}" aria-label="${esc(L('إعادة', 'Redo'))}">${IC.redo}</button>
+      <button type="button" style="right:0;top:0" class="cd-rc cd-rc3 ${other ? 'on' : ''}" data-cd="toolspop" title="${esc(L('الأدوات والأشكال', 'Tools and shapes'))}" aria-label="${esc(L('الأدوات والأشكال', 'Tools and shapes'))}">${other ? IC[other] : IC.shapes}</button>
+      <button type="button" style="right:0;bottom:0" class="cd-rc cd-rc4 cd-t ${CD.tool === 'select' ? 'on' : ''}" data-cd="tool" data-k="select" title="${esc(toolName('select'))}" aria-label="${esc(toolName('select'))}">${IC.select}</button></div>`;
+  }
+  function updRing() {
+    const cb = curBrush();
+    document.querySelectorAll('#nfcd [data-hv]').forEach(b => { const k = b.dataset.hv; const v = curV(k); if (k === 'size') { const n = `<span class="ltr">${esc(mmTxt(cb, v))}</span>`, u = `<small>${esc(L('مم', 'mm'))}</small>`; b.innerHTML = b.closest('.cd-ring') && L('ar', '') === 'ar' ? `${u} ${n}` : `${n} ${u}`; } else b.textContent = hubTxt(k, v); });   /* the ring is laid out left → right in both languages: Arabic puts the unit first so it reads right */
+    const lt = (() => { const h = String(CD.color || '').replace('#', ''); if (h.length < 6) return false; const [r, g, bb] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); return (r * 299 + g * 587 + bb * 114) / 1000 > 170; })();
+    document.querySelectorAll('#nfcd .cd-slot').forEach(b => { const k = b.dataset.k; b.classList.toggle('on', CD.tool === k); b.classList.toggle('cur', cb === k && !BRUSH_TOOLS.includes(CD.tool)); b.classList.toggle('lt', lt); b.style.setProperty('--c', CD.color); });
+    const sl = document.querySelector(`#nfcd [data-slsz="${cb}"]`); if (sl && BRUSH_TOOLS.includes(CD.tool)) sl.textContent = mmTxt(cb, CD.size);
+    document.querySelectorAll('#nfcd .cd-hcol').forEach(b => b.style.setProperty('--c', CD.color));
+    const t3 = document.querySelector('#nfcd .cd-rc3'); if (t3) { const other = SIDE_TOOLS.includes(CD.tool) && CD.tool !== 'select' ? CD.tool : ''; t3.classList.toggle('on', !!other); if (t3.dataset.ic !== (other || 'shapes')) { t3.dataset.ic = other || 'shapes'; t3.innerHTML = other ? IC[other] : IC.shapes; } }
+    document.querySelectorAll('#nfcd .cd-rc4').forEach(b => b.classList.toggle('on', CD.tool === 'select'));
+    if (CD.pop && CD.pop.startsWith('hub:')) { const k = CD.pop.slice(4); const v = curV(k); document.querySelectorAll('#nfcd .cd-pop [data-cd="hset"]').forEach(c => c.classList.toggle('on', Math.abs(+c.dataset.v - v) < 0.026)); }
+  }
+  function hubPopHTML(k) {
+    const [pres, mn, mx, st] = HUB[k]; const v = curV(k); const lb = ARCLBL()[k];
+    return `<div class="cd-pophd"><b>${esc(lb)} · <span data-hv="${k}"></span></b><button type="button" class="cd-px" data-cd="popx" aria-label="${esc(L('قفل', 'Close'))}">✕</button></div>
+      <div class="cd-chips cd-hchips" style="direction:ltr">${pres.map(x => `<button type="button" class="cd-chip ${Math.abs(x - v) < 0.026 ? 'on' : ''}" data-cd="hset" data-k="${k}" data-v="${x}">${esc(k === 'size' ? mmTxt(curBrush(), x) : hubTxt(k, x))}</button>`).join('')}</div>
+      <div class="cd-hsl" style="direction:ltr"><button type="button" class="cd-ib sm" data-cd="hstep" data-k="${k}" data-v="-1" aria-label="−">${IC.minus}</button><input type="range" min="${mn}" max="${mx}" step="${st}" value="${v}" data-cdr="${k}" aria-label="${esc(lb)}"><button type="button" class="cd-ib sm" data-cd="hstep" data-k="${k}" data-v="1" aria-label="+">${IC.plus}</button></div>`;
+  }
+  /* the colour fan: hues around, light → deep from the outside in, greys under it */
+  const hsl2hex = (h, s0, l0) => { const s1 = s0 / 100, l1 = l0 / 100; const k = n => (n + h / 30) % 12; const a = s1 * Math.min(l1, 1 - l1); const f = n => l1 - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); };
+  function fanHTML() {
+    const N = 14, rows = [[86, 88], [72, 76], [58, 64], [46, 52], [34, 40]]; const cx = 160, cy = 160, r0 = 40, dr = 23; const cur = String(CD.color).toLowerCase(); let out = '';
+    for (let i = 0; i < N; i++) { const h = Math.round(i * 360 / N); const a0 = Math.PI + i * Math.PI / N + 0.012, a1 = Math.PI + (i + 1) * Math.PI / N - 0.012;
+      rows.forEach((row, j) => { const ri = r0 + j * dr + 1, ro = r0 + (j + 1) * dr - 1; const [L0, S0] = rows[rows.length - 1 - j]; const hex = hsl2hex(h, S0, L0); const P = (r, a) => `${(cx + r * Math.cos(a)).toFixed(1)} ${(cy + r * Math.sin(a)).toFixed(1)}`;
+        out += `<path d="M${P(ri, a0)}L${P(ro, a0)}A${ro} ${ro} 0 0 1 ${P(ro, a1)}L${P(ri, a1)}A${ri} ${ri} 0 0 0 ${P(ri, a0)}z" fill="${hex}" data-fan="${hex}" class="${hex === cur ? 'on' : ''}"><title>${hex}</title></path>`; }); }
+    const greys = ['#ffffff', '#e5e5ea', '#c7c7cc', '#8e8e93', '#636366', '#3a3a3c', '#1c1c1e', '#000000'];
+    return `<svg class="cd-fan" viewBox="0 0 320 168" role="img" aria-label="${esc(L('مروحة الألوان', 'Colour fan'))}">${out}</svg><div class="cd-strip cd-greys">${greys.map(c => `<button type="button" class="cd-sw ${c === cur ? 'on' : ''}" data-cd="paluse" data-k="${c}" style="--c:${c}" aria-label="${c}"></button>`).join('')}</div>`;
+  }
+  function rgbHTML() {
+    const h = String(CD.color || '#000000').replace('#', ''); const v = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
+    return `<div class="cd-rgb">${['R', 'G', 'B'].map((n, i) => `<label class="cd-rng"><span>${n} <b class="ltr" data-rgbv="${i}">${v[i]}</b></span><input type="range" min="0" max="255" step="1" value="${v[i]}" data-rgb="${i}"></label>`).join('')}
+      <div class="cd-srow"><span class="cd-dot" style="width:28px;height:28px;background:${esc(CD.color)}" data-rgbdot></span><input class="ltr" value="${esc(CD.color)}" data-cdhex aria-label="HEX" maxlength="7"><button type="button" class="cd-chip" data-cd="hexgo">${esc(L('استخدم', 'Use'))}</button></div></div>`;
+  }
   /* ---------- the other column sections ---------- */
   function toolsHTML() { return `<div class="cd-tools2">${SIDE_TOOLS.map(k => `<button type="button" class="cd-t ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}" title="${esc(toolName(k))}" aria-label="${esc(toolName(k))}">${IC[k]}</button>`).join('')}</div>`; }
   function projPal() { const s = byId(COL, CD.id) || CD.rec; const pr = SYS === 'stu' && s && lid(s) ? byId('projects', lid(s)) : null; return { pr, pal: (pr && Array.isArray(pr.palette) ? pr.palette : []).slice(0, 16) }; }
@@ -44937,6 +45033,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         <button type="button" class="cd-ib sm" data-cd="lvis" data-k="${esc(l.id)}" title="${esc(l.visible ? L('اخفي', 'Hide') : L('اظهر', 'Show'))}" aria-label="${esc(l.visible ? L('اخفي', 'Hide') : L('اظهر', 'Show'))}">${l.visible ? IC.eye : IC.eyeoff}</button></div>`; };
     return `<div class="cd-sech"><b>${esc(L('الطبقات', 'Layers'))}</b>${!ro ? `<button type="button" class="cd-ib sm" data-cd="ladd" title="${esc(L('طبقة جديدة', 'New layer'))}" aria-label="${esc(L('طبقة جديدة', 'New layer'))}">${IC.plus}</button><button type="button" class="cd-ib sm" data-cd="addimg" title="${esc(L('ضيف صورة', 'Add a picture'))}" aria-label="${esc(L('ضيف صورة', 'Add a picture'))}">${IC.image}</button><button type="button" class="cd-ib sm" data-cd="lsort" title="${esc(L('رتّب حسب النوع: الصور تحت والرسم فوق', 'Sort by kind: pictures below, drawing above'))}" aria-label="${esc(L('رتّب حسب النوع', 'Sort by kind'))}">${IC.sort}</button>` : ''}</div>
       <div class="cd-lys">${ed.layers.slice().reverse().map(row).join('')}</div>
+      ${act && !ro ? `<button type="button" class="cd-lyopt" data-cd="lyopts" aria-expanded="${prefs.lyOpts ? 'true' : 'false'}">${IC.more}<span>${esc(prefs.lyOpts ? L('أقل', 'Less') : L('خيارات الطبقة', 'Layer options'))}</span></button>` : ''}
       ${act && !ro ? `<div class="cd-lyact"><label class="cd-rng"><span>${esc(L('شفافية الطبقة', 'Layer opacity'))}</span><input type="range" min="0.05" max="1" step="0.05" value="${act.opacity == null ? 1 : act.opacity}" data-cdl="${esc(act.id)}"></label>
         <div class="cd-chips"><button type="button" class="cd-chip ${ed.focus ? 'on' : ''}" data-cd="lfocus" title="${esc(L('الطبقات التانية تبهت', 'The other layers fade'))}">${IC.focus}${esc(L('تركيز', 'Focus'))}</button><button type="button" class="cd-chip" data-cd="llock" data-k="${esc(act.id)}">${act.locked ? IC.lock : IC.unlock}${esc(act.locked ? L('افتحها', 'Unlock') : L('اقفلها', 'Lock'))}</button><button type="button" class="cd-chip" data-cd="lren">${IC.edit}${esc(L('اسم', 'Rename'))}</button><button type="button" class="cd-chip" data-cd="lup" aria-label="${esc(L('لفوق', 'Up'))}">${IC.up}</button><button type="button" class="cd-chip" data-cd="ldown" aria-label="${esc(L('لتحت', 'Down'))}">${IC.down}</button><button type="button" class="cd-chip" data-cd="ldup">${IC.copy}${esc(L('نسخة', 'Copy'))}</button><button type="button" class="cd-chip" data-cd="lmerge">${IC.merge}${esc(L('دمج لتحت', 'Merge down'))}</button><button type="button" class="cd-chip d" data-cd="ldel" aria-label="${esc(L('امسح الطبقة', 'Delete the layer'))}">${IC.trash}</button></div></div>` : ''}
       <p class="cd-hint">${esc(L('دوستين على طبقة = وضع التركيز (الباقي يبهت). اسحب ⋮⋮ عشان ترتّب.', 'Double-tap a layer = focus mode (the rest fades). Drag ⋮⋮ to reorder.'))}</p>`;
@@ -44963,6 +45060,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
           <aside class="cd-col ${side()}" aria-label="${esc(L('الأدوات', 'Tools'))}"></aside>
           <div class="cd-sel" hidden><button type="button" data-cd="sdel">${IC.trash}<span>${esc(L('امسح', 'Delete'))}</span></button><button type="button" data-cd="sdup">${IC.copy}<span>${esc(L('نسخة', 'Duplicate'))}</span></button><button type="button" data-cd="scolor"><i class="cd-dot"></i><span>${esc(L('اللون', 'Colour'))}</span></button><button type="button" data-cd="smove">${IC.layers}<span>${esc(L('طبقة تانية', 'Other layer'))}</span></button></div>
           <div class="cd-focus" hidden>${IC.focus}<span></span><button type="button" data-cd="unfocus">${esc(L('رجّع الكل', 'Show all'))}</button></div>
+          <button type="button" class="cd-precbtn" data-cd="mprec" hidden>${IC.ruler}<span>${esc(L('الدقة', 'Precision'))}</span></button>
           <div class="cd-pop" hidden></div></div>
         <nav class="cd-mbar" aria-label="${esc(L('الأدوات', 'Tools'))}"></nav></div>`;
   }
@@ -45017,7 +45115,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const el = $c('.cd-saved'); if (!el) return; el.dataset.st = st;
     el.textContent = st === 'saving' ? L('بيحفظ…', 'Saving…') : st === 'dirty' ? L('لسه ماتحفظش', 'Not saved yet') : st === 'err' ? L('مااتحفظش — هيحاول تاني', 'Not saved — retrying') : st === 'ro' ? L('عرض بس', 'View only') : L('اتحفظ ✓', 'Saved ✓');
   }
-  function refreshTop() { const ed = CD.ed; const u = $c('[data-cd="undo"]'), r = $c('[data-cd="redo"]'); if (u) u.disabled = !ed || !ed.canUndo() || CD.readOnly; if (r) r.disabled = !ed || !ed.canRedo() || CD.readOnly; }
+  function refreshTop() { const ed = CD.ed; document.querySelectorAll('#nfcd [data-cd="undo"]').forEach(u => { u.disabled = !ed || !ed.canUndo() || CD.readOnly; }); document.querySelectorAll('#nfcd [data-cd="redo"]').forEach(r => { r.disabled = !ed || !ed.canRedo() || CD.readOnly; }); }
   function refreshSel() { const b = $c('.cd-sel'); if (b && CD.ed) { b.hidden = !CD.ed.sel.length; const d = b.querySelector('.cd-dot'); if (d) d.style.background = CD.color; } }
   const angleDeg = () => { if (!CD.ed || !CD.ed.rotation) return 0; let d = Math.round(CD.ed.rotation() * 180 / Math.PI) % 360; if (d > 180) d -= 360; return d; };
   function refreshZoom() {
@@ -45036,10 +45134,12 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       el.className = 'cd-col ' + side();
       /* physical side in both languages: inline, so the English mirror of the style sheet never swaps it */
       el.style.left = side() === 'l' ? '12px' : 'auto'; el.style.right = side() === 'r' ? '12px' : 'auto';
+      el.classList.toggle('lyopts', !!prefs.lyOpts);
       el.innerHTML = CD.readOnly ? `<div class="cd-colsec">${toolsHTML()}</div><div class="cd-colsec cd-lyw">${layersHTML()}</div>`
-        : `<div class="cd-colsec cd-wsec">${wheelHTML()}</div><div class="cd-colsec">${toolsHTML()}</div><div class="cd-colsec cd-stripw">${stripHTML()}</div><div class="cd-colsec cd-precw">${precHTML()}</div><div class="cd-colsec cd-lyw">${layersHTML()}</div>`;
+        : `<div class="cd-colsec cd-wsec cd-ringw">${ringHTML()}</div><div class="cd-colsec cd-lyw">${layersHTML()}</div>`;   /* v7.53: ring + floating layers; the tools are in the ring's corner, precision in the bottom corner, colours in the colour pop */
       if (!narrow()) thumbs(el);
     }
+    const pb = $c('.cd-precbtn'); if (pb) { pb.hidden = !!CD.readOnly; pb.style.left = side() === 'l' ? '14px' : 'auto'; pb.style.right = side() === 'r' ? '14px' : 'auto'; }
     paintMbar(); updWheel(); syncSliders(); refreshFocus();
   }
   function paintMbar() {
@@ -45092,14 +45192,14 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
 
   /* ---------- v7.48 pen settings: one curve for the hand (per person, per device) + per brush what the pressure changes ---------- */
-  const PEN_DEF = { curve: 'normal', sound: true, vol: 0.6, paper: true, hover: true, action: 'wheel', brushes: {} };
+  const PEN_DEF = { curve: 'normal', sound: true, vol: 0.35, paper: true, hover: true, action: 'wheel', brushes: {} };
   const penKey = () => 'nf.pen.' + ((S.session && (S.session.id || S.session.workerId)) || 'x');
   function penPrefs() { try { return Object.assign({}, PEN_DEF, JSON.parse(localStorage.getItem(penKey()) || '{}')); } catch (e) { return Object.assign({}, PEN_DEF); } }
   function savePen(p) { try { localStorage.setItem(penKey(), JSON.stringify(p)); } catch (e) { /* ignore */ } }
   const curveArr = c => (Array.isArray(c) && c.length === 4 ? c : (NFDraw.CURVES[c] || NFDraw.CURVES.normal));
   function brushPress(k) { const br = NFDraw.BRUSHES[k] || {}; const u = (penPrefs().brushes || {})[k] || {}; const pm = br.pm || [1 - (br.press || 0), 1]; return { mode: u.mode || (br.po ? 'both' : 'size'), min: u.min != null ? u.min : pm[0], max: u.max != null ? u.max : pm[1] }; }
   function brushCfg() { const out = {}; Object.keys(NFDraw.BRUSHES).forEach(k => { const br = NFDraw.BRUSHES[k]; if (!br.press || br.erase) return; const b = brushPress(k); out[k] = { pm: b.mode === 'opacity' ? [b.max, b.max] : [Math.min(b.min, b.max), b.max], po: b.mode !== 'size' ? 1 : 0 }; }); return out; }
-  function applyPen(ed) { if (!ed) return; const p = penPrefs(); try { NFDraw.sound.setVol(p.vol != null ? p.vol : 0.6); } catch (e) { /* older draw part */ } ed.setCurve(curveArr(p.curve)); ed.sound = p.sound !== false; ed.paperTex = p.paper !== false; ed.hoverDot = p.hover !== false; ed.brushCfg = brushCfg(); ed.feel = true; }
+  function applyPen(ed) { if (!ed) return; const p = penPrefs(); try { NFDraw.sound.setVol(p.vol != null ? p.vol : 0.35); } catch (e) { /* older draw part */ } ed.setCurve(curveArr(p.curve)); ed.sound = p.sound !== false; ed.paperTex = p.paper !== false; ed.hoverDot = p.hover !== false; ed.brushCfg = brushCfg(); ed.feel = true; }
   const pct = v => Math.round(v * 100) + '%';
   function pressHTML() {
     const k = CD.tool; const br = NFDraw.BRUSHES[k]; if (!br || !br.press || br.erase || !PENS.includes(k)) return ''; const b = brushPress(k);
@@ -45119,7 +45219,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       <div class="cd-chips">${[['wheel', L('العجلة عند السن', 'The wheel at the tip')], ['eraser', L('أستيكة', 'Eraser')], ['last', L('آخر أداة', 'Last tool')], ['undo', L('رجوع', 'Undo')]].map(([k, t]) => `<button type="button" class="cd-chip ${(p.action || 'wheel') === k ? 'on' : ''}" data-cd="paction" data-k="${k}">${esc(t)}</button>`).join('')}</div>
       <p class="cd-hint">${esc(L('ضغطة قلم آبل والدبل تاب في أبليكيشن Ninety للآيباد، وزرار قلم سامسونج في أندرويد. في أي متصفح: اضغط بالقلم مطوّل في مكانك، أو دوسة سريعة بصباعين = العجلة.', 'The Apple Pencil squeeze and double-tap work in the Ninety iPad app, and the Samsung pen button on Android. In any browser: hold the pen still, or a quick two-finger tap = the wheel.'))}</p>
       <div class="cd-mgrp">${tg('psound', IC.pen2, L('صوت القلم على الورق', 'The sound of the pen on paper'), p.sound !== false)}${tg('ppaper', IC.rect, L('ملمس الورق', 'Paper texture'), p.paper !== false)}${tg('phover', IC.focus, L('نقطة قبل ما القلم يلمس', 'A dot before the pen touches'), p.hover !== false)}${ed ? tg('finger2', IC.pan, L('ارسم بالصباع (حتى لو فيه قلم)', 'Draw with the finger (even with a pen)'), ed.fingerDraws === true) : ''}</div>
-      ${p.sound !== false ? `<label class="cd-rng cd-vol"><span>${esc(L('مستوى صوت القلم', 'Pen sound level'))} <b class="ltr" data-cdpv="vol">${pct(p.vol != null ? p.vol : 0.6)}</b></span><input type="range" min="0.05" max="1" step="0.05" value="${p.vol != null ? p.vol : 0.6}" data-cdp="vol"></label><p class="cd-hint">${esc(L('الصوت ثابت: مابيعلاش مع كل خط، وبيتغير بس مع سرعة الخط وضغطه.', 'The level is steady: it does not grow with every line, only the speed and pressure of the line change it.'))}</p>` : ''}
+      ${p.sound !== false ? `<label class="cd-rng cd-vol"><span>${esc(L('مستوى صوت القلم', 'Pen sound level'))} <b class="ltr" data-cdpv="vol">${pct(p.vol != null ? p.vol : 0.35)}</b></span><input type="range" min="0.05" max="1" step="0.05" value="${p.vol != null ? p.vol : 0.35}" data-cdp="vol"></label><p class="cd-hint">${esc(L('الصوت ثابت: مابيعلاش مع كل خط، وبيتغير بس مع سرعة الخط وضغطه.', 'The level is steady: it does not grow with every line, only the speed and pressure of the line change it.'))}</p>` : ''}
       <p class="cd-hint">${esc(L('أول ما القلم يتعرف: الكف والصباع مابيرسموش — الصباع بيحرّك ويزووم بس. الصوت مش هيطلع والآيفون صامت.', 'Once the pen is seen, the palm and the finger do not draw — the finger only moves and zooms. No sound while the iPhone is on silent.'))}</p>`;
   }
   function mountTest() {
@@ -45165,13 +45265,19 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   function closePop() { if (CD.pop === 'pen') unmountTest(); CD.pop = ''; const p = $c('.cd-pop'); if (p) { p.hidden = true; p.innerHTML = ''; p.className = 'cd-pop'; } }
   function openPop(kind) {
     const p = $c('.cd-pop'); if (!p) return; if (CD.pop === kind) return closePop(); if (CD.pop === 'pen') unmountTest(); closeQW(); CD.pop = kind; p.hidden = false; p.dataset.k = kind; p.scrollTop = 0;
-    const near = ['color', 'brush', 'move'].includes(kind) && !narrow(); p.className = 'cd-pop' + (near ? ' near' + side() : '');
+    const near = (['color', 'brush', 'move', 'tools', 'prec'].includes(kind) || kind.startsWith('hub:')) && !narrow(); p.className = 'cd-pop' + (near ? ' near' + side() : '');
     p.style.left = near ? (side() === 'l' ? '260px' : 'auto') : ''; p.style.right = near ? (side() === 'r' ? '260px' : 'auto') : '';
     const hd = popHd;
+    if (kind.startsWith('hub:')) { p.classList.add('cd-hpop'); p.innerHTML = hubPopHTML(kind.slice(4)); updRing(); return; }
+    if (kind === 'tools') { p.innerHTML = hd(L('الأدوات والأشكال', 'Tools and shapes')) + toolsHTML(); return; }
     if (kind === 'color') {
       const { pr, pal } = projPal(); const canPal = !!pr && !CD.readOnly && writable();
       p.innerHTML = hd(L('الألوان', 'Colours')) + `<div class="cd-wheel"></div>${pr ? `<div class="cd-mlbl">${esc(L('ألوان المشروع', 'Project colours'))} · <span class="notr">${esc(pr.name || '')}</span></div><div class="cd-pal">${pal.map((c, i) => `<span class="cd-pre"><button type="button" class="cd-sw" data-cd="paluse" data-k="${esc(c)}" style="--c:${esc(c)}" aria-label="${esc(c)}"></button>${canPal ? `<button type="button" class="cd-prex" data-cd="paldel" data-k="${i}" aria-label="${esc(L('شيل', 'Remove'))}">✕</button>` : ''}</span>`).join('')}${canPal && pal.length < 16 ? `<button type="button" class="cd-chip" data-cd="paladd">${IC.plus}${esc(L('ضيف اللون ده', 'Add this colour'))}</button>` : ''}</div>${!pal.length ? `<p class="cd-hint">${esc(L('ألوان المشروع بيشوفها كل فريق المشروع في كل رسوماته.', 'The project colours are shared with the whole project team in all its drawings.'))}</p>` : ''}` : ''}<button type="button" class="cd-mi" data-cd="tool" data-k="eyedrop">${IC.eyedrop}<span>${esc(L('خد لون من الرسمة', 'Pick a colour from the drawing'))}</span></button>`;
-      NFDraw.colorPicker(p.querySelector('.cd-wheel'), CD.color, (hex, fin) => setColor(hex, fin)); return;
+      const tab = prefs.colTab || 'fan'; const wh = p.querySelector('.cd-wheel');
+      wh.insertAdjacentHTML('beforebegin', `<div class="cd-chips cd-ctabs">${[['fan', L('درجات', 'Shades')], ['hsl', 'HSL'], ['rgb', 'RGB']].map(([k2, t]) => `<button type="button" class="cd-chip ${tab === k2 ? 'on' : ''}" data-cd="ctab" data-k="${k2}">${esc(t)}</button>`).join('')}</div>`);
+      wh.classList.toggle('cd-fanw', tab !== 'hsl'); if (tab === 'fan') wh.innerHTML = fanHTML(); else if (tab === 'rgb') wh.innerHTML = rgbHTML(); else NFDraw.colorPicker(wh, CD.color, (hex, fin) => setColor(hex, fin));
+      const rc = (prefs.recent || []).slice(0, 10); if (rc.length && tab !== 'hsl') wh.insertAdjacentHTML('afterend', `<div class="cd-mlbl">${esc(L('آخر الألوان', 'Recent colours'))}</div><div class="cd-strip">${rc.map(c => `<button type="button" class="cd-sw" data-cd="paluse" data-k="${esc(c)}" style="--c:${esc(c)}" aria-label="${esc(c)}"></button>`).join('')}</div>`);
+      return;
     }
     if (kind === 'brush' || kind === 'wheel') {
       p.innerHTML = hd(L('الفرش', 'Brushes')) + (kind === 'wheel' ? `<div class="cd-wsec">${wheelHTML()}</div>` : '') + `<div class="cd-bgrid">${PENS.map(k => `<button type="button" class="cd-bt ${CD.tool === k ? 'on' : ''}" data-cd="tool" data-k="${k}">${IC[k]}<span>${esc(toolName(k))}</span></button>`).join('')}</div>
@@ -45319,6 +45425,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
 
   /* ---------- events ---------- */
+  document.addEventListener('click', e => { const f = e.target.closest && e.target.closest('#nfcd [data-fan]'); if (!f) return; setColor(f.dataset.fan); document.querySelectorAll('#nfcd .cd-fan path').forEach(x => x.classList.toggle('on', x === f)); });
   document.addEventListener('click', async e => {
     const b = e.target.closest && e.target.closest('#nfcd [data-cd]'); if (!b) return; e.preventDefault();
     const a = b.dataset.cd, k = b.dataset.k; const ed = CD.ed; const s = byId(COL, CD.id) || CD.rec;
@@ -45344,6 +45451,15 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     }
     if (a === 'finger2') { ed.fingerDraws = ed.fingerDraws === true ? 'auto' : true; prefs.finger = ed.fingerDraws === true; savePrefs(); const pop = $c('.cd-pop'); if (pop && CD.pop === 'pen') { unmountTest(); pop.innerHTML = popHd(L('إعدادات القلم', 'Pen settings')) + penHTML(); requestAnimationFrame(mountTest); } return; }
     if (a === 'pmode') { const pp = penPrefs(); pp.brushes = pp.brushes || {}; pp.brushes[CD.tool] = Object.assign({}, pp.brushes[CD.tool] || {}, { mode: k }); savePen(pp); penChanged(); const pw = $c('.cd-pressw'); if (pw) pw.innerHTML = pressHTML(); return; }
+    /* v7.53 the ring: a slot = that brush (tap the one in use = its settings); the hub = small strips with ready values */
+    if (a === 'slot') { if (CD.tool === k) return openPop('brush'); closePop(); return setTool(k); }
+    if (a === 'hub') return openPop('hub:' + k);
+    if (a === 'hset') { setBrush(k, +b.dataset.v); return updRing(); }
+    if (a === 'hstep') { const [, mn, mx] = HUB[k]; const v = curV(k); const d = +b.dataset.v; const nv = k === 'size' ? Math.round(Math.max(mn, Math.min(mx, d > 0 ? v * 1.15 : v / 1.15)) * 100) / 100 : Math.round(Math.max(mn, Math.min(mx, v + d * 0.05)) * 100) / 100; setBrush(k, nv); return updRing(); }
+    if (a === 'toolspop') return openPop('tools');
+    if (a === 'lyopts') { prefs.lyOpts = !prefs.lyOpts; savePrefs(); const cl = $c('.cd-col'); if (cl) cl.classList.toggle('lyopts', !!prefs.lyOpts); return paintLayers(); }
+    if (a === 'ctab') { prefs.colTab = k; savePrefs(); CD.pop = ''; return openPop('color'); }
+    if (a === 'hexgo') { const i = $c('[data-cdhex]'); const v = i ? String(i.value || '').trim() : ''; if (/^#?[0-9a-f]{6}$/i.test(v)) { setColor(v[0] === '#' ? v.toLowerCase() : '#' + v.toLowerCase()); CD.pop = ''; return openPop('color'); } return toast(L('اكتب اللون كده: #1c1c1e', 'Type the colour like #1c1c1e'), 'err'); }
     if (a === 'color') return openPop('color');
     if (a === 'brush') return openPop('brush');
     /* the middle of the wheel: back to the last brush first, then all the brushes */
@@ -45415,6 +45531,8 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const t = e.target; if (!t || !t.closest || !t.closest('#nfcd')) return;
     if (t.dataset.cdr) { setBrush(t.dataset.cdr, +t.value); document.querySelectorAll(`#nfcd [data-cdr="${t.dataset.cdr}"]`).forEach(x => { if (x !== t) x.value = t.value; }); }
     if (t.dataset.cdl && CD.ed) CD.ed.setLayerOpacity(t.dataset.cdl, +t.value, true);
+    /* v7.53 RGB sliders in the colour pop */
+    if (t.dataset.rgb != null) { const vs = [0, 1, 2].map(i => { const x = $c(`[data-rgb="${i}"]`); return x ? +x.value : 0; }); const hex = '#' + vs.map(x => x.toString(16).padStart(2, '0')).join(''); vs.forEach((x, i) => { const b2 = $c(`[data-rgbv="${i}"]`); if (b2) b2.textContent = x; }); const dt = $c('[data-rgbdot]'); if (dt) dt.style.background = hex; const hi = $c('[data-cdhex]'); if (hi) hi.value = hex; setColor(hex, false); clearTimeout(CD.rgbT); CD.rgbT = setTimeout(() => setColor(hex), 500); }
     if (t.dataset.cdp === 'vol') { const pp = penPrefs(); pp.vol = Math.round(+t.value * 100) / 100; savePen(pp); try { NFDraw.sound.setVol(pp.vol); } catch (er) { /* ignore */ } const v = $c('[data-cdpv="vol"]'); if (v) v.textContent = pct(+t.value); return; }
     if (t.dataset.cdp) { const pp = penPrefs(); pp.brushes = pp.brushes || {}; const cur = brushPress(CD.tool); const o = Object.assign({ mode: cur.mode, min: cur.min, max: cur.max }, pp.brushes[CD.tool] || {}); o[t.dataset.cdp] = Math.round(+t.value * 100) / 100; pp.brushes[CD.tool] = o; savePen(pp); penChanged(); const v = $c(`[data-cdpv="${t.dataset.cdp}"]`); if (v) v.textContent = pct(+t.value); }
   });
@@ -45675,6 +45793,43 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     .cdgrid.sm{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
     .cdmini{text-decoration:none;color:inherit}.cdmini .cdmeta{padding:8px 10px 10px}
     @media (max-width:759px){.nfcd .cd-sto span{display:none}.nfcd .cd-sto{width:40px;padding:0;justify-content:center}.nfcd .cd-penrow{flex-direction:column}.nfcd .cd-cvw{align-self:center}}
+    /* v7.53 light floating workspace (ring + floating layers + precision in the corner) */
+    .nfcd{--cd-glass:color-mix(in srgb,var(--surface,#fff) 84%,transparent);--cd-glass2:color-mix(in srgb,var(--surface,#fff) 94%,transparent);--cd-edge:color-mix(in srgb,var(--ink,#111) 10%,transparent)}
+    .nfcd .cd-top{min-height:46px;padding:4px 10px;background:var(--cd-glass2);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--cd-edge)}
+    .nfcd .cd-top .cd-ib{width:36px;height:36px;border-radius:10px}.nfcd .cd-top .cd-zb{height:30px;border-color:transparent;color:var(--ink-2)}.nfcd .cd-top .cd-title b{font-size:15px}
+    @media (min-width:760px){
+      .nfcd .cd-col{background:transparent;border:0;box-shadow:none;border-radius:0;overflow:visible;pointer-events:none;bottom:auto;max-height:calc(100% - 70px);gap:10px}
+      .nfcd .cd-col>*{pointer-events:auto}
+      .nfcd .cd-colsec{border-top:0;padding:0}.nfcd .cd-ringw{flex:none}
+      .nfcd .cd-colsec.cd-lyw{flex:0 1 auto;min-height:0;overflow:auto;padding:8px 10px;border-radius:16px;background:var(--cd-glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--cd-edge);box-shadow:0 10px 30px -18px rgba(0,0,0,.35)}
+      .nfcd .cd-lyw .cd-ly{background:color-mix(in srgb,var(--surface,#fff) 70%,transparent)}.nfcd .cd-lyw .cd-ly.cd-lyon{background:var(--accent-soft,rgba(0,122,255,.14))}
+    }
+    .nfcd .cd-ring{position:relative;width:220px;height:220px;margin:0 auto;user-select:none;-webkit-user-select:none}
+    .nfcd .cd-ringbg{position:absolute;inset:5px;width:210px;height:210px;border-radius:50%;background:radial-gradient(circle,transparent 0 63px,var(--cd-glass) 64px);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 12px 34px -16px rgba(0,0,0,.42),inset 0 0 0 1px var(--cd-edge)}
+    .nfcd .cd-slot{position:absolute;width:46px;height:46px;transform:translate(-50%,-50%);border-radius:50%;border:0;background:transparent;color:var(--ink,#111);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0;cursor:pointer;transition:background .12s}
+    .nfcd .cd-slot svg{width:20px;height:20px}.nfcd .cd-slot small{font:600 9.5px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink-2);font-variant-numeric:tabular-nums;line-height:1.15}
+    .nfcd .cd-slot:hover{background:var(--cd-edge)}.nfcd .cd-slot.on{background:var(--c,#1c1c1e);color:#fff;box-shadow:0 5px 14px -5px rgba(0,0,0,.5)}.nfcd .cd-slot.on small{color:rgba(255,255,255,.85)}
+    .nfcd .cd-slot.on.lt{color:#111}.nfcd .cd-slot.on.lt small{color:#444}.nfcd .cd-slot.cur{box-shadow:inset 0 0 0 2px var(--c,#1c1c1e)}
+    .nfcd .cd-hub{position:absolute;inset:49px;border-radius:50%;background:var(--cd-glass2);box-shadow:inset 0 0 0 1px var(--cd-edge),0 2px 10px -6px rgba(0,0,0,.3)}
+    .nfcd .cd-hb{position:absolute;border:0;background:transparent;color:var(--ink,#111);display:flex;align-items:center;gap:2px;padding:3px 5px;border-radius:9px;cursor:pointer;font:600 11px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .nfcd .cd-hb svg{width:15px;height:15px;opacity:.75;flex:none}.nfcd .cd-hb:hover{background:var(--cd-edge)}
+    .nfcd .cd-hsm,.nfcd .cd-hop{flex-direction:column}   /* positions are inline: physical in both languages */
+    .nfcd .cd-hcol{position:absolute;inset:50px 41px 32px;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--c);box-shadow:0 0 0 3px var(--surface,#fff),0 0 0 4px var(--cd-edge),0 4px 10px -4px rgba(0,0,0,.4)}.nfcd .cd-hcol i{display:none}
+    .nfcd .cd-rc{position:absolute;width:36px;height:36px;min-width:0;border-radius:50%;border:0;display:grid;place-items:center;padding:0;cursor:pointer;background:var(--cd-glass2);color:var(--ink,#111);box-shadow:inset 0 0 0 1px var(--cd-edge),0 4px 12px -6px rgba(0,0,0,.35)}
+    .nfcd .cd-rc svg{width:18px;height:18px}.nfcd .cd-rc:disabled{opacity:.35;cursor:default}.nfcd .cd-rc.on{background:var(--accent,#0a84ff);color:#fff}
+        .nfcd .cd-pop{background:var(--cd-glass2);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+    .nfcd .cd-pop.cd-hpop{width:auto;min-width:270px;max-width:400px;padding:8px 10px}.nfcd .cd-hchips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.nfcd .cd-hchips .cd-chip{white-space:nowrap;font-variant-numeric:tabular-nums}.nfcd [data-hv]{unicode-bidi:isolate}
+    .nfcd .cd-hsl{display:flex;align-items:center;gap:6px;padding:2px 2px 4px}.nfcd .cd-hsl input{flex:1;accent-color:var(--accent,#0a84ff)}
+    .nfcd .cd-precbtn{position:absolute;bottom:14px;z-index:4;display:flex;align-items:center;gap:6px;height:36px;padding:0 13px;border-radius:999px;border:0;background:var(--cd-glass2);color:var(--ink,#111);box-shadow:inset 0 0 0 1px var(--cd-edge),0 6px 18px -10px rgba(0,0,0,.4);cursor:pointer;font:600 13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+    .nfcd .cd-precbtn svg{width:18px;height:18px}
+    .nfcd .cd-fan{width:100%;height:auto;display:block;margin:2px 0 4px}.nfcd .cd-fan path{cursor:pointer;stroke:var(--surface,#fff);stroke-width:1}.nfcd .cd-fan path:hover{stroke:var(--ink,#111);stroke-width:1.6}.nfcd .cd-fan path.on{stroke:var(--accent,#0a84ff);stroke-width:3}
+    .nfcd .cd-wheel.cd-fanw{display:block}.nfcd .cd-greys,.nfcd .cd-ctabs{justify-content:center}.nfcd .cd-rgb input[data-cdhex]{width:104px}
+    @media (max-width:759px){.nfcd .cd-precbtn{display:none}}
+    .nfcd .cd-hb small{font-size:9.5px;font-weight:500;opacity:.8}.nfcd .cd-hb [data-hv]{unicode-bidi:isolate;direction:ltr}
+    .nfcd .cd-slot.on{outline:2px solid color-mix(in srgb,var(--ink,#111) 28%,transparent);outline-offset:1px}
+    .nfcd .cd-lyopt{display:flex;align-items:center;gap:6px;width:100%;margin-top:6px;padding:6px 4px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);font:inherit;font-size:12px;cursor:pointer}.nfcd .cd-lyopt svg{width:16px;height:16px}.nfcd .cd-lyopt:hover{background:var(--cd-edge)}
+    @media (max-width:759px){.nfcd .cd-lyopt{display:none}}
+    @media (min-width:760px){.nfcd .cd-col:not(.lyopts) .cd-lyw .cd-lyact,.nfcd .cd-col:not(.lyopts) .cd-lyw>.cd-hint{display:none}}
     .nfcd .cd-pop .cd-wsec{padding:2px 0 6px}
     .nfcd .cd-pop .cd-lywp>.cd-sech b{opacity:0}
     @media (max-width:759px){
@@ -46369,6 +46524,8 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     const payer = P.defaultPayer(); const advTotal = r2x(adv.reduce((a, b) => a + (+b.total || 0), 0)); const restTotal = r2x(items.reduce((a, it) => a + (+it.amount || 0), 0)); const total = r2x(advTotal + restTotal);
     if (items.length && !P.custodyOf(payer)) { toast(L('المحوِّل مالوش عهدة — اعملها من «الفلوس» الأول', 'The payer has no custody — add it on the money page first'), 'err'); return; }
     const lines = adv.map(b => `<div class="pbli"><span>${esc(L(`دفعة سلف ${b.code || ''} — ${(b.items || []).length} سلفة`, `Advance batch ${b.code || ''} — ${(b.items || []).length} advances`))}</span><b class="num">${fmtMoney(+b.total || 0)}</b></div>`).join('') + items.map(it => `<div class="pbli"><span>${esc(it.label)}</span><b class="num">${fmtMoney(it.amount)}</b></div>`).join('');
+    const lock = on => Promise.all(adv.map(b => (window.nfAdvLock ? window.nfAdvLock(b.id, on) : null)));   /* v7.53: no new advance joins a batch while its total is on screen */
+    await lock(true);
     const r = await dialog({ title: L(`تحويل واحد — ${money(total)} لعهدة ${short(P.nameOf(payer))}`, `One transfer — ${money(total)} to ${short(P.nameOf(payer))}'s custody`), submitLabel: L('حوّلت — ارفع الصورة', 'Transferred — upload it'),
       body: `<div class="form"><div class="full pblist">${lines}<div class="pbli tot"><span>${esc(L('المجموع', 'Total'))}</span><b class="num">${esc(money(total))}</b></div></div>
         <div class="full"><div class="tiny muted" style="margin-bottom:4px">${esc(L(`حوّل المجموع على رقم ${P.nameOf(payer)}:`, `Transfer the total to ${P.nameOf(payer)}'s number:`))}</div>${P.payerNumbers(payer)}</div>
@@ -46376,7 +46533,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
         <div class="field full"><label>${esc(L('صورة التحويل', 'Transfer screenshot'))}</label><input type="file" id="omf-file" accept="image/*"></div>
         <div class="full tiny muted">${esc(L('صورة واحدة للتحويل كله: السيستم بيقراها ويتأكد إن المستلم المحوِّل والمبلغ = المجموع، ودفعات السلف بتتبعت له على طول، والباقي بيدخل عهدته في دفعة تحويل يوزّعها.', 'One screenshot for the whole transfer: it is read and checked (recipient = the payer, amount = the total); the advance batches go to him at once and the rest goes into his custody as a pay batch he pays out.'))}</div></div>`,
       onSubmit: async f => { const file = (f.querySelector('#omf-file') || {}).files?.[0]; if (!file) { toast(L('صورة التحويل مطلوبة', 'The screenshot is needed'), 'err'); return false; } return { file, from: (formData(f).from || 'personal') }; } });
-    if (!r) return;
+    if (!r) { lock(false); return; }
     busy(L('بيجهّز الصورة…', 'Preparing the picture…'));
     let pb = null, a = { thumb: null, fileIds: [] };
     try {
@@ -46386,7 +46543,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       busy(''); done();
       if (res && (res.queued || res.pending)) { window.nfTrf.notice(res); return; }
       await comboDone(res, { ids: adv.map(b => b.id), pb: pb ? pb.id : null, from: r.from, thumb: a.thumb, fileIds: a.fileIds }, false);
-    } catch (e) { busy(''); toast(L('مقدرتش أكمّل', 'Could not finish') + ': ' + (e.message || e), 'err'); }
+    } catch (e) { busy(''); lock(false); toast(L('مقدرتش أكمّل', 'Could not finish') + ': ' + (e.message || e), 'err'); }
   }
   async function comboDone(res, ctx, late) {
     const P = window.nfPb; const pb = ctx.pb ? byId('money', ctx.pb) : null;
@@ -48826,6 +48983,354 @@ function oxFlow(k) {
   })(vMe);
   myAttCard = (base => function (w) { try { if (w && away(w)) return card(w); } catch (e) { console.warn('away att', e); } return base.apply(this, arguments); })(myAttCard);
   window.nfAwayAttCache = C;
+})();
+/* =====================================================================
+   v7.53 (PIN approved 12 Oct) — an advance within the employee's limit needs nobody's approval:
+   Mahmoud: within the limit it comes straight to me to be paid and Bahaa finishes the task; over the limit it waits for the financial manager.
+   · the request is saved with chain ['hr'] (99zzZzZZq); the first owner / Saeed session that sees it approves it by itself
+     (note «within the limit — approved automatically») → the usual effects: the advance record + the transfer order → it joins the one advance
+     batch already at the owner (99zzK addToOpenBatch, no «send» step any more).
+   · Saeed gets an information-only task (no amount) when it was not his own session that did it.
+   · over the limit → it waits for Saeed as before (only him now). Factory only.
+   ===================================================================== */
+(function () {
+  if (window.__NF_V753ADV__) return; window.__NF_V753ADV__ = 1;
+  const factory = () => !((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction()));
+  const busy = new Set(); let at = 0, running = false;
+  const isAuto = r => !!r && r.type === 'advance' && r.status === 'pending' && !r.overLimit && Array.isArray(r.chain) && r.chain.length === 1 && r.chain[0] === 'hr' && !(+r.step > 0);
+  window.nfAdvAuto = isAuto;
+  const ready = () => !S.db || (S.loaded && S.loaded.requests && S.loaded.workers && S.loaded.advpay && S.loaded.advbatch);
+  async function run() {
+    if (running || !S.session || !factory() || !(isAdmin() || role() === 'hr') || (typeof writable === 'function' && !writable()) || !ready()) return;
+    const due = list('requests').filter(r => isAuto(r) && !busy.has(r.id)).slice(0, 3); if (!due.length) return;
+    running = true;
+    try {
+      for (const r of due) {
+        busy.add(r.id); setTimeout(() => busy.delete(r.id), 120000);
+        try {
+          const ok = await decideRequest(r.id, 'approved', 'جوه الحد — اتعتمدت تلقائي ودخلت دفعة السلف', { final: true, auto: true });
+          if (ok === false) continue;
+          try { await Store.update('requests', r.id, { autoOk: true }, { silent: true }); } catch (e) { /* ignore */ }
+          if (role() !== 'hr' && typeof notifyRole === 'function') {
+            const w = byId('workers', r.workerId);
+            await notifyRole('hr', `للعلم: سلفة ${w ? w.name : ''} جوه الحد دخلت دفعة السلف`, 'اتعتمدت لوحدها لأنها جوه الحد — مستنية تحويل المالك، وبهاء بيحوّلها بعدها.', { id: `advinfo_${r.id}`, kind: 'update', source: 'advance' });
+          }
+        } catch (e) { console.warn('advance auto', e); }
+      }
+    } finally { running = false; }
+  }
+  window.nfAdvAutoRun = run;
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (Date.now() - at < 15000) return; at = Date.now(); setTimeout(() => { run().catch(() => { }); }, 600); });
+  setInterval(() => { if (!document.hidden) run().catch(() => { }); }, 60000);
+  /* the request card says it approves by itself while it waits a moment */
+  if (typeof reqDesc === 'function') reqDesc = (base => function (r) { const t = base.apply(this, arguments); try { if (isAuto(r) && t) return `${t} — جوه الحد: بتتعتمد لوحدها وتدخل دفعة السلف`; } catch (e) { /* ignore */ } return t; })(reqDesc);
+})();
+/* =====================================================================
+   v7.53 — inside a request: the purchase it is about + replies that come back (Mahmoud, 12 Oct, on RFQ-26-009:
+   he wanted to see the purchase request itself to check something, and the answer to come back on the same task).
+   · any request tied to a purchase (new-material technical / price approval, PO steps…) shows a «Purchase request» box:
+     number, who asked, the work order, the items (size / qty / unit) and, per supplier offer, unit price × qty.
+   · «Send reply» used to add a line to the thread only — nobody was told. Now everyone involved (the requester, whoever
+     wrote or decided in the thread, the purchase's author, and whoever's turn it is) gets a task + a push that open the
+     same request; answering there notifies the others back. A reply task closes once that person replies or opens it.
+     No amounts in the task / push texts.
+   ===================================================================== */
+(function () {
+  if (window.__NF_V753REQ__) return; window.__NF_V753REQ__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
+  const money = n => (typeof fmtMoney === 'function' ? fmtMoney(n) : String(n));
+  /* ---------- 1) the purchase box ---------- */
+  function poBox(p) {
+    const items = (p.rfqItems && p.rfqItems.length ? p.rfqItems : (p.items || [])).filter(Boolean); if (!items.length) return '';
+    const o = p.orderId ? byId('orders', p.orderId) : null;
+    const offers = (p.rfqOffers || []).slice().sort((a, b) => (+a.total || 0) - (+b.total || 0));
+    const row = (it, i) => {
+      const unitP = offers.length ? '' : (it.price != null ? money(+it.price) : '');
+      return `<tr><td>${esc(it.name || '')}${it.desc ? `<div class="tiny muted">${esc(it.desc)}</div>` : ''}</td><td class="n">${esc(String(it.qty != null ? it.qty : ''))}</td><td>${esc(it.unit || '')}</td>${offers.length ? '' : `<td class="n">${unitP}</td>`}</tr>`;
+    };
+    const offerLines = offers.map(of => {
+      const parts = items.map((it, i) => { const x = (of.items || [])[i] || {}; if (x.price == null) return ''; return `${money(+x.price)} × ${esc(String(it.qty != null ? it.qty : ''))} ${esc(it.unit || '')}${items.length > 1 ? ` (${esc(it.name || '')})` : ''}`; }).filter(Boolean).join(' + ');
+      return `<div class="rqpo-of"><b>${esc(of.supplierName || '')}</b><span>${parts || ''}</span><b class="num">= ${money(+of.total || 0)}</b></div>`;
+    }).join('');
+    return `<div class="rqpo" id="rq-po"><div class="rqpo-h">${icon('purchase')}<b>${esc(T('طلب الشراء', 'Purchase request'))}</b><span class="code">${esc(p.number || '')}</span>${p.requestedByName ? `<span class="tiny muted">${esc(T('طالبه', 'Asked by'))}: ${esc(p.requestedByName)}</span>` : ''}${o ? `<span class="tiny muted">${esc(o.code || '')}${o.title ? ' — ' + esc(o.title) : ''}</span>` : ''}</div>
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>${esc(T('الصنف', 'Item'))}</th><th class="n">${esc(T('الكمية', 'Qty'))}</th><th>${esc(T('الوحدة', 'Unit'))}</th>${offers.length ? '' : `<th class="n">${esc(T('سعر الوحدة', 'Unit price'))}</th>`}</tr></thead><tbody>${items.map(row).join('')}</tbody></table></div>
+      ${offerLines ? `<div class="rqpo-ofs"><div class="tiny muted">${esc(T('العروض: سعر الوحدة × الكمية', 'Offers: unit price × quantity'))}</div>${offerLines}</div>` : ''}
+      ${p.notes ? `<div class="tiny muted" style="margin-top:4px">${esc(p.notes)}</div>` : ''}</div>`;
+  }
+  ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); const p = r && r.purchaseId ? byId('purchases', r.purchaseId) : null;
+      if (p && !document.getElementById('rq-po')) { const th = document.getElementById('rq-thread'); if (th) th.insertAdjacentHTML('beforebegin', poBox(p)); }
+      /* opening it = you saw the reply */
+      closeMine(id);
+    } catch (e) { console.warn('rq po', e); }
+    return out;
+  })(ACTIONS.reqOpen);
+  /* the approve dialog shows it too (so the price can be checked against the quantity before approving) */
+  if (typeof ACTIONS.reqDecide === 'function') ACTIONS.reqDecide = (base => function (arg) {
+    const out = base.apply(this, arguments);
+    try { const id = String(arg || '').split(':')[0]; const r = byId('requests', id); const p = r && r.purchaseId ? byId('purchases', r.purchaseId) : null; const f = document.getElementById('mform'); const box = f && f.querySelector('.form');
+      if (p && box && !box.querySelector('#rq-po')) box.insertAdjacentHTML('afterbegin', poBox(p).replace('class="rqpo"', 'class="rqpo full" style="grid-column:1/-1"')); } catch (e) { /* ignore */ }
+    return out;
+  })(ACTIONS.reqDecide);
+  /* ---------- 2) replies notify everyone involved ---------- */
+  const meTargets = () => { const me = S.session || {}; const s = new Set(); if (me.id) s.add(me.id); if (me.workerId) s.add('w:' + me.workerId); if (isAdmin()) s.add('role:admin'); return s; };
+  const toT = (id, rl) => { if (!id && !rl) return null; const v = String(id || ''); if (v.startsWith('w:')) return v; if (rl === 'admin' || v === 'owner' || v.startsWith('sb:')) return 'role:admin'; return null; };
+  function partiesOf(r) {
+    const s = new Set();
+    try { (typeof reqStepTargets === 'function' && r.status === 'pending' ? reqStepTargets(r) : []).forEach(t => s.add(t)); } catch (e) { /* ignore */ }
+    if (r.workerId) s.add('w:' + r.workerId); if (r.requesterId) s.add(String(r.requesterId).startsWith('w:') ? r.requesterId : 'w:' + r.requesterId);
+    const c = toT(r.createdBy); if (c) s.add(c);
+    (r.thread || []).forEach(m => { if (m.kind === 'system') return; const t = toT(m.by, m.role); if (t) s.add(t); });
+    (r.approvals || []).forEach(a => { const t = toT(a.by, a.role); if (t) s.add(t); });
+    const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; if (p) { const t = toT(p.createdBy) || (p.requestedBy ? 'w:' + String(p.requestedBy).replace(/^w:/, '') : null); if (t) s.add(t); }
+    const mine = meTargets(); return [...s].filter(t => t && !mine.has(t) && (!t.startsWith('w:') || byId('workers', t.slice(2))));
+  }
+  const taskId = (rid, t) => `rqc_${rid}_${String(t).replace(/[^a-zA-Z0-9]/g, '_')}`;
+  async function closeMine(rid) {
+    try { const ids = [...meTargets()].map(t => taskId(rid, t)); for (const id of ids) { const t = byId('tasks', id); if (t && t.status !== 'done') await Store.update('tasks', id, { status: 'done', doneAt: nowISO(), doneByName: (S.session && S.session.name) || '' }, { silent: true }); } } catch (e) { /* ignore */ }
+  }
+  window.nfReqParties = partiesOf;
+  /* whoever was asked in the thread (or asked it) can open it from his task */
+  if (typeof requestVisible === 'function') requestVisible = (base => function (r) {
+    if (base.apply(this, arguments)) return true;
+    try {
+      const me = S.session || {}; const wid = me.workerId || ''; if (!r) return false;
+      if (wid && (String(r.requesterId || '').replace(/^w:/, '') === wid)) return true;
+      if ((r.thread || []).some(m => m.by && m.by === me.id)) return true;
+      const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; if (p && ((p.createdBy && p.createdBy === me.id) || (wid && String(p.requestedBy || '').replace(/^w:/, '') === wid))) return true;
+      return [...meTargets()].some(t => { const k = byId('tasks', taskId(r.id, t)); return !!k; });
+    } catch (e) { return false; }
+  })(requestVisible);
+  ACTIONS.reqComment = (base => async function (id) {
+    const before = byId('requests', id); const n0 = before ? (before.thread || []).length : 0;
+    const out = await base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); if (!r || (r.thread || []).length <= n0) return out;
+      const me = S.session || {}; const who = me.name || ''; const kind = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || T('طلب', 'request');
+      const p = r.purchaseId ? byId('purchases', r.purchaseId) : null; const ref = p && p.number ? ` ${p.number}` : '';
+      const targets = partiesOf(r); if (!targets.length) return out;
+      const now = nowISO();
+      for (const t of targets) {
+        const doc = { id: taskId(r.id, t), title: T(`رد جديد من ${who} — ${kind}${ref}`, `New reply from ${who} — ${kind}${ref}`), desc: T('افتح الطلب وشوف الرد، وردّ عليه من نفس المكان.', 'Open the request to read the reply and answer it there.'), reqId: r.id, purchaseId: r.purchaseId || null, link: `/#/requests/${r.id}`, priority: 'high', status: 'open', kind: 'notice', source: 'reqreply', deptId: null, orderId: null, dueDate: todayISO(), createdBy: me.id || null, createdByName: who, createdAt: (byId('tasks', taskId(r.id, t)) || {}).createdAt || now, updatedAt: now };
+        if (t.startsWith('w:')) Object.assign(doc, { assigneeId: t.slice(2), toRole: null }); else Object.assign(doc, { assigneeId: null, toRole: t.replace(/^role:/, '') });
+        try { await Store.save('tasks', doc, { silent: true }); } catch (e) { /* a role may not be allowed to write that task — the push still goes */ }
+      }
+      if (typeof pushSend === 'function') pushSend(targets, T(`رد جديد من ${who} — ${kind}${ref}`, `New reply from ${who} — ${kind}${ref}`).slice(0, 100), T('افتح الطلب وردّ من نفس المكان', 'Open the request and answer there'), `/#/requests/${r.id}`, 'req-' + r.id).catch(() => { });
+      toast(T(`الرد وصل لـ${targets.length} ${targets.length === 1 ? 'شخص' : 'أشخاص'}`, `The reply reached ${targets.length} ${targets.length === 1 ? 'person' : 'people'}`));
+    } catch (e) { console.warn('req reply notify', e); }
+    return out;
+  })(ACTIONS.reqComment);
+  /* ---------- 3) a purchase made on the wrong project → move it (Mahmoud, 12 Oct, RFQ-26-009) ----------
+     the owner, the factory manager and purchasing; until it is received. The purchase, its requests and its open tasks follow;
+     the move is written on the purchase (from → to, who, when). */
+  const canMove = p => !!S.session && writable() && p && !['received', 'cancelled'].includes(p.status) && (isAdmin() || ['manager', 'purch'].includes(role()) || (typeof canDo === 'function' && canDo('purchases')));
+  if (typeof vPurchaseDetail === 'function') vPurchaseDetail = (base => function (id) {
+    const h = base.apply(this, arguments);
+    try { const p = byId('purchases', id); if (!canMove(p)) return h; const o = p.orderId ? byId('orders', p.orderId) : null;
+      const bar = `<div class="card pomove" style="padding:10px 14px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="small muted">${esc(T('المشروع', 'Project'))}:</span><b>${o ? esc(`${o.code} — ${o.title || ''}`) : esc(T('من غير مشروع', 'No project'))}</b><div class="grow"></div><button type="button" class="btn sm" data-action="poMoveOrder" data-arg="${esc(p.id)}">${icon('arrow')}${esc(T('انقل لمشروع تاني', 'Move to another project'))}</button></div></div>`;
+      const i = h.indexOf('<div class="card'); const j = i >= 0 ? h.indexOf('<div class="card', i + 10) : -1; return j > 0 ? h.slice(0, j) + bar + h.slice(j) : h + bar; } catch (e) { return h; }
+  })(vPurchaseDetail);
+  ACTIONS.poMoveOrder = id => {
+    const p = byId('purchases', id); if (!canMove(p)) return;
+    const os = sortBy(list('orders').filter(o => (typeof isOpen === 'function' ? isOpen(o) : true) && o.id !== p.orderId), o => o.code || '');
+    openModal({ title: T(`نقل ${p.number || ''} لمشروع تاني`, `Move ${p.number || ''} to another project`), submitLabel: T('انقل', 'Move'),
+      body: `<div class="form">${field(T('المشروع الصح', 'The right project'), `<select name="to" required><option value="">—</option>${os.map(o => `<option value="${esc(o.id)}">${esc(`${o.code} — ${o.title || ''}`)}</option>`).join('')}</select>`, 'full')}${field(T('السبب (اختياري)', 'Reason (optional)'), inp('why', ''), 'full')}<div class="tiny muted full">${esc(T('أمر الشراء وطلباته ومهامه المفتوحة بيروحوا للمشروع الجديد، وتكلفة الخامة بتتحسب عليه.', 'The purchase, its requests and its open tasks move to the new project, and the material cost is charged to it.'))}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const to = byId('orders', d.to); if (!to) { toast(T('اختار المشروع', 'Pick the project'), 'err'); return false; }
+        const now = nowISO(); const me = (S.session && S.session.name) || ''; const from = p.orderId || null;
+        await Store.update('purchases', p.id, { orderId: to.id, brandId: to.brandId || p.brandId || null, orderMoves: (p.orderMoves || []).concat([{ from, to: to.id, by: me, at: now, why: d.why || '' }]) });
+        try { for (const r of list('requests').filter(x => x.purchaseId === p.id)) { const th = (r.thread || []).concat([{ id: uid(), at: now, kind: 'system', text: `${me}: ${T('اتنقل للمشروع', 'moved to the project')} ${to.code}${d.why ? ' — ' + d.why : ''}` }]); await Store.update('requests', r.id, { orderId: to.id, thread: th }, { silent: true }); } } catch (e) { /* ignore */ }
+        try { for (const t of list('tasks').filter(x => x.purchaseId === p.id && x.status !== 'done' && x.orderId !== to.id)) await Store.update('tasks', t.id, { orderId: to.id }, { silent: true }); } catch (e) { /* ignore */ }
+        toast(T(`اتنقل لـ ${to.code}`, `Moved to ${to.code}`)); render(false);
+      } });
+  };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+  .rqpo{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;background:var(--surface-2)}
+  .rqpo-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}.rqpo-h svg{width:16px;height:16px}
+  .rqpo .tbl{font-size:13px}.rqpo-ofs{margin-top:6px;display:flex;flex-direction:column;gap:3px}
+  .rqpo-of{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:13px}.rqpo-of span{color:var(--muted);flex:1;min-width:0}
+  </style>`);
+})();
+/* =====================================================================
+   v7.53 (PIN approved 12 Oct) — the counted hours of a day are the shift only, until overtime is approved. Factory only.
+   Mahmoud: an early punch before the shift, or a punch after 17:00 without approved overtime → count his 8 hours only until
+   the department manager approves the overtime; an early punch reads as 09:00 unless he has a task to go out early (7 / 8).
+   · counted from the shift start (09:00) — or earlier when the person has, that day, a task with an early start time
+     («startAt», written by whoever gives the task), is on an approved installation team, or checked in from an errand place.
+   · counted until the shift end (17:00) — later only when he is on tonight's approved overtime list (otnight), or the extra
+     was approved (otDeptOk by his department head / the factory manager / the owner, or the existing otMgrOk / otOk).
+   · the time after 17:00 that is not approved yet = «extra hours waiting» (otPend): a task to his department head (push), a
+     page «extra hours» (#/otpend) with approve / reject; approved → it becomes overtime and goes on through the existing
+     overtime approval (factory manager → accounts manager) before payroll. Rejected → the 8 hours stay.
+   · the real punch times are kept as they are (in / out), plus hrsRaw / countFrom / countTo for the screens.
+   ===================================================================== */
+(function () {
+  if (window.__NF_V753ATT__) return; window.__NF_V753ATT__ = 1;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof setAtt !== 'function' || typeof shiftFor !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
+  const MIN_PEND = 15;
+  const hpd = () => +(S.settings && S.settings.hoursPerDay) || 8;
+  const canDecide = w => !!S.session && (isAdmin() || role() === 'manager' || (role() === 'head' && w && myDepts().includes(w.deptId)));
+  /* ---------- the rule ---------- */
+  function earlyStart(w, date, row) {
+    const ss = tmToMin(shiftFor(w).start); let e = null; const a = tmToMin(row.in);
+    try { list('tasks').forEach(t => { if (!t || t.status === 'cancelled' || !t.startAt || String(t.assigneeId || '') !== String(w.id)) return; const d = t.startDate || t.dueDate || String(t.createdAt || '').slice(0, 10); if (d !== date) return; const m = tmToMin(t.startAt); if (m != null && m < ss && (e == null || m < e)) e = m; }); } catch (x) { /* ignore */ }
+    try { if (typeof assignmentsFor === 'function' && assignmentsFor(w, date).length && a != null && (e == null || a < e)) e = a; } catch (x) { /* ignore */ }
+    if ((row.errand || /errand/.test(String(row.src || ''))) && a != null && (e == null || a < e)) e = a;
+    return e;
+  }
+  function lateOk(w, date, row) {
+    if (row.otDeptOk || row.otMgrOk || row.otOk) return true;
+    try { if (typeof window.nfOtNightOf === 'function' && window.nfOtNightOf(date, w.id)) return true; } catch (x) { /* ignore */ }
+    try { if (typeof window.nfOtTaskFor === 'function' && window.nfOtTaskFor(date, w.id)) return true; } catch (x) { /* ignore */ }   /* the head's overtime task (v6.63) = approved */
+    return false;
+  }
+  function counted(w, date, r) {
+    if (!r || !['P', 'H', undefined, null, ''].includes(r.s)) return null;
+    const a = tmToMin(r.in), b0 = tmToMin(r.out); if (a == null || b0 == null) return null;
+    let b = b0; if (b < a) b += 1440;
+    const sh = shiftFor(w); const ss = tmToMin(sh.start), se0 = tmToMin(sh.end); if (ss == null || se0 == null) return null;
+    let se = se0; if (se <= ss) se += 1440;
+    const brk = +sh.breakMinutes || 0; const e = earlyStart(w, date, r);
+    const st = a >= ss ? a : (e != null ? Math.max(a, e) : ss);
+    const ok = lateOk(w, date, r); const cap = Math.max(se, st);
+    const end = ok ? b : Math.min(b, cap);
+    const worked = Math.max(0, end - st - brk) / 60; const raw = Math.max(0, b - a - brk) / 60;
+    if (r.otManual) { const sw = Math.max(0, Math.min(b, cap) - st - brk) / 60; const mo = +r.ot || 0; return { hrs: r2(Math.min(raw, sw + mo)), hrsRaw: r2(raw), ot: r2(mo), otPend: 0, earlyOff: a < st && st - a >= 5 ? st - a : 0, countFrom: minToTm(st % 1440), countTo: minToTm(Math.min(b, cap + mo * 60) % 1440) }; }
+    let ot = +r.ot || 0;
+    if (!r.otManual) { ot = Math.max(0, worked - hpd()); if (ot * 60 < (+sh.otAfterMinutes || 0)) ot = 0; if (r.meal && ot > 0) ot = Math.max(0, ot - (+(S.settings.policy && S.settings.policy.mealBreakMinutes) || 30) / 60); }
+    const pend = ok ? 0 : Math.max(0, b - cap);
+    const early = a < st ? st - a : 0;
+    return { hrs: r2(worked), hrsRaw: r2(raw), ot: r2(ot), otPend: !r.otDeptRej && pend >= MIN_PEND ? r2(pend / 60) : 0, earlyOff: early >= 5 ? early : 0, countFrom: minToTm(st % 1440), countTo: minToTm(end % 1440) };
+  }
+  window.nfAttCounted = counted;
+  /* every save of a day with both punches goes through the rule */
+  setAtt = (base => async function (date, w, patch) {
+    let p = patch;
+    try {
+      if (w && patch && typeof patch === 'object') {
+        const cur = (attendanceFor(date) || {})[w.id] || {}; const r = Object.assign({}, cur, patch);
+        /* hours typed by HR / a head / the owner (not the automatic «out − in − 8») stay as typed */
+        const self = !!(S.session && S.session.workerId && String(S.session.workerId) === String(w.id));
+        if (!self && !r.otManual && Object.prototype.hasOwnProperty.call(patch, 'ot') && +patch.ot > 0 && r.in && r.out) {
+          const a = tmToMin(r.in); let b = tmToMin(r.out); if (a != null && b != null) { if (b < a) b += 1440; const sh = shiftFor(w); const wk = Math.max(0, b - a - (+sh.breakMinutes || 0)) / 60; let au = Math.max(0, wk - hpd()); if (au * 60 < (+sh.otAfterMinutes || 0)) au = 0; if (r.meal && au > 0) au = Math.max(0, au - (+(S.settings.policy && S.settings.policy.mealBreakMinutes) || 30) / 60);
+            const fromRule = cur.hrsRule === 'v753' && Math.abs((+cur.ot || 0) - (+patch.ot)) < 0.01;
+            if (!fromRule && Math.abs(au - (+patch.ot)) > 0.01) { r.otManual = true; patch = Object.assign({}, patch, { otManual: true }); } }
+        }
+        const c = r.in && r.out ? counted(w, date, r) : null;
+        if (c) p = Object.assign({}, patch, c, { hrsRule: 'v753' });
+      }
+    } catch (e) { console.warn('att rule', e); }
+    const out = await base.call(this, date, w, p);
+    try { if (p && +p.otPend > 0 && !p.otDeptOk && !p.otDeptRej) await askHead(date, w, Object.assign({}, (attendanceFor(date) || {})[w.id] || {}, p)); } catch (e) { /* ignore */ }
+    return out;
+  })(setAtt);
+  let recalcBusy = false;
+  Store.save = (base => function (col, doc) {
+    const out = base.apply(this, arguments);
+    try {
+      if (col === 'tasks' && doc && doc.ot && doc.ot.date && Array.isArray(doc.ot.workerIds) && !recalcBusy) Promise.resolve(out).then(async () => {
+        recalcBusy = true;
+        try { for (const wid of doc.ot.workerIds) { const w = byId('workers', wid); const cur = (attendanceFor(doc.ot.date) || {})[wid]; if (!w || !cur || !(+cur.otPend > 0)) continue; await setAtt(doc.ot.date, w, Object.assign({}, cur)); const t = byId('tasks', `otp_${doc.ot.date}_${wid}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneNote: 'اتسجّل سهر' }, { silent: true }); } } catch (e) { /* ignore */ } finally { recalcBusy = false; }
+      }, () => { });
+    } catch (e) { /* ignore */ }
+    return out;
+  })(Store.save);
+  /* ---------- the department head is asked ---------- */
+  const tid = (date, wid) => `otp_${date}_${wid}`;
+  async function askHead(date, w, r) {
+    const id = tid(date, w.id); const ex = byId('tasks', id); if (ex && ex.status !== 'cancelled' && ex.status !== 'done' && ex.otp && ex.otp.out === r.out) return;
+    const heads = typeof deptHeads === 'function' ? deptHeads(w.deptId) : []; const h = heads[0] || null; const sh = shiftFor(w);
+    const doc = { id, title: `ساعات زيادة مستنية اعتمادك — ${w.name} (${fmtDate(date)})`, desc: `انصرف ${r.out} من غير سهر متوافق عليه — اللي بعد ${sh.end} مش محسوب لحد ما توافق. افتح «ساعات زيادة» واعتمد أو ارفض.`, link: '/#/otpend', deptId: w.deptId || null, assigneeId: h ? h.id : null, toRole: h ? null : 'manager', priority: 'high', status: 'open', kind: 'task', source: 'otpend', otp: { date, wid: w.id, out: r.out }, createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: (ex && ex.createdAt) || nowISO(), updatedAt: nowISO() };
+    await Store.save('tasks', doc, { silent: true });
+    try { if (typeof pushSend === 'function') pushSend(h ? ['w:' + h.id] : ['role:manager'], `ساعات زيادة مستنية اعتمادك — ${w.name}`.slice(0, 100), `انصرف ${r.out} من غير سهر متوافق عليه`, '/#/otpend', 'otp-' + w.id).catch(() => { }); } catch (e) { /* ignore */ }
+  }
+  /* ---------- the list + approve / reject ---------- */
+  function pending(days = 10) {
+    const out = []; const today = todayISO();
+    for (let i = 0; i < days; i++) {
+      const d = addDays(today, -i); const att = attendanceFor(d) || {};
+      Object.entries(att).forEach(([wid, r]) => { if (!r || !(+r.otPend > 0) || r.otDeptOk || r.otDeptRej) return; const w = byId('workers', wid); if (!w || !canDecide(w)) return; out.push({ d, w, r }); });
+    }
+    return out;
+  }
+  window.nfOtPending = pending;
+  ACTIONS.otpDecide = async arg => {
+    const [d, wid, k] = String(arg || '').split('|'); const w = byId('workers', wid); if (!w || !canDecide(w)) return;
+    const cur = (attendanceFor(d) || {})[wid] || {}; if (!(+cur.otPend > 0)) return;
+    const me = { by: (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '', at: nowISO() };
+    let patch = Object.assign({}, cur, k === 'ok' ? { otDeptOk: me, otDeptRej: null } : { otDeptRej: me, otDeptOk: null, otPend: 0 });
+    if (typeof computeAttRow === 'function') patch = computeAttRow(patch, w);
+    await setAtt(d, w, patch);
+    try { const t = byId('tasks', tid(d, wid)); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: me.byName, doneNote: k === 'ok' ? 'اتعتمدت' : 'اترفضت' }, { silent: true }); } catch (e) { /* ignore */ }
+    toast(k === 'ok' ? T('اتعتمدت — بقت سهر ومكمّلة على اعتماد السهر', 'Approved — it is overtime now and goes on to the overtime approval') : T('اترفضت — اتحسبت 8 ساعات بس', 'Rejected — only the 8 hours count'));
+    rerender();
+  };
+  function listHTML(rows) {
+    if (!rows.length) return `<div class="empty small">${esc(T('مفيش ساعات زيادة مستنية', 'No extra hours waiting'))}</div>`;
+    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span class="ltr">${esc(r.in || '')} → ${esc(r.out || '')}</span><span>${esc(T(`محسوب ${r.countFrom || ''}–${r.countTo || ''}`, `Counted ${r.countFrom || ''}–${r.countTo || ''}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
+  }
+  if (typeof EXTRA_VIEWS !== 'undefined') {
+    VIEW_TITLES.otpend = 'ساعات زيادة';
+    canSee = (base => function (v) { if (v === 'otpend') return !!S.session && (isAdmin() || ['manager', 'head', 'hr'].includes(role())); return base.apply(this, arguments); })(canSee);
+    EXTRA_VIEWS.otpend = () => `<div class="card"><div class="cardhead"><h3>${icon('moon')}${esc(T('ساعات زيادة مستنية اعتماد', 'Extra hours waiting for approval'))}</h3></div><p class="small muted" style="margin:0 0 8px">${esc(T('اللي بصم انصراف بعد آخر الوردية من غير سهر متوافق عليه: محسوبله ساعات الوردية بس لحد ما رئيس قسمه يعتمد. بعد الاعتماد بتبقى سهر وتكمّل على اعتماد السهر (مدير المصنع ← مدير الحسابات).', 'Someone who punched out after the shift without approved overtime: only the shift hours count until his department head approves. Approved, it becomes overtime and goes on to the overtime approval (factory manager → accounts manager).'))}</p>${listHTML(pending())}</div>`;
+    if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.otpend = () => ({ title: T('ساعات زيادة', 'Extra hours'), sub: T('اعتماد الساعات اللي بعد الوردية', 'Approve the hours after the shift') });
+  }
+  /* a card on the attendance page / dashboard for whoever decides */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    try {
+      const v = S.route && S.route.view; if (!['attendance', 'dashboard'].includes(v) || !S.session || !(isAdmin() || ['manager', 'head'].includes(role()))) return;
+      const host = document.getElementById('view'); if (!host) return; const old = host.querySelector('#otpcard'); if (old) old.remove();
+      const rows = pending(); if (!rows.length) return;
+      host.insertAdjacentHTML('afterbegin', `<div class="card" id="otpcard" style="border-color:var(--warn,#e5932a)"><div class="cardhead"><h3>${icon('moon')}${esc(T('ساعات زيادة مستنية اعتمادك', 'Extra hours waiting for you'))}</h3><span class="badge warn">${rows.length}</span><div class="grow"></div><a class="btn xs ghost" href="#/otpend">${esc(T('الكل', 'All'))}</a></div>${listHTML(rows.slice(0, 5))}</div>`);
+    } catch (e) { /* ignore */ }
+  });
+  /* ---------- an early start time on a task ---------- */
+  if (typeof taskForm === 'function') taskForm = (base => function (t) {
+    const html = base.apply(this, arguments);
+    const f = field(T('يبدأ بدري الساعة (لو قبل الوردية)', 'Starts early at (if before the shift)'), `<input type="time" name="startAt" value="${esc((t && t.startAt) || '')}" class="ltr">`);
+    const i = html.lastIndexOf('</div>'); return i > 0 ? html.slice(0, i) + f + html.slice(i) : html;
+  })(taskForm);
+  let pendStart = null;
+  document.addEventListener('submit', e => { const f = e.target; if (!f || f.id !== 'mform') return; const s = f.querySelector('input[name="startAt"]'); pendStart = s ? { v: s.value || '', at: Date.now() } : null; }, true);
+  Store.save = (base => function (col, doc) {
+    try { if (col === 'tasks' && doc && pendStart && Date.now() - pendStart.at < 4000 && (!doc.source || doc.source === 'manual')) { doc.startAt = pendStart.v || null; pendStart = null; } } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(Store.save);
+  /* «my attendance» rows: show what counted when it differs from the punches */
+  document.head.insertAdjacentHTML('beforeend', `<style>.otp-it .meta span{white-space:nowrap}</style>`);
+})();
+/* =====================================================================
+   v7.53 — what you are typing survives a screen refresh (Mahmoud, 12 Oct, screen recording: typing in a task chat on the
+   iPhone, the words kept disappearing). A refresh of the page (new data arriving, a reminder tick…) rebuilt the chat box
+   empty; focus and caret came back but not the text. Now the text in the focused box — and the chat / request reply boxes
+   even when the keyboard is closed — is put back with the caret where it was. Every system, every page.
+   ===================================================================== */
+(function () {
+  if (window.__NF_KEEPTYPED__ || typeof preserveFocus !== 'function') return; window.__NF_KEEPTYPED__ = 1;
+  const KEEP = ['tmsg', 'rq-msg'];
+  const typed = el => el && el.id && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !/^(file|checkbox|radio|range|button|submit|color|date|time|number)$/i.test(el.type || '') && !!el.value;
+  preserveFocus = (base => function (fn) {
+    const keep = [];
+    try {
+      const a = document.activeElement;
+      if (typed(a)) keep.push({ id: a.id, v: a.value, s: a.selectionStart, e: a.selectionEnd });
+      KEEP.forEach(id => { const el = document.getElementById(id); if (el && el !== a && typed(el)) keep.push({ id, v: el.value }); });
+    } catch (e) { /* ignore */ }
+    const out = base.call(this, fn);
+    try {
+      keep.forEach(k => {
+        const el = document.getElementById(k.id); if (!el || el.value) return;
+        el.value = k.v;
+        if (k.id === 'tmsg') { el.style.height = 'auto'; el.style.height = Math.min(120, el.scrollHeight) + 'px'; }
+        if (k.s != null && document.activeElement === el && el.setSelectionRange) { try { el.setSelectionRange(k.s, k.e != null ? k.e : k.s); } catch (e) { /* ignore */ } }
+      });
+    } catch (e) { /* ignore */ }
+    return out;
+  })(preserveFocus);
 })();
 </script>
 
