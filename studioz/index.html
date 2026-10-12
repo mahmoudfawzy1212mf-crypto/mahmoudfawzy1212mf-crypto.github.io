@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-0927-3d54dd";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-1213-206d22";</script>
 
 <script>
 'use strict';
@@ -25172,7 +25172,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       if (r && r.status === 'paid') {
         try { await Store.save('tasks', { id: `apd_${p.advanceId}`, title: 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         try { const t = byId('tasks', `apt_${p.advanceId}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
-        try { const bb = p.batchId ? byId('advbatch', p.batchId) : null; if (bb && bb.status === 'funded') { const left = (bb.items || []).filter(i => i !== p.id).map(i => byId('advpay', i)).filter(x => x && x.status !== 'paid' && x.status !== 'cancelled'); if (!left.length) { pushTo(['role:admin'], `${S.session?.name || ''} خلّص توزيع دفعة سلف ${bb.code}`.trim(), `${(bb.items || []).length} سلفة اتحوّلت وكل واحدة بصورتها`); try { const t = byId('tasks', `abf_${bb.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e3) { /* ignore */ } } } } catch (e2) { /* ignore */ }
+        try { const bb = p.batchId ? byId('advbatch', p.batchId) : null; if (bb && bb.status === 'funded') { const left = (bb.items || []).filter(i => i !== p.id).map(i => byId('advpay', i)).filter(x => x && x.status !== 'paid' && x.status !== 'cancelled'); if (!left.length) { pushTo(['role:admin'], `${S.session?.name || ''} خلّص توزيع دفعة سلف ${bb.code}`.trim(), `${(bb.items || []).length} سلفة اتحوّلت وكل واحدة بصورتها`, bb.id); try { const t = byId('tasks', `abf_${bb.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e3) { /* ignore */ } } } } catch (e2) { /* ignore */ }
         if (late) { if (!quiet) toast(L(`تحويل سلفة ${p.workerName || ''} مطابق ✓ — اتقفلت «اتحولت»`, `The advance transfer for ${p.workerName || ''} matches ✓ — closed «transferred»`)); return; }
         const q = Object.assign({}, p, { status: 'paid', ref: r.ref, paidAmount: r.amount, proofUrl: r.proofUrl, walletShown: r.walletShown || p.walletShown });
         openModal({ title: 'التحويل مطابق ✓', submitLabel: 'تمام', body: `<div class="form"><div class="full">الرقم والمبلغ مطابقين — السلفة اتقفلت «اتحولت».<br>المبلغ: <b>${fmtMoney(r.amount)} ${CUR()}</b> · رقم العملية: <b class="ltr">${esc(r.ref)}</b></div>${q.waPhone && typeof waLink === 'function' ? `<div class="full"><a class="btn p" target="_blank" rel="noopener" href="${esc(waLink(q.waPhone, msgFor(q)))}">${icon('wa')}ابعت للموظف واتساب</a></div>` : '<div class="full muted small">مفيش رقم واتساب مسجّل للموظف</div>'}</div>`, onSubmit: () => { } });
@@ -25210,7 +25210,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const ap = byId('advpay', apId); if (ap) { try { await Store.save('advpay', Object.assign({}, ap, { batchId: b.id }), { silent: true }); } catch (e) { /* ignore */ } }
   }
   window.nfAddToOpenBatch = addToOpenBatch;
-  const pushTo = (to, title, body) => { try { if (typeof pushSend === 'function') pushSend(to, title, body, '/#/advpay', 'advbatch'); } catch (e) { /* ignore */ } };
+  const pushTo = (to, title, body, bid) => { try { if (typeof pushSend === 'function') pushSend(to, title, body, bid ? `/#/go/ab/${bid}` : '/#/advpay', bid ? 'advbatch-' + bid : 'advbatch'); } catch (e) { /* ignore */ } };   /* v7.52: the push opens that batch */
   /* v7.42: one helper tells the payer the money arrived (task + push, no amounts) — used after the photo AND after manual approve */
   async function notifyFunded(b, to, ref) {
     const items = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); const names = items.map(p => p.workerName || '').filter(Boolean).join('، ');
@@ -25222,7 +25222,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const b = byId('advbatch', id); if (!b || b.status !== 'funded' || !isAdmin() || !b.fundedTo) return;
     const left = (b.items || []).map(i => byId('advpay', i)).filter(p => p && p.status !== 'paid' && p.status !== 'cancelled');
     if (!left.length) { toast('كله اتحوّل خلاص'); return; }
-    pushTo(['w:' + b.fundedTo], `فاضل تحويلات في دفعة سلف ${b.code}`, `لسه: ${left.map(p => p.workerName || '').join('، ')}`.slice(0, 300));
+    pushTo(['w:' + b.fundedTo], `فاضل تحويلات في دفعة سلف ${b.code}`, `لسه: ${left.map(p => p.workerName || '').join('، ')}`.slice(0, 300), b.id);
     try { const t = byId('tasks', `abf_${b.id}`); if (t && t.status === 'done') await Store.update('tasks', t.id, { status: 'open', doneAt: null, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
     toast(`اتبعت تذكير لـ${b.fundedToName || ''}`);
   };
@@ -25233,7 +25233,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (!(await confirmDlg(`تبعت دفعة ${b.code} لمحمود؟ ${items.length} سلفة — المجموع ${fmtMoney(total)} ${CUR()}`, 'ابعت', false))) return;
     await Store.save('advbatch', Object.assign({}, b, { items: items.map(p => p.id), total, status: 'sent', sentAt: nowISO(), sentBy: S.session?.id || null, sentByName: S.session?.name || '' }));
     try { await Store.save('tasks', { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — المجموع ${fmtMoney(total)} ${CUR()}`, desc: `${items.length} سلفة: ${names}\nحوّل المجموع مرة واحدة لبهاء من «تحويل السلف» ← الدفعات`, link: '/#/advpay', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
-    pushTo(['role:admin'], `${S.session?.name || 'سعيد'} وافق على سلف — المجموع ${fmtMoney(total)} ${CUR()}`.slice(0, 100), names.slice(0, 300));
+    pushTo(['role:admin'], `${S.session?.name || 'سعيد'} وافق على سلف — المجموع ${fmtMoney(total)} ${CUR()}`.slice(0, 100), names.slice(0, 300), b.id);
     toast('اتبعتت الدفعة لمحمود');
   };
   document.addEventListener('change', async e => {
@@ -29748,6 +29748,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     }
     return s ? { c, s } : null;
   }
+  window.nfPeerSession = peerSession;   /* v7.52: «حضوري» يقرا سجل الشركة الأساسية (99zzZzZZzq) */
   const OPEN = ['open', 'doing'];
   function mineFilter(ids, rl, owner) { return t => { if (!t || !OPEN.includes(t.status) || t.kind === 'update') return false; if (owner) return true; if (t.assigneeId && ids.includes(t.assigneeId)) return true; if (!t.assigneeId && t.toRole && t.toRole === rl) return true; return (t.participants || []).some(x => x && ids.includes(x.id)); }; }
   async function peerTasks(co, owner) {
@@ -38715,7 +38716,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
       FS.osm = mine.concat(fromMap).sort((x, y) => (x.dist ?? 1e9) - (y.dist ?? 1e9)); if (!FS.osm.length && r && r.error) FS.osmErr = String(r.error);
     } catch (e) { FS.osmErr = L('مقدرتش أجيب المحطات — جرّب تاني', 'Could not load the stations — try again'); FS.osm = null; } finally { FS.osmBusy = false; fsPaint(); }
   };
-  const staffPush = (x, title, body) => { try { if (typeof pushSend === 'function') pushSend(['role:fleet', 'role:manager'], title, body, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } };
+  const staffPush = (x, title, body) => { try { if (typeof pushSend === 'function') pushSend(['role:fleet', 'role:manager'], title, body, `/#/go/fuel/${x.id}`, 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } };
   const who = x => (typeof assigneeName === 'function' ? assigneeName(x.driverId) : '') || x.byName || '';
   const vname = id => (typeof vehicleName === 'function' ? vehicleName(id) : ((byId('vehicles', id) || {}).name || ''));
   function newFill(st, petro, extra) {
@@ -38739,7 +38740,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
         const x = newFill({ key: o.id, name, lat: o.lat, lng: o.lng, brand: o.brand }, false, { status: 'requested', reason: d.reason, reasonNote: String(d.note || '').trim(), reqAt: nowISO() });
         await Store.save('fuelfills', x);
         const rl = (REASONS().find(r => r[0] === x.reason) || [])[1] || '';
-        try { if (typeof pushSend === 'function') pushSend(['role:fleet'], L(`⚠ ${who(x)} طالب يموّن من محطة مش متعاقدين`, `⚠ ${who(x)} asks to refuel at a non-contracted station`), `${rl}${x.reasonNote ? ' — ' + x.reasonNote : ''} · ${name} · ${vname(x.vehicleId)} — ${L('وافق أو ارفض من السيستم', 'approve or reject in the system')}`, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ }
+        try { if (typeof pushSend === 'function') pushSend(['role:fleet'], L(`⚠ ${who(x)} طالب يموّن من محطة مش متعاقدين`, `⚠ ${who(x)} asks to refuel at a non-contracted station`), `${rl}${x.reasonNote ? ' — ' + x.reasonNote : ''} · ${name} · ${vname(x.vehicleId)} — ${L('وافق أو ارفض من السيستم', 'approve or reject in the system')}`, `/#/go/fuel/${x.id}`, 'nf-fuel-' + x.id); } catch (e) { /* ignore */ }
         later(() => ACTIONS.fuelView(x.id)); return true;
       } }));
   };
@@ -38774,7 +38775,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   ACTIONS.fuelDecide = async arg => {
     const [id, ok] = String(arg).split(':'); const x = byId('fuelfills', id); if (!x || x.status !== 'requested' || !canDecide()) return;
     await Store.update('fuelfills', id, { status: ok === '1' ? 'approved' : 'rejected', decidedAt: nowISO(), decidedByName: (S.session && S.session.name) || '' });
-    try { if (typeof pushSend === 'function' && x.driverId) pushSend(['w:' + x.driverId], ok === '1' ? L(`✅ اتوافق — موّن من ${x.station.name}`, `✅ Approved — refuel at ${x.station.name}`) : L(`❌ اترفض التموين من ${x.station.name}`, `❌ Refuelling at ${x.station.name} rejected`), ok === '1' ? L('ابعت صورة الإيصال بعد التموين.', 'Send the receipt photo after refuelling.') : L('كلّم مدير الحركة أو اختار محطة PetroApp.', 'Call the fleet manager or pick a PetroApp station.'), '/#/fleet', 'nf-fuel-' + id); } catch (e) { /* ignore */ }
+    try { if (typeof pushSend === 'function' && x.driverId) pushSend(['w:' + x.driverId], ok === '1' ? L(`✅ اتوافق — موّن من ${x.station.name}`, `✅ Approved — refuel at ${x.station.name}`) : L(`❌ اترفض التموين من ${x.station.name}`, `❌ Refuelling at ${x.station.name} rejected`), ok === '1' ? L('ابعت صورة الإيصال بعد التموين.', 'Send the receipt photo after refuelling.') : L('كلّم مدير الحركة أو اختار محطة PetroApp.', 'Call the fleet manager or pick a PetroApp station.'), `/#/go/fuel/${id}`, 'nf-fuel-' + id); } catch (e) { /* ignore */ }
     toast(ok === '1' ? L('اتوافق', 'Approved') : L('اترفض', 'Rejected'));
   };
   ACTIONS.fuelCancel = async id => { const x = byId('fuelfills', id); if (!x || !OPEN.includes(x.status) || !((drv() && x.driverId === me()) || canDecide())) return; await Store.update('fuelfills', id, { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '' }); toast(L('اتلغى', 'Cancelled')); };
@@ -38810,7 +38811,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
         }
         await Store.update('fuelfills', x.id, patch);
         staffPush(x, L(`⛽ ${who(x)} اتموّن`, `⛽ ${who(x)} refuelled`), `${x.station.name}${x.petro ? ' (PetroApp)' : ` — ${L('مش متعاقدين', 'not contracted')}`} · ${vname(x.vehicleId)}${thumb ? ` · ${L('بصورة', 'with a photo')}` : ''}`);
-        if (need && patch.payment === 'reimburse') { try { if (typeof pushSend === 'function') pushSend(['role:acc', 'role:hr'], L(`تموين طوارئ محتاج تسوية — ${who(x)}`, `Emergency refuel to settle — ${who(x)}`), `${x.station.name} · ${vname(x.vehicleId)} · ${L('الإيصال في السيستم', 'the receipt is in the system')}`, '/#/dashboard', 'nf-fuel-acc-' + x.id); } catch (e) { /* ignore */ } }
+        if (need && patch.payment === 'reimburse') { try { if (typeof pushSend === 'function') pushSend(['role:acc', 'role:hr'], L(`تموين طوارئ محتاج تسوية — ${who(x)}`, `Emergency refuel to settle — ${who(x)}`), `${x.station.name} · ${vname(x.vehicleId)} · ${L('الإيصال في السيستم', 'the receipt is in the system')}`, `/#/go/fuel/${x.id}`, 'nf-fuel-acc-' + x.id); } catch (e) { /* ignore */ } }
         toast(L('اتسجّل التموين', 'Refuel recorded')); return true;
       } }));
   };
@@ -38822,7 +38823,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   RENDER_HOOKS.push(() => {
     if (!drv() || !W() || Date.now() - _esc < 30000) return; _esc = Date.now();
     list('fuelfills').filter(x => x.status === 'requested' && x.driverId === me() && !x.escalatedAt && x.reqAt && Date.now() - Date.parse(x.reqAt) >= 10 * 60000).forEach(x => {
-      Store.update('fuelfills', x.id, { escalatedAt: nowISO() }).then(() => { try { if (typeof pushSend === 'function') pushSend(['role:manager'], L(`⚠ ${who(x)} مستني موافقة على تموين من 10 دقايق`, `⚠ ${who(x)} has waited 10 min for a refuel approval`), `${x.station.name} · ${vname(x.vehicleId)} — ${L('مدير الحركة ما ردّش', 'the fleet manager has not answered')}`, '/#/fleet', 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } }).catch(() => { /* next round */ });
+      Store.update('fuelfills', x.id, { escalatedAt: nowISO() }).then(() => { try { if (typeof pushSend === 'function') pushSend(['role:manager'], L(`⚠ ${who(x)} مستني موافقة على تموين من 10 دقايق`, `⚠ ${who(x)} has waited 10 min for a refuel approval`), `${x.station.name} · ${vname(x.vehicleId)} — ${L('مدير الحركة ما ردّش', 'the fleet manager has not answered')}`, `/#/go/fuel/${x.id}`, 'nf-fuel-' + x.id); } catch (e) { /* ignore */ } }).catch(() => { /* next round */ });
     });
   });
   /* «arrived at the station» — the vehicle tracker (or the phone) within 150 m */
@@ -41248,7 +41249,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       const desc = wids.length ? `${oName(o)} (${placeShort(n.place)}) — ${deptName(t.deptId)}\n${names.join('، ')}\nمن ${head}` : `${deptName(t.deptId)} — من ${head}`;
       const had = byId('tasks', nid);
       await Store.save('tasks', Object.assign({}, had || {}, { id: nid, title, desc, assigneeId: pid, deptId: null, orderId: o.id, kind: 'update', source: 'otnight', priority: 'high', status: 'open', link: '/#/otnight', taskRef: wids.length ? null : t.id, createdBy: (had && had.createdBy) || me.id || null, createdByName: (had && had.createdByName) || head, createdAt: (had && had.createdAt) || now, updatedAt: now }), { silent: true });
-      if (had && typeof pushSend === 'function') pushSend([pid], title, desc.split('\n')[0], '/#/otnight', 'otb-' + t.id).catch(() => { });
+      if (had && typeof pushSend === 'function') pushSend([pid], title, desc.split('\n')[0], `/#/tasks/${t.id}`, 'otb-' + t.id).catch(() => { });
     }
     /* custody request: one per entry; while it waits it follows the list, after the owner paid only additions ask again */
     const wl = payerWallet(); if (!wl) return;
@@ -42760,7 +42761,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         const to = mode === 'payer' ? L(`لعهدة ${short(nameOf(payer))}`, `to ${short(nameOf(payer))}'s custody`) : L('للموردين', 'to the suppliers');
         if (!isAdmin()) {
           try { await Store.save('tasks', { id: `pbt_${id}`, title: L(`دفعة تحويل ${code} مستنية تحويلك — ${items.length} بند ${to}`, `Pay batch ${code} waits for your transfer — ${items.length} items ${to}`), desc: L('افتح «الفلوس» ← مستحق عليك تحويله — المجموع والبنود هناك.', 'Open «Money» → due for you to transfer — the total and the items are there.'), link: '/#/money', toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'money', createdBy: me.id || null, createdByName: me.name || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
-          try { if (typeof pushSend === 'function') pushSend(['role:admin'], L(`${short(me.name)} جمّع ${items.length} بند في تحويل واحد — ${code}`, `${short(me.name)} grouped ${items.length} items into one transfer — ${code}`), to, '/#/money', 'paybatch'); } catch (e) { /* ignore */ }
+          try { if (typeof pushSend === 'function') pushSend(['role:admin'], L(`${short(me.name)} جمّع ${items.length} بند في تحويل واحد — ${code}`, `${short(me.name)} grouped ${items.length} items into one transfer — ${code}`), to, `/#/go/pb/${id}`, 'paybatch-' + id); } catch (e) { /* ignore */ }
         }
         const u = ui(); u.pick = false; u.sel = [];
         toast(isAdmin() ? L(`اتعملت ${code}`, `${code} made`) : L(`اتبعتت ${code} للمالك`, `${code} sent to the owner`));
@@ -42873,7 +42874,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
           await Store.update('money', b.id, { status: 'funded', fundedAt: now, fundedAmount: amt, fundedFrom: d.from || 'personal', fundedByName: (S.session && S.session.name) || '', fundThumb: a.thumb || null, fundRef: o.ref || null, fundProofUrl: o.proofUrl || null }, { silent: true });
           try { const t = byId('tasks', `pbt_${b.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: now }, { silent: true }); } catch (e) { /* ignore */ }
           try { await Store.save('tasks', { id: `pbf_${b.id}`, title: L(`وصلتك دفعة تحويل ${b.code} — حوّل البنود من عهدتك`, `Pay batch ${b.code} reached you — pay the items from your custody`), desc: L('افتح «الفلوس» — كل بند بزرار «حوّلت» وصورة التحويل.', 'Open «Money» — every item has «Paid» and the screenshot.'), link: '/#/money', assigneeId: b.payerId, toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'money', createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: now, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
-          try { if (typeof pushSend === 'function') pushSend(['w:' + b.payerId], L(`وصلتك دفعة تحويل ${b.code} — حوّلها من عهدتك`, `Pay batch ${b.code} reached you — pay it from your custody`), L(`${unpaid(b1).length} بند — التفاصيل في «الفلوس»`, `${unpaid(b1).length} items — details on «Money»`), '/#/money', 'paybatch'); } catch (e) { /* ignore */ }
+          try { if (typeof pushSend === 'function') pushSend(['w:' + b.payerId], L(`وصلتك دفعة تحويل ${b.code} — حوّلها من عهدتك`, `Pay batch ${b.code} reached you — pay it from your custody`), L(`${unpaid(b1).length} بند — التفاصيل في «الفلوس»`, `${unpaid(b1).length} items — details on «Money»`), `/#/go/pb/${b.id}`, 'paybatch-' + b.id); } catch (e) { /* ignore */ }
   }
   function rest(b, head, lines, cancel, left) {
     const groups = b.mode === 'direct' && isAdmin() && b.status === 'sent' ? (() => { const m = new Map(); left.filter(it => it.k === 'po').forEach(it => { if (!m.has(it.sk)) m.set(it.sk, []); m.get(it.sk).push(it); }); return [...m.entries()].map(([sk, a]) => `<div class="pbsup"><div><b>${esc(a[0].supplier || '')}</b><small>${esc(a.map(x => x.no).join('، '))}</small></div><b class="num">${fmtMoney(sum(a, x => x.amount))}</b><button type="button" class="btn sm p" data-action="supGroupPay" data-arg="${esc('pb|' + b.id + '|' + sk)}">${esc(L('حوّل', 'Transfer'))}</button></div>`).join(''); })() : '';
@@ -48509,6 +48510,9 @@ function oxFlow(k) {
       const p = get('purchases', c); if (p) return ofPo(p);
       const tr = get('trips', c); if (tr) return { k: 'trip', tr };
       const mt = get('materials', c); if (mt) return { k: 'mat', mt };
+      const pb = get('money', c); if (pb && pb.type === 'paybatch') return { k: 'pb', x: pb };
+      const ab = get('advbatch', c); if (ab) return { k: 'ab', x: ab };
+      const fu = get('fuelfills', c); if (fu) return { k: 'fuel', x: fu };
     }
     if (t.tripId && get('trips', t.tripId)) return { k: 'trip', tr: get('trips', t.tripId) };
     if (t.materialId && get('materials', t.materialId)) return { k: 'mat', mt: get('materials', t.materialId) };
@@ -48547,6 +48551,9 @@ function oxFlow(k) {
     if (L.k === 'trip') return { label: T('افتح المشوار', 'Open the trip'), action: 'go', arg: 'fleet/' + L.tr.id, pending: false };
     if (L.k === 'mat') return { label: T('افتح الصنف', 'Open the item'), action: 'go', arg: 'materials/' + L.mt.id, pending: false };
     if (L.k === 'task') return { label: T('افتح المهمة الأصلية', 'Open the original task'), action: 'go', arg: 'tasks/' + L.tk.id, pending: false };
+    if (L.k === 'pb') return { label: T('افتح دفعة التحويل', 'Open the pay batch'), action: 'go', arg: 'go/pb/' + L.x.id, pending: false };
+    if (L.k === 'ab') return { label: T('افتح دفعة السلف', 'Open the advance batch'), action: 'go', arg: 'go/ab/' + L.x.id, pending: false };
+    if (L.k === 'fuel') return { label: T('افتح التموين', 'Open the refuel'), action: 'go', arg: 'go/fuel/' + L.x.id, pending: false };
     return null;
   }
   const actKey = L => { if (!L) return ''; const r = L.r, p = L.p; return [p ? 'p:' + p.id + ':' + p.status : '', r ? 'r:' + r.id + ':' + r.status + ':' + (r.step || 0) : ''].filter(Boolean).join('|'); };
@@ -48592,6 +48599,11 @@ function oxFlow(k) {
       rows = row(T('الغرض', 'Purpose'), tr.purpose || '') + row(T('رايح', 'To'), tr.to || '') + row(T('الميعاد', 'When'), `${fmtD(tr.date)} ${tr.time || ''}`.trim()) + row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(tr.vehicleId) : '') + row(T('السواق', 'Driver'), tr.driverId && typeof assigneeName === 'function' ? assigneeName(tr.driverId) : '');
     } else if (L.k === 'mat') {
       const m = L.mt; ic = 'cube'; kind = T('صنف', 'Item'); no = m.code || ''; rows = row(T('الاسم', 'Name'), m.name || '') + row(T('الرصيد', 'Stock'), `${typeof fmtNum === 'function' ? fmtNum(+m.qty || 0) : m.qty} ${m.unit || ''}`);
+    } else if (['pb', 'ab', 'fuel'].includes(L.k)) {
+      const x = L.x; const SX = { open: T('مفتوحة', 'Open'), sent: T('مستنية تحويل المالك', 'Waiting for the owner'), funded: T('اتحوّلت — مستنية التوزيع', 'Funded — being paid out'), done: T('خلصت', 'Done'), paid: T('خلصت', 'Done'), cancelled: T('اتلغت', 'Cancelled'), requested: T('مستني موافقة', 'Awaiting approval'), approved: T('اتوافق', 'Approved'), going: T('رايح يموّن', 'On the way'), arrived: T('وصل المحطة', 'At the station'), rejected: T('اترفض', 'Rejected') };
+      ic = L.k === 'fuel' ? 'map' : 'money'; kind = L.k === 'pb' ? T('دفعة تحويل', 'Pay batch') : L.k === 'ab' ? T('دفعة سلف', 'Advance batch') : T('تموين عربية', 'Refuel'); no = x.code || (x.station && x.station.name) || '';
+      st = x.status ? `<span class="badge ${['done', 'paid'].includes(x.status) ? 'good' : ['cancelled', 'rejected'].includes(x.status) ? 'crit' : 'warn'}">${esc(SX[x.status] || x.status)}</span>` : '';
+      rows = L.k === 'fuel' ? row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(x.vehicleId) : '') + row(T('السواق', 'Driver'), x.driverId && typeof assigneeName === 'function' ? assigneeName(x.driverId) : '') + row(T('الميعاد', 'When'), fmtD(x.createdAt)) : row(T('البنود', 'Items'), String((x.items || []).length)) + row(T('التاريخ', 'Date'), fmtD(x.sentAt || x.createdAt));
     } else if (L.k === 'task') {
       const k = L.tk; ic = 'board'; kind = T('المهمة الأصلية', 'Original task'); no = ''; st = stBadge(typeof TASK_STATUS !== 'undefined' ? TASK_STATUS : null, k.status);
       rows = row(T('المهمة', 'Task'), k.title || '') + row(T('المكلَّف', 'Assignee'), k.assigneeId && typeof assigneeName === 'function' ? assigneeName(k.assigneeId) : '');
@@ -48684,6 +48696,22 @@ function oxFlow(k) {
     setTimeout(() => openReq(id), 200);
   });
 
+  /* #/go/<kind>/<id> — a notification about a pay batch / advance batch / refuel opens that one thing (v7.52) */
+  const hl = id => { const el = document.querySelector(`#view [data-arg="${CSS.escape(id)}"], #view [data-arg^="${CSS.escape(id)}:"]`); const box = el && (el.closest('.item, tr, .card') || el); if (box) { box.scrollIntoView({ block: 'center', behavior: 'smooth' }); box.classList.add('hl'); setTimeout(() => box.classList.remove('hl'), 2500); } };
+  const can = v => (typeof canSee !== 'function' || canSee(v));
+  const GO = {
+    pb: { page: () => (can('money') ? 'money' : homeView()), run: id => { if (!byId('money', id)) return toast(T('الدفعة دي مش متاحة ليك', 'This batch is not available to you'), 'err'); if (ACTIONS.pbOpen) ACTIONS.pbOpen(id); else hl(id); } },
+    ab: { page: () => (can('advpay') ? 'advpay' : homeView()), run: id => { const b = byId('advbatch', id); if (!b) return toast(T('الدفعة دي مش متاحة ليك', 'This batch is not available to you'), 'err'); if (isAdmin() && b.status === 'sent' && ACTIONS.abApprove) ACTIONS.abApprove(id); else hl(id); } },
+    fuel: { page: () => (can('fleet') ? 'fleet' : homeView()), run: id => { if (!byId('fuelfills', id)) return toast(T('التموين ده مش متاح ليك', 'This refuel is not available to you'), 'err'); if (ACTIONS.fuelView) ACTIONS.fuelView(id); } },
+  };
+  let _go = null;
+  RENDER_HOOKS.push(() => {
+    if (!S.session) return;
+    const m = /^#\/go\/([a-z]+)\/([^/?#]+)/.exec(location.hash || '');
+    if (m && GO[m[1]]) { _go = { k: m[1], id: decodeURIComponent(m[2]) }; const pg = GO[m[1]].page(); setTimeout(() => { try { history.replaceState(null, '', '#/' + pg); } catch (e) { /* ignore */ } parseRoute(); render(true); }, 0); return; }
+    if (_go) { const x = _go; _go = null; setTimeout(() => { try { GO[x.k].run(x.id); } catch (e) { /* ignore */ } }, 300); }
+  });
+
   /* (5) a notice about every movement */
   const pushTo = (to, title, body, url, tag) => { try { const ids = [...new Set(to.filter(Boolean).map(String))].filter(x => !mineIds().includes(x)); if (ids.length && typeof pushSend === 'function') pushSend(ids, String(title).slice(0, 100), String(body || '').slice(0, 140), url, tag); } catch (e) { /* ignore */ } };
   function stepNotice(r, before) {
@@ -48727,6 +48755,77 @@ function oxFlow(k) {
 .nflc-hint{text-align:center;margin-top:6px}
 @media (max-width:760px){.nflc{padding:12px}.nflc-rs{grid-template-columns:1fr}}
 </style>`);
+})();
+/* =====================================================================
+   v7.52 — «حضوري» لموظف بيبصم على شركة تانية (محمود 12 أكتوبر — سكرين سعيد: كل الأيام «غير مسجّل»)
+   سعيد بيبصم من الاستوديو (workers.attHome = studio)، فبوابته في المصنع كانت بتقرا حضور المصنع (فاضي)
+   وتكتب «غير مسجّل» على كل الأيام. دلوقتي الكارت بيجيب سجله من الشركة الأساسية بجلسته هو (SSO، صلاحيات
+   السيستم التاني) ويعرضه للقراءة؛ طلب التعديل من هناك. لو ماقدرش يوصل: رسالة واضحة + زرار يفتح الحضور هناك.
+   ===================================================================== */
+(() => {
+  if (typeof myAttCard !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
+  const CO = { factory: ['Ninety Fabrication', 'المصنع'], studio: ['Ninety Studioz', 'الاستوديو'] };
+  const homeOf = w => (typeof window.nfAttHomeOf === 'function' ? window.nfAttHomeOf(w) : null);
+  const away = w => (typeof window.nfAttAway === 'function' ? window.nfAttAway(w) : false);
+  const C = {};   /* `${home}|${ym}` → { rows, at, err, loading } */
+  async function load(home, ym) {
+    const k = home + '|' + ym; const st = C[k] = Object.assign(C[k] || {}, { loading: true });   /* kick() marks it loading first */
+    try {
+      if (typeof window.nfPeerSession !== 'function') throw new Error('nohub');
+      const ps = await window.nfPeerSession(home); if (!ps) throw new Error('nosession');
+      const { c, s } = ps;
+      let pid = ''; try { const r = await c.from('profiles').select('person_id').eq('uid', s.user.id).maybeSingle(); pid = (r.data && r.data.person_id) || ''; } catch (e) { pid = ''; }
+      const ids = [pid, String(pid).replace(/^[a-z]:/, '')].filter(Boolean); if (!ids.length) throw new Error('noperson');
+      const r = await c.from('docs').select('id, rows:data->rows').eq('col', 'attendance').like('id', ym + '%'); if (r.error) throw r.error;
+      const rows = {};
+      (r.data || []).forEach(d => { if (!String(d.id).startsWith(ym + '_')) return; Object.entries(d.rows || {}).forEach(([date, day]) => { const hit = ids.map(id => day && day[id]).find(Boolean); if (hit) rows[date] = hit; }); });
+      Object.assign(st, { rows, at: Date.now(), err: null, loading: false });
+    } catch (e) { Object.assign(st, { err: String((e && e.message) || e || 'err'), at: Date.now(), loading: false }); }
+    try { if (S.route && S.route.view === 'me') rerender(); } catch (e) { /* ignore */ }
+  }
+  function kick(home, ym) { const k = home + '|' + ym; const st = C[k]; if (st && (st.loading || Date.now() - (st.at || 0) < 60000)) return; C[k] = Object.assign(st || {}, { loading: true }); setTimeout(() => load(home, ym), 0); }
+  function card(w) {
+    const home = homeOf(w); const nm = CO[home] || [home, home];
+    const f = S.ui.filter.meatt ||= { ym: monthOf(todayISO()) }; const ym = f.ym; const today = todayISO();
+    const k = home + '|' + ym; const st = C[k];
+    kick(home, ym);
+    const open = `<button type="button" class="btn sm" data-action="nfHubOpen" data-arg="${esc(home)}|#/me">${icon('arrow')}<span>${esc(T(`افتح حضوري على ${nm[0]}`, `Open my attendance on ${nm[0]}`))}</span></button>`;
+    const head = `<div class="cardhead"><h3>${icon('attendance')}${esc(T('حضوري', 'My attendance'))} <span class="badge acc" style="margin-inline-start:6px">${esc(T(`بصمتك على ${nm[0]}`, `You punch on ${nm[0]}`))}</span></h3><div class="grow"></div>${monthNavBar('meatt')}</div>`;
+    let body = '';
+    if (!st || (st.loading && !st.rows)) body = `<div class="empty small">${esc(T(`بنجيب حضورك من ${nm[0]}…`, `Loading your attendance from ${nm[0]}…`))}</div>`;
+    else if (st.err && !st.rows) body = `<div class="banner info" style="margin:6px 0">${icon('info')}<span>${esc(T(`حضورك متسجل على ${nm[0]} — مش على ${CO[home === 'studio' ? 'factory' : 'studio'][1]}. ماقدرناش نجيب السجل من هنا دلوقتي — افتحه من هناك.`, `Your attendance is recorded on ${nm[0]}. We could not load it here right now — open it there.`))}</span></div>`;
+    else {
+      const rows = st.rows || {}; let present = 0, half = 0, absent = 0, late = 0, miss = 0;
+      const days = monthDates(ym).filter(d => d <= today).reverse();
+      const tr = days.map(d => {
+        const r = rows[d]; const c = classifyDay(w, d, r); if (c.kind === 'before') return '';
+        if (r && r.s === 'P') present++; else if (r && r.s === 'H') half++; if (c.kind === 'absent') absent++; if (r && r.late) late += +r.late || 0;
+        const one = r && ((r.in && !r.out) || (!r.in && r.out)) && d < today; if (one) miss++;
+        const cls = c.kind === 'absent' ? 'absent' : ['off', 'holiday'].includes(c.kind) ? 'muted' : '';
+        return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ` <span class="badge warn" style="padding:0 5px">${esc(T('ناقص بصمة', 'Missing punch'))}</span>` : ''}</td><td class="ltr">${esc((r && r.in) || '—')}</td><td class="ltr">${esc((r && r.out) || '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td></tr>`;
+      }).join('');
+      body = `<div class="kp"><div><b class="num">${present + (half ? ' + ' + half + '½' : '')}</b><span>${esc(T('أيام حضور', 'Days present'))}</span></div><div><b class="num">${absent}</b><span>${esc(T('غياب', 'Absent'))}</span></div><div><b class="num">${late}</b><span>${esc(T('تأخير (دقيقة)', 'Late (min)'))}</span></div><div><b class="num">${miss}</b><span>${esc(T('نسيان بصمة', 'Missed punch'))}</span></div></div>
+        ${tr ? `<div class="tablewrap"><table><thead><tr><th>${esc(T('اليوم', 'Day'))}</th><th>${esc(T('الحالة', 'Status'))}</th><th>${esc(T('حضور', 'In'))}</th><th>${esc(T('انصراف', 'Out'))}</th><th class="n hide-sm">${esc(T('ساعات', 'Hours'))}</th><th class="n hide-sm">${esc(T('تأخير', 'Late'))}</th></tr></thead><tbody>${tr}</tbody></table></div>` : `<div class="empty small">${esc(T('لا يوجد حضور مسجّل في الشهر ده', 'No attendance this month'))}</div>`}`;
+    }
+    return `<div class="card myatt" id="myattcard">${head}${body}
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><div class="tiny muted grow">${esc(T(`السجل جاي من ${nm[0]} (للقراءة). طلب تعديل يوم بيتقدّم من هناك.`, `This record comes from ${nm[0]} (read-only). Ask for a correction there.`))}</div>${open}</div></div>`;
+  }
+  /* the big «today» line and the month boxes on top of «بوابتي» came from this company (empty → «غياب» / zeros) */
+  const KPIS = /<div class="kpis" style="grid-template-columns:repeat\(3,minmax\(0,1fr\)\)">[\s\S]*?ساعات إضافية<\/div><div class="v num">[^<]*<\/div><\/div><\/div>/;
+  if (typeof vMe === 'function') vMe = (base => function () {
+    let html = base.apply(this, arguments);
+    try {
+      const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; if (!w || !away(w)) return html;
+      const home = homeOf(w); const nm = CO[home] || [home, home]; const ym = monthOf(todayISO()); kick(home, ym);
+      const st = C[home + '|' + ym]; const r = st && st.rows ? st.rows[todayISO()] : null;
+      const txt = r ? (r.out ? T(`انصرفت ${r.out}`, `Out at ${r.out}`) : r.in ? T(`حضرت ${r.in}`, `In at ${r.in}`) : r.s === 'L' ? T('إجازة', 'Leave') : T('مسجّل', 'Recorded')) : (st && st.rows ? T('لسه مابصمتش النهارده', 'No punch yet today') : '…');
+      html = html.replace(/(<div style="font-size:22px;font-weight:700;margin:6px 0">)[^<]*(<\/div>)/, `$1${esc(txt)} <span class="badge acc" style="font-size:12px;vertical-align:middle">${esc(nm[0])}</span>$2`).replace(KPIS, '');
+    } catch (e) { /* ignore */ }
+    return html;
+  })(vMe);
+  myAttCard = (base => function (w) { try { if (w && away(w)) return card(w); } catch (e) { console.warn('away att', e); } return base.apply(this, arguments); })(myAttCard);
+  window.nfAwayAttCache = C;
 })();
 </script>
 
