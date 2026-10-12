@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-0811-9d749a";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261012-0927-3d54dd";</script>
 
 <script>
 'use strict';
@@ -15831,7 +15831,7 @@ applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   const res = await base(r, w, patch, opts);
   if (r && r.type === 'po' && !isStuSys()) {
     const p = r.purchaseId ? byId('purchases', r.purchaseId) : null;
-    if (p && p.status === 'transfer') { try { await notifyRole('hr', `أمر شراء معتمد من الحسابات — ${p.number}`, `${p.supplier || ''} — ${fmtMoney(poPayable(p))} ${CUR()}\nبانتظار تحويل المالك للمورد. التفاصيل وعروض الأسعار على صفحة الأمر.`, { id: `po_hr_${p.id}`, fields: { purchaseId: p.id, link: `/#/purchases/${p.id}` } }); if (typeof pushSend === 'function') pushSend(['role:hr'], `أمر شراء معتمد — ${p.number}`, `${p.supplier || ''} — ${fmtMoney(poPayable(p))} ${CUR()} · بانتظار التحويل`, `/#/purchases/${p.id}`, 'po-hr-' + p.id).catch(() => { }); } catch (e) { /* ignore */ } }
+    if (p && p.status === 'transfer') { try { await notifyRole('hr', `للعلم: ${p.number} اتعتمد من مسؤول الحسابات وراح للمالك يحوّل`, `${p.supplier || ''}\nمش محتاج موافقتك — التفاصيل وعروض الأسعار على صفحة الأمر.`, { id: `po_hr_${p.id}`, kind: 'update', fields: { purchaseId: p.id, link: `/#/purchases/${p.id}` } }); if (typeof pushSend === 'function') pushSend(['role:hr'], `للعلم: ${p.number} راح للمالك يحوّل`, `${p.supplier || ''} · اتعتمد من مسؤول الحسابات`, `/#/purchases/${p.id}`, 'po-hr-' + p.id).catch(() => { }); } catch (e) { /* ignore */ } }
   }
   return res;
 })(applyRequestEffects);
@@ -16035,10 +16035,10 @@ async function acctPurchaseOut(p, amt) {
 /* ---------- 7+8) operating expenses + homes ---------- */
 ACTIONS.opexNew = () => {
   if (!canOpex()) return;
-  openModal({ title: 'مصروف تشغيل', submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">${field('البند', `<select name="cat" id="f-ocat">${OPEX_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('عن شهر', inp('month', monthOf(todayISO()), 'type="month"'))}
+  openModal({ title: 'مصروف تشغيل', submitLabel: oxFlow('submit'), body: `<div class="form">${field('البند', `<select name="cat" id="f-ocat">${OPEX_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('عن شهر', inp('month', monthOf(todayISO()), 'type="month"'))}
     ${field('السكن', `<select name="homeId" id="f-ohome"><option value="">—</option>${homes().map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`)}${field(`المبلغ (${CUR()})`, inp('amount', '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('المستفيد (شركة الكهربا، صاحب السكن…)', inp('payee', ''))}
     <div class="field full"><label>صورة الفاتورة / الإيصال</label><input type="file" id="ox-file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}
-    <div class="tiny muted full">مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.</div></div>`,
+    <div class="tiny muted full">${oxFlow('hint')}</div></div>`,
     onOpen: f => { const sync = () => { const c = f.querySelector('#f-ocat').value; const hf = f.querySelector('#f-ohome').closest('.field'); if (hf) hf.hidden = !HOME_CATS.includes(c); }; f.querySelector('#f-ocat').addEventListener('change', sync); sync(); },
     onSubmit: async f => {
       const d = formData(f); if (!(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (HOME_CATS.includes(d.cat) && !d.homeId) { toast('اختار السكن', 'err'); return false; }
@@ -16048,7 +16048,7 @@ ACTIONS.opexNew = () => {
       const r = { id, type: 'opex', cat: d.cat, month: d.month || monthOf(todayISO()), homeId: HOME_CATS.includes(d.cat) ? d.homeId : null, amount: num(d.amount), payee: d.payee || '', note: d.note || '', reason: `${catLabel(d.cat)}${d.homeId && HOME_CATS.includes(d.cat) ? ' — ' + homeName(d.homeId) : ''} — ${fmtMonth(d.month)}`, thumb, fileIds, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: chainFor('opex'), step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `مصروف تشغيل ${catLabel(d.cat)} ${fmtMoney(num(d.amount))} ${CUR()}` }] };
       await Store.save('requests', r, { silent: true });
       try { await notifyRole('hr', `مصروف تشغيل للموافقة — ${catLabel(r.cat)}: ${fmtMoney(r.amount)} ${CUR()}`, `${r.reason}\n${r.payee || ''}`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
-      toast('اتبعت لمدير الحسابات'); rerender();
+      toast(oxFlow('sent')); rerender();
     } });
 };
 ACTIONS.opexPay = async id => {
@@ -27249,7 +27249,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     const rs = sortBy(list('requests').filter(r => liveReq(r) && r.itemId === it.id && (wk ? r.period === per : (r.month === ym && !r.period))), r => r.createdAt || '', true); const r = rs[0] || null;
     const exp = list('expenses').find(e => e.itemId === it.id && (wk ? e.period === per : (e.month === ym && !e.period))) || (r ? byId('expenses', 'opx_' + r.id) : null);
     if (exp) return { k: 'paid', label: 'اتدفع', cls: 'good', amount: +exp.amount || 0, r, exp };
-    if (r && r.status === 'pending') return { k: 'pending', label: 'عند مدير الحسابات', cls: 'warn', amount: +r.amount || 0, r };
+    if (r && r.status === 'pending') return { k: 'pending', label: oxFlow('at'), cls: 'warn', amount: +r.amount || 0, r };
     if (r && r.status === 'approved') return { k: 'approved', label: 'معتمد — مستني تحويل المالك', cls: 'acc', amount: +r.amount || 0, r };
     const due = wk ? per : dueOf(it, ym); if (todayISO() > due) return { k: 'late', label: 'متأخر', cls: 'crit', due, per };
     return { k: 'todo', label: 'لسه', cls: '', due, per };
@@ -27322,11 +27322,11 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   ACTIONS.oxRecord = arg => {
     if (!oxRec()) return; const [iid, ym0, per0] = String(arg || '').split(':'); const it = oxItems().find(x => x.id === iid); if (!it) return; const ym = ym0 || monthOf(todayISO()); const per = isWk(it) ? perOf(it, ym, per0) : null;
     const meter = !!it.meter; const unit = it.unit || METER_UNITS[it.cat] || ''; const h0 = meter ? meterHist(it, ym)[0] : null; const needPhoto = it.kind !== 'fixed';
-    openModal({ title: `${itemLabel(it)} — ${perLabel(it, ym, per)}`, submitLabel: 'إرسال لمدير الحسابات', body: `<div class="form">
+    openModal({ title: `${itemLabel(it)} — ${perLabel(it, ym, per)}`, submitLabel: oxFlow('submit'), body: `<div class="form">
       ${field(`المبلغ (${CUR()})`, inp('amount', it.kind === 'fixed' && it.amount ? it.amount : '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${field('المستفيد', inp('payee', it.payee || ''))}
       ${meter ? field(`قراءة العداد (${esc(unit)})`, inp('reading', '', 'type="number" step="any" min="0" inputmode="decimal"') + (h0 ? `<div class="tiny muted">القراءة اللي فاتت: ${fmtNum(h0.reading)} (${fmtMonth(h0.month)})</div>` : '')) : ''}
       <div class="field full"><label>صورة الفاتورة / الإيصال${needPhoto ? '' : ' (اختياري)'}</label><input type="file" id="oxr-file" accept="image/*,application/pdf" capture="environment"></div>${field('ملاحظة', inp('note', ''), 'full')}
-      <div class="tiny muted full">مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.</div></div>`,
+      <div class="tiny muted full">${oxFlow('hint')}</div></div>`,
       onSubmit: async f => {
         const d = formData(f); if (!(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; }
         const file = (f.querySelector('#oxr-file') || {}).files?.[0]; if (needPhoto && !file) { toast('صورة الفاتورة مطلوبة', 'err'); return false; }
@@ -27340,7 +27340,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
         await Store.save('requests', r, { silent: true });
         try { await notifyRole('hr', `مصروف تشغيل للموافقة — ${itemLabel(it)}${r.spike ? ' ⚠️ استهلاك زايد' : ''}`, `${reason} — المبلغ في صفحة «مصاريف التشغيل» / الطلبات`, { id: `opx_hr_${r.id}`, fields: { link: '/#/requests' } }); } catch (e) { /* ignore */ }
         const t = byId('tasks', `oxrem_${it.id}_${per || ym}`); if (t && t.status !== 'done') { try { await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me.name || '' }); } catch (e) { /* ignore */ } }
-        toast(r.spike ? 'اتبعت — الاستهلاك زايد عن المتوسط، اتعلّم لمدير الحسابات' : 'اتبعت لمدير الحسابات'); rerender();
+        toast(r.spike ? oxFlow('spike') : oxFlow('sent')); rerender();
       } });
   };
   /* the paid expense keeps the item link (for the monthly state + reports) */
@@ -32131,14 +32131,15 @@ document.head.insertAdjacentHTML('beforeend', '<style>.banner.psim{flex-wrap:wra
   })(rfqCodeAndOrder);
 
   /* ---------- 3) the chain: … ← accounts officer ← Accounts & HR manager ← owner transfer ---------- */
-  if (typeof poChainFor === 'function') poChainFor = (base => p => { const c = base(p).slice(); if (!fac()) return c; const i = c.indexOf('acc'); if (i >= 0 && !c.includes('hr')) c.splice(i + 1, 0, 'hr'); return c; })(poChainFor);
+  /* v7.51 (بالرقم السري، قرار المالك): بعد مسؤول الحسابات يروح للمالك يحوّل على طول — مدير الحسابات والموارد البشرية إشعار للعلم بس (99y-acc-scope) */
+  if (typeof poChainFor === 'function') poChainFor = (base => p => { const c = base(p).slice(); return fac() ? c.filter(x => x !== 'hr') : c; })(poChainFor);
   /* the accounts officer's step is his — the Accounts & HR manager approves after him, not in his place */
   stepActor = (base => function (step, r) { if (fac() && r && r.type === 'po' && step === 'acc' && role() === 'hr') return false; return base.apply(this, arguments); })(stepActor);
 
   /* ---------- 4) task texts: named steps, project + supplier, no amounts ---------- */
   const poTexts = (p, rl, prevName) => {
     const sup = p.supplier || (supplierOf(p) || {}).name || '—'; const proj = projOf(p); const items = (p.items || []).map(it => `${byId('materials', it.materialId)?.code || ''} ${it.name || byId('materials', it.materialId)?.name || ''} × ${fmtNum(it.qty)}`.trim()).join('، ');
-    if (rl === 'acc') return { title: `أمر شراء جاي لمشروع ${proj} للمورد ${sup}${p.rfqPrice && p.rfqPrice.ok ? ' — اتعتمد من مدير المصنع' : ''}`, desc: `${p.number}: ${items}\nراجع المورد والأسعار من صفحة الأمر واعتمده — بعدك ${stepWho('hr')} ثم تحويل المالك.` };
+    if (rl === 'acc') return { title: `أمر شراء جاي لمشروع ${proj} للمورد ${sup}${p.rfqPrice && p.rfqPrice.ok ? ' — اتعتمد من مدير المصنع' : ''}`, desc: `${p.number}: ${items}\nراجع المورد والأسعار من صفحة الأمر واعتمده — بعدك يروح للمالك يحوّل على طول، و${stepWho('hr')} بيوصله إشعار للعلم.` };
     if (rl === 'hr') return { title: `أمر شراء لمشروع ${proj} للمورد ${sup} — اعتمده ${prevName || CHAIN_LABEL.acc}`, desc: `${p.number}: ${items}\nراجعه واعتمده — بعدك يروح للمالك يحوّل للمورد.` };
     if (rl === 'manager') return { title: `اعتماد أمر شراء لمشروع ${proj} — مورد جديد ${sup}`, desc: `${p.number}: ${items}\nاعتمده أو ارفضه من «الطلبات».` };
     return null;
@@ -32148,7 +32149,7 @@ document.head.insertAdjacentHTML('beforeend', '<style>.banner.psim{flex-wrap:wra
       const id = String(extra.id || ''); const pid = extra.fields && extra.fields.purchaseId; const p = pid && byId('purchases', pid);
       if (fac() && p && id === `rfqok_${p.id}` && toRole === 'purch') {
         const nb = p.items || []; title = `أمر شراء جاهز: مشروع ${projOf(p)} ← المورد ${p.supplier || '—'}`;
-        desc = `${p.number}: ${nb.map(x => `${byId('materials', x.materialId)?.code || ''} ${x.name}`).join('، ')}\nمدير المصنع اعتمد والصنف اتكوّد. راجعه وابعته: ${stepWho('acc')} ← ${stepWho('hr')} ← تحويل المالك.`;
+        desc = `${p.number}: ${nb.map(x => `${byId('materials', x.materialId)?.code || ''} ${x.name}`).join('، ')}\nمدير المصنع اعتمد والصنف اتكوّد. راجعه وابعته: ${stepWho('acc')} ← تحويل المالك.`;
         extra = Object.assign({}, extra, { kind: 'task', priority: 'high' });
       } else if (fac() && p && id === `po_appr_${p.id}`) { const t = poTexts(p, toRole); if (t) { title = t.title; desc = t.desc; extra = Object.assign({}, extra, { kind: 'task', priority: 'high' }); } }
       else if (fac() && p && id === `po_hr_${p.id}` && ((p.approval && p.approval.chain) || []).includes('hr')) return null; /* he approved it himself */
@@ -48376,6 +48377,355 @@ html.nfmp-open{overflow:hidden}
   .nfmp{align-items:flex-end;padding:0}
   .nfmp-sh{width:100%;max-height:calc(100dvh - 48px);height:calc(100dvh - 48px);border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
 }
+</style>`);
+})();
+/* =====================================================================
+   v7.51 — (المصنع) قرار المالك بالرقم السري:
+   1) أي حاجة فيها تحويل فلوس ومسؤول الحسابات وافق عليها ← تروح للمالك يحوّل على طول.
+      مدير الحسابات والموارد البشرية (سعيد) بيوصله إشعار للعلم بس — من غير موافقة.
+      · أوامر الشراء: السلسلة من غير خطوة hr (99zzZzG) — إشعار سعيد من غير مبلغ (99y-acc-scope).
+      · مصاريف التشغيل: السلسلة ['acc'] — لو مسؤول الحسابات هو اللي سجّلها تتعتمد لوحدها وتروح للمالك؛
+        لو حد تاني سجّلها (أو اتفتحت تلقائي) مسؤول الحسابات يوافق ← المالك. سعيد إشعار للعلم.
+   2) ترقيم أوامر الشراء وطلبات العروض (PO / RFQ) من كل الأوامر على السيرفر (nf_po_next)
+      مش من اللي باين للمستخدم بس — عشان الرقم مايتكررش (PO-26-002 اتكرر).
+   ===================================================================== */
+function oxFlow(k) {
+  const fac = !(typeof isStuSys === 'function' && isStuSys()); const acc = typeof role === 'function' && role() === 'acc';
+  if (!fac) return { submit: 'إرسال لمدير الحسابات', hint: 'مسؤول الحسابات يسجل ← مدير الحسابات يوافق ← المالك يحوّل.', sent: 'اتبعت لمدير الحسابات', spike: 'اتبعت — الاستهلاك زايد عن المتوسط، اتعلّم لمدير الحسابات', at: 'عند مدير الحسابات' }[k] || '';
+  return {
+    submit: acc ? 'إرسال للمالك يحوّل' : 'إرسال لمسؤول الحسابات',
+    hint: 'مسؤول الحسابات يسجل أو يوافق ← المالك يحوّل على طول — ومدير الحسابات والموارد البشرية بيوصله إشعار للعلم.',
+    sent: acc ? 'اتبعت للمالك يحوّل ✓' : 'اتبعت لمسؤول الحسابات',
+    spike: acc ? 'اتبعت للمالك — الاستهلاك زايد عن المتوسط واتعلّم' : 'اتبعت — الاستهلاك زايد عن المتوسط، اتعلّم لمسؤول الحسابات',
+    at: 'عند مسؤول الحسابات'
+  }[k] || '';
+}
+(() => {
+  const fac = () => !(typeof isStuSys === 'function' && isStuSys());
+  const ME = () => S.session || {};
+
+  /* ---------- 1) مصاريف التشغيل: مسؤول الحسابات ← المالك ---------- */
+  if (typeof DEFAULT_CHAINS !== 'undefined') {
+    const studio = DEFAULT_CHAINS.opex || ['hr'];
+    Object.defineProperty(DEFAULT_CHAINS, 'opex', { configurable: true, enumerable: true, get: () => (fac() ? ['acc'] : studio), set: v => { /* keep the factory rule */ } });
+  }
+  /* سعيد مايوافقش مكان مسؤول الحسابات على مصاريف التشغيل (زي أوامر الشراء) */
+  if (typeof stepActor === 'function') stepActor = (base => function (step, r) { if (fac() && r && r.type === 'opex' && step === 'acc' && role() === 'hr') return false; return base.apply(this, arguments); })(stepActor);
+
+  const oxTitle = r => `${r.auto ? 'مصروف ثابت' : 'مصروف تشغيل'} للموافقة — ${typeof catLabel === 'function' ? catLabel(r.cat) : ''}${r.homeId && typeof homeName === 'function' ? ' · ' + homeName(r.homeId) : ''}${r.spike ? ' ⚠️ استهلاك زايد' : ''}`;
+  /* the three places that open an opex request all notify hr with id opx_hr_<id> — in the factory it goes to the accounts officer instead,
+     and when he recorded it himself his recording is the approval → straight to the owner */
+  notifyRole = (base => async function (toRole, title, desc, extra = {}) {
+    try {
+      const m = /^opx_hr_(.+)$/.exec(String((extra && extra.id) || ''));
+      if (m && toRole === 'hr' && fac()) {
+        const r = byId('requests', m[1]);
+        if (r && r.type === 'opex' && r.status === 'pending' && (r.chain || [])[+r.step || 0] === 'acc') {
+          if (role() === 'acc' && r.createdBy && r.createdBy === ME().id) { await decideRequest(r.id, 'approved', 'سجّله مسؤول الحسابات بنفسه — راح للمالك يحوّل على طول'); return null; }
+          return base.call(this, 'acc', oxTitle(r), `${r.reason || ''}${r.payee ? '\n' + r.payee : ''}\nالمبلغ وصورة الفاتورة جوه الطلب — بعد موافقتك يروح للمالك يحوّل على طول.`, Object.assign({}, extra, { id: `opx_acc_${r.id}`, fields: Object.assign({}, extra.fields || {}, { link: '/#/requests' }) }));
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(notifyRole);
+
+  /* after the approval → Saeed is informed (no amount); the owner's task names who approved it */
+  applyRequestEffects = (base => async function (r, w, patch, opts = {}) {
+    const res = await base.apply(this, arguments);
+    try {
+      if (fac() && r && r.type === 'opex' && role() !== 'hr') {
+        await notifyRole('hr', `للعلم: مصروف تشغيل اتعتمد وراح للمالك يحوّل — ${typeof catLabel === 'function' ? catLabel(r.cat) : ''}`, `${r.reason || ''}\nاعتمده ${ME().name || 'مسؤول الحسابات'} — مش محتاج موافقتك.`, { id: `opx_info_${r.id}`, kind: 'update', fields: { link: '/#/opex' } });
+      }
+    } catch (e) { /* ignore */ }
+    return res;
+  })(applyRequestEffects);
+  if (typeof notifyOwner === 'function') notifyOwner = (base => async function (title, desc, opts = {}) {
+    try { if (fac() && /^opex_/.test(String((opts && opts.id) || '')) && typeof desc === 'string') desc = desc.replace('وافق عليه مدير الحسابات', `وافق عليه مسؤول الحسابات: ${ME().name || ''}`); } catch (e) { /* ignore */ }
+    return base.call(this, title, desc, opts);
+  })(notifyOwner);
+
+  /* ---------- 2) PO / RFQ numbers from all purchases (server), not only what this user can see ---------- */
+  const localMax = (pre, selfId) => { let n = 0; list('purchases').forEach(q => { if (q.id === selfId) return; const s = String(q.number || ''); if (s.startsWith(pre)) n = Math.max(n, parseInt(s.slice(pre.length), 10) || 0); }); return n; };
+  Store.save = (base => async function (col, doc, opts) {
+    try {
+      if (col === 'purchases' && doc && doc.number && !byId('purchases', doc.id) && (!doc.createdAt || Date.now() - Date.parse(doc.createdAt) < 15 * 60e3)) {   /* new docs only (a restore keeps its numbers) */
+        const m = /^((?:PO|RFQ)-\d{2}-)(\d+)$/.exec(String(doc.number));
+        if (m) {
+          let srv = 0; if (typeof sbOn === 'function' && sbOn()) { try { const { data, error } = await S.sb.rpc('nf_po_next', { p_prefix: m[1], p_id: doc.id || null }); if (!error) srv = +data || 0; } catch (e) { /* offline → local only */ } }
+          const mx = Math.max(srv, localMax(m[1], doc.id));
+          if ((parseInt(m[2], 10) || 0) <= mx) doc.number = m[1] + String(mx + 1).padStart(3, '0');
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(Store.save);
+})();
+/* =====================================================================
+   v7.51 — تفاصيل المهمة جوه المهمة نفسها + الإشعار يفتح الحاجة على طول (محمود 12 أكتوبر، «ابدأ»)
+   «أنا عايز كل تاسك أو إشعار أخش فيه يبقى جايب كل تفاصيل التاسك دي، مرجعش أخش على الطلبات علشان أشوف إيه اللي بعته»
+   «لما يبقى في إشعار إن حد عمل حاجة قدام، أدوس عليه يدخلني على طول على الطلب»
+   1) كارت تفاصيل فوق في أي مهمة / إشعار مربوط بحاجة: أمر شراء / طلب عروض · طلب · أمر تشغيل · مشوار · صنف · مهمة أصلية.
+      الكارت بيتبع صلاحيات الصفحة الأصلية (الداتا اللي على الجهاز أصلًا متفلترة بالسيرفر) ومن غير أي مبالغ.
+   2) الإجراء المطلوب زرار جوه المهمة (موافقة / رفض · كمّل الأمر وابعته · أكّد الاستلام · حوّل · افتح).
+   3) «بدء» في مهمة مربوطة بيفتح الحاجة نفسها؛ و«تم» لو في إجراء مستنيك بيبقى هو الإجراء — والمهمة بتتقفل لوحدها لما الإجراء يخلص.
+   4) الإشعار (جوه السيستم وعلى الموبايل) بيفتح الطلب نفسه (#/requests/<id>) أو المهمة بالكارت — مش صفحة الطلبات.
+   5) إشعار عن أي حركة: الطلب عدّى خطوة ← صاحبه يتبلّغ؛ رسالة في مهمة ← أطراف المهمة (موجودة) + القسم/الدور لو المهمة لدور؛ حد بدأ/خلّص مهمة ← اللي عملها.
+   ===================================================================== */
+(() => {
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
+  const lbl = k => (typeof CHAIN_LABEL !== 'undefined' && CHAIN_LABEL[k]) || k;
+  const get = (c, id) => { try { return id ? byId(c, id) : null; } catch (e) { return null; } };
+  const OPEN = s => ['open', 'doing'].includes(s || 'open');
+  const me = () => S.session || {};
+  const mineIds = () => [me().workerId, me().id, me().workerId ? 'w:' + me().workerId : null].filter(Boolean);
+  const noMoney = s => String(s == null ? '' : s).replace(/\d[\d,.]*\s*(ج\.?\s?م|جنيه|ج\b|EGP|LE)/g, '•••').replace(/\d[\d,.]*\s*ج(?=\s|$|[^؀-ۿ])/g, '•••');
+  const fmtD = d => { try { return d ? fmtDate(String(d).slice(0, 10)) : ''; } catch (e) { return String(d || '').slice(0, 10); } };
+  const ownerIds = () => { const ids = new Set(['local-admin']); try { list('staff').filter(s => s.role === 'admin').forEach(s => ids.add(s.id)); list('workers').filter(w => w.role === 'admin').forEach(w => { ids.add(w.id); ids.add('w:' + w.id); }); } catch (e) { /* ignore */ } return ids; };
+
+  /* ---------- which thing a task is about ---------- */
+  const poReq = p => { if (!p) return null; const ids = [p.approval && p.approval.status === 'pending' ? p.approval.reqId : null, p.status === 'rfq_tech' ? p.rfqTechReqId : null, p.status === 'rfq_price' ? p.rfqPriceReqId : null].filter(Boolean); for (const id of ids) { const r = get('requests', id); if (r && r.status === 'pending') return r; } const rs = list('requests').filter(r => r.purchaseId === p.id && r.status === 'pending'); return rs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null; };
+  const ofReq = r => ({ k: 'req', r, p: r.purchaseId ? get('purchases', r.purchaseId) : null });
+  const ofPo = p => ({ k: 'po', p, r: poReq(p) });
+  function linkOf(t) {
+    if (!t) return null; const id = String(t.id || ''); const link = String(t.link || '');
+    let r = get('requests', t.reqId);
+    if (!r && t.purchaseId && /^rfq[tp]_/.test(id)) { const p = get('purchases', t.purchaseId); r = p && get('requests', id.startsWith('rfqt_') ? p.rfqTechReqId : p.rfqPriceReqId); }
+    if (r) return ofReq(r);
+    if (t.purchaseId) { const p = get('purchases', t.purchaseId); if (p) return ofPo(p); }
+    const m = /#\/(requests|purchases|orders|fleet|materials|tasks)\/([^/?#]+)/.exec(link);
+    if (m) {
+      const [, v, x] = m;
+      if (v === 'requests' && get('requests', x)) return ofReq(get('requests', x));
+      if (v === 'purchases' && get('purchases', x)) return ofPo(get('purchases', x));
+      if (v === 'orders' && get('orders', x)) return { k: 'order', o: get('orders', x) };
+      if (v === 'fleet' && get('trips', x)) return { k: 'trip', tr: get('trips', x) };
+      if (v === 'materials' && get('materials', x)) return { k: 'mat', mt: get('materials', x) };
+      if (v === 'tasks' && x !== id && get('tasks', x)) return { k: 'task', tk: get('tasks', x) };
+    }
+    const parts = id.split('_');
+    for (let i = 0; i < parts.length; i++) for (let j = parts.length; j > i; j--) {
+      if (i === 0 && j === parts.length) continue; const c = parts.slice(i, j).join('_'); if (c.length < 8) continue;
+      const rq = get('requests', c); if (rq) return ofReq(rq);
+      const p = get('purchases', c); if (p) return ofPo(p);
+      const tr = get('trips', c); if (tr) return { k: 'trip', tr };
+      const mt = get('materials', c); if (mt) return { k: 'mat', mt };
+    }
+    if (t.tripId && get('trips', t.tripId)) return { k: 'trip', tr: get('trips', t.tripId) };
+    if (t.materialId && get('materials', t.materialId)) return { k: 'mat', mt: get('materials', t.materialId) };
+    if (t.orderId && get('orders', t.orderId)) return { k: 'order', o: get('orders', t.orderId) };
+    return null;
+  }
+
+  /* ---------- who it waits for ---------- */
+  function waitNames(r) {
+    const out = []; let t = []; try { t = typeof reqStepTargets === 'function' ? reqStepTargets(r) : []; } catch (e) { t = []; }
+    t.forEach(x => { const s = String(x); if (s.startsWith('w:')) { const w = get('workers', s.slice(2)); if (w) out.push(w.name); } else if (s.startsWith('role:')) { const rl = s.slice(5); const ws = list('workers').filter(w => w.role === rl && w.status !== 'inactive'); if (ws.length) ws.forEach(w => out.push(w.name)); else out.push(lbl(rl)); } });
+    if (!out.length && r && r.chain) out.push(lbl(r.chain[r.step || 0]));
+    return [...new Set(out)];
+  }
+  const roleNames = rl => { const ws = list('workers').filter(w => w.role === rl && w.status !== 'inactive'); return ws.length ? ws.map(w => w.name) : [lbl(rl)]; };
+  const isPurch = () => { try { return typeof canPurch === 'function' ? canPurch() : (isAdmin() || role() === 'purch'); } catch (e) { return false; } };
+  const isHeadOf = deptId => { try { return role() === 'head' && myDepts().includes(deptId); } catch (e) { return false; } };
+
+  /* ---------- the action this task waits for (for the person looking at it) ---------- */
+  function actOf(L) {
+    if (!L) return null; const r = L.r, p = L.p;
+    if (r && r.status === 'pending' && typeof awaitingMe === 'function' && awaitingMe(r)) {
+      const lab = r.type === 'rfqtech' ? T('اعتمد فنيًا', 'Technical approval') : r.type === 'rfqprice' ? T('اختار المورد واعتمد السعر', 'Pick the supplier + approve the price') : r.type === 'po' ? T('اعتمد أمر الشراء', 'Approve the PO') : T('موافقة / رفض', 'Approve / reject');
+      return { label: lab, action: 'reqOpen', arg: r.id, pending: true, hint: T('المهمة دي بتتقفل لوحدها بعد ما تقرر', 'This task closes by itself once you decide') };
+    }
+    if (p) {
+      const pg = 'purchases/' + p.id;
+      if (['draft', 'need_ok'].includes(p.status) && isPurch()) return { label: p.status === 'draft' ? T('كمّل الأمر وابعته للاعتماد', 'Complete the PO and send it for approval') : T('اعمل أمر الشراء', 'Make the PO'), action: 'go', arg: pg, pending: true, hint: T('المهمة بتتقفل لوحدها لما الأمر يتبعت للاعتماد', 'The task closes by itself once the PO is sent for approval') };
+      if (p.status === 'rfq' && isPurch()) return { label: T('كمّل عروض الأسعار وابعتها', 'Complete the quotes and send them'), action: 'go', arg: pg, pending: true, hint: T('المهمة بتتقفل لوحدها لما العروض تتبعت للاعتماد', 'The task closes by itself once the quotes are sent') };
+      if (p.status === 'transfer' && isAdmin()) return { label: T('حوّل للمورد', 'Pay the supplier'), action: 'go', arg: pg, pending: true, hint: T('المهمة بتتقفل لوحدها بعد التحويل', 'The task closes by itself after the transfer') };
+      if (p.status === 'arrived' && isHeadOf(p.deptId)) return { label: T('أكّد الاستلام', 'Confirm the receipt'), action: 'go', arg: pg, pending: true, hint: T('المهمة بتتقفل لوحدها بعد تأكيد الاستلام', 'The task closes by itself after you confirm') };
+      return { label: p.kind === 'rfq' ? T('افتح طلب العروض', 'Open the RFQ') : T('افتح أمر الشراء', 'Open the PO'), action: 'go', arg: pg, pending: false };
+    }
+    if (r) return { label: T('افتح الطلب', 'Open the request'), action: 'reqOpen', arg: r.id, pending: false };
+    if (L.k === 'order') return { label: T('افتح أمر التشغيل', 'Open the work order'), action: 'go', arg: 'orders/' + L.o.id, pending: false };
+    if (L.k === 'trip') return { label: T('افتح المشوار', 'Open the trip'), action: 'go', arg: 'fleet/' + L.tr.id, pending: false };
+    if (L.k === 'mat') return { label: T('افتح الصنف', 'Open the item'), action: 'go', arg: 'materials/' + L.mt.id, pending: false };
+    if (L.k === 'task') return { label: T('افتح المهمة الأصلية', 'Open the original task'), action: 'go', arg: 'tasks/' + L.tk.id, pending: false };
+    return null;
+  }
+  const actKey = L => { if (!L) return ''; const r = L.r, p = L.p; return [p ? 'p:' + p.id + ':' + p.status : '', r ? 'r:' + r.id + ':' + r.status + ':' + (r.step || 0) : ''].filter(Boolean).join('|'); };
+  window.nfTaskLink = t => { const L = linkOf(t); return L ? { link: L, act: actOf(L) } : null; };
+
+  /* ---------- the card ---------- */
+  const row = (k, v) => v ? `<div class="nflc-r"><span>${esc(k)}</span><b>${esc(v)}</b></div>` : '';
+  const stBadge = (map, s) => { try { return typeof badge === 'function' && map ? badge(map, s) : ''; } catch (e) { return ''; } };
+  function itemsOf(p) {
+    const it = (p.items && p.items.length ? p.items.map(x => ({ n: x.name || (get('materials', x.materialId) || {}).name || '', c: (get('materials', x.materialId) || {}).code || '', q: x.qty, u: x.unit || (get('materials', x.materialId) || {}).unit || '' })) : (p.rfqItems || []).map(x => ({ n: x.name, c: '', q: x.qty, u: x.unit || '' })));
+    if (!it.length) return '';
+    const sh = it.slice(0, 6).map(x => `<li>${x.c ? `<span class="code">${esc(x.c)}</span> ` : ''}${esc(x.n)} <span class="q">× ${esc(typeof fmtNum === 'function' ? fmtNum(x.q) : x.q)} ${esc(x.u)}</span></li>`).join('');
+    return `<ul class="nflc-it">${sh}${it.length > 6 ? `<li class="more">+${it.length - 6}</li>` : ''}</ul>`;
+  }
+  function poWait(p, r) {
+    if (r && r.status === 'pending') return waitNames(r);
+    if (['draft', 'rfq', 'need_ok'].includes(p.status)) return roleNames('purch');
+    if (p.status === 'transfer') return [T('المالك — التحويل للمورد', 'The owner — paying the supplier')];
+    if (p.status === 'arrived') { try { return deptHeads(p.deptId).map(h => h.name); } catch (e) { return []; } }
+    return [];
+  }
+  function card(t, L, A) {
+    let ic = 'board', kind = '', no = '', st = '', rows = '', extra = '', wait = [];
+    if (L.p) {
+      const p = L.p, r = L.r; const o = get('orders', p.orderId); const sup = p.supplier || (p.rfqQuote && p.rfqQuote.supplierName) || '';
+      ic = 'purchase'; kind = p.kind === 'rfq' ? T('طلب عروض أسعار — خامة جديدة', 'RFQ — new item') : T('أمر شراء', 'Purchase order'); no = p.number || ''; st = stBadge(typeof PO_STATUS !== 'undefined' ? PO_STATUS : null, p.status);
+      const offers = (p.offers || p.rfqOffers || []).length;
+      rows = row(T('المشروع', 'Project'), o ? `${o.code || ''} — ${o.title || ''}` : (p.project || '')) + row(T('القسم الطالب', 'Requesting dept'), p.deptId && typeof deptName === 'function' ? deptName(p.deptId) : '') + row(T('المورد', 'Supplier'), sup) + row(T('العروض', 'Quotes'), offers ? String(offers) : '') + row(T('طلبه', 'Requested by'), p.requestedBy && typeof assigneeName === 'function' ? assigneeName(p.requestedBy) : (p.createdByName || '')) + row(T('التاريخ', 'Date'), fmtD(p.createdAt || p.date));
+      if (r && r.status === 'pending' && L.k === 'req' && r.type !== 'po') rows += row(T('الخطوة', 'Step'), REQ_TYPES[r.type] || r.type);
+      extra = itemsOf(p); wait = poWait(p, r);
+    } else if (L.r) {
+      const r = L.r; const w = get('workers', r.workerId); ic = 'request'; kind = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type; no = w ? w.name : (r.requesterName || r.createdByName || '');
+      st = (() => { try { return typeof stageChip === 'function' ? stageChip(r) : ''; } catch (e) { return ''; } })();
+      let desc = ''; try { desc = typeof reqDesc === 'function' ? reqDesc(r) : ''; } catch (e) { desc = ''; }
+      rows = row(T('التفاصيل', 'Details'), noMoney(desc)) + row(T('السبب', 'Reason'), noMoney(r.reason || '')) + row(T('القسم', 'Dept'), r.deptId && typeof deptName === 'function' ? deptName(r.deptId) : '') + row(T('اتقدّم', 'Filed'), `${fmtD(r.createdAt)} ${String(r.createdAt || '').slice(11, 16)}${r.createdByName ? ' — ' + r.createdByName : ''}`);
+      const done = (r.approvals || []).filter(a => a.status === 'approved').map(a => `${lbl(a.role)}${a.byName ? ': ' + a.byName : ''}`); if (done.length) rows += row(T('وافق', 'Approved by'), done.join(' ← '));
+      if (r.status === 'pending') wait = waitNames(r);
+    } else if (L.k === 'order') {
+      const o = L.o; const c = get('clients', o.clientId); ic = 'orders'; kind = T('أمر تشغيل', 'Work order'); no = o.code || ''; st = stBadge(typeof ORDER_STATUS !== 'undefined' ? ORDER_STATUS : null, o.status);
+      rows = row(T('المشروع', 'Project'), o.title || '') + row(T('العميل', 'Client'), c ? c.name : '') + row(T('التسليم', 'Due'), fmtD(o.dueDate));
+    } else if (L.k === 'trip') {
+      const tr = L.tr; ic = 'map'; kind = T('مشوار', 'Trip'); no = tr.number || ''; st = stBadge(typeof TRIP_STATUS !== 'undefined' ? TRIP_STATUS : null, tr.status);
+      rows = row(T('الغرض', 'Purpose'), tr.purpose || '') + row(T('رايح', 'To'), tr.to || '') + row(T('الميعاد', 'When'), `${fmtD(tr.date)} ${tr.time || ''}`.trim()) + row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(tr.vehicleId) : '') + row(T('السواق', 'Driver'), tr.driverId && typeof assigneeName === 'function' ? assigneeName(tr.driverId) : '');
+    } else if (L.k === 'mat') {
+      const m = L.mt; ic = 'cube'; kind = T('صنف', 'Item'); no = m.code || ''; rows = row(T('الاسم', 'Name'), m.name || '') + row(T('الرصيد', 'Stock'), `${typeof fmtNum === 'function' ? fmtNum(+m.qty || 0) : m.qty} ${m.unit || ''}`);
+    } else if (L.k === 'task') {
+      const k = L.tk; ic = 'board'; kind = T('المهمة الأصلية', 'Original task'); no = ''; st = stBadge(typeof TASK_STATUS !== 'undefined' ? TASK_STATUS : null, k.status);
+      rows = row(T('المهمة', 'Task'), k.title || '') + row(T('المكلَّف', 'Assignee'), k.assigneeId && typeof assigneeName === 'function' ? assigneeName(k.assigneeId) : '');
+    }
+    const btn = A ? `<button type="button" class="btn ${A.pending ? 'p' : ''} nflc-go" data-action="${esc(A.action)}" data-arg="${esc(A.arg)}">${icon(A.pending ? 'check' : 'arrow')}<span>${esc(A.label)}</span></button>` : '';
+    return `<div class="card nflc ${A && A.pending ? 'pend' : ''}" data-nflc="${esc(L.k)}"><div class="nflc-h"><span class="nflc-ic">${icon(ic)}</span><div class="nflc-t"><span>${esc(kind)}</span><b>${esc(no)}</b></div><div class="nflc-st">${st}</div></div>
+      <div class="nflc-rs">${rows}</div>${extra}
+      ${wait.length ? `<div class="nflc-w">${icon('info')}<span>${esc(T('دلوقتي عند:', 'Now with:'))} <b>${esc(wait.join('، '))}</b></span></div>` : ''}
+      ${btn}${A && A.pending && A.hint ? `<div class="tiny muted nflc-hint">${esc(A.hint)}</div>` : ''}</div>`;
+  }
+
+  /* (1)+(2) the task page: the card on top, «Done» becomes the action while it waits for you */
+  if (typeof vTaskDetail === 'function') vTaskDetail = (base => function (t) {
+    let html = base.apply(this, arguments);
+    try {
+      if (!t || (typeof taskVisible === 'function' && typeof taskIsParty === 'function' && !taskVisible(t) && !taskIsParty(t))) return html;
+      const L = linkOf(t); if (!L) return html; const A = actOf(L);
+      if (L.r || L.p) html = html.replace(/<div class="banner (warn|info) rfqtk" style="margin-bottom:12px">[\s\S]*?<\/span><\/div>/, '').replace(/^<div class="banner (warn|info)" style="margin-bottom:12px">[\s\S]*?<\/span><\/div>/, '');
+      if (A && A.pending && OPEN(t.status)) {
+        const re = new RegExp(`<button class="btn sm p" data-action="taskStatus" data-arg="${t.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:done">[\\s\\S]*?</button>`);
+        html = html.replace(re, `<button class="btn sm p" data-action="${esc(A.action)}" data-arg="${esc(A.arg)}">${icon('check')}${esc(A.label)}</button>`);
+        const k = actKey(L); if (k && t.actKey !== k && writable()) setTimeout(() => { try { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && cur.actKey !== k) Store.update('tasks', t.id, { actKey: k }, { silent: true }); } catch (e) { /* ignore */ } }, 400);
+      }
+      return card(t, L, A) + html;
+    } catch (e) { console.warn('task card', e); return html; }
+  })(vTaskDetail);
+
+  /* (3) «Start» opens the thing; «Done» runs the action while it waits for you */
+  const runAct = A => { if (!A) return; if (A.action === 'reqOpen' && ACTIONS.reqOpen) ACTIONS.reqOpen(A.arg); else if (A.action === 'go') go(A.arg); };
+  if (ACTIONS.taskStatus) ACTIONS.taskStatus = (base => async function (arg) {
+    const [id, st] = String(arg || '').split(':'); const t0 = byId('tasks', id); const L = t0 ? linkOf(t0) : null; const A = L ? actOf(L) : null;
+    if (st === 'done' && A && A.pending && t0 && OPEN(t0.status)) { toast(A.hint || T('المهمة بتتقفل لوحدها لما الإجراء يخلص', 'The task closes by itself once the action is done')); runAct(A); return; }
+    const was = t0 ? t0.status : null; const out = await base.apply(this, arguments);
+    try {
+      const t = byId('tasks', id);
+      if (t && was !== t.status && ['doing', 'done'].includes(t.status)) moveNotice(t, t.status);
+      if (st === 'doing' && A && t && t.status === 'doing') setTimeout(() => runAct(A), 250);
+    } catch (e) { /* ignore */ }
+    return out;
+  })(ACTIONS.taskStatus);
+
+  /* the task closes by itself when the action it waited for is done — by me (immediately) or by anyone (sweep, via actKey) */
+  const closeT = async (t, note) => { try { const now = nowISO(); await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: me().name || 'السيستم', autoClosed: true, proof: { note, at: now, byName: me().name || '' } }, { silent: true }); } catch (e) { /* ignore */ } };
+  const candTasks = test => list('tasks').filter(t => t && OPEN(t.status) && test(t));
+  const pendingNow = t => { const L = linkOf(t); const A = actOf(L); return !!(A && A.pending); };
+  if (typeof decideRequest === 'function') decideRequest = (base => async function (id) {
+    const before = byId('requests', id); const cands = before ? candTasks(t => (taskMine(t) || mineIds().includes(t.assigneeId)) && (t.reqId === id || String(t.id).includes(id) || (before.purchaseId && t.purchaseId === before.purchaseId))).filter(pendingNow) : [];
+    const out = await base.apply(this, arguments);
+    try {
+      const r = byId('requests', id);
+      if (out !== false && r && before) {
+        for (const t of cands) { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && !pendingNow(cur)) await closeT(cur, T('اتقفلت لوحدها بعد القرار', 'Closed by itself after the decision')); }
+        if (before.status === 'pending' && r.status === 'pending' && r.step !== before.step) stepNotice(r, before);
+      }
+    } catch (e) { /* the decision itself is saved */ }
+    return out;
+  })(decideRequest);
+  Store.update = (base => async function (col, id, patch, opts) {
+    if (col !== 'purchases' || !patch || !patch.status) return base.apply(this, arguments);
+    const p0 = byId('purchases', id); const st0 = p0 && p0.status; const cands = p0 ? candTasks(t => (taskMine(t) || mineIds().includes(t.assigneeId)) && (t.purchaseId === id || String(t.id).includes(id))).filter(pendingNow) : [];
+    const out = await base.apply(this, arguments);
+    try { const p = byId('purchases', id); if (p && p.status !== st0) for (const t of cands) { const cur = byId('tasks', t.id); if (cur && OPEN(cur.status) && !pendingNow(cur)) await closeT(cur, T('اتقفلت لوحدها — الإجراء خلص', 'Closed by itself — the action is done')); } } catch (e) { /* ignore */ }
+    return out;
+  })(Store.update);
+  let _sw = 0;
+  RENDER_HOOKS.push(() => {
+    if (!S.session || !writable() || Date.now() - _sw < 60000) return; _sw = Date.now();
+    setTimeout(async () => { try { for (const t of candTasks(t => t.actKey && (taskMine(t) || mineIds().includes(t.assigneeId)))) { const L = linkOf(t); const k = actKey(L); if (L && k && k !== t.actKey && !pendingNow(t)) await closeT(t, T('اتقفلت لوحدها — الإجراء خلص', 'Closed by itself — the action is done')); } } catch (e) { /* ignore */ } }, 1500);
+  });
+
+  /* (4) notifications open the request itself */
+  if (typeof notifItems === 'function') notifItems = (base => function () {
+    const arr = base.apply(this, arguments).filter(x => x.kind !== 'req');
+    try { list('requests').forEach(r => { if (typeof awaitingMe === 'function' && awaitingMe(r)) { let d = ''; try { d = typeof reqDesc === 'function' ? reqDesc(r) : ''; } catch (e) { d = ''; } arr.push({ kind: 'req', n: 1, at: r.stepAt || r.createdAt || '', title: T(`طلب ${REQ_TYPES[r.type] || r.type} بانتظارك`, `${REQ_TYPES[r.type] || r.type} waiting for you`), sub: noMoney(d).slice(0, 80), href: `#/requests/${r.id}` }); } }); } catch (e) { /* ignore */ }
+    return sortBy(arr, x => x.at, true);
+  })(notifItems);
+  if (typeof pushSend === 'function') pushSend = (base => async function (to, title, body, url, tag) {
+    try { const m = /^req-(.+)$/.exec(String(tag || '')); if (m && (!url || !/\/requests\/./.test(String(url)))) url = `/#/requests/${m[1]}`; } catch (e) { /* ignore */ }
+    return base.call(this, to, title, body, url, tag);
+  })(pushSend);
+  /* #/requests/<id> → the request opens by itself (people without the requests page get it over their home page) */
+  let _rqKey = '', _rqPend = null;
+  const openReq = id => { const r = byId('requests', id); if (!r) { toast(T('الطلب ده مش متاح ليك أو اتمسح', 'This request is not available to you'), 'err'); return; } ACTIONS.reqOpen(id); };
+  RENDER_HOOKS.push(() => {
+    if (!S.session || !S.route) return;
+    if (_rqPend && S.route.view !== 'requests') { const id = _rqPend; _rqPend = null; setTimeout(() => openReq(id), 200); return; }
+    if (S.route.view !== 'requests' || !S.route.id) { _rqKey = ''; return; }
+    const key = location.hash; if (_rqKey === key) return; _rqKey = key; const id = S.route.id;
+    if (typeof canSee === 'function' && !canSee('requests')) { _rqPend = id; location.hash = '#/' + (typeof homeView === 'function' ? homeView() : 'me'); return; }
+    setTimeout(() => openReq(id), 200);
+  });
+
+  /* (5) a notice about every movement */
+  const pushTo = (to, title, body, url, tag) => { try { const ids = [...new Set(to.filter(Boolean).map(String))].filter(x => !mineIds().includes(x)); if (ids.length && typeof pushSend === 'function') pushSend(ids, String(title).slice(0, 100), String(body || '').slice(0, 140), url, tag); } catch (e) { /* ignore */ } };
+  function stepNotice(r, before) {
+    const who = r.workerId ? 'w:' + r.workerId : (r.requesterId ? (get('workers', r.requesterId) ? 'w:' + r.requesterId : r.requesterId) : r.createdBy);
+    const done = lbl((before.chain || [])[before.step || 0]);
+    pushTo([who], T(`طلبك اتحرك — ${REQ_TYPES[r.type] || r.type}`, `Your request moved — ${REQ_TYPES[r.type] || r.type}`), T(`${done} وافق${me().name ? ' (' + me().name + ')' : ''} — دلوقتي عند ${waitNames(r).join('، ')}`, `${done} approved — now with ${waitNames(r).join(', ')}`), `/#/requests/${r.id}`, 'req-' + r.id);
+  }
+  function moveNotice(t, st) {
+    const own = ownerIds(); const to = [];
+    if (t.createdBy && !(st === 'done' && own.has(t.createdBy))) to.push(t.createdBy);   /* the owner already gets «X finished» (99zzZzT) */
+    if (t.assigneeId && !mineIds().includes(t.assigneeId)) to.push('w:' + t.assigneeId);
+    const nm = me().name || '';
+    pushTo(to, st === 'doing' ? T(`${nm} بدأ: ${t.title}`, `${nm} started: ${t.title}`) : T(`${nm} خلّص: ${t.title}`, `${nm} finished: ${t.title}`), '', `/#/tasks/${t.id}`, 'task-' + t.id);
+  }
+  /* messages: the base (83) already pushes every party — a task sent to a whole role reaches that role too */
+  if (typeof taskPost === 'function') taskPost = (base => async function (t, text, file, opts = {}) {
+    const ok = await base.apply(this, arguments); if (!ok) return ok;
+    try {
+      const cur = byId('tasks', t.id) || t;
+      if (!cur.assigneeId && cur.toRole && !(cur.toRole === 'admin' && isAdmin()) && role() !== cur.toRole) {
+        const body = (text || '').trim() || (file ? T('📎 مرفق', '📎 attachment') : T('🎤 رسالة صوتية', '🎤 voice note'));
+        pushTo(['role:' + cur.toRole], `${me().name || ''} — ${cur.title}`, body, `/#/tasks/${cur.id}`, 'task-' + cur.id);
+      }
+    } catch (e) { /* ignore */ }
+    return ok;
+  })(taskPost);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-taskcard">
+.nflc{margin-bottom:12px;padding:14px 16px;border-inline-start:4px solid var(--line)}
+.nflc.pend{border-inline-start-color:var(--accent,#2f6fed)}
+.nflc-h{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.nflc-ic{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent,#2f6fed) 12%,transparent);color:var(--accent,#2f6fed)}.nflc-ic svg{width:19px;height:19px}
+.nflc-t{display:flex;flex-direction:column;min-width:0;flex:1}.nflc-t span{font-size:12px;color:var(--muted)}.nflc-t b{font-size:16px;overflow-wrap:anywhere}
+.nflc-st{flex:none}
+.nflc-rs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 16px}
+.nflc-r{display:flex;gap:8px;font-size:13px;min-width:0;padding:3px 0}.nflc-r span{flex:none;color:var(--muted);min-width:78px}.nflc-r b{font-weight:600;overflow-wrap:anywhere;min-width:0}
+.nflc-it{margin:8px 0 0;padding:8px 12px;list-style:none;border-radius:10px;background:var(--surface-2,rgba(127,127,127,.07));font-size:13px;display:flex;flex-direction:column;gap:4px}
+.nflc-it .code{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);border:0;background:none;padding:0;box-shadow:none}.nflc-it .q{color:var(--muted);white-space:nowrap}.nflc-it .more{color:var(--muted)}
+.nflc-w{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--warn,#e0a100) 12%,transparent)}.nflc-w svg{width:16px;height:16px;flex:none}
+.nflc-go{width:100%;justify-content:center;margin-top:12px;min-height:46px;font-size:15px;white-space:normal}
+.nflc-hint{text-align:center;margin-top:6px}
+@media (max-width:760px){.nflc{padding:12px}.nflc-rs{grid-template-columns:1fr}}
 </style>`);
 })();
 </script>
