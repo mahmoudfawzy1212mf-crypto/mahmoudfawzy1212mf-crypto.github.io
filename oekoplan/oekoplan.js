@@ -57,7 +57,8 @@ html[data-theme="light"] .topbar{background:#f3f7f5!important}
 :root[data-theme="dark"]{--bg:#0b1513;--surface:#13201d;--surface-2:#1a2b27;--surface-3:#223732;--line:#223732;--line-2:#2f4740;--ink:#e9f1ee;--ink-2:#c0d1cb;--muted:#86a39b}
 html[data-theme="dark"] body{background:#0b1513}
 html[data-theme="dark"] .topbar{background:#0b1513!important}
-/* no office door / no other companies */
+/* no office door / no other companies — the «Ninety — three companies» button goes too */
+.nfhomebtn,[data-action="ninetyHome"]{display:none!important}
 .side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
 html.apple .tb-logo,.tb-logo{width:auto!important;height:40px;padding:0 4px!important;background:transparent!important;border:0!important;box-shadow:none!important}
 html.apple .tb-logo img,.tb-logo img{filter:none!important;width:auto!important;height:36px!important;border-radius:8px}
@@ -319,7 +320,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
   if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || view === 'door' ? false : base(view)))(canSee);
   if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (NAV[i].id === 'door') NAV.splice(i, 1);
   if (typeof NINETY_COS === 'object') Object.keys(NINETY_COS).forEach(k => { NINETY_COS[k].url = ''; });
-  if (typeof ACTIONS === 'object') { ACTIONS.ninetyGo = () => go('dashboard'); ACTIONS.goHome = () => go('dashboard'); }
+  if (typeof ACTIONS === 'object') { ACTIONS.ninetyGo = () => go('dashboard'); ACTIONS.goHome = () => go('dashboard'); ACTIONS.ninetyHome = () => go('dashboard'); }
   /* no Ninety owner hub: the owner lands on the dashboard (the hub is skipped while sessionStorage says a company is open) */
   try { sessionStorage.setItem('nf.ninety.co', 'factory'); } catch (e) { /* ignore */ }
   if (typeof ninetySet === 'function') ninetySet = () => { try { sessionStorage.setItem('nf.ninety.co', 'factory'); } catch (e) { /* ignore */ } };
@@ -381,7 +382,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
     swapLogos(); if (/Ninety/.test(document.title) || document.title === 'Ninety') document.title = NAME;
     document.querySelectorAll('.stufoot img').forEach(i => { const want = typeof themeCurrent === 'function' && themeCurrent() === 'dark' ? IMG.lockupDark : IMG.lockup; if (i.getAttribute('src') !== want) i.setAttribute('src', want); });
-    document.querySelectorAll('.co[data-action="ninetyGo"], .ninetyhub, [data-view="ninety"]').forEach(e => e.remove());
+    document.querySelectorAll('.co[data-action="ninetyGo"], .ninetyhub, [data-view="ninety"], .nfhomebtn, [data-action="ninetyHome"]').forEach(e => e.remove());
   });
   document.addEventListener('DOMContentLoaded', () => { document.title = NAME; swapLogos(); });
 
