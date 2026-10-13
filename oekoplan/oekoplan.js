@@ -18,6 +18,10 @@
   const C = { green: '#70b62e', green2: '#3ca13c', lime: '#92cb4e', blue: '#50b1e7', sky: '#9cdff7', teal: '#38a599', ink: '#17191c' };
   const NAME = 'Ökoplan Landscaping';
   const NAME_AR = 'أوكوبلان لتنسيق المواقع';
+  /* the office's project photos (oekoplan/_src/portfolio/<project>/<n>.jpg, with <n>-t.jpg previews) — the login / home slideshow; oeko-home.js draws the projects */
+  const PHOTOS = { xanadu: 2, 'rixos-seagate': 4, 'rixos-sharm': 4, sokhna: 5, 'telal-alamein': 6, 'crowne-plaza': 7 };
+  const STILLS = []; { const best = { 'telal-alamein': [1, 6, 2], 'rixos-seagate': [1, 4], 'crowne-plaza': [1, 2, 4], xanadu: [1], 'rixos-sharm': [1, 2], sokhna: [5, 4] }; Object.keys(best).forEach(k => best[k].forEach(n => STILLS.push(BASE + '_src/portfolio/' + k + '/' + n + '.jpg'))); }
+  window.OEKO_PHOTOS = PHOTOS; window.OEKO_STILLS = STILLS;
 
   /* ---------------------------------------------------------------- identity: colours, theme, logos */
   document.head.insertAdjacentHTML('beforeend', `<style id="oeko-theme">
@@ -146,7 +150,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     { id: 'mgmt', name: 'إدارة المكتب', en: 'Office Management', admin: true },
     { id: 'acct', name: 'الحسابات والموارد البشرية', en: 'Accounts & HR', admin: true },
   ];
-  const TITLES = ['Associate Partner', 'Landscape Design Manager', 'Lead Landscape Architect', 'Senior Landscape Architect', 'Landscape Architect', 'Junior Landscape Architect', 'Senior Lead Irrigation Engineer', 'Irrigation Engineer', 'Senior 3D Visualizing Architect', 'PMO Coordinator', 'Site Engineer', 'Senior Site Engineer', 'Office Manager', 'Accountant', 'HR Specialist', 'Office Boy', 'Driver'];
+  const TITLES = ['Associate Partner', 'Landscape Design Manager', 'Lead Landscape Architect', 'Senior Landscape Architect', 'Landscape Architect', 'Junior Landscape Architect', 'Senior Lead Irrigation Engineer', 'Irrigation Engineer', 'Agricultural Engineer', 'Senior 3D Visualizing Architect', 'PMO Coordinator', 'Site Engineer', 'Senior Site Engineer', 'Office Manager', 'Accountant', 'HR Specialist', 'Office Boy', 'Driver'];
   /* shifts = the regulation: office 8 h effective + 30 min break, flexible arrival 08:00–11:00 (grace 180 min from 08:00; the day
      ends 8.5 h after the punch-in — see policy.flexEnd) · site 09:00–17:00 six days · home / hybrid punch from anywhere · part time */
   const SHIFTS = [
@@ -271,7 +275,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     policy: POLICY,
     regulation: { version: 1, title: 'لائحة العمل والنظام الأساسي ولائحة الجزاءات — شركة أوكوبلان لتنسيق المواقع', text: REG_AR, textEn: REG_EN, updatedAt: null },
     regParams: { annualAfterMonths: 12, probationMonths: 3 },
-    stuLogin: { video: '', videoM: '', poster: BASE + '_src/brand/cover-1.jpg', logo: IMG.full, stills: [BASE + '_src/brand/cover-1.jpg'], slogan: 'Designing landscapes that live', sub: 'Landscape architecture · consulting · site supervision', site: 'https://oekoplan.com', ig: 'https://www.instagram.com/oekoplan.landscapers', fb: 'https://www.facebook.com/OekoplanLandscapers', li: '', be: '', vm: '' },
+    stuLogin: { video: '', videoM: '', poster: STILLS[0], logo: IMG.full, stills: STILLS, slogan: 'Designing landscapes that live', sub: 'Landscape architecture · consulting · site supervision', site: 'https://oekoplan.com', ig: 'https://www.instagram.com/oekoplan.landscapers', fb: 'https://www.facebook.com/OekoplanLandscapers', li: '', be: '', vm: '' },
   };
 
   if (typeof DEFAULT_SETTINGS === 'object') {
@@ -282,7 +286,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
       const keep = new Set(OEKO_DEFAULTS.departments.map(d => d.id).concat(((saved || {}).departments || []).map(d => d.id)));
       s.departments = (s.departments || []).filter(d => keep.has(d.id)); OEKO_DEFAULTS.departments.forEach(d => { if (!s.departments.find(x => x.id === d.id)) s.departments.push(clone(d)); });
       if (!saved) { s.shifts = clone(OEKO_DEFAULTS.shifts); s.leaveTypes = clone(OEKO_DEFAULTS.leaveTypes); s.policy = Object.assign({}, s.policy || {}, clone(OEKO_DEFAULTS.policy)); s.regulation = clone(OEKO_DEFAULTS.regulation); s.trades = OEKO_DEFAULTS.trades.slice(); s.company = NAME; s.brands = clone(OEKO_DEFAULTS.brands); s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); }
-      else { s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); if (!(s.regulation && s.regulation.text) || /Ninety|نينتي/.test(s.regulation.title || '')) s.regulation = clone(OEKO_DEFAULTS.regulation); }
+      else { s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); if (!Array.isArray(s.stuLogin.stills) || s.stuLogin.stills.length <= 1) { s.stuLogin.stills = STILLS.slice(); s.stuLogin.poster = STILLS[0]; } if (!(s.regulation && s.regulation.text) || /Ninety|نينتي/.test(s.regulation.title || '')) s.regulation = clone(OEKO_DEFAULTS.regulation); }
       return s;
     })(mergeSettings);
     if (!(S.loaded && S.loaded.settings)) S.settings = mergeSettings(null);

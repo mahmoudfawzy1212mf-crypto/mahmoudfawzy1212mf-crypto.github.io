@@ -75,11 +75,11 @@ rep("const I18N_STU = (() => { try { return (window.NF_CONFIG && window.NF_CONFI
 
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
-    '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep this line on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n</body>', 1)
+    '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
 
 import hashlib, datetime
 STU_BUILD = open(os.path.join(SRC, 'BUILD.txt'), encoding='utf-8').read().strip()
-h = hashlib.sha1((html + open(os.path.join(DST, 'oekoplan.js'), encoding='utf-8').read()).encode('utf-8')).hexdigest()[:6]
+h = hashlib.sha1((html + open(os.path.join(DST, 'oekoplan.js'), encoding='utf-8').read() + open(os.path.join(DST, 'oeko-home.js'), encoding='utf-8').read()).encode('utf-8')).hexdigest()[:6]
 BUILD = f"{STU_BUILD}-o{h}"
 rep(f'NF_BUILD="{STU_BUILD}"', f'NF_BUILD="{BUILD}"', 1)
 open(os.path.join(DST, 'index.html'), 'w', encoding='utf-8').write(html)
@@ -116,7 +116,7 @@ if r.returncode: sys.exit('!! en.json rebuild failed')
 
 # --- service worker: add the add-on to the shell list
 sw = open(os.path.join(SRC, 'sw.js'), encoding='utf-8').read()
-sw = sw.replace('"./en.json"]', '"./en.json", "./oekoplan.js", "./qrp-v1.js"]', 1)
+sw = sw.replace('"./en.json"]', '"./en.json", "./oekoplan.js", "./oeko-home.js", "./qrp-v1.js"]', 1)
 sw = sw.replace(f"const BUILD = '{STU_BUILD}';", f"const BUILD = '{BUILD}';", 1)
 open(os.path.join(DST, 'sw.js'), 'w', encoding='utf-8').write(sw)
 for f in ('qrp-v1.js', 'qrdec-v1.js', 'qrgen-v1.js'):
