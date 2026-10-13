@@ -177,5 +177,17 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
     document.querySelectorAll('.okh .shn:not(.done)').forEach(el => { if (el.closest('.stuhome')) return; el.classList.add('done'); el.textContent = el.dataset.n; });
     trySeed();
   });
+  /* Dr. Tarek's portrait (Mahmoud, 13 Oct) goes on his account by itself the first time he opens the home without a picture */
+  const TAREK = SRC + 'brand/tarek.jpg'; let tarekTried = false;
+  const tarekData = async () => { const r = await fetch(TAREK); const bl = await r.blob(); return new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(bl); }); };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (tarekTried || !S.session || !(S.route && S.route.view === 'dashboard')) return; tarekTried = true;
+    setTimeout(async () => { try {
+      const nm = String(S.session.name || ''); if (!/طارق|Tarek/i.test(nm) || !(typeof isAdmin === 'function' && isAdmin())) return;
+      if (typeof myAvatarSrc === 'function' && myAvatarSrc()) return;
+      if (typeof saveMyPhoto === 'function') { await saveMyPhoto(await tarekData()); if (typeof render === 'function') render(true); }
+    } catch (e) { console.warn('tarek photo', e); } }, 1200);
+  });
+  if (typeof ACTIONS === 'object') ACTIONS.oekoTarekPhoto = async () => { try { await saveMyPhoto(await tarekData()); toast(L('اتحطت صورة د. طارق', "Dr. Tarek's photo is set")); render(true); } catch (e) { toast(L('تعذّر', 'Could not'), 'err'); } };
   window.oekoHome = { PROJECTS, OFFICE, seedGallery };
 })();
