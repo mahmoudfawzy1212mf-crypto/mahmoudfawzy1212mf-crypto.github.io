@@ -64,7 +64,11 @@ html[data-theme="dark"] .tb-logo img,html[data-theme="dark"] .brand img{filter:n
 /* ---- the side bar's top block: logo · person · language/look · view-as/password/sign-out/guide — one width (the menu's), one rhythm ---- */
 .side .brand,html.apple .side .brand{margin:10px 8px 4px!important;padding:4px 2px 6px!important;border-bottom:0!important;display:flex;justify-content:flex-start;align-items:center}
 .side .brand .brandstack{width:100%}
-.side .brand .wordmark,html.apple .side .brand .wordmark{width:100%!important;height:auto!important;max-height:92px!important;object-fit:contain;object-position:left center}
+.side .brand .wordmark,html.apple .side .brand .wordmark{width:100%!important;height:auto!important;max-height:124px!important;object-fit:contain;object-position:left center}
+.side .nav>a,.side .nav .ngh,html.apple .side .nav>a,html.apple .side .nav .ngh{margin:1px 8px!important;width:calc(100% - 16px)!important;padding:10px 12px!important;box-sizing:border-box}
+.side .nav>a>svg:first-child,.side .nav .ngh>svg:first-child{width:18px!important;height:18px!important;flex:none}
+.side .nav .ngh>span,.side .nav>a>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+@media (max-width:1000px){.side .nav .ngh,.side .nav>a{font-size:13.5px!important;letter-spacing:0}}
 .side .userchip,html.apple .side .userchip{margin:0 8px 6px!important;padding:10px 10px!important;border-bottom:0!important;border-radius:12px;background:rgba(255,255,255,.07);display:flex;align-items:center;gap:10px}
 html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 .side .nftogs,html.apple .side .nftogs{margin:0 8px 6px!important;gap:6px!important;display:flex;flex-wrap:nowrap}
