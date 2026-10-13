@@ -14,7 +14,7 @@
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const BASE = (() => { try { const s = document.currentScript && document.currentScript.src; return s ? s.replace(/[^/]*$/, '') : './'; } catch (e) { return './'; } })();
-  const IMG = { lockup: BASE + '_src/brand/lockup.png', lockupDark: BASE + '_src/brand/lockup-dark.png', full: BASE + '_src/brand/full.png', fullDark: BASE + '_src/brand/full-dark.png', mark: BASE + '_src/brand/mark.png', sig: BASE + '_src/brand/sig.png' };
+  const IMG = { lockup: BASE + '_src/brand/lockup.png', lockupDark: BASE + '_src/brand/lockup-dark.png', full: BASE + '_src/brand/full.png', fullDark: BASE + '_src/brand/full-dark.png', mark: BASE + '_src/brand/mark.png', icon: BASE + 'icons/icon-192.png', sig: BASE + '_src/brand/sig.png' };
   const C = { green: '#70b62e', green2: '#3ca13c', lime: '#92cb4e', blue: '#50b1e7', sky: '#9cdff7', teal: '#38a599', ink: '#17191c' };
   const NAME = 'Ökoplan Landscaping';
   const NAME_AR = 'أوكوبلان لتنسيق المواقع';
@@ -129,7 +129,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     themeLoad();
   }
   /* the wordmark in the side bar / reports: white text version in dark mode */
-  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo, .tb-logo img').forEach(i => { const inTb = !!i.closest('.tb-logo'); const want = i.closest('.nfsplash') ? IMG.lockupDark : inTb && window.innerWidth <= 760 ? IMG.mark : (dark ? IMG.lockupDark : IMG.lockup); if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
+  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo, .tb-logo img').forEach(i => { const inTb = !!i.closest('.tb-logo'); const want = i.closest('.nfsplash') ? IMG.lockupDark : inTb && window.innerWidth <= 760 ? IMG.icon : (dark ? IMG.lockupDark : IMG.lockup); if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
 
   /* ---------------------------------------------------------------- office structure */
   const DEPTS = [
