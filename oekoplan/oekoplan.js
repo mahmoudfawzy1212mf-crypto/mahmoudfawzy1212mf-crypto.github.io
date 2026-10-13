@@ -580,6 +580,14 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
   }
   ACTIONS.oekoImportProjects = async () => { if (!(await confirmDlg(L(`إضافة ${PROJECTS_2026.length} مشروع من قائمة 2026 بمسؤوليها؟ الموجود بنفس الاسم مش هيتكرر.`, `Add the ${PROJECTS_2026.length} projects of the 2026 list with their leads? Existing names are kept.`), L('أضف', 'Add')))) return; const r = await importProjects(); toast(L(`اتضاف ${r.added} — موجود من قبل ${r.kept}${r.unmatched.length ? ` — مش في ملف الفريق: ${r.unmatched.join('، ')}` : ''}`, `${r.added} added — ${r.kept} already there${r.unmatched.length ? ` — not in the team file: ${r.unmatched.join(', ')}` : ''}`)); };
   window.oekoImportProjects = importProjects;
+  /* the first admin to open the home with the team in and no projects gets the 2026 list by itself (once per system — flag in settings) */
+  let projSeedTried = false;
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (projSeedTried || !S.session || typeof isAdmin !== 'function' || !isAdmin() || !(S.route && S.route.view === 'dashboard')) return;
+    if (!S.settings || S.settings.oekoProjectsSeeded) { projSeedTried = true; return; }
+    if (typeof sbOn === 'function' && sbOn() && !S.staffReady) return; if (!list('workers').length || list('projects').length) return; projSeedTried = true;
+    setTimeout(async () => { try { const r = await importProjects(); if (typeof Store.saveSettings === 'function') await Store.saveSettings({ oekoProjectsSeeded: true }); if (r.added) toast(L(`اتضاف ${r.added} مشروع من قائمة 2026`, `${r.added} projects added from the 2026 list`)); } catch (e) { console.warn('oeko projects seed', e); } }, 1800);
+  });
 
   /* ---------------------------------------------------------------- settings: the Ökoplan tab */
   if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.oekoplan = { label: 'أوكوبلان — المكتب', render: () => {
