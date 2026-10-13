@@ -29,8 +29,8 @@
   --good:${C.green};--good-soft:#edf7e2;--good-ink:#3f7a12;--lof:${C.green};--elm:${C.blue};--alu:${C.teal};
   --side-bg:#16302b;--side-ink:#d6e6e2;--side-muted:#8fb0a9;--side-on:#fff;--side-on-bg:linear-gradient(135deg,${C.green},${C.teal} 60%,${C.blue});
   --chart-grid:#e3e8e4;--chart-axis:#c2cbc5}
-:root[data-theme="dark"]{--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#091a20;--side-on-bg:linear-gradient(135deg,${C.green2},${C.teal})}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#091a20}}
+:root[data-theme="dark"],html.apple[data-theme="dark"]{--accent:#50b1e7;--accent-ink:#04121c;--accent-soft:rgba(80,177,231,.16);--good-ink:#9ad66a;--side-bg:#0a1b28;--side-on-bg:linear-gradient(135deg,${C.green2},${C.teal})}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#0a1b28}}
 .brandstack .lockup:empty{display:none}
 .wordmark{filter:none!important}
 /* ---- the side bar: light = white with the coloured lockup · dark = deep green with the white lockup ---- */
@@ -54,7 +54,7 @@ html.apple[data-theme="light"] .side .acct.nfstrip>.nfst,html.apple[data-theme="
 html.apple[data-theme="light"] .side .acct.nfstrip>.nfst.logout{color:#b42318!important}
 html.apple[data-theme="light"] .side .userchip{border-bottom-color:#e1e8e5}
 html.apple[data-theme="light"] .side .avatar{background:linear-gradient(135deg,#70b62e,#38a599);color:#fff}
-html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#091a20!important;border-color:#19343d!important}
+html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#0a1b28!important;border-color:#1b3a4f!important}
 html.apple[data-theme="dark"] .side .nav a.on{background:linear-gradient(135deg,#3ca13c,#38a599)!important;color:#fff!important}
 html[data-theme="dark"] .side .userchip{background:rgba(255,255,255,.06)}
 html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
@@ -82,11 +82,11 @@ html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 /* ---- day / night surfaces ---- */
 html[data-theme="light"] body{background:#f3f7f5}
 html[data-theme="light"] .topbar{background:#f3f7f5!important}
-html:root[data-theme="dark"],html.apple[data-theme="dark"],html.apple.apple[data-theme="dark"]{--bg:#07151a;--surface:#0c1f26;--surface-2:#112a32;--surface-3:#163640;--line:#19343d;--line-2:#224854;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(12,31,38,.72);--glass-solid:rgba(12,31,38,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(9,26,32,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#07151a}
-@media (prefers-color-scheme: dark){html.apple.apple:not([data-theme="light"]){--bg:#07151a;--surface:#0c1f26;--surface-2:#112a32;--surface-3:#163640;--line:#19343d;--line-2:#224854;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(12,31,38,.72);--glass-solid:rgba(12,31,38,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(9,26,32,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#07151a}}
-html[data-theme="dark"] body{background:#07151a}
-html[data-theme="dark"] .topbar{background:#07151a!important}
-html.apple.apple[data-theme="dark"] .side,html.apple.apple[data-theme="dark"] .nhome .nside{background:#091a20!important}
+html:root[data-theme="dark"],html.apple[data-theme="dark"],html.apple.apple[data-theme="dark"]{--bg:#081620;--surface:#0d2130;--surface-2:#122a3c;--surface-3:#173448;--line:#1b3a4f;--line-2:#255069;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(13,33,48,.72);--glass-solid:rgba(13,33,48,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(10,27,40,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(80,177,231,.14),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(60,160,90,.12),transparent 60%),#081620}
+@media (prefers-color-scheme: dark){html.apple.apple:not([data-theme="light"]){--bg:#081620;--surface:#0d2130;--surface-2:#122a3c;--surface-3:#173448;--line:#1b3a4f;--line-2:#255069;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(13,33,48,.72);--glass-solid:rgba(13,33,48,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(10,27,40,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(80,177,231,.14),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(60,160,90,.12),transparent 60%),#081620}}
+html[data-theme="dark"] body{background:#081620}
+html[data-theme="dark"] .topbar{background:#081620!important}
+html.apple.apple[data-theme="dark"] .side,html.apple.apple[data-theme="dark"] .nhome .nside{background:#0a1b28!important}
 /* no office door / no other companies — the «Ninety — three companies» button goes too */
 .nfhomebtn,[data-action="ninetyHome"]{display:none!important}
 .side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
@@ -165,12 +165,12 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
 .okcard .slalt{margin-top:16px}.okcard .slalt button{font-size:12.5px;color:#4b7f78}
 .okfoot{font-size:11.5px;line-height:1.7}
 .oklogin .slsoc a,.oklogin .slsoc button{opacity:.75}
-html[data-theme="dark"] .oklogin{background:linear-gradient(180deg,#091a20,#050f13)}
-html[data-theme="dark"] .okcard{background:#0c1f26;border-color:rgba(255,255,255,.06);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
+html[data-theme="dark"] .oklogin{background:linear-gradient(180deg,#0a1b28,#050e16)}
+html[data-theme="dark"] .okcard{background:#0d2130;border-color:rgba(255,255,255,.06);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
 html[data-theme="dark"] .okcard h2{color:#a9bbb5}
 html[data-theme="dark"] .okcard .slf label{color:#7f948d}
-html[data-theme="dark"] .okcard .slf input{background:#07151a;border-color:#19343d;color:#eef2f0}
-html[data-theme="dark"] .okcard .slf input:focus{border-color:#38a599;box-shadow:0 0 0 3px #38a59926}
+html[data-theme="dark"] .okcard .slf input{background:#081620;border-color:#1b3a4f;color:#eef2f0}
+html[data-theme="dark"] .okcard .slf input:focus{border-color:#50b1e7;box-shadow:0 0 0 3px #50b1e726}
 html[data-theme="dark"] .okcard .slchk{color:#a9bbb5}
 html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
 @media (max-width:1000px){.okside{padding:24px 16px 40px}.okcard{padding:28px 22px 24px}}
