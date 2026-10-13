@@ -138,6 +138,17 @@ rep("const rg = b.groups.find(g => /render/i.test(g.name)) || b.groups[Math.max(
 # --- the office typeface: Jost (geometric, like the profile's Century Gothic) for Latin and numbers; IBM Plex Sans Arabic stays for Arabic
 rep('family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap', 'family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Jost:wght@300;400;500;600;700&display=swap', 1)
 
+# --- the home «pulse» and «shot of the week»: landscape deliverables instead of shots / renders
+rep("L('نبض المكتب', 'Studio pulse')", "L('نبض المكتب', 'Office pulse')", 1)
+rep("L('لقطات اتعتمدت الأسبوع ده', 'shots approved this week')", "L('مخرجات اتعتمدت الأسبوع ده', 'deliverables approved this week')", 1)
+rep("L('ريندرات الشهر ده', 'renders this month')", "L('لوحات اتصدرت الشهر ده', 'drawings issued this month')", 1)
+rep("L('مشاريع اتسلمت السنة دي', 'delivered this year')", "L('مشاريع اتسلّمت للعميل السنة دي', 'projects handed over this year')", 1)
+# issued drawings = deliverables that reached «Issued» this month + drawing versions uploaded to task boards this month (not photo files)
+rep("let renders = list('files').filter(f => f.kind === 'render' && String(f.createdAt || '').startsWith(m0)).length;", "let renders = list('shots').filter(s => s.state === 'done' && String(s.doneAt || '').startsWith(m0)).length;", 1)
+rep("L('اختار لقطة الأسبوع', 'Pick the shot of the week')", "L('اختار صورة الأسبوع', 'Pick the picture of the week')", 1)
+rep("L('لقطة الأسبوع', 'Shot of the week')", "L('صورة الأسبوع', 'Picture of the week')")
+rep("L('اختار أحلى ريندر الأسبوع ده عشان يظهر للفريق كله.', 'Pick the best render of the week to show it to the whole team.')", "L('اختار أحلى لوحة أو صورة الأسبوع ده عشان تظهر للفريق كله.', 'Pick the best drawing or photo of the week to show it to the whole team.')", 1)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
