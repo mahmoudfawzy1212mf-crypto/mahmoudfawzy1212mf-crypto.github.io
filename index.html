@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261013-0326-3b6a56";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261013-0429-fc51d1";</script>
 
 <script>
 'use strict';
@@ -18173,7 +18173,7 @@ body.stuboard .fab{display:none!important}
       </div></div>
       <div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">مهام المشروع (${tasks.length})</h3><div class="grow"></div>${stuCanEdit() ? `<button class="btn sm ghost" data-action="stuTaskNew" data-arg="${p.id}">${icon('plus')}مهمة</button>` : ''}</div>
       ${tasks.length ? tasks.map(t => `<a class="row small" href="#/tasks/${t.id}" style="padding:6px 0;border-bottom:1px solid var(--line);gap:8px"><span class="stagedot ${t.status === 'doing' ? 'active' : ''}"></span><span>${esc(t.title)}</span><div class="grow"></div><span class="muted">${t.assigneeId ? esc(stuPerson(t.assigneeId).name) : ''}${t.dueDate ? ' · ' + fmtDate(t.dueDate) : ''}</span></a>`).join('') : '<p class="small muted">لا توجد مهام مفتوحة</p>'}</div>
-      ${files.length || (window.nfFinals && window.nfFinals.can(p.id)) ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3><div class="grow"></div>${window.nfFinals ? window.nfFinals.btn(p.id) : ''}</div>${files.length ? `<div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div>` : `<p class="small muted">${typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'No files yet — «Upload finals» adds the shots at full quality.' : 'لسه مفيش ملفات — «ارفع الفاينال» بيضيف اللقطات بجودتها الكاملة.'}</p>`}</div>` : ''}`;   /* v7.59: «Upload finals» (99zzZzZZzz-proj-finals) */
+      ${files.length || (window.nfFinals && window.nfFinals.can(p.id)) || (window.nfPortfolio && window.nfPortfolio.btn(p.id)) ? `<div class="card" style="margin-top:14px"><div class="cardhead"><h3 style="margin:0">ملفات المشروع (${files.length})</h3><div class="grow"></div>${window.nfPortfolio ? window.nfPortfolio.btn(p.id) : ''}${window.nfFinals ? window.nfFinals.btn(p.id) : ''}</div>${files.length ? `<div class="fgrid">${files.map(f => fileTile(f, 'proj')).join('')}</div>` : `<p class="small muted">${typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'No files yet — «Upload finals» adds the shots at full quality.' : 'لسه مفيش ملفات — «ارفع الفاينال» بيضيف اللقطات بجودتها الكاملة.'}</p>`}</div>` : ''}`;   /* v7.59: «Upload finals» (99zzZzZZzz-proj-finals) */
   }
   EXTRA_TITLES.projects = () => { if (S.route.id) { const p = byId('projects', S.route.id); return { title: p ? p.name : 'مشروع', sub: p ? `${stuStage(p.stage).ar} · ${(typeof nfDevName === 'function' ? nfDevName(p) : p.client) || ''}` : '', actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>كل المشاريع</span></a>` }; } return { sub: 'مشاريع التصميم بمراحلها وفِرقها وبورداتها' }; };
   viewTitleProjects = t => { const x = EXTRA_TITLES.projects(); return S.route.view === 'projects' ? Object.assign(t, x) : t; };
@@ -25281,6 +25281,9 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      is being checked (lockAt, 15 min) or that is paid takes no more — the next advance starts a new one. Task + push without amounts. */
   const locked = b => !!(b && b.lockAt && Date.now() - Date.parse(b.lockAt) < 15 * 60000);
   async function addToOpenBatch(apId) {
+    /* v7.63 (Mahmoud, 13 Oct): an advance waits for its payout time (under 500 → the next day at 12:00, 500 or more → after 48 hours at 12:00,
+       requests after 16:00 count from the next day, a Friday moves to Saturday) in a «queued» batch; at that time it reaches the owner. */
+    try { const Q = window.nfAdvSched; const at = Q && Q.planFor(apId); if (at && Date.parse(at) > Date.now()) { await Q.queue(apId, at); return; } } catch (e) { console.warn('adv schedule', e); }
     let b = list('advbatch').find(x => x.status === 'sent' && !locked(x)) || list('advbatch').find(x => x.status === 'open');
     const fresh = !b;
     if (!b) b = { id: 'sb_' + uid(), code: nextBatchCode(), status: 'sent', items: [], total: 0, createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' };
@@ -25343,7 +25346,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   ACTIONS.abRetry = async id => { try { await callFn({ action: 'fundretry', id }); toast('ارفع صورة تانية'); } catch (e) { toast(e.message, 'err'); } };
   function batchCard(b) {
     const items = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); const total = b.status === 'open' ? bTotal(b) : +b.total || bTotal(b);
-    const st = { open: ['مفتوحة — بتتجمع', ''], sent: ['مستنية تحويل محمود', 'warn'], review: ['مراجعة', 'serious'], funded: items.length && items.every(p => p.status === 'paid' || p.status === 'cancelled') ? ['اتوزّعت كلها', 'good'] : ['اتبعتت للمحوِّل — بيوزّع', 'good'] }[b.status] || [b.status, ''];
+    const st = { queued: [window.nfAdvSched ? window.nfAdvSched.whenLabel(b.releaseAt, true) : 'في الطريق', ''], open: ['مفتوحة — بتتجمع', ''], sent: ['مستنية تحويل محمود', 'warn'], review: ['مراجعة', 'serious'], funded: items.length && items.every(p => p.status === 'paid' || p.status === 'cancelled') ? ['اتوزّعت كلها', 'good'] : ['اتبعتت للمحوِّل — بيوزّع', 'good'] }[b.status] || [b.status, ''];
     const acts = [];
     if (b.status === 'open' && canWalletAdmin() && writable() && items.length) acts.push(`<button class="btn p sm" data-action="abSend" data-arg="${esc(b.id)}">${icon('send')}ابعت الدفعة لمحمود</button>`);
     if (['sent', 'review'].includes(b.status) && isAdmin() && writable()) acts.push(`<label class="btn p sm">${icon('camera')}ارفع صورة تحويلك<input type="file" accept="image/*" hidden data-abup="${esc(b.id)}"></label><button class="btn sm" data-action="abApprove" data-arg="${esc(b.id)}">اعتماد يدوي</button>${b.status === 'review' ? `<button class="btn sm ghost" data-action="abRetry" data-arg="${esc(b.id)}">صورة تانية</button>` : ''}`);
@@ -25361,7 +25364,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       ${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}${hint}</div>`;
   }
   function batchesHTML() {
-    const bs = sortBy(list('advbatch').filter(b => isAdmin() || ['hr', 'acc'].includes(role()) || (b.status === 'funded' && b.fundedTo === myWid())), b => ({ open: 0, sent: 1, review: 1, funded: 2 }[b.status] || 3) + (b.sentAt || b.createdAt || ''));
+    const bs = sortBy(list('advbatch').filter(b => isAdmin() || ['hr', 'acc'].includes(role()) || (b.status === 'funded' && b.fundedTo === myWid())), b => ({ open: 0, queued: 0, sent: 1, review: 1, funded: 2 }[b.status] || 3) + (b.releaseAt || b.sentAt || b.createdAt || ''));
     const intro = role() === 'hr' ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>كل سلفة بتوافق عليها بتدخل الدفعة المفتوحة. لما تخلّص، دوس «ابعت الدفعة لمحمود» — هيوصله إشعار بالأسماء والمجموع.</span></div>` : isAdmin() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل مجموع الدفعة لبهاء (أو أحمد لو بهاء مش موجود) وارفع صورة التحويل — السيستم بيعرف حوّلت لمين وبيتأكد من المبلغ، والمبلغ بيدخل عهدته على طول، وكل سلفة بيحوّلها بتتخصم منها.</span></div>` : '';
     return intro + (bs.length ? `<div class="apgrid">${bs.map(batchCard).join('')}</div>` : `<div class="empty"><b>مفيش دفعات لسه</b></div>`);
   }
@@ -33635,17 +33638,16 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const HQ = new Map();   /* file id → the high-quality url once resolved (so a re-render does not drop back to the small preview) */
   const nShots = n => (en() ? `${n} ${n === 1 ? 'shot' : 'shots'}` : n === 1 ? 'لقطة واحدة' : n === 2 ? 'لقطتين' : n <= 10 ? `${n} لقطات` : `${n} لقطة`);
   const shotName = f => String(f.name || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+  window.nfStuFinished = () => finished();   /* v7.63: «Studio work» lists the finished projects not published yet (editors) */
+  /* v7.63 (Mahmoud, 13 Oct: rename it «From the studio work»; show what we publish): the strip = the published portfolio
+     (99zzZzZZzze-portfolio) — one slide per shot, at the high-quality display copy. */
   function heroHTML() {
-    const ps = finished(); const MAX = 12;
-    const per = ps.length <= 1 ? MAX : Math.max(3, Math.floor(MAX / ps.length));
-    const sl = []; ps.forEach((p, pi) => { const fs = finalsOf(p).slice(0, per); if (fs.length) fs.forEach(f => sl.push({ p, f })); else sl.push({ p, c: cover(p, pi) }); });
-    const slides = sl.slice(0, MAX);
-    if (!slides.length) return `<div class="shhero one"><div class="shslide cur"><img src="${esc(stills()[0])}" alt=""><div class="sht"><small>${L('الاستوديو', 'The studio')}</small><h2>${L('لسه مفيش مشاريع خلصانة', 'No finished projects yet')}</h2><div class="shm"><span class="shd">${L('أول ما لقطات مشروع تتعتمد كلها بيظهر هنا', 'A project shows here once all its shots are approved')}</span></div></div></div></div>`;
-    return `<div class="shhero" id="shhero" data-n="${slides.length}">${slides.map((x, i) => { const p = x.p, f = x.f; const src = f ? (HQ.get(f.id) || f.thumb || '') : x.c.src; const hq = f && f.store === 'sb' && !HQ.has(f.id) ? ` data-hq="${esc(f.id)}"` : '';
-      const n = shotsOf(p).filter(s => s.state === 'done').length || finalsOf(p).length; const deliv = ['delivered', 'closed'].includes(p.osStatus);
-      const team = [...new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean))].slice(0, 6);
-      return `<a class="shslide ${i === H.i % slides.length ? 'cur' : ''}" href="#/projects/${esc(p.id)}" data-i="${i}"><img src="${esc(src)}" alt=""${hq} ${i ? 'loading="lazy"' : ''}><div class="sht"><small class="notr" dir="auto">${esc((typeof nfDevName === 'function' ? nfDevName(p) : p.client) || '')}</small><h2 class="notr" dir="auto">${esc(p.name)}</h2><div class="shm"><span class="shst">${esc(deliv ? stageL(p) : L('اللقطات اتعتمدت', 'Shots approved'))}</span>${n ? `<span class="shd">${nShots(n)}</span>` : ''}${f ? `<span class="shd shfn notr" dir="auto">${esc(shotName(f))}</span>` : ''}<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span></div></div></a>`; }).join('')}
-      <div class="shdots">${slides.map((_, i) => `<i class="${i === H.i % slides.length ? 'on' : ''}" data-action="shGo" data-arg="${i}"></i>`).join('')}</div>
+    const PF = window.nfPortfolio; const sl = PF ? PF.slides(12) : [];
+    if (!sl.length) return `<div class="shhero one"><div class="shslide cur"><img src="${esc(stills()[0])}" alt=""><div class="sht"><small>${L('الاستوديو', 'The studio')}</small><h2>${L('لسه مفيش شغل منشور', 'Nothing published yet')}</h2><div class="shm"><span class="shd">${PF && PF.canEdit() ? L('انشر أول مشروع من «شغل الاستوديو»', 'Publish the first project from «Studio work»') : L('شغل الاستوديو بيظهر هنا أول ما يتنشر', 'The studio work shows here once it is published')}</span></div></div></div></div>`;
+    return `<div class="shhero" id="shhero" data-n="${sl.length}">${sl.map((x, i) => { const e = x.e, f = x.f; const n = PF.shotsOf(e).length; const p = e.projectId ? byId('projects', e.projectId) : null;
+      const team = p ? [...new Set([...(p.team || []), p.leadId, p.ownerId].filter(Boolean))].slice(0, 6) : [];
+      return `<a class="shslide ${i === H.i % sl.length ? 'cur' : ''}" href="#/portfolio/${esc(e.id)}" data-i="${i}"><img src="${esc(x.src)}" alt=""${x.hq ? ` data-pfhq="${esc(x.hq)}"` : ''} ${i ? 'loading="lazy"' : ''}><div class="sht"><small class="notr" dir="auto">${esc(e.client || '')}</small><h2 class="notr" dir="auto">${esc(e.title || '')}</h2><div class="shm">${e.type ? `<span class="shst">${esc(({ ext: L('خارجي', 'Exterior'), int: L('داخلي', 'Interior'), master: L('ماستر بلان', 'Masterplan'), video: L('فيديو', 'Video'), anim: L('أنيميشن', 'Animation') })[e.type] || '')}</span>` : ''}${e.year ? `<span class="shd">${esc(String(e.year))}</span>` : ''}${n ? `<span class="shd">${nShots(n)}</span>` : ''}${f ? `<span class="shd shfn notr" dir="auto">${esc(shotName(f))}</span>` : ''}${team.length ? `<span class="shav">${team.map(id => (typeof stuAvatar === 'function' ? stuAvatar(id, 24) : '')).join('')}</span>` : ''}</div></div></a>`; }).join('')}
+      <div class="shdots">${sl.map((_, i) => `<i class="${i === H.i % sl.length ? 'on' : ''}" data-action="shGo" data-arg="${i}"></i>`).join('')}</div>
       <button type="button" class="shnav prev" data-action="shStep" data-arg="-1" aria-label="prev">‹</button><button type="button" class="shnav next" data-action="shStep" data-arg="1" aria-label="next">›</button></div>`;
   }
   /* swap the small preview for the 2560 px display copy (once loaded, so there is no blank flash) */
@@ -33698,7 +33700,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       ${top || `<div class="shgreet"><div><small>${esc(date)}</small><h1>${greet}، <b class="notr">${esc(first)}</b></h1></div>${typeof stuAvatar === 'function' ? stuAvatar(me(), 44) : ''}</div>`}
       ${top ? '' : heroHTML()}
       <div class="shsec"><h3>${L('يومك النهارده', 'Your day')}</h3></div>${todayHTML()}
-      ${top ? `<div class="shsec"><h3>${L('مشاريع خلّصناها', 'Finished projects')}</h3></div>${heroHTML()}` : ''}
+      ${top ? `<div class="shsec pfsec"><h3>${L('من شغل الاستوديو', 'From the studio\'s work')}</h3><a class="btn xs" href="#/portfolio">${L('الكل', 'All')}</a></div>${heroHTML()}` : ''}
       ${SM ? SM.galleryHTML() : ''}
       <div class="shgrid">${noticeHTML()}${spotHTML()}${pulseHTML()}</div>
       ${oldDash ? `<details class="shold"><summary>${L('لوحة المتابعة', 'Tracking board')}</summary><div class="sholdb">${oldDash}</div></details>` : ''}
@@ -33757,6 +33759,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .shdots{position:absolute;top:16px;inset-inline-end:18px;z-index:3;display:flex;gap:6px}.shdots i{width:22px;height:4px;border-radius:2px;background:rgba(255,255,255,.35);cursor:pointer;transition:.3s}.shdots i.on{background:#fff;width:34px}
 .shnav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:38px;height:38px;border-radius:50%;border:0;background:rgba(11,13,16,.45);color:#fff;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;opacity:0;transition:.2s;backdrop-filter:blur(6px)}.shhero:hover .shnav{opacity:1}.shnav.prev{inset-inline-start:12px}.shnav.next{inset-inline-end:12px}
 .shhero.one .shnav,.shhero.one .shdots{display:none}
+.shsec.pfsec{display:flex;align-items:center;justify-content:space-between;gap:8px}.shsec.pfsec .btn{margin-bottom:-6px}
 .shfn{max-width:46ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shdots{flex-wrap:wrap;max-width:60%;justify-content:flex-end}.shhero[data-n] .shdots i{width:14px}.shhero[data-n] .shdots i.on{width:26px}
 .shsec h3{margin:6px 0 -6px;font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
 .shrow{display:grid;grid-template-columns:repeat(3,1fr) 2fr;gap:10px}
@@ -50004,8 +50007,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function galleryHTML() {
     const c = cur(); const ed = canEdit() ? `<button type="button" class="btn xs" data-action="smEdit">${icon('edit')}${esc(L('تعديل', 'Edit'))}</button>` : '';
-    if (!c.items.length) return canEdit() ? `<section class="shcard smempty"><div class="shh"><h3>${esc(L('من شغل الاستوديو', 'From the studio\'s work'))}</h3><div class="grow"></div>${ed}</div><p class="muted small">${esc(L('ارفع الشوريل ولقطات من شغل الاستوديو — هيظهروا لكل الفريق هنا وفي شاشة الدخول.', 'Upload the showreel and stills from the studio\'s work — the whole team sees them here and on the login screen.'))}</p><button type="button" class="btn p sm" data-action="smEdit">${esc(L('ارفع الصور والفيديو', 'Upload the pictures and video'))}</button></section>` : '';
-    return `<section class="smgal"><div class="shsec smsec"><h3>${esc(L('من شغل الاستوديو', 'From the studio\'s work'))}</h3>${ed}</div>
+    if (!c.items.length) return canEdit() ? `<section class="shcard smempty"><div class="shh"><h3>${esc(L('لقطات مختارة', 'Selected stills'))}</h3><div class="grow"></div>${ed}</div><p class="muted small">${esc(L('ارفع الشوريل ولقطات من شغل الاستوديو — هيظهروا لكل الفريق هنا وفي شاشة الدخول.', 'Upload the showreel and stills from the studio\'s work — the whole team sees them here and on the login screen.'))}</p><button type="button" class="btn p sm" data-action="smEdit">${esc(L('ارفع الصور والفيديو', 'Upload the pictures and video'))}</button></section>` : '';
+    return `<section class="smgal"><div class="shsec smsec"><h3>${esc(L('لقطات مختارة', 'Selected stills'))}</h3>${ed}</div>
       <div class="smgrid${reduced() ? '' : ' kb'}">${c.items.map((x, i) => `<button type="button" class="smt" data-action="smOpen" data-arg="${i}"><img src="${esc(x.thumb || x.src)}" alt="" loading="lazy">${x.cap ? `<span class="notr" dir="auto">${esc(x.cap)}</span>` : ''}</button>`).join('')}</div></section>`;
   }
   function widget(s) {
@@ -50251,9 +50254,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const toBlob = (c, q) => new Promise(res => { const t = canWebp() ? 'image/webp' : 'image/jpeg'; c.toBlob(b => res({ blob: b, type: t, w: c.width, h: c.height }), t, q); });
 
   /* ---------- the original: R2 when its keys are saved, else the current storage (≤ 50 MB) ---------- */
-  async function putOriginal(file, pid, onP) {
+  async function putOriginal(file, pid, onP, dir) {
     if (!F.r2off && window.nfFiles && typeof window.nfFiles.put === 'function') {
-      try { const safe = window.nfFiles.safeName ? window.nfFiles.safeName(file.name) : String(file.name || 'file'); const r = await window.nfFiles.put(file, `studio/projects/${pid}/${Date.now().toString(36)}_${safe}`, onP); return { store: 'r2', path: r.path, size: file.size, mime: mimeOf(file), name: file.name }; }
+      try { const safe = window.nfFiles.safeName ? window.nfFiles.safeName(file.name) : String(file.name || 'file'); const r = await window.nfFiles.put(file, `${dir || `studio/projects/${pid}`}/${Date.now().toString(36)}_${safe}`, onP); return { store: 'r2', path: r.path, size: file.size, mime: mimeOf(file), name: file.name }; }
       catch (e) { if (/no_r2/.test(String(e && e.message))) F.r2off = true; else console.warn('finals r2', e); }
     }
     if (file.size > MAXSB) return null;
@@ -50292,7 +50295,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     toast(noOrig ? L(`اترفعوا ${done} — ${noOrig} من غير الأصل (فعّل R2 للملفات الكبيرة)`, `${done} uploaded — ${noOrig} without the original (set up R2 for big files)`) : L(`اترفعوا ${done} بجودة عالية ✓`, `${done} uploaded at full quality ✓`));
     return true;
   }
-  async function one(x, pid, say) {
+  async function one(x, pid, say, ex) {   /* v7.63: ex = { dir, fields } for the portfolio uploads */
     const f = x.file; say(L('بيجهّز النسخ…', 'Preparing the copies…'));
     const im = await decode(f);
     let thumb, disp;
@@ -50301,7 +50304,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     say(L('بيرفع نسخة العرض…', 'Uploading the display copy…'));
     const d = await Files.put(disp.blob, disp.type);
     say(L('بيرفع الأصل…', 'Uploading the original…'));
-    const orig = await putOriginal(f, pid, p => say(L(`بيرفع الأصل ${Math.round(p * 100)}%`, `Uploading the original ${Math.round(p * 100)}%`)));
+    const orig = await putOriginal(f, pid, p => say(L(`بيرفع الأصل ${Math.round(p * 100)}%`, `Uploading the original ${Math.round(p * 100)}%`)), ex && ex.dir);
     const now = nowISO(); const sess = S.session || {};
     const base = { name: f.name, kind: 'render', mime: disp.type, store: 'sb', ref: d.ref, enc: null, size: f.size, thumb, w: im.w, h: im.h,
       disp: { ref: d.ref, size: disp.blob.size, w: disp.w, h: disp.h, mime: disp.type }, orig: orig || null, rev: 'Final', projectId: pid, byId: me() || null, byName: sess.name || '', updatedAt: now };
@@ -50310,9 +50313,10 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       const v = { name: old.name, store: old.store || '', ref: old.ref || null, thumb: old.store === 'thumb' ? (old.thumb || null) : null, size: old.size || 0, rev: old.rev || '', orig: old.orig || null, at: old.updatedAt || old.createdAt || '' };
       await Store.update('files', old.id, Object.assign(base, { vers: (old.vers || []).concat([v]).slice(-5) }));
     } else {
-      await Store.save('files', Object.assign({ id: uid(), note: '', createdAt: now, orderId: null, productId: null }, base), { silent: true });
+      const nid = uid(); await Store.save('files', Object.assign({ id: nid, note: '', createdAt: now, orderId: null, productId: null }, base, (ex && ex.fields) || {}), { silent: true });
+      return { orig, id: nid };
     }
-    return { orig };
+    return { orig, id: x.match };
   }
 
   /* ---------- the original: download from the viewer / «Download» ---------- */
@@ -50346,7 +50350,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   window.nfFinals = {
     can,
     btn: pid => (can(pid) ? `<button type="button" class="btn sm" data-action="finalsPick" data-arg="${esc(pid)}">${icon('plus')}${esc(L('ارفع الفاينال', 'Upload finals'))}</button>` : ''),
-    _F: F, _run: run, _plan: plan, _code: code, _norm: norm
+    _F: F, _run: run, _plan: plan, _code: code, _norm: norm,
+    /* v7.63: one picture → preview + 2560 display copy + the original (R2 / storage), as a file doc with extra fields (the portfolio) */
+    upload: (file, o) => one({ file, match: '' }, (o && o.pid) || null, (o && o.say) || (() => { }), { dir: o && o.dir, fields: o && o.fields })
   };
 
   const css = document.createElement('style'); css.textContent = `
@@ -50397,6 +50403,264 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .rqpay-h{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .rqpay .fto{margin-top:8px}
 .pbrow.pbopen{cursor:pointer}.pbrow.pbopen:hover{background:var(--surface-2)}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.63 — advance payout times (Mahmoud, 13 Oct, on «Money waiting for you»: «let us organise it a bit»; brief
+   claude/adv-schedule-brief.md, «start» given):
+   · the employee check (his limit) and the approvals do not change;
+   · the cut-off is 16:00 every day — a request after 16:00 counts from the next day;
+   · under 500 → it is paid the next day at 12:00; 500 or more → after 48 hours at 12:00; a payout day that falls on a Friday
+     moves to Saturday 12:00;
+   · until then the advance waits in a «queued» batch (one per payout time — small and big ones of the same time go together);
+     at 12:00 the server (Edge «remind», every 2 minutes) sends it to the owner (task + phone notice, no amounts); an owner /
+     Saeed session that is open at that time does the same, so it never waits;
+   · the employee sees «it reaches your wallet on <day> at 12:00» on his request (and gets a notice without the amount);
+     the owner / Saeed see the queued batch as «on the way — reaches the owner on <day> at 12:00».
+   Factory only (where advances are transferred to wallets).
+   ===================================================================== */
+(function () {
+  if (window.__NF_ADVSCHED__) return; window.__NF_ADVSCHED__ = 1;
+  const stu = () => typeof isStuSys === 'function' && isStuSys();
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const BIG = 500, CUT = 16 * 60;
+  const TZ = 'Africa/Cairo';
+  /* Cairo wall clock of an instant */
+  function cairo(t) {
+    const p = {}; new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short' }).formatToParts(new Date(t)).forEach(x => { p[x.type] = x.value; });
+    return { date: `${p.year}-${p.month}-${p.day}`, min: (+p.hour) * 60 + (+p.minute), wd: p.weekday };
+  }
+  const addD = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const isFri = d => new Date(d + 'T12:00:00Z').getUTCDay() === 5;
+  /* 12:00 in Cairo on that date, as an instant (Egypt is UTC+2, or +3 in summer time) */
+  function noon(d) { const [y, m, dd] = d.split('-').map(Number); for (const off of [3, 2]) { const t = Date.UTC(y, m - 1, dd, 12 - off, 0, 0); const c = cairo(t); if (c.date === d && c.min === 720) return new Date(t).toISOString(); } return new Date(Date.UTC(y, m - 1, dd, 10, 0, 0)).toISOString(); }
+  /* the payout instant for a request made at `at` for `amount` */
+  function payoutAt(at, amount) {
+    const c = cairo(Date.parse(at) || Date.now()); let base = c.date; if (c.min >= CUT) base = addD(base, 1);
+    let d = addD(base, (+amount || 0) >= BIG ? 2 : 1); if (isFri(d)) d = addD(d, 1);
+    return noon(d);
+  }
+  /* which time counts: within the limit (approved by itself) = when the employee asked; over the limit = when Saeed approved (now) */
+  function planFor(apId) {
+    if (stu()) return null; const ap = byId('advpay', apId); if (!ap) return null;
+    const a = ap.advanceId ? byId('advances', ap.advanceId) : null; const r = a && a.reqId ? byId('requests', a.reqId) : null;
+    const at = r && !r.overLimit && r.createdAt ? r.createdAt : nowISO();
+    return payoutAt(at, +ap.amount || (a && +a.amount) || 0);
+  }
+  const DAYS = { ar: ['الأحد', 'الاتنين', 'التلات', 'الأربع', 'الخميس', 'الجمعة', 'السبت'], en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] };
+  function dayName(iso) { const c = cairo(Date.parse(iso)); const today = cairo(Date.now()).date; if (c.date === today) return L('النهارده', 'today'); if (c.date === addD(today, 1)) return L('بكرة', 'tomorrow'); const wd = new Date(c.date + 'T12:00:00Z').getUTCDay(); return `${(en() ? DAYS.en : DAYS.ar)[wd]} ${c.date.slice(8, 10)}/${c.date.slice(5, 7)}`; }
+  function whenLabel(iso, forBatch) { if (!iso) return L('في الطريق', 'On the way'); return forBatch ? L(`في الطريق — توصل للمالك ${dayName(iso)} الساعة 12`, `On the way — reaches the owner ${dayName(iso)} at 12:00`) : L(`هتتحوّل على محفظتك ${dayName(iso)} الساعة 12`, `Reaches your wallet ${dayName(iso)} at 12:00`); }
+  function nextCode() { const yy = todayISO().slice(2, 4); const pre = `SB-${yy}-`; const n = list('advbatch').reduce((m, b) => { const c = String(b.code || ''); if (!c.startsWith(pre)) return m; const k = parseInt(c.slice(pre.length), 10); return isNaN(k) ? m : Math.max(m, k); }, 0) + 1; return pre + String(n).padStart(3, '0'); }
+  /* put the advance in the queued batch of its payout time (one batch per time) */
+  async function queue(apId, at) {
+    let b = list('advbatch').find(x => x.status === 'queued' && x.releaseAt === at);
+    if (!b) b = { id: 'sb_' + uid(), code: nextCode(), status: 'queued', releaseAt: at, items: [], total: 0, createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' };
+    const items = Array.from(new Set((b.items || []).concat([apId])));
+    const total = Math.round(sum(items.map(i => byId('advpay', i)).filter(Boolean), p => +p.amount || 0) * 100) / 100;
+    await Store.save('advbatch', Object.assign({}, b, { items, total, updatedAt: nowISO() }), { silent: true });
+    const ap = byId('advpay', apId); if (ap) { try { await Store.save('advpay', Object.assign({}, ap, { batchId: b.id, payoutAt: at }), { silent: true }); } catch (e) { /* ignore */ } }
+    /* the employee: when it reaches him (no amount) */
+    try { if (ap && ap.workerId) await Store.save('tasks', { id: `advwhen_${ap.advanceId || apId}`, title: `سلفتك اتوافق عليها — ${whenLabelAr(at)}`, desc: 'التحويل على محفظتك المسجّلة. لو الرقم اتغيّر حدّثه من «بوابتي ← رقم التحويلات».', assigneeId: ap.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advsched', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+    return b.id;
+  }
+  /* the task text is stored once in Arabic (tasks are translated on display) */
+  function whenLabelAr(iso) { const c = cairo(Date.parse(iso)); const wd = new Date(c.date + 'T12:00:00Z').getUTCDay(); return `هتتحوّل ${DAYS.ar[wd]} ${c.date.slice(8, 10)}/${c.date.slice(5, 7)} الساعة 12`; }
+  /* at the payout time: the queued batch becomes the batch at the owner (the server does it too — whoever comes first) */
+  let busy = false;
+  async function releaseDue() {
+    if (busy || stu() || !S.session || !(isAdmin() || role() === 'hr') || typeof writable === 'function' && !writable()) return; busy = true;
+    try {
+      const due = list('advbatch').filter(b => b && b.status === 'queued' && b.releaseAt && Date.parse(b.releaseAt) <= Date.now() - 5 * 60000); /* the server goes first; a session steps in only if it lags 5 min */
+      for (const b of due) {
+        const items = (b.items || []).map(i => byId('advpay', i)).filter(p => p && p.status !== 'cancelled'); const at = nowISO();
+        await Store.save('advbatch', Object.assign({}, b, { status: 'sent', sentAt: at, sentBy: null, sentByName: L('السيستم (ميعاد الصرف)', 'The system (payout time)'), auto: true, released: true, updatedAt: at }), { silent: true });
+        const names = items.map(p => p.workerName || '').filter(Boolean);
+        await Store.save('tasks', Object.assign({}, byId('tasks', `abt_${b.id}`) || {}, { id: `abt_${b.id}`, title: `دفعة سلف ${b.code} مستنية تحويلك — ${items.length} سلفة`, desc: `${names.join('، ')}\nميعاد صرفها النهارده الساعة 12 — حوّل المجموع مرة واحدة لبهاء من «فلوس مستنياك» أو «تحويل السلف».`, link: `/#/go/ab/${b.id}`, toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'advbatch', createdBy: null, createdByName: 'السيستم', createdAt: at, updatedAt: at }), { silent: true });
+      }
+      if (due.length && typeof rerender === 'function') rerender();
+    } catch (e) { console.warn('adv release', e); } finally { busy = false; }
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!window.__nfAdvTick) { window.__nfAdvTick = setInterval(releaseDue, 60000); } setTimeout(releaseDue, 400); });
+  /* the employee: the payout time on his approved advance request (requests list + the request window) */
+  function payoutOfReq(r) { if (!r || r.type !== 'advance' || r.status !== 'approved') return null; const a = list('advances').find(x => x.reqId === r.id); const ap = a && (a.advPayId ? byId('advpay', a.advPayId) : list('advpay').find(p => p.advanceId === a.id)); if (!ap || ['paid', 'cancelled'].includes(ap.status)) return null; const b = ap.batchId ? byId('advbatch', ap.batchId) : null; const at = ap.payoutAt || (b && b.releaseAt) || null; if (b && b.status !== 'queued' && !(at && Date.parse(at) > Date.now())) return { sent: true }; return at ? { at } : null; }
+  if (typeof ACTIONS === 'object' && typeof ACTIONS.reqOpen === 'function') ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try { const r = byId('requests', id); const x = payoutOfReq(r); const th = document.getElementById('rq-thread'); if (x && th && !document.getElementById('rq-when')) th.insertAdjacentHTML('beforebegin', `<div id="rq-when" class="banner info small" style="margin:8px 0">${icon('clock')}<span>${esc(x.sent ? L('اتبعتت للمالك يحوّلها — هتوصلك قريب', 'Sent to the owner to transfer — it reaches you soon') : whenLabel(x.at))}</span></div>`); } catch (e) { /* ignore */ }
+    return out;
+  })(ACTIONS.reqOpen);
+  window.nfAdvSched = { payoutAt, planFor, queue, releaseDue, whenLabel, payoutOfReq, _cairo: cairo, _noon: noon };
+})();
+/* =====================================================================
+   v7.63 — «From the studio work»: the studio portfolio (Mahmoud, 13 Oct — brief claude/portfolio-brief.md, «start» + PIN):
+   · the big strip on the home is «From the studio work» and shows only what is published here (each slide = one shot);
+   · a page «Studio work» (menu icon): the projects (cover, name, client, year, type), filters, a project page with its data,
+     the shots at high quality and a full-screen show (for a client meeting);
+   · «+ Old project» (data + the shots uploaded at high quality, original to R2 when set up) → a draft → «Publish»;
+   · a finished studio project (delivered / closed / all shots approved) → «Publish to Studio work» (its final shots);
+   · the 24 projects of the office Behance page come in as drafts (name, link, cover) — the shots come from the archive;
+   · who edits: the owner + Mohamed Sabek + whoever the owner adds (Settings → «Studio work») — enforced on the server too
+     (col portfolio: write = nf_pf_editor(), drafts readable by editors only); everyone in the studio sees what is published.
+   No money anywhere. Studio only; Arabic and English; iPhone, Android, computer.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_PORTFOLIO__) return; window.__NF_PORTFOLIO__ = 1;
+  if (!COLS.includes('portfolio')) COLS.push('portfolio'); S.data.portfolio = S.data.portfolio || new Map();
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection('portfolio').onSnapshot(snap => { S.data.portfolio = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded.portfolio = true; if (['dashboard', 'portfolio', 'projects'].includes(S.route.view)) rerender(); }, e => console.warn('snapshot portfolio', e))); })(Store.subscribeAll);
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  if (typeof ICONS === 'object' && !ICONS.gallery) ICONS.gallery = '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>';
+  const TYPES = { ext: ['خارجي', 'Exterior'], int: ['داخلي', 'Interior'], master: ['ماستر بلان', 'Masterplan'], video: ['فيديو', 'Video'], anim: ['أنيميشن', 'Animation'] };
+  const typeL = t => (TYPES[t] ? L(TYPES[t][0], TYPES[t][1]) : '');
+  const DEF_ED = ['stu_sabek'];
+  const P = { ed: null, asked: false, filter: 'all', year: '', busy: false };
+  const myW = () => String((S.session && S.session.workerId) || (typeof stuMe === 'function' ? stuMe() : '') || '');
+  function editors() { if (Array.isArray(P.ed)) return P.ed; const s = S.settings && S.settings.pfEditors; return Array.isArray(s) ? s : DEF_ED; }
+  function askEditors() { if (P.asked || typeof sbOn !== 'function' || !sbOn() || !S.sb || !S.sb.rpc) return; P.asked = true; Promise.resolve(S.sb.rpc('nf_pf_editors')).then(r => { if (r && Array.isArray(r.data)) { P.ed = r.data.map(String); rerender(); } }, () => { }); }
+  const canEdit = () => { if (!S.session) return false; if (typeof isAdmin === 'function' && isAdmin()) return true; askEditors(); const w = myW(); return !!w && editors().includes(w); };
+  const all = () => list('portfolio').filter(e => e && !e.deleted);
+  const order = arr => arr.sort((a, b) => ((+a.order || 999) - (+b.order || 999)) || String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  const shown = () => order(all().filter(e => e.published || canEdit()));
+  const published = () => order(all().filter(e => e.published));
+  const shotsOf = e => (e.shots || []).map(id => byId('files', id)).filter(f => f && !f.deleted);
+  const coverFile = e => { const fs = shotsOf(e); return (e.coverId && fs.find(f => f.id === e.coverId)) || fs[0] || null; };
+  const coverSrc = e => { const f = coverFile(e); return f ? (HQ.get(f.id) || f.thumb || '') : (e.coverUrl || ''); };
+  const HQ = new Map();
+  const hqAttr = f => (f && f.store === 'sb' && !HQ.has(f.id) ? ` data-pfhq="${esc(f.id)}"` : '');
+  async function hqUrl(f) { if (!f) return null; if (HQ.has(f.id)) return HQ.get(f.id); if (f.store !== 'sb') return f.thumb || null; try { const u = await Files.url(f); if (u) HQ.set(f.id, u); return u; } catch (e) { return null; } }
+  function hqUp(root) { (root || document).querySelectorAll('img[data-pfhq]:not([data-pfhqd])').forEach(img => { img.setAttribute('data-pfhqd', '1'); const f = byId('files', img.getAttribute('data-pfhq')); if (!f) return; hqUrl(f).then(u => { if (!u) return; const im = new Image(); im.onload = () => { document.querySelectorAll(`img[data-pfhq="${f.id}"]`).forEach(x => { x.src = u; }); }; im.src = u; }); }); }
+  const nShots = n => (en() ? `${n} ${n === 1 ? 'shot' : 'shots'}` : n === 1 ? 'لقطة واحدة' : n === 2 ? 'لقطتين' : n <= 10 ? `${n} لقطات` : `${n} لقطة`);
+  const metaLine = e => [e.client, e.year, e.location].filter(Boolean).join(' · ');
+
+  /* ---------- the home strip: one slide per shot of the published projects ---------- */
+  function slides(max = 12) {
+    const ps = published(); if (!ps.length) return [];
+    const per = ps.length <= 1 ? max : Math.max(3, Math.floor(max / ps.length)); const out = [];
+    ps.forEach(e => { const fs = shotsOf(e); const c = coverFile(e); const list0 = fs.length ? [c].concat(fs.filter(f => f !== c)).slice(0, per) : []; if (list0.length) list0.forEach(f => out.push({ e, f, src: HQ.get(f.id) || f.thumb || '', hq: f.store === 'sb' && !HQ.has(f.id) ? f.id : '' })); else if (e.coverUrl) out.push({ e, f: null, src: e.coverUrl, hq: '' }); });
+    return out.slice(0, max);
+  }
+
+  /* ---------- the page ---------- */
+  const card = e => { const f = coverFile(e); const n = shotsOf(e).length; return `<a class="pfc" href="#/portfolio/${esc(e.id)}"><div class="pfcimg">${coverSrc(e) ? `<img src="${esc(coverSrc(e))}" alt="" loading="lazy"${hqAttr(f)}>` : `<div class="pfcno">${icon('gallery')}</div>`}${!e.published ? `<span class="pfdraft">${esc(L('مسودة', 'Draft'))}</span>` : ''}</div><div class="pfct"><b class="notr" dir="auto">${esc(e.title || '')}</b><small class="notr" dir="auto">${esc(metaLine(e))}</small><span class="pfcm">${e.type ? `<i>${esc(typeL(e.type))}</i>` : ''}${n ? `<span>${esc(nShots(n))}</span>` : (canEdit() ? `<span class="pfneed">${esc(L('محتاج لقطات', 'Needs shots'))}</span>` : '')}</span></div></a>`; };
+  function unpublishedFinished() {
+    if (!canEdit()) return []; const done = typeof window.nfStuFinished === 'function' ? window.nfStuFinished() : [];
+    return done.filter(p => !all().some(e => e.projectId === p.id));
+  }
+  function pageList() {
+    const es = shown(); const years = [...new Set(es.map(e => String(e.year || '')).filter(Boolean))].sort().reverse();
+    const vis = es.filter(e => (P.filter === 'all' || e.type === P.filter) && (!P.year || String(e.year) === P.year));
+    const ed = canEdit(); const todo = unpublishedFinished();
+    const chips = [['all', L('الكل', 'All')]].concat(Object.keys(TYPES).filter(k => es.some(e => e.type === k)).map(k => [k, typeL(k)]));
+    return `<div class="pfpage">
+      <div class="pfhead"><div><h2>${esc(L('شغل الاستوديو', 'Studio work'))}</h2><small class="muted">${esc(L(`${published().length} مشروع منشور`, `${published().length} published projects`))}${ed ? ` · ${esc(L(`${es.length - published().length} مسودة`, `${es.length - published().length} drafts`))}` : ''}</small></div><div class="grow"></div>
+        ${ed ? `<button type="button" class="btn p sm" data-action="pfNew">${icon('plus')}${esc(L('مشروع قديم', 'Old project'))}</button>` : ''}${isAdmin() ? `<button type="button" class="btn sm" data-action="pfEditors">${esc(L('مين يعدّل', 'Who edits'))}</button>` : ''}</div>
+      ${todo.length ? `<div class="banner info pfbanner">${icon('star')}<div><b>${esc(L('مشاريع خلصت ولسه ما اتنشرتش', 'Finished projects not published yet'))}</b><div class="pftodo">${todo.map(p => `<button type="button" class="btn xs" data-action="pfFromProject" data-arg="${esc(p.id)}"><span class="notr" dir="auto">${esc(p.name)}</span> — ${esc(L('انشر', 'Publish'))}</button>`).join('')}</div></div></div>` : ''}
+      <div class="pffil">${chips.map(([k, l]) => `<button type="button" class="chip ${P.filter === k ? 'on2' : ''}" data-action="pfFilter" data-arg="${esc(k)}">${esc(l)}</button>`).join('')}${years.length > 1 ? `<select class="pfyear" data-pfyear="1"><option value="">${esc(L('كل السنين', 'All years'))}</option>${years.map(y => `<option value="${esc(y)}" ${P.year === y ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>` : ''}</div>
+      ${vis.length ? `<div class="pfgrid">${vis.map(card).join('')}</div>` : `<div class="empty"><b>${esc(L('لسه مفيش شغل منشور', 'Nothing published yet'))}</b>${ed ? esc(L('ضيف مشروع قديم أو انشر مشروع خلص.', 'Add an old project or publish a finished one.')) : ''}</div>`}
+    </div>`;
+  }
+  function pageOne(e) {
+    const ed = canEdit(); const fs = shotsOf(e); const c = coverFile(e); const p = e.projectId ? byId('projects', e.projectId) : null;
+    const rows = [[L('العميل', 'Client'), e.client], [L('السنة', 'Year'), e.year], [L('المكان', 'Location'), e.location], [L('النوع', 'Type'), typeL(e.type)], [L('المساحة / الوحدات', 'Area / units'), e.area], [L('الخدمات', 'Services'), (e.services || []).join('، ')]].filter(r => r[1]);
+    return `<div class="pfpage pfone">
+      <div class="pfback"><a class="btn xs ghost" href="#/portfolio">${icon('back')}${esc(L('شغل الاستوديو', 'Studio work'))}</a><div class="grow"></div>
+        ${ed ? `<button type="button" class="btn sm" data-action="pfEdit" data-arg="${esc(e.id)}">${icon('edit')}${esc(L('البيانات', 'Details'))}</button><button type="button" class="btn sm" data-action="pfUpload" data-arg="${esc(e.id)}">${icon('plus')}${esc(L('ارفع لقطات', 'Upload shots'))}</button>${e.published ? `<button type="button" class="btn sm" data-action="pfPub" data-arg="${esc(e.id)}:0">${esc(L('إلغاء النشر', 'Unpublish'))}</button>` : `<button type="button" class="btn p sm" data-action="pfPub" data-arg="${esc(e.id)}:1">${icon('check')}${esc(L('انشر', 'Publish'))}</button>`}<button type="button" class="btn sm d" data-action="pfDel" data-arg="${esc(e.id)}">${icon('trash')}</button>` : ''}</div>
+      <div class="pfhero">${coverSrc(e) ? `<img src="${esc(coverSrc(e))}" alt=""${hqAttr(c)}>` : ''}<div class="pfht"><small class="notr" dir="auto">${esc(e.client || '')}</small><h1 class="notr" dir="auto">${esc(e.title || '')}</h1>${fs.length ? `<button type="button" class="btn sm pfshow" data-action="pfShow" data-arg="${esc(e.id)}:0">${icon('play')}${esc(L('عرض ملء الشاشة', 'Full-screen show'))}</button>` : ''}</div>${!e.published ? `<span class="pfdraft big">${esc(L('مسودة — مش ظاهرة للفريق', 'Draft — the team does not see it'))}</span>` : ''}</div>
+      <div class="pfinfo">${rows.length ? `<dl>${rows.map(r => `<div><dt>${esc(r[0])}</dt><dd class="notr" dir="auto">${esc(String(r[1]))}</dd></div>`).join('')}</dl>` : ''}${e.about ? `<p class="notr" dir="auto">${esc(e.about)}</p>` : ''}<div class="pflinks">${e.behance ? `<a class="btn xs ghost" href="${esc(e.behance)}" target="_blank" rel="noopener">${icon('link')}Behance</a>` : ''}${p && (typeof stuProjectVisible !== 'function' || stuProjectVisible(p)) ? `<a class="btn xs ghost" href="#/projects/${esc(p.id)}">${esc(L('افتح المشروع', 'Open the project'))}</a>` : ''}</div></div>
+      ${fs.length ? `<div class="pfshots">${fs.map((f, i) => `<div class="pfs"><button type="button" class="pfsimg" data-action="pfShow" data-arg="${esc(e.id)}:${i}"><img src="${esc(HQ.get(f.id) || f.thumb || '')}" alt="" loading="lazy"${hqAttr(f)}></button>${ed ? `<div class="pfsa">${f.id === (c && c.id) ? `<span class="pfcov">${esc(L('الغلاف', 'Cover'))}</span>` : `<button type="button" class="btn xs" data-action="pfCover" data-arg="${esc(e.id)}:${esc(f.id)}">${esc(L('خليها الغلاف', 'Make cover'))}</button>`}<button type="button" class="btn xs ghost" data-action="pfDrop" data-arg="${esc(e.id)}:${esc(f.id)}">${esc(L('شيل', 'Remove'))}</button></div>` : ''}</div>`).join('')}</div>` : `<div class="empty"><b>${esc(L('لسه مفيش لقطات', 'No shots yet'))}</b>${ed ? esc(L('دوس «ارفع لقطات» وارفعها من أرشيف المكتب بأعلى جودة.', 'Press «Upload shots» and add them from the office archive at full quality.')) : ''}</div>`}
+    </div>`;
+  }
+  if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.portfolio = () => { const id = S.route && S.route.id; if (id) { const e = byId('portfolio', id); if (e && !e.deleted && (e.published || canEdit())) return pageOne(e); } return pageList(); };
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.portfolio = () => ({ title: L('شغل الاستوديو', 'Studio work'), sub: L('المشاريع اللي خلصناها', 'The projects we finished') });
+  Object.assign(VIEW_TITLES, { portfolio: 'شغل الاستوديو' });
+  Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('portfolio')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['portfolio']); });
+  { const at = NAV.findIndex(n => n.id === 'door'); const at2 = at >= 0 ? at + 1 : Math.max(1, NAV.findIndex(n => n.id === 'dashboard') + 1); NAV.splice(at2, 0, { id: 'portfolio', label: 'شغل الاستوديو', short: 'شغلنا', icon: 'gallery' }); }
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (S.route && (S.route.view === 'portfolio' || S.route.view === 'dashboard')) hqUp(); });
+  document.addEventListener('change', ev => { const s = ev.target.closest && ev.target.closest('[data-pfyear]'); if (!s) return; P.year = s.value || ''; rerender(); });
+  ACTIONS.pfFilter = k => { P.filter = k || 'all'; rerender(); };
+
+  /* ---------- the viewer (full screen; the shots at the 2560 display copy) ---------- */
+  ACTIONS.pfShow = arg => { const [id, i] = String(arg || '').split(':'); const e = byId('portfolio', id); if (!e) return; const fs = shotsOf(e); if (!fs.length || !window.nfView) return;
+    window.nfView.open(fs.map(f => ({ thumb: f.thumb || '', src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.thumb || ''), load: () => hqUrl(f), caption: e.title || '', name: f.name || e.title || 'Ninety Studioz' })), +i || 0); };
+
+  /* ---------- editing (owner + editors; the server checks too) ---------- */
+  function form(e) {
+    const v = k => esc(e && e[k] != null ? String(e[k]) : '');
+    return `<div class="form">${field(L('اسم المشروع', 'Project name'), `<input name="title" class="notr" dir="auto" required value="${v('title')}">`, 'full')}
+      ${field(L('العميل / المطوّر', 'Client / developer'), `<input name="client" class="notr" dir="auto" value="${v('client')}">`)}${field(L('السنة', 'Year'), `<input name="year" inputmode="numeric" maxlength="4" value="${v('year')}">`)}
+      ${field(L('المكان', 'Location'), `<input name="location" class="notr" dir="auto" value="${v('location')}" placeholder="${esc(L('المدينة / البلد', 'City / country'))}">`)}${field(L('النوع', 'Type'), `<select name="type"><option value="">—</option>${Object.keys(TYPES).map(k => `<option value="${k}" ${e && e.type === k ? 'selected' : ''}>${esc(typeL(k))}</option>`).join('')}</select>`)}
+      ${field(L('المساحة / عدد الوحدات (اختياري)', 'Area / number of units (optional)'), `<input name="area" class="notr" dir="auto" value="${v('area')}">`)}${field(L('الخدمات (بينهم فاصلة)', 'Services (comma separated)'), `<input name="services" class="notr" dir="auto" value="${esc(((e && e.services) || []).join(', '))}" placeholder="${esc(L('ريندر، أنيميشن، VR', 'Renders, animation, VR'))}">`)}
+      ${field(L('نبذة قصيرة', 'A short note'), `<textarea name="about" rows="3" class="notr" dir="auto">${v('about')}</textarea>`, 'full')}
+      ${field(L('لينك بيهانس / الموقع', 'Behance / website link'), `<input name="behance" class="ltr notr" value="${v('behance')}">`)}${field(L('الترتيب', 'Order'), `<input name="order" type="number" min="1" value="${v('order')}">`)}
+      <div class="tiny muted full">${esc(L('مفيش أسعار أو مبالغ هنا — دي صفحة بيشوفها الفريق كله لما تتنشر.', 'No prices or amounts here — the whole team sees this page once it is published.'))}</div></div>`;
+  }
+  const readForm = f => { const d = formData(f); return { title: String(d.title || '').trim(), client: String(d.client || '').trim(), year: String(d.year || '').replace(/\D/g, '').slice(0, 4), location: String(d.location || '').trim(), type: d.type || '', area: String(d.area || '').trim(), services: String(d.services || '').split(/[,،]/).map(x => x.trim()).filter(Boolean), about: String(d.about || '').trim(), behance: String(d.behance || '').trim(), order: d.order ? +d.order : null }; };
+  ACTIONS.pfNew = () => { if (!canEdit()) return; openModal({ title: L('مشروع قديم', 'Old project'), submitLabel: L('احفظ كمسودة', 'Save as draft'), body: form(null), onSubmit: async f => { const d = readForm(f); if (!d.title) { toast(L('اكتب اسم المشروع', 'Write the project name'), 'err'); return false; } const id = 'pf_' + uid(); await Store.save('portfolio', Object.assign({ id, shots: [], published: false, source: 'manual', createdAt: nowISO(), by: myW() || (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '' }, d, { updatedAt: nowISO() })); location.hash = '#/portfolio/' + id; return true; } }); };
+  ACTIONS.pfEdit = id => { const e = byId('portfolio', id); if (!e || !canEdit()) return; openModal({ title: L('بيانات المشروع', 'Project details'), submitLabel: L('احفظ', 'Save'), body: form(e), onSubmit: async f => { const d = readForm(f); if (!d.title) { toast(L('اكتب اسم المشروع', 'Write the project name'), 'err'); return false; } await Store.update('portfolio', id, Object.assign(d, { updatedAt: nowISO() })); return true; } }); };
+  ACTIONS.pfPub = async arg => { const [id, on] = String(arg || '').split(':'); const e = byId('portfolio', id); if (!e || !canEdit()) return; if (on === '1' && !shotsOf(e).length && !e.coverUrl) { toast(L('ارفع لقطة واحدة على الأقل الأول', 'Upload at least one shot first'), 'err'); return; } await Store.update('portfolio', id, { published: on === '1', publishedAt: on === '1' ? nowISO() : (e.publishedAt || null), updatedAt: nowISO() }); toast(on === '1' ? L('اتنشر — الفريق كله بيشوفه دلوقتي', 'Published — the whole team sees it now') : L('اتلغى النشر', 'Unpublished')); rerender(); };
+  ACTIONS.pfDel = async id => { const e = byId('portfolio', id); if (!e || !canEdit()) return; if (!(await confirmDlg(L(`تمسح «${e.title}» من شغل الاستوديو؟ (اللقطات المرفوعة بتفضل في الملفات)`, `Remove «${e.title}» from Studio work? (uploaded shots stay in the files)`), L('امسح', 'Remove')))) return; await Store.update('portfolio', id, { deleted: true, published: false, updatedAt: nowISO() }); location.hash = '#/portfolio'; };
+  ACTIONS.pfCover = async arg => { const [id, fid] = String(arg || '').split(':'); if (!canEdit()) return; await Store.update('portfolio', id, { coverId: fid, updatedAt: nowISO() }); rerender(); };
+  ACTIONS.pfDrop = async arg => { const [id, fid] = String(arg || '').split(':'); const e = byId('portfolio', id); if (!e || !canEdit()) return; await Store.update('portfolio', id, { shots: (e.shots || []).filter(x => x !== fid), coverId: e.coverId === fid ? null : (e.coverId || null), updatedAt: nowISO() }); rerender(); };
+  ACTIONS.pfUpload = id => {
+    const e = byId('portfolio', id); if (!e || !canEdit() || P.busy) return; if (!window.nfFinals || !window.nfFinals.upload) { toast(L('الرفع مش متاح هنا', 'Upload is not available here'), 'err'); return; }
+    const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = 'image/*';
+    inp.addEventListener('change', async () => {
+      const fs = [...(inp.files || [])].filter(f => /^image\//.test(f.type || '') || /\.(jpe?g|png|webp|tiff?|heic)$/i.test(f.name || '')); if (!fs.length) return;
+      P.busy = true; let done = 0, fail = 0; const ids = [];
+      for (const f of fs) {
+        toast(L(`بيرفع ${done + fail + 1} من ${fs.length}…`, `Uploading ${done + fail + 1} of ${fs.length}…`));
+        try { const r = await window.nfFinals.upload(f, { pid: e.projectId || null, dir: `studio/portfolio/${e.id}`, fields: { portfolioId: e.id, rev: 'Portfolio', projectId: e.projectId || null } }); if (r && r.id) { ids.push(r.id); done++; } else fail++; } catch (er) { console.warn('pf upload', er); fail++; }
+      }
+      const cur = byId('portfolio', id) || e; await Store.update('portfolio', id, { shots: Array.from(new Set((cur.shots || []).concat(ids))), updatedAt: nowISO() });
+      P.busy = false; toast(fail ? L(`اترفع ${done} ومعرفتش أرفع ${fail}`, `${done} uploaded, ${fail} failed`) : L(`اترفعوا ${done} بجودة عالية ✓`, `${done} uploaded at full quality ✓`), fail ? 'err' : ''); rerender();
+    }, { once: true });
+    inp.click();
+  };
+  /* a finished studio project → its portfolio entry (its final shots), opened for review before publishing */
+  ACTIONS.pfFromProject = async pid => {
+    if (!canEdit()) return; const p = byId('projects', pid); if (!p) return; const ex = all().find(e => e.projectId === pid); if (ex) { location.hash = '#/portfolio/' + ex.id; return; }
+    const fs = list('files').filter(f => f.projectId === pid && !f.deleted && (String(f.mime || '').startsWith('image/') || f.store === 'thumb') && (f.thumb || f.store === 'sb')).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true }));
+    const fin = fs.filter(f => f.rev === 'Final' || f.kind === 'render'); const use = fin.length ? fin : fs;
+    const id = 'pf_' + uid(); await Store.save('portfolio', { id, title: p.name || '', client: (typeof nfDevName === 'function' ? nfDevName(p) : '') || p.client || '', year: String(new Date().getFullYear()), location: p.location || '', type: 'ext', shots: use.map(f => f.id), coverId: use[0] ? use[0].id : null, projectId: pid, published: false, source: 'project', createdAt: nowISO(), updatedAt: nowISO(), by: myW() || (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '' });
+    toast(L('اتعمل كمسودة — راجع البيانات واللقطات ودوس «انشر»', 'Made as a draft — check the details and shots, then press «Publish»')); location.hash = '#/portfolio/' + id;
+  };
+  /* who edits (owner only) — the server list admin_config.pf_editors through nf_pf_editors_set */
+  ACTIONS.pfEditors = () => {
+    if (!isAdmin()) return; const cur = new Set(editors()); const ws = sortBy(list('workers').filter(w => w && !['inactive', 'suspended'].includes(w.status)), w => w.name || '');
+    openModal({ title: L('مين يعدّل في شغل الاستوديو', 'Who edits Studio work'), submitLabel: L('احفظ', 'Save'), body: `<p class="small muted">${esc(L('إنت دايمًا بتعدّل. اللي تعلّم عليه يقدر يضيف ويعدّل وينشر ويمسح — والباقي بيشوف المنشور بس.', 'You can always edit. Whoever you tick can add, edit, publish and remove — everyone else only sees what is published.'))}</p><div class="pfed">${ws.map(w => `<label class="check"><input type="checkbox" name="w_${esc(w.id)}" ${cur.has(w.id) ? 'checked' : ''}> <span class="notr">${esc(w.name || w.id)}</span></label>`).join('')}</div>`,
+      onSubmit: async f => {
+        const ids = ws.filter(w => f.querySelector(`[name="w_${w.id}"]`) && f.querySelector(`[name="w_${w.id}"]`).checked).map(w => w.id);
+        try { if (S.sb && S.sb.rpc && typeof sbOn === 'function' && sbOn()) { const r = await S.sb.rpc('nf_pf_editors_set', { p: ids }); if (r && r.error) throw r.error; } P.ed = ids; if (S.settings) S.settings.pfEditors = ids; } catch (e) { toast(L('ما اتحفظش: ', 'Not saved: ') + (e.message || e), 'err'); return false; }
+        try { if (typeof logChange === 'function') logChange('settings', 'pf_editors', 'update', ['pfEditors'], { name: L('مين يعدّل في شغل الاستوديو', 'Who edits Studio work') }); } catch (e) { /* ignore */ }
+        toast(L('اتحفظ', 'Saved')); rerender(); return true;
+      } });
+  };
+  /* the project page: «Publish to Studio work» for a finished project */
+  const btn = pid => { if (!canEdit()) return ''; const p = byId('projects', pid); const done = typeof window.nfStuFinished === 'function' ? window.nfStuFinished().some(x => x.id === pid) : false; const ex = all().find(e => e.projectId === pid); if (!ex && !done) return ''; return `<button type="button" class="btn sm" data-action="pfFromProject" data-arg="${esc(pid)}">${icon('gallery')}${esc(ex ? (ex.published ? L('في شغل الاستوديو', 'In Studio work') : L('مسودة شغل الاستوديو', 'Studio work draft')) : L('انشر في شغل الاستوديو', 'Publish to Studio work'))}</button>`; };
+  if (typeof EXTRA_SETTINGS !== 'undefined') EXTRA_SETTINGS.portfolio = { label: 'شغل الاستوديو', render: () => {
+    if (!isAdmin()) return `<div class="card"><p class="small muted">${esc(L('للمالك فقط', 'Owner only'))}</p></div>`; askEditors();
+    const names = editors().map(id => (byId('workers', id) || {}).name || id);
+    return `<div class="card"><h3>${icon('gallery')} ${esc(L('شغل الاستوديو — مين يعدّل', 'Studio work — who edits'))}</h3><p class="small muted">${esc(L('الفريق كله بيشوف المنشور. اللي في القايمة دي بس (وإنت) يضيفوا ويعدّلوا وينشروا ويمسحوا — والسيرفر بيتأكد.', 'The whole team sees what is published. Only the people on this list (and you) add, edit, publish and remove — the server checks it.'))}</p><p><b>${esc(L('دلوقتي:', 'Now:'))}</b> <span class="notr">${esc(names.join('، ') || L('إنت بس', 'only you'))}</span></p><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn p" data-action="pfEditors">${esc(L('غيّر القايمة', 'Change the list'))}</button><a class="btn" href="#/portfolio">${esc(L('افتح شغل الاستوديو', 'Open Studio work'))}</a></div></div>`;
+  } };
+  window.nfPortfolio = { slides, canEdit, published, all, btn, shotsOf, coverSrc, hqUp, _P: P };
+
+  const css = document.createElement('style'); css.textContent = `
+.pfpage{display:flex;flex-direction:column;gap:14px}
+.pfhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pfhead h2{margin:0;font-size:22px;font-weight:500}.pfhead .grow{flex:1}
+.pfbanner{display:flex;gap:10px;align-items:flex-start}.pftodo{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.pffil{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.pffil .chip{border:1px solid var(--line);border-radius:999px;padding:4px 12px;background:var(--surface);cursor:pointer;font-size:13px;color:inherit}.pffil .chip.on2{background:var(--ink,#111);color:var(--surface,#fff);border-color:transparent}.pfyear{border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--surface);color:inherit}
+.pfgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.pfc{display:flex;flex-direction:column;border-radius:18px;overflow:hidden;background:var(--surface);border:1px solid var(--line);text-decoration:none;color:inherit;transition:.2s}.pfc:hover{transform:translateY(-2px);border-color:var(--line-2)}
+.pfcimg{position:relative;aspect-ratio:4/3;background:#0b0d10;overflow:hidden}.pfcimg img{width:100%;height:100%;object-fit:cover;display:block}.pfcno{display:grid;place-items:center;height:100%;color:#777}.pfcno svg{width:40px;height:40px}
+.pfdraft{position:absolute;top:10px;inset-inline-start:10px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,188,56,.92);color:#2a1d00;font-weight:600}.pfdraft.big{top:14px;font-size:12px}
+.pfct{padding:10px 12px 12px;display:flex;flex-direction:column;gap:3px}.pfct b{font-weight:500;font-size:15px}.pfct small{color:var(--muted);font-size:12px}.pfcm{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}.pfcm i{font-style:normal;border:1px solid var(--line);border-radius:999px;padding:0 8px}.pfneed{color:var(--warn-ink,#9a6700)}
+.pfback{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.pfback .grow{flex:1}
+.pfhero{position:relative;border-radius:22px;overflow:hidden;background:#0b0d10;color:#fff;min-height:260px;aspect-ratio:21/9;max-height:62vh}.pfhero img{width:100%;height:100%;object-fit:cover;display:block;position:absolute;inset:0}.pfhero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,13,16,0) 40%,rgba(11,13,16,.85))}
+.pfht{position:absolute;inset-inline:24px;bottom:20px;z-index:1;display:flex;flex-direction:column;gap:6px;align-items:flex-start}.pfht small{color:#c9d0d6;letter-spacing:.08em;text-transform:uppercase;font-size:12px}.pfht h1{margin:0;font-weight:300;font-size:clamp(24px,3.4vw,40px)}.pfshow{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.35)}
+.pfinfo{display:flex;flex-direction:column;gap:8px}.pfinfo dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 16px;margin:0}.pfinfo dt{font-size:12px;color:var(--muted)}.pfinfo dd{margin:0;font-size:14px}.pfinfo p{margin:0;line-height:1.7}.pflinks{display:flex;gap:6px;flex-wrap:wrap}
+.pfshots{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.pfs{display:flex;flex-direction:column;gap:6px}.pfsimg{border:0;padding:0;border-radius:14px;overflow:hidden;cursor:zoom-in;background:#0b0d10;aspect-ratio:16/10}.pfsimg img{width:100%;height:100%;object-fit:cover;display:block}.pfsa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pfcov{font-size:11px;color:var(--good-ink,#16a34a)}
+.pfed{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;max-height:50vh;overflow:auto}
+@media (max-width:600px){.pfgrid{grid-template-columns:1fr 1fr;gap:10px}.pfct b{font-size:13px}.pfhero{aspect-ratio:4/3;min-height:220px}.pfshots{grid-template-columns:1fr 1fr}.pfht{inset-inline:14px;bottom:14px}}`;
   document.head.appendChild(css);
 })();
 </script>
