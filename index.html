@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261013-0309-3cac7b";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261013-0326-3b6a56";</script>
 
 <script>
 'use strict';
@@ -15958,24 +15958,71 @@ const fundXfer = id => { const m = byId('money', `fund_${id}`); return m && m.ty
 /* v7.58 (Mahmoud, 12 Oct, on «Transfer to Mahmoud El-Behiry's custody»: «transfer here to whom — Bahaa or El-Behiry — and where is the number to
    transfer to?»): the money goes to the custody's holder; his receiving number («Advance pay ← Employees' numbers») shows in the transfer
    dialog (with «Copy») and in the «to transfer» line; no number → says so and where to register it. */
-function fundTo(r) {
-  const w = r && walletOf(r.walletId); if (!w) return null; const hw = w.holder ? byId('workers', w.holder) : null; const W = window.nfWallet;
-  const rw = W && w.holder ? W.of(w.holder) : null; const ms = rw ? [rw].concat(rw.alt && (rw.alt.number || rw.alt.ipa || rw.alt.last4) ? [rw.alt] : []) : [];
-  return { name: (hw && hw.name) || w.name || '', lines: ms.map(m => W.label(m)).filter(Boolean), copy: ms.map(m => m.number || m.ipa || m.card || '') };
+/* v7.62 (Mahmoud, 13 Oct, on the v7.60 «waiting for your transfer» box: «this is transferred to Bahaa, or Ahmed Abdel Zaher if Bahaa is not
+   there»): a custody request goes to the payer (policy.advPayerId — Bahaa) or the alternate (advPayerAltId — Ahmed Abdel Zaher) when Bahaa is on
+   leave today or has not punched in by 11:00; the payer hands it to the custody holder (a task tells him — no amount). A custody held by
+   one of them goes to him directly. No payers set → the holder, as before. */
+function fundPayers() { const p = (S.settings && S.settings.policy) || {}; return [p.advPayerId, p.advPayerAltId].filter(Boolean).map(String); }
+function fundAway(wid) {
+  const t = todayISO();
+  try {
+    if (list('requests').some(r => r.type === 'leave' && r.status === 'approved' && String(r.workerId) === String(wid) && String(r.from || '') <= t && String(r.to || r.from || '') >= t)) return 'leave';
+    const row = (typeof attendanceFor === 'function' ? attendanceFor(t) : {})[wid]; if (!(row && row.in) && new Date().getHours() >= 11) return 'absent';
+  } catch (e) { /* ignore */ }
+  return '';
 }
-function fundToLine(r) { const t = fundTo(r); if (!t) return ''; const EN = typeof I18N !== 'undefined' && I18N.lang === 'en'; return t.lines.length ? `${EN ? 'Transfer to' : 'حوّل على'}: ${t.lines.join(' / ')} (${t.name})` : (EN ? `${t.name} has no transfer number registered` : `${t.name} مالوش رقم تحويل متسجّل`); }
+function fundRecips(r) {
+  const w = r && walletOf(r.walletId); const holder = w && w.holder ? String(w.holder) : ''; const ps = fundPayers();
+  if (!ps.length) return holder ? [{ id: holder, away: '' }] : [];
+  if (holder && ps.includes(holder)) return [{ id: holder, away: '' }];
+  const out = ps.map(id => ({ id, away: fundAway(id) })); if (out.length > 1 && out[0].away && !out[1].away) out.reverse(); return out;
+}
+function fundTo(r) {
+  const w = r && walletOf(r.walletId); if (!w) return null; const W = window.nfWallet; const hw = w.holder ? byId('workers', w.holder) : null; const holderName = (hw && hw.name) || w.name || '';
+  const all = fundRecips(r).map(x => { const wk = byId('workers', x.id); const rw = W ? W.of(x.id) : null; const ms = rw ? [rw].concat(rw.alt && (rw.alt.number || rw.alt.ipa || rw.alt.last4) ? [rw.alt] : []) : [];
+    return { id: x.id, away: x.away || '', name: (wk && wk.name) || (String(x.id) === String(w.holder || '') ? holderName : '') || '', lines: ms.map(m => W.label(m)).filter(Boolean), copy: ms.map(m => m.number || m.ipa || m.card || '') }; });
+  const first = all[0] || { id: w.holder || '', away: '', name: holderName, lines: [], copy: [] };
+  return Object.assign({}, first, { all: all.length ? all : [first], holderName, via: !!(first.id && String(first.id) !== String(w.holder || '')) });
+}
+const fundEN = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+const fundAwayTxt = (n, a) => (fundEN() ? `${n} is ${a === 'leave' ? 'on leave today' : 'not in yet today'}` : `${n} ${a === 'leave' ? 'أجازة النهارده' : 'مش موجود النهارده'}`);
+function fundToLine(r) {
+  const t = fundTo(r); if (!t) return ''; const EN = fundEN();
+  if (!t.lines.length) return EN ? `${t.name} has no transfer number registered` : `${t.name} مالوش رقم تحويل متسجّل`;
+  const alt = t.all[1] && t.all[1].lines.length ? (EN ? ` · or ${t.all[1].name}: ${t.all[1].lines[0]}` : ` · أو ${t.all[1].name}: ${t.all[1].lines[0]}`) : '';
+  return `${EN ? 'Transfer to' : 'حوّل على'}: ${t.lines.join(' / ')} (${t.name}${t.via ? (EN ? ` → hands it to ${t.holderName}` : ` ← يسلّمها لـ ${t.holderName}`) : ''})${alt}`;
+}
 function fundToHTML(r) {
-  const t = fundTo(r); if (!t) return ''; const EN = typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const t = fundTo(r); if (!t) return ''; const EN = fundEN();
+  const rows = x => x.lines.map((l, i) => `<div class="ftor"><b class="ftonum notr">${esc(l)}</b>${x.copy[i] ? `<button type="button" class="btn xs" data-action="ftoCopy" data-arg="${esc(x.copy[i])}">${EN ? 'Copy' : 'نسخ'}</button>` : ''}</div>`).join('');
   if (!t.lines.length) return `<div class="full fto warn">${icon('alert')}<span>${EN ? `${esc(t.name)} has no transfer number registered — add it from «Advance pay ← Employees' numbers»` : `${esc(t.name)} مالوش رقم تحويل متسجّل — سجّله من «تحويل السلف ← أرقام الموظفين»`}</span></div>`;
-  return `<div class="full fto"><div class="ftoh">${EN ? 'Transfer to' : 'حوّل لـ'} <b>${esc(t.name)}</b> ${EN ? 'on' : 'على'}:</div>${t.lines.map((l, i) => `<div class="ftor"><b class="ftonum notr">${esc(l)}</b>${t.copy[i] ? `<button type="button" class="btn xs" data-action="ftoCopy" data-arg="${esc(t.copy[i])}">${EN ? 'Copy' : 'نسخ'}</button>` : ''}</div>`).join('')}</div>`;
+  const swapped = t.all.length > 1 && t.all.find(x => x.away) ? t.all.find(x => x.away) : null;
+  const alt = t.all[1];
+  return `<div class="full fto"><div class="ftoh">${EN ? 'Transfer to' : 'حوّل لـ'} <b>${esc(t.name)}</b> ${EN ? 'on' : 'على'}:</div>${rows(t)}
+    ${t.via ? `<div class="tiny muted">${EN ? `He hands it to ${esc(t.holderName)} (the custody holder).` : `وهو يسلّمها لـ ${esc(t.holderName)} (صاحب العهدة).`}</div>` : ''}
+    ${swapped && swapped !== t.all[0] ? `<div class="tiny" style="color:var(--warn-ink,#9a6700)">${esc(fundAwayTxt(swapped.name, swapped.away))}</div>` : ''}
+    ${alt ? `<div class="ftoalt"><div class="ftoh">${EN ? `Or ${esc(alt.name)}${alt === swapped ? '' : ` (if ${esc(t.name)} is not there)`}:` : `أو <b>${esc(alt.name)}</b>${alt === swapped ? '' : ` (لو ${esc(t.name)} مش موجود)`}:`}</div>${alt.lines.length ? rows(alt) : `<div class="tiny muted">${EN ? 'no number registered' : 'مالوش رقم متسجّل'}</div>`}</div>` : ''}</div>`;
+}
+/* who the owner transferred to (the payer then hands it over) — a select in the transfer dialog when there is a choice */
+function fundToPick(r) {
+  const t = fundTo(r); if (!t || (!t.via && t.all.length < 2)) return '';
+  return field(fundEN() ? 'Transferred to' : 'اتحوّل لـ', `<select name="payTo">${t.all.map((x, i) => `<option value="${esc(x.id)}" ${i === 0 ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`);
+}
+async function fundHandover(r, toId) {
+  try {
+    const w = walletOf(r.walletId); if (!w || !toId || String(toId) === String(w.holder || '')) return; const hw = w.holder ? byId('workers', w.holder) : null; const tw = byId('workers', toId);
+    await Store.update('requests', r.id, { payTo: String(toId), payToName: (tw && tw.name) || '' });
+    await Store.save('tasks', { id: `fundho_${r.id}`, title: `وصلك تحويل لعهدة ${(hw && hw.name) || w.name || ''} — سلّمه له`, desc: `${catLabel(r.cat)}: ${r.reason || ''}\nالمالك حوّله عليك — سلّمه لصاحب العهدة ودوس «تم».`, link: '/#/money', assigneeId: String(toId), toRole: null, priority: 'high', status: 'open', kind: 'task', source: 'fund', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true });
+  } catch (e) { console.warn('handover', e); }
 }
 ACTIONS.ftoCopy = async v => { try { await navigator.clipboard.writeText(String(v || '')); toast(typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Copied' : 'اتنسخ'); } catch (e) { toast(String(v || '')); } };
-document.head.insertAdjacentHTML('beforeend', '<style>.fto{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px}.fto.warn{flex-direction:row;align-items:center;gap:8px;color:var(--warn-ink,#9a6700);background:var(--warn-bg,#fff4d6);border-color:transparent}.ftoh{font-size:13px;color:var(--ink-2)}.ftor{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.ftonum{font-size:17px;letter-spacing:.5px;direction:ltr;unicode-bidi:isolate}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>.fto{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface-2);display:flex;flex-direction:column;gap:6px}.fto.warn{flex-direction:row;align-items:center;gap:8px;color:var(--warn-ink,#9a6700);background:var(--warn-bg,#fff4d6);border-color:transparent}.ftoh{font-size:13px;color:var(--ink-2)}.ftor{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.ftonum{font-size:17px;letter-spacing:.5px;direction:ltr;unicode-bidi:isolate}.ftoalt{border-top:1px dashed var(--line);padding-top:6px;display:flex;flex-direction:column;gap:4px}</style>');
 /* owner pays a custody request */
 ACTIONS.fundPay = async id => {
   const r = byId('requests', id); if (!r || !isAdmin() || !fundToPay(r)) return; const w = walletOf(r.walletId); if (!w) return;
-  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: fundToHTML(r) + field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
+  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: fundToHTML(r) + fundToPick(r) + field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
   if (!res) return;
+  { const t0 = fundTo(r); const to = res.payTo || (t0 && t0.via ? t0.id : ''); if (to) await fundHandover(r, to); }
   await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
   if (r.status === 'approved') { await Store.update('requests', r.id, { toPay: false, paidAt: nowISO(), paidByName: S.session?.name || '' }); await applyRequestEffects(byId('requests', r.id)); rerender(); return; }
   await decideRequest(r.id, 'approved', res.note || '');
