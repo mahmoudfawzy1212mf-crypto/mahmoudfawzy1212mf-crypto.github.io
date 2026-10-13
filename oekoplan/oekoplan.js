@@ -72,8 +72,7 @@ html.apple .tb-logo img,.tb-logo img{filter:none!important;width:auto!important;
   .topbar .tb-actions > *:last-child{margin-inline-end:0!important}}
 /* the home hero: Ökoplan colours until the office's own photos are published (no studio stills) */
 .shhero{background:linear-gradient(160deg,#9cdff7 0%,#50b1e7 38%,#38a599 70%,#3ca13c 100%)!important}
-.shhero img.shimg,.shhero img.slstill,.shhero > img{display:none!important}
-.shhero::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#9cdff7 0 28%,transparent 28.1%),linear-gradient(225deg,#92cb4e 0 22%,transparent 22.1%),linear-gradient(45deg,#70b62e 0 26%,transparent 26.1%);opacity:.9}
+.shhero:not(:has(img[src]))::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#9cdff7 0 28%,transparent 28.1%),linear-gradient(225deg,#92cb4e 0 22%,transparent 22.1%),linear-gradient(45deg,#70b62e 0 26%,transparent 26.1%);opacity:.9}
 html[data-theme="light"] .kpi,html[data-theme="light"] .ahm,html[data-theme="light"] .nfw{background:rgba(255,255,255,.85)!important;color:var(--ink)!important}
 .sptile.ideas .ic{background:#e8f5d9;color:#3f7a12}.sptile.design .ic{background:#dff3f0;color:#1f7a6f}
 /* ---- login ---- */
@@ -272,7 +271,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     policy: POLICY,
     regulation: { version: 1, title: 'لائحة العمل والنظام الأساسي ولائحة الجزاءات — شركة أوكوبلان لتنسيق المواقع', text: REG_AR, textEn: REG_EN, updatedAt: null },
     regParams: { annualAfterMonths: 12, probationMonths: 3 },
-    stuLogin: { video: '', videoM: '', poster: '', logo: IMG.full, stills: [], slogan: 'Designing landscapes that live', sub: 'Landscape architecture · consulting · site supervision', site: 'https://oekoplan.com', ig: 'https://www.instagram.com/oekoplan.landscapers', fb: 'https://www.facebook.com/OekoplanLandscapers', li: '', be: '', vm: '' },
+    stuLogin: { video: '', videoM: '', poster: BASE + '_src/brand/cover-1.jpg', logo: IMG.full, stills: [BASE + '_src/brand/cover-1.jpg'], slogan: 'Designing landscapes that live', sub: 'Landscape architecture · consulting · site supervision', site: 'https://oekoplan.com', ig: 'https://www.instagram.com/oekoplan.landscapers', fb: 'https://www.facebook.com/OekoplanLandscapers', li: '', be: '', vm: '' },
   };
 
   if (typeof DEFAULT_SETTINGS === 'object') {
