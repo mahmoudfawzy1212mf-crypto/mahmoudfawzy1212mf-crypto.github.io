@@ -721,6 +721,36 @@ html[data-theme="dark"] .spcard .cov.okdev,html[data-theme="dark"] .sphead .cov.
     });
   };
   Object.assign(OEKO_I18N, { 'صورة المشروع': 'Project picture', 'صورة من الجهاز': 'A photo from this device', 'أو لوجو الجهة صاحبة المشروع': "Or the project owner's logo", 'إزالة الصورة': 'Remove picture' });
+
+  /* ---------------------------------------------------------------- «Project operations» panel: the landscape stages, not the ArchViz ones
+     · the status strip = the office's stages (same ids as the project stage, so both stay in step) + handover + closed
+     · the shot gates become deliverable gates (ids kept: the engine's logic reads them)
+     · wording: shots → deliverables, Artist → responsible, Art Director → design manager */
+  if (Array.isArray(window.OS_STATUSES)) {
+    const list = [{ id: 'data', en: 'Site Survey & Data', ar: 'استلام الداتا ورفع الموقع' }].concat(STAGES.map(st => ({ id: st.id, en: st.name, ar: st.ar.split(' (')[0] })), [{ id: 'delivered', en: 'Handover', ar: 'التسليم' }, { id: 'closed', en: 'Closed', ar: 'اتقفل' }]);
+    OS_STATUSES.length = 0; list.forEach(x => OS_STATUSES.push(x));
+  }
+  if (Array.isArray(window.OS_GATES)) {
+    const g = [{ id: 'comp', en: 'Drafting', ar: 'الرسم' }, { id: 'light', en: 'Team Lead Review', ar: 'مراجعة التيم ليدر' }, { id: 'detail', en: 'Design Manager Review', ar: 'مراجعة مدير التصميم' }, { id: 'post', en: 'Issued', ar: 'إصدار' }];
+    OS_GATES.length = 0; g.forEach(x => OS_GATES.push(x));
+  }
+  /* the stage chip and the operations status move together */
+  if (ACTIONS.osStatus) ACTIONS.osStatus = (base => async function (arg) { const r = await base.apply(this, arguments); try { const [pid, st] = String(arg).split(':'); const p = byId('projects', pid); if (p && p.osStatus === st && STAGES.some(x => x.id === st) && p.stage !== st) await Store.update('projects', pid, { stage: st }); } catch (e) { /* ignore */ } return r; })(ACTIONS.osStatus);
+  /* once: projects imported with a stage but no operations status start at that stage */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    try {
+      if (!S.session || role() !== 'admin' || !(S.settings && S.settings.oekoProjectsSeeded) || (S.settings && S.settings.oekoOsSynced) || window.__okOsSync) return;
+      const ps = list('projects').filter(p => p.stage && (!p.osStatus || p.osStatus === 'data') && p.stage !== p.osStatus); if (!ps.length) return; window.__okOsSync = 1;
+      (async () => { for (const p of ps) await Store.update('projects', p.id, { osStatus: p.stage, flow: p.flow || 'os' }); await Store.saveSettings(Object.assign({}, S.settings, { oekoOsSynced: true })); })().catch(() => { });
+    } catch (e) { /* ignore */ }
+  });
+  const OS_WORDS = [['Deliverables schedule — Deliverables', 'Deliverables schedule'], ['Master Schedule — Shots', 'Deliverables schedule'], ['الـMaster Schedule — اللقطات', 'جدول التسليمات'], ['لقطات', 'مخرجات'], ['Master Schedule — shots', 'Deliverables schedule'], ['Master Schedule', 'جدول التسليمات'], ['اللقطات', 'المخرجات'], ['اللقطة', 'المخرج'], ['لقطة جديدة', 'مخرج جديد'], ['لقطة', 'مخرج'], ['Shots', 'Deliverables'], ['shots', 'deliverables'], ['shot', 'deliverable'], ['Artist', 'المسؤول'], ['Project Owner', 'Project Manager'], ['الآرت دايركتور', 'مدير التصميم'], ['Art Director', 'Design Manager'], ['الـOwner والموعد', 'المدير والموعد'], ['Owner & deadline', 'Manager & deadline'], ['Owner:', 'PM:'], ['Composition → Lighting → Detailing + AI → Final Post', 'Drafting → Team lead review → Design manager review → Issued'], ['الكومبوزيشن → الإضاءة → التفاصيل + AI → البوست النهائي', 'الرسم → مراجعة التيم ليدر → مراجعة مدير التصميم → الإصدار'], ['تشغيل المشروع', 'إدارة المشروع']];
+  const OS_HINT_AR = 'ضيف مخرجات المشروع (لوحات · تقارير · مقايسات): كل مخرج بيعدي الرسم ← مراجعة التيم ليدر ← مراجعة مدير التصميم ← الإصدار، وكل مرحلة محتاجة اعتماد.', OS_HINT_EN = 'Add the project deliverables (drawings · reports · BOQs): each one goes Drafting → Team lead review → Design manager review → Issued, and every gate needs approval.';
+  const osWord = h => { if (typeof h !== 'string') return h; h = h.replace(/ضيف لقطات المشروع[^<]{0,200}?اعتماد\./g, () => en() ? OS_HINT_EN : OS_HINT_AR).replace(/Add the project shots[^<]{0,200}?approval\./g, () => en() ? OS_HINT_EN : OS_HINT_AR); OS_WORDS.forEach(([a, b]) => { h = h.split(a).join(b); }); return h; };
+  if (typeof vProjects === 'function') vProjects = (base => function () { const h = base.apply(this, arguments); return S.route && S.route.id ? osWord(h) : h; })(vProjects);
+  if (EXTRA_TITLES && EXTRA_TITLES.projects) EXTRA_TITLES.projects = (base => function () { const t = base.apply(this, arguments); if (t && t.sub) t.sub = osWord(t.sub); return t; })(EXTRA_TITLES.projects);
+  Object.assign(OEKO_I18N, { 'استلام الداتا ورفع الموقع': 'Site Survey & Data', 'التسليم': 'Handover', 'الرسم': 'Drafting', 'مراجعة التيم ليدر': 'Team Lead Review', 'مراجعة مدير التصميم': 'Design Manager Review', 'إصدار': 'Issued', 'جدول التسليمات': 'Deliverables schedule', 'المخرجات': 'Deliverables', 'المخرج': 'Deliverable', 'مخرج': 'Deliverable', 'مخرج جديد': 'New deliverable', 'المسؤول': 'Responsible', 'المدير والموعد': 'Manager & deadline', 'إدارة المشروع': 'Project operations' });
+  Object.assign(OEKO_I18N, { 'لاند سكيب — تصميم كامل': 'Landscape — Full design', 'من رفع الموقع والكونسبت لحد مستندات الطرح والإشراف — مراحل المكتب السبعة.': "From site survey and concept to tender documents and supervision — the office's seven stages.", 'لاند سكيب — كونسبت وتمهيدي': 'Landscape — Concept & schematic', 'رفع الموقع، الكونسبت والتصميم التمهيدي لحد اعتماد العميل.': 'Site survey, concept and schematic design up to client approval.', 'لاند سكيب — رسومات تنفيذية ومستندات طرح': 'Landscape — Tender package', 'تطوير التصميم، الرسومات التنفيذية (هارد سكيب · سوفت سكيب · ري · إضاءة) والمقايسة.': 'Design development, detailed drawings (hardscape · softscape · irrigation · lighting) and the BOQ.', 'إشراف على التنفيذ': 'Site supervision', 'اعتماد الشوب دروينج والعينات، زيارات الموقع والتقارير، واستلام الزراعة.': 'Shop drawing and sample approvals, site visits and reports, planting handover.', 'ميدان / شارع': 'Roundabout / street', 'مشروع صغير سريع: رفع، كونسبت، رسومات تنفيذية وإشراف.': 'A small fast project: survey, concept, detailed drawings and supervision.' });
   window.OEKO_I18N = OEKO_I18N;
   const oekoI18nApply = () => { try { if (!I18N || !I18N.exact) return; const norm = typeof i18nNorm === 'function' ? i18nNorm : (x => String(x).trim()); Object.keys(OEKO_I18N).forEach(k => { I18N.exact.set(norm(k), OEKO_I18N[k]); }); } catch (e) { /* ignore */ } };
   if (typeof i18nCompile === 'function') i18nCompile = (base => function () { const r = base.apply(this, arguments); oekoI18nApply(); return r; })(i18nCompile);

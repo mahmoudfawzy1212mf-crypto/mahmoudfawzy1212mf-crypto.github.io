@@ -95,6 +95,39 @@ rep("src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.thumb || ''), load: () => h
 rep("const I18N_STU = (() => { try { return (window.NF_CONFIG && window.NF_CONFIG.company === 'studioz') || window.NF_CO === 'studioz'; } catch (e) { return false; } })();",
     "const I18N_STU = false; /* Ökoplan: Arabic by default, choice kept per device (mk-oeko.py) */", 1)
 
+# --- Projects & Tasks (PM) templates: the landscape pipeline instead of the ArchViz / Interior boards
+_t0 = html.index("  const TPL = {\n    stills:"); _t1 = html.index("  const defaultRules = groups =>", _t0)
+TPL_JS = """  const TPL = {
+    full: { l: 'لاند سكيب — تصميم كامل', d: 'من رفع الموقع والكونسبت لحد مستندات الطرح والإشراف — مراحل المكتب السبعة.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Client brief & scope meeting', 1, 4], ['Site visit, survey & photos', 2, 12], ['Base map, levels & existing trees', 2, 10]]],
+      ['Concept Design', '#7d6f9c', [['Design narrative & mood board', 2, 10], ['Zoning & preliminary master plan', 4, 24], ['Circulation, axes & entrances', 2, 10], ['Preliminary plant & material palette', 2, 8], ['Concept 3D views', 3, 20], ['Concept presentation & client approval', 1, 6]]],
+      ['Schematic Design', '#8a7a63', [['Developed master plan', 4, 24], ['Hardscape layout & levels', 3, 18], ['Softscape layout & planting zones', 3, 18], ['Water features & lighting concept', 2, 10], ['Schematic presentation & approval', 1, 6]]],
+      ['Design Development', '#b07d48', [['Grading & drainage plan', 3, 18], ['Hardscape details & materials', 4, 24], ['Planting plan & plant schedule', 4, 24], ['Irrigation concept', 2, 10], ['Landscape lighting plan', 2, 10], ['Coordination with architecture & MEP', 2, 8]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape construction drawings', 5, 36], ['Softscape & planting drawings', 4, 28], ['Irrigation drawings', 3, 20], ['Lighting & electrical drawings', 3, 18], ['Details & sections', 4, 24]]],
+      ['BOQ & Specifications', '#4f86a8', [['Bill of quantities', 3, 18], ['Technical specifications', 2, 12], ['Tender package issue', 1, 4]]],
+      ['Site Supervision', '#3aa874', [['Shop drawings & material approvals', 5, 20], ['Site visits & reports', 10, 40], ['Planting inspection & handover', 2, 10]]]] },
+    concept: { l: 'لاند سكيب — كونسبت وتمهيدي', d: 'رفع الموقع، الكونسبت والتصميم التمهيدي لحد اعتماد العميل.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Client brief & scope meeting', 1, 4], ['Site visit, survey & photos', 2, 12], ['Base map & existing conditions', 2, 10]]],
+      ['Concept Design', '#7d6f9c', [['Design narrative & mood board', 2, 10], ['Zoning & preliminary master plan', 4, 24], ['Preliminary plant & material palette', 2, 8], ['Concept 3D views', 3, 20], ['Concept presentation & approval', 1, 6]]],
+      ['Schematic Design', '#8a7a63', [['Developed master plan', 4, 24], ['Hardscape & softscape layouts', 4, 24], ['Schematic presentation & approval', 1, 6]]]] },
+    tender: { l: 'لاند سكيب — رسومات تنفيذية ومستندات طرح', d: 'تطوير التصميم، الرسومات التنفيذية (هارد سكيب · سوفت سكيب · ري · إضاءة) والمقايسة.', groups: [
+      ['Design Development', '#b07d48', [['Grading & drainage plan', 3, 18], ['Hardscape details & materials', 4, 24], ['Planting plan & plant schedule', 4, 24], ['Irrigation & lighting concepts', 3, 16]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape construction drawings', 5, 36], ['Softscape & planting drawings', 4, 28], ['Irrigation drawings', 3, 20], ['Lighting & electrical drawings', 3, 18], ['Details & sections', 4, 24]]],
+      ['BOQ & Specifications', '#4f86a8', [['Bill of quantities', 3, 18], ['Technical specifications', 2, 12], ['Tender package issue', 1, 4]]]] },
+    super: { l: 'إشراف على التنفيذ', d: 'اعتماد الشوب دروينج والعينات، زيارات الموقع والتقارير، واستلام الزراعة.', groups: [
+      ['Site Supervision', '#3aa874', [['Shop drawings review', 4, 16], ['Material & plant samples approval', 3, 12], ['Weekly site visits & reports', 10, 40], ['Irrigation testing', 2, 8], ['Planting inspection & snag list', 2, 10], ['Final handover', 1, 4]]]] },
+    roundabout: { l: 'ميدان / شارع', d: 'مشروع صغير سريع: رفع، كونسبت، رسومات تنفيذية وإشراف.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Site visit & measurements', 1, 6]]],
+      ['Concept Design', '#7d6f9c', [['Concept layout & 3D view', 3, 16], ['Client approval', 1, 3]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape, planting & irrigation drawings', 4, 24], ['BOQ', 1, 6]]],
+      ['Site Supervision', '#3aa874', [['Site visits & handover', 5, 16]]]] }
+  };
+"""
+html = html[:_t0] + TPL_JS + html[_t1:]
+rep('TPL[tk] || TPL.stills', 'TPL[tk] || TPL.full', 1)
+rep("Ökoplan Landscaping — an architectural visualisation & interior design studio in Cairo (modellers, render artists, an art director, video editors).", "Ökoplan Landscaping — a landscape architecture office in Cairo (landscape architects, planting and irrigation designers, a technical office, site engineers).", 1)
+rep("Studio stage vocabulary (reuse when it fits): Brief & survey, Script & storyboard, Concept & mood board, Modeling, Texturing, Lighting, Lighting & animation, Render, Post, Client Review, Delivery.", "Office stage vocabulary (reuse when it fits): Site Survey & Data, Concept Design, Schematic Design, Design Development, Tender / Detailed Drawings, BOQ & Specifications, Site Supervision, Handover.", 1)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)

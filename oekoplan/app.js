@@ -20326,30 +20326,29 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   /* ---------- templates ---------- */
   const TPL = {
-    stills: { l: 'ArchViz — صور ثابتة', d: 'من الموديلنج لحد تسليم الصور 4K، بمراحل المكتب الثابتة.', groups: [
-      ['Modeling', '#6b7f99', [['Site & context model', 3, 16], ['Building massing & facades', 4, 28], ['Lobby & amenities model', 3, 20]]],
-      ['Texturing', '#8a7a63', [['Material library setup', 2, 10], ['Facade & landscape materials', 2, 12]]],
-      ['Lighting', '#7d6f9c', [['Camera angles approval', 1, 4], ['Day / dusk lighting setup', 2, 12]]],
-      ['Render', '#b07d48', [['Test renders', 1, 6], ['Final 4K renders (3840×2160)', 2, 14]]],
-      ['Post', '#5f8f7a', [['Photoshop post & entourage', 2, 14], ['Color grading', 1, 5]]],
-      ['Client Review', '#4f86a8', [['Round 1 submission', 1, 3], ['Client comments round', 2, 8]]],
-      ['Delivery', '#3aa874', [['Final delivery package', 1, 2]]]] },
-    film: { l: 'ArchViz — فيلم', d: 'سكريبت وستوري بورد ثم أنيميشن وريندر ومونتاج وصوت.', groups: [
-      ['Script & storyboard', '#7d6f9c', [['Scenario & shot list', 2, 10], ['Storyboard frames', 3, 18]]],
-      ['Modeling', '#6b7f99', [['Buildings modeling', 5, 36], ['Landscape & environment', 4, 26]]],
-      ['Lighting & animation', '#8a7a63', [['Camera paths', 3, 18], ['Lifestyle shots', 3, 20]]],
-      ['Render', '#b07d48', [['Render queue — 4K 60fps', 4, 20]]],
-      ['Post', '#5f8f7a', [['Edit & motion graphics', 3, 18], ['Music & sound design', 1, 5]]],
-      ['Client Review', '#4f86a8', [['Preview cut to client', 1, 3], ['Client comments round', 2, 8]]],
-      ['Delivery', '#3aa874', [['Master export & delivery', 1, 2]]]] },
-    interior: { l: 'Interior', d: 'بريف ومود بورد وزوننج وثري دي ورسومات تفصيلية.', groups: [
-      ['Brief & survey', '#6b7f99', [['Client brief meeting', 1, 3], ['Site survey & measurements', 2, 10]]],
-      ['Concept & mood board', '#7d6f9c', [['Mood board', 2, 10], ['Concept presentation', 2, 12]]],
-      ['Modeling', '#8a7a63', [['Furniture layout & zoning', 3, 18]]],
-      ['Render', '#b07d48', [['Key space renders', 4, 26]]],
-      ['Post', '#5f8f7a', [['Ceiling & lighting plans', 3, 18], ['Joinery details', 3, 20]]],
-      ['Client Review', '#4f86a8', [['Design approval', 2, 6]]],
-      ['Delivery', '#3aa874', [['IFC drawing set', 1, 4]]]] }
+    full: { l: 'لاند سكيب — تصميم كامل', d: 'من رفع الموقع والكونسبت لحد مستندات الطرح والإشراف — مراحل المكتب السبعة.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Client brief & scope meeting', 1, 4], ['Site visit, survey & photos', 2, 12], ['Base map, levels & existing trees', 2, 10]]],
+      ['Concept Design', '#7d6f9c', [['Design narrative & mood board', 2, 10], ['Zoning & preliminary master plan', 4, 24], ['Circulation, axes & entrances', 2, 10], ['Preliminary plant & material palette', 2, 8], ['Concept 3D views', 3, 20], ['Concept presentation & client approval', 1, 6]]],
+      ['Schematic Design', '#8a7a63', [['Developed master plan', 4, 24], ['Hardscape layout & levels', 3, 18], ['Softscape layout & planting zones', 3, 18], ['Water features & lighting concept', 2, 10], ['Schematic presentation & approval', 1, 6]]],
+      ['Design Development', '#b07d48', [['Grading & drainage plan', 3, 18], ['Hardscape details & materials', 4, 24], ['Planting plan & plant schedule', 4, 24], ['Irrigation concept', 2, 10], ['Landscape lighting plan', 2, 10], ['Coordination with architecture & MEP', 2, 8]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape construction drawings', 5, 36], ['Softscape & planting drawings', 4, 28], ['Irrigation drawings', 3, 20], ['Lighting & electrical drawings', 3, 18], ['Details & sections', 4, 24]]],
+      ['BOQ & Specifications', '#4f86a8', [['Bill of quantities', 3, 18], ['Technical specifications', 2, 12], ['Tender package issue', 1, 4]]],
+      ['Site Supervision', '#3aa874', [['Shop drawings & material approvals', 5, 20], ['Site visits & reports', 10, 40], ['Planting inspection & handover', 2, 10]]]] },
+    concept: { l: 'لاند سكيب — كونسبت وتمهيدي', d: 'رفع الموقع، الكونسبت والتصميم التمهيدي لحد اعتماد العميل.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Client brief & scope meeting', 1, 4], ['Site visit, survey & photos', 2, 12], ['Base map & existing conditions', 2, 10]]],
+      ['Concept Design', '#7d6f9c', [['Design narrative & mood board', 2, 10], ['Zoning & preliminary master plan', 4, 24], ['Preliminary plant & material palette', 2, 8], ['Concept 3D views', 3, 20], ['Concept presentation & approval', 1, 6]]],
+      ['Schematic Design', '#8a7a63', [['Developed master plan', 4, 24], ['Hardscape & softscape layouts', 4, 24], ['Schematic presentation & approval', 1, 6]]]] },
+    tender: { l: 'لاند سكيب — رسومات تنفيذية ومستندات طرح', d: 'تطوير التصميم، الرسومات التنفيذية (هارد سكيب · سوفت سكيب · ري · إضاءة) والمقايسة.', groups: [
+      ['Design Development', '#b07d48', [['Grading & drainage plan', 3, 18], ['Hardscape details & materials', 4, 24], ['Planting plan & plant schedule', 4, 24], ['Irrigation & lighting concepts', 3, 16]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape construction drawings', 5, 36], ['Softscape & planting drawings', 4, 28], ['Irrigation drawings', 3, 20], ['Lighting & electrical drawings', 3, 18], ['Details & sections', 4, 24]]],
+      ['BOQ & Specifications', '#4f86a8', [['Bill of quantities', 3, 18], ['Technical specifications', 2, 12], ['Tender package issue', 1, 4]]]] },
+    super: { l: 'إشراف على التنفيذ', d: 'اعتماد الشوب دروينج والعينات، زيارات الموقع والتقارير، واستلام الزراعة.', groups: [
+      ['Site Supervision', '#3aa874', [['Shop drawings review', 4, 16], ['Material & plant samples approval', 3, 12], ['Weekly site visits & reports', 10, 40], ['Irrigation testing', 2, 8], ['Planting inspection & snag list', 2, 10], ['Final handover', 1, 4]]]] },
+    roundabout: { l: 'ميدان / شارع', d: 'مشروع صغير سريع: رفع، كونسبت، رسومات تنفيذية وإشراف.', groups: [
+      ['Site Survey & Data', '#6b7f99', [['Site visit & measurements', 1, 6]]],
+      ['Concept Design', '#7d6f9c', [['Concept layout & 3D view', 3, 16], ['Client approval', 1, 3]]],
+      ['Tender / Detailed Drawings', '#5f8f7a', [['Hardscape, planting & irrigation drawings', 4, 24], ['BOQ', 1, 6]]],
+      ['Site Supervision', '#3aa874', [['Site visits & handover', 5, 16]]]] }
   };
   const defaultRules = groups => { const dg = groups[groups.length - 1]; return [
     { id: uid(), on: true, tr: 'status', tv: 'done', ac: 'prog' }, { id: uid(), on: true, tr: 'status', tv: 'client', ac: 'notifyP', ap: 'role:admin' },
@@ -20358,7 +20357,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     { id: uid(), on: false, tr: 'status', tv: 'done', ac: 'move', ag: dg ? dg.id : null }]; };
   const mkTask = (b, gid, name, o = {}) => Object.assign({ id: uid(), boardId: b.id, projectId: b.projectId, g: gid, name, owner: null, status: 'idle', pri: 'med', start: null, due: null, progress: 0, rev: 0, mins: 0, timer: null, est: 8, deps: [], subs: [], upd: [], files: [], vers: [], log: [{ at: now(), by: meId(), k: 'created' }], created: now() }, o);
   async function buildBoard(pid, tk, o) {
-    const Tp = TPL[tk] || TPL.stills; const b = { id: pid, projectId: pid, tpl: tk, allowed: Math.max(0, +o.allowed || 2), color: o.color || COLORS[list('pmboards').length % COLORS.length], groups: [], rules: [], createdAt: nowISO() };
+    const Tp = TPL[tk] || TPL.full; const b = { id: pid, projectId: pid, tpl: tk, allowed: Math.max(0, +o.allowed || 2), color: o.color || COLORS[list('pmboards').length % COLORS.length], groups: [], rules: [], createdAt: nowISO() };
     const out = []; let cur = o.start || TODAY(); let prevLast = null;
     Tp.groups.forEach(([gname, gc, tasks]) => {
       const g = { id: uid(), name: gname, c: gc, open: true }; b.groups.push(g); let gEnd = cur; let first = true;
@@ -20787,7 +20786,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   async function aiJ(prompt, max) { if (typeof aiText !== 'function') throw { code: 'no_ai' }; const r = await aiText(prompt, { max_tokens: max || 3000 }); const t = String((r && (r.text || r.content)) || r || ''); const m = t.match(/\{[\s\S]*\}/); return JSON.parse(m ? m[0] : t); }
   async function aiT(prompt, max) { if (typeof aiText !== 'function') throw { code: 'no_ai' }; const r = await aiText(prompt, { max_tokens: max || 1500 }); return String((r && (r.text || r.content)) || r || '').trim(); }
   const LANG = () => (en() ? 'Write in English.' : 'اكتب بالعربي المصري البسيط، والمصطلحات الفنية تقدر تسيبها بالإنجليزي.');
-  const CTXS = 'Ökoplan Landscaping — an architectural visualisation & interior design studio in Cairo (modellers, render artists, an art director, video editors).';
+  const CTXS = 'Ökoplan Landscaping — a landscape architecture office in Cairo (landscape architects, planting and irrigation designers, a technical office, site engineers).';
   const ownerName = id => pName(id) || '—';
   const findPerson = n => { const q = String(n || '').trim().toLowerCase(); if (!q) return null; const ps = people(); return (ps.find(p => String(p.name || '').toLowerCase() === q) || ps.find(p => String(p.name || '').toLowerCase().includes(q)) || ps.find(p => q.includes(String(p.name || '').toLowerCase().split(/\s+/)[0] || '§')) || null); };
   const doneAt = it => { const l = (it.log || []).find(x => x.k === 'status' && x.x === 'done'); return l ? l.at : (it.status === 'done' ? (it.created || now()) : null); };
@@ -20849,7 +20848,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     const br = String((document.getElementById('pmBrief') || {}).value || '').trim(); if (br.length < 15) { toast(L('اكتب البريف الأول', 'Write the brief first'), 'err'); return; }
     PM.magic = { busy: true }; renderLayer();
     try {
-      const j = await aiJ(`You plan projects for ${CTXS}\nStudio stage vocabulary (reuse when it fits): Brief & survey, Script & storyboard, Concept & mood board, Modeling, Texturing, Lighting, Lighting & animation, Render, Post, Client Review, Delivery.\nBuild a realistic plan for this brief. 4-9 stages in order, 1-6 tasks each, durations in working days (Friday off) and estimated hours. Task names short and specific (English or Arabic like the brief). Never include money.\nBrief:\n${br.slice(0, 6000)}\nReturn JSON only: {"title":"short plan name","stages":[{"name":"…","tasks":[{"name":"…","days":2,"hours":12}]}]}`, 3000);
+      const j = await aiJ(`You plan projects for ${CTXS}\nOffice stage vocabulary (reuse when it fits): Site Survey & Data, Concept Design, Schematic Design, Design Development, Tender / Detailed Drawings, BOQ & Specifications, Site Supervision, Handover.\nBuild a realistic plan for this brief. 4-9 stages in order, 1-6 tasks each, durations in working days (Friday off) and estimated hours. Task names short and specific (English or Arabic like the brief). Never include money.\nBrief:\n${br.slice(0, 6000)}\nReturn JSON only: {"title":"short plan name","stages":[{"name":"…","tasks":[{"name":"…","days":2,"hours":12}]}]}`, 3000);
       const stg = (j.stages || []).filter(s => s && s.name && Array.isArray(s.tasks) && s.tasks.length).slice(0, 10); if (!stg.length) throw new Error('empty');
       TPL.ai = { l: String(j.title || L('خطة من البريف', 'Plan from the brief')).slice(0, 80), d: br.slice(0, 200), groups: stg.map((s, i) => [String(s.name).slice(0, 40), COLORS[i % COLORS.length], s.tasks.slice(0, 8).map(t => [String(t.name || '').slice(0, 120), Math.max(1, Math.min(30, Math.round(+t.days || 1))), Math.max(1, Math.min(200, Math.round(+t.hours || 8)))])]) };
       PM.magic = { ok: true };
