@@ -339,7 +339,7 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
       const s = base(saved ? clone(saved) : saved);
       const keep = new Set(OEKO_DEFAULTS.departments.map(d => d.id).concat(((saved || {}).departments || []).map(d => d.id)));
       s.departments = (s.departments || []).filter(d => keep.has(d.id)); OEKO_DEFAULTS.departments.forEach(d => { if (!s.departments.find(x => x.id === d.id)) s.departments.push(clone(d)); });
-      if (!saved) { s.shifts = clone(OEKO_DEFAULTS.shifts); s.leaveTypes = clone(OEKO_DEFAULTS.leaveTypes); s.policy = Object.assign({}, s.policy || {}, clone(OEKO_DEFAULTS.policy)); s.regulation = clone(OEKO_DEFAULTS.regulation); s.trades = OEKO_DEFAULTS.trades.slice(); s.company = NAME; s.brands = clone(OEKO_DEFAULTS.brands); s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); }
+      if (!saved) { s.shifts = clone(OEKO_DEFAULTS.shifts); s.leaveTypes = clone(OEKO_DEFAULTS.leaveTypes); s.policy = Object.assign({}, s.policy || {}, clone(OEKO_DEFAULTS.policy)); s.regulation = clone(OEKO_DEFAULTS.regulation); s.trades = OEKO_DEFAULTS.trades.slice(); s.company = NAME; s.ownerName = 'د. طارق صبحي'; s.brands = clone(OEKO_DEFAULTS.brands); s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); }
       else { s.stuLogin = Object.assign({}, clone(OEKO_DEFAULTS.stuLogin), s.stuLogin || {}); if (!Array.isArray(s.stuLogin.stills) || s.stuLogin.stills.length <= 1) { s.stuLogin.stills = STILLS.slice(); s.stuLogin.poster = STILLS[0]; } if (!s.stuLogin.logo || /brand\/(full|lockup)(-dark)?\.png$/.test(String(s.stuLogin.logo))) s.stuLogin.logo = IMG.icon; if (!(s.regulation && s.regulation.text) || /Ninety|نينتي/.test(s.regulation.title || '')) s.regulation = clone(OEKO_DEFAULTS.regulation); }
       return s;
     })(mergeSettings);
@@ -394,14 +394,60 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
   const unhub = () => { if (document.getElementById('nhome') && typeof render === 'function') { try { render(true); } catch (e) { /* ignore */ } } };
   setTimeout(unhub, 0); setTimeout(unhub, 400); document.addEventListener('nf:ready', () => setTimeout(unhub, 50)); document.addEventListener('nf:login', () => setTimeout(unhub, 50));
   /* landscape stages instead of the ArchViz stages (the PM module reads its stage list from settings when present) */
-  const STAGES = [
-    { id: 'concept', name: 'Concept Design', ar: 'التصور المبدئي', pct: 15 },
-    { id: 'schem', name: 'Schematic Design', ar: 'التصميم التمهيدي', pct: 20 },
-    { id: 'dd', name: 'Design Development', ar: 'تطوير التصميم', pct: 25 },
-    { id: 'tender', name: 'Tender / Detailed Drawings', ar: 'رسومات تنفيذية ومستندات طرح (سوفت سكيب · هارد سكيب · ري · إضاءة)', pct: 30 },
-    { id: 'boq', name: 'BOQ & Specifications', ar: 'المقايسة والمواصفات', pct: 5 },
-    { id: 'super', name: 'Site Supervision', ar: 'الإشراف على التنفيذ', pct: 5 },
+  /* the office pipeline — RIBA Plan of Work 2020 / Landscape Institute stages mapped to the office's seven, each with its steps and approval gate */
+  const PIPELINE = [
+    { id: 'data', name: 'Inception & Site Analysis', ar: 'البداية وتحليل الموقع', pct: 5, riba: 'RIBA 0–1', gate: ['التيم ليدر', 'Team lead'], items: [
+      ['اجتماع البريف: متطلبات العميل والميزانية والبرنامج الزمني والتعاقد', 'Client brief, requirements, budget, schedule and contract kick-off'],
+      ['زيارة الموقع ورفع مساحي (توبوغرافي · أشجار قائمة · مياه) وتصوير', 'Site visit, topographic survey (existing trees · water) and photo record'],
+      ['تحليل الموقع: مناخ · تربة · مياه · مناسيب · رؤى · حركة', 'Site analysis: climate · soil · water · levels · views · circulation'],
+      ['مراجعة الاشتراطات والكود المحلي', 'Local regulations and code review'],
+      ['تقرير تحليل الموقع — الفرص والمحددات', 'Site analysis report — opportunities & constraints'],
+      ['برنامج المتطلبات وجدول المشروع', 'Program of requirements and project schedule']] },
+    { id: 'concept', name: 'Concept Design', ar: 'التصور المبدئي', pct: 15, riba: 'RIBA 2', gate: ['مدير التصميم ← د. طارق ← العميل', 'Design Manager → Dr. Tarek → Client'], items: [
+      ['السرد التصميمي والمراجع (Mood board)', 'Design narrative and references (mood board)'],
+      ['زوننج وماستر بلان مبدئي', 'Preliminary master plan and zoning'],
+      ['المحاور والحركة والمداخل', 'Axes, circulation and entrances'],
+      ['باليتة مبدئية للخامات والنباتات', 'Preliminary materials and plant palette'],
+      ['اسكتشات / لقطات 3D', 'Concept sketches / 3D views'],
+      ['عرض الكونسبت واعتماد العميل', 'Concept presentation and client approval']] },
+    { id: 'schem', name: 'Schematic Design', ar: 'التصميم التمهيدي', pct: 20, riba: 'RIBA 2', gate: ['مدير التصميم ← العميل', 'Design Manager → Client'], items: [
+      ['ماستر بلان بالأبعاد', 'Dimensioned master plan'],
+      ['مخططات مبدئية للهاردسكيب والسوفت سكيب', 'Preliminary hardscape and softscape plans'],
+      ['عناصر المياه والإضاءة والإشارات (مبدئي)', 'Water features, lighting and signage (preliminary)'],
+      ['شبكة ري مبدئية وحساب الاحتياج المائي', 'Preliminary irrigation layout and water demand'],
+      ['قايمة نباتات مبدئية', 'Preliminary plant list (plant palette)'],
+      ['كميات ومساحات مبدئية', 'Preliminary quantities / area schedule'],
+      ['اعتماد التصميم التمهيدي', 'Schematic design approval']] },
+    { id: 'dd', name: 'Design Development', ar: 'تطوير التصميم', pct: 25, riba: 'RIBA 3', gate: ['التيم ليدر ← مدير التصميم', 'Team lead → Design Manager'], items: [
+      ['تفاصيل الهاردسكيب: أرضيات · حوائط · درج · فرش خارجي', 'Hardscape details: paving · walls · steps · outdoor furniture'],
+      ['مخطط زراعة تفصيلي وجداول النباتات', 'Detailed planting plan and plant schedules'],
+      ['تصميم ري تفصيلي (شبكات · محابس · كنترولر)', 'Detailed irrigation design (networks · valves · controllers)'],
+      ['إضاءة وعناصر مياه تفصيلي', 'Detailed lighting and water-feature design'],
+      ['أعمال فنية ومنحوتات وإشارات', 'Artwork, sculpture and signage selection'],
+      ['تنسيق مع الاستشاريين (معماري · إنشائي · MEP)', 'Coordination with consultants (architect · structural · MEP)'],
+      ['اعتماد تطوير التصميم', 'Design development approval']] },
+    { id: 'tender', name: 'Construction Documents & Tender (IFC)', ar: 'الرسومات التنفيذية ومستندات الطرح', pct: 25, riba: 'RIBA 4', gate: ['المكتب الفني ← مدير التصميم', 'Technical Office → Design Manager'], items: [
+      ['رسومات تنفيذية كاملة (IFC) لكل التخصصات', 'Full construction drawings (IFC) for all disciplines'],
+      ['تفاصيل الإنشاء', 'Construction details'],
+      ['المواصفات الفنية', 'Technical specifications'],
+      ['المقايسة (BOQ)', 'Bill of quantities (BOQ)'],
+      ['مستندات الطرح والرد على استفسارات المقاولين', 'Tender documents and contractor queries'],
+      ['مراجعة QA/QC قبل الإصدار', 'QA/QC review before issue']] },
+    { id: 'super', name: 'Site Supervision', ar: 'الإشراف على التنفيذ', pct: 5, riba: 'RIBA 5', gate: ['مهندس الموقع ← التيم ليدر', 'Site engineer → Team lead'], items: [
+      ['زيارات دورية وتقارير موقع', 'Periodic site visits and site reports'],
+      ['اعتماد العينات والخامات والنباتات (Submittals)', 'Samples, materials and plant approvals (submittals)'],
+      ['الرد على RFIs واعتماد الشوب دروينج', 'RFI responses and shop-drawing approvals'],
+      ['متابعة أعمال الري والزراعة والإضاءة', 'Follow-up of irrigation, planting and lighting works'],
+      ['قايمة الملاحظات والتسليم الابتدائي', 'Snag list and initial handover']] },
+    { id: 'delivered', name: 'Handover & Maintenance', ar: 'التسليم والصيانة', pct: 5, riba: 'RIBA 6–7', gate: ['د. طارق ← العميل', 'Dr. Tarek → Client'], items: [
+      ['التسليم النهائي وشهادة الاستلام', 'Final handover and acceptance certificate'],
+      ['دليل التشغيل والصيانة (O&M)', 'Operation & maintenance manual'],
+      ['رسومات As-built', 'As-built drawings'],
+      ['برنامج صيانة وسنة ضمان العيوب', 'Maintenance program and defects-liability year'],
+      ['توثيق المشروع بالتصوير للمعرض', 'Project documentation (photography) for the gallery']] },
   ];
+  window.OEKO_PIPELINE = PIPELINE;
+  const STAGES = PIPELINE.map(st => ({ id: st.id, name: st.name, ar: st.ar, pct: st.pct }));
   if (typeof DEFAULT_SETTINGS === 'object') DEFAULT_SETTINGS.pmStages = STAGES;
   if (typeof PM_STAGES !== 'undefined' && Array.isArray(PM_STAGES)) { PM_STAGES.length = 0; STAGES.forEach(s => PM_STAGES.push(s)); }
   if (typeof STU_STAGES !== 'undefined' && Array.isArray(STU_STAGES)) { STU_STAGES.length = 0; STAGES.forEach(s => STU_STAGES.push(s)); }
@@ -616,6 +662,8 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
       ${missing ? `<button type="button" class="btn" data-action="oekoImportTeam">${icon('plus')} ${L('إضافة الفريق من الملف', 'Add the team from the file')}</button>` : ''}
       <p class="small" style="margin-top:12px">${L(`قائمة مشاريع 2026 فيها ${PROJECTS_2026.length} مشروع بمسؤوليها — الموجود منهم في «المشاريع»: ${PROJECTS_2026.filter(([nm]) => list('projects').some(p => String(p.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') === nm.toLowerCase().replace(/[^a-z0-9]/g, ''))).length}.`, `The 2026 projects list has ${PROJECTS_2026.length} projects with their leads — already in «Projects»: ${PROJECTS_2026.filter(([nm]) => list('projects').some(p => String(p.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') === nm.toLowerCase().replace(/[^a-z0-9]/g, ''))).length}.`)}</p>
       <button type="button" class="btn" data-action="oekoImportProjects">${icon('plus')} ${L('إضافة مشاريع 2026 من القائمة', 'Add the 2026 projects from the list')}</button>
+      <p class="small" style="margin-top:12px">${L('مشروع تجريبي للشرح', 'Demo project for training')} — ${L('مشروع كامل بمراحله وخطواته ومخرجاته ولوحة مهامه، علشان تشرح للفريق إزاي الدنيا بتمشي.', 'a complete project with its stages, steps, deliverables and task board, to walk the team through how things run.')}</p>
+      ${list('projects').some(p => p.code === 'OK-DEMO') ? `<button type="button" class="btn" data-action="oekoDemo">${icon('layers')} ${L('افتح المشروع التجريبي', 'Open the demo project')}</button> <button type="button" class="btn ghost" data-action="oekoDemoDelete">${L('حذف المشروع التجريبي', 'Delete the demo project')}</button>` : `<button type="button" class="btn p" data-action="oekoDemo">${icon('plus')} ${L('إنشاء مشروع تجريبي', 'Create the demo project')}</button>`}
       <div class="oko-team" style="margin-top:12px">${Object.keys(TEAMS).map(t => `<div class="p"><i>${esc(t.replace(/^Team /, '').slice(0, 2))}</i><div><b>${esc(t)}</b><small>${TEAMS[t].length ? TEAMS[t].slice(0, 3).join(' · ') + (TEAMS[t].length > 3 ? ' …' : '') : L('الأعضاء يتحددوا من الشاشة', 'members assigned from the screen')}</small></div></div>`).join('')}</div></div>
       <div class="card"><h3>${L('الحضور حسب نمط العمل', 'Attendance by work mode')}</h3>
       <table class="tbl"><thead><tr><th>${L('النمط', 'Mode')}</th><th>${L('البصمة', 'Punch')}</th><th>${L('المواعيد', 'Hours')}</th></tr></thead><tbody>
@@ -727,7 +775,7 @@ html[data-theme="dark"] .spcard .cov.okdev,html[data-theme="dark"] .sphead .cov.
      · the shot gates become deliverable gates (ids kept: the engine's logic reads them)
      · wording: shots → deliverables, Artist → responsible, Art Director → design manager */
   if (Array.isArray(window.OS_STATUSES)) {
-    const list = [{ id: 'data', en: 'Site Survey & Data', ar: 'استلام الداتا ورفع الموقع' }].concat(STAGES.map(st => ({ id: st.id, en: st.name, ar: st.ar.split(' (')[0] })), [{ id: 'delivered', en: 'Handover', ar: 'التسليم' }, { id: 'closed', en: 'Closed', ar: 'اتقفل' }]);
+    const list = PIPELINE.map(st => ({ id: st.id, en: st.name, ar: st.ar })).concat([{ id: 'closed', en: 'Closed', ar: 'اتقفل' }]);
     OS_STATUSES.length = 0; list.forEach(x => OS_STATUSES.push(x));
   }
   if (Array.isArray(window.OS_GATES)) {
@@ -744,13 +792,97 @@ html[data-theme="dark"] .spcard .cov.okdev,html[data-theme="dark"] .sphead .cov.
       (async () => { for (const p of ps) await Store.update('projects', p.id, { osStatus: p.stage, flow: p.flow || 'os' }); await Store.saveSettings(Object.assign({}, S.settings, { oekoOsSynced: true })); })().catch(() => { });
     } catch (e) { /* ignore */ }
   });
-  const OS_WORDS = [['Deliverables schedule — Deliverables', 'Deliverables schedule'], ['Master Schedule — Shots', 'Deliverables schedule'], ['الـMaster Schedule — اللقطات', 'جدول التسليمات'], ['لقطات', 'مخرجات'], ['Master Schedule — shots', 'Deliverables schedule'], ['Master Schedule', 'جدول التسليمات'], ['اللقطات', 'المخرجات'], ['اللقطة', 'المخرج'], ['لقطة جديدة', 'مخرج جديد'], ['لقطة', 'مخرج'], ['Shots', 'Deliverables'], ['shots', 'deliverables'], ['shot', 'deliverable'], ['Artist', 'المسؤول'], ['Project Owner', 'Project Manager'], ['الآرت دايركتور', 'مدير التصميم'], ['Art Director', 'Design Manager'], ['الـOwner والموعد', 'المدير والموعد'], ['Owner & deadline', 'Manager & deadline'], ['Owner:', 'PM:'], ['Composition → Lighting → Detailing + AI → Final Post', 'Drafting → Team lead review → Design manager review → Issued'], ['الكومبوزيشن → الإضاءة → التفاصيل + AI → البوست النهائي', 'الرسم → مراجعة التيم ليدر → مراجعة مدير التصميم → الإصدار'], ['تشغيل المشروع', 'إدارة المشروع']];
+  const OS_WORDS = [['Deliverables schedule — Deliverables', 'Deliverables schedule'], ['Master Schedule — Shots', 'Deliverables schedule'], ['الـMaster Schedule — اللقطات', 'جدول التسليمات'], ['لقطات', 'مخرجات'], ['Master Schedule — shots', 'Deliverables schedule'], ['Master Schedule', 'جدول التسليمات'], ['اللقطات', 'المخرجات'], ['اللقطة', 'المخرج'], ['لقطة جديدة', 'مخرج جديد'], ['لقطة', 'مخرج'], ['Shots', 'Deliverables'], ['shots', 'deliverables'], ['shot', 'deliverable'], ['Artist', 'المسؤول'], ['Project Owner', 'Project Manager'], ['الآرت دايركتور', 'مدير التصميم'], ['Art Director', 'Design Manager'], ['الـOwner والموعد', 'المدير والموعد'], ['Owner & deadline', 'Manager & deadline'], ['Owner:', 'PM:'], ['Composition → Lighting → Detailing + AI → Final Post', 'Drafting → Team lead review → Design manager review → Issued'], ['الكومبوزيشن → الإضاءة → التفاصيل + AI → البوست النهائي', 'الرسم → مراجعة التيم ليدر → مراجعة مدير التصميم → الإصدار'], ['تشغيل المشروع', 'إدارة المشروع'], ['(مرحلة Render)', '(مرحلة الرسومات التنفيذية)'], ['(Render stage)', '(construction documents stage)'], ['مرحلة Render', 'مرحلة الرسومات التنفيذية'], ['Render stage', 'construction documents stage']];
   const OS_HINT_AR = 'ضيف مخرجات المشروع (لوحات · تقارير · مقايسات): كل مخرج بيعدي الرسم ← مراجعة التيم ليدر ← مراجعة مدير التصميم ← الإصدار، وكل مرحلة محتاجة اعتماد.', OS_HINT_EN = 'Add the project deliverables (drawings · reports · BOQs): each one goes Drafting → Team lead review → Design manager review → Issued, and every gate needs approval.';
-  const osWord = h => { if (typeof h !== 'string') return h; h = h.replace(/ضيف لقطات المشروع[^<]{0,200}?اعتماد\./g, () => en() ? OS_HINT_EN : OS_HINT_AR).replace(/Add the project shots[^<]{0,200}?approval\./g, () => en() ? OS_HINT_EN : OS_HINT_AR); OS_WORDS.forEach(([a, b]) => { h = h.split(a).join(b); }); return h; };
+  const osWord = h => { if (typeof h !== 'string') return h; h = h.replace(/ضيف لقطات المشروع[^<]{0,200}?اعتماد\./g, () => en() ? OS_HINT_EN : OS_HINT_AR).replace(/Add the project shots[^<]{0,200}?approval\./g, () => en() ? OS_HINT_EN : OS_HINT_AR).replace(/(اللقطات|المخرجات)\s+\S+\s+لمهام[^<]{0,200}?\)\./g, () => en() ? 'The deliverables moved to the project tasks — tracking and approvals now happen on the task board (construction documents stage).' : 'المخرجات اتنقلت لمهام المشروع — المتابعة والاعتمادات بقت من لوحة المهام (مرحلة الرسومات التنفيذية).'); OS_WORDS.forEach(([a, b]) => { h = h.split(a).join(b); }); return h; };
   if (typeof vProjects === 'function') vProjects = (base => function () { const h = base.apply(this, arguments); return S.route && S.route.id ? osWord(h) : h; })(vProjects);
   if (EXTRA_TITLES && EXTRA_TITLES.projects) EXTRA_TITLES.projects = (base => function () { const t = base.apply(this, arguments); if (t && t.sub) t.sub = osWord(t.sub); return t; })(EXTRA_TITLES.projects);
   Object.assign(OEKO_I18N, { 'استلام الداتا ورفع الموقع': 'Site Survey & Data', 'التسليم': 'Handover', 'الرسم': 'Drafting', 'مراجعة التيم ليدر': 'Team Lead Review', 'مراجعة مدير التصميم': 'Design Manager Review', 'إصدار': 'Issued', 'جدول التسليمات': 'Deliverables schedule', 'المخرجات': 'Deliverables', 'المخرج': 'Deliverable', 'مخرج': 'Deliverable', 'مخرج جديد': 'New deliverable', 'المسؤول': 'Responsible', 'المدير والموعد': 'Manager & deadline', 'إدارة المشروع': 'Project operations' });
   Object.assign(OEKO_I18N, { 'لاند سكيب — تصميم كامل': 'Landscape — Full design', 'من رفع الموقع والكونسبت لحد مستندات الطرح والإشراف — مراحل المكتب السبعة.': "From site survey and concept to tender documents and supervision — the office's seven stages.", 'لاند سكيب — كونسبت وتمهيدي': 'Landscape — Concept & schematic', 'رفع الموقع، الكونسبت والتصميم التمهيدي لحد اعتماد العميل.': 'Site survey, concept and schematic design up to client approval.', 'لاند سكيب — رسومات تنفيذية ومستندات طرح': 'Landscape — Tender package', 'تطوير التصميم، الرسومات التنفيذية (هارد سكيب · سوفت سكيب · ري · إضاءة) والمقايسة.': 'Design development, detailed drawings (hardscape · softscape · irrigation · lighting) and the BOQ.', 'إشراف على التنفيذ': 'Site supervision', 'اعتماد الشوب دروينج والعينات، زيارات الموقع والتقارير، واستلام الزراعة.': 'Shop drawing and sample approvals, site visits and reports, planting handover.', 'ميدان / شارع': 'Roundabout / street', 'مشروع صغير سريع: رفع، كونسبت، رسومات تنفيذية وإشراف.': 'A small fast project: survey, concept, detailed drawings and supervision.' });
+
+  /* ---------------------------------------------------------------- the stage steps on the project page (checklist per stage, approval gate) */
+  document.head.insertAdjacentHTML('beforeend', `<style id="oeko-pipe">
+.okpipe{margin-top:14px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:var(--surface)}
+.okpipe .okph{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.okpipe .okph b{font-size:14px}.okpipe .okph .okn{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent)}.okpipe .okph small{color:var(--muted)}
+.okpipe .okbar{height:6px;border-radius:999px;background:var(--line);overflow:hidden;margin:4px 0 10px}.okpipe .okbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .3s}
+.okstep{display:flex;gap:10px;align-items:flex-start;padding:7px 4px;border-top:1px solid var(--line);font-size:13.5px;cursor:pointer}.okstep:first-of-type{border-top:0}.okstep input{margin-top:3px;accent-color:var(--accent)}.okstep.done span{color:var(--muted);text-decoration:line-through}
+.okpipe details{margin-top:10px}.okpipe summary{cursor:pointer;color:var(--muted);font-size:12.5px}.okpipe .okall{display:grid;gap:8px;margin-top:8px}.okpipe .okall>div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}.okpipe .okall b{display:block;margin-bottom:2px}.okpipe .okall .ok{color:var(--good-ink,#3f7a12)}.okpipe .okall small{color:var(--muted)}
+.okgate{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--muted)}</style>`);
+  const stepsDone = (p, id) => Array.isArray((p.okSteps || {})[id]) ? p.okSteps[id] : [];
+  const stageOf = p => PIPELINE.find(st => st.id === (p.osStatus || p.stage)) || PIPELINE[0];
+  const pipeHTML = p => {
+    const st = stageOf(p); const done = stepsDone(p, st.id); const can = typeof stuCanEdit === 'function' && stuCanEdit();
+    const row = (it, i) => `<label class="okstep ${done.includes(i) ? 'done' : ''}"><input type="checkbox" data-okstep="${p.id}:${st.id}:${i}" ${done.includes(i) ? 'checked' : ''} ${can ? '' : 'disabled'}><span>${esc(L(it[0], it[1]))}</span></label>`;
+    const all = PIPELINE.map(x => { const d = stepsDone(p, x.id).length, n = x.items.length; return `<div><b>${esc(L(x.ar, x.name))} <small>· ${x.riba}</small> <span class="${d === n ? 'ok' : ''}" style="float:inline-end">${d}/${n}</span></b><small>${esc(L('الاعتماد', 'Gate'))}: ${esc(L(x.gate[0], x.gate[1]))}</small></div>`; }).join('');
+    return `<div class="okpipe"><div class="okph"><b>${esc(L('خطوات المرحلة', 'Stage steps'))} — ${esc(L(st.ar, st.name))}</b><span class="okn">${done.length}/${st.items.length}</span><small>${st.riba}</small><div class="grow"></div><span class="okgate">${esc(L('الاعتماد', 'Approval gate'))}: ${esc(L(st.gate[0], st.gate[1]))}</span></div>
+      <div class="okbar"><i style="width:${Math.round(done.length / st.items.length * 100)}%"></i></div>${st.items.map(row).join('')}
+      <details><summary>${esc(L('كل مراحل المشروع السبعة', 'All seven project stages'))}</summary><div class="okall">${all}</div></details></div>`;
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (!(S.route && S.route.view === 'projects' && S.route.id)) return; const p = byId('projects', S.route.id); if (!p) return;
+    const flow = document.querySelector('.osp .osflow'); if (!flow || flow.parentElement.querySelector('.okpipe')) return;
+    flow.insertAdjacentHTML('afterend', pipeHTML(p));
+  });
+  document.addEventListener('change', async ev => {
+    const el = ev.target.closest && ev.target.closest('[data-okstep]'); if (!el) return;
+    const [pid, sid, idx] = el.dataset.okstep.split(':'); const p = byId('projects', pid); if (!p || !(typeof stuCanEdit === 'function' && stuCanEdit())) return;
+    const cur = new Set(stepsDone(p, sid)); if (el.checked) cur.add(+idx); else cur.delete(+idx);
+    const okSteps = Object.assign({}, p.okSteps || {}, { [sid]: Array.from(cur).sort((a, b) => a - b) });
+    const log = (p.okLog || []).concat([{ at: nowISO(), by: S.session && S.session.id, stage: sid, step: +idx, on: !!el.checked }]).slice(-200);
+    await Store.update('projects', pid, { okSteps, okLog: log });
+  });
+
+  /* ---------------------------------------------------------------- a demo project to explain the system (stages · steps · deliverables · task board) */
+  const DEMO_NAME = 'مشروع تجريبي — حديقة كمبوند (Demo)';
+  const demoProject = () => list('projects').find(p => p.code === 'OK-DEMO');
+  ACTIONS.oekoDemo = async () => {
+    if (demoProject()) { if (typeof go === 'function') go('projects/' + demoProject().id); return; }
+    if (!(await confirmDlg(L('إنشاء مشروع تجريبي كامل (مراحل وخطوات ومخرجات ولوحة مهام) علشان الشرح؟', 'Create a complete demo project (stages, steps, deliverables and a task board) for training?'), L('إنشاء', 'Create')))) return;
+    const ws = list('workers').filter(w => w.active !== false); if (!ws.length) { toast(L('ضيف الفريق الأول', 'Add the team first'), 'err'); return; }
+    const pick = re => ws.find(w => re.test(w.name || '')) || null;
+    const lead = pick(/Samah|سماح/) || ws[0]; const team = [lead, pick(/Asmaa|أسماء/), pick(/Haidy|هايدي/), pick(/Dalia|داليا/), pick(/Maria|ماريا/)].filter(Boolean).filter((w, i, a) => a.indexOf(w) === i).slice(0, 5);
+    const tid = team.map(w => w.id); const today = todayISO(); const pid = uid(); const me = S.session && S.session.id;
+    const steps = { data: [0, 1, 2, 3, 4, 5], concept: [0, 1, 2, 3, 4, 5], schem: [0, 1, 2, 3, 4, 5, 6], dd: [0, 1, 2] };
+    await Store.save('projects', { id: pid, name: DEMO_NAME, code: 'OK-DEMO', client: 'Demo Developer', stage: 'dd', osStatus: 'dd', flow: 'os', camReq: 'opt', ownerId: lead.id, leadId: lead.id, team: tid, area: 42000, dueDate: addDays(today, 75), clientDeadline: addDays(today, 75), okSteps: steps, status: 'active', createdAt: nowISO(),
+      desc: L('مشروع للشرح والتدريب: حديقة مركزية لكمبوند سكني 4.2 فدان — بحيرة، ممشى، ملاعب أطفال، مناطق جلوس وزراعة محلية. المشروع في مرحلة تطوير التصميم؛ الكونسبت والتمهيدي معتمدين من العميل.', 'A training project: the central park of a residential compound (4.2 feddan) — lake, promenade, playgrounds, seating and native planting. In Design Development; concept and schematic approved by the client.') });
+    try { if (typeof stuEnsureBoards === 'function') await stuEnsureBoards(pid); } catch (e) { /* ignore */ }
+    const at = d => new Date(Date.now() + d * 864e5).toISOString();
+    const dl = (code, name, assignee, gate, state, extra) => Object.assign({ id: uid(), projectId: pid, code, name, kind: 'still', assigneeId: assignee ? assignee.id : null, gate, state, log: [], createdAt: at(-40), createdBy: me, updatedAt: nowISO() }, extra || {});
+    const dls = [
+      dl('L-001', L('تقرير تحليل الموقع', 'Site analysis report'), team[1] || lead, 'post', 'done', { doneAt: at(-34) }),
+      dl('L-101', L('ماستر بلان الكونسبت', 'Concept master plan'), lead, 'post', 'done', { doneAt: at(-22) }),
+      dl('L-201', L('ماستر بلان تمهيدي بالأبعاد', 'Schematic master plan (dimensioned)'), team[2] || lead, 'post', 'done', { doneAt: at(-9) }),
+      dl('L-301', L('حزمة تفاصيل الهاردسكيب', 'Hardscape details package'), team[1] || lead, 'detail', 'ad', { submittedAt: at(-2), ok1At: at(-1), due: addDays(today, 6) }),
+      dl('L-302', L('مخطط الزراعة وجداول النباتات', 'Planting plan & plant schedule'), team[3] || lead, 'light', 'owner', { submittedAt: at(-0.3), due: addDays(today, 9) }),
+      dl('L-303', L('تصميم الري التفصيلي', 'Detailed irrigation design'), team[4] || team[0], 'comp', 'work', { due: addDays(today, 14) }),
+    ];
+    for (const d of dls) await Store.save('shots', d);
+    const tasks = [
+      [L('تنسيق مناسيب الممشى مع المعماري', 'Coordinate promenade levels with the architect'), lead, 'doing', 3, 'high'],
+      [L('اعتماد عينات بلاط الهاردسكيب من العميل', 'Client approval of hardscape paving samples'), team[1] || lead, 'open', 7, 'normal'],
+      [L('حساب الاحتياج المائي للبحيرة والري', 'Water demand calculation (lake + irrigation)'), team[4] || team[0], 'open', 10, 'normal'],
+    ];
+    for (const [title, w, status, due, pri] of tasks) await Store.save('tasks', { id: uid(), title, projectId: pid, assigneeId: w.id, status, dueDate: addDays(today, due), priority: pri, kind: 'task', createdBy: me, createdAt: nowISO() });
+    try {
+      if (typeof pmBuildBoard === 'function') {
+        await pmBuildBoard(pid, 'full', { start: addDays(today, -45), allowed: 2 });
+        const ts = list('pmtasks').filter(t => t.boardId === pid).sort((a, b) => String(a.start).localeCompare(String(b.start)));
+        for (let i = 0; i < ts.length; i++) { try { await Store.save('pmtasks', Object.assign({}, ts[i], { owner: tid[i % tid.length] }), { silent: true }); } catch (e) { /* ignore */ } }
+        for (const t of ts.slice(0, 14)) { try { await pmSetStatus(t.id, 'done'); } catch (e) { /* ignore */ } }
+        for (const t of ts.slice(14, 16)) { try { await pmSetStatus(t.id, 'work'); } catch (e) { /* ignore */ } }
+      }
+    } catch (e) { console.warn('demo board', e); }
+    toast(L('المشروع التجريبي جاهز ✓', 'Demo project ready ✓')); if (typeof go === 'function') go('projects/' + pid); else render();
+  };
+  ACTIONS.oekoDemoDelete = async () => {
+    const p = demoProject(); if (!p) return; if (!(await confirmDlg(L('حذف المشروع التجريبي وكل اللي عليه؟', 'Delete the demo project and everything on it?'), L('حذف', 'Delete')))) return;
+    const pid = p.id;
+    for (const [col, key] of [['shots', 'projectId'], ['tasks', 'projectId'], ['pmtasks', 'boardId'], ['pmnotifs', 'boardId'], ['bitems', 'projectId'], ['boards', 'projectId']]) for (const d of list(col).filter(x => x[key] === pid)) { try { await Store.remove(col, d.id); } catch (e) { /* ignore */ } }
+    for (const col of ['pmboards', 'pmfin']) { if (byId(col, pid)) { try { await Store.remove(col, pid); } catch (e) { /* ignore */ } } }
+    try { await Store.remove('projects', pid); } catch (e) { /* ignore */ }
+    toast(L('اتمسح', 'Deleted')); if (typeof go === 'function') go('projects'); else render();
+  };
+  Object.assign(OEKO_I18N, { 'المخرجات انتقلت لمهام المشروع — المتابعة والاعتمادات بقت من لوحة المهام (مرحلة الرسومات التنفيذية).': 'The deliverables moved to the project tasks — tracking and approvals now happen on the task board (construction documents stage).', 'خطوات المرحلة': 'Stage steps', 'الاعتماد': 'Approval gate', 'كل مراحل المشروع السبعة': 'All seven project stages', 'مشروع تجريبي للشرح': 'Demo project for training', 'إنشاء مشروع تجريبي': 'Create the demo project', 'افتح المشروع التجريبي': 'Open the demo project', 'حذف المشروع التجريبي': 'Delete the demo project' });
   window.OEKO_I18N = OEKO_I18N;
   const oekoI18nApply = () => { try { if (!I18N || !I18N.exact) return; const norm = typeof i18nNorm === 'function' ? i18nNorm : (x => String(x).trim()); Object.keys(OEKO_I18N).forEach(k => { I18N.exact.set(norm(k), OEKO_I18N[k]); }); } catch (e) { /* ignore */ } };
   if (typeof i18nCompile === 'function') i18nCompile = (base => function () { const r = base.apply(this, arguments); oekoI18nApply(); return r; })(i18nCompile);

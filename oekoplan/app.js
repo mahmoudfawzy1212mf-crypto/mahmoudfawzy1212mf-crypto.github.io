@@ -6747,7 +6747,7 @@ Object.assign(VIEW_TITLES, { kpi: 'مؤشرات الأداء', help: 'شرح ا�
    v4.5 — الهيكل: المدير المباشر لكل موظف (من الوظائف الأعلى فقط، تعبئة
    تلقائية حسب الهيكل) · لوكيشن المكتب كموقع بصمة مستقل · اسم المالك «محمود»
    ===================================================================== */
-const OWNER_NAME = () => (S.settings.ownerName || '').trim() || 'محمود';
+const OWNER_NAME = () => (S.settings.ownerName || '').trim() || 'د. طارق صبحي';
 const ROLE_RANK = { admin: 0, vice: 1, hr: 2, manager: 2, bdd: 2, acc: 3, purch: 3, store: 3, fleet: 3, tech: 3, office: 3, head: 3, driver: 4, employee: 5, none: 5, viewer: 6, kiosk: 9 };
 const roleRank = r => ROLE_RANK[r || 'none'] ?? 5;
 /* the owner as a manager reference (workers/staff may not have an admin record; the token role:admin always resolves) */
@@ -20366,8 +20366,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     });
     b.rules = defaultRules(b.groups);
     // Studio OS shots → tasks in the Render stage (their 4 approval gates become subitems)
-    const rg = b.groups.find(g => /render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];
-    const GATES = [['comp', 'Composition'], ['light', 'Concept lighting'], ['detail', 'Detailing + AI'], ['post', 'Final post']];
+    const rg = b.groups.find(g => /tender|construction|detailed|render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];
+    const GATES = [['comp', 'Drafting'], ['light', 'Team lead review'], ['detail', 'Design manager review'], ['post', 'Issued']];
     list('shots').filter(s => s.projectId === pid && !s.movedTo).forEach(s => {
       const gi = Math.max(0, GATES.findIndex(g => g[0] === s.gate)); const done = s.state === 'done';
       const it = mkTask(b, rg.id, `${s.code || ''} ${s.name || s.title || 'Shot'}`.trim(), { owner: s.assigneeId || null, status: done ? 'done' : (s.state === 'work' ? 'work' : (['owner', 'ad'].includes(s.state) ? 'int' : 'idle')), progress: done ? 100 : Math.round(gi / 4 * 100), due: (s.due && (s.due[GATES[GATES.length - 1][0]] || s.due.post)) || s.dueDate || null, rev: +s.backs || 0, subs: GATES.map(([k, l], i) => ({ id: uid(), name: l, done: done || i < gi, owner: s.assigneeId || null })), fromShot: s.id });

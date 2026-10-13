@@ -128,6 +128,13 @@ rep('TPL[tk] || TPL.stills', 'TPL[tk] || TPL.full', 1)
 rep("Ökoplan Landscaping — an architectural visualisation & interior design studio in Cairo (modellers, render artists, an art director, video editors).", "Ökoplan Landscaping — a landscape architecture office in Cairo (landscape architects, planting and irrigation designers, a technical office, site engineers).", 1)
 rep("Studio stage vocabulary (reuse when it fits): Brief & survey, Script & storyboard, Concept & mood board, Modeling, Texturing, Lighting, Lighting & animation, Render, Post, Client Review, Delivery.", "Office stage vocabulary (reuse when it fits): Site Survey & Data, Concept Design, Schematic Design, Design Development, Tender / Detailed Drawings, BOQ & Specifications, Site Supervision, Handover.", 1)
 
+# --- the office owner's name everywhere the engine falls back to «محمود» (org chart root, owner labels)
+rep("const OWNER_NAME = () => (S.settings.ownerName || '').trim() || 'محمود';", "const OWNER_NAME = () => (S.settings.ownerName || '').trim() || 'د. طارق صبحي';", 1)
+
+# --- deliverables moved into a task board: landscape gate names + they land in the construction-documents group
+rep("const GATES = [['comp', 'Composition'], ['light', 'Concept lighting'], ['detail', 'Detailing + AI'], ['post', 'Final post']];", "const GATES = [['comp', 'Drafting'], ['light', 'Team lead review'], ['detail', 'Design manager review'], ['post', 'Issued']];", 1)
+rep("const rg = b.groups.find(g => /render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];", "const rg = b.groups.find(g => /tender|construction|detailed|render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];", 1)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
