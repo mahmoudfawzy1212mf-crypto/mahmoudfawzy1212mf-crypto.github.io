@@ -72,6 +72,10 @@ html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 @media (max-width:760px){.smhero .smmark,.smmark{height:36px!important;width:36px!important;border-radius:10px!important;top:14px!important;inset-inline-start:14px!important}}
 /* no avatar badge in the showreel hero (it sat on the logo's corner on phones) — the person is in the side bar */
 .smhero .smav{display:none!important}
+/* the live-attendance dock lives in the side bar on computers (Mahmoud, 13 Oct), above the footer line */
+@media (min-width:1001px){body:not(:has(.oklogin)) .nq-dock{left:auto!important;right:auto!important;inset-inline-start:22px!important;bottom:122px!important;transform:none!important;width:calc(var(--side-w,240px) - 44px);box-sizing:border-box;flex-direction:column;align-items:stretch!important;gap:6px!important;padding:10px!important;border-radius:14px!important;z-index:21!important;box-shadow:none!important}
+  body:not(:has(.oklogin)) .nq-dock .nq-st{justify-content:center}
+  body:not(:has(.oklogin)) .nq-dock button{width:100%;text-align:center}}
 /* ---- day / night surfaces ---- */
 html[data-theme="light"] body{background:#f3f7f5}
 html[data-theme="light"] .topbar{background:#f3f7f5!important}
