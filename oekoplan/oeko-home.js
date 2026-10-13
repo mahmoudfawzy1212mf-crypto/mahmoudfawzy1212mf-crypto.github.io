@@ -5,8 +5,6 @@
      about the office (vision · values · services) → the partners strip (moving logos) → the projects with
      their data → awards · international collaborations → the engine's cards (notice / shot / pulse).
    · «شغل المكتب» (menu): the projects grid + a project page (data + photos + full-screen show).
-   · team photos: the official portraits from the profile — Dr. Tarek's is set automatically; every person picks
-     their own portrait once (first sign-in) and the picture is then locked (the owner / admin changes it).
    Photos: oekoplan/_src/portfolio/<project>/<n>.jpg (computer) · <n>-m.jpg (phone) · <n>-t.jpg (cards).
    Arabic + English (L()). No money anywhere.
    ===================================================================== */
@@ -123,11 +121,6 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 .okpp .more{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 /* «شغل المكتب» page */
 .okpl{display:flex;flex-direction:column;gap:14px}.okpl .head{display:flex;align-items:flex-end;gap:12px}.okpl .head h2{margin:0;font-size:22px;letter-spacing:-.02em}.okpl .head small{color:var(--muted)}
-/* the portrait picker */
-.oktiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;max-height:min(60vh,520px);overflow:auto;padding:2px}
-.oktiles button{border:2px solid transparent;padding:0;border-radius:14px;overflow:hidden;background:none;cursor:pointer;aspect-ratio:1;position:relative;transition:.15s}.oktiles button img{width:100%;height:100%;object-fit:cover;display:block}.oktiles button:hover{transform:scale(1.04);border-color:#38a599}.oktiles button.on{border-color:#38a599;box-shadow:0 0 0 3px #38a59933}
-.oktiles button.used{opacity:.35;cursor:not-allowed}.oktiles button.used::after{content:attr(data-who);position:absolute;inset-inline:0;bottom:0;font-size:9px;background:rgba(0,0,0,.6);color:#fff;padding:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.okpick .me{display:flex;gap:14px;align-items:center;margin-bottom:12px}.okpick .me img{width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid #38a599}.okpick .me .ph{width:72px;height:72px;border-radius:50%;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
 /* phones */
 @media (max-width:1000px){.okpf{grid-template-columns:repeat(2,1fr)}.okaw{grid-template-columns:1fr 1fr}.okabout{grid-template-columns:1fr}.okpp .okgrid{columns:2}}
 @media (max-width:760px){.okmq{height:58px}.okmq.okcb{height:62px}.okstats{grid-template-columns:repeat(2,1fr)}.okst b{font-size:26px}.okpf{grid-template-columns:1fr}.okaw{grid-template-columns:1fr}.okserv{grid-template-columns:repeat(2,1fr)}.okvals{grid-template-columns:repeat(2,1fr)}.okpp .hero{aspect-ratio:4/3;border-radius:18px}.okpp .hero .t{inset-inline:16px;bottom:14px}.okpp .okgrid{columns:1}.okpp .more{grid-template-columns:1fr}.okmq .lg{height:50px;width:112px}.okmq .lg img{width:88px;height:34px}}
@@ -211,56 +204,6 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
   /* count-up for our numbers when the engine's hydrate is not around (it handles .shn inside .stuhome) */
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { document.querySelectorAll('.okh .shn:not(.done)').forEach(el => { if (el.closest('.stuhome')) return; el.classList.add('done'); el.textContent = el.dataset.n; }); });
 
-  /* ---------------------------------------------------------------- team portraits: the official pictures from the profile */
-  const TILES = 40; const tile = n => `${SRC}team/p${String(n).padStart(2, '0')}.jpg`; const OWNER_TILE = 1;
-  const myWorker = () => { try { const r = typeof myRecordRef === 'function' ? myRecordRef() : null; return r && r.col === 'workers' ? r.rec : null; } catch (e) { return null; } };
-  const isAdm = () => typeof isAdmin === 'function' && isAdmin();
-  const usedTiles = () => { const m = new Map(); try { list('workers').forEach(w => { if (w.photoTile) m.set(+w.photoTile, w.name || ''); }); const av = (S.settings && S.settings.avatars) || {}; Object.keys(av).forEach(id => { const t = /team\/p(\d\d)\.jpg/.exec(String(av[id] || '')); if (t) m.set(+t[1], (list('staff').find(s => s.id === id) || {}).name || L('المدير', 'Admin')); }); } catch (e) { /* ignore */ } return m; };
-  async function setPortrait(wid, n) {
-    const url = tile(n);
-    if (wid) await Store.update('workers', wid, { photo: url, photoTile: n, photoLocked: true });
-    else if (typeof saveMyPhoto === 'function') await saveMyPhoto(url);
-    try { sessionStorage.setItem('oeko.photoAsked', '1'); } catch (e) { /* ignore */ }
-    if (typeof closeModal === 'function') closeModal(); if (typeof toast === 'function') toast(L('اتحفظت صورتك', 'Your photo is saved')); if (typeof render === 'function') render(true);
-  }
-  function picker(wid, opts) {
-    const w = wid ? byId('workers', wid) : null; const used = usedTiles(); let cur = w ? (w.photoTile || 0) : 0; const name = w ? w.name : (S.session && S.session.name) || '';
-    const curSrc = w ? w.photo : (typeof myAvatarSrc === 'function' ? myAvatarSrc() : ''); if (!w && curSrc) { const t = /team\/p(\d\d)\.jpg/.exec(String(curSrc)); if (t) cur = +t[1]; }
-    let picked = cur || 0;
-    openModal({ title: L('الصورة الشخصية', 'Profile photo') + (name ? ' — ' + name : ''), sticky: true, size: 'lg',
-      footer: `<button type="button" class="btn" data-action="closemodal">${E(opts && opts.later ? L('بعدين', 'Later') : L('إغلاق', 'Close'))}</button>${isAdm() && opts && opts.upload ? `<button type="button" class="btn ghost" id="okp-upload">${E(L('ارفع صورة من الجهاز', 'Upload a picture instead'))}</button>` : ''}<button type="button" class="btn p" id="okp-save" disabled>${E(L('دي صورتي', 'This is me'))}</button>`,
-      body: `<div class="okpick"><div class="me">${curSrc ? `<img src="${E(curSrc)}" alt="">` : `<div class="ph">${ic('user', 30)}</div>`}<div><b>${E(L('اختار صورتك من صور الفريق', 'Pick your portrait from the team photos'))}</b><div class="muted small">${E(L('الصور الرسمية من بروفايل المكتب. بتتحدد مرة واحدة — لو اتغيرت كلّم الإدارة.', 'The official portraits from the office profile. Chosen once — ask management to change it later.'))}</div></div></div>
-        <div class="oktiles">${Array.from({ length: TILES }, (_, k) => k + 1).map(n => { const who = used.get(n); const mine = n === cur; const taken = !!who && !mine; return `<button type="button" data-okt="${n}" class="${mine ? 'on' : ''}${taken ? ' used' : ''}" ${taken ? `data-who="${E(who)}" disabled` : ''}><img src="${tile(n)}" alt="" loading="lazy"></button>`; }).join('')}</div></div>`,
-      onOpen: f => {
-        const save = f.querySelector('#okp-save');
-        f.querySelectorAll('[data-okt]').forEach(b => b.addEventListener('click', () => { if (b.disabled) return; f.querySelectorAll('[data-okt]').forEach(x => x.classList.remove('on')); b.classList.add('on'); picked = +b.dataset.okt; save.disabled = false; }));
-        save.addEventListener('click', async () => { if (!picked) return; save.disabled = true; try { await setPortrait(wid, picked); } catch (e) { save.disabled = false; toast(L('تعذّر الحفظ', 'Could not save'), 'err'); } });
-        const up = f.querySelector('#okp-upload'); if (up && opts.upload) up.addEventListener('click', () => { closeModal(); opts.upload(); });
-      } });
-  }
-  const locked = () => { if (typeof toast === 'function') toast(L('الصورة الشخصية بتتحدد مرة واحدة من صور الفريق — لتغييرها كلّم الإدارة.', 'The profile photo is set once from the team portraits — ask management to change it.')); };
-  const hookPhotos = () => {
-    if (typeof ACTIONS !== 'object' || ACTIONS.__oekoPhoto) return; ACTIONS.__oekoPhoto = 1;
-    const baseMy = ACTIONS.myPhoto, baseSet = ACTIONS.photoSet;
-    ACTIONS.myPhoto = () => { if (!S.session) return; const w = myWorker(); if (isAdm()) return picker(w ? w.id : null, { upload: baseMy ? () => baseMy() : null }); if (w && w.photo) return locked(); picker(w ? w.id : null); };
-    ACTIONS.photoSet = wid => { if (!isAdm()) return locked(); picker(wid, { upload: baseSet ? () => baseSet(wid) : null }); };
-    ACTIONS.okPickPhoto = () => ACTIONS.myPhoto();
-  };
-  hookPhotos(); document.addEventListener('nf:ready', hookPhotos);
-  /* Dr. Tarek's portrait goes on automatically; everyone else is asked once on the home screen */
-  let asked = false;
-  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
-    if (!S.session || asked || !(S.route && S.route.view === 'dashboard')) return; asked = true;
-    setTimeout(async () => {
-      try {
-        const have = typeof myAvatarSrc === 'function' ? myAvatarSrc() : null; if (have) return;
-        const nm = String(S.session.name || ''); const w = myWorker();
-        if (isAdm() && /طارق|Tarek/i.test(nm)) { await setPortrait(w ? w.id : null, OWNER_TILE); return; }
-        if (w && w.photo) return; let done = ''; try { done = sessionStorage.getItem('oeko.photoAsked') || ''; } catch (e) { /* ignore */ }
-        if (done) return; try { sessionStorage.setItem('oeko.photoAsked', '1'); } catch (e) { /* ignore */ }
-        if (!document.querySelector('.modal, .modalbox')) picker(w ? w.id : null, { later: true });
-      } catch (e) { /* ignore */ }
-    }, 1400);
-  });
-  window.oekoHome = { PROJECTS, OFFICE, picker };
+  /* team photos: the engine's own flow (upload / camera → crop with zoom & move) — everyone sets their own picture (Mahmoud, 13 Oct) */
+  window.oekoHome = { PROJECTS, OFFICE };
 })();
