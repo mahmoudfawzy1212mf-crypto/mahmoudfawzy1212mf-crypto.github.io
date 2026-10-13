@@ -60,7 +60,9 @@ html[data-theme="dark"] .side .userchip{background:rgba(255,255,255,.06)}
 html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
 html[data-theme="dark"] .tb-logo img,html[data-theme="dark"] .brand img{filter:none}
 /* ---- the side bar's top block: logo · person · language/look · view-as/password/sign-out/guide — one width (the menu's), one rhythm ---- */
-.side .brand,html.apple .side .brand{margin:8px 8px 2px!important;padding:6px 0 8px!important;border-bottom:0!important;display:flex;justify-content:center;align-items:center}
+.side .brand,html.apple .side .brand{margin:10px 8px 4px!important;padding:4px 2px 6px!important;border-bottom:0!important;display:flex;justify-content:flex-start;align-items:center}
+.side .brand .brandstack{width:100%}
+.side .brand .wordmark,html.apple .side .brand .wordmark{width:100%!important;height:auto!important;max-height:92px!important;object-fit:contain;object-position:left center}
 .side .userchip,html.apple .side .userchip{margin:0 8px 6px!important;padding:10px 10px!important;border-bottom:0!important;border-radius:12px;background:rgba(255,255,255,.07);display:flex;align-items:center;gap:10px}
 html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 .side .nftogs,html.apple .side .nftogs{margin:0 8px 6px!important;gap:6px!important;display:flex;flex-wrap:nowrap}
