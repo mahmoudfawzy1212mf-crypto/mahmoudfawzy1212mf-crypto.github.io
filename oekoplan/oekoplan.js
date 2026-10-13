@@ -59,7 +59,14 @@ html[data-theme="dark"] body{background:#0b1513}
 html[data-theme="dark"] .topbar{background:#0b1513!important}
 /* no office door / no other companies */
 .side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
-.tb-logo img{border-radius:6px}
+html.apple .tb-logo,.tb-logo{width:auto!important;height:40px;padding:0 4px!important;background:transparent!important;border:0!important;box-shadow:none!important}
+html.apple .tb-logo img,.tb-logo img{filter:none!important;width:auto!important;height:36px!important;border-radius:8px}
+@media (max-width:760px){html.apple .tb-logo img,.tb-logo img{height:32px!important}}
+/* the home hero: Ökoplan colours until the office's own photos are published (no studio stills) */
+.shhero{background:linear-gradient(160deg,#9cdff7 0%,#50b1e7 38%,#38a599 70%,#3ca13c 100%)!important}
+.shhero img.shimg,.shhero img.slstill,.shhero > img{display:none!important}
+.shhero::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#9cdff7 0 28%,transparent 28.1%),linear-gradient(225deg,#92cb4e 0 22%,transparent 22.1%),linear-gradient(45deg,#70b62e 0 26%,transparent 26.1%);opacity:.9}
+html[data-theme="light"] .kpi,html[data-theme="light"] .ahm,html[data-theme="light"] .nfw{background:rgba(255,255,255,.85)!important;color:var(--ink)!important}
 .sptile.ideas .ic{background:#e8f5d9;color:#3f7a12}.sptile.design .ic{background:#dff3f0;color:#1f7a6f}
 /* ---- login ---- */
 .oklogin{min-height:100dvh;display:grid;grid-template-columns:1.1fr .9fr;background:#fff;color:${C.ink}}
@@ -118,7 +125,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     themeLoad();
   }
   /* the wordmark in the side bar / reports: white text version in dark mode */
-  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo').forEach(i => { const want = dark ? IMG.lockupDark : IMG.lockup; if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
+  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo, .tb-logo img').forEach(i => { const inTb = !!i.closest('.tb-logo'); const want = inTb && window.innerWidth <= 760 ? IMG.mark : (dark ? IMG.lockupDark : IMG.lockup); if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
 
   /* ---------------------------------------------------------------- office structure */
   const DEPTS = [
