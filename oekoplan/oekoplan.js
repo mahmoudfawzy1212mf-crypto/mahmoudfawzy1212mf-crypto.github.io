@@ -659,9 +659,15 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
      · anyone who can edit the project sets the picture: upload a photo (kept as a `files` doc → coverFileId, the engine's own field)
        or pick a client logo from the partners list (coverLogo) */
   const PARTNERS = 'l01 l02 l03 l04 l05 l06 l07 l08 l09 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l21 l22 l23 l24 l25 l26 l27 l28 l29 l30 l31 l32 l33 l34 l35 l37 l38 l39 l40 l41 l42 l43 l44 l46 l47 l48 l49 l51 l53 l101 l103 l104 l106 l107 l108 l110 l111 l112 l113 l115 l116'.split(' ');
-  const LOGO_OF = { 'IL MONTE GALALA Phase 2': 'l28', 'D-Bay': 'l01', 'Salt': 'l01', 'Bloomfields Phase 1': 'l01', 'Bloomfields Phase 2': 'l01', 'Fouka-Bay Phase 4': 'l49', 'Icity': 'l34', 'El-Qamzy Eastshire': 'l35', 'Seazen': 'l35', 'Mangroovy': 'l33', 'Skywalk': 'l18', 'Skywalk Oasis': 'l18', 'Estates club house - Sodic': 'l10', 'LMD roundabout': 'l104' };
+  /* developer per project (the office's 2026 list; checked on the web, Oct 2026) — a partner logo when we have the file, else the developer's name */
+  const DEV = { tatweer: ['l01', 'Tatweer Misr'], lmd: ['l104', 'LMD'], mv: ['l34', 'Mountain View'], qamzi: ['l35', 'Al Qamzi Developments'], mangroovy: ['l33', 'Mangroovy'], skywalk: ['l18', 'Skywalk'], sodic: ['l10', 'SODIC'], sabbour: ['l21', 'Al Ahly Sabbour'],
+    atric: ['', 'Atric Developments'], riyadh: ['', 'Al Riyadh Misr'], igi: ['', 'IGI Developments'], shurooq: ['', 'Shurooq'], dubaidev: ['', 'Dubai Developments'], lud: ['', 'LUD'], mda: ['', 'MDA Developments'], misritalia: ['', 'Misr Italia Properties'], hassanallam: ['', 'Hassan Allam Properties'], ezan: ['', 'EZAN Developments'], palmhills: ['', 'Palm Hills Developments'], madaar: ['', 'Madaar Development'], beta: ['', 'Beta Egypt'], jumeirah: ['', 'Jumeirah Egypt'], ndev: ['', 'N Developments'], ilcazar: ['', 'Il Cazar Developments'], marq: ['', 'The Marq Communities'], landmark: ['', 'Landmark Sabbour'], somabay: ['', 'Somabay'], citystars: ['', 'City Stars Properties'], cred: ['', 'Cred'], mostakbal: ['', 'El Mostakbal for Urban Development'], regent: ['', 'Regent Hotels & Resorts'] };
+  const DEV_OF = { 'D-Bay': 'tatweer', 'Salt': 'tatweer', 'Bloomfields Phase 1': 'tatweer', 'Bloomfields Phase 2': 'tatweer', 'Rivers': 'tatweer', 'Fouka-Bay Phase 4': 'tatweer', 'IL MONTE GALALA Phase 2': 'tatweer',
+    'STEI8HT RESIDENTIAL': 'lmd', 'STEI8HT COMMERCIAL': 'lmd', 'One Ninety': 'lmd', 'LMD roundabout': 'lmd', 'Icity': 'mv', 'El-Qamzy Eastshire': 'qamzi', 'Seazen': 'qamzi', 'Mangroovy': 'mangroovy', 'Skywalk': 'skywalk', 'Skywalk Oasis': 'skywalk', 'Estates club house - Sodic': 'sodic', 'Masaya': 'sabbour',
+    'Boardwalk': 'atric', 'Peerage Residence': 'riyadh', 'South Of Gardenia Compound': 'igi', 'AJWAN': 'shurooq', 'LUMIA': 'dubaidev', 'The Rift': 'lud', 'Raville': 'mda', 'Raville 77': 'mda', 'IL BOSCO': 'misritalia', 'SOLARE': 'misritalia', 'SWAN LAKE PARCEL 5': 'hassanallam', 'MEDIAN': 'ezan', 'Palm Hills New Cairo': 'palmhills', 'Azha': 'madaar', 'Beta Egypt': 'beta', 'BETA': 'beta', 'Naia West': 'jumeirah', 'Naia Bay': 'jumeirah', 'Nest': 'ndev', 'Creek Town': 'ilcazar', 'The Marq': 'marq', 'Zoya- North coast': 'landmark', 'Mesca Residence': 'somabay', 'City Stars': 'citystars', 'Ever Roundabout': 'cred', 'EL MOSTAKBAL CITY': 'mostakbal', 'Mostakbal city': 'mostakbal', 'Regent Hotel - Jeddah': 'regent' };
+  const devOf = p => { if (!p) return null; if (p.coverLogo) return [p.coverLogo, '']; const k = DEV_OF[String(p.name || '').trim()]; return k ? DEV[k] : null; };
   const logoSrc = k => BASE + '_src/partners/' + k + '.png';
-  const coverLogo = p => p && (p.coverLogo || LOGO_OF[String(p.name || '').trim()] || '');
+  const coverLogo = p => { const d = devOf(p); return d && d[0] ? d[0] : ''; };
   document.head.insertAdjacentHTML('beforeend', `<style id="oeko-cover">
 .spcard .cov img,.sphead .cov img{filter:grayscale(1);opacity:.9;transition:filter .25s,opacity .25s}
 .spcard:hover .cov img,.sphead:hover .cov img{filter:none;opacity:1}
@@ -671,6 +677,10 @@ html[data-theme="dark"] .spcard .cov.oklogo,html[data-theme="dark"] .sphead .cov
 .spcard:hover .cov.oklogo img{filter:none;opacity:1}
 .spcard .cov.okmark{background:linear-gradient(135deg,var(--surface-2),var(--surface-3))!important}
 .spcard .cov.okmark img,.sphead .cov.okmark img{width:34%!important;height:auto!important;object-fit:contain!important;filter:grayscale(1);opacity:.35}
+.spcard .cov.okdev,.sphead .cov.okdev{background:#e9eef0!important;color:#5c6b72!important;padding:12%}
+html[data-theme="dark"] .spcard .cov.okdev,html[data-theme="dark"] .sphead .cov.okdev{background:#d7dde0!important}
+.okdevnm{font-family:Inter,system-ui,sans-serif;font-weight:600;font-size:clamp(13px,1.3vw,19px);letter-spacing:.14em;text-transform:uppercase;text-align:center;line-height:1.35;filter:grayscale(1)}
+.sphead .cov.okdev .okdevnm{font-size:13px}
 .okcovgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:46vh;overflow:auto;padding:2px}
 .okcovgrid button{border:1px solid var(--line);border-radius:10px;background:#fff;aspect-ratio:4/3;display:grid;place-items:center;padding:8px;cursor:pointer}
 .okcovgrid button img{max-width:100%;max-height:100%;object-fit:contain}
@@ -678,11 +688,12 @@ html[data-theme="dark"] .spcard .cov.oklogo,html[data-theme="dark"] .sphead .cov
   const paintCover = (cov, p) => {
     if (!cov || !p) return;
     const img = cov.querySelector('img');
-    if (img && !cov.classList.contains('oklogo') && !cov.classList.contains('okmark')) return; // a real photo (engine cover)
-    const lg = coverLogo(p);
-    const want = lg ? logoSrc(lg) : IMG.mark; const cls = lg ? 'oklogo' : 'okmark';
-    if (img && img.getAttribute('src') === want && cov.classList.contains(cls)) return;
-    cov.classList.remove('oklogo', 'okmark'); cov.classList.add(cls); cov.innerHTML = `<img src="${want}" alt="" decoding="async">`;
+    if (img && !cov.classList.contains('oklogo') && !cov.classList.contains('okmark') && !cov.classList.contains('okdev')) return; // a real photo (engine cover)
+    const d = devOf(p); const lg = d && d[0]; const nm = d && !lg ? d[1] : '';
+    const want = lg ? logoSrc(lg) : nm ? 'dev:' + nm : IMG.mark; const cls = lg ? 'oklogo' : nm ? 'okdev' : 'okmark';
+    if (cov.dataset.okcov === want && cov.classList.contains(cls)) return;
+    cov.dataset.okcov = want; cov.classList.remove('oklogo', 'okmark', 'okdev'); cov.classList.add(cls);
+    cov.innerHTML = nm ? `<span class="okdevnm">${esc(nm)}</span>` : `<img src="${want}" alt="" decoding="async">`;
   };
   const paintCovers = () => {
     document.querySelectorAll('.spcard[href^="#/projects/"] .cov').forEach(cov => { const id = cov.closest('.spcard').getAttribute('href').slice('#/projects/'.length); paintCover(cov, byId('projects', id)); });
