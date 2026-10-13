@@ -99,11 +99,25 @@ rep("const I18N_STU = (() => { try { return (window.NF_CONFIG && window.NF_CONFI
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
 
+# --- v-split: the app code lives in app.js (parsed off the main thread, kept compiled by the browser). The English pack is
+#     aligned by position with the page SOURCE, so the loader re-assembles «page + code» exactly as it was built, and the
+#     "is this string written in the app itself" check reads the code file too.
+rep("""  const getSrc = () => fetch('./index.html', { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('src'))).catch(() => fetch('./index.html').then(r => r.ok ? r.text() : '').catch(() => ''));""",
+    """  const getSrc = () => { const get = u => fetch(u, { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('src'))).catch(() => fetch(u.split('?')[0] + (u.indexOf('app.js') >= 0 ? '?v=' + bv : '')).then(r => r.ok ? r.text() : '').catch(() => '')); return Promise.all([get('./index.html'), get('./app.js?v=' + bv)]).then(([h, js]) => { if (js) window.NF_APP_SRC = js; return h.replace(/<script src="\\.\\/app\\.js\\?v=[^"]*"><\\/script>/, () => '<script>' + js + '</' + 'script>'); }); };""", 1)
+rep("""  const inSource = s => { if (I18A.src == null) { try { I18A.src = Array.from(document.scripts).map(x => x.textContent || '').join('\\n'); } catch (e) { I18A.src = ''; } } return s.length < 400 && I18A.src.indexOf(s) >= 0; };""",
+    """  const inSource = s => { if (window.NF_APP_SRC == null) { if (!I18A.srcReq) { I18A.srcReq = true; fetch('./app.js?v=' + encodeURIComponent(window.NF_BUILD || ''), { cache: 'force-cache' }).then(r => r.ok ? r.text() : '').then(t => { window.NF_APP_SRC = t || ''; I18A.src = null; }).catch(() => { window.NF_APP_SRC = ''; I18A.src = null; }); } return s.length < 400; /* until the code file is read: treat it as app text (never sent for translation) */ } if (I18A.src == null) { try { I18A.src = Array.from(document.scripts).map(x => x.textContent || '').join('\\n') + '\\n' + window.NF_APP_SRC; } catch (e) { I18A.src = ''; } } return s.length < 400 && I18A.src.indexOf(s) >= 0; };""", 1)
+
 import hashlib, datetime
 STU_BUILD = open(os.path.join(SRC, 'BUILD.txt'), encoding='utf-8').read().strip()
 h = hashlib.sha1((html + open(os.path.join(DST, 'oekoplan.js'), encoding='utf-8').read() + open(os.path.join(DST, 'oeko-home.js'), encoding='utf-8').read()).encode('utf-8')).hexdigest()[:6]
 BUILD = f"{STU_BUILD}-o{h}"
 rep(f'NF_BUILD="{STU_BUILD}"', f'NF_BUILD="{BUILD}"', 1)
+FULL = html  # the page with the code inline — only for the English-pack extractor below
+_i = html.index("<script>\n'use strict';"); _j = html.index('</script>', _i)
+APP_JS = html[_i + len('<script>'):_j]
+assert '</script' not in APP_JS, 'app code contains </script'
+html = html[:_i] + f'<script src="./app.js?v={BUILD}"></script>' + html[_j + len('</script>'):]
+open(os.path.join(DST, 'app.js'), 'w', encoding='utf-8').write(APP_JS)
 open(os.path.join(DST, 'index.html'), 'w', encoding='utf-8').write(html)
 open(os.path.join(DST, 'BUILD.txt'), 'w', encoding='utf-8').write(BUILD + '\n')
 
@@ -132,13 +146,18 @@ const out = Object.assign({}, pack, { v }); if (pack.x) { out.x = {}; for (const
 fs.writeFileSync(outPath, JSON.stringify(out)); console.log('pack', v.length, 'direct', direct, 'via replacement', fixed, 'missing', miss);
 """
 with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False, encoding='utf-8') as f: f.write(js); jsp = f.name
-r = subprocess.run(['node', jsp, os.path.join(SRC, 'index.html'), os.path.join(DST, 'index.html'), os.path.join(SRC, 'en.json'), os.path.join(DST, 'en.json'), json.dumps(EN_REPL), json.dumps(AR_REPL)], capture_output=True, text=True)
+with tempfile.NamedTemporaryFile('w', suffix='.html', delete=False, encoding='utf-8') as f: f.write(FULL); fullp = f.name
+r = subprocess.run(['node', jsp, os.path.join(SRC, 'index.html'), fullp, os.path.join(SRC, 'en.json'), os.path.join(DST, 'en.json'), json.dumps(EN_REPL), json.dumps(AR_REPL)], capture_output=True, text=True)
 print(r.stdout.strip(), r.stderr.strip()[:300])
 if r.returncode: sys.exit('!! en.json rebuild failed')
 
 # --- service worker: add the add-on to the shell list
 sw = open(os.path.join(SRC, 'sw.js'), encoding='utf-8').read()
-sw = sw.replace('"./en.json"]', '"./en.json", "./oekoplan.js", "./oeko-home.js", "./qrp-v1.js"]', 1)
+sw = sw.replace('"./en.json"]', '"./en.json", "./oekoplan.js", "./oeko-home.js", "./qrp-v1.js", "./app.js?v=' + BUILD + '"]', 1)
+# the page: this build's cached copy first (instant open) — a new build arrives through sw.js (new cache, skipWaiting → reload), not through the page fetch
+_o = "e.respondWith(fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)).catch(() => { }); return r; }).catch(() => caches.match('./index.html')));"
+assert _o in sw, 'sw page handler not found'
+sw = sw.replace(_o, "e.respondWith(caches.open(CACHE).then(c => c.match('./index.html')).then(hit => hit || fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)).catch(() => { }); return r; })).catch(() => caches.match('./index.html')));", 1)
 sw = sw.replace(f"const BUILD = '{STU_BUILD}';", f"const BUILD = '{BUILD}';", 1)
 open(os.path.join(DST, 'sw.js'), 'w', encoding='utf-8').write(sw)
 for f in ('qrp-v1.js', 'qrdec-v1.js', 'qrgen-v1.js'):
