@@ -117,7 +117,7 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 @media (prefers-reduced-motion:reduce){.okmq .trk{animation:none;flex-wrap:wrap;width:auto}}
 /* awards & collaborations */
 .okaw{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.okaw .a{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px}.okaw .a img{width:56px;height:64px;object-fit:contain;flex:0 0 auto;background:#fff;border-radius:10px;padding:4px;box-sizing:border-box}.okaw .a b{display:block;font-size:13px;line-height:1.35}.okaw .a small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}.okaw .a em{font-style:normal;color:var(--accent);font-weight:700;font-size:11.5px}
-.okmq.okcb{height:70px;animation-duration:60s}.okcb .lg{width:150px;height:62px}.okcb .lg img{filter:none;opacity:1;width:126px;height:44px}.okcb .trk{animation-duration:70s}
+.okmq.okcb{height:70px;animation-duration:60s}.okcb .lg{width:150px;height:62px}.okcb .lg img{width:126px;height:44px}.okcb .trk{animation-duration:70s}
 /* about page */
 .okpage{display:flex;flex-direction:column;gap:14px}.okpage .head h2{margin:0;font-size:22px;letter-spacing:-.02em}.okpage .head small{color:var(--muted)}
 /* phones */
