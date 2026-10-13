@@ -29,8 +29,8 @@
   --good:${C.green};--good-soft:#edf7e2;--good-ink:#3f7a12;--lof:${C.green};--elm:${C.blue};--alu:${C.teal};
   --side-bg:#16302b;--side-ink:#d6e6e2;--side-muted:#8fb0a9;--side-on:#fff;--side-on-bg:linear-gradient(135deg,${C.green},${C.teal} 60%,${C.blue});
   --chart-grid:#e3e8e4;--chart-axis:#c2cbc5}
-:root[data-theme="dark"]{--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#0c2027;--side-on-bg:linear-gradient(135deg,${C.green2},${C.teal})}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#0c2027}}
+:root[data-theme="dark"]{--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#091a20;--side-on-bg:linear-gradient(135deg,${C.green2},${C.teal})}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#091a20}}
 .brandstack .lockup:empty{display:none}
 .wordmark{filter:none!important}
 /* ---- the side bar: light = white with the coloured lockup · dark = deep green with the white lockup ---- */
@@ -54,7 +54,7 @@ html.apple[data-theme="light"] .side .acct.nfstrip>.nfst,html.apple[data-theme="
 html.apple[data-theme="light"] .side .acct.nfstrip>.nfst.logout{color:#b42318!important}
 html.apple[data-theme="light"] .side .userchip{border-bottom-color:#e1e8e5}
 html.apple[data-theme="light"] .side .avatar{background:linear-gradient(135deg,#70b62e,#38a599);color:#fff}
-html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#0c2027!important;border-color:#1d3d47!important}
+html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#091a20!important;border-color:#19343d!important}
 html.apple[data-theme="dark"] .side .nav a.on{background:linear-gradient(135deg,#3ca13c,#38a599)!important;color:#fff!important}
 html[data-theme="dark"] .side .userchip{background:rgba(255,255,255,.06)}
 html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
@@ -74,17 +74,17 @@ html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 /* no avatar badge in the showreel hero (it sat on the logo's corner on phones) — the person is in the side bar */
 .smhero .smav{display:none!important}
 /* the live-attendance dock lives in the side bar on computers (Mahmoud, 13 Oct), above the footer line */
-@media (min-width:1001px){body:not(:has(.oklogin)) .nq-dock{left:auto!important;right:auto!important;inset-inline-start:22px!important;bottom:122px!important;transform:none!important;width:calc(var(--side-w,240px) - 44px);box-sizing:border-box;flex-direction:column;align-items:stretch!important;gap:6px!important;padding:10px!important;border-radius:14px!important;z-index:21!important;box-shadow:none!important}
-  body:not(:has(.oklogin)) .nq-dock .nq-st{justify-content:center}
-  body:not(:has(.oklogin)) .nq-dock button{width:100%;text-align:center}}
+@media (min-width:1001px){.topbar .tb-actions .nq-dock{position:static!important;transform:none!important;box-shadow:none!important;padding:4px 6px!important;border-radius:12px!important;gap:6px!important;flex-wrap:nowrap!important;max-width:none!important;font-size:12px;margin-inline-end:4px;order:-1}
+  .topbar .tb-actions .nq-dock button{padding:5px 9px;border-radius:9px;white-space:nowrap}
+  .topbar .tb-actions .nq-dock .nq-st{padding:0 4px}}
 /* ---- day / night surfaces ---- */
 html[data-theme="light"] body{background:#f3f7f5}
 html[data-theme="light"] .topbar{background:#f3f7f5!important}
-html:root[data-theme="dark"],html.apple[data-theme="dark"],html.apple.apple[data-theme="dark"]{--bg:#0a1b21;--surface:#10262e;--surface-2:#153039;--surface-3:#1a3a44;--line:#1d3d47;--line-2:#285260;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(16,38,46,.7);--glass-solid:rgba(16,38,46,.94);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(12,32,39,.92);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#0a1b21}
-@media (prefers-color-scheme: dark){html.apple.apple:not([data-theme="light"]){--bg:#0a1b21;--surface:#10262e;--surface-2:#153039;--surface-3:#1a3a44;--line:#1d3d47;--line-2:#285260;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(16,38,46,.7);--glass-solid:rgba(16,38,46,.94);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(12,32,39,.92);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#0a1b21}}
-html[data-theme="dark"] body{background:#0a1b21}
-html[data-theme="dark"] .topbar{background:#0a1b21!important}
-html.apple.apple[data-theme="dark"] .side,html.apple.apple[data-theme="dark"] .nhome .nside{background:#0c2027!important}
+html:root[data-theme="dark"],html.apple[data-theme="dark"],html.apple.apple[data-theme="dark"]{--bg:#07151a;--surface:#0c1f26;--surface-2:#112a32;--surface-3:#163640;--line:#19343d;--line-2:#224854;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(12,31,38,.72);--glass-solid:rgba(12,31,38,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(9,26,32,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#07151a}
+@media (prefers-color-scheme: dark){html.apple.apple:not([data-theme="light"]){--bg:#07151a;--surface:#0c1f26;--surface-2:#112a32;--surface-3:#163640;--line:#19343d;--line-2:#224854;--ink:#e9f1f2;--ink-2:#c0d3d6;--muted:#86a5ab;--glass:rgba(12,31,38,.72);--glass-solid:rgba(12,31,38,.95);--glass-brd:rgba(255,255,255,.08);--nf-side:rgba(9,26,32,.93);--wall:radial-gradient(1100px 620px at 108% -10%,rgba(30,90,100,.35),transparent 62%),radial-gradient(900px 560px at -12% 112%,rgba(40,120,70,.22),transparent 60%),#07151a}}
+html[data-theme="dark"] body{background:#07151a}
+html[data-theme="dark"] .topbar{background:#07151a!important}
+html.apple.apple[data-theme="dark"] .side,html.apple.apple[data-theme="dark"] .nhome .nside{background:#091a20!important}
 /* no office door / no other companies — the «Ninety — three companies» button goes too */
 .nfhomebtn,[data-action="ninetyHome"]{display:none!important}
 .side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
@@ -163,11 +163,11 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
 .okcard .slalt{margin-top:16px}.okcard .slalt button{font-size:12.5px;color:#4b7f78}
 .okfoot{font-size:11.5px;line-height:1.7}
 .oklogin .slsoc a,.oklogin .slsoc button{opacity:.75}
-html[data-theme="dark"] .oklogin{background:linear-gradient(180deg,#0c2027,#081419)}
-html[data-theme="dark"] .okcard{background:#10262e;border-color:rgba(255,255,255,.06);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
+html[data-theme="dark"] .oklogin{background:linear-gradient(180deg,#091a20,#050f13)}
+html[data-theme="dark"] .okcard{background:#0c1f26;border-color:rgba(255,255,255,.06);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
 html[data-theme="dark"] .okcard h2{color:#a9bbb5}
 html[data-theme="dark"] .okcard .slf label{color:#7f948d}
-html[data-theme="dark"] .okcard .slf input{background:#0a1b21;border-color:#1d3d47;color:#eef2f0}
+html[data-theme="dark"] .okcard .slf input{background:#07151a;border-color:#19343d;color:#eef2f0}
 html[data-theme="dark"] .okcard .slf input:focus{border-color:#38a599;box-shadow:0 0 0 3px #38a59926}
 html[data-theme="dark"] .okcard .slchk{color:#a9bbb5}
 html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
@@ -661,3 +661,5 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
   /* AI assistants talk about a landscape office */
   if (typeof aiInstructionsBase === 'function') aiInstructionsBase = (base => () => base().replace(/مكتب التصميم المعماري/g, 'مكتب تصميم اللاند سكيب والإشراف على التنفيذ').replace(/الإظهار المعماري/g, 'تصميم اللاند سكيب'))(aiInstructionsBase);
 })();
+
+;(function(){try{setInterval(function(){try{if(innerWidth<1001)return;var d=document.getElementById('nq-dock'),a=document.querySelector('.topbar .tb-actions');if(d&&a&&d.parentElement!==a)a.insertBefore(d,a.firstChild)}catch(e){}},700)}catch(e){}})();
