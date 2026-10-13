@@ -130,7 +130,7 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 .shhero .shdots i:hover{background:rgba(255,255,255,.8)!important}
 /* the slides: a grey screen with a fine dot pattern; the natural colours come back on hover (Mahmoud, 13 Oct) */
 .shhero .shslide img{filter:grayscale(.92) contrast(.96);transition:transform 7s linear,filter .5s ease}
-.shhero .shslide::after{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(rgba(20,26,30,.5) 0.55px,transparent 0.8px);background-size:3px 3px;mix-blend-mode:multiply;opacity:.5;transition:opacity .5s ease}
+.shhero .shslide::after{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(rgba(20,26,30,.5) 0.55px,transparent 0.8px);background-size:3px 3px;mix-blend-mode:multiply;opacity:.25;transition:opacity .5s ease}
 .shhero .shslide::before{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background:rgba(14,22,28,.14);transition:opacity .5s ease}
 .shhero .shslide .shcap,.shhero .shslide>*:not(img){position:relative;z-index:2}
 .shhero:hover .shslide img{filter:none}
