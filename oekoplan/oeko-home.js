@@ -132,7 +132,18 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 .shhero .shslide img{filter:grayscale(.55) contrast(.98);transition:transform 7s linear,filter .5s ease}
 .shhero .shslide::after{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(rgba(20,26,30,.5) 0.55px,transparent 0.8px);background-size:3px 3px;mix-blend-mode:multiply;opacity:.25;transition:opacity .5s ease}
 .shhero .shslide::before{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background:rgba(14,22,28,.07);transition:opacity .5s ease}
-.shhero .shslide .shcap,.shhero .shslide>*:not(img){position:relative;z-index:2}
+/* the caption: an editorial, luxury look — thin big title, spaced client line, a hairline, then location · type · services · shots */
+.shhero .sht{bottom:34px;inset-inline:40px;gap:8px;max-width:72%;z-index:2}
+.shhero .sht::after{content:'';position:absolute;inset:-22px -26px -18px;z-index:-1;border-radius:18px;background:linear-gradient(180deg,rgba(5,12,18,0),rgba(5,12,18,.55));filter:blur(14px)}
+.shhero .sht small{font-size:11.5px;letter-spacing:.3em;text-transform:uppercase;color:#dfe7ec;opacity:.9;font-weight:500}
+.shhero .sht h2{font-size:clamp(34px,4.8vw,64px);font-weight:200;letter-spacing:-.015em;line-height:1.02;text-shadow:0 2px 24px rgba(0,0,0,.35)}
+.shhero .sht .okrule{width:56px;height:1px;background:linear-gradient(90deg,#fff,rgba(255,255,255,0));margin:4px 0 2px}
+.shhero .sht .okmeta{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#c9d3da}
+.shhero .sht .okmeta i{width:3px;height:3px;border-radius:50%;background:#9fb0ba;display:inline-block}
+.shhero .sht .shm{margin-top:2px}.shhero .sht .shm .shst{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);backdrop-filter:blur(6px);letter-spacing:.08em;text-transform:uppercase;font-size:11px}
+.shhero .sht .shm .shd{letter-spacing:.08em;text-transform:uppercase;font-size:11px;color:#c9d3da}
+html[dir=rtl] .shhero .sht .okrule{background:linear-gradient(270deg,#fff,rgba(255,255,255,0))}
+@media (max-width:760px){.shhero .sht{inset-inline:18px;bottom:18px;max-width:92%}.shhero .sht h2{font-size:clamp(26px,7vw,36px)}.shhero .sht .okmeta{display:none}}
 .stuhome .smgal,.stuhome .smempty{display:none!important}
 .pfpage .pfyear{display:none!important}
 </style>`);
@@ -194,5 +205,18 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
     } catch (e) { console.warn('tarek photo', e); } }, 1200);
   });
   if (typeof ACTIONS === 'object') ACTIONS.oekoTarekPhoto = async () => { try { await saveMyPhoto(await tarekData()); toast(L('اتحطت صورة د. طارق', "Dr. Tarek's photo is set")); render(true); } catch (e) { toast(L('تعذّر', 'Could not'), 'err'); } };
+
+  /* the hero caption: hairline + location · services under the title (the engine prints client, title, type and shot count) */
+  const okCaption = () => {
+    document.querySelectorAll('.shhero .shslide').forEach(a => {
+      const t = a.querySelector('.sht'); if (!t || t.querySelector('.okrule')) return;
+      const id = (a.getAttribute('href') || '').split('/portfolio/')[1]; const e = id && typeof byId === 'function' ? byId('portfolio', id) : null;
+      const h2 = t.querySelector('h2'); if (!h2) return;
+      const bits = []; if (e && e.location) bits.push(E(e.location)); if (e && Array.isArray(e.services) && e.services.length) bits.push(E(e.services.join(' · '))); if (e && e.area) bits.push(E(e.area));
+      h2.insertAdjacentHTML('afterend', `<span class="okrule"></span>${bits.length ? `<div class="okmeta notr" dir="auto">${bits.join('<i></i>')}</div>` : ''}`);
+    });
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(okCaption);
+  setInterval(okCaption, 1500);
   window.oekoHome = { PROJECTS, OFFICE, seedGallery };
 })();
