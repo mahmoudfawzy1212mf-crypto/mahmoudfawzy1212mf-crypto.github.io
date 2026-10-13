@@ -1403,7 +1403,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </style>
 <div id="root"></div>
 <script src="config.js"></script>
-<script>window.NF_PWA=true;window.NF_BUILD="20261012-2031-6a05b7";</script>
+<script>window.NF_PWA=true;window.NF_BUILD="20261013-0309-3cac7b";</script>
 
 <script>
 'use strict';
@@ -34666,7 +34666,7 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
 /* =====================================================================
    Ninety Studioz v6.53 — open the office door from the app (Mahmoud, 5 Oct — go-ahead):
    · an NFC sticker beside the Hikvision door station (DS-KV6113) carries the link #/door — tapping the phone opens the
-     app on that page and the door opens; the same from the «Open the door» button (dashboard + menu).
+     app on that page and the door opens; the same from the door icon in the top bar (v7.61, was a card on the home) + the menu.
    · the server (Edge `door`) checks the person (active employee, role allowed, not blocked, inside the hours, inside the
      office zone when set) and hands the command to the bridge on the office server, which opens the door on the LAN —
      no port is opened on the router. Every attempt is logged (col `doorlog`).
@@ -34713,7 +34713,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     } catch (e) { DOOR.last = { phase: 'no', reason: 'error' }; }
     finally { DOOR.busy = false; rerender(); }
   }
-  ACTIONS.doorOpen = () => openDoor(S.route && S.route.view === 'door' ? 'sticker' : 'button');
+  ACTIONS.doorOpen = () => openDoor(S.route && S.route.view === 'door' ? 'sticker' : 'button');   /* (v7.61: openDoor is wrapped below — this calls the wrapped one) */
 
   /* ---------- the page the sticker opens ---------- */
   const resultHTML = () => {
@@ -34734,17 +34734,27 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('door')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['door']); });
   { const at = NAV.findIndex(n => n.id === 'dashboard'); NAV.splice(at >= 0 ? at + 1 : 1, 0, { id: 'door', label: 'افتح الباب', short: 'الباب', icon: 'door' }); }
 
-  /* ---------- dashboard button ---------- */
+  /* ---------- v7.61 (Mahmoud, 13 Oct, on the «Office door» card: «make it a small icon up top»): the door is an icon in the top bar
+     (beside full screen) on every page — tap = open; it pulses while opening, turns green / red for a few seconds, and the answer
+     shows as a toast. The big card on the home page is gone. Only for people allowed to open (same check as before). ---------- */
+  const allowedNow = () => { if (DOOR.state) return !!DOOR.state.allowed; const c = DOOR.cached && DOOR.cached.key === cacheKey() ? DOOR.cached : null; if (!DOOR._p) DOOR._p = loadState().then(s => { DOOR._p = null; if (s && !!s.allowed !== !!(c && c.allowed)) rerender(); }); return !!(c && c.allowed); };
+  const tbState = () => { const l = DOOR.last; if (DOOR.busy || (l && l.phase === 'work')) return 'work'; if (l && l.at && Date.now() - l.at < 4000) return l.phase; return ''; };
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
-    if (!S.session || !S.route || S.route.view !== 'dashboard' || !sbOn()) return; const v = document.getElementById('view'); if (!v || v.querySelector('#doorcard')) return;
-    if (!DOOR.state) {
-      const c = DOOR.cached && DOOR.cached.key === cacheKey() ? DOOR.cached : null;
-      if (!DOOR._p) DOOR._p = loadState().then(s => { DOOR._p = null; if (s && !!s.allowed !== !!(c && c.allowed)) rerender(); });
-      if (!(c && c.allowed)) return;
-    } else if (!DOOR.state.allowed) return;
-    const l = DOOR.last; const msg = !l ? '' : l.phase === 'work' ? L('بيفتح…', 'Opening…') : l.phase === 'ok' ? L('الباب اتفتح ✓', 'Door open ✓') : why(l.reason);
-    v.insertAdjacentHTML('afterbegin', `<div class="card" id="doorcard"><div class="grow"><b>${L('باب المكتب', 'Office door')}</b>${msg ? `<div class="small ${l && l.phase === 'no' ? 'doorno' : 'muted'}">${esc(msg)}</div>` : ''}</div><button type="button" class="btn p" data-action="doorOpen" ${DOOR.busy ? 'disabled' : ''}>${icon('door')}${L('افتح الباب', 'Open the door')}</button></div>`);
+    const ta = document.querySelector('.tb-actions'); if (!ta) return; let b = ta.querySelector('.nfdoortb');
+    if (!S.session || !sbOn() || !allowedNow()) { if (b) b.remove(); return; }
+    const t = L('افتح باب المكتب', 'Open the office door');
+    if (!b) { const fs = ta.querySelector('.nffstb'); const h = `<button type="button" class="iconbtn nfdoortb" data-action="doorOpen" title="${esc(t)}" aria-label="${esc(t)}">${icon('door')}</button>`; if (fs) fs.insertAdjacentHTML('beforebegin', h); else ta.insertAdjacentHTML('afterbegin', h); b = ta.querySelector('.nfdoortb'); }
+    const st = tbState(); b.classList.toggle('work', st === 'work'); b.classList.toggle('ok', st === 'ok'); b.classList.toggle('no', st === 'no'); b.disabled = DOOR.busy; b.title = t; b.setAttribute('aria-label', t);
   });
+  /* the answer: a toast (the sticker page keeps its big result) + the icon colour for 4 s */
+  openDoor = (base => async function (via) {
+    const out = await base.apply(this, arguments);
+    try {
+      const l = DOOR.last; if (l && l.phase !== 'work') { l.at = Date.now(); if (!(S.route && S.route.view === 'door')) toast(l.phase === 'ok' ? L('الباب اتفتح ✓', 'Door open ✓') : why(l.reason), l.phase === 'ok' ? '' : 'err'); setTimeout(() => { try { rerender(); } catch (e) { /* ignore */ } }, 4100); }
+    } catch (e) { /* ignore */ }
+    return out;
+  })(openDoor);
+  document.head.insertAdjacentHTML('beforeend', `<style>.tb-actions .nfdoortb{flex:none}.nfdoortb svg{width:18px;height:18px}.nfdoortb.work svg{animation:doorp 1s ease-in-out infinite}.nfdoortb.ok{color:var(--good-ink,#16a34a);border-color:currentColor}.nfdoortb.no{color:var(--serious-ink,#dc2626);border-color:currentColor}</style>`);
   document.addEventListener('nf:login', () => { DOOR.state = null; setTimeout(() => loadState(true).then(() => rerender()), 2500); });
 
   /* ---------- Settings → «الباب» (owner) ---------- */
