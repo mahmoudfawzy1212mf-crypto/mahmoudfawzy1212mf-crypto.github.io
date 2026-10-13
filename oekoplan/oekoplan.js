@@ -33,6 +33,9 @@
 .brand .brandstack .wordmark,.side .brand .wordmark,html.apple .side .brand .wordmark{height:74px!important;max-height:none!important;width:auto!important}
 .side .brand{padding:6px 4px 10px;justify-content:center}
 .nfback{display:none!important}
+/* the opening splash is always dark → white-letter lockup, bigger */
+.nfsplash img.wordmark{content:url("_src/brand/lockup-dark.png");height:96px!important;max-height:none!important;width:auto!important;filter:none!important}
+.nfsplash .brand{margin-bottom:10px}
 html.apple[data-theme="light"] .side,html.apple[data-theme="light"] .nhome .nside{background:#ffffff!important;border-inline-start:1px solid #e1e8e5}
 html.apple[data-theme="light"] .side .nav .ngh,html.apple[data-theme="light"] .side .nav a,html.apple[data-theme="light"] .side .userchip .n,html.apple[data-theme="light"] .side .acct.nfstrip>.nfst,html.apple[data-theme="light"] .side .nftogs>.nfst{color:#1d3d36!important}
 html.apple[data-theme="light"] .side .userchip .r{color:#5b7a73}
@@ -126,7 +129,7 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     themeLoad();
   }
   /* the wordmark in the side bar / reports: white text version in dark mode */
-  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo, .tb-logo img').forEach(i => { const inTb = !!i.closest('.tb-logo'); const want = inTb && window.innerWidth <= 760 ? IMG.mark : (dark ? IMG.lockupDark : IMG.lockup); if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
+  const swapLogos = () => { const dark = typeof themeCurrent === 'function' && themeCurrent() === 'dark'; document.querySelectorAll('img.wordmark, img.rlogo, .tb-logo img').forEach(i => { const inTb = !!i.closest('.tb-logo'); const want = i.closest('.nfsplash') ? IMG.lockupDark : inTb && window.innerWidth <= 760 ? IMG.mark : (dark ? IMG.lockupDark : IMG.lockup); if (i.getAttribute('src') !== want) i.setAttribute('src', want); }); };
 
   /* ---------------------------------------------------------------- office structure */
   const DEPTS = [
