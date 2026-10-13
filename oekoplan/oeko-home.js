@@ -1,11 +1,14 @@
 /* =====================================================================
-   Ökoplan Landscaping — the home screen & the office profile (v1, 13 Oct 2026 — Mahmoud: «حط بيانات المكتب فوق والمشاريع تحتها ودلّع الدنيا»)
-   Loaded after oekoplan.js. Everything here is the office's own content from the company profile:
-   · home (every role): the project-photo slideshow (engine hero) → the office in numbers → your day →
-     about the office (vision · values · services) → the partners strip (moving logos) → the projects with
-     their data → awards · international collaborations → the engine's cards (notice / shot / pulse).
-   · «شغل المكتب» (menu): the projects grid + a project page (data + photos + full-screen show).
-   Photos: oekoplan/_src/portfolio/<project>/<n>.jpg (computer) · <n>-m.jpg (phone) · <n>-t.jpg (cards).
+   Ökoplan Landscaping — the home & the office profile (v2, 13 Oct 2026 — Mahmoud)
+   Loaded after oekoplan.js. The office's own content from the company profile:
+   · home (every role): the office in numbers under the greeting → your day → the engine's «From the projects gallery»
+     strip (one slide per photo of the published gallery projects) → the partners strip (moving logos) → awards →
+     international collaborations → the engine's cards (notice / shot / pulse).
+   · «Projects Gallery» (menu) = the engine's portfolio module renamed (mk-oeko.py): add / edit / delete / publish projects,
+     upload shots at full quality. The six profile projects are seeded into it once (`oekoSeedGallery`) as real entries
+     (col portfolio + col files with URL shots), so they can be edited or deleted like any other.
+   · «About the office» (menu): about · vision · mission · values · services · awards · collaborations.
+   Photos: oekoplan/_src/portfolio/<project>/<n>.jpg (full) · <n>-m.jpg (phone / cards) · <n>-t.jpg (thumbs).
    Arabic + English (L()). No money anywhere.
    ===================================================================== */
 (() => {
@@ -18,24 +21,46 @@
   const SRC = BASE + '_src/';
   const E = s => (typeof esc === 'function' ? esc(s) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
 
-  /* ---------------------------------------------------------------- the content */
-  const SCOPE = { concept: ['التصور المبدئي', 'Concept Design'], schem: ['التصميم التمهيدي', 'Schematic Design'], dd: ['تطوير التصميم', 'Design Development'], cd: ['الرسومات التنفيذية', 'Construction Drawings'], tender: ['مستندات الطرح', 'Tender Documents'], super: ['الإشراف على التنفيذ', 'Site Supervision'] };
-  const CAT = { hotel: ['فنادق ومنتجعات', 'Hotels & Resorts'], res: ['سكني', 'Residential'], urban: ['تخطيط عمراني', 'Urban Planning'], com: ['تجاري وترفيهي', 'Retail & Entertainment'], edu: ['تعليمي وثقافي', 'Educational & Cultural'] };
+  /* ---------------------------------------------------------------- the profile projects (seeded into the gallery once) */
+  const SCOPE = { concept: 'Concept Design', schem: 'Schematic Design', dd: 'Design Development', cd: 'Construction Drawings', tender: 'Tender Documents', super: 'Site Supervision' };
   const PROJECTS = [
-    { id: 'telal-alamein', n: 6, name: ['تلال العلمين', 'Telal El-Alamein'], loc: ['الساحل الشمالي', 'North Coast, Egypt'], client: ['رؤية للتنمية العقارية', 'Rooya for Real Estate Development'], year: 2013, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: [], cover: 1, award: ['أفضل منتجع سياحي — Cityscape 2015', 'Cityscape Best Touristic Resort 2015'] },
-    { id: 'rixos-seagate', n: 4, name: ['ريكسوس سي جيت', 'Rixos Sea Gate'], loc: ['شرم الشيخ', 'Sharm El-Sheikh, Egypt'], client: ['فنادق ريكسوس', 'Rixos Hotels'], year: 2015, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: [], cover: 1 },
-    { id: 'xanadu', n: 2, name: ['زانادو مكادي باي', 'Xanadu Makadi Bay'], loc: ['الغردقة', 'Hurghada, Egypt'], client: ['تيا مكادي', 'Tia Makadi'], year: 2019, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: ['concept', 'schem', 'dd', 'cd', 'tender'], cover: 1 },
-    { id: 'crowne-plaza', n: 7, name: ['كراون بلازا — شرم الشيخ', 'Crowne Plaza — Sharm El-Sheikh'], loc: ['شرم الشيخ', 'Sharm El-Sheikh, Egypt'], client: ['م. منتصر أبو غالي', 'Mr. Montasser Abu Ghaly'], year: 1999, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: ['concept', 'schem', 'dd', 'cd', 'tender', 'super'], cover: 1 },
-    { id: 'rixos-sharm', n: 4, name: ['ريكسوس شرم', 'Rixos Sharm'], loc: ['شرم الشيخ', 'Sharm El-Sheikh, Egypt'], client: ['رادامس بلو بلانت للفنادق والمنتجعات السياحية', 'Radamis Blue Planet for Hotels and Touristic Resorts'], year: 2009, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: ['concept', 'schem', 'dd', 'cd', 'tender'], cover: 1 },
-    { id: 'sokhna', n: 5, name: ['تلال السخنة', 'Telal El-Sokhna'], loc: ['العين السخنة', 'Al-Ain Al-Sokhna, Egypt'], client: ['رؤية للتنمية العقارية', 'Rooya for Real Estate Development'], year: 2007, cat: 'hotel', services: ['تصميم اللاند سكيب', 'Landscape Design'], scope: ['concept', 'schem', 'dd', 'cd', 'tender', 'super'], cover: 5, award: ['ثاني أفضل منتجع سياحي — Cityscape 2015', 'Cityscape Second Best Touristic Resort 2015'] },
+    { id: 'telal-alamein', n: 6, title: 'Telal El-Alamein', location: 'North Coast, Egypt', client: 'Rooya for Real Estate Development', year: 2013, type: 'hotel', scope: [], cover: 1, about: 'Cityscape Best Touristic Resort Award 2015.' },
+    { id: 'rixos-seagate', n: 4, title: 'Rixos Sea Gate', location: 'Sharm El-Sheikh, Egypt', client: 'Rixos Hotels', year: 2015, type: 'hotel', scope: [], cover: 1 },
+    { id: 'xanadu', n: 2, title: 'Xanadu Makadi Bay', location: 'Hurghada, Egypt', client: 'Tia Makadi', year: 2019, type: 'hotel', scope: ['concept', 'schem', 'dd', 'cd', 'tender'], cover: 1 },
+    { id: 'crowne-plaza', n: 7, title: 'Crowne Plaza — Sharm El-Sheikh', location: 'Sharm El-Sheikh, Egypt', client: 'Mr. Montasser Abu Ghaly', year: 1999, type: 'hotel', scope: ['concept', 'schem', 'dd', 'cd', 'tender', 'super'], cover: 1 },
+    { id: 'rixos-sharm', n: 4, title: 'Rixos Sharm', location: 'Sharm El-Sheikh, Egypt', client: 'Radamis Blue Planet for Hotels and Touristic Resorts', year: 2009, type: 'hotel', scope: ['concept', 'schem', 'dd', 'cd', 'tender'], cover: 1 },
+    { id: 'sokhna', n: 5, title: 'Telal El-Sokhna', location: 'Al-Ain Al-Sokhna, Egypt', client: 'Rooya for Real Estate Development', year: 2007, type: 'hotel', scope: ['concept', 'schem', 'dd', 'cd', 'tender', 'super'], cover: 5, about: 'Cityscape Second Best Touristic Resort Award 2015.' },
   ];
   const img = (p, i, s) => `${SRC}portfolio/${p.id}/${i}${s || ''}.jpg`;
-  const photos = p => Array.from({ length: p.n }, (_, k) => k + 1);
-  const ordered = p => [p.cover].concat(photos(p).filter(i => i !== p.cover));
-  const pic = (p, i, cls, lazy) => `<img class="${cls || ''}" src="${img(p, i, '-m')}" srcset="${img(p, i, '-t')} 520w, ${img(p, i, '-m')} 1100w, ${img(p, i)} 2000w" sizes="(max-width:760px) 100vw, 50vw" alt="" ${lazy ? 'loading="lazy"' : ''} decoding="async">`;
-  const T = (p, k) => (p[k] && Array.isArray(p[k]) ? p[k][en() ? 1 : 0] : (p[k] || ''));
-  const scopeText = p => (p.scope || []).map(k => L(SCOPE[k][0], SCOPE[k][1])).join(L('، ', ', '));
+  async function seedGallery(force) {
+    if (typeof Store === 'undefined' || typeof list !== 'function') return 0;
+    const have = list('portfolio').filter(e => e && !e.deleted); if (have.length && !force) return 0;
+    const now = typeof nowISO === 'function' ? nowISO() : new Date().toISOString(); let n = 0;
+    for (let k = 0; k < PROJECTS.length; k++) {
+      const p = PROJECTS[k]; const pid = 'ok-' + p.id; if (byId('portfolio', pid)) continue;
+      const order = [p.cover].concat(Array.from({ length: p.n }, (_, j) => j + 1).filter(i => i !== p.cover)); const ids = [];
+      for (const i of order) {
+        const fid = `okpf-${p.id}-${i}`;
+        await Store.save('files', { id: fid, name: `${p.title} — ${i}.jpg`, kind: 'render', mime: 'image/jpeg', store: 'thumb', ref: null, enc: null, size: 0, thumb: img(p, i, '-m'), full: img(p, i), rev: 'Portfolio', portfolioId: pid, projectId: null, orderId: null, productId: null, note: '', byId: null, byName: 'Ökoplan profile', createdAt: now, updatedAt: now }, { silent: true });
+        ids.push(fid);
+      }
+      await Store.save('portfolio', { id: pid, title: p.title, client: p.client, year: p.year, location: p.location, type: p.type, area: '', services: ['Landscape Design'].concat(p.scope.map(k => SCOPE[k])), about: p.about || '', behance: '', order: k + 1, shots: ids, coverId: ids[0], published: true, projectId: null, createdAt: now, updatedAt: now, by: (typeof me === 'function' && me()) || null }, { silent: true });
+      n++;
+    }
+    if (n && typeof render === 'function') render(true);
+    return n;
+  }
+  window.oekoSeedGallery = seedGallery;
+  if (typeof ACTIONS === 'object') ACTIONS.oekoSeedGallery = async () => { const n = await seedGallery(true); if (typeof toast === 'function') toast(n ? L(`اتضاف ${n} مشاريع للمعرض`, `${n} projects added to the gallery`) : L('مشاريع البروفايل موجودة بالفعل', 'The profile projects are already there')); };
+  /* the first admin to open the app with an empty gallery gets the six profile projects (once per system — flag in settings) */
+  let seedTried = false;
+  const trySeed = () => {
+    if (seedTried || !S.session || typeof isAdmin !== 'function' || !isAdmin()) return; if (!S.settings || S.settings.oekoGallerySeeded) { seedTried = true; return; }
+    if (typeof sbOn === 'function' && sbOn() && !S.staffReady) return; seedTried = true;
+    setTimeout(async () => { try { const n = await seedGallery(false); if (typeof Store.saveSettings === 'function') await Store.saveSettings({ oekoGallerySeeded: true }); if (n && typeof toast === 'function') toast(L('مشاريع البروفايل اتضافت لمعرض المشاريع', 'The profile projects were added to the Projects Gallery')); } catch (e) { console.warn('oeko seed', e); } }, 1500);
+  };
 
+  /* ---------------------------------------------------------------- the office */
   const OFFICE = {
     stats: [[30, '', 'سنة في السوق', 'years in the market'], [90, '+', 'موظف', 'employees'], [400, '+', 'مشروع', 'projects'], [12, '', 'جائزة وتكريم', 'awards']],
     about: ['أوكوبلان لتنسيق المواقع مكتب استشاري حائز على جوائز، بيعيد تشكيل مشهد عمارة اللاند سكيب في مصر من قرابة تلاتين سنة. هدفنا مساحات خارجية مستدامة وبتكلفة مناسبة، الإنسان في مركزها، وبتوصل بين الداخل والخارج بأفكار خارج الصندوق — عملية وجميلة في نفس الوقت.',
@@ -55,6 +80,7 @@
     collab: [['c1', 'CSCEC', 'أبراج العلمين', 'Al Alamein Towers'], ['c2', 'EDSA · !melk', 'كايرو كابيتال', 'Cairo Capital'], ['c3', 'Zaha Hadid Architects', 'ستون تاورز', 'Stone Towers'], ['c4', 'Gianluca Peluffo & Partners', 'فوكا باي · إل مونتي جالالا · بلومفيلدز', 'Fouka Bay · IL Monte Galala · Bloomfields'], ['c5', 'SASAKI', 'NJIT — مدينة المستقبل', 'NJIT, Mostakbal City'], ['c6', 'GROSS. MAX.', 'ستون ستريت', 'Stone Street'], ['c7', 'GB Design', 'سكاي ووك', 'Skywalk'], ['c8', 'WATG', 'ون ناينتي · سكاي ووك', 'One Ninety · Skywalk'], ['c9', 'SWA', 'نور — كايرو كابيتال', 'Noor, Cairo Capital']],
     partners: 'l01 l02 l03 l04 l05 l06 l07 l08 l09 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l21 l22 l23 l24 l25 l26 l27 l28 l29 l30 l31 l32 l33 l34 l35 l37 l38 l39 l40 l41 l42 l43 l44 l46 l47 l48 l49 l51 l53 l101 l103 l104 l106 l107 l108 l110 l111 l112 l113 l115 l116'.split(' '),
   };
+  const T = (o, k) => (o[k] && Array.isArray(o[k]) ? o[k][en() ? 1 : 0] : (o[k] || ''));
   const ICON = {
     team: '<circle cx="12" cy="7" r="3"/><circle cx="5" cy="10" r="2.2"/><circle cx="19" cy="10" r="2.2"/><path d="M8 20a4 4 0 0 1 8 0M1.5 18a3.5 3.5 0 0 1 5-3M22.5 18a3.5 3.5 0 0 0-5-3"/>',
     dedic: '<path d="M4 20l6-10 4 5 6-9"/><path d="M14 6h6v6"/>', innov: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.5 1 2.5h6c0-1 .4-1.9 1-2.5A6 6 0 0 0 12 3z"/>',
@@ -63,25 +89,15 @@
     hard: '<path d="M3 9l5-5 5 4-5 5zM13 8l5-4 3 5-5 3zM3 14l5 2 1 5-6-1zM10 17l5-3 5 3-4 4z"/>', light: '<path d="M12 3v2M9 5h6l1 5H8zM12 10v10M8 20h8"/>',
     water: '<path d="M4 14h16M6 14a6 6 0 0 0 12 0M12 3v4M8 6c1 1 2 2 4 1M16 6c-1 1-2 2-4 1M12 7c-2 2-2 4 0 6 2-2 2-4 0-6z"/>', plant: '<path d="M12 21v-8M12 13c-5 0-7-4-7-8 4 0 7 2 7 8zM12 13c5 0 7-4 7-8-4 0-7 2-7 8z"/>',
     art: '<path d="M8 21h8M10 21v-4h4v4M12 3c-3 0-4 3-3 5s3 3 3 5c0-2 2-3 3-5s0-5-3-5z"/>', sign: '<path d="M12 3v18M6 6h11l2 2-2 2H6zM18 13H7l-2 2 2 2h11z"/>',
-    pin: '<path d="M12 21s-6-5.4-6-11a6 6 0 0 1 12 0c0 5.6-6 11-6 11z"/><circle cx="12" cy="10" r="2"/>', cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
-    play: '<path d="M8 5v14l11-7z"/>', back: '<path d="M15 6l-6 6 6 6"/>', award: '<circle cx="12" cy="9" r="6"/><path d="M8.5 14.5L7 22l5-3 5 3-1.5-7.5"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   };
   const ic = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k] || ''}</svg>`;
+  if (typeof ICONS === 'object' && !ICONS.okinfo) ICONS.okinfo = ICON.info;
 
   /* ---------------------------------------------------------------- styles */
   document.head.insertAdjacentHTML('beforeend', `<style id="oeko-home">
 .okh{display:flex;flex-direction:column;gap:16px}
 .oksec{display:flex;align-items:baseline;gap:10px;margin:6px 2px 0}.oksec h3{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em}.oksec small{color:var(--muted);font-size:12px}.oksec .grow{flex:1}.oksec a{font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600}
-/* the hero */
-.okhero{position:relative;border-radius:22px;overflow:hidden;aspect-ratio:21/8;min-height:300px;background:#17302b;color:#fff;border:1px solid var(--line);isolation:isolate}
-.okhero .sl{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;text-decoration:none;color:inherit}.okhero .sl.on{opacity:1;z-index:1}.okhero .sl img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.04);transition:transform 7s linear}.okhero .sl.on img{transform:scale(1)}
-.okhero .v{position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.08) 0%,rgba(0,0,0,0) 35%,rgba(8,26,22,.78) 100%)}
-.okhero .g{position:absolute;z-index:3;top:22px;inset-inline-start:26px;pointer-events:none}.okhero .g small{display:block;font-size:13px;opacity:.9;text-shadow:0 1px 6px rgba(0,0,0,.5)}.okhero .g h1{margin:2px 0 0;font-size:clamp(24px,3vw,38px);font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 12px rgba(0,0,0,.5)}
-.okhero .stuav{position:absolute;z-index:3;top:22px;inset-inline-end:24px;width:44px!important;height:44px!important;border:2px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.3)}
-.okhero .sl .cap{position:absolute;z-index:2;inset-inline-start:26px;bottom:24px;display:flex;flex-direction:column;gap:2px;pointer-events:none}.okhero .sl .cap b{font-size:20px;font-weight:700;text-shadow:0 1px 10px rgba(0,0,0,.5)}.okhero .sl .cap small{font-size:12.5px;opacity:.9}
-.okhero .nav{position:absolute;z-index:4;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.85);color:#17302b;font-size:26px;line-height:1;cursor:pointer;display:grid;place-items:center;opacity:0;transition:.25s}.okhero:hover .nav{opacity:1}.okhero .nav.prev{left:14px}.okhero .nav.next{right:14px}
-.okhero .dots{position:absolute;z-index:3;inset-inline-end:22px;bottom:26px;display:flex;gap:5px;flex-wrap:wrap;max-width:50%;justify-content:flex-end}.okhero .dots i{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer;transition:.3s}.okhero .dots i.on{background:#fff;width:18px;border-radius:3px}
-@media (max-width:760px){.okhero .nav{display:none}.okhero{aspect-ratio:4/3;min-height:0;border-radius:18px}.okhero .g{top:16px;inset-inline-start:16px}.okhero .g h1{font-size:22px}.okhero .sl .cap{inset-inline-start:16px;bottom:18px}.okhero .sl .cap b{font-size:16px}.okhero .dots{display:none}.okhero .stuav{top:16px;inset-inline-end:16px}}
 /* the office in numbers */
 .okstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .okst{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:2px}
@@ -94,38 +110,21 @@
 .okserv{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;grid-column:1/-1}.oksv{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:1px solid var(--line);border-radius:14px;font-size:12px;text-align:center;background:var(--surface-2,var(--bg));transition:.25s}.oksv svg{color:#38a599;width:26px;height:26px}.oksv:hover{transform:translateY(-2px);border-color:#38a599}
 /* moving strips */
 .okmq{overflow:hidden;direction:ltr;flex:none;height:66px;padding:3px 0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent);mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
-.okmq .trk{display:flex;gap:12px;width:max-content;animation:okmq 70s linear infinite;direction:ltr}.okmq.one .trk{animation-duration:150s}.okmq.rev .trk{animation-direction:reverse;animation-duration:84s}.okmq:hover .trk{animation-play-state:paused}
+.okmq .trk{display:flex;gap:12px;width:max-content;animation:okmq 150s linear infinite;direction:ltr}.okmq:hover .trk{animation-play-state:paused}
 @keyframes okmq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .okmq .lg{flex:0 0 auto;height:58px;width:132px;background:#fff;border:1px solid var(--line);border-radius:12px;display:grid;place-items:center;padding:8px 12px;box-sizing:border-box}.okmq .lg img{width:108px;height:40px;object-fit:contain;filter:grayscale(1);opacity:.78;transition:.3s}.okmq .lg:hover img{filter:none;opacity:1}
 html[data-theme="dark"] .okmq .lg{border-color:transparent}
 @media (prefers-reduced-motion:reduce){.okmq .trk{animation:none;flex-wrap:wrap;width:auto}}
-/* projects */
-.okpf{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.okpc{position:relative;display:block;border-radius:18px;overflow:hidden;aspect-ratio:4/3;background:#17302b;color:#fff;text-decoration:none;isolation:isolate;border:1px solid var(--line)}
-.okpc img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .8s cubic-bezier(.2,.7,.2,1)}.okpc:hover img{transform:scale(1.06)}
-.okpc .v{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(8,26,22,.82) 100%)}
-.okpc .t{position:absolute;inset-inline-start:16px;inset-inline-end:84px;bottom:14px;display:flex;flex-direction:column;gap:3px}.okpc .t b{font-size:17px;font-weight:700;letter-spacing:-.01em;text-shadow:0 1px 8px rgba(0,0,0,.4)}.okpc .t small{font-size:12px;opacity:.9;display:flex;gap:8px;flex-wrap:wrap}.okpc .t small span{display:inline-flex;align-items:center;gap:4px}
-.okpc .y{position:absolute;top:12px;inset-inline-start:12px;background:rgba(255,255,255,.9);color:#17302b;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px}
-.okpc .aw{position:absolute;top:12px;inset-inline-end:12px;background:linear-gradient(135deg,#f6c453,#e49a1a);color:#3d2a00;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;display:flex;align-items:center;gap:4px}
-.okpc .n{position:absolute;bottom:14px;inset-inline-end:14px;font-size:11.5px;background:rgba(0,0,0,.35);padding:3px 8px;border-radius:999px;backdrop-filter:blur(4px)}
 /* awards & collaborations */
 .okaw{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.okaw .a{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px}.okaw .a img{width:56px;height:64px;object-fit:contain;flex:0 0 auto;background:#fff;border-radius:10px;padding:4px;box-sizing:border-box}.okaw .a b{display:block;font-size:13px;line-height:1.35}.okaw .a small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}.okaw .a em{font-style:normal;color:var(--accent);font-weight:700;font-size:11.5px}
-.okmq.okcb{height:70px}.okcb .lg{width:150px;height:62px}.okcb .lg img{filter:none;opacity:1;width:126px;height:44px}
-/* the project page */
-.okpp{display:flex;flex-direction:column;gap:16px}
-.okpp .hero{position:relative;border-radius:22px;overflow:hidden;aspect-ratio:21/9;background:#17302b;color:#fff;border:1px solid var(--line)}.okpp .hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.okpp .hero .v{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 30%,rgba(8,26,22,.85) 100%)}
-.okpp .hero .t{position:absolute;inset-inline:24px;bottom:22px;display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}.okpp .hero h1{margin:0;font-size:clamp(22px,3vw,36px);font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 12px rgba(0,0,0,.4)}.okpp .hero .t small{display:block;font-size:13px;opacity:.9;margin-bottom:4px}.okpp .hero .t .grow{flex:1}
-.okpp .show{background:#fff;color:#17302b;border:0;border-radius:999px;padding:9px 16px;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
-.okpp .back{display:inline-flex;align-items:center;gap:4px;color:var(--accent);text-decoration:none;font-size:13px;font-weight:600}
-.okpp dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:0;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px}.okpp dl div{display:flex;flex-direction:column;gap:3px}.okpp dt{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}.okpp dd{margin:0;font-size:14px;font-weight:600;line-height:1.45}
-.okpp .okgrid{columns:3;column-gap:10px}.okpp .okgrid button{display:block;width:100%;border:0;padding:0;margin:0 0 10px;border-radius:14px;overflow:hidden;cursor:pointer;background:#17302b;break-inside:avoid}.okpp .okgrid img{display:block;width:100%;height:auto;transition:transform .6s}.okpp .okgrid button:hover img{transform:scale(1.03)}
-.okpp .more{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-/* «شغل المكتب» page */
-.okpl{display:flex;flex-direction:column;gap:14px}.okpl .head{display:flex;align-items:flex-end;gap:12px}.okpl .head h2{margin:0;font-size:22px;letter-spacing:-.02em}.okpl .head small{color:var(--muted)}
+.okmq.okcb{height:70px;animation-duration:60s}.okcb .lg{width:150px;height:62px}.okcb .lg img{filter:none;opacity:1;width:126px;height:44px}.okcb .trk{animation-duration:70s}
+/* about page */
+.okpage{display:flex;flex-direction:column;gap:14px}.okpage .head h2{margin:0;font-size:22px;letter-spacing:-.02em}.okpage .head small{color:var(--muted)}
 /* phones */
-@media (max-width:1000px){.okpf{grid-template-columns:repeat(2,1fr)}.okaw{grid-template-columns:1fr 1fr}.okabout{grid-template-columns:1fr}.okpp .okgrid{columns:2}}
-@media (max-width:760px){.okmq{height:58px}.okmq.okcb{height:62px}.okstats{grid-template-columns:repeat(2,1fr)}.okst b{font-size:26px}.okpf{grid-template-columns:1fr}.okaw{grid-template-columns:1fr}.okserv{grid-template-columns:repeat(2,1fr)}.okvals{grid-template-columns:repeat(2,1fr)}.okpp .hero{aspect-ratio:4/3;border-radius:18px}.okpp .hero .t{inset-inline:16px;bottom:14px}.okpp .okgrid{columns:1}.okpp .more{grid-template-columns:1fr}.okmq .lg{height:50px;width:112px}.okmq .lg img{width:88px;height:34px}}
-.stuhome .pfsec,.stuhome .shhero,.stuhome .smgal,.stuhome .smempty{display:none!important}
+@media (max-width:1000px){.okaw{grid-template-columns:1fr 1fr}.okabout{grid-template-columns:1fr}}
+@media (max-width:760px){.okmq{height:58px}.okmq.okcb{height:62px}.okmq .lg{height:50px;width:112px}.okmq .lg img{width:88px;height:34px}.okstats{grid-template-columns:repeat(2,1fr)}.okst b{font-size:26px}.okaw{grid-template-columns:1fr}.okserv{grid-template-columns:repeat(2,1fr)}.okvals{grid-template-columns:repeat(2,1fr)}}
+.stuhome .smgal,.stuhome .smempty{display:none!important}
+.pfpage .pfyear{display:none!important}
 </style>`);
 
   /* ---------------------------------------------------------------- pieces */
@@ -136,75 +135,42 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
     <div class="okserv">${OFFICE.services.map(([k, a, b]) => `<div class="oksv">${ic(k, 26)}<span>${E(L(a, b))}</span></div>`).join('')}</div>
   </div>`;
   const mq = (items, cls) => { const row = items.join(''); return `<div class="okmq ${cls || ''}"><div class="trk">${row}${row}</div></div>`; };
-  const partnersHTML = () => { const tile = f => `<span class="lg"><img src="${SRC}partners/${f}.png" alt="" decoding="async"></span>`; return `<div class="oksec"><h3>${E(L('شركاء النجاح', 'Our partners'))}</h3><small>${E(L('عملاء وجهات وثقت في المكتب', 'Clients and institutions who trusted the office'))}</small></div>${mq(OFFICE.partners.map(tile), 'one')}`; };
-  const card = p => `<a class="okpc" href="#/portfolio/ok-${p.id}">${pic(p, p.cover, '', false)}<div class="v"></div>${p.award ? `<span class="aw">${ic('award', 12)}${E(L('جائزة', 'Award'))}</span>` : ''}<div class="t"><b class="notr" dir="auto">${E(T(p, 'name'))}</b><small><span>${ic('pin', 12)}${E(T(p, 'loc'))}</span><span>${ic('user', 12)}${E(T(p, 'client'))}</span></small></div><span class="n">${p.n} ${E(L('صور', 'photos'))}</span></a>`;
-  const projectsHTML = (all) => `<div class="oksec"><h3>${E(L('المشاريع', 'Projects'))}</h3><small>${E(L('مشاريع مختارة', 'Selected projects'))}</small><div class="grow"></div>${all ? '' : `<a href="#/portfolio">${E(L('الكل', 'All'))}</a>`}</div><div class="okpf">${PROJECTS.map(card).join('')}</div>`;
+  const partnersHTML = () => { const tile = f => `<span class="lg"><img src="${SRC}partners/${f}.png" alt="" decoding="async"></span>`; return `<div class="oksec"><h3>${E(L('شركاء النجاح', 'Our partners'))}</h3><small>${E(L('عملاء وجهات وثقت في المكتب', 'Clients and institutions who trusted the office'))}</small></div>${mq(OFFICE.partners.map(tile))}`; };
   const awardsHTML = () => `<div class="oksec"><h3>${E(L('جوايز وتكريمات', 'Awards'))}</h3></div><div class="okaw">${OFFICE.awards.map(([f, y, a, b, da, db]) => `<div class="a"><img src="${SRC}awards/${f}.png" alt="" loading="lazy"><div><em>${y}</em><b>${E(L(a, b))}</b><small>${E(L(da, db))}</small></div></div>`).join('')}</div>`;
   const collabHTML = () => `<div class="oksec"><h3>${E(L('تعاون دولي', 'International collaborations'))}</h3><small>${E(L('مكاتب عالمية اشتغلنا معاها', 'Global practices we have worked with'))}</small></div>${mq(OFFICE.collab.map(([f, nm, a, b]) => `<span class="lg" title="${E(nm)} — ${E(L(a, b))}"><img src="${SRC}collab/${f}.png" alt="${E(nm)}" decoding="async"></span>`), 'okcb')}`;
 
-  /* ---------------------------------------------------------------- the home: office data on top, the projects under it */
-  /* the hero: the project photos crossfading under the greeting (used when the office has not uploaded its own showreel / stills) */
-  const HERO = { i: 0, t: null };
-  const heroSlides = () => { const out = []; PROJECTS.forEach(p => ordered(p).forEach(i => out.push({ p, i }))); return out; };
-  function heroHTML() {
-    const sl = heroSlides();
-    return `<div class="oksec"><h3>${E(L('من شغل المكتب', 'From the office\'s work'))}</h3><small>${E(L(`${sl.length} صورة من ${PROJECTS.length} مشاريع`, `${sl.length} photos from ${PROJECTS.length} projects`))}</small></div>
-      <div class="okhero" id="okhero" data-n="${sl.length}">${sl.map((x, k) => `<a class="sl ${k === HERO.i % sl.length ? 'on' : ''}" href="#/portfolio/ok-${x.p.id}">${pic(x.p, x.i, '', k > 1)}<span class="cap"><b class="notr" dir="auto">${E(T(x.p, 'name'))}</b><small>${E(T(x.p, 'loc'))} · ${E(T(x.p, 'client'))}</small></span></a>`).join('')}<div class="v"></div>
-      <button type="button" class="nav prev" data-action="okHeroStep" data-arg="-1" aria-label="prev">‹</button><button type="button" class="nav next" data-action="okHeroStep" data-arg="1" aria-label="next">›</button>
-      <div class="dots">${sl.map((_, k) => `<i class="${k === HERO.i % sl.length ? 'on' : ''}" data-action="okHero" data-arg="${k}"></i>`).join('')}</div></div>`;
-  }
-  function heroTick(force) { const h = document.getElementById('okhero'); if (!h) return; const n = +h.dataset.n || 1; if (!force) HERO.i = (HERO.i + 1) % n; else HERO.i = ((HERO.i % n) + n) % n; h.querySelectorAll('.sl').forEach((e, k) => e.classList.toggle('on', k === HERO.i)); h.querySelectorAll('.dots i').forEach((e, k) => e.classList.toggle('on', k === HERO.i)); }
-  const heroArm = () => { clearInterval(HERO.t); HERO.t = setInterval(() => { if (document.hidden) return; heroTick(); }, 5500); };
-  if (typeof ACTIONS === 'object') { ACTIONS.okHero = k => { HERO.i = +k || 0; heroTick(true); heroArm(); }; ACTIONS.okHeroStep = d => { HERO.i += +d || 1; heroTick(true); heroArm(); }; }
-  function homeExtras() {
-    return `<div class="okh">${statsHTML()}</div>`;
-  }
-  function homeLower() {
-    return `<div class="okh">${heroHTML()}${partnersHTML()}${projectsHTML()}${awardsHTML()}${collabHTML()}</div>`;
-  }
+  /* ---------------------------------------------------------------- the home: numbers under the greeting; partners / awards / collaborations after the gallery strip */
   const wrapDash = () => {
     if (typeof vDashboard !== 'function' || vDashboard.__oeko) return;
     vDashboard = (base => { const f = function () {
       let html = base.apply(this, arguments);
       if (!S.session || typeof html !== 'string' || html.indexOf('class="stuhome') < 0) return html;
-      /* the office in numbers right under the slideshow (before «your day») */
-      const k = html.indexOf('<div class="shsec"><h3>'); if (k >= 0) html = html.slice(0, k) + homeExtras() + html.slice(k);
-      /* the engine's portfolio strip + stills gallery go; ours come before the notice / shot / pulse cards */
-      const i = html.indexOf('<div class="shsec pfsec">'); const j = html.indexOf('<div class="shgrid">', Math.max(0, i));
-      if (j >= 0) html = (i >= 0 ? html.slice(0, i) : html.slice(0, j)) + homeLower() + html.slice(j);
+      /* the gallery strip: the engine puts it right under the greeting when no showreel is uploaded → it goes after «your day», with its heading */
+      let strip = ''; const i = html.indexOf('<div class="shhero'); const k2 = i >= 0 ? html.indexOf('<div class="shsec"><h3>', i) : -1;
+      if (i >= 0 && k2 > i) { strip = html.slice(i, k2); html = html.slice(0, i) + html.slice(k2); }
+      const k = html.indexOf('<div class="shsec"><h3>'); if (k >= 0) html = html.slice(0, k) + `<div class="okh">${statsHTML()}</div>` + html.slice(k);
+      const j = html.indexOf('<div class="shgrid">'); if (j >= 0) html = html.slice(0, j) + (strip ? `<div class="shsec pfsec"><h3>${E(L('من معرض المشاريع', 'From the projects gallery'))}</h3><a class="btn xs" href="#/portfolio">${E(L('الكل', 'All'))}</a></div>${strip}` : '') + `<div class="okh">${partnersHTML()}${awardsHTML()}${collabHTML()}</div>` + html.slice(j);
       return html;
     }; f.__oeko = 1; return f; })(vDashboard);
   };
   wrapDash(); document.addEventListener('nf:ready', wrapDash);
 
-  /* ---------------------------------------------------------------- «شغل المكتب»: our projects first, the engine's published entries (if any) under them */
-  const listPage = () => `<div class="okpl"><div class="head"><h2>${E(L('شغل المكتب', 'Office work'))}</h2><small>${E(L(`${PROJECTS.length} مشاريع مختارة من بروفايل المكتب`, `${PROJECTS.length} selected projects from the office profile`))}</small></div>${projectsHTML(true)}${awardsHTML()}${collabHTML()}<div class="oksec"><h3>${E(L('عن المكتب', 'About the office'))}</h3></div>${aboutHTML()}</div>`;
-  function projPage(p) {
-    const rows = [[L('المكان', 'Location'), T(p, 'loc')], [L('العميل', 'Client'), T(p, 'client')], [L('النوع', 'Type'), L(CAT[p.cat][0], CAT[p.cat][1])], [L('الخدمات', 'Services'), T(p, 'services')], [L('نطاق العمل', 'Scope of work'), scopeText(p)], [L('الجوايز', 'Awards'), T(p, 'award')]].filter(r => r[1]);
-    const ps = ordered(p); const others = PROJECTS.filter(x => x.id !== p.id).slice(0, 3);
-    return `<div class="okpp">
-      <a class="back" href="#/portfolio">${ic('back', 16)}${E(L('شغل المكتب', 'Office work'))}</a>
-      <div class="hero">${pic(p, p.cover)}<div class="v"></div><div class="t"><div><small>${E(T(p, 'client'))}</small><h1 class="notr" dir="auto">${E(T(p, 'name'))}</h1></div><div class="grow"></div><button type="button" class="show" data-action="okShow" data-arg="${p.id}:0">${ic('play', 16)}${E(L('عرض ملء الشاشة', 'Full-screen show'))}</button></div></div>
-      <dl>${rows.map(r => `<div><dt>${E(r[0])}</dt><dd class="notr" dir="auto">${E(String(r[1]))}</dd></div>`).join('')}</dl>
-      <div class="okgrid">${ps.map((i, k) => `<button type="button" data-action="okShow" data-arg="${p.id}:${k}">${pic(p, i, '', k > 2)}</button>`).join('')}</div>
-      <div class="oksec"><h3>${E(L('مشاريع تانية', 'More projects'))}</h3></div><div class="more">${others.map(card).join('')}</div>
-    </div>`;
-  }
+  /* ---------------------------------------------------------------- «About the office» page + menu entry */
+  const aboutPage = () => `<div class="okpage"><div class="head"><h2>${E(L('عن المكتب', 'About the office'))}</h2><small>${E(L('أوكوبلان لتنسيق المواقع — من البروفايل الرسمي', 'Ökoplan Landscaping — from the official profile'))}</small></div>
+    <div class="okh">${statsHTML()}${aboutHTML()}${partnersHTML()}${awardsHTML()}${collabHTML()}</div></div>`;
   const hookViews = () => {
-    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.__oekoPf) return;
-    const base = EXTRA_VIEWS.portfolio; EXTRA_VIEWS.__oekoPf = 1;
-    EXTRA_VIEWS.portfolio = () => { const id = S.route && S.route.id; if (id && /^ok-/.test(id)) { const p = PROJECTS.find(x => 'ok-' + x.id === id); if (p) return projPage(p); } if (id && base) return base(); return listPage(); };
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.okabout) return;
+    EXTRA_VIEWS.okabout = () => aboutPage();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.okabout = () => ({ title: L('عن المكتب', 'About the office'), sub: L('البروفايل', 'The profile') });
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'okabout')) { const at = NAV.findIndex(n => n.id === 'portfolio'); NAV.splice(at >= 0 ? at + 1 : 1, 0, { id: 'okabout', label: 'عن المكتب', short: 'المكتب', icon: 'okinfo' }); }
+    if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('okabout')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['okabout']); });
   };
   hookViews(); document.addEventListener('nf:ready', hookViews);
-  if (typeof ACTIONS === 'object') {
-    ACTIONS.okShow = arg => { const [id, k] = String(arg || '').split(':'); const p = PROJECTS.find(x => x.id === id); if (!p) return; const ps = ordered(p);
-      const items = ps.map(i => ({ thumb: img(p, i, '-t'), src: img(p, i), caption: T(p, 'name') + ' · ' + T(p, 'loc'), name: T(p, 'name') }));
-      if (window.nfView && nfView.open) nfView.open(items, +k || 0); else if (typeof lightbox === 'function') lightbox(items[+k || 0].src, items[+k || 0].caption); };
-  }
-  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { const h = document.getElementById('okhero'); if (h && !h.__on) { h.__on = 1; heroTick(true); heroArm(); let x0 = null; h.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true }); h.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 40) { HERO.i += dx < 0 ? 1 : -1; heroTick(true); heroArm(); } }); } else if (!h) clearInterval(HERO.t); });
-  /* count-up for our numbers when the engine's hydrate is not around (it handles .shn inside .stuhome) */
-  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { document.querySelectorAll('.okh .shn:not(.done)').forEach(el => { if (el.closest('.stuhome')) return; el.classList.add('done'); el.textContent = el.dataset.n; }); });
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'عن المكتب': 'About the office' });
 
-  /* team photos: the engine's own flow (upload / camera → crop with zoom & move) — everyone sets their own picture (Mahmoud, 13 Oct) */
-  window.oekoHome = { PROJECTS, OFFICE };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    document.querySelectorAll('.okh .shn:not(.done)').forEach(el => { if (el.closest('.stuhome')) return; el.classList.add('done'); el.textContent = el.dataset.n; });
+    trySeed();
+  });
+  window.oekoHome = { PROJECTS, OFFICE, seedGallery };
 })();

@@ -68,6 +68,28 @@ rep('نينتي ديجري', 'أوكوبلان', must=False)
 rep('الاستوديو', 'المكتب')
 rep('the studio', 'the office')
 rep('The studio', 'The office')
+# --- «Projects Gallery»: the engine's portfolio module (add / edit / delete / publish, shots at full quality) is the office's gallery
+rep("'شغل المكتب'", "'معرض المشاريع'")
+rep("short: 'شغلنا'", "short: 'المعرض'", 1)
+rep("'من شغل المكتب'", "'من معرض المشاريع'")
+rep("'Studio work'", "'Projects Gallery'")
+rep("'From the studio\\'s work'", "'From the projects gallery'", must=False)
+rep("'From the office\\'s work'", "'From the projects gallery'", must=False)
+rep("'المشاريع اللي خلصناها', 'The projects we finished'", "'مشاريع المكتب', 'The office\\'s projects'", 1)
+rep("'مشروع قديم', 'Old project'", "'إضافة مشروع', 'Add project'")
+# the home strip: landscape types, no year, no file name
+rep("({ ext: L('خارجي', 'Exterior'), int: L('داخلي', 'Interior'), master: L('ماستر بلان', 'Masterplan'), video: L('فيديو', 'Video'), anim: L('أنيميشن', 'Animation') })[e.type]",
+    "({ hotel: L('فنادق ومنتجعات', 'Hotels & Resorts'), res: L('سكني', 'Residential'), urban: L('تخطيط عمراني', 'Urban Planning'), com: L('تجاري وترفيهي', 'Retail & Entertainment'), edu: L('تعليمي وثقافي', 'Educational & Cultural'), gov: L('حكومي', 'Governmental'), park: L('حدائق عامة', 'Public Parks') })[e.type]", 1)
+rep("${e.year ? `<span class=\"shd\">${esc(String(e.year))}</span>` : ''}${n ? `<span class=\"shd\">${nShots(n)}</span>` : ''}${f ? `<span class=\"shd shfn notr\" dir=\"auto\">${esc(shotName(f))}</span>` : ''}",
+    "${n ? `<span class=\"shd\">${nShots(n)}</span>` : ''}", 1)
+# landscape project types instead of archviz ones
+rep("const TYPES = { ext: ['خارجي', 'Exterior'], int: ['داخلي', 'Interior'], master: ['ماستر بلان', 'Masterplan'], video: ['فيديو', 'Video'], anim: ['أنيميشن', 'Animation'] };",
+    "const TYPES = { hotel: ['فنادق ومنتجعات', 'Hotels & Resorts'], res: ['سكني', 'Residential'], urban: ['تخطيط عمراني', 'Urban Planning'], com: ['تجاري وترفيهي', 'Retail & Entertainment'], edu: ['تعليمي وثقافي', 'Educational & Cultural'], gov: ['حكومي', 'Governmental'], park: ['حدائق عامة', 'Public Parks'] };", 1)
+# no year on the gallery (Mahmoud, 13 Oct) — the field stays in the form for the record
+rep("const metaLine = e => [e.client, e.year, e.location].filter(Boolean).join(' · ');", "const metaLine = e => [e.client, e.location].filter(Boolean).join(' · ');", 1)
+rep("[L('السنة', 'Year'), e.year], ", "", 1)
+# shots kept as URLs (the profile photos) open at full size in the show
+rep("src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.thumb || ''), load: () => hqUrl(f)", "src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.full || f.thumb || ''), load: () => hqUrl(f)", 1)
 
 # --- language: Ökoplan is not the (English-only) studio — Arabic by default, the device / person choice is kept (nf.lang)
 rep("const I18N_STU = (() => { try { return (window.NF_CONFIG && window.NF_CONFIG.company === 'studioz') || window.NF_CO === 'studioz'; } catch (e) { return false; } })();",
@@ -88,7 +110,7 @@ open(os.path.join(DST, 'BUILD.txt'), 'w', encoding='utf-8').write(BUILD + '\n')
 # --- en.json: the pack is aligned BY POSITION with the Arabic strings extracted from index.html (i18nBuildDict); our text
 #     replacements change some Arabic keys, so the pack is rebuilt for the derived page with node (the page's own extractor + checksum),
 #     carrying the English over with the same name replacements. Add-on strings (oekoplan.js) carry their own English at runtime.
-EN_REPL = [('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office'), ('art director', 'design manager'), ('Art director', 'Design manager'), ('Art Director', 'Design Manager'), ('Studio work', 'Office work'), ('studio work', 'office work')]
+EN_REPL = [('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office'), ('art director', 'design manager'), ('Art director', 'Design manager'), ('Art Director', 'Design Manager'), ('Studio work', 'Projects Gallery'), ('studio work', 'projects gallery'), ('Office work', 'Projects Gallery'), ("From the office's work", 'From the projects gallery'), ("From the studio's work", 'From the projects gallery')]
 import subprocess, tempfile
 js = r"""
 const fs = require('fs'); const [,, srcHtml, dstHtml, packPath, outPath, replJson] = process.argv;
