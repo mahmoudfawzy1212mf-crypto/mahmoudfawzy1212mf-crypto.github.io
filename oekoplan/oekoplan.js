@@ -70,6 +70,8 @@ html.apple[data-theme="light"] .side .userchip{background:#eef4f2!important}
 /* the showreel hero: the square mark (rounded, like the top bar), big enough to read */
 .smhero .smmark,.smmark{height:44px!important;width:44px!important;border-radius:12px!important;object-fit:cover!important;opacity:1!important;box-shadow:0 4px 14px rgba(0,0,0,.35);top:20px!important;inset-inline-start:22px!important}
 @media (max-width:760px){.smhero .smmark,.smmark{height:36px!important;width:36px!important;border-radius:10px!important;top:14px!important;inset-inline-start:14px!important}}
+/* no avatar badge in the showreel hero (it sat on the logo's corner on phones) — the person is in the side bar */
+.smhero .smav{display:none!important}
 /* ---- day / night surfaces ---- */
 html[data-theme="light"] body{background:#f3f7f5}
 html[data-theme="light"] .topbar{background:#f3f7f5!important}
