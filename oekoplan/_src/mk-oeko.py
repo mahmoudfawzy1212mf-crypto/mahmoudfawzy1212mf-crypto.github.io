@@ -43,7 +43,7 @@ def rep(old, new, count=None, must=True):
 rep('<title>Ninety Studioz</title>', f'<title>{NAME}</title>', 1)
 rep('<meta name="description" content="نظام إدارة مكتب Ninety Studioz — الحضور والإجازات واللائحة والمشاريع">',
     f'<meta name="description" content="نظام إدارة مكتب {NAME} — الحضور والإجازات واللائحة والمشاريع">', 1)
-rep('<meta name="apple-mobile-web-app-title" content="Ninety Studioz">', f'<meta name="apple-mobile-web-app-title" content="{NAME}">', 1)
+rep('<meta name="apple-mobile-web-app-title" content="Ninety Studioz">', '<meta name="apple-mobile-web-app-title" content="Ökoplan">', 1)  # iOS shows ~11 characters under the icon
 
 # --- logos: the NINETY wordmark / mark become the Ökoplan lockup / square mark (data URIs, like the originals)
 html = re.sub(r"const LOGO_SRC = 'data:image/png;base64,[^']*'", lambda m: "const LOGO_SRC = '" + b64('lockup.png') + "'", html, count=1)
