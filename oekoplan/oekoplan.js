@@ -134,6 +134,37 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
 @media (max-width:1000px){.oklogin{grid-template-columns:1fr;grid-template-rows:38vh 1fr}.okscene .cap{left:22px;right:22px;bottom:22px}.okside{padding:24px 16px 40px;margin-top:-28px}.okcard{border-radius:22px}}
 @media (max-width:600px){body:has(.oklogin) .nq-dock{display:none}}
 @media (max-width:520px){.oklogin{grid-template-rows:28vh 1fr}.okscene .cap h1{font-size:22px}.okscene .cap p{display:none}}
+/* ---- login, polished (13 Oct): no stripe between photo and panel, calmer panel, labelled fields, one strong button ---- */
+.okscene{background:#0e1f1b}
+.okscene .shape{display:none}
+.okscene img.still{width:calc(100% + 2px);height:100%;left:0;top:0}
+.okscene .veil{background:linear-gradient(180deg,rgba(0,0,0,.08) 0%,rgba(0,0,0,0) 30%,rgba(8,26,22,.72) 100%)}
+.okscene .cap h1{font-size:clamp(26px,3vw,42px);font-weight:600;letter-spacing:-.015em;text-shadow:0 2px 18px rgba(0,0,0,.45)}
+.okscene .cap p{font-size:14px;letter-spacing:.02em;opacity:.85;margin-top:6px}
+.okside{gap:22px;padding:48px 32px}
+.okcard{width:min(440px,100%);padding:36px 34px 30px;border-radius:22px;border:1px solid #e6ebe8;box-shadow:0 30px 70px -40px rgba(23,25,28,.35)}
+.okcard .lg{width:250px;margin:0 auto 4px}
+.okcard .sig{width:104px;opacity:.9;margin:0 auto 26px}
+.okcard h2{font-size:15px;font-weight:500;color:#5b6b66;margin:0 0 22px;letter-spacing:.01em}
+.okcard .slf{display:flex;flex-direction:column;margin:0 0 14px}
+.okcard .slf label{display:block!important;order:-1;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#7b8783;margin:0 0 6px}
+.okcard .slf input{height:50px;border-radius:12px;padding:0 14px;font-size:15px}
+.okcard .slf input::placeholder{color:#a4b0ab}
+.okcard .slchk{margin:2px 0 10px;color:#5b6b66}
+.okcard .slerr{min-height:0;margin:0}.okcard .slerr:not(:empty){margin:0 0 10px}
+.okcard .slbtn{height:52px;border-radius:12px;font-size:15.5px;letter-spacing:.01em;box-shadow:0 12px 24px -14px rgba(56,165,153,.7)}
+.okcard .slalt{margin-top:16px}.okcard .slalt button{font-size:12.5px;color:#4b7f78}
+.okfoot{font-size:11.5px;line-height:1.7}
+.oklogin .slsoc a,.oklogin .slsoc button{opacity:.75}
+html[data-theme="dark"] .oklogin{background:linear-gradient(180deg,#0c1412,#0a0f0e)}
+html[data-theme="dark"] .okcard{background:#111a18;border-color:rgba(255,255,255,.06);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
+html[data-theme="dark"] .okcard h2{color:#a9bbb5}
+html[data-theme="dark"] .okcard .slf label{color:#7f948d}
+html[data-theme="dark"] .okcard .slf input{background:#0b1210;border-color:#22312d;color:#eef2f0}
+html[data-theme="dark"] .okcard .slf input:focus{border-color:#38a599;box-shadow:0 0 0 3px #38a59926}
+html[data-theme="dark"] .okcard .slchk{color:#a9bbb5}
+html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
+@media (max-width:1000px){.okside{padding:24px 16px 40px}.okcard{padding:28px 22px 24px}}
 /* ---- footer / welcome ---- */
 .stufoot img{height:40px!important;width:auto!important;max-width:none;filter:none!important;opacity:1!important}
 /* ---- settings tab ---- */
