@@ -79,8 +79,9 @@
 .okhero .g{position:absolute;z-index:3;top:22px;inset-inline-start:26px;pointer-events:none}.okhero .g small{display:block;font-size:13px;opacity:.9;text-shadow:0 1px 6px rgba(0,0,0,.5)}.okhero .g h1{margin:2px 0 0;font-size:clamp(24px,3vw,38px);font-weight:700;letter-spacing:-.02em;text-shadow:0 2px 12px rgba(0,0,0,.5)}
 .okhero .stuav{position:absolute;z-index:3;top:22px;inset-inline-end:24px;width:44px!important;height:44px!important;border:2px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 .okhero .sl .cap{position:absolute;z-index:2;inset-inline-start:26px;bottom:24px;display:flex;flex-direction:column;gap:2px;pointer-events:none}.okhero .sl .cap b{font-size:20px;font-weight:700;text-shadow:0 1px 10px rgba(0,0,0,.5)}.okhero .sl .cap small{font-size:12.5px;opacity:.9}
-.okhero .dots{position:absolute;z-index:3;inset-inline-end:22px;bottom:26px;display:flex;gap:5px}.okhero .dots i{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer;transition:.3s}.okhero .dots i.on{background:#fff;width:18px;border-radius:3px}
-@media (max-width:760px){.okhero{aspect-ratio:4/3;min-height:0;border-radius:18px}.okhero .g{top:16px;inset-inline-start:16px}.okhero .g h1{font-size:22px}.okhero .sl .cap{inset-inline-start:16px;bottom:18px}.okhero .sl .cap b{font-size:16px}.okhero .dots{display:none}.okhero .stuav{top:16px;inset-inline-end:16px}}
+.okhero .nav{position:absolute;z-index:4;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.85);color:#17302b;font-size:26px;line-height:1;cursor:pointer;display:grid;place-items:center;opacity:0;transition:.25s}.okhero:hover .nav{opacity:1}.okhero .nav.prev{left:14px}.okhero .nav.next{right:14px}
+.okhero .dots{position:absolute;z-index:3;inset-inline-end:22px;bottom:26px;display:flex;gap:5px;flex-wrap:wrap;max-width:50%;justify-content:flex-end}.okhero .dots i{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer;transition:.3s}.okhero .dots i.on{background:#fff;width:18px;border-radius:3px}
+@media (max-width:760px){.okhero .nav{display:none}.okhero{aspect-ratio:4/3;min-height:0;border-radius:18px}.okhero .g{top:16px;inset-inline-start:16px}.okhero .g h1{font-size:22px}.okhero .sl .cap{inset-inline-start:16px;bottom:18px}.okhero .sl .cap b{font-size:16px}.okhero .dots{display:none}.okhero .stuav{top:16px;inset-inline-end:16px}}
 /* the office in numbers */
 .okstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .okst{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:2px}
@@ -137,35 +138,35 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
   const mq = (items, cls) => { const row = items.join(''); return `<div class="okmq ${cls || ''}"><div class="trk">${row}${row}</div></div>`; };
   const partnersHTML = () => { const tile = f => `<span class="lg"><img src="${SRC}partners/${f}.png" alt="" decoding="async"></span>`; return `<div class="oksec"><h3>${E(L('شركاء النجاح', 'Our partners'))}</h3><small>${E(L('عملاء وجهات وثقت في المكتب', 'Clients and institutions who trusted the office'))}</small></div>${mq(OFFICE.partners.map(tile), 'one')}`; };
   const card = p => `<a class="okpc" href="#/portfolio/ok-${p.id}">${pic(p, p.cover, '', false)}<div class="v"></div>${p.award ? `<span class="aw">${ic('award', 12)}${E(L('جائزة', 'Award'))}</span>` : ''}<div class="t"><b class="notr" dir="auto">${E(T(p, 'name'))}</b><small><span>${ic('pin', 12)}${E(T(p, 'loc'))}</span><span>${ic('user', 12)}${E(T(p, 'client'))}</span></small></div><span class="n">${p.n} ${E(L('صور', 'photos'))}</span></a>`;
-  const projectsHTML = (all) => `<div class="oksec"><h3>${E(L('من شغل المكتب', 'From the office\'s work'))}</h3><small>${E(L('مشاريع مختارة', 'Selected projects'))}</small><div class="grow"></div>${all ? '' : `<a href="#/portfolio">${E(L('الكل', 'All'))}</a>`}</div><div class="okpf">${PROJECTS.map(card).join('')}</div>`;
+  const projectsHTML = (all) => `<div class="oksec"><h3>${E(L('المشاريع', 'Projects'))}</h3><small>${E(L('مشاريع مختارة', 'Selected projects'))}</small><div class="grow"></div>${all ? '' : `<a href="#/portfolio">${E(L('الكل', 'All'))}</a>`}</div><div class="okpf">${PROJECTS.map(card).join('')}</div>`;
   const awardsHTML = () => `<div class="oksec"><h3>${E(L('جوايز وتكريمات', 'Awards'))}</h3></div><div class="okaw">${OFFICE.awards.map(([f, y, a, b, da, db]) => `<div class="a"><img src="${SRC}awards/${f}.png" alt="" loading="lazy"><div><em>${y}</em><b>${E(L(a, b))}</b><small>${E(L(da, db))}</small></div></div>`).join('')}</div>`;
   const collabHTML = () => `<div class="oksec"><h3>${E(L('تعاون دولي', 'International collaborations'))}</h3><small>${E(L('مكاتب عالمية اشتغلنا معاها', 'Global practices we have worked with'))}</small></div>${mq(OFFICE.collab.map(([f, nm, a, b]) => `<span class="lg" title="${E(nm)} — ${E(L(a, b))}"><img src="${SRC}collab/${f}.png" alt="${E(nm)}" decoding="async"></span>`), 'okcb')}`;
 
   /* ---------------------------------------------------------------- the home: office data on top, the projects under it */
   /* the hero: the project photos crossfading under the greeting (used when the office has not uploaded its own showreel / stills) */
   const HERO = { i: 0, t: null };
-  const heroSlides = () => { const out = []; PROJECTS.forEach(p => ordered(p).slice(0, 3).forEach(i => out.push({ p, i }))); return out; };
-  function heroHTML(greetInner, av) {
+  const heroSlides = () => { const out = []; PROJECTS.forEach(p => ordered(p).forEach(i => out.push({ p, i }))); return out; };
+  function heroHTML() {
     const sl = heroSlides();
-    return `<div class="okhero" id="okhero" data-n="${sl.length}">${sl.map((x, k) => `<a class="sl ${k === HERO.i % sl.length ? 'on' : ''}" href="#/portfolio/ok-${x.p.id}">${pic(x.p, x.i, '', k > 0)}<span class="cap"><b class="notr" dir="auto">${E(T(x.p, 'name'))}</b><small>${E(T(x.p, 'loc'))}</small></span></a>`).join('')}<div class="v"></div>
-      <div class="g">${greetInner}</div>${av || ''}<div class="dots">${sl.map((_, k) => `<i class="${k === HERO.i % sl.length ? 'on' : ''}" data-action="okHero" data-arg="${k}"></i>`).join('')}</div></div>`;
+    return `<div class="oksec"><h3>${E(L('من شغل المكتب', 'From the office\'s work'))}</h3><small>${E(L(`${sl.length} صورة من ${PROJECTS.length} مشاريع`, `${sl.length} photos from ${PROJECTS.length} projects`))}</small></div>
+      <div class="okhero" id="okhero" data-n="${sl.length}">${sl.map((x, k) => `<a class="sl ${k === HERO.i % sl.length ? 'on' : ''}" href="#/portfolio/ok-${x.p.id}">${pic(x.p, x.i, '', k > 1)}<span class="cap"><b class="notr" dir="auto">${E(T(x.p, 'name'))}</b><small>${E(T(x.p, 'loc'))} · ${E(T(x.p, 'client'))}</small></span></a>`).join('')}<div class="v"></div>
+      <button type="button" class="nav prev" data-action="okHeroStep" data-arg="-1" aria-label="prev">‹</button><button type="button" class="nav next" data-action="okHeroStep" data-arg="1" aria-label="next">›</button>
+      <div class="dots">${sl.map((_, k) => `<i class="${k === HERO.i % sl.length ? 'on' : ''}" data-action="okHero" data-arg="${k}"></i>`).join('')}</div></div>`;
   }
   function heroTick(force) { const h = document.getElementById('okhero'); if (!h) return; const n = +h.dataset.n || 1; if (!force) HERO.i = (HERO.i + 1) % n; else HERO.i = ((HERO.i % n) + n) % n; h.querySelectorAll('.sl').forEach((e, k) => e.classList.toggle('on', k === HERO.i)); h.querySelectorAll('.dots i').forEach((e, k) => e.classList.toggle('on', k === HERO.i)); }
   const heroArm = () => { clearInterval(HERO.t); HERO.t = setInterval(() => { if (document.hidden) return; heroTick(); }, 5500); };
-  if (typeof ACTIONS === 'object') ACTIONS.okHero = k => { HERO.i = +k || 0; heroTick(true); heroArm(); };
+  if (typeof ACTIONS === 'object') { ACTIONS.okHero = k => { HERO.i = +k || 0; heroTick(true); heroArm(); }; ACTIONS.okHeroStep = d => { HERO.i += +d || 1; heroTick(true); heroArm(); }; }
   function homeExtras() {
     return `<div class="okh">${statsHTML()}</div>`;
   }
   function homeLower() {
-    return `<div class="okh">${aboutHTML()}${partnersHTML()}${projectsHTML()}${awardsHTML()}${collabHTML()}</div>`;
+    return `<div class="okh">${heroHTML()}${partnersHTML()}${projectsHTML()}${awardsHTML()}${collabHTML()}</div>`;
   }
   const wrapDash = () => {
     if (typeof vDashboard !== 'function' || vDashboard.__oeko) return;
     vDashboard = (base => { const f = function () {
       let html = base.apply(this, arguments);
       if (!S.session || typeof html !== 'string' || html.indexOf('class="stuhome') < 0) return html;
-      /* no showreel uploaded yet → our slideshow carries the greeting */
-      html = html.replace(/<div class="shgreet"><div>([\s\S]*?)<\/div>(<span class="stuav[\s\S]*?<\/span>)?<\/div>/, (m, inner, av) => heroHTML(inner, av));
       /* the office in numbers right under the slideshow (before «your day») */
       const k = html.indexOf('<div class="shsec"><h3>'); if (k >= 0) html = html.slice(0, k) + homeExtras() + html.slice(k);
       /* the engine's portfolio strip + stills gallery go; ours come before the notice / shot / pulse cards */
@@ -177,7 +178,7 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
   wrapDash(); document.addEventListener('nf:ready', wrapDash);
 
   /* ---------------------------------------------------------------- «شغل المكتب»: our projects first, the engine's published entries (if any) under them */
-  const listPage = () => `<div class="okpl"><div class="head"><h2>${E(L('شغل المكتب', 'Office work'))}</h2><small>${E(L(`${PROJECTS.length} مشاريع مختارة من بروفايل المكتب`, `${PROJECTS.length} selected projects from the office profile`))}</small></div>${projectsHTML(true)}${awardsHTML()}${collabHTML()}</div>`;
+  const listPage = () => `<div class="okpl"><div class="head"><h2>${E(L('شغل المكتب', 'Office work'))}</h2><small>${E(L(`${PROJECTS.length} مشاريع مختارة من بروفايل المكتب`, `${PROJECTS.length} selected projects from the office profile`))}</small></div>${projectsHTML(true)}${awardsHTML()}${collabHTML()}<div class="oksec"><h3>${E(L('عن المكتب', 'About the office'))}</h3></div>${aboutHTML()}</div>`;
   function projPage(p) {
     const rows = [[L('المكان', 'Location'), T(p, 'loc')], [L('العميل', 'Client'), T(p, 'client')], [L('النوع', 'Type'), L(CAT[p.cat][0], CAT[p.cat][1])], [L('الخدمات', 'Services'), T(p, 'services')], [L('نطاق العمل', 'Scope of work'), scopeText(p)], [L('الجوايز', 'Awards'), T(p, 'award')]].filter(r => r[1]);
     const ps = ordered(p); const others = PROJECTS.filter(x => x.id !== p.id).slice(0, 3);
