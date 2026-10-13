@@ -64,7 +64,8 @@ html[data-theme="dark"] .topbar{background:#0b1513!important}
 .nfhomebtn,[data-action="ninetyHome"]{display:none!important}
 .side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
 html.apple .tb-logo,.tb-logo{width:auto!important;height:40px;padding:0 4px!important;background:transparent!important;border:0!important;box-shadow:none!important}
-html.apple .tb-logo img,.tb-logo img{filter:none!important;width:auto!important;height:36px!important;border-radius:8px}
+html.apple .tb-logo,.tb-logo{overflow:visible!important}
+html.apple .tb-logo img,.tb-logo img{filter:none!important;width:auto!important;height:36px!important;max-width:none!important;object-fit:contain!important;border-radius:8px;display:block}
 @media (max-width:760px){html.apple .tb-logo img,.tb-logo img{height:32px!important}}
 /* the home hero: Ökoplan colours until the office's own photos are published (no studio stills) */
 .shhero{background:linear-gradient(160deg,#9cdff7 0%,#50b1e7 38%,#38a599 70%,#3ca13c 100%)!important}
