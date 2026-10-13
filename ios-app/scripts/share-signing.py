@@ -11,7 +11,41 @@ def skip(why):
     print('share extension skipped:', why)
     sys.exit(0)
 
-iss = os.environ.get('APP_STORE_CONNECT_ISSUER_ID', ''); kid = os.environ.get('APP_STORE_CONNECT_KEY_IDENTIFIER', ''); key = os.environ.get('APP_STORE_CONNECT_PRIVATE_KEY', '')
+iss = os.environ.get('APP_STORE_CONNECT_ISSUER_ID', ''); kid = os.environ.get('APP_STORE_CONNECT_KEY_IDENTIFIER', ''); raw = os.environ.get('APP_STORE_CONNECT_PRIVATE_KEY', '')
+
+# v7.61: the integration key does not always arrive as a clean PEM (build 106: «Could not deserialize key data») —
+# accept @file:/@env: references (Codemagic CLI style), literal \n, CRLF, one-line PEM, base64 of the .p8, a bare base64 body,
+# or the AuthKey_<id>.p8 file in the usual private_keys folders. Only the shape is printed, never the key.
+def load_key(v):
+    import re
+    shape = []
+    v = (v or '').strip().strip('"').strip("'")
+    if v.startswith('@file:'):
+        shape.append('file'); 
+        try: v = open(os.path.expanduser(v[6:])).read()
+        except Exception: v = ''
+    elif v.startswith('@env:'):
+        shape.append('env'); v = os.environ.get(v[5:], '')
+    if not v and kid:
+        for d in ('~/private_keys', '~/.private_keys', '~/.appstoreconnect/private_keys', '.'):
+            f = os.path.join(os.path.expanduser(d), 'AuthKey_%s.p8' % kid)
+            if os.path.exists(f): shape.append('p8file'); v = open(f).read(); break
+    v = v.replace('\\n', '\n').replace('\r', '')
+    if v and 'BEGIN' not in v:
+        try:
+            dec = base64.b64decode(re.sub(r'\s+', '', v), validate=False).decode('utf-8', 'ignore')
+            if 'BEGIN' in dec: shape.append('b64pem'); v = dec
+        except Exception: pass
+    m = re.search(r'-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----', v, re.S)
+    if m:
+        label, body = m.group(1), re.sub(r'\s+', '', m.group(2)); shape.append('pem:' + label.lower().replace(' ', '-'))
+    else:
+        label, body = 'PRIVATE KEY', re.sub(r'\s+', '', v); shape.append('body')
+    pem = '-----BEGIN %s-----\n%s\n-----END %s-----\n' % (label, '\n'.join(body[i:i + 64] for i in range(0, len(body), 64)), label)
+    print('key shape:', '+'.join(shape) or 'empty', '| length', len(body))
+    return pem if body else ''
+
+key = load_key(raw)
 if not (iss and kid and key):
     skip('App Store Connect credentials not in the environment')
 try:
@@ -26,7 +60,7 @@ except Exception:
 
 def token():
     now = int(time.time())
-    return jwt.encode({'iss': iss, 'iat': now, 'exp': now + 1100, 'aud': 'appstoreconnect-v1'}, key.replace('\\n', '\n'), algorithm='ES256', headers={'kid': kid, 'typ': 'JWT'})
+    return jwt.encode({'iss': iss, 'iat': now, 'exp': now + 1100, 'aud': 'appstoreconnect-v1'}, key, algorithm='ES256', headers={'kid': kid, 'typ': 'JWT'})
 
 def call(method, path, body=None):
     req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body is not None else None,
