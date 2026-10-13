@@ -123,6 +123,11 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 /* phones */
 @media (max-width:1000px){.okaw{grid-template-columns:1fr 1fr}.okabout{grid-template-columns:1fr}}
 @media (max-width:760px){.okmq{height:58px}.okmq.okcb{height:62px}.okmq .lg{height:50px;width:112px}.okmq .lg img{width:88px;height:34px}.okstats{grid-template-columns:repeat(2,1fr)}.okst b{font-size:26px}.okaw{grid-template-columns:1fr}.okserv{grid-template-columns:repeat(2,1fr)}.okvals{grid-template-columns:repeat(2,1fr)}}
+/* the gallery strip: small grey dots on a soft dark fade instead of the bars (Mahmoud, 13 Oct) */
+.shhero .shdots{top:14px;inset-inline-end:16px;gap:5px;padding:6px 9px;border-radius:999px;background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.12));backdrop-filter:blur(3px);align-items:center}
+.shhero .shdots i{width:6px!important;height:6px!important;border-radius:50%!important;background:rgba(255,255,255,.42)!important;box-shadow:0 0 0 0 rgba(255,255,255,0);transition:background .3s,transform .3s,box-shadow .3s}
+.shhero .shdots i.on{background:#fff!important;width:6px!important;transform:scale(1.35);box-shadow:0 0 0 3px rgba(255,255,255,.18)}
+.shhero .shdots i:hover{background:rgba(255,255,255,.8)!important}
 .stuhome .smgal,.stuhome .smempty{display:none!important}
 .pfpage .pfyear{display:none!important}
 </style>`);
