@@ -135,6 +135,9 @@ rep("const OWNER_NAME = () => (S.settings.ownerName || '').trim() || 'محمود
 rep("const GATES = [['comp', 'Composition'], ['light', 'Concept lighting'], ['detail', 'Detailing + AI'], ['post', 'Final post']];", "const GATES = [['comp', 'Drafting'], ['light', 'Team lead review'], ['detail', 'Design manager review'], ['post', 'Issued']];", 1)
 rep("const rg = b.groups.find(g => /render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];", "const rg = b.groups.find(g => /tender|construction|detailed|render/i.test(g.name)) || b.groups[Math.max(0, b.groups.length - 3)];", 1)
 
+# --- the office typeface: Jost (geometric, like the profile's Century Gothic) for Latin and numbers; IBM Plex Sans Arabic stays for Arabic
+rep('family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap', 'family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Jost:wght@300;400;500;600;700&display=swap', 1)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)

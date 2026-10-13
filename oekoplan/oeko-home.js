@@ -133,7 +133,7 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
 .shhero .shslide::after{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(rgba(20,26,30,.5) 0.55px,transparent 0.8px);background-size:3px 3px;mix-blend-mode:multiply;opacity:.25;transition:opacity .5s ease}
 .shhero .shslide::before{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background:rgba(14,22,28,.07);transition:opacity .5s ease}
 /* the caption: the office profile's typography — light geometric caps title in the logo blue, category line above, bold-label details under it */
-.shhero .sht{bottom:30px;inset-inline:40px;gap:6px;max-width:70%;z-index:2;font-family:'Jost','Century Gothic','Futura',system-ui,sans-serif}
+.shhero .sht{bottom:30px;inset-inline:40px;gap:6px;max-width:70%;z-index:2}
 .shhero .sht::after{content:'';position:absolute;inset:-26px -30px -20px;z-index:-1;border-radius:18px;background:linear-gradient(180deg,rgba(5,12,18,0),rgba(5,12,18,.62));filter:blur(16px)}
 .shhero .sht small{display:none}
 .shhero .sht .okcat{font-size:15px;font-weight:400;color:#7fd0f5;letter-spacing:.02em;text-transform:none}
@@ -217,7 +217,6 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
       h2.insertAdjacentHTML('afterend', `<div class="okdet notr">${rows.map(([k, v]) => `<div><b>${E(k)}:</b><span dir="auto">${E(String(v))}</span></div>`).join('')}</div>`);
     });
   };
-  (() => { try { if (!document.getElementById('okfont')) { const l = document.createElement('link'); l.id = 'okfont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap'; document.head.appendChild(l); } } catch (e) { /* offline */ } })();
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(okCaption);
   setInterval(okCaption, 1500);
   window.oekoHome = { PROJECTS, OFFICE, seedGallery };

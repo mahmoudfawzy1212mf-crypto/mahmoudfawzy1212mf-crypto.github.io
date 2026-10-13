@@ -25,6 +25,8 @@
 
   /* ---------------------------------------------------------------- identity: colours, theme, logos */
   document.head.insertAdjacentHTML('beforeend', `<style id="oeko-theme">
+:root,html.apple,html.apple[data-theme="dark"],html.apple[data-theme="light"]{--font:'Jost','IBM Plex Sans Arabic',-apple-system,BlinkMacSystemFont,'SF Arabic','Segoe UI','Noto Sans Arabic',system-ui,sans-serif}
+body,button,input,select,textarea{font-family:var(--font)}
 :root{--accent:${C.teal};--accent-ink:#fff;--accent-soft:#e3f4f1;--accent-2:${C.blue};--primary:#1d3d36;--primary-ink:#fff;
   --good:${C.green};--good-soft:#edf7e2;--good-ink:#3f7a12;--lof:${C.green};--elm:${C.blue};--alu:${C.teal};
   --side-bg:#16302b;--side-ink:#d6e6e2;--side-muted:#8fb0a9;--side-on:#fff;--side-on-bg:linear-gradient(135deg,${C.green},${C.teal} 60%,${C.blue});
