@@ -653,6 +653,63 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
   const LEAVE_EN = { annual: 'Annual leave — 21 days after one year of service (30 after 10 years or past 50)', casual: 'Casual leave — 6 separate days a year from the annual balance', sick: 'Sick leave (medical certificate)', maternity: 'Maternity leave — 120 days at full pay (up to 3 times)', marriage: 'Marriage leave — 5 days', bereave: 'Bereavement leave (first-degree relative) — 3 days', newborn: 'Newborn leave — 1 day', hajj: 'Hajj leave — one month after 5 years of service', unpaid: 'Unpaid leave', mission: 'Work errand / site visit' };
   LEAVES.forEach(l => { if (LEAVE_EN[l.id]) OEKO_I18N[l.name] = LEAVE_EN[l.id]; });
   (() => { const a = REG_AR.split('\n'), e = REG_EN.split('\n'); if (a.length === e.length) a.forEach((ln, i) => { const strip = t => t.replace(/^(## |- )/, ''); OEKO_I18N[ln] = e[i]; OEKO_I18N[strip(ln)] = strip(e[i]); }); })();
+
+  /* ---------------------------------------------------------------- project covers (Projects & stages)
+     · one consistent look: every cover is shown in grey (colour on hover); the developer's logo stands in until a photo is chosen
+     · anyone who can edit the project sets the picture: upload a photo (kept as a `files` doc → coverFileId, the engine's own field)
+       or pick a client logo from the partners list (coverLogo) */
+  const PARTNERS = 'l01 l02 l03 l04 l05 l06 l07 l08 l09 l10 l11 l12 l13 l14 l15 l16 l17 l18 l19 l21 l22 l23 l24 l25 l26 l27 l28 l29 l30 l31 l32 l33 l34 l35 l37 l38 l39 l40 l41 l42 l43 l44 l46 l47 l48 l49 l51 l53 l101 l103 l104 l106 l107 l108 l110 l111 l112 l113 l115 l116'.split(' ');
+  const LOGO_OF = { 'IL MONTE GALALA Phase 2': 'l28', 'D-Bay': 'l01', 'Salt': 'l01', 'Bloomfields Phase 1': 'l01', 'Bloomfields Phase 2': 'l01', 'Fouka-Bay Phase 4': 'l49', 'Icity': 'l34', 'El-Qamzy Eastshire': 'l35', 'Seazen': 'l35', 'Mangroovy': 'l33', 'Skywalk': 'l18', 'Skywalk Oasis': 'l18', 'Estates club house - Sodic': 'l10', 'LMD roundabout': 'l104' };
+  const logoSrc = k => BASE + '_src/partners/' + k + '.png';
+  const coverLogo = p => p && (p.coverLogo || LOGO_OF[String(p.name || '').trim()] || '');
+  document.head.insertAdjacentHTML('beforeend', `<style id="oeko-cover">
+.spcard .cov img,.sphead .cov img{filter:grayscale(1);opacity:.9;transition:filter .25s,opacity .25s}
+.spcard:hover .cov img,.sphead:hover .cov img{filter:none;opacity:1}
+.spcard .cov.oklogo,.sphead .cov.oklogo{background:#e9eef0!important}
+html[data-theme="dark"] .spcard .cov.oklogo,html[data-theme="dark"] .sphead .cov.oklogo{background:#d7dde0!important}
+.spcard .cov.oklogo img,.sphead .cov.oklogo img{object-fit:contain!important;padding:14%;box-sizing:border-box;filter:grayscale(1) contrast(.9);opacity:.85;mix-blend-mode:multiply}
+.spcard:hover .cov.oklogo img{filter:none;opacity:1}
+.spcard .cov.okmark{background:linear-gradient(135deg,var(--surface-2),var(--surface-3))!important}
+.spcard .cov.okmark img,.sphead .cov.okmark img{width:34%!important;height:auto!important;object-fit:contain!important;filter:grayscale(1);opacity:.35}
+.okcovgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:46vh;overflow:auto;padding:2px}
+.okcovgrid button{border:1px solid var(--line);border-radius:10px;background:#fff;aspect-ratio:4/3;display:grid;place-items:center;padding:8px;cursor:pointer}
+.okcovgrid button img{max-width:100%;max-height:100%;object-fit:contain}
+.okcovgrid button.on{outline:2px solid var(--accent)}</style>`);
+  const paintCover = (cov, p) => {
+    if (!cov || !p) return;
+    const img = cov.querySelector('img');
+    if (img && !cov.classList.contains('oklogo') && !cov.classList.contains('okmark')) return; // a real photo (engine cover)
+    const lg = coverLogo(p);
+    const want = lg ? logoSrc(lg) : IMG.mark; const cls = lg ? 'oklogo' : 'okmark';
+    if (img && img.getAttribute('src') === want && cov.classList.contains(cls)) return;
+    cov.classList.remove('oklogo', 'okmark'); cov.classList.add(cls); cov.innerHTML = `<img src="${want}" alt="" decoding="async">`;
+  };
+  const paintCovers = () => {
+    document.querySelectorAll('.spcard[href^="#/projects/"] .cov').forEach(cov => { const id = cov.closest('.spcard').getAttribute('href').slice('#/projects/'.length); paintCover(cov, byId('projects', id)); });
+    if (S.route && S.route.view === 'projects' && S.route.id) {
+      const p = byId('projects', S.route.id); const head = document.querySelector('.sphead'); if (!p || !head) return;
+      paintCover(head.querySelector('.cov'), p);
+      if (typeof stuCanEdit === 'function' && stuCanEdit() && !head.querySelector('[data-action="oekoCover"]')) { const ed = head.querySelector('[data-action="stuProjectEdit"]'); if (ed) ed.insertAdjacentHTML('beforebegin', `<button class="btn sm ghost" data-action="oekoCover" data-arg="${p.id}">${typeof icon === 'function' ? icon('image') : ''}${L('صورة المشروع', 'Project picture')}</button>`); }
+    }
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(paintCovers);
+  const shrink = (src, max) => new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.8)); }; im.onerror = rej; im.src = src; });
+  ACTIONS.oekoCover = id => {
+    const p = byId('projects', id); if (!p || !(typeof stuCanEdit === 'function' && stuCanEdit())) return;
+    const cur = coverLogo(p);
+    openModal({
+      title: L('صورة المشروع', 'Project picture'),
+      body: `<div class="form"><div class="field full"><label>${L('صورة من الجهاز', 'A photo from this device')}</label><input type="file" id="okcov-file" accept="image/*"><div class="tiny muted" style="margin-top:4px">${L('بتتحفظ بحجم مناسب للكروت وبتظهر بالرمادي زي باقي المشاريع.', 'Stored at card size and shown in grey like the other projects.')}</div></div>
+        <div class="field full"><label>${L('أو لوجو الجهة صاحبة المشروع', "Or the project owner's logo")}</label><div class="okcovgrid">${PARTNERS.map(k => `<button type="button" data-logo="${k}" class="${k === cur ? 'on' : ''}"><img src="${logoSrc(k)}" alt=""></button>`).join('')}</div></div></div>`,
+      footer: `<button type="button" class="btn ghost" data-action="closemodal">${L('إلغاء', 'Cancel')}</button>${(p.coverFileId || p.coverLogo) ? `<button type="button" class="btn ghost" id="okcov-clear">${L('إزالة الصورة', 'Remove picture')}</button>` : ''}`,
+      onOpen: m => {
+        m.querySelector('#okcov-file').addEventListener('change', async ev => { const f = ev.target.files[0]; if (!f) return; try { const url = await shrink(await fileToDataURL(f), 900); const fid = uid(); await Store.save('files', { id: fid, name: `${p.code || p.name} — cover.jpg`, kind: 'photo', mime: 'image/jpeg', size: 0, projectId: p.id, ownerKind: 'project', ownerId: p.id, thumb: url, note: L('صورة المشروع', 'Project picture'), at: new Date().toISOString() }); await Store.update('projects', p.id, { coverFileId: fid, coverLogo: '' }); closeModal(); toast(L('اتحفظت ✓', 'Saved ✓')); render(); } catch (e) { toast(L('الصورة ماتقريتش', 'Could not read the picture'), 'err'); } });
+        m.querySelectorAll('[data-logo]').forEach(b => b.addEventListener('click', async () => { await Store.update('projects', p.id, { coverLogo: b.dataset.logo, coverFileId: null }); closeModal(); render(); }));
+        const cl = m.querySelector('#okcov-clear'); if (cl) cl.addEventListener('click', async () => { await Store.update('projects', p.id, { coverLogo: '', coverFileId: null }); closeModal(); render(); });
+      },
+    });
+  };
+  Object.assign(OEKO_I18N, { 'صورة المشروع': 'Project picture', 'صورة من الجهاز': 'A photo from this device', 'أو لوجو الجهة صاحبة المشروع': "Or the project owner's logo", 'إزالة الصورة': 'Remove picture' });
   window.OEKO_I18N = OEKO_I18N;
   const oekoI18nApply = () => { try { if (!I18N || !I18N.exact) return; const norm = typeof i18nNorm === 'function' ? i18nNorm : (x => String(x).trim()); Object.keys(OEKO_I18N).forEach(k => { I18N.exact.set(norm(k), OEKO_I18N[k]); }); } catch (e) { /* ignore */ } };
   if (typeof i18nCompile === 'function') i18nCompile = (base => function () { const r = base.apply(this, arguments); oekoI18nApply(); return r; })(i18nCompile);
