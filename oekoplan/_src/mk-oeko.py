@@ -27,8 +27,10 @@ DOMAIN = 'oekoplanlandscaping.com'
 html = open(os.path.join(SRC, 'index.html'), encoding='utf-8').read()
 n0 = len(html)
 
+AR_REPL = []
 def rep(old, new, count=None, must=True):
     global html
+    if '<' not in old and '\n' not in old: AR_REPL.append((old, new))
     c = html.count(old)
     if must and c == 0:
         sys.exit(f'!! pattern not found: {old[:80]!r}')
@@ -77,11 +79,34 @@ rep('<script src="./qrp-v1.js" defer></script>\n</body>',
 
 open(os.path.join(DST, 'index.html'), 'w', encoding='utf-8').write(html)
 
-# --- en.json: same name replacements in the English dictionary
-en = open(os.path.join(SRC, 'en.json'), encoding='utf-8').read()
-for a, b in [('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office')]:
-    en = en.replace(a, b)
-open(os.path.join(DST, 'en.json'), 'w', encoding='utf-8').write(en)
+# --- en.json: the pack is aligned BY POSITION with the Arabic strings extracted from index.html (i18nBuildDict); our text
+#     replacements change some Arabic keys, so the pack is rebuilt for the derived page with node (the page's own extractor + checksum),
+#     carrying the English over with the same name replacements. Add-on strings (oekoplan.js) carry their own English at runtime.
+EN_REPL = [('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office'), ('art director', 'design manager'), ('Art director', 'Design manager'), ('Art Director', 'Design Manager'), ('Studio work', 'Office work'), ('studio work', 'office work')]
+import subprocess, tempfile
+js = r"""
+const fs = require('fs'); const [,, srcHtml, dstHtml, packPath, outPath, replJson] = process.argv;
+const grab = (html, startRe, endMarker) => { const i = html.search(startRe); if (i < 0) throw new Error('extractor not found'); const j = html.indexOf(endMarker, i); return html.slice(i, j + endMarker.length); };
+const a = fs.readFileSync(srcHtml, 'utf8'), b = fs.readFileSync(dstHtml, 'utf8');
+const ext = grab(a, /\(function \(root\) \{[\s\S]{0,200}?nfI18nExtract|\(function \(root\) \{/, "})(typeof window !== 'undefined' ? window : globalThis);");
+const chk = a.slice(a.indexOf('function i18nChk(k)'), a.indexOf('\n', a.indexOf('function i18nChk(k)')));
+const g = {}; new Function('globalThis', 'window', ext + '\n' + chk + '\nglobalThis.i18nChk = i18nChk;')(g, g);
+const M = '\u0001';
+const ka = g.nfI18nExtract(a).map(k => k.replace(/\{\{[^}]+\}\}/g, M)), kb = g.nfI18nExtract(b).map(k => k.replace(/\{\{[^}]+\}\}/g, M));
+const pack = JSON.parse(fs.readFileSync(packPath, 'utf8')); const repl = JSON.parse(replJson);
+if (ka.length !== kb.length) { console.error('key count differs', ka.length, kb.length); }
+const tr = s => { let t = s; for (const [x, y] of repl) t = t.split(x).join(y); return t; };
+const AR = JSON.parse(process.argv[7] || '[]'); // [[old, new]] Arabic replacements, applied in reverse to find the original key
+const byOld = new Map(); ka.forEach((k, i) => { const e = pack.v[i]; if (e && e[0] === g.i18nChk(k) && !byOld.has(k)) byOld.set(k, e[1]); });
+const inv = s => { let t = s; for (const [x, y] of AR.slice().reverse()) if (y) t = t.split(y).join(x); return t; };
+let direct = 0, fixed = 0, miss = 0; const v = kb.map(k => { if (byOld.has(k)) { direct++; return [g.i18nChk(k), tr(byOld.get(k))]; } const o = inv(k); if (byOld.has(o)) { fixed++; return [g.i18nChk(k), tr(byOld.get(o))]; } miss++; return ['00', '']; });
+const out = Object.assign({}, pack, { v }); if (pack.x) { out.x = {}; for (const k of Object.keys(pack.x)) out.x[k] = tr(pack.x[k]); }
+fs.writeFileSync(outPath, JSON.stringify(out)); console.log('pack', v.length, 'direct', direct, 'via replacement', fixed, 'missing', miss);
+"""
+with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False, encoding='utf-8') as f: f.write(js); jsp = f.name
+r = subprocess.run(['node', jsp, os.path.join(SRC, 'index.html'), os.path.join(DST, 'index.html'), os.path.join(SRC, 'en.json'), os.path.join(DST, 'en.json'), json.dumps(EN_REPL), json.dumps(AR_REPL)], capture_output=True, text=True)
+print(r.stdout.strip(), r.stderr.strip()[:300])
+if r.returncode: sys.exit('!! en.json rebuild failed')
 
 # --- service worker: add the add-on to the shell list
 sw = open(os.path.join(SRC, 'sw.js'), encoding='utf-8').read()

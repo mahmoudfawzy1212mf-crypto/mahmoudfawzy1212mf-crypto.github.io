@@ -29,8 +29,36 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#5fc4b8;--accent-ink:#06211d;--accent-soft:#143530;--good-ink:#9ad66a;--side-bg:#0d1a17}}
 .brandstack .lockup:empty{display:none}
 .wordmark{filter:none!important}
-.brand .brandstack .wordmark{height:58px!important;width:auto}
+/* ---- the side bar: light = white with the coloured lockup · dark = deep green with the white lockup ---- */
+.brand .brandstack .wordmark,.side .brand .wordmark,html.apple .side .brand .wordmark{height:74px!important;max-height:none!important;width:auto!important}
+.side .brand{padding:6px 4px 10px;justify-content:center}
 .nfback{display:none!important}
+html.apple[data-theme="light"] .side,html.apple[data-theme="light"] .nhome .nside{background:#ffffff!important;border-inline-start:1px solid #e1e8e5}
+html.apple[data-theme="light"] .side .nav .ngh,html.apple[data-theme="light"] .side .nav a,html.apple[data-theme="light"] .side .userchip .n,html.apple[data-theme="light"] .side .acct.nfstrip>.nfst,html.apple[data-theme="light"] .side .nftogs>.nfst{color:#1d3d36!important}
+html.apple[data-theme="light"] .side .userchip .r{color:#5b7a73}
+html.apple[data-theme="light"] .side .nav .ngh:hover,html.apple[data-theme="light"] .side .nav a:hover{background:rgba(29,61,54,.06)!important}
+html.apple[data-theme="light"] .side .nav .ngh > svg:first-child{color:#5b7a73!important}
+html.apple[data-theme="light"] .side .nav .ngc{background:#e3f4f1!important;color:#1f7a6f!important}
+html.apple[data-theme="light"] .side .nav .ngc.hot{background:#ff453a!important;color:#fff!important}
+html.apple[data-theme="light"] .side .nav .ngrp.open > .ngh,html.apple[data-theme="light"] .side .nav .ngrp.fly > .ngh{background:rgba(29,61,54,.05)!important}
+html.apple[data-theme="light"] .side .nav a.on,html.apple[data-theme="light"] .side .nav .ngrp.open > .ngh.on{background:linear-gradient(135deg,#70b62e,#38a599)!important;color:#fff!important;box-shadow:0 6px 16px -8px rgba(56,165,153,.6)!important}
+html.apple[data-theme="light"] .side .nav a.on svg{color:#fff!important}
+html.apple[data-theme="light"] .side .acct.nfstrip>.nfst,html.apple[data-theme="light"] .side .nftogs>.nfst{background:#eef4f2!important}
+html.apple[data-theme="light"] .side .acct.nfstrip>.nfst.logout{color:#b42318!important}
+html.apple[data-theme="light"] .side .userchip{border-bottom-color:#e1e8e5}
+html.apple[data-theme="light"] .side .avatar{background:linear-gradient(135deg,#70b62e,#38a599);color:#fff}
+html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#0e1f1b!important}
+html.apple[data-theme="dark"] .side .nav a.on{background:linear-gradient(135deg,#3ca13c,#38a599)!important;color:#fff!important}
+html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
+html[data-theme="dark"] .tb-logo img,html[data-theme="dark"] .brand img{filter:none}
+/* ---- day / night surfaces ---- */
+html[data-theme="light"] body{background:#f3f7f5}
+html[data-theme="light"] .topbar{background:#f3f7f5!important}
+:root[data-theme="dark"]{--bg:#0b1513;--surface:#13201d;--surface-2:#1a2b27;--surface-3:#223732;--line:#223732;--line-2:#2f4740;--ink:#e9f1ee;--ink-2:#c0d1cb;--muted:#86a39b}
+html[data-theme="dark"] body{background:#0b1513}
+html[data-theme="dark"] .topbar{background:#0b1513!important}
+/* no office door / no other companies */
+.side .nav a[href="#/door"],.side .nav a[data-view="door"],.sptile.door{display:none!important}
 .tb-logo img{border-radius:6px}
 .sptile.ideas .ic{background:#e8f5d9;color:#3f7a12}.sptile.design .ic{background:#dff3f0;color:#1f7a6f}
 /* ---- login ---- */
@@ -281,7 +309,9 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (n.id && /^ninety/.test(String(n.id))) NAV.splice(i, 1); }
   }
   if (typeof VIEW_TITLES === 'object') Object.assign(VIEW_TITLES, { workers: 'فريق المكتب', sites: 'مواقع البصمة' });
-  if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) ? false : base(view)))(canSee);
+  if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || view === 'door' ? false : base(view)))(canSee);
+  if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (NAV[i].id === 'door') NAV.splice(i, 1);
+  if (typeof NINETY_COS === 'object') Object.keys(NINETY_COS).forEach(k => { NINETY_COS[k].url = ''; });
   if (typeof ACTIONS === 'object') { ACTIONS.ninetyGo = () => go('dashboard'); ACTIONS.goHome = () => go('dashboard'); }
   /* no Ninety owner hub: the owner lands on the dashboard (the hub is skipped while sessionStorage says a company is open) */
   try { sessionStorage.setItem('nf.ninety.co', 'factory'); } catch (e) { /* ignore */ }
@@ -347,6 +377,22 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
     document.querySelectorAll('.co[data-action="ninetyGo"], .ninetyhub, [data-view="ninety"]').forEach(e => e.remove());
   });
   document.addEventListener('DOMContentLoaded', () => { document.title = NAME; swapLogos(); });
+
+  /* local / preview mode (no server yet): the engine seeds factory demo data — wipe it once, the owner account is Dr. Tarek */
+  const oekoCleanStart = async () => {
+    try {
+      if (typeof sbOn === 'function' && sbOn()) return; if (!S || S.mode !== 'local') return;
+      let done = ''; try { done = localStorage.getItem('oeko.clean') || ''; } catch (e) { /* ignore */ }
+      if (done) return;
+      for (const c of COLS) { if (c === 'staff' || c === 'backups') continue; for (const d of list(c)) { try { await Store.remove(c, d.id); } catch (e) { /* ignore */ } } }
+      for (const st of list('staff')) { if (/تجريبي/.test(st.name || '') && st.role !== 'admin') { try { await Store.remove('staff', st.id); } catch (e) { /* ignore */ } continue; } if (st.role === 'admin' && /محمود|Mahmoud/.test(st.name || '')) { try { await Store.save('staff', Object.assign({}, st, { name: 'طارق صبحي' })); if (S.session && S.session.id === st.id) S.session.name = 'طارق صبحي'; } catch (e) { /* ignore */ } } }
+      try { localStorage.setItem('oeko.clean', '1'); } catch (e) { /* ignore */ }
+      if (typeof render === 'function') render(true);
+    } catch (e) { /* ignore */ }
+  };
+  document.addEventListener('nf:ready', oekoCleanStart); if (typeof S !== 'undefined' && S._readyFired) setTimeout(oekoCleanStart, 0);
+  /* the owner's line in the org chart / about: Dr. Tarek Sobhy */
+  if (typeof OEKO_DEFAULTS === 'object') OEKO_DEFAULTS.owner = 'د. طارق صبحي';
 
   /* ---------------------------------------------------------------- the team (from «Ökoplan Landscaping — Team Database», 13 Oct 2026) */
   /* [name, graduation year, title, e-mail, phone, mode, remark, dept, role] — dept/role from the structure; '' = to be confirmed */
@@ -467,6 +513,37 @@ html[data-theme="dark"] .okcard .slf input{background:#0f1614;border-color:#2b3b
         <tr><td>${L('الإشراف على التنفيذ', 'Site supervision')}</td><td>${L('من موقع المشروع المسجّل على الخريطة', 'At the project site registered on the map')}</td><td>${L('9:00–5:00 · 6 أيام، أو 12 يوم + 3 راحة خارج القاهرة الكبرى · إضافي ×1.5', '09:00–17:00 · 6 days, or 12 on + 3 off outside Greater Cairo · OT ×1.5')}</td></tr>
       </tbody></table></div>`;
   } };
+
+
+  /* ---------------------------------------------------------------- language: the add-on's Arabic ↔ English (the page pack covers the engine) */
+  const OEKO_I18N = {
+    'صاحب المكتب': 'Office owner', 'مدير التصميم — Landscape Design Manager': 'Landscape Design Manager', 'مدير المكتب — الشؤون الإدارية والموارد البشرية': 'Office Manager — Admin & HR', 'الحسابات': 'Accounts',
+    'شريك / رئيس قسم — Associate Partner': 'Associate Partner — Head of Department', 'مهندس — Landscape Architect': 'Landscape Architect', 'موظف — بوابة الموبايل': 'Employee — mobile portal', 'مشاهد': 'Viewer', 'كشك الحضور': 'Attendance kiosk',
+    'صاحب المكتب (د. طارق صبحي): يرى كل شيء ويعتمد نهائيًا — المشاريع، الفريق، الحضور، الإجازات، المرتبات، العملاء وعروض الأسعار.': 'Office owner (Dr. Tarek Sobhy): sees everything and gives the final approval — projects, team, attendance, leave, payroll, clients and fee proposals.',
+    'الشريك / رئيس القسم: يدير قسمه وفرقه — يوزّع المهام ويتابع المشاريع ويعتمد إجازات وأذونات وبصمات فريقه (الاعتماد النهائي).': 'Associate partner / head of department: runs the department and its teams — assigns tasks, follows projects and gives the final approval on the team\'s leave, permissions and punches.',
+    'مدير التصميم: يتابع كل مشاريع التصميم ومراحلها والمهام والفريق والحضور — بدون أرقام مالية.': 'Design manager: follows every design project and stage, tasks, team and attendance — no financial figures.',
+    'مدير المكتب: الفريق والحضور والجزاءات والإجازات والمرتبات والمصروفات والشؤون الإدارية.': 'Office manager: team, attendance, penalties, leave, payroll, expenses and administration.',
+    'المهندس: مشاريعه ومهامه وبوردات التصميم وبصمته وطلباته.': 'Engineer: own projects, tasks, design boards, punches and requests.', 'موظف: يبصم ويقدّم طلباته من موبايله فقط.': 'Employee: punches and sends requests from the phone only.',
+    'المكتب الفني': 'Technical Office', 'استوديو التصميم 1': 'Design Studio 1', 'استوديو التصميم 2': 'Design Studio 2', 'تنسيق أعمال اللاند سكيب': 'Landscape Coordination', 'إدارة المشروعات (PMO)': 'PMO', 'تطوير الأعمال': 'Business Development', 'الإشراف على التنفيذ': 'Site Supervision', 'إدارة المكتب': 'Office Management', 'الحسابات والموارد البشرية': 'Accounts & HR',
+    'المشاريع ومراحلها': 'Projects & stages', 'فريق المكتب': 'Office team', 'مواقع البصمة (المكتب والمشاريع)': 'Punch locations (office & sites)', 'التقييم ربع السنوي': 'Quarterly appraisal', 'الهيكل التنظيمي': 'Org chart', 'مواقع البصمة': 'Punch locations',
+    'راتب شهري': 'Monthly salary', 'يومية': 'Daily wage', 'بارت تايم': 'Part time',
+    'تلقائي — المكتب، ومواقع المشاريع لمهندسي الإشراف': 'Automatic — the office, and project sites for supervision engineers', 'المكتب فقط (QR)': 'Office only (QR)', 'مواقع المشاريع المخصصة له فقط (الإشراف على التنفيذ)': 'Assigned project sites only (site supervision)', 'المكتب أو مواقع المشاريع': 'Office or project sites', 'بدون قيد موقع (من البيت)': 'No location limit (from home)',
+    'أوكوبلان — المكتب': 'Ökoplan — the office', 'دوام كامل من المكتب': 'Full time at the office', 'من البيت': 'From home', 'هايبرد': 'Hybrid', 'بارت تايم من المكتب': 'Part time at the office', 'بارت تايم من البيت': 'Part time from home',
+    'رقم الموبايل ناقص رقم — يُراجع': 'Mobile number is one digit short — to check', 'رقم الموبايل فيه رقم زيادة — يُراجع': 'Mobile number has an extra digit — to check', 'إجازة وضع': 'Maternity leave', 'تخرج': 'Graduated',
+    'لائحة العمل والنظام الأساسي ولائحة الجزاءات — شركة أوكوبلان لتنسيق المواقع': 'Work regulation, basic statute and disciplinary code — Ökoplan Landscaping',
+    'شركة أوكوبلان لتنسيق المواقع (ÖKOPLAN Landscaping)': 'Ökoplan Landscaping Co. (ÖKOPLAN)', 'مساكن شيراتون — هليوبوليس — مصر الجديدة — القاهرة': 'Sheraton Residences — Heliopolis — Cairo', 'تصميم لاند سكيب · استشارات · إشراف على التنفيذ': 'Landscape design · consulting · site supervision',
+    'د. طارق صبحي': 'Dr. Tarek Sobhy',
+  };
+  /* shifts, leave types and the regulation: line by line */
+  SHIFTS.forEach(sh => { OEKO_I18N[sh.name] = sh.en; });
+  const LEAVE_EN = { annual: 'Annual leave — 21 days after one year of service (30 after 10 years or past 50)', casual: 'Casual leave — 6 separate days a year from the annual balance', sick: 'Sick leave (medical certificate)', maternity: 'Maternity leave — 120 days at full pay (up to 3 times)', marriage: 'Marriage leave — 5 days', bereave: 'Bereavement leave (first-degree relative) — 3 days', newborn: 'Newborn leave — 1 day', hajj: 'Hajj leave — one month after 5 years of service', unpaid: 'Unpaid leave', mission: 'Work errand / site visit' };
+  LEAVES.forEach(l => { if (LEAVE_EN[l.id]) OEKO_I18N[l.name] = LEAVE_EN[l.id]; });
+  (() => { const a = REG_AR.split('\n'), e = REG_EN.split('\n'); if (a.length === e.length) a.forEach((ln, i) => { const strip = t => t.replace(/^(## |- )/, ''); OEKO_I18N[ln] = e[i]; OEKO_I18N[strip(ln)] = strip(e[i]); }); })();
+  const oekoI18nApply = () => { try { if (!I18N || !I18N.exact) return; const norm = typeof i18nNorm === 'function' ? i18nNorm : (x => String(x).trim()); Object.keys(OEKO_I18N).forEach(k => { I18N.exact.set(norm(k), OEKO_I18N[k]); }); } catch (e) { /* ignore */ } };
+  if (typeof i18nCompile === 'function') i18nCompile = (base => function () { const r = base.apply(this, arguments); oekoI18nApply(); return r; })(i18nCompile);
+  oekoI18nApply();
+  /* every switch: the whole page re-renders in the chosen language (the engine re-renders; this covers texts painted outside render) */
+  if (typeof i18nSet === 'function') i18nSet = (base => async function () { const r = await base.apply(this, arguments); oekoI18nApply(); try { if (typeof render === 'function') render(true); } catch (e) { /* ignore */ } return r; })(i18nSet);
 
   /* AI assistants talk about a landscape office */
   if (typeof aiInstructionsBase === 'function') aiInstructionsBase = (base => () => base().replace(/مكتب التصميم المعماري/g, 'مكتب تصميم اللاند سكيب والإشراف على التنفيذ').replace(/الإظهار المعماري/g, 'تصميم اللاند سكيب'))(aiInstructionsBase);
