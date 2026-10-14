@@ -11321,6 +11321,20 @@ function serviceMonths(w) { const j0 = w.serviceFrom || w.joined; if (!j0) retur
 const onProbation = w => !!w.probation && (!w.probationUntil || w.probationUntil >= todayISO());
 function advanceLimit(w, ym) { const pol = advPolicy(); const s = hrMonthSummary(w, ym || monthOf(todayISO())); const earned = (s.present + s.half * 0.5) * dailyRate(w); return { limit: r2(earned * (+pol.advanceMaxPct || 50) / 100), earned: r2(earned), days: s.present + s.half * 0.5, absent: s.absent }; }
 function advanceOpenBalance(w) { return r2(sum(list('advances').filter(a => a.workerId === w.id && a.status !== 'closed'), a => Math.max(0, (+a.amount || 0) - (+a.paid || 0)))); }
+/* v7.68 (Mahmoud 14 Oct): several advances a month are fine as long as the total stays inside the monthly limit (50% of the worked
+   days' value — leave days are not worked days); over it = an exception with a written reason that goes to the accounts manager.
+   used this month = this month's advances (taken, or still waiting for approval) + this month's instalment of older ones still open. */
+function advanceUsed(w, ym) {
+  ym = ym || monthOf(todayISO()); const mOf = x => String(x.date || x.from || x.createdAt || '').slice(0, 7);
+  let used = 0, items = 0; const advs = list('advances').filter(a => a.workerId === w.id && !['cancelled', 'rejected'].includes(a.status));
+  advs.forEach(a => {
+    if (mOf(a) === ym) { used += +a.amount || 0; items++; return; }
+    if (a.status === 'closed' || mOf(a) > ym) return; const rem = Math.max(0, (+a.amount || 0) - (+a.paid || 0)); if (rem > 0) used += Math.min(rem, +a.monthly || rem);
+  });
+  list('requests').filter(r => r.type === 'advance' && r.workerId === w.id && r.status === 'pending' && mOf(r) === ym && !advs.some(a => a.reqId === r.id)).forEach(r => { used += +r.amount || 0; items++; });
+  return { used: r2(used), items };
+}
+function advanceRoom(w, ym) { const lim = advanceLimit(w, ym); const u = advanceUsed(w, ym); return Object.assign({}, lim, { used: u.used, items: u.items, room: r2(Math.max(0, lim.limit - u.used)) }); }
 /* why can't this worker ask now? null = allowed */
 function advanceBlock(w) {
   const pol = advPolicy(); const today = todayISO(); const day = +today.slice(8, 10); const ym = monthOf(today);
@@ -11334,21 +11348,21 @@ async function advanceValidate(r, d, w, forKiosk) {
   const amount = num(d.amount); if (!amount) { toast('أدخل المبلغ', 'err'); return false; }
   const blk = advanceBlock(w); if (blk) { toast(blk.msg, 'err'); return false; }
   const inst = Math.max(1, Math.round(num(d.installments) || 1)); const lim = advanceLimit(w); const open = advanceOpenBalance(w);
-  if (open > 0 && !isAdmin()) { toast(`عليك سلفة قائمة متبقٍ منها ${fmtMoney(open)} ${CUR()} — تُطلب سلفة جديدة بعد سدادها (أو بموافقة المالك)`, 'err'); return false; }
-  if (amount > lim.limit) { if (!d.overLimit) { toast(`الحد المسموح لك هذا الشهر ${fmtMoney(lim.limit)} ${CUR()} — لطلب أكبر علّم «طلب استثناء» واكتب السبب`, 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب سبب طلب سلفة أكبر من الحد', 'err'); return false; } r.overLimit = true; }
-  Object.assign(r, { amount, installments: inst, monthly: r2(amount / inst), limit: lim.limit, earnedDays: lim.days, from: todayISO() });
+  const room = advanceRoom(w); /* v7.68: no more «you have an open advance» — the month's total against the limit */
+  if (amount > room.room) { if (!d.overLimit) { toast(room.used > 0 ? `باقي لك من حد الشهر ${fmtMoney(room.room)} ${CUR()} (الحد ${fmtMoney(room.limit)} — طلبت منه ${fmtMoney(room.used)}) — لطلب أكبر علّم «طلب استثناء» واكتب السبب` : `الحد المسموح لك هذا الشهر ${fmtMoney(lim.limit)} ${CUR()} — لطلب أكبر علّم «طلب استثناء» واكتب السبب`, 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب سبب طلب سلفة أكبر من الحد', 'err'); return false; } r.overLimit = true; }
+  Object.assign(r, { amount, installments: inst, monthly: r2(amount / inst), limit: lim.limit, usedMonth: room.used, room: room.room, earnedDays: lim.days, from: todayISO() });
   return true;
 }
 function requestForm(wid, forKiosk) {
   let html = requestFormRules(wid, forKiosk);
   const w = wid ? byId('workers', wid) : (S.session?.workerId ? byId('workers', S.session.workerId) : null);
   let info = '';
-  if (w) { const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); info = blk ? `<div class="banner warn full" data-rq="advance">${icon('alert')}<span>${esc(blk.msg)}</span></div>` : `<div class="banner info full" data-rq="advance">${icon('info')}<span>حدك المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (50% من ${fmtNum(lim.days)} يوم عمل = ${fmtMoney(lim.earned)})${open ? ` · عليك سلفة قائمة متبقٍ ${fmtMoney(open)}` : ''}. المسار: رئيس القسم ← مدير المصنع ← مدير الحسابات ← المالك.</span></div>`; }
+  if (w) { const blk = advanceBlock(w); const lim = advanceRoom(w); info = blk ? `<div class="banner warn full" data-rq="advance">${icon('alert')}<span>${esc(blk.msg)}</span></div>` : `<div class="banner info full" data-rq="advance">${icon('info')}<span>حدك المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (50% من ${fmtNum(lim.days)} يوم عمل = ${fmtMoney(lim.earned)})${lim.used ? ` · طلبت منه ${fmtMoney(lim.used)} · <b>باقي لك ${fmtMoney(lim.room)} ${CUR()}</b>` : ''}. جوه الحد بتتعتمد لوحدها؛ أكبر من الحد = طلب استثناء بسبب مكتوب ويروح لمدير الحسابات.</span></div>`; }
   html = html.replace(/<label class="check full" data-rq="advance"><input type="checkbox" name="emergency"[\s\S]*?<\/label>/, '').replace(/<div class="tiny muted full" data-rq="advance">[\s\S]*?<\/div>/, '');
   const extra = `${info}<label class="check full" data-rq="advance"><input type="checkbox" name="overLimit" id="f-overLimit"> طلب استثناء — سلفة أكبر من الحد (اكتب السبب وعدد الشهور)</label>`;
   return html.replace(/(<div class="field" data-rq="advance"><label>عدد أشهر السداد<\/label>[\s\S]*?<\/div>)/, '$1' + extra);
 }
-function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — فوق الحد (الحد ${fmtMoney(r.limit || 0)})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
+function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — فوق الحد (الحد ${fmtMoney(r.limit || 0)}${r.usedMonth ? ` — اتطلب منه قبلها ${fmtMoney(r.usedMonth)}` : ''})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
 function reqDesc(r) { return reqDescAdv(r) || reqDescCycle(r); }
 /* absence settlement: head raises it from the worker page; both head + manager approve */
 ACTIONS.absSettle = id => {
@@ -11363,13 +11377,13 @@ function payrollRow(w, ym) { const r = payrollRowCost(w, ym); if (onProbation(w)
 /* worker page: probation + advance status + settle button */
 function vWorkerDetail(id) {
   let html = vWorkerDetailCost(id); const w = byId('workers', id); if (!w) return html;
-  const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); const canSettle = writable() && (isAdmin() || role() === 'manager' || (role() === 'head' && myDepts().includes(w.deptId))) && blk && blk.code === 'absence';
+  const blk = advanceBlock(w); const lim = advanceRoom(w); const open = advanceOpenBalance(w); const canSettle = writable() && (isAdmin() || role() === 'manager' || (role() === 'head' && myDepts().includes(w.deptId))) && blk && blk.code === 'absence';
   const pending = list('requests').find(x => x.type === 'abssettle' && x.workerId === w.id && x.status === 'pending');
-  const card = `<div class="card"><div class="cardhead"><h3>السلف${onProbation(w) ? ' · <span class="badge warn">تحت الاختبار</span>' : ''}</h3><div class="grow"></div>${canSettle ? (pending ? '<span class="badge warn">تسوية الغياب بانتظار الاعتماد</span>' : `<button class="btn xs" data-action="absSettle" data-arg="${w.id}">${icon('check')}تسوية الغياب</button>`) : ''}</div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `الحد المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (${fmtNum(lim.days)} يوم عمل)`}${open ? ` · قائم: ${fmtMoney(open)} ${CUR()}` : ''}${onProbation(w) ? ` · يُصرف أسبوعيًا ${fmtMoney((+w.basic || 0) * (+advPolicy().probationWeeklyPct || 25) / 100)} ${CUR()}${w.probationUntil ? ` حتى ${fmtDate(w.probationUntil)}` : ''}` : ''}</div></div>`;
+  const card = `<div class="card"><div class="cardhead"><h3>السلف${onProbation(w) ? ' · <span class="badge warn">تحت الاختبار</span>' : ''}</h3><div class="grow"></div>${canSettle ? (pending ? '<span class="badge warn">تسوية الغياب بانتظار الاعتماد</span>' : `<button class="btn xs" data-action="absSettle" data-arg="${w.id}">${icon('check')}تسوية الغياب</button>`) : ''}</div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `الحد المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (${fmtNum(lim.days)} يوم عمل)${lim.used ? ` · اتطلب منه ${fmtMoney(lim.used)} · باقي ${fmtMoney(lim.room)}` : ''}`}${open ? ` · قائم: ${fmtMoney(open)} ${CUR()}` : ''}${onProbation(w) ? ` · يُصرف أسبوعيًا ${fmtMoney((+w.basic || 0) * (+advPolicy().probationWeeklyPct || 25) / 100)} ${CUR()}${w.probationUntil ? ` حتى ${fmtDate(w.probationUntil)}` : ''}` : ''}</div></div>`;
   const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card;
 }
 /* employee portal: limit card */
-function vMe() { let html = vMeAsk(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); const card = `<div class="card"><div class="cardhead"><h3>سلفتي</h3></div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `تقدر تطلب حتى <b>${fmtMoney(lim.limit)} ${CUR()}</b> هذا الشهر (50% من ${fmtNum(lim.days)} يوم عمل) — من «طلب جديد ← سلفة».`}${open ? `<div style="margin-top:4px">متبقٍ من سلفك: <b>${fmtMoney(open)} ${CUR()}</b> يُخصم قسطه من المرتب.</div>` : ''}</div></div>`; const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card; }
+function vMe() { let html = vMeAsk(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const blk = advanceBlock(w); const lim = advanceRoom(w); const open = advanceOpenBalance(w); const card = `<div class="card"><div class="cardhead"><h3>سلفتي</h3></div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : lim.used ? `باقي لك <b>${fmtMoney(lim.room)} ${CUR()}</b> من حدك هذا الشهر (الحد ${fmtMoney(lim.limit)} — طلبت منه ${fmtMoney(lim.used)}) — من «طلب جديد ← سلفة».` : `تقدر تطلب حتى <b>${fmtMoney(lim.limit)} ${CUR()}</b> هذا الشهر (50% من ${fmtNum(lim.days)} يوم عمل) — من «طلب جديد ← سلفة».`}${open ? `<div style="margin-top:4px">متبقٍ من سلفك: <b>${fmtMoney(open)} ${CUR()}</b> يُخصم قسطه من المرتب.</div>` : ''}</div></div>`; const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card; }
 /* settings (rules tab addition) */
 EXTRA_SETTINGS.advances = { label: 'السلف وفترة الاختبار', render: () => { const p = advPolicy(); return `<form class="card" id="advform"><h3>السلف وفترة الاختبار</h3><div class="form">${field('من يوم', inp('advanceFromDay', p.advanceFromDay, 'type="number" min="1" max="31"'))}${field('إلى يوم', inp('advanceToDay', p.advanceToDay, 'type="number" min="1" max="31"'))}${field('الحد % من قيمة أيام العمل الفعلية', inp('advanceMaxPct', p.advanceMaxPct, 'type="number" min="0" max="100"'))}${field('أقل مدة خدمة (شهور)', inp('advanceMinMonths', p.advanceMinMonths, 'type="number" min="0"'))}${field('أيام الغياب المسموحة شهريًا قبل إيقاف السلف (حسب اللائحة)', inp('absenceAllowedPerMonth', p.absenceAllowedPerMonth, 'type="number" min="0"'))}${field('تحت الاختبار: % من الأساسي يُصرف أسبوعيًا', inp('probationWeeklyPct', p.probationWeeklyPct, 'type="number" min="0" max="100"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>`; } };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'advform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); const pol = Object.assign({}, S.settings.policy || {}); ['advanceFromDay', 'advanceToDay', 'advanceMaxPct', 'advanceMinMonths', 'absenceAllowedPerMonth', 'probationWeeklyPct'].forEach(k => { pol[k] = num(d[k]); }); await Store.saveSettings(Object.assign({}, S.settings, { policy: pol })); toast('تم الحفظ'); });
@@ -40567,7 +40581,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       if (k === 'leave') { if (!w || typeof leaveBalances !== 'function') return L('يوم أو أكتر', 'One day or more'); const b = leaveBalances(w).find(x => x.type && x.type.id === 'annual'); return b && b.remaining != null ? L(`باقي لك ${b.remaining} يوم`, `${b.remaining} days left`) : L('يوم أو أكتر', 'One day or more'); }
       if (k === 'permission') return L('تأخير أو خروج بدري', 'Late arrival or early leave');
       if (k === 'punch') return L('حضور أو انصراف', 'Check-in or check-out');
-      if (k === 'advance') { if (!w || typeof advanceLimit !== 'function') return L('على المرتب', 'Against the salary'); if (typeof advanceBlock === 'function' && advanceBlock(w)) return L('مقفولة دلوقتي', 'Closed for now'); const l = advanceLimit(w); return L(`تقدر لحد ${fmtMoney(l.limit)} ${CUR()}`, `Up to ${fmtMoney(l.limit)} ${CUR()}`); }
+      if (k === 'advance') { if (!w || typeof advanceLimit !== 'function') return L('على المرتب', 'Against the salary'); if (typeof advanceBlock === 'function' && advanceBlock(w)) return L('مقفولة دلوقتي', 'Closed for now'); const l = typeof advanceRoom === 'function' ? advanceRoom(w) : Object.assign({ room: 0 }, advanceLimit(w)); const v = typeof advanceRoom === 'function' ? l.room : l.limit; return L(`تقدر لحد ${fmtMoney(v)} ${CUR()}`, `Up to ${fmtMoney(v)} ${CUR()}`); }
     } catch (e) { /* ignore */ }
     return '';
   }
@@ -51339,4 +51353,391 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
   setInterval(tick, 600000);
   setTimeout(tick, 2500);
+})();
+/* =====================================================================
+   v7.68 — «Technical support» (brief support-bot-brief, 14 Oct — Mahmoud said go).
+   Everyone in the 3 systems (factory / studio / construction) reports a system problem from: the assistant panel (button
+   «Problem in the system?»), «My portal» (a card) and the side menu («Support»).
+   · captured by itself: the page he was on (hash + title), the device (iPhone / Android / computer + app / browser), the build, the time;
+   · he writes or talks (the server speech-to-text where the owner set it, else the browser's), and may add up to 4 screenshots
+     (pick, or paste on a computer);
+   · the bot first: a rule question (advance room, leave balance, today's punch) is answered at once from his own data; with the
+     Anthropic key the assistant answers a how-to, or asks one or two short questions; then the ticket opens. «That solved it» keeps
+     it as solved-by-the-bot (no push) so the owner still sees what people ask;
+   · collection «support» — the server lets a person write and read only his own tickets, the owner (admin) all of them
+     (nf_can_write + the restrictive select docs_support_sel); the change log skips it;
+   · the owner: page «Support» — New / Working on it / Solved / All, this system + the other systems he is signed in to (SSO peers,
+     read only, opens there); a ticket shows who, department, page, device, build, the thread and the pictures; reply, «Working on it»,
+     «Solved» (+ a note); the person gets a notice on a reply and when it is solved;
+   · pushes: a new ticket / a follow-up → the owner; a reply / solved → the person. No money amounts in a push or a list line.
+   · the nightly summary (21:00 Cairo) is the server's job (Edge remind, all 3 systems).
+   Arabic and English; phone and computer.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUP__) return; window.__NF_SUP__ = 1;
+  if (typeof NAV === 'undefined' || typeof EXTRA_VIEWS === 'undefined' || typeof Store === 'undefined') return;
+  const COL = 'support';
+  if (!COLS.includes(COL)) COLS.push(COL); S.data[COL] = S.data[COL] || new Map();
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection(COL).onSnapshot(snap => { S.data[COL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[COL] = true; rerender(); }, e => console.warn('snapshot', COL, e))); })(Store.subscribeAll);
+  /* the change log is readable by other people — a problem report never goes there */
+  if (typeof logChange === 'function') logChange = (base => function (col) { return col === COL ? Promise.resolve() : base.apply(this, arguments); })(logChange);
+  if (typeof ICONS === 'object' && !ICONS.refresh) ICONS.refresh = '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>';
+  if (typeof ICONS === 'object' && !ICONS.lifebuoy) ICONS.lifebuoy = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/><path d="M5.7 5.7l3.8 3.8M14.5 14.5l3.8 3.8M18.3 5.7l-3.8 3.8M9.5 14.5l-3.8 3.8"/>';
+
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const MONEY = /(\d[\d.,\s]*\s*(جنيه|جنية|ج\.?م|EGP|LE|USD|\$|دولار|ريال|SAR|€))|((EGP|USD|SAR|\$|€)\s*\d[\d.,]*)|\d{4,}/gi;
+  const clean = s => String(s || '').replace(MONEY, '…');
+  const me = () => S.session || {};
+  const myId = () => String(me().id || '');
+  const isOwner = () => !!S.session && isAdmin() && !(S.viewOrig || S.demoOrig);
+  const canUse = () => !!S.session && role() !== 'kiosk' && !(S.viewOrig || S.demoOrig);
+  const sysKey = () => (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : (typeof isStudioz === 'function' && isStudioz()) ? 'studio' : 'factory';
+  const SYS = { factory: ['المصنع', 'Factory'], studio: ['الاستوديو', 'Studio'], construction: ['المقاولات', 'Construction'] };
+  const sysName = k => { const x = SYS[k] || [k, k]; return L(x[0], x[1]); };
+  const coName = () => ({ factory: 'Ninety Fabrication', studio: 'Ninety Studioz', construction: 'Ninety Construction' })[sysKey()];
+  const ST = { new: ['جديدة', 'New', 'warn'], working: ['بنشتغل عليها', 'Working on it', 'info'], solved: ['اتحلّت', 'Solved', 'good'] };
+  const badge = s => { const x = ST[s] || ST.new; return `<span class="badge ${x[2]}">${esc(L(x[0], x[1]))}</span>`; };
+  const DEV = { iphone: ['آيفون', 'iPhone'], android: ['أندرويد', 'Android'], computer: ['كمبيوتر', 'Computer'] };
+  const VIA = { app: ['التطبيق', 'app'], desktop: ['برنامج الكمبيوتر', 'desktop app'], pwa: ['الويب المثبّت', 'installed web app'], browser: ['المتصفح', 'browser'] };
+  const devTxt = d => d ? `${L((DEV[d.kind] || DEV.computer)[0], (DEV[d.kind] || DEV.computer)[1])} · ${L((VIA[d.via] || VIA.browser)[0], (VIA[d.via] || VIA.browser)[1])}` : '';
+  const tickets = () => list(COL).filter(t => t && t.id && !t.deleted);
+  const mine = () => tickets().filter(t => t.byId === myId());
+  const code = t => '#' + String(t.id || '').replace(/^sp_/, '').slice(-4).toUpperCase();
+  const firstLine = s => String(s || '').split('\n').map(x => x.trim()).find(Boolean) || '';
+  const when = iso => { if (!iso) return ''; try { const d = new Date(iso); return String(iso).slice(0, 10) === todayISO() ? fmtAtTm(d) : d.toLocaleString(en() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return String(iso).slice(0, 16).replace('T', ' '); } };
+  const nl = s => esc(String(s || '')).replace(/\n/g, '<br>');
+  const push = (to, title, body, url, tag) => { try { if (to && to.length && typeof pushSend === 'function') { const p = pushSend(to, clean(title).slice(0, 100), clean(body).slice(0, 160), url, tag); if (p && p.catch) p.catch(() => { }); } } catch (e) { /* the page still shows it */ } };
+
+  const SUP = { last: null, lastHash: '', chat: null, tab: null, draft: {}, files: { chat: [], reply: [] }, urls: {}, opened: {}, peers: { at: 0, busy: false, rows: [] } };
+  window.nfSupport = SUP;
+
+  /* ---------- what is captured by itself ---------- */
+  function device() {
+    const ua = navigator.userAgent || ''; let cap = '';
+    try { const c = window.Capacitor; if (c && c.isNativePlatform && c.isNativePlatform()) cap = (c.getPlatform && c.getPlatform()) || 'native'; } catch (e) { cap = ''; }
+    const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+    const kind = cap === 'ios' || (!cap && ios) ? 'iphone' : cap === 'android' || (!cap && /Android/i.test(ua)) ? 'android' : 'computer';
+    let via = 'browser'; if (cap) via = 'app'; else if (/Electron/i.test(ua)) via = 'desktop'; else { try { if ((window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone) via = 'pwa'; } catch (e) { /* ignore */ } }
+    return { kind, via, w: Math.round(innerWidth), h: Math.round(innerHeight), ua: ua.slice(0, 180) };
+  }
+  function pageNow() {
+    let title = ''; try { const t = viewTitle(); title = String(t.title || ''); const sub = typeof t.sub === 'string' ? t.sub.replace(/<[^>]+>/g, '').trim() : ''; if (sub && sub.length < 90 && S.route && S.route.id) title += ' — ' + sub; /* a list page's sub is only its description */ } catch (e) { title = ''; }
+    return { hash: location.hash || '#/', view: (S.route && S.route.view) || '', id: (S.route && S.route.id) || null, title: (title || (S.route && S.route.view) || '').slice(0, 120) };
+  }
+  RENDER_HOOKS.push(() => { if (!S.session || !S.route || S.route.view === 'support') return; if (location.hash === SUP.lastHash && SUP.last && SUP.last.title) return; SUP.lastHash = location.hash; SUP.last = pageNow(); });
+  function who() {
+    const s = me(); const w = s.workerId ? byId('workers', s.workerId) : null; const st = !w && S.data.staff ? byId('staff', s.id) : null;
+    const deptId = (w && w.deptId) || (st && (st.deptIds || [])[0]) || (s.deptIds || [])[0] || null;
+    return { id: myId(), name: s.name || (w && w.name) || '', workerId: s.workerId || null, deptId, dept: deptId ? deptName(deptId) : '', role: role(), roleName: (typeof ROLES === 'object' && ROLES[role()]) || role(), job: (w && (w.trade || w.job)) || '' };
+  }
+
+  /* ---------- the bot: rule answers from his own data, then the assistant ---------- */
+  function ruleAnswer(text) {
+    const w = me().workerId ? byId('workers', me().workerId) : null; if (!w) return '';
+    const t = (typeof arDigits === 'function' ? arDigits(text) : String(text)).toLowerCase(); const has = re => re.test(t); const cur = typeof CUR === 'function' ? CUR() : '';
+    const out = [];
+    if (has(/سلف|advance/) && typeof advanceRoom === 'function') { try { const r = advanceRoom(w); out.push(L(`السلفة: حدّك الشهر ده ${fmtMoney(r.limit)} ${cur} (نص قيمة الأيام اللي اشتغلتها، من غير الإجازات) — طلبت منه ${fmtMoney(r.used)}، فباقي لك ${fmtMoney(r.room)} ${cur}. تقدر تطلب أكتر من سلفة طول ما إنت جوه الحد، ولو محتاج أكتر علّم «طلب استثناء» واكتب السبب.`, `Advance: your limit this month is ${fmtMoney(r.limit)} ${cur} (half the value of the days you worked, leave not counted) — you asked ${fmtMoney(r.used)} of it, so ${fmtMoney(r.room)} ${cur} is left. You can ask more than once while inside the limit; for more, tick «Exception request» and write the reason.`)); } catch (e) { /* skip */ } }
+    if (has(/اجاز|إجاز|رصيد|leave/) && typeof leaveBalances === 'function') { try { const b = leaveBalances(w).filter(x => x.type && !x.type.noBalance && x.remaining != null); out.push((b.length ? L('رصيد إجازاتك: ', 'Your leave balance: ') + b.map(x => `${x.type.name}: ${fmtNum(Math.max(0, x.remaining))}`).join(' · ') + '\n' : '') + L('الإجازة بتتطلب من «طلب جديد» ← «إجازة»، ويعتمدها رئيس قسمك وبعدين الموارد البشرية.', 'Leave is asked from «New request» → «Leave»; your head of department approves it, then HR.')); } catch (e) { /* skip */ } }
+    if (has(/بصم|حضور|انصراف|punch|check.?in/) && typeof attendanceFor === 'function') { try { const row = (attendanceFor(todayISO()) || {})[w.id] || null; out.push(row && row.in ? L(`بصمتك النهارده: دخول ${fmtTm(row.in)}${row.out ? ` · انصراف ${fmtTm(row.out)}` : ' · لسه ما سجلتش انصراف'}.`, `Your punches today: in ${fmtTm(row.in)}${row.out ? ` · out ${fmtTm(row.out)}` : ' · no check-out yet'}.`) : L('مفيش بصمة دخول متسجلة ليك النهارده. لو بصمت ومش ظاهرة، ابعتها للدعم وقول الساعة كام والمكان.', 'There is no check-in for you today. If you punched and it is not showing, send it to support with the time and the place.')); } catch (e) { /* skip */ } }
+    return out.join('\n');
+  }
+  async function botThink(text, page) {
+    if (typeof aiAvailable !== 'function' || !aiAvailable() || typeof aiJson !== 'function') return null;
+    const W = who(); const w = W.workerId ? byId('workers', W.workerId) : null;
+    let facts = ''; try { if (w && sysKey() === 'factory' && typeof askContext === 'function') facts = askContext(w).slice(0, 3500); } catch (e) { facts = ''; }
+    const prompt = `أنت «الدعم الفني» لسيستم إدارة شركة ${coName()}. موظف بيبلّغ عن مشكلة أو سؤال في السيستم.
+رجّع JSON بس بالشكل ده من غير أي كلام تاني:
+{"kind":"how|rule|bug|access|idea","answer":"","questions":[],"title":"","summary":""}
+- kind: how = بيسأل إزاي يعمل حاجة في السيستم؛ rule = سؤال عن قاعدة أو لائحة أو رصيد بيتجاوب من بياناته؛ bug = عطل أو حاجة مش شغالة؛ access = مش شايف صفحة أو مالوش صلاحية؛ idea = اقتراح.
+- answer: لو how أو rule وإنت متأكد من الإجابة من البيانات اللي تحت، اكتب رد قصير بالمصري (3 سطور بالكتير). غير كده سيبها فاضية. ما تخترعش خطوات مش متأكد منها وما توعدش بأي قرار.
+- questions: لو الكلام مش واضح كفاية علشان حد يصلّح المشكلة، اسأل سؤال أو اتنين قصيرين جدًا (حصل إيه بالظبط؟ كنت متوقع إيه؟ إمتى؟). لو واضح سيبها [].
+- title: عنوان قصير للمشكلة (6 كلمات بالكتير). summary: سطر واحد للمالك يلخّص المشكلة. ما تكتبش أي مبالغ فلوس في title ولا summary.
+الصفحة اللي كان فيها: ${(page && page.title) || '—'} (${(page && page.hash) || ''}) · الجهاز: ${devTxt(device())} · الدور: ${W.roleName}${W.dept ? ' · القسم: ' + W.dept : ''}
+${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}كلام الموظف: ${text}`;
+    try {
+      const j = await Promise.race([aiJson(prompt, { max_tokens: 600 }), new Promise(res => setTimeout(() => res(null), 25000))]);
+      if (!j || typeof j !== 'object') return null;
+      const kind = ['how', 'rule', 'bug', 'access', 'idea'].includes(j.kind) ? j.kind : 'bug';
+      return { kind, answer: String(j.answer || '').trim().slice(0, 900), questions: (Array.isArray(j.questions) ? j.questions : []).map(x => String(x || '').trim()).filter(Boolean).slice(0, 2), title: clean(String(j.title || '').trim()).slice(0, 80), summary: clean(String(j.summary || '').trim()).slice(0, 200) };
+    } catch (e) { return null; }
+  }
+
+  /* ---------- pictures: shrink, upload at once, show from the store ---------- */
+  const shrink = file => new Promise(res => {
+    try { const url = URL.createObjectURL(file); const img = new Image();
+      img.onload = () => { try { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k)); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); cv.toBlob(b => { URL.revokeObjectURL(url); res(b || file); }, 'image/jpeg', 0.82); } catch (e) { URL.revokeObjectURL(url); res(file); } };
+      img.onerror = () => { URL.revokeObjectURL(url); res(file); }; img.src = url; } catch (e) { res(file); }
+  });
+  async function addFiles(files, slot) {
+    const arr = SUP.files[slot] || (SUP.files[slot] = []);
+    for (const f of Array.from(files || [])) {
+      if (!/^image\//.test(f.type || '')) continue;
+      if (arr.length >= 4) { toast(L('٤ صور بالكتير', 'Four pictures at most'), 'err'); break; }
+      const tmp = { k: uid(), busy: true, prev: URL.createObjectURL(f) }; arr.push(tmp); render(false);
+      try { const b = await shrink(f); const r = await Files.put(b, 'image/jpeg'); tmp.f = { store: r.store, ref: r.ref, enc: r.enc || null, mime: r.mime || 'image/jpeg', size: r.size || b.size || 0 }; if (r.id) tmp.f.id = r.id; tmp.busy = false; }
+      catch (e) { const i = arr.indexOf(tmp); if (i >= 0) arr.splice(i, 1); toast(L('الصورة ما اترفعتش — جرّب تاني', 'The picture did not upload — try again'), 'err'); }
+      render(false);
+    }
+  }
+  const readyFiles = slot => (SUP.files[slot] || []).filter(x => !x.busy && x.f).map(x => x.f);
+  const busyFiles = slot => (SUP.files[slot] || []).some(x => x.busy);
+  const thumbs = slot => { const a = SUP.files[slot] || []; return a.length ? `<div class="supthumbs">${a.map(x => `<div class="th${x.busy ? ' busy' : ''}"><img src="${esc(x.prev || '')}" alt=""><button type="button" data-supdel="${esc(slot)}:${esc(x.k)}" aria-label="${esc(L('شيل', 'Remove'))}">${icon('x')}</button></div>`).join('')}</div>` : ''; };
+  const imgs = files => (files && files.length) ? `<div class="supimgs">${files.map(f => `<a class="supimg" target="_blank" rel="noopener" data-supf="${esc(JSON.stringify(f))}"><img alt=""></a>`).join('')}</div>` : '';
+  RENDER_HOOKS.push(() => {
+    document.querySelectorAll('a.supimg[data-supf]:not([data-ok])').forEach(a => {
+      a.setAttribute('data-ok', '1'); let f = null; try { f = JSON.parse(a.getAttribute('data-supf')); } catch (e) { f = null; } if (!f) return;
+      const k = f.ref || f.id || ''; const set = u => { if (!u) return; a.href = u; const im = a.querySelector('img'); if (im) im.src = u; };
+      if (SUP.urls[k]) { set(SUP.urls[k]); return; }
+      try { Promise.resolve(Files.url(f)).then(u => { if (u) { SUP.urls[k] = u; set(u); } }).catch(() => { }); } catch (e) { /* ignore */ }
+    });
+  });
+  document.addEventListener('change', e => { const i = e.target; if (!i || !i.matches || !i.matches('input[data-supfile]')) return; addFiles(i.files, i.getAttribute('data-supfile')); i.value = ''; });
+  document.addEventListener('paste', e => {
+    if (!S.route || S.route.view !== 'support') return; const it = Array.from((e.clipboardData && e.clipboardData.items) || []).filter(x => /^image\//.test(x.type)); if (!it.length) return;
+    e.preventDefault(); addFiles(it.map(x => x.getAsFile()).filter(Boolean), S.route.id ? 'reply' : 'chat');
+  });
+  document.addEventListener('input', e => { const t = e.target; if (t && (t.id === 'supq' || t.id === 'supr')) SUP.draft[t.id] = t.value; });
+
+  /* ---------- talking: the server's speech-to-text (factory, key set) or the browser's ---------- */
+  let REC = null, sttOk = null;
+  const micState = on => document.querySelectorAll('[data-supmic]').forEach(b => b.classList.toggle('on', !!on));
+  const putText = (id, add) => { const v = ((SUP.draft[id] || '').trim() + ' ' + String(add || '').trim()).trim(); SUP.draft[id] = v; const el = document.getElementById(id); if (el) el.value = v; };
+  async function sttReady() { if (sttOk !== null) return sttOk; try { if (sysKey() !== 'factory' || !S.sb || !S.sb.rpc) return (sttOk = false); const r = await S.sb.rpc('nf_stt_ready'); sttOk = !r.error && r.data === true; } catch (e) { sttOk = false; } return sttOk; }
+  async function serverRec(id) {
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { toast(L('اسمح للتطبيق يستخدم المايك', 'Allow the app to use the microphone'), 'err'); return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    let mr; try { mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); } catch (e) { stream.getTracks().forEach(t => t.stop()); sttOk = false; return browserRec(id); }
+    const chunks = []; mr.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    const done = new Promise(res => { mr.onstop = res; }); REC = { stop: () => { if (mr.state !== 'inactive') mr.stop(); } }; micState(true); mr.start(250);
+    const cap = setTimeout(() => REC && REC.stop(), 60000);
+    await done; clearTimeout(cap); stream.getTracks().forEach(t => t.stop()); REC = null; micState(false);
+    const blob = new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }); if (blob.size < 1500) return;
+    toast(L('بكتب كلامك…', 'Writing what you said…'));
+    try { const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = rej; fr.readAsDataURL(blob); });
+      const r = await S.sb.functions.invoke('stt', { body: { audio: b64, mime: blob.type } }); const j = (r && r.data) || {};
+      if (j.text) putText(id, j.text); else toast(L('ماقدرتش أفهم الصوت — جرّب تاني أو اكتب', 'Could not understand the voice — try again or type'), 'err');
+    } catch (e) { toast(L('مشكلة في الاتصال — جرّب تاني', 'Connection problem — try again'), 'err'); }
+  }
+  function browserRec(id) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast(L('الجهاز ده مش بيدعم الكلام من هنا — استخدم مايك الكيبورد', 'This device cannot take speech here — use the keyboard mic'), 'err'); return; }
+    const r = new SR(); r.lang = en() ? 'en-US' : 'ar-EG'; r.interimResults = true; r.continuous = true; const base = (SUP.draft[id] || '').trim();
+    r.onresult = ev => { let s = ''; for (let i = 0; i < ev.results.length; i++) s += ev.results[i][0].transcript; const v = (base ? base + ' ' : '') + s.trim(); SUP.draft[id] = v; const el = document.getElementById(id); if (el) el.value = v; };
+    r.onerror = ev => { if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast(L('اسمح للتطبيق يستخدم المايك', 'Allow the app to use the microphone'), 'err'); };
+    r.onend = () => { REC = null; micState(false); };
+    try { r.start(); REC = r; micState(true); setTimeout(() => { if (REC === r) r.stop(); }, 60000); } catch (e) { toast(L('المايك مش متاح دلوقتي', 'The microphone is not available now'), 'err'); }
+  }
+  async function micToggle(id) { if (REC) { try { REC.stop(); } catch (e) { /* ignore */ } return; } if (await sttReady()) return serverRec(id); return browserRec(id); }
+
+  /* ---------- the chat (a new problem) ---------- */
+  function newChat() { SUP.files.chat = []; SUP.draft.supq = ''; SUP.chat = { step: 'write', page: SUP.last || null, t0: null, text: '', files0: [], local: '', bot: null, qs: [], answers: '', files1: [], msgs: [{ from: 'bot', text: L('اكتب المشكلة اللي قابلتك في السيستم — حصل إيه وفي أنهي صفحة. وممكن تبعت صورة للشاشة. هتوصل للإدارة على طول.', 'Write the problem you ran into in the system — what happened and on which page. You can add a screenshot. It reaches the management right away.') }], ticketId: null }; }
+  const bubble = (m, viewerIsOwner) => {
+    const lab = m.from === 'bot' ? L('البوت', 'Bot') : m.from === 'owner' ? (viewerIsOwner ? L('إنت', 'You') : L('الدعم الفني', 'Support')) : m.from === 'sys' ? '' : (viewerIsOwner ? (m.byName || '') : L('إنت', 'You'));
+    const side = viewerIsOwner ? (m.from === 'owner' ? 'me' : m.from === 'sys' ? 'sys' : 'bot') : (m.from === 'me' ? 'me' : m.from === 'sys' ? 'sys' : 'bot');
+    return `<div class="supb ${side}${m.from === 'bot' ? ' isbot' : ''}">${lab ? `<div class="who"><span class="notr">${esc(lab)}</span>${m.at ? ` · <span class="tiny">${esc(when(m.at))}</span>` : ''}</div>` : ''}${m.html || (m.text ? `<div class="tx notr">${nl(m.text)}</div>` : '')}${imgs(m.files)}${m.acts || ''}</div>`;
+  };
+  const ctxChips = (page, dev) => `<div class="supctx">${page && page.title ? `<span>${icon('link')}<span class="notr">${esc(page.title)}</span></span>` : ''}${dev ? `<span>${esc(devTxt(dev))}</span>` : ''}<span>${esc(sysName(sysKey()))}</span></div>`;
+  const composer = (id, slot, action, ph, arg) => `<div class="supcomp"><textarea id="${id}" placeholder="${esc(ph)}">${esc(SUP.draft[id] || '')}</textarea>${thumbs(slot)}<div class="row"><button type="button" class="btn p" data-action="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${icon('send')}<span>${esc(L('ابعت', 'Send'))}</span></button><label class="btn ghost supatt">${icon('camera')}<span>${esc(L('صورة', 'Picture'))}</span><input type="file" accept="image/*" multiple data-supfile="${slot}" hidden></label><button type="button" class="btn ghost supmic${REC ? ' on' : ''}" data-supmic="${id}" title="${esc(L('اتكلم', 'Talk'))}">${icon('mic')}<span>${esc(L('اتكلم', 'Talk'))}</span></button></div></div>`;
+  function chatHTML() {
+    if (!SUP.chat) newChat(); const c = SUP.chat;
+    let bottom = '';
+    if (c.step === 'write' || c.step === 'clarify') bottom = composer('supq', 'chat', 'supSend', c.step === 'clarify' ? L('اكتب الرد هنا…', 'Type your answer here…') : L('مثال: بدوس «تسجيل حضور» ومفيش حاجة بتحصل', 'e.g. I tap «Check in» and nothing happens'));
+    else if (c.step === 'answer') bottom = `<div class="row supacts"><button type="button" class="btn p" data-action="supBotOk">${icon('check')}<span>${esc(L('كده اتحلت', 'That solved it'))}</span></button><button type="button" class="btn" data-action="supBotNo">${icon('send')}<span>${esc(L('لأ، ابعتها للدعم', 'No, send it to support'))}</span></button></div>`;
+    else if (c.step === 'think' || c.step === 'sending') bottom = `<div class="muted small">${esc(L('ثانية واحدة…', 'One moment…'))}</div>`;
+    else bottom = `<div class="row supacts">${c.ticketId ? `<a class="btn p" href="#/support/${esc(c.ticketId)}">${icon('chat')}<span>${esc(L('افتح المشكلة', 'Open the problem'))}</span></a>` : ''}<button type="button" class="btn ghost" data-action="supNew">${icon('plus')}<span>${esc(L('مشكلة تانية', 'Another problem'))}</span></button></div>`;
+    return `<div class="card supchat"><div class="cardhead"><h3>${icon('lifebuoy')} ${esc(L('مشكلة جديدة', 'A new problem'))}</h3></div>${ctxChips(c.page, device())}<div class="supmsgs">${c.msgs.map(m => bubble(m, false)).join('')}</div>${bottom}</div>`;
+  }
+  ACTIONS.supNew = () => { newChat(); render(false); };
+  ACTIONS.supSend = async () => {
+    const c = SUP.chat || (newChat(), SUP.chat); if (c.step !== 'write' && c.step !== 'clarify' && c.step !== 'answer') return;
+    const el = document.getElementById('supq'); const text = String((el ? el.value : SUP.draft.supq) || '').trim();
+    if (busyFiles('chat')) { toast(L('استنى الصورة تخلص رفع', 'Wait for the picture to finish uploading'), 'err'); return; }
+    const files = readyFiles('chat'); if (!text && !files.length) { toast(L('اكتب المشكلة الأول', 'Write the problem first'), 'err'); return; }
+    SUP.draft.supq = ''; SUP.files.chat = [];
+    c.msgs.push({ from: 'me', text, files, at: nowISO() });
+    if (c.step === 'clarify' || c.step === 'answer') { c.answers = [c.answers, text].filter(Boolean).join('\n'); c.files1 = c.files1.concat(files); await sendTicket(false); return; }
+    c.text = text; c.files0 = files; c.t0 = nowISO();
+    const local = text ? ruleAnswer(text) : '';
+    if (local) { c.local = local; c.msgs.push({ from: 'bot', text: local + '\n' + L('ده حلّ مشكلتك؟', 'Did that solve it?') }); c.step = 'answer'; render(false); return; }
+    c.step = 'think'; c.msgs.push({ from: 'bot', html: `<div class="tx muted">${esc(L('بفكّر…', 'Thinking…'))}</div>`, thinking: 1 }); render(false);
+    const bot = text ? await botThink(text, c.page) : null; c.msgs = c.msgs.filter(m => !m.thinking); c.bot = bot;
+    if (bot && bot.answer && (bot.kind === 'how' || bot.kind === 'rule')) { c.msgs.push({ from: 'bot', text: bot.answer + '\n' + L('ده حلّ مشكلتك؟', 'Did that solve it?') }); c.step = 'answer'; render(false); return; }
+    if (bot && bot.questions.length) { c.qs = bot.questions; c.msgs.push({ from: 'bot', text: L('عشان نحلها أسرع:', 'To fix it faster:') + '\n' + bot.questions.map(q => '• ' + q).join('\n') }); c.step = 'clarify'; render(false); return; }
+    if (!bot && text.length < 40 && !files.length) { c.qs = [L('حصل إيه بالظبط؟ وكنت متوقع إيه يحصل؟', 'What exactly happened, and what did you expect?')]; c.msgs.push({ from: 'bot', text: L('عشان نحلها أسرع: حصل إيه بالظبط؟ وكنت متوقع إيه يحصل؟', 'To fix it faster: what exactly happened, and what did you expect?') }); c.step = 'clarify'; render(false); return; }
+    await sendTicket(false);
+  };
+  ACTIONS.supBotOk = () => sendTicket(true);
+  ACTIONS.supBotNo = () => sendTicket(false);
+  async function sendTicket(byBot) {
+    const c = SUP.chat; if (!c || c.step === 'sending' || c.step === 'sent') return; c.step = 'sending'; render(false);
+    const W = who(); const now = nowISO(); const id = 'sp_' + uid();
+    const thread = [{ id: uid(), at: c.t0 || now, from: 'me', by: W.id, byName: W.name, text: c.text, files: c.files0 }];
+    if (c.local) thread.push({ id: uid(), at: now, from: 'bot', text: clean(c.local) });
+    if (c.bot && c.bot.answer && !c.qs.length) thread.push({ id: uid(), at: now, from: 'bot', text: clean(c.bot.answer) });
+    if (c.qs.length) thread.push({ id: uid(), at: now, from: 'bot', text: c.qs.join('\n') });
+    if (c.answers || c.files1.length) thread.push({ id: uid(), at: now, from: 'me', by: W.id, byName: W.name, text: c.answers, files: c.files1 });
+    const subj = clean((c.bot && c.bot.title) || firstLine(c.text).slice(0, 80) || L('صورة من الشاشة', 'A screenshot'));
+    const t = { id, byId: W.id, byName: W.name, workerId: W.workerId, deptId: W.deptId, dept: W.dept, role: W.role, roleName: W.roleName, job: W.job, sys: sysKey(), page: c.page || null, dev: device(), build: String(window.NF_BUILD || ''), lang: en() ? 'en' : 'ar', subj, sum: (c.bot && c.bot.summary) || '', kind: (c.bot && c.bot.kind) || (c.local ? 'rule' : 'bug'), status: byBot ? 'solved' : 'new', solvedBy: byBot ? 'bot' : null, solvedAt: byBot ? now : null, thread, lastAt: now, unreadOwner: !byBot, unreadMe: false };
+    try { await Store.save(COL, t); }
+    catch (e) { c.step = c.qs.length ? 'clarify' : 'write'; c.msgs.push({ from: 'bot', text: L('ماقدرتش أبعتها دلوقتي — اتأكد من النت وجرّب تاني.', 'Could not send it now — check the connection and try again.') }); render(false); return; }
+    c.ticketId = id; c.step = 'sent';
+    if (byBot) c.msgs.push({ from: 'bot', text: L('تمام ✓ — لو احتجت أي حاجة تانية ابعت هنا.', 'Great ✓ — if you need anything else, send it here.') });
+    else {
+      c.msgs.push({ from: 'bot', text: L(`✓ وصلت للدعم الفني — رقمها ${code(t)}. هيوصلك إشعار لما يترد عليها أو تتحل.`, `✓ It reached support — number ${code(t)}. You will get a notice when it is answered or solved.`) });
+      push(['role:admin'], `مشكلة جديدة من ${W.name}`, `${W.dept ? W.dept + ' · ' : ''}${t.page && t.page.title ? t.page.title + ' — ' : ''}${subj}`, `/#/support/${id}`, 'sup-' + id);
+    }
+    render(false);
+  }
+
+  /* ---------- one ticket ---------- */
+  function ticketHTML(id) {
+    const t = byId(COL, id); const own = isOwner();
+    if (!t) return `<div class="card"><div class="empty">${esc(L('مش لاقي المشكلة دي.', 'This problem was not found.'))}</div></div>`;
+    if (!own && t.byId !== myId()) return `<div class="card"><div class="empty">${esc(L('المشكلة دي مش بتاعتك.', 'This problem is not yours.'))}</div></div>`;
+    const flag = own ? 'unreadOwner' : 'unreadMe'; if (t[flag] && !SUP.opened[id + flag]) { SUP.opened[id + flag] = 1; setTimeout(() => { Store.update(COL, id, { [flag]: false }).catch(() => { }); }, 0); }
+    const pg = t.page || {}; const kv = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '';
+    const info = `<dl class="supkv">${kv(L('من', 'From'), `<span class="notr">${esc(t.byName || '')}</span>${t.dept ? ` — <span class="notr">${esc(t.dept)}</span>` : ''}${t.roleName ? ` <span class="muted tiny notr">(${esc(t.roleName)})</span>` : ''}`)}${kv(L('الصفحة', 'Page'), pg.title ? (own && pg.hash && (t.sys || sysKey()) === sysKey() ? `<a href="${esc(pg.hash)}" class="notr">${esc(pg.title)}</a>` : `<span class="notr">${esc(pg.title)}</span>`) : '')}${kv(L('الجهاز', 'Device'), esc(devTxt(t.dev)) + (t.dev && t.dev.w ? ` <span class="muted tiny ltr">${esc(t.dev.w)}×${esc(t.dev.h)}</span>` : ''))}${kv(L('السيستم', 'System'), esc(sysName(t.sys || sysKey())))}${own ? kv(L('النسخة', 'Build'), t.build ? `<span class="ltr tiny">${esc(t.build)}</span>` : '') : ''}${kv(L('اتبعتت', 'Sent'), esc(when(t.createdAt)))}${t.solvedAt && t.status === 'solved' ? kv(L('اتحلّت', 'Solved'), esc(when(t.solvedAt)) + (t.solvedBy === 'bot' ? ` · ${esc(L('ردّ عليها البوت', 'answered by the bot'))}` : '')) : ''}</dl>`;
+    const acts = [];
+    if (own && t.status === 'new') acts.push(`<button type="button" class="btn sm" data-action="supWorking" data-arg="${esc(id)}">${icon('edit')}<span>${esc(L('بنشتغل عليها', 'Working on it'))}</span></button>`);
+    if (own && t.status !== 'solved') acts.push(`<button type="button" class="btn sm p" data-action="supSolve" data-arg="${esc(id)}">${icon('check')}<span>${esc(L('اتحلت', 'Solved'))}</span></button>`);
+    if (t.status === 'solved') acts.push(`<button type="button" class="btn sm" data-action="supReopen" data-arg="${esc(id)}">${icon('refresh')}<span>${esc(own ? L('افتحها تاني', 'Reopen') : L('لسه المشكلة موجودة؟ افتحها تاني', 'Still there? Reopen it'))}</span></button>`);
+    const head = `<div class="card suphead"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><b class="notr" style="font-size:16px">${esc(t.subj || '')}</b>${badge(t.status)}<span class="muted tiny">${esc(code(t))}</span></div>${t.sum && own ? `<div class="small muted notr" style="margin-top:4px">${esc(t.sum)}</div>` : ''}${info}${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${acts.join('')}</div>` : ''}</div>`;
+    const th = `<div class="card supchat"><div class="supmsgs">${(t.thread || []).map(m => bubble(m, own)).join('')}</div>${composer('supr', 'reply', 'supReply', own ? L('ردّك على الموظف…', 'Your reply to the person…') : L('زوّد تفاصيل أو ردّ…', 'Add details or reply…'), id)}</div>`;
+    return head + th;
+  }
+  ACTIONS.supReply = async id => {
+    const t = byId(COL, id); if (!t) return; const own = isOwner();
+    const el = document.getElementById('supr'); const text = String((el ? el.value : SUP.draft.supr) || '').trim();
+    if (busyFiles('reply')) { toast(L('استنى الصورة تخلص رفع', 'Wait for the picture to finish uploading'), 'err'); return; }
+    const files = readyFiles('reply'); if (!text && !files.length) { toast(L('اكتب الرد الأول', 'Write the reply first'), 'err'); return; }
+    const now = nowISO(); const m = { id: uid(), at: now, from: own ? 'owner' : 'me', by: myId(), byName: me().name || '', text, files };
+    const patch = { thread: (t.thread || []).concat([m]).slice(-200), lastAt: now };
+    if (own) { patch.unreadMe = true; if (t.status === 'new') patch.status = 'working'; }
+    else { patch.unreadOwner = true; if (t.status === 'solved') { patch.status = 'new'; patch.reopenedAt = now; patch.solvedAt = null; } }
+    try { await Store.update(COL, id, patch); } catch (e) { return; }
+    SUP.draft.supr = ''; SUP.files.reply = [];
+    if (own) push([t.byId], 'رد من الدعم الفني', `${t.subj || ''} — ${text || 'صورة'}`, `/#/support/${id}`, 'sup-' + id);
+    else push(['role:admin'], `رد من ${t.byName || ''} على مشكلته`, `${t.subj || ''} — ${text || 'صورة'}`, `/#/support/${id}`, 'sup-' + id);
+    render(false);
+  };
+  ACTIONS.supWorking = async id => { const t = byId(COL, id); if (!t || !isOwner()) return; const now = nowISO(); await Store.update(COL, id, { status: 'working', workingAt: now, thread: (t.thread || []).concat([{ id: uid(), at: now, from: 'sys', text: L('بنشتغل عليها', 'Working on it') }]).slice(-200), unreadMe: true }); };
+  ACTIONS.supSolve = id => {
+    const t = byId(COL, id); if (!t || !isOwner()) return;
+    openModal({ title: L('اتحلت', 'Solved'), submitLabel: L('اتحلت ✓', 'Solved ✓'), body: `<div class="form">${field(L('رسالة للموظف (اختياري)', 'A note to the person (optional)'), `<textarea name="note" rows="3" placeholder="${esc(L('مثال: اتصلحت — حدّث الصفحة وجرّب تاني', 'e.g. Fixed — refresh the page and try again'))}"></textarea>`, 'full')}</div>`, onSubmit: async f => {
+      const d = formData(f); const now = nowISO(); const add = []; if (d.note) add.push({ id: uid(), at: now, from: 'owner', by: myId(), byName: me().name || '', text: d.note }); add.push({ id: uid(), at: now, from: 'sys', text: L('✓ اتحلّت', '✓ Solved') });
+      await Store.update(COL, id, { status: 'solved', solvedAt: now, solvedBy: myId(), thread: (t.thread || []).concat(add).slice(-200), lastAt: now, unreadMe: true, unreadOwner: false });
+      push([t.byId], 'مشكلتك اتحلت ✓', d.note ? `${t.subj || ''} — ${d.note}` : (t.subj || ''), `/#/support/${id}`, 'sup-' + id); toast(L('اتعلّمت إنها اتحلت', 'Marked as solved'));
+    } });
+  };
+  ACTIONS.supReopen = async id => {
+    const t = byId(COL, id); if (!t) return; const own = isOwner(); if (!own && t.byId !== myId()) return; const now = nowISO();
+    await Store.update(COL, id, { status: own ? 'working' : 'new', reopenedAt: now, solvedAt: null, thread: (t.thread || []).concat([{ id: uid(), at: now, from: 'sys', text: own ? L('اتفتحت تاني', 'Reopened') : L('الموظف قال إن المشكلة لسه موجودة', 'The person says the problem is still there') }]).slice(-200), lastAt: now, unreadOwner: !own, unreadMe: own });
+    if (!own) push(['role:admin'], `${t.byName || ''}: المشكلة لسه موجودة`, t.subj || '', `/#/support/${id}`, 'sup-' + id);
+  };
+
+  /* ---------- lists ---------- */
+  const PEER_CO = p => /stud/i.test(p.name || '') ? 'studio' : /fact/i.test(p.name || '') ? 'factory' : /constr/i.test(p.name || '') ? 'construction' : '';
+  const coUrl = co => { const self = sysKey(); const root = self === 'factory' ? '' : '../'; return root + (co === 'factory' ? 'index.html' : co === 'studio' ? 'studioz/index.html' : 'construction/index.html'); };
+  function loadPeers() {
+    if (!isOwner() || SUP.peers.busy || Date.now() - SUP.peers.at < 90000 || typeof window.nfPeerSession !== 'function' || typeof NF_PEERS !== 'function') return;
+    const cos = Array.from(new Set(NF_PEERS().map(PEER_CO).filter(c => c && c !== sysKey()))); if (!cos.length) return;
+    SUP.peers.busy = true;
+    Promise.all(cos.map(async co => { try { const ps = await window.nfPeerSession(co); if (!ps) return []; const r = await ps.c.from('docs').select('id, data').eq('col', COL).order('updated_at', { ascending: false }).limit(150); if (r.error) return []; return (r.data || []).map(x => Object.assign({}, x.data || {}, { id: x.id, _co: co })); } catch (e) { return []; } }))
+      .then(a => { SUP.peers.rows = [].concat(...a); }).catch(() => { }).finally(() => { SUP.peers.busy = false; SUP.peers.at = Date.now(); if (S.route && S.route.view === 'support' && !S.route.id) render(false); });
+  }
+  const initials = n => (String(n || '?').trim()[0] || '?'); /* one letter: two Arabic initials join into a word */
+  function row(t, own) {
+    const href = t._co ? `${coUrl(t._co)}#/support/${t.id}` : `#/support/${t.id}`; const unread = own ? t.unreadOwner : t.unreadMe;
+    const last = (t.thread || []).slice(-1)[0] || {}; const lastTx = last.from === 'sys' ? '' : clean(firstLine(last.text || '')).slice(0, 80);
+    const sub = own ? [t.dept, t.page && t.page.title, devTxt(t.dev), when(t.lastAt || t.createdAt)].filter(Boolean).join(' · ') : [when(t.lastAt || t.createdAt), lastTx].filter(Boolean).join(' · ');
+    return `<a class="suprow${unread ? ' un' : ''}" href="${esc(href)}">${own ? `<span class="av notr">${esc(initials(t.byName))}</span>` : `<span class="av">${icon('lifebuoy')}</span>`}<div class="b"><div class="t"><span class="notr">${own ? esc(t.byName || '') + ' — ' : ''}${esc(clean(t.subj || ''))}</span></div><div class="s notr">${esc(sub)}</div>${t._co ? `<span class="supco">${esc(sysName(t._co))}</span>` : ''}${t.solvedBy === 'bot' ? `<span class="supco">${esc(L('ردّ عليها البوت', 'answered by the bot'))}</span>` : ''}</div><div class="e">${badge(t.status)}${unread ? '<span class="dot"></span>' : ''}</div></a>`;
+  }
+  function inboxHTML() {
+    loadPeers();
+    const all = tickets().concat(SUP.peers.rows || []); const by = s => all.filter(t => t.status === s || (s === 'new' && !t.status));
+    const tab = SUP.tab || (by('new').length ? 'new' : by('working').length ? 'working' : 'all');
+    const tabs = [['new', 'جديدة', 'New'], ['working', 'بنشتغل عليها', 'Working on it'], ['solved', 'اتحلّت', 'Solved'], ['all', 'الكل', 'All']];
+    const shown = sortBy(tab === 'all' ? all : by(tab), t => t.lastAt || t.createdAt || '', true);
+    const peers = (typeof NF_PEERS === 'function' ? NF_PEERS().map(PEER_CO).filter(c => c && c !== sysKey()) : []);
+    return `<div class="suptabs">${tabs.map(([k, a, b]) => { const n = k === 'all' ? all.length : by(k).length; return `<button type="button" class="${tab === k ? 'on' : ''}" data-action="supTab" data-arg="${k}">${esc(L(a, b))}${n ? ` <span class="n${k === 'new' ? '' : ' q'}">${n}</span>` : ''}</button>`; }).join('')}</div>
+      <div class="card"><div class="list suplist">${shown.length ? shown.map(t => row(t, true)).join('') : `<div class="empty">${esc(tab === 'new' ? L('مفيش مشاكل جديدة 👌', 'No new problems 👌') : L('مفيش حاجة هنا', 'Nothing here'))}</div>`}</div></div>
+      <div class="tiny muted" style="margin-top:8px">${esc(L(`بتشوف هنا مشاكل ${sysName(sysKey())}${peers.length ? ' + ' + peers.map(sysName).join(' + ') : ''} — ملخص بالمفتوح بيوصلك كل يوم الساعة 9 بالليل.`, `You see the problems of ${sysName(sysKey())}${peers.length ? ' + ' + peers.map(sysName).join(' + ') : ''} here — a summary of the open ones reaches you every day at 9 PM.`))}</div>`;
+  }
+  ACTIONS.supTab = k => { SUP.tab = k; render(false); };
+  function myListHTML() {
+    const xs = sortBy(mine(), t => t.lastAt || t.createdAt || '', true); if (!xs.length) return '';
+    return `<div class="card"><div class="cardhead"><h3>${esc(L('مشاكلي', 'My problems'))}</h3><span class="muted small">${xs.length}</span></div><div class="list suplist">${xs.slice(0, 30).map(t => row(t, false)).join('')}</div></div>`;
+  }
+  function pageHTML(r) {
+    if (r.id) return ticketHTML(r.id);
+    if (isOwner()) return inboxHTML();
+    return chatHTML() + myListHTML();
+  }
+  EXTRA_VIEWS.support = r => (canUse() ? pageHTML(r) : `<div class="card"><div class="empty">${esc(L('مش متاح', 'Not available'))}</div></div>`);
+  EXTRA_TITLES.support = r => {
+    if (r.id) { const t = byId(COL, r.id); return { title: L('الدعم الفني', 'Support'), sub: t ? `${clean(t.subj || '')} · ${code(t)}` : '' }; } /* the top bar's own «Back» returns to the list */
+    return isOwner() ? { title: L('الدعم الفني', 'Support'), sub: L('مشاكل السيستم اللي الموظفين بعتوها — رد عليها أو علّمها اتحلت', 'System problems people sent — reply, or mark them solved') } : { title: L('الدعم الفني', 'Support'), sub: L('قابلتك مشكلة في السيستم؟ اكتبها هنا وهتوصل للإدارة على طول', 'Ran into a problem in the system? Write it here and it reaches the management right away') };
+  };
+  if (typeof VIEW_TITLES === 'object') VIEW_TITLES.support = 'الدعم الفني';
+  canSee = (base => function (v) { if (v === 'support') return canUse(); return base.apply(this, arguments); })(canSee);
+  const navCount = () => { if (!canUse()) return 0; return isOwner() ? tickets().filter(t => t.status === 'new' || t.unreadOwner).length : mine().filter(t => t.unreadMe).length; };
+  (() => {
+    if (NAV.some(n => n.id === 'support')) return; let i = NAV.findIndex(n => n.id === 'regulation'); if (i < 0) i = NAV.findIndex(n => n.id === 'me');
+    const e = { id: 'support', label: 'الدعم الفني', icon: 'lifebuoy', countCls: 'warn', count: navCount };
+    if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e);
+  })();
+
+  /* ---------- the doors: the assistant panel, «My portal» ---------- */
+  function go() { if (!isOwner()) { if (!SUP.chat || SUP.chat.step === 'sent') newChat(); else if (SUP.last) SUP.chat.page = SUP.chat.page || SUP.last; } const p = document.querySelector('#aipanel'); if (p && !p.hidden) { const x = p.querySelector('[data-aiclose]'); if (x) x.click(); } if (location.hash !== '#/support') location.hash = '#/support'; else render(false); }
+  window.nfSupportOpen = go;
+  document.addEventListener('click', e => {
+    const g = e.target.closest && e.target.closest('[data-supgo]'); if (g) { e.preventDefault(); go(); return; }
+    const m = e.target.closest && e.target.closest('[data-supmic]'); if (m) { e.preventDefault(); micToggle(m.getAttribute('data-supmic')); return; }
+    const d = e.target.closest && e.target.closest('[data-supdel]'); if (d) { e.preventDefault(); const [slot, k] = d.getAttribute('data-supdel').split(':'); SUP.files[slot] = (SUP.files[slot] || []).filter(x => x.k !== k); render(false); return; }
+    if (e.target.closest && e.target.closest('[data-aifab]')) setTimeout(fabBtn, 30);
+  });
+  function fabBtn() {
+    const p = document.querySelector('#aipanel'); if (!p || !canUse()) return; const h = p.querySelector('.aih'); if (!h || h.querySelector('[data-supgo]')) return;
+    const n = isOwner() ? navCount() : 0;
+    const ref = h.querySelector('.newc') || h.querySelector('[data-aiclose]');
+    const html = `<button type="button" class="btn xs supfab" data-supgo>${icon('lifebuoy')}<span>${esc(isOwner() ? L('الدعم الفني', 'Support') : L('مشكلة في السيستم؟', 'Problem in the system?'))}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`;
+    if (ref) ref.insertAdjacentHTML('beforebegin', html); else h.insertAdjacentHTML('beforeend', html);
+  }
+  RENDER_HOOKS.push(fabBtn);
+  function meCard() {
+    if (!canUse() || isOwner()) return ''; const xs = mine(); const open = xs.filter(t => t.status !== 'solved').length; const un = xs.filter(t => t.unreadMe).length;
+    return `<div class="card supme"><div class="cardhead"><h3>${icon('lifebuoy')} ${esc(L('الدعم الفني', 'Support'))}</h3>${un ? `<span class="badge warn">${esc(L(`${un} رد جديد`, `${un} new repl${un > 1 ? 'ies' : 'y'}`))}</span>` : ''}</div><div class="small muted">${esc(L('قابلتك مشكلة في السيستم؟ ابعتها وهتوصل للإدارة على طول — وممكن تبعت صورة للشاشة.', 'Ran into a problem in the system? Send it and it reaches the management right away — you can add a screenshot.'))}</div><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn p" data-supgo>${icon('lifebuoy')}<span>${esc(L('مشكلة في السيستم؟', 'Problem in the system?'))}</span></button>${xs.length ? `<a class="btn ghost" href="#/support">${esc(L(`مشاكلي (${xs.length})`, `My problems (${xs.length})`))}${open ? ` · ${esc(L(`${open} مفتوحة`, `${open} open`))}` : ''}</a>` : ''}</div></div>`;
+  }
+  if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); try { return h + meCard(); } catch (e) { return h; } })(vMe);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.supchat .supmsgs{display:flex;flex-direction:column;gap:8px;padding:2px 0 10px}
+.supb{max-width:86%;padding:9px 12px;border-radius:14px;line-height:1.65;word-break:break-word;font-size:14.5px}
+.supb .tx{white-space:pre-wrap}
+.supb.bot{align-self:flex-start;background:var(--surface-2,var(--surface));border:1px solid var(--line)}
+.supb.me{align-self:flex-end;background:color-mix(in srgb,var(--accent) 13%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line))}
+.supb.sys{align-self:center;max-width:100%;background:none;border:0;padding:2px 8px;font-size:12.5px;color:var(--ink-2)}
+.supb .who{font-size:11.5px;color:var(--ink-2);margin-bottom:2px;font-weight:600}
+.supctx{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.supctx>span{display:inline-flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.supctx svg{width:13px;height:13px}
+.supcomp textarea{display:block;width:100%;min-height:86px;resize:vertical;font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-sizing:border-box}
+.supcomp .row,.supacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.supatt{cursor:pointer}.supmic.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}
+.supthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.supthumbs .th{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}.supthumbs .th.busy{opacity:.55}
+.supthumbs img{width:100%;height:100%;object-fit:cover;display:block}.supthumbs .th button{position:absolute;top:3px;inset-inline-end:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer}.supthumbs .th button svg{width:13px;height:13px}
+.supimgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.supimgs img{width:112px;height:112px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--surface-2,var(--surface));display:block}
+.supkv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13.5px;margin:10px 0 0}.supkv dt{color:var(--ink-2)}.supkv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.suprow{display:flex;gap:10px;align-items:flex-start;padding:11px 6px;border-bottom:1px solid var(--line);text-decoration:none;color:inherit}.suprow:last-child{border-bottom:0}
+.suprow .av{flex:0 0 36px;height:36px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--accent);font-weight:700;font-size:13px}.suprow .av svg{width:18px;height:18px}
+.suprow .b{flex:1;min-width:0}.suprow .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.suprow.un .t{font-weight:800}
+.suprow .s{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.suprow .e{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:0 0 auto}.suprow .dot{width:9px;height:9px;border-radius:50%;background:#e5484d}
+.supco{display:inline-block;margin-top:4px;margin-inline-end:4px;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--ink-2)}
+.suptabs{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 0 12px;padding:2px 0 4px}.suptabs::-webkit-scrollbar{display:none}
+.suptabs button{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:6px 13px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}.suptabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.suptabs .n,.supfab .n{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;font-weight:700;margin-inline-start:4px}
+.suptabs .n.q{background:color-mix(in srgb,var(--ink-2) 22%,transparent);color:inherit}
+.supfab{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.supfab svg{width:14px;height:14px}
+@media (max-width:560px){.supb{max-width:94%}.supfab span:not(.n){max-width:120px;overflow:hidden;text-overflow:ellipsis}}
+</style>`);
 })();
