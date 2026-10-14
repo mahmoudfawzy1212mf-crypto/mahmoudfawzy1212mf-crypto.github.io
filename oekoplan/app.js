@@ -11321,6 +11321,20 @@ function serviceMonths(w) { const j0 = w.serviceFrom || w.joined; if (!j0) retur
 const onProbation = w => !!w.probation && (!w.probationUntil || w.probationUntil >= todayISO());
 function advanceLimit(w, ym) { const pol = advPolicy(); const s = hrMonthSummary(w, ym || monthOf(todayISO())); const earned = (s.present + s.half * 0.5) * dailyRate(w); return { limit: r2(earned * (+pol.advanceMaxPct || 50) / 100), earned: r2(earned), days: s.present + s.half * 0.5, absent: s.absent }; }
 function advanceOpenBalance(w) { return r2(sum(list('advances').filter(a => a.workerId === w.id && a.status !== 'closed'), a => Math.max(0, (+a.amount || 0) - (+a.paid || 0)))); }
+/* v7.68 (Mahmoud 14 Oct): several advances a month are fine as long as the total stays inside the monthly limit (50% of the worked
+   days' value — leave days are not worked days); over it = an exception with a written reason that goes to the accounts manager.
+   used this month = this month's advances (taken, or still waiting for approval) + this month's instalment of older ones still open. */
+function advanceUsed(w, ym) {
+  ym = ym || monthOf(todayISO()); const mOf = x => String(x.date || x.from || x.createdAt || '').slice(0, 7);
+  let used = 0, items = 0; const advs = list('advances').filter(a => a.workerId === w.id && !['cancelled', 'rejected'].includes(a.status));
+  advs.forEach(a => {
+    if (mOf(a) === ym) { used += +a.amount || 0; items++; return; }
+    if (a.status === 'closed' || mOf(a) > ym) return; const rem = Math.max(0, (+a.amount || 0) - (+a.paid || 0)); if (rem > 0) used += Math.min(rem, +a.monthly || rem);
+  });
+  list('requests').filter(r => r.type === 'advance' && r.workerId === w.id && r.status === 'pending' && mOf(r) === ym && !advs.some(a => a.reqId === r.id)).forEach(r => { used += +r.amount || 0; items++; });
+  return { used: r2(used), items };
+}
+function advanceRoom(w, ym) { const lim = advanceLimit(w, ym); const u = advanceUsed(w, ym); return Object.assign({}, lim, { used: u.used, items: u.items, room: r2(Math.max(0, lim.limit - u.used)) }); }
 /* why can't this worker ask now? null = allowed */
 function advanceBlock(w) {
   const pol = advPolicy(); const today = todayISO(); const day = +today.slice(8, 10); const ym = monthOf(today);
@@ -11334,21 +11348,21 @@ async function advanceValidate(r, d, w, forKiosk) {
   const amount = num(d.amount); if (!amount) { toast('أدخل المبلغ', 'err'); return false; }
   const blk = advanceBlock(w); if (blk) { toast(blk.msg, 'err'); return false; }
   const inst = Math.max(1, Math.round(num(d.installments) || 1)); const lim = advanceLimit(w); const open = advanceOpenBalance(w);
-  if (open > 0 && !isAdmin()) { toast(`عليك سلفة قائمة متبقٍ منها ${fmtMoney(open)} ${CUR()} — تُطلب سلفة جديدة بعد سدادها (أو بموافقة المالك)`, 'err'); return false; }
-  if (amount > lim.limit) { if (!d.overLimit) { toast(`الحد المسموح لك هذا الشهر ${fmtMoney(lim.limit)} ${CUR()} — لطلب أكبر علّم «طلب استثناء» واكتب السبب`, 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب سبب طلب سلفة أكبر من الحد', 'err'); return false; } r.overLimit = true; }
-  Object.assign(r, { amount, installments: inst, monthly: r2(amount / inst), limit: lim.limit, earnedDays: lim.days, from: todayISO() });
+  const room = advanceRoom(w); /* v7.68: no more «you have an open advance» — the month's total against the limit */
+  if (amount > room.room) { if (!d.overLimit) { toast(room.used > 0 ? `باقي لك من حد الشهر ${fmtMoney(room.room)} ${CUR()} (الحد ${fmtMoney(room.limit)} — طلبت منه ${fmtMoney(room.used)}) — لطلب أكبر علّم «طلب استثناء» واكتب السبب` : `الحد المسموح لك هذا الشهر ${fmtMoney(lim.limit)} ${CUR()} — لطلب أكبر علّم «طلب استثناء» واكتب السبب`, 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب سبب طلب سلفة أكبر من الحد', 'err'); return false; } r.overLimit = true; }
+  Object.assign(r, { amount, installments: inst, monthly: r2(amount / inst), limit: lim.limit, usedMonth: room.used, room: room.room, earnedDays: lim.days, from: todayISO() });
   return true;
 }
 function requestForm(wid, forKiosk) {
   let html = requestFormRules(wid, forKiosk);
   const w = wid ? byId('workers', wid) : (S.session?.workerId ? byId('workers', S.session.workerId) : null);
   let info = '';
-  if (w) { const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); info = blk ? `<div class="banner warn full" data-rq="advance">${icon('alert')}<span>${esc(blk.msg)}</span></div>` : `<div class="banner info full" data-rq="advance">${icon('info')}<span>حدك المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (50% من ${fmtNum(lim.days)} يوم عمل = ${fmtMoney(lim.earned)})${open ? ` · عليك سلفة قائمة متبقٍ ${fmtMoney(open)}` : ''}. المسار: رئيس القسم ← مدير المصنع ← مدير الحسابات ← المالك.</span></div>`; }
+  if (w) { const blk = advanceBlock(w); const lim = advanceRoom(w); info = blk ? `<div class="banner warn full" data-rq="advance">${icon('alert')}<span>${esc(blk.msg)}</span></div>` : `<div class="banner info full" data-rq="advance">${icon('info')}<span>حدك المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (50% من ${fmtNum(lim.days)} يوم عمل = ${fmtMoney(lim.earned)})${lim.used ? ` · طلبت منه ${fmtMoney(lim.used)} · <b>باقي لك ${fmtMoney(lim.room)} ${CUR()}</b>` : ''}. جوه الحد بتتعتمد لوحدها؛ أكبر من الحد = طلب استثناء بسبب مكتوب ويروح لمدير الحسابات.</span></div>`; }
   html = html.replace(/<label class="check full" data-rq="advance"><input type="checkbox" name="emergency"[\s\S]*?<\/label>/, '').replace(/<div class="tiny muted full" data-rq="advance">[\s\S]*?<\/div>/, '');
   const extra = `${info}<label class="check full" data-rq="advance"><input type="checkbox" name="overLimit" id="f-overLimit"> طلب استثناء — سلفة أكبر من الحد (اكتب السبب وعدد الشهور)</label>`;
   return html.replace(/(<div class="field" data-rq="advance"><label>عدد أشهر السداد<\/label>[\s\S]*?<\/div>)/, '$1' + extra);
 }
-function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — فوق الحد (الحد ${fmtMoney(r.limit || 0)})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
+function reqDescAdv(r) { if (r.type === 'advance' && r.overLimit) return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments} شهر — فوق الحد (الحد ${fmtMoney(r.limit || 0)}${r.usedMonth ? ` — اتطلب منه قبلها ${fmtMoney(r.usedMonth)}` : ''})${r.reason ? ' — ' + esc(r.reason) : ''}`; if (r.type === 'abssettle') return `تسوية غياب شهر ${fmtMonth(r.month || '')} — ${esc(r.reason || '')}`; return null; }
 function reqDesc(r) { return reqDescAdv(r) || reqDescCycle(r); }
 /* absence settlement: head raises it from the worker page; both head + manager approve */
 ACTIONS.absSettle = id => {
@@ -11363,13 +11377,13 @@ function payrollRow(w, ym) { const r = payrollRowCost(w, ym); if (onProbation(w)
 /* worker page: probation + advance status + settle button */
 function vWorkerDetail(id) {
   let html = vWorkerDetailCost(id); const w = byId('workers', id); if (!w) return html;
-  const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); const canSettle = writable() && (isAdmin() || role() === 'manager' || (role() === 'head' && myDepts().includes(w.deptId))) && blk && blk.code === 'absence';
+  const blk = advanceBlock(w); const lim = advanceRoom(w); const open = advanceOpenBalance(w); const canSettle = writable() && (isAdmin() || role() === 'manager' || (role() === 'head' && myDepts().includes(w.deptId))) && blk && blk.code === 'absence';
   const pending = list('requests').find(x => x.type === 'abssettle' && x.workerId === w.id && x.status === 'pending');
-  const card = `<div class="card"><div class="cardhead"><h3>السلف${onProbation(w) ? ' · <span class="badge warn">تحت الاختبار</span>' : ''}</h3><div class="grow"></div>${canSettle ? (pending ? '<span class="badge warn">تسوية الغياب بانتظار الاعتماد</span>' : `<button class="btn xs" data-action="absSettle" data-arg="${w.id}">${icon('check')}تسوية الغياب</button>`) : ''}</div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `الحد المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (${fmtNum(lim.days)} يوم عمل)`}${open ? ` · قائم: ${fmtMoney(open)} ${CUR()}` : ''}${onProbation(w) ? ` · يُصرف أسبوعيًا ${fmtMoney((+w.basic || 0) * (+advPolicy().probationWeeklyPct || 25) / 100)} ${CUR()}${w.probationUntil ? ` حتى ${fmtDate(w.probationUntil)}` : ''}` : ''}</div></div>`;
+  const card = `<div class="card"><div class="cardhead"><h3>السلف${onProbation(w) ? ' · <span class="badge warn">تحت الاختبار</span>' : ''}</h3><div class="grow"></div>${canSettle ? (pending ? '<span class="badge warn">تسوية الغياب بانتظار الاعتماد</span>' : `<button class="btn xs" data-action="absSettle" data-arg="${w.id}">${icon('check')}تسوية الغياب</button>`) : ''}</div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `الحد المسموح هذا الشهر: <b>${fmtMoney(lim.limit)} ${CUR()}</b> (${fmtNum(lim.days)} يوم عمل)${lim.used ? ` · اتطلب منه ${fmtMoney(lim.used)} · باقي ${fmtMoney(lim.room)}` : ''}`}${open ? ` · قائم: ${fmtMoney(open)} ${CUR()}` : ''}${onProbation(w) ? ` · يُصرف أسبوعيًا ${fmtMoney((+w.basic || 0) * (+advPolicy().probationWeeklyPct || 25) / 100)} ${CUR()}${w.probationUntil ? ` حتى ${fmtDate(w.probationUntil)}` : ''}` : ''}</div></div>`;
   const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card;
 }
 /* employee portal: limit card */
-function vMe() { let html = vMeAsk(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const blk = advanceBlock(w); const lim = advanceLimit(w); const open = advanceOpenBalance(w); const card = `<div class="card"><div class="cardhead"><h3>سلفتي</h3></div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : `تقدر تطلب حتى <b>${fmtMoney(lim.limit)} ${CUR()}</b> هذا الشهر (50% من ${fmtNum(lim.days)} يوم عمل) — من «طلب جديد ← سلفة».`}${open ? `<div style="margin-top:4px">متبقٍ من سلفك: <b>${fmtMoney(open)} ${CUR()}</b> يُخصم قسطه من المرتب.</div>` : ''}</div></div>`; const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card; }
+function vMe() { let html = vMeAsk(); const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return html; const blk = advanceBlock(w); const lim = advanceRoom(w); const open = advanceOpenBalance(w); const card = `<div class="card"><div class="cardhead"><h3>سلفتي</h3></div><div class="small">${blk ? `<span class="badge warn">${esc(blk.msg)}</span>` : lim.used ? `باقي لك <b>${fmtMoney(lim.room)} ${CUR()}</b> من حدك هذا الشهر (الحد ${fmtMoney(lim.limit)} — طلبت منه ${fmtMoney(lim.used)}) — من «طلب جديد ← سلفة».` : `تقدر تطلب حتى <b>${fmtMoney(lim.limit)} ${CUR()}</b> هذا الشهر (50% من ${fmtNum(lim.days)} يوم عمل) — من «طلب جديد ← سلفة».`}${open ? `<div style="margin-top:4px">متبقٍ من سلفك: <b>${fmtMoney(open)} ${CUR()}</b> يُخصم قسطه من المرتب.</div>` : ''}</div></div>`; const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : html + card; }
 /* settings (rules tab addition) */
 EXTRA_SETTINGS.advances = { label: 'السلف وفترة الاختبار', render: () => { const p = advPolicy(); return `<form class="card" id="advform"><h3>السلف وفترة الاختبار</h3><div class="form">${field('من يوم', inp('advanceFromDay', p.advanceFromDay, 'type="number" min="1" max="31"'))}${field('إلى يوم', inp('advanceToDay', p.advanceToDay, 'type="number" min="1" max="31"'))}${field('الحد % من قيمة أيام العمل الفعلية', inp('advanceMaxPct', p.advanceMaxPct, 'type="number" min="0" max="100"'))}${field('أقل مدة خدمة (شهور)', inp('advanceMinMonths', p.advanceMinMonths, 'type="number" min="0"'))}${field('أيام الغياب المسموحة شهريًا قبل إيقاف السلف (حسب اللائحة)', inp('absenceAllowedPerMonth', p.absenceAllowedPerMonth, 'type="number" min="0"'))}${field('تحت الاختبار: % من الأساسي يُصرف أسبوعيًا', inp('probationWeeklyPct', p.probationWeeklyPct, 'type="number" min="0" max="100"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>`; } };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'advform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); const pol = Object.assign({}, S.settings.policy || {}); ['advanceFromDay', 'advanceToDay', 'advanceMaxPct', 'advanceMinMonths', 'absenceAllowedPerMonth', 'probationWeeklyPct'].forEach(k => { pol[k] = num(d[k]); }); await Store.saveSettings(Object.assign({}, S.settings, { policy: pol })); toast('تم الحفظ'); });
@@ -40566,7 +40580,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       if (k === 'leave') { if (!w || typeof leaveBalances !== 'function') return L('يوم أو أكتر', 'One day or more'); const b = leaveBalances(w).find(x => x.type && x.type.id === 'annual'); return b && b.remaining != null ? L(`باقي لك ${b.remaining} يوم`, `${b.remaining} days left`) : L('يوم أو أكتر', 'One day or more'); }
       if (k === 'permission') return L('تأخير أو خروج بدري', 'Late arrival or early leave');
       if (k === 'punch') return L('حضور أو انصراف', 'Check-in or check-out');
-      if (k === 'advance') { if (!w || typeof advanceLimit !== 'function') return L('على المرتب', 'Against the salary'); if (typeof advanceBlock === 'function' && advanceBlock(w)) return L('مقفولة دلوقتي', 'Closed for now'); const l = advanceLimit(w); return L(`تقدر لحد ${fmtMoney(l.limit)} ${CUR()}`, `Up to ${fmtMoney(l.limit)} ${CUR()}`); }
+      if (k === 'advance') { if (!w || typeof advanceLimit !== 'function') return L('على المرتب', 'Against the salary'); if (typeof advanceBlock === 'function' && advanceBlock(w)) return L('مقفولة دلوقتي', 'Closed for now'); const l = typeof advanceRoom === 'function' ? advanceRoom(w) : Object.assign({ room: 0 }, advanceLimit(w)); const v = typeof advanceRoom === 'function' ? l.room : l.limit; return L(`تقدر لحد ${fmtMoney(v)} ${CUR()}`, `Up to ${fmtMoney(v)} ${CUR()}`); }
     } catch (e) { /* ignore */ }
     return '';
   }
@@ -42934,6 +42948,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
    v7.38 - the sketch tools are the shared drawing engine NFDraw (part 99zzZzZZzcd-draw.js, also behind «Concept Drawing» in
    Ökoplan Landscaping): layers (the picture locked at the bottom, «Hidden», «Drawing», add more), pen / marker / highlighter / eraser
    that follow pen pressure, line / arrow / box / circle, numbers, text, hide, a colour wheel, two-finger zoom, select / move / delete.
+   v7.69 - «Send it to support» beside «Send to the task» (part 99zzZzZZzzl-support.js): the picture opens a new problem.
    ===================================================================== */
 (function () {
   if (window.__NF_SNAP__) return; window.__NF_SNAP__ = 1;
@@ -43177,7 +43192,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
         ${ps.length ? `<div class="sn-lbl">${esc(L('تعليق كل رقم', 'A comment for each number'))}</div>${ps.map(p => `<div class="sn-pin"><b style="background:${esc(pinBg(p.color))};color:${light(pinBg(p.color)) ? '#1c1c1e' : '#fff'}">${p.n}</b><input type="text" data-pin="${p.n}" data-pid="${esc(p.id)}" value="${esc(E.notes[p.id] || '')}" placeholder="${esc(L('اكتب الملاحظة على الرقم ده', 'Write the note for this number'))}"></div>`).join('')}` : ''}
         <div class="sn-lbl">${esc(L('ملاحظة', 'Note'))}</div><textarea id="sn-note" rows="2" placeholder="${esc(L('اختياري', 'Optional'))}">${esc(E.note || '')}</textarea>
         <div class="sn-warn">${esc(L('كل اللي في المهمة هيشوفوا الصورة — استخدم «إخفاء» لأي حاجة خاصة.', 'Everyone on the task will see the picture — use «Hide» for anything private.'))}</div></div>
-      <div class="sn-foot"><button type="button" class="btn p" data-sn="send" ${E.busy ? 'disabled' : ''}>${esc(E.busy ? L('بيبعت…', 'Sending…') : L('ابعت على المهمة', 'Send to the task'))}</button></div>`;
+      <div class="sn-foot">${window.nfSupportCan && window.nfSupportCan() ? `<button type="button" class="btn sn-sup" data-sn="support">${esc(L('ابعتها للدعم الفني', 'Send it to support'))}</button>` : ''}<button type="button" class="btn p" data-sn="send" ${E.busy ? 'disabled' : ''}>${esc(E.busy ? L('بيبعت…', 'Sending…') : L('ابعت على المهمة', 'Send to the task'))}</button></div>`;
   }
   function paint() { const d = $('.sn-draw'), s = $('.sn-send'); if (!d || !s) return; d.hidden = E.step !== 'draw'; s.hidden = E.step === 'draw'; if (E.step === 'draw') { s.innerHTML = ''; requestAnimationFrame(() => { if (E.ed) E.ed.render(); }); } else paintSend(); }
   const pinBg = c => c === '#ffffff' ? '#1c1c1e' : (c || '#ff3b30');
@@ -43232,6 +43247,15 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       toast(L('مابعتتش — جرّب تاني', 'Not sent — try again'), 'err');
     }
   }
+  /* v7.69: «Send it to support» — the picture (with the hidden parts covered) + the note and the numbers' comments open a new problem */
+  async function toSupport() {
+    if (!window.nfSupportFromSnap || E.busy || !E.ed) return; collect();
+    const lines = []; if (E.note) lines.push(E.note.trim());
+    pins().forEach(p => { const n = String(E.notes[p.id] || '').trim(); if (n) lines.push(`${PIN(p.n)} ${n}`); });
+    const blob = await new Promise(res => final(1600).toBlob(res, 'image/jpeg', 0.86)); if (!blob) return;
+    const page = { hash: E.from || '', title: E.page || '' }; closeEditor();
+    window.nfSupportFromSnap({ blob, note: lines.join('\n'), page });
+  }
   function collect() {
     const el = document.getElementById('nfsnap'); if (!el || E.step !== 'send') return;
     const n = el.querySelector('#sn-note'); if (n) E.note = n.value;
@@ -43245,6 +43269,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const a = b.dataset.sn; const ed = E.ed;
     if (a === 'cancel') return closeEditor();
     if (a === 'send') return send();
+    if (a === 'support') return toSupport();
     if (a === 'back') { collect(); E.step = 'draw'; return paint(); }
     if (a === 'task') { collect(); E.task = b.dataset.k; document.querySelectorAll('#nfsnap .sn-task').forEach(x => x.classList.toggle('on', x.dataset.k === E.task)); return; }
     if (!ed) return;
@@ -51338,4 +51363,915 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
   setInterval(tick, 600000);
   setTimeout(tick, 2500);
+})();
+/* =====================================================================
+   v7.68 — «Technical support» (brief support-bot-brief, 14 Oct — Mahmoud said go).
+   Everyone in the 3 systems (factory / studio / construction) reports a system problem from: the assistant panel (button
+   «Problem in the system?»), «My portal» (a card) and the side menu («Support»).
+   · captured by itself: the page he was on (hash + title), the device (iPhone / Android / computer + app / browser), the build, the time;
+   · he writes or talks (the server speech-to-text where the owner set it, else the browser's), and may add up to 4 screenshots
+     (pick, or paste on a computer);
+   · the bot first: a rule question (advance room, leave balance, today's punch) is answered at once from his own data; with the
+     Anthropic key the assistant answers a how-to, or asks one or two short questions; then the ticket opens. «That solved it» keeps
+     it as solved-by-the-bot (no push) so the owner still sees what people ask;
+   · collection «support» — the server lets a person write and read only his own tickets, the owner (admin) all of them
+     (nf_can_write + the restrictive select docs_support_sel); the change log skips it;
+   · the owner: page «Support» — New / Working on it / Solved / All, this system + the other systems he is signed in to (SSO peers,
+     read only, opens there); a ticket shows who, department, page, device, build, the thread and the pictures; reply, «Working on it»,
+     «Solved» (+ a note); the person gets a notice on a reply and when it is solved;
+   · pushes: a new ticket / a follow-up → the owner; a reply / solved → the person. No money amounts in a push or a list line.
+   · the nightly summary (21:00 Cairo) is the server's job (Edge remind, all 3 systems).
+   Arabic and English; phone and computer.
+   v7.69 «smart support» (brief addition, 14 Oct): «Screenshot» in the «+» → «Send it to support» (the drawn picture + the page it was
+   taken on open a new problem); a voice note (up to 2 min, written out too where the server's speech-to-text is set); a screen video
+   with his voice from a computer (up to 3 min, he may move between pages; a floating «Stop» bar) — on a phone, «Video» uploads the
+   phone's own screen recording; with the Anthropic key the bot looks at the screenshot (and the voice note's text) to title and sum
+   up the problem or ask what is missing. The owner hears / watches them in the ticket.
+   v7.69 «Support session» (brief support-triage-brief): the owner's one-by-one console lives in 99zzZzZZzzm-triage.js (it uses
+   window.nfSupportApi below). Ökoplan (a separate system, no shared sign-in) gets «Support» too — only the support-owner account(s)
+   the server lists (Mahmoud's) see the tickets there; other admins get the «new problem» chat like everyone. A ticket keeps «urgent» (his work is stuck)
+   and his manager's name.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUP__) return; window.__NF_SUP__ = 1;
+  if (typeof NAV === 'undefined' || typeof EXTRA_VIEWS === 'undefined' || typeof Store === 'undefined') return;
+  const COL = 'support';
+  if (!COLS.includes(COL)) COLS.push(COL); S.data[COL] = S.data[COL] || new Map();
+  Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection(COL).onSnapshot(snap => { S.data[COL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[COL] = true; rerender(); }, e => console.warn('snapshot', COL, e))); })(Store.subscribeAll);
+  /* the change log is readable by other people — a problem report never goes there */
+  if (typeof logChange === 'function') logChange = (base => function (col) { return col === COL ? Promise.resolve() : base.apply(this, arguments); })(logChange);
+  if (typeof ICONS === 'object' && !ICONS.refresh) ICONS.refresh = '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>';
+  if (typeof ICONS === 'object' && !ICONS.vid) ICONS.vid = '<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="M16 10.5l5-3v9l-5-3z"/>';
+  if (typeof ICONS === 'object' && !ICONS.screenrec) ICONS.screenrec = '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/><circle cx="12" cy="10.2" r="2.6" fill="currentColor" stroke="none"/>';
+  if (typeof ICONS === 'object' && !ICONS.lifebuoy) ICONS.lifebuoy = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/><path d="M5.7 5.7l3.8 3.8M14.5 14.5l3.8 3.8M18.3 5.7l-3.8 3.8M9.5 14.5l-3.8 3.8"/>';
+
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const MONEY = /(\d[\d.,\s]*\s*(جنيه|جنية|ج\.?م|EGP|LE|USD|\$|دولار|ريال|SAR|€))|((EGP|USD|SAR|\$|€)\s*\d[\d.,]*)|\d{4,}/gi;
+  const clean = s => String(s || '').replace(MONEY, '…');
+  const me = () => S.session || {};
+  const myId = () => String(me().id || '');
+  const isOeko = () => { try { return typeof nfConfig === 'function' && nfConfig().brand === 'oekoplan'; } catch (e) { return false; } };
+  /* Ökoplan (Mahmoud: «ليا انا بس»): only the accounts the server lists as support owners (admin_config.sup_owners, set with the PIN)
+     see the problems there — the app asks the server once per account; the notices to them come from the server (nf_sup_notify). */
+  const OWN = { for: '', ok: false, busy: false };
+  function ownerOk() {
+    if (!isOeko()) return true; const id = String((S.session && S.session.id) || ''); if (!id) return false;
+    if (OWN.for !== id && !OWN.busy && S.sb && typeof S.sb.rpc === 'function') {
+      OWN.busy = true; OWN.for = id; OWN.ok = false;
+      Promise.resolve(S.sb.rpc('nf_sup_owner')).then(r => { OWN.ok = !!(r && !r.error && r.data === true); }).catch(() => { OWN.ok = false; }).finally(() => { OWN.busy = false; if (OWN.ok) { try { render(false); } catch (e) { /* next render */ } } });
+    }
+    return OWN.for === id && OWN.ok;
+  }
+  const isOwner = () => !!S.session && isAdmin() && !(S.viewOrig || S.demoOrig) && ownerOk();
+  const ownerTo = () => (isOeko() ? [] : ['role:admin']); /* Ökoplan: the server notifies the support owner itself */
+  const canUse = () => !!S.session && role() !== 'kiosk' && !(S.viewOrig || S.demoOrig);
+  const sysKey = () => isOeko() ? 'oekoplan' : (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : (typeof isStudioz === 'function' && isStudioz()) ? 'studio' : 'factory';
+  const SYS = { factory: ['المصنع', 'Factory'], studio: ['المكتب', 'Studio'], construction: ['المقاولات', 'Construction'], oekoplan: ['أوكوبلان', 'Ökoplan'] };
+  const sysName = k => { const x = SYS[k] || [k, k]; return L(x[0], x[1]); };
+  const coName = () => ({ factory: 'Ninety Fabrication', studio: 'Ökoplan Landscaping', construction: 'Ninety Construction', oekoplan: 'Ökoplan Landscaping' })[sysKey()];
+  const ST = { new: ['جديدة', 'New', 'warn'], working: ['بنشتغل عليها', 'Working on it', 'info'], solved: ['اتحلّت', 'Solved', 'good'] };
+  const badge = s => { const x = ST[s] || ST.new; return `<span class="badge ${x[2]}">${esc(L(x[0], x[1]))}</span>`; };
+  /* «for the developer» (a code fix) — open / fixed and waiting for the new version / shipped */
+  const devChip = t => t && t.dev && t.status !== 'solved' ? `<span class="supco supdev">${esc(t.dev === 'fixed' ? L('اتصلحت — مستنية التحديث', 'Fixed — waiting for the update') : L('للمطوّر', 'For the developer'))}</span>` : '';
+  const DEV = { iphone: ['آيفون', 'iPhone'], android: ['أندرويد', 'Android'], computer: ['كمبيوتر', 'Computer'] };
+  const VIA = { app: ['التطبيق', 'app'], desktop: ['برنامج الكمبيوتر', 'desktop app'], pwa: ['الويب المثبّت', 'installed web app'], browser: ['المتصفح', 'browser'] };
+  const devTxt = d => d ? `${L((DEV[d.kind] || DEV.computer)[0], (DEV[d.kind] || DEV.computer)[1])} · ${L((VIA[d.via] || VIA.browser)[0], (VIA[d.via] || VIA.browser)[1])}` : '';
+  const tickets = () => list(COL).filter(t => t && t.id && !t.deleted);
+  const mine = () => tickets().filter(t => t.byId === myId());
+  const code = t => '#' + String(t.id || '').replace(/^sp_/, '').slice(-4).toUpperCase();
+  const firstLine = s => String(s || '').split('\n').map(x => x.trim()).find(Boolean) || '';
+  const when = iso => { if (!iso) return ''; try { const d = new Date(iso); return String(iso).slice(0, 10) === todayISO() ? fmtAtTm(d) : d.toLocaleString(en() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return String(iso).slice(0, 16).replace('T', ' '); } };
+  const nl = s => esc(String(s || '')).replace(/\n/g, '<br>');
+  const push = (to, title, body, url, tag) => { try { if (to && to.length && typeof pushSend === 'function') { const p = pushSend(to, clean(title).slice(0, 100), clean(body).slice(0, 160), url, tag); if (p && p.catch) p.catch(() => { }); } } catch (e) { /* the page still shows it */ } };
+
+  const SUP = { last: null, lastHash: '', chat: null, tab: null, draft: {}, files: { chat: [], reply: [] }, urls: {}, opened: {}, peers: { at: 0, busy: false, rows: [] } };
+  window.nfSupport = SUP;
+
+  /* ---------- what is captured by itself ---------- */
+  function device() {
+    const ua = navigator.userAgent || ''; let cap = '';
+    try { const c = window.Capacitor; if (c && c.isNativePlatform && c.isNativePlatform()) cap = (c.getPlatform && c.getPlatform()) || 'native'; } catch (e) { cap = ''; }
+    const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+    const kind = cap === 'ios' || (!cap && ios) ? 'iphone' : cap === 'android' || (!cap && /Android/i.test(ua)) ? 'android' : 'computer';
+    let via = 'browser'; if (cap) via = 'app'; else if (/Electron/i.test(ua)) via = 'desktop'; else { try { if ((window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone) via = 'pwa'; } catch (e) { /* ignore */ } }
+    return { kind, via, w: Math.round(innerWidth), h: Math.round(innerHeight), ua: ua.slice(0, 180) };
+  }
+  function pageNow() {
+    let title = ''; try { const t = viewTitle(); title = String(t.title || ''); const sub = typeof t.sub === 'string' ? t.sub.replace(/<[^>]+>/g, '').trim() : ''; if (sub && sub.length < 90 && S.route && S.route.id) title += ' — ' + sub; /* a list page's sub is only its description */ } catch (e) { title = ''; }
+    return { hash: location.hash || '#/', view: (S.route && S.route.view) || '', id: (S.route && S.route.id) || null, title: (title || (S.route && S.route.view) || '').slice(0, 120) };
+  }
+  RENDER_HOOKS.push(() => { if (!S.session || !S.route || S.route.view === 'support') return; if (location.hash === SUP.lastHash && SUP.last && SUP.last.title) return; SUP.lastHash = location.hash; SUP.last = pageNow(); });
+  function who() {
+    const s = me(); const w = s.workerId ? byId('workers', s.workerId) : null; const st = !w && S.data.staff ? byId('staff', s.id) : null;
+    const deptId = (w && w.deptId) || (st && (st.deptIds || [])[0]) || (s.deptIds || [])[0] || null;
+    return { id: myId(), name: s.name || (w && w.name) || '', workerId: s.workerId || null, deptId, dept: deptId ? deptName(deptId) : '', role: role(), roleName: (typeof ROLES === 'object' && ROLES[role()]) || role(), job: (w && (w.trade || w.job)) || '', mgr: (w && w.managerId && (byId('workers', w.managerId) || {}).name) || '' };
+  }
+
+  /* ---------- the bot: rule answers from his own data, then the assistant ---------- */
+  function ruleAnswer(text) {
+    const w = me().workerId ? byId('workers', me().workerId) : null; if (!w) return '';
+    const t = (typeof arDigits === 'function' ? arDigits(text) : String(text)).toLowerCase(); const has = re => re.test(t); const cur = typeof CUR === 'function' ? CUR() : '';
+    const out = [];
+    if (has(/سلف|advance/) && typeof advanceRoom === 'function') { try { const r = advanceRoom(w); out.push(L(`السلفة: حدّك الشهر ده ${fmtMoney(r.limit)} ${cur} (نص قيمة الأيام اللي اشتغلتها، من غير الإجازات) — طلبت منه ${fmtMoney(r.used)}، فباقي لك ${fmtMoney(r.room)} ${cur}. تقدر تطلب أكتر من سلفة طول ما إنت جوه الحد، ولو محتاج أكتر علّم «طلب استثناء» واكتب السبب.`, `Advance: your limit this month is ${fmtMoney(r.limit)} ${cur} (half the value of the days you worked, leave not counted) — you asked ${fmtMoney(r.used)} of it, so ${fmtMoney(r.room)} ${cur} is left. You can ask more than once while inside the limit; for more, tick «Exception request» and write the reason.`)); } catch (e) { /* skip */ } }
+    if (has(/اجاز|إجاز|رصيد|leave/) && typeof leaveBalances === 'function') { try { const b = leaveBalances(w).filter(x => x.type && !x.type.noBalance && x.remaining != null); out.push((b.length ? L('رصيد إجازاتك: ', 'Your leave balance: ') + b.map(x => `${x.type.name}: ${fmtNum(Math.max(0, x.remaining))}`).join(' · ') + '\n' : '') + L('الإجازة بتتطلب من «طلب جديد» ← «إجازة»، ويعتمدها رئيس قسمك وبعدين الموارد البشرية.', 'Leave is asked from «New request» → «Leave»; your head of department approves it, then HR.')); } catch (e) { /* skip */ } }
+    if (has(/بصم|حضور|انصراف|punch|check.?in/) && typeof attendanceFor === 'function') { try { const row = (attendanceFor(todayISO()) || {})[w.id] || null; out.push(row && row.in ? L(`بصمتك النهارده: دخول ${fmtTm(row.in)}${row.out ? ` · انصراف ${fmtTm(row.out)}` : ' · لسه ما سجلتش انصراف'}.`, `Your punches today: in ${fmtTm(row.in)}${row.out ? ` · out ${fmtTm(row.out)}` : ' · no check-out yet'}.`) : L('مفيش بصمة دخول متسجلة ليك النهارده. لو بصمت ومش ظاهرة، ابعتها للدعم وقول الساعة كام والمكان.', 'There is no check-in for you today. If you punched and it is not showing, send it to support with the time and the place.')); } catch (e) { /* skip */ } }
+    return out.join('\n');
+  }
+  async function botThink(text, page, pics, md) {
+    md = md || { frames: [], said: [] }; const hasMedia = !!(md.frames.length || md.said.length || md.kinds);
+    if (typeof aiAvailable !== 'function' || !aiAvailable() || typeof aiJson !== 'function') return null;
+    const W = who(); const w = W.workerId ? byId('workers', W.workerId) : null;
+    let facts = ''; try { if (w && sysKey() === 'factory' && typeof askContext === 'function') facts = askContext(w).slice(0, 3500); } catch (e) { facts = ''; }
+    const prompt = `أنت «الدعم الفني» لسيستم إدارة شركة ${coName()}. موظف بيبلّغ عن مشكلة أو سؤال في السيستم.
+رجّع JSON بس بالشكل ده من غير أي كلام تاني:
+{"kind":"how|rule|bug|access|idea","answer":"","questions":[],"title":"","summary":"","report":"","urgent":false}
+- kind: how = بيسأل إزاي يعمل حاجة في السيستم؛ rule = سؤال عن قاعدة أو لائحة أو رصيد بيتجاوب من بياناته؛ bug = عطل أو حاجة مش شغالة؛ access = مش شايف صفحة أو مالوش صلاحية؛ idea = اقتراح.
+- answer: لو how أو rule وإنت متأكد من الإجابة من البيانات اللي تحت، اكتب رد قصير بالمصري (3 سطور بالكتير). غير كده سيبها فاضية. ما تخترعش خطوات مش متأكد منها وما توعدش بأي قرار.
+- questions: لو الكلام مش واضح كفاية علشان حد يصلّح المشكلة، اسأل سؤال أو اتنين قصيرين جدًا (حصل إيه بالظبط؟ كنت متوقع إيه؟ إمتى؟). لو واضح سيبها [].
+- urgent: true لو باين إن شغله واقف بسبب المشكلة أو مش قادر يكمّل، غير كده false.
+- title: عنوان قصير للمشكلة (6 كلمات بالكتير). summary: سطر واحد للمالك يلخّص المشكلة. ما تكتبش أي مبالغ فلوس في title ولا summary.
+${hasMedia ? '- report: ملخص مكتوب للمالك من 3 لـ 6 سطور قصيرة بالمصري، كل سطر بيبدأ بكلمة: «بيقول:» (اللي قاله بصوته أو كتبه) / «في الفيديو:» أو «في الصورة:» (اللي باين على الشاشة خطوة بخطوة) / «الصفحة:» / «المطلوب:» (اللي هو عايزه يتصلّح). ما تخترعش حاجة مش باينة ولا مقالة، ومن غير أي مبالغ فلوس.\n' : '- report: سيبها فاضية.\n'}الصفحة اللي كان فيها: ${(page && page.title) || '—'} (${(page && page.hash) || ''}) · الجهاز: ${devTxt(device())} · الدور: ${W.roleName}${W.dept ? ' · القسم: ' + W.dept : ''}
+${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}${pics && pics.length ? 'مرفق صورة من الشاشة — بص عليها وإنت بتحدد المشكلة.\n' : ''}${md.frames.length ? `مرفق ${md.frames.length} صور متتابعة من فيديو لشاشته وهو بيشرح المشكلة (بالترتيب${md.pages && md.pages.length ? '، الصفحات اللي عدّى عليها: ' + md.pages.join(' ← ') : ''}).\n` : ''}${md.said.length ? 'كلامه في الفيديو / رسالة الصوت (مكتوب من صوته):\n' + md.said.join('\n') + '\n' : ''}كلام الموظف: ${text || '(مفيش كلام مكتوب — بص على الصور وكلامه)'}`;
+    try {
+      let input = prompt; const imgs = [];
+      for (const b of (pics || []).slice(0, 2)) { try { imgs.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await b64Of(b) } }); } catch (e) { /* skip */ } }
+      for (const fr of md.frames.slice(0, 8 - imgs.length)) { const d = String(fr.url || fr || '').split(',')[1]; if (d) imgs.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d } }); }
+      if (imgs.length) input = [{ role: 'user', content: imgs.concat([{ type: 'text', text: prompt }]) }];
+      const j = await Promise.race([aiJson(input, { max_tokens: hasMedia ? 900 : 600 }), new Promise(res => setTimeout(() => res(null), hasMedia ? 45000 : 25000))]);
+      if (!j || typeof j !== 'object') return null;
+      const kind = ['how', 'rule', 'bug', 'access', 'idea'].includes(j.kind) ? j.kind : 'bug';
+      return { kind, answer: String(j.answer || '').trim().slice(0, 900), questions: (Array.isArray(j.questions) ? j.questions : []).map(x => String(x || '').trim()).filter(Boolean).slice(0, 2), title: clean(String(j.title || '').trim()).slice(0, 80), summary: clean(String(j.summary || '').trim()).slice(0, 200), report: hasMedia ? clean(String(j.report || '').trim()).slice(0, 1200) : '', urgent: j.urgent === true };
+    } catch (e) { return null; }
+  }
+
+  /* ---------- attachments: pictures (shrunk), voice notes, videos — uploaded at once, shown from the store ---------- */
+  const MAXV = 45 * 1024 * 1024;
+  const shrink = file => new Promise(res => {
+    try { const url = URL.createObjectURL(file); const img = new Image();
+      img.onload = () => { try { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k)); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); cv.toBlob(b => { URL.revokeObjectURL(url); res(b || file); }, 'image/jpeg', 0.82); } catch (e) { URL.revokeObjectURL(url); res(file); } };
+      img.onerror = () => { URL.revokeObjectURL(url); res(file); }; img.src = url; } catch (e) { res(file); }
+  });
+  const kindOf = t => /^image\//.test(t || '') ? 'image' : /^audio\//.test(t || '') ? 'audio' : /^video\//.test(t || '') ? 'video' : '';
+  const b64Of = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = rej; fr.readAsDataURL(blob); });
+  const fmtDur = v => { const t = Math.round(+v || 0); return t ? `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : ''; };
+  let sttOk = null;
+  async function sttReady() { if (sttOk !== null) return sttOk; try { if (sysKey() !== 'factory' || !S.sb || !S.sb.rpc) return (sttOk = false); const r = await S.sb.rpc('nf_stt_ready'); sttOk = !r.error && r.data === true; } catch (e) { sttOk = false; } return sttOk; }
+  /* a voice note is also written out (the server's speech-to-text, where the owner set the key) — for the owner and for the bot */
+  async function transcribe(blob) { if (!(await sttReady())) return ''; try { const r = await S.sb.functions.invoke('stt', { body: { audio: await b64Of(blob), mime: blob.type } }); return String((r && r.data && r.data.text) || '').trim(); } catch (e) { return ''; } }
+  async function addBlob(blob, slot, meta) {
+    const arr = SUP.files[slot] || (SUP.files[slot] = []); const kind = (meta && meta.kind) || kindOf(blob && blob.type); if (!blob || !kind) return null;
+    if (arr.length >= 6) { toast(L('٦ مرفقات بالكتير', 'Six attachments at most'), 'err'); return null; }
+    if (kind === 'image' && arr.filter(x => x.kind === 'image').length >= 4) { toast(L('٤ صور بالكتير', 'Four pictures at most'), 'err'); return null; }
+    if (kind !== 'image' && blob.size > MAXV) { toast(L('الفيديو كبير — خليه أقصر من دقيقتين', 'The video is too big — keep it under two minutes'), 'err'); return null; }
+    const tmp = { k: uid(), busy: true, kind, prev: URL.createObjectURL(blob), dur: (meta && meta.dur) || 0 }; arr.push(tmp); render(false);
+    try {
+      const b = kind === 'image' ? await shrink(blob) : blob; if (kind === 'image') tmp.blob = b;
+      const mime = kind === 'image' ? 'image/jpeg' : (String(blob.type || '').split(';')[0] || (kind === 'audio' ? 'audio/webm' : 'video/webm'));
+      const r = await Files.put(b, mime);
+      tmp.f = { store: r.store, ref: r.ref, enc: r.enc || null, mime: r.mime || mime, size: r.size || b.size || 0, kind }; if (r.id) tmp.f.id = r.id; if (tmp.dur) tmp.f.dur = Math.round(tmp.dur);
+      tmp.busy = false;
+      const said = String((meta && meta.said) || '').trim(); if (said) tmp.f.text = said.slice(0, 2000);
+      if (meta && meta.frames && meta.frames.length) { tmp.frames = meta.frames; tmp.pages = meta.pages || []; }
+      const voice = kind === 'audio' ? blob : (meta && meta.voice) || (kind === 'video' && !meta && blob.size < 5.5 * 1024 * 1024 ? blob : null);
+      if (!said && voice) tmp.tp = transcribe(voice).then(t => { if (t) tmp.f.text = t.slice(0, 2000); render(false); return t; });
+      if (kind === 'video' && !(meta && meta.frames)) tmp.fp = videoFrames(blob, 5).then(fr => { tmp.frames = fr; return fr; });
+    } catch (e) { const i = arr.indexOf(tmp); if (i >= 0) arr.splice(i, 1); toast(kind === 'image' ? L('الصورة ما اترفعتش — جرّب تاني', 'The picture did not upload — try again') : L('الملف ما اترفعش — جرّب تاني', 'The file did not upload — try again'), 'err'); render(false); return null; }
+    render(false); return tmp;
+  }
+  async function addFiles(files, slot) { for (const f of Array.from(files || [])) { if (kindOf(f.type)) await addBlob(f, slot); } }
+  const readyFiles = slot => (SUP.files[slot] || []).filter(x => !x.busy && x.f).map(x => x.f);
+  const busyFiles = slot => (SUP.files[slot] || []).some(x => x.busy);
+  const thumbs = slot => { const a = SUP.files[slot] || []; return a.length ? `<div class="supthumbs">${a.map(x => `<div class="th k-${x.kind}${x.busy ? ' busy' : ''}">${x.kind === 'image' ? `<img src="${esc(x.prev || '')}" alt="">` : `<span class="ico">${icon(x.kind === 'audio' ? 'mic' : 'vid')}</span><span class="d">${esc(fmtDur(x.dur) || (x.kind === 'audio' ? L('صوت', 'Voice') : L('فيديو', 'Video')))}</span>`}<button type="button" data-supdel="${esc(slot)}:${esc(x.k)}" aria-label="${esc(L('شيل', 'Remove'))}">${icon('x')}</button></div>`).join('')}</div>` : ''; };
+  const media = files => {
+    const fs = (files || []).filter(Boolean); if (!fs.length) return ''; const im = fs.filter(f => !f.kind || f.kind === 'image'); const av = fs.filter(f => f.kind === 'audio' || f.kind === 'video');
+    return (im.length ? `<div class="supimgs">${im.map(f => `<a class="supimg" target="_blank" rel="noopener" data-supf="${esc(JSON.stringify(f))}"><img alt=""></a>`).join('')}</div>` : '')
+      + av.map(f => `<div class="supav k-${f.kind}">${f.kind === 'audio' ? `<audio controls preload="none" data-supf="${esc(JSON.stringify(f))}"></audio>` : `<video controls playsinline preload="metadata" data-supf="${esc(JSON.stringify(f))}"></video>`}${f.text ? `<div class="suptr notr">${icon('mic')}<span>${esc(f.text)}</span></div>` : ''}</div>`).join('');
+  };
+  RENDER_HOOKS.push(() => {
+    document.querySelectorAll('[data-supf]:not([data-ok])').forEach(a => {
+      a.setAttribute('data-ok', '1'); let f = null; try { f = JSON.parse(a.getAttribute('data-supf')); } catch (e) { f = null; } if (!f) return;
+      const k = f.ref || f.id || ''; const set = u => { if (!u) return; if (a.tagName === 'A') { a.href = u; const im = a.querySelector('img'); if (im) im.src = u; } else a.src = u; };
+      if (SUP.urls[k]) { set(SUP.urls[k]); return; }
+      if (f._co && f.store === 'sb' && typeof window.nfPeerSession === 'function') { window.nfPeerSession(f._co).then(ps => ps ? ps.c.storage.from('files').createSignedUrl(f.ref, 3600) : null).then(r => { const u = r && r.data && r.data.signedUrl; if (u) { SUP.urls[k] = u; set(u); } }).catch(() => { }); return; }
+      try { Promise.resolve(Files.url(f)).then(u => { if (u) { SUP.urls[k] = u; set(u); } }).catch(() => { }); } catch (e) { /* ignore */ }
+    });
+  });
+  document.addEventListener('change', e => { const i = e.target; if (!i || !i.matches || !i.matches('input[data-supfile]')) return; addFiles(i.files, i.getAttribute('data-supfile')); i.value = ''; });
+  document.addEventListener('paste', e => {
+    if (!S.route || S.route.view !== 'support') return; const it = Array.from((e.clipboardData && e.clipboardData.items) || []).filter(x => /^image\//.test(x.type)); if (!it.length) return;
+    e.preventDefault(); addFiles(it.map(x => x.getAsFile()).filter(Boolean), S.route.id ? 'reply' : 'chat');
+  });
+  document.addEventListener('input', e => { const t = e.target; if (t && (t.id === 'supq' || t.id === 'supr')) SUP.draft[t.id] = t.value; });
+
+  /* ---------- writing out what he says while he records (computer: the browser's own speech service, no key) ---------- */
+  function liveSpeech() {
+    const C = window.SpeechRecognition || window.webkitSpeechRecognition; if (!C || isNative() || device().kind !== 'computer') return null;
+    let on = true, r = null; const parts = [];
+    const start = () => { if (!on) return; try { r = new C(); r.lang = en() ? 'en-US' : 'ar-EG'; r.continuous = true; r.interimResults = false; r.onresult = ev => { for (let i = ev.resultIndex || 0; i < ev.results.length; i++) { const x = ev.results[i]; if (x && x.isFinal && x[0]) parts.push(String(x[0].transcript || '').trim()); } }; r.onerror = ev => { if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(ev && ev.error)) on = false; }; r.onend = () => { if (on) setTimeout(start, 200); }; r.start(); } catch (e) { on = false; } };
+    start();
+    return { stop: () => new Promise(res => { on = false; try { if (r) r.stop(); } catch (e) { /* ignore */ } setTimeout(() => res(parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()), 700); }) };
+  }
+  const pickN = (a, n) => a.length <= n ? a.slice() : Array.from({ length: n }, (_, i) => a[Math.round(i * (a.length - 1) / (n - 1))]);
+  /* a picture of the shared screen every 4 s (only for the summary — never stored) */
+  function frameGrabber(stream) {
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true; try { v.srcObject = stream; v.play().catch(() => { }); } catch (e) { /* no frames */ }
+    const frames = []; const cv = document.createElement('canvas');
+    const grab = () => { try { if (!v.videoWidth) return; const k = Math.min(1, 1024 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k); cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height); frames.push({ url: cv.toDataURL('image/jpeg', 0.6), page: (SUP.last && SUP.last.title) || '' }); if (frames.length > 45) frames.splice(1, 1); } catch (e) { /* skip */ } };
+    const t1 = setTimeout(grab, 1200); const iv = setInterval(grab, 4000);
+    return { stop: () => { clearTimeout(t1); clearInterval(iv); grab(); try { v.pause(); v.srcObject = null; } catch (e) { /* ignore */ } return frames; } };
+  }
+  /* pictures out of an uploaded video (the phone's screen recording) */
+  function videoFrames(blob, n) {
+    return new Promise(res => {
+      const out = []; let v; try { v = document.createElement('video'); } catch (e) { res(out); return; }
+      const url = URL.createObjectURL(blob); const done = () => { try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ } res(out); }; const to = setTimeout(done, 20000);
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.onloadedmetadata = async () => {
+        const d = isFinite(v.duration) ? v.duration : 0; if (!d || !v.videoWidth) { clearTimeout(to); done(); return; }
+        const cv = document.createElement('canvas'); const k = Math.min(1, 1024 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+        for (let i = 0; i < n; i++) {
+          await new Promise(r => { let ok = false; const fin = () => { if (ok) return; ok = true; v.removeEventListener('seeked', fin); r(); }; v.addEventListener('seeked', fin); try { v.currentTime = Math.min(d - 0.05, d * (i + 0.5) / n); } catch (e) { fin(); } setTimeout(fin, 3000); });
+          try { cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height); out.push({ url: cv.toDataURL('image/jpeg', 0.6) }); } catch (e) { /* not drawable */ }
+        }
+        clearTimeout(to); done();
+      };
+      v.onerror = () => { clearTimeout(to); done(); };
+      v.src = url;
+    });
+  }
+
+  /* ---------- a voice note (up to 2 minutes) ---------- */
+  const REC = { voice: null, screen: null };
+  const MIME_A = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'];
+  function voiceState() { document.querySelectorAll('[data-supvoice]').forEach(b => { b.classList.toggle('on', !!REC.voice); const sp = b.querySelector('span'); if (sp) sp.textContent = REC.voice ? `${L('وقّف', 'Stop')} ${fmtDur((Date.now() - REC.voice.t0) / 1000) || '0:00'}` : L('صوت', 'Voice'); }); }
+  async function voiceToggle(slot) {
+    if (REC.voice) { REC.voice.stop(); return; }
+    if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast(L('الجهاز ده مش بيسجّل صوت من هنا — اكتب المشكلة', 'This device cannot record a voice here — type the problem'), 'err'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch (e) { toast(L('اسمح للتطبيق يستخدم المايك', 'Allow the app to use the microphone'), 'err'); return; }
+    const mime = MIME_A.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    let mr; try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 48000 } : undefined); } catch (e) { stream.getTracks().forEach(t => t.stop()); toast(L('المايك مش متاح دلوقتي', 'The microphone is not available now'), 'err'); return; }
+    const chunks = []; mr.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); }; const t0 = Date.now(); const sp = liveSpeech();
+    const tick = setInterval(voiceState, 500); const cap = setTimeout(() => REC.voice && REC.voice.stop(), 120000);
+    mr.onstop = async () => { clearInterval(tick); clearTimeout(cap); stream.getTracks().forEach(t => t.stop()); REC.voice = null; voiceState(); const said = sp ? await sp.stop() : ''; const dur = (Date.now() - t0) / 1000; const blob = new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm') }); if (blob.size < 1200 || dur < 0.7) return; await addBlob(blob, slot, { kind: 'audio', dur, said }); };
+    REC.voice = { t0, stop: () => { if (mr.state !== 'inactive') mr.stop(); } }; mr.start(250); voiceState();
+  }
+
+  /* ---------- a screen video with his voice (computer: Chrome / Edge / Firefox / Safari) — up to 3 minutes, he may move between pages ---------- */
+  const isNative = () => { try { const c = window.Capacitor; return !!(c && c.isNativePlatform && c.isNativePlatform()); } catch (e) { return false; } };
+  const canScreen = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && window.MediaRecorder) && device().kind === 'computer' && !isNative();
+  function recBar() { const d = document.createElement('div'); d.className = 'suprecbar'; d.innerHTML = `<span class="dot"></span><b>${esc(L('بيسجّل الشاشة', 'Recording the screen'))}</b><span class="t">0:00</span><button type="button" class="btn sm p" data-suprecstop>${esc(L('وقّف وارجع', 'Stop and go back'))}</button><button type="button" class="btn sm ghost" data-supreccancel>${esc(L('إلغاء', 'Cancel'))}</button>`; document.body.appendChild(d); return d; }
+  async function screenStart(slot, back) {
+    if (REC.screen) return;
+    if (!canScreen()) { toast(L('تسجيل الشاشة شغال من الكمبيوتر (كروم أو إيدج)', 'Screen recording works from a computer (Chrome or Edge)'), 'err'); return; }
+    let disp; try { disp = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false }); } catch (e) { toast(L('ما اتسجّلش — لازم تختار الشاشة وتوافق', 'Not recording — choose the screen and allow it'), 'err'); return; }
+    let mic = null; try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); } catch (e) { mic = null; }
+    const stream = new MediaStream([].concat(disp.getVideoTracks(), mic ? mic.getAudioTracks() : []));
+    const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    const stopAll = () => [disp, mic].forEach(x => { if (x) x.getTracks().forEach(t => t.stop()); });
+    let mr; try { mr = new MediaRecorder(stream, Object.assign({ videoBitsPerSecond: 900000, audioBitsPerSecond: 64000 }, mime ? { mimeType: mime } : {})); } catch (e) { stopAll(); toast(L('الجهاز ده مش بيسجّل الشاشة', 'This device cannot record the screen'), 'err'); return; }
+    const chunks = []; mr.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); }; const t0 = Date.now(); let cancelled = false;
+    const grabber = frameGrabber(new MediaStream(disp.getVideoTracks())); const sp = mic ? liveSpeech() : null;
+    let ar = null; const ac = []; if (mic) { try { const am = MIME_A.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || ''; ar = new MediaRecorder(new MediaStream(mic.getAudioTracks()), am ? { mimeType: am, audioBitsPerSecond: 32000 } : undefined); ar.ondataavailable = ev => { if (ev.data && ev.data.size) ac.push(ev.data); }; ar.start(1000); } catch (e) { ar = null; } }
+    const bar = recBar(); const tick = setInterval(() => { const t = bar.querySelector('.t'); if (t) t.textContent = fmtDur((Date.now() - t0) / 1000) || '0:00'; }, 500);
+    const cap = setTimeout(() => REC.screen && REC.screen.stop(), 180000);
+    const vt = disp.getVideoTracks()[0]; if (vt) vt.addEventListener('ended', () => REC.screen && REC.screen.stop());
+    mr.onstop = async () => {
+      const frames = grabber.stop(); const arDone = ar && ar.state !== 'inactive' ? new Promise(r => { ar.onstop = r; ar.stop(); }) : Promise.resolve();
+      clearInterval(tick); clearTimeout(cap); await arDone; stopAll(); REC.screen = null; bar.remove(); const said = sp ? await sp.stop() : ''; if (cancelled) return;
+      const dur = (Date.now() - t0) / 1000; const blob = new Blob(chunks, { type: String(mr.mimeType || mime || 'video/webm').split(';')[0] }); if (blob.size < 3000) return;
+      const voice = ac.length ? new Blob(ac, { type: (ac[0] && ac[0].type) || 'audio/webm' }) : null; const fr = pickN(frames, 6);
+      if (back && location.hash !== back) location.hash = back;
+      toast(L('بيرفع الفيديو…', 'Uploading the video…')); const r = await addBlob(blob, slot, { kind: 'video', dur, frames: fr, pages: Array.from(new Set(frames.map(x => x.page).filter(Boolean))), said, voice: said ? null : voice });
+      if (r) toast(L('الفيديو اتضاف ✓ — اكتب أو سجّل صوت ودوس «ابعت»', 'Video added ✓ — type or record a voice and press «Send»'));
+    };
+    REC.screen = { t0, stop: () => { if (mr.state !== 'inactive') mr.stop(); }, cancel: () => { cancelled = true; if (mr.state !== 'inactive') mr.stop(); } };
+    mr.start(1000);
+    toast(L('بيسجّل — روح للصفحة اللي فيها المشكلة واشرح بصوتك، وبعدين دوس «وقّف»', 'Recording — go to the page with the problem and explain out loud, then press «Stop»'));
+  }
+
+  /* ---------- the chat (a new problem) ---------- */
+  function newChat() { SUP.files.chat = []; SUP.draft.supq = ''; SUP.chat = { step: 'write', page: SUP.last || null, t0: null, text: '', files0: [], local: '', bot: null, qs: [], answers: '', files1: [], msgs: [{ from: 'bot', text: L('اكتب المشكلة اللي قابلتك في السيستم — حصل إيه وفي أنهي صفحة. وممكن تبعت صورة أو تسجّل صوت أو فيديو للشاشة. هتوصل للإدارة على طول.', 'Write the problem you ran into in the system — what happened and on which page. You can add a picture, a voice note or a screen video. It reaches the management right away.') }], ticketId: null }; }
+  const bubble = (m, viewerIsOwner) => {
+    const lab = m.from === 'bot' ? L('البوت', 'Bot') : m.from === 'owner' ? (viewerIsOwner ? L('إنت', 'You') : L('الدعم الفني', 'Support')) : m.from === 'sys' ? '' : (viewerIsOwner ? (m.byName || '') : L('إنت', 'You'));
+    const side = viewerIsOwner ? (m.from === 'owner' ? 'me' : m.from === 'sys' ? 'sys' : 'bot') : (m.from === 'me' ? 'me' : m.from === 'sys' ? 'sys' : 'bot');
+    return `<div class="supb ${side}${m.from === 'bot' ? ' isbot' : ''}">${lab ? `<div class="who"><span class="notr">${esc(lab)}</span>${m.at ? ` · <span class="tiny">${esc(when(m.at))}</span>` : ''}</div>` : ''}${m.html || (m.text ? `<div class="tx notr">${nl(m.text)}</div>` : '')}${media(m.files)}${m.acts || ''}</div>`;
+  };
+  const ctxChips = (page, dev) => `<div class="supctx">${page && page.title ? `<span>${icon('link')}<span class="notr">${esc(page.title)}</span></span>` : ''}${dev ? `<span>${esc(devTxt(dev))}</span>` : ''}<span>${esc(sysName(sysKey()))}</span></div>`;
+  const composer = (id, slot, action, ph, arg) => {
+    const pc = device().kind === 'computer'; const scr = pc && canScreen();
+    return `<div class="supcomp"><textarea id="${id}" placeholder="${esc(ph)}">${esc(SUP.draft[id] || '')}</textarea>${thumbs(slot)}<div class="row"><button type="button" class="btn p" data-action="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${icon('send')}<span>${esc(L('ابعت', 'Send'))}</span></button><label class="btn ghost supatt">${icon('camera')}<span>${esc(L('صورة', 'Picture'))}</span><input type="file" accept="image/*" multiple data-supfile="${slot}" hidden></label><button type="button" class="btn ghost supvoice${REC.voice ? ' on' : ''}" data-supvoice="${slot}">${icon('mic')}<span>${esc(REC.voice ? L('وقّف', 'Stop') : L('صوت', 'Voice'))}</span></button>${scr ? `<button type="button" class="btn ghost" data-suprec="${slot}">${icon('screenrec')}<span>${esc(L('سجّل الشاشة', 'Record the screen'))}</span></button>` : `<label class="btn ghost supatt">${icon('vid')}<span>${esc(L('فيديو', 'Video'))}</span><input type="file" accept="video/*" data-supfile="${slot}" hidden></label>`}</div>${pc ? '' : `<div class="tiny muted suphint">${esc(L('عايز تصوّر الشاشة فيديو؟ سجّلها من الموبايل نفسه (تسجيل الشاشة) وارفعها من «فيديو».', 'Want a video of the screen? Record it with the phone\'s own screen recording and add it from «Video».'))}</div>`}</div>`;
+  };
+  function chatHTML() {
+    if (!SUP.chat) newChat(); const c = SUP.chat;
+    let bottom = '';
+    if (c.step === 'write' || c.step === 'clarify') bottom = composer('supq', 'chat', 'supSend', c.step === 'clarify' ? L('اكتب الرد هنا…', 'Type your answer here…') : L('مثال: بدوس «تسجيل حضور» ومفيش حاجة بتحصل', 'e.g. I tap «Check in» and nothing happens'));
+    else if (c.step === 'answer') bottom = `<div class="row supacts"><button type="button" class="btn p" data-action="supBotOk">${icon('check')}<span>${esc(L('كده اتحلت', 'That solved it'))}</span></button><button type="button" class="btn" data-action="supBotNo">${icon('send')}<span>${esc(L('لأ، ابعتها للدعم', 'No, send it to support'))}</span></button></div>`;
+    else if (c.step === 'think' || c.step === 'sending') bottom = `<div class="muted small">${esc(L('ثانية واحدة…', 'One moment…'))}</div>`;
+    else bottom = `<div class="row supacts">${c.ticketId ? `<a class="btn p" href="#/support/${esc(c.ticketId)}">${icon('chat')}<span>${esc(L('افتح المشكلة', 'Open the problem'))}</span></a>` : ''}<button type="button" class="btn ghost" data-action="supNew">${icon('plus')}<span>${esc(L('مشكلة تانية', 'Another problem'))}</span></button></div>`;
+    return `<div class="card supchat"><div class="cardhead"><h3>${icon('lifebuoy')} ${esc(L('مشكلة جديدة', 'A new problem'))}</h3></div>${ctxChips(c.page, device())}<div class="supmsgs">${c.msgs.map(m => bubble(m, false)).join('')}</div>${bottom}</div>`;
+  }
+  ACTIONS.supNew = () => { newChat(); render(false); };
+  ACTIONS.supSend = async () => {
+    const c = SUP.chat || (newChat(), SUP.chat); if (c.step !== 'write' && c.step !== 'clarify' && c.step !== 'answer') return;
+    const el = document.getElementById('supq'); const text = String((el ? el.value : SUP.draft.supq) || '').trim();
+    if (REC.voice) { toast(L('وقّف تسجيل الصوت الأول', 'Stop the voice recording first'), 'err'); return; }
+    if (busyFiles('chat')) { toast(L('استنى الصورة تخلص رفع', 'Wait for the picture to finish uploading'), 'err'); return; }
+    const att = (SUP.files.chat || []).slice(); if (!text && !att.length) { toast(L('اكتب المشكلة الأول', 'Write the problem first'), 'err'); return; }
+    const tps = att.filter(x => x.tp || x.fp).map(x => Promise.all([x.tp, x.fp])); if (tps.length) { const prev = c.step; c.step = 'think'; render(false); await Promise.race([Promise.all(tps), new Promise(r => setTimeout(r, 15000))]); c.step = prev; }
+    const files = att.filter(x => !x.busy && x.f).map(x => x.f); const pics = att.filter(x => x.kind === 'image' && x.blob).map(x => x.blob);
+    const heard = files.filter(f => (f.kind === 'audio' || f.kind === 'video') && f.text).map(f => f.text);
+    const said = [text].concat(heard).filter(Boolean).join('\n');
+    const md = { frames: att.filter(x => x.frames && x.frames.length).flatMap(x => x.frames).slice(0, 8), said: heard, pages: Array.from(new Set(att.flatMap(x => x.pages || []))), kinds: files.some(f => f.kind === 'video' || f.kind === 'audio') };
+    SUP.draft.supq = ''; SUP.files.chat = [];
+    c.msgs.push({ from: 'me', text, files, at: nowISO() });
+    if (c.step === 'clarify' || c.step === 'answer') { c.answers = [c.answers, text].filter(Boolean).join('\n'); c.files1 = c.files1.concat(files); await sendTicket(false); return; }
+    c.text = text; c.said = said; c.files0 = files; c.t0 = nowISO();
+    const local = said ? ruleAnswer(said) : '';
+    if (local) { c.local = local; c.msgs.push({ from: 'bot', text: local + '\n' + L('ده حلّ مشكلتك؟', 'Did that solve it?') }); c.step = 'answer'; render(false); return; }
+    c.step = 'think'; c.msgs.push({ from: 'bot', html: `<div class="tx muted">${esc(md.frames.length || md.said.length ? L('بشوف الفيديو وبكتب الملخص…', 'Watching the video and writing the summary…') : L('بفكّر…', 'Thinking…'))}</div>`, thinking: 1 }); render(false);
+    c.md = md; const bot = (said || pics.length || md.frames.length) ? await botThink(said, c.page, pics, md) : null; c.msgs = c.msgs.filter(m => !m.thinking); c.bot = bot;
+    if (bot && bot.answer && (bot.kind === 'how' || bot.kind === 'rule')) { c.msgs.push({ from: 'bot', text: bot.answer + '\n' + L('ده حلّ مشكلتك؟', 'Did that solve it?') }); c.step = 'answer'; render(false); return; }
+    if (bot && bot.questions.length) { c.qs = bot.questions; c.msgs.push({ from: 'bot', text: L('عشان نحلها أسرع:', 'To fix it faster:') + '\n' + bot.questions.map(q => '• ' + q).join('\n') }); c.step = 'clarify'; render(false); return; }
+    if (!bot && said.length < 40 && !files.length) { c.qs = [L('حصل إيه بالظبط؟ وكنت متوقع إيه يحصل؟', 'What exactly happened, and what did you expect?')]; c.msgs.push({ from: 'bot', text: L('عشان نحلها أسرع: حصل إيه بالظبط؟ وكنت متوقع إيه يحصل؟', 'To fix it faster: what exactly happened, and what did you expect?') }); c.step = 'clarify'; render(false); return; }
+    await sendTicket(false);
+  };
+  ACTIONS.supBotOk = () => sendTicket(true);
+  ACTIONS.supBotNo = () => sendTicket(false);
+  const STUCK = /(?:واقف|وقف شغلي|مش عارف اشتغل|مش قادر (اشتغل|أشتغل|اكمل|أكمل)|مستعجل|ضروري|urgent|blocked|can.?t work|cannot work)/i;
+  async function sendTicket(byBot) {
+    const c = SUP.chat; if (!c || c.step === 'sending' || c.step === 'sent') return; c.step = 'sending'; render(false);
+    const W = who(); const now = nowISO(); const id = 'sp_' + uid();
+    const thread = [{ id: uid(), at: c.t0 || now, from: 'me', by: W.id, byName: W.name, text: c.text, files: c.files0 }];
+    if (c.local) thread.push({ id: uid(), at: now, from: 'bot', text: clean(c.local) });
+    if (c.bot && c.bot.answer && !c.qs.length) thread.push({ id: uid(), at: now, from: 'bot', text: clean(c.bot.answer) });
+    if (c.qs.length) thread.push({ id: uid(), at: now, from: 'bot', text: c.qs.join('\n') });
+    if (c.answers || c.files1.length) thread.push({ id: uid(), at: now, from: 'me', by: W.id, byName: W.name, text: c.answers, files: c.files1 });
+    const mk = (c.files0 || []).concat(c.files1 || []); const mediaName = mk.some(f => f.kind === 'video') ? L('فيديو للشاشة', 'A screen video') : mk.some(f => f.kind === 'audio') ? L('رسالة صوت', 'A voice message') : L('صورة من الشاشة', 'A screenshot');
+    const subj = clean((c.bot && c.bot.title) || firstLine(c.said || c.text).slice(0, 80) || mediaName);
+    const heard = ((c.md && c.md.said) || []).filter(Boolean); const report = clean((c.bot && c.bot.report) || (heard.length ? `${L('بيقول', 'Says')}: ${heard.join(' ')}` : '')).slice(0, 1200);
+    const t = { id, byId: W.id, byName: W.name, workerId: W.workerId, deptId: W.deptId, dept: W.dept, role: W.role, roleName: W.roleName, job: W.job, sys: sysKey(), page: c.page || null, dev: device(), build: String(window.NF_BUILD || ''), lang: en() ? 'en' : 'ar', mgr: W.mgr, urgent: !!((c.bot && c.bot.urgent) || STUCK.test([c.said, c.text, c.answers].join(' '))), subj, sum: (c.bot && c.bot.summary) || '', report, kind: (c.bot && c.bot.kind) || (c.local ? 'rule' : 'bug'), status: byBot ? 'solved' : 'new', solvedBy: byBot ? 'bot' : null, solvedAt: byBot ? now : null, thread, lastAt: now, unreadOwner: !byBot, unreadMe: false };
+    try { await Store.save(COL, t); }
+    catch (e) { c.step = c.qs.length ? 'clarify' : 'write'; c.msgs.push({ from: 'bot', text: L('ماقدرتش أبعتها دلوقتي — اتأكد من النت وجرّب تاني.', 'Could not send it now — check the connection and try again.') }); render(false); return; }
+    c.ticketId = id; c.step = 'sent';
+    if (byBot) c.msgs.push({ from: 'bot', text: L('تمام ✓ — لو احتجت أي حاجة تانية ابعت هنا.', 'Great ✓ — if you need anything else, send it here.') });
+    else {
+      c.msgs.push({ from: 'bot', text: L(`✓ وصلت للدعم الفني — رقمها ${code(t)}. هيوصلك إشعار لما يترد عليها أو تتحل.`, `✓ It reached support — number ${code(t)}. You will get a notice when it is answered or solved.`) + (report ? '\n\n' + L('اللي فهمته:', 'What I understood:') + '\n' + report : '') });
+      push(ownerTo(), `مشكلة جديدة من ${W.name}`, `${W.dept ? W.dept + ' · ' : ''}${t.page && t.page.title ? t.page.title + ' — ' : ''}${(c.bot && c.bot.summary) || subj}`, `/#/support/${id}`, 'sup-' + id);
+    }
+    render(false);
+  }
+
+  /* ---------- one ticket ---------- */
+  function ticketHTML(id) {
+    const t = byId(COL, id); const own = isOwner();
+    if (!t) return `<div class="card"><div class="empty">${esc(L('مش لاقي المشكلة دي.', 'This problem was not found.'))}</div></div>`;
+    if (!own && t.byId !== myId()) return `<div class="card"><div class="empty">${esc(L('المشكلة دي مش بتاعتك.', 'This problem is not yours.'))}</div></div>`;
+    const flag = own ? 'unreadOwner' : 'unreadMe'; if (t[flag] && !SUP.opened[id + flag]) { SUP.opened[id + flag] = 1; setTimeout(() => { Store.update(COL, id, { [flag]: false }).catch(() => { }); }, 0); }
+    const pg = t.page || {}; const kv = (k, v) => v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '';
+    const info = `<dl class="supkv">${kv(L('من', 'From'), `<span class="notr">${esc(t.byName || '')}</span>${t.dept ? ` — <span class="notr">${esc(t.dept)}</span>` : ''}${t.roleName ? ` <span class="muted tiny notr">(${esc(t.roleName)})</span>` : ''}`)}${kv(L('الصفحة', 'Page'), pg.title ? (own && pg.hash && (t.sys || sysKey()) === sysKey() ? `<a href="${esc(pg.hash)}" class="notr">${esc(pg.title)}</a>` : `<span class="notr">${esc(pg.title)}</span>`) : '')}${kv(L('الجهاز', 'Device'), esc(devTxt(t.dev)) + (t.dev && t.dev.w ? ` <span class="muted tiny ltr">${esc(t.dev.w)}×${esc(t.dev.h)}</span>` : ''))}${kv(L('السيستم', 'System'), esc(sysName(t.sys || sysKey())))}${own ? kv(L('النسخة', 'Build'), t.build ? `<span class="ltr tiny">${esc(t.build)}</span>` : '') : ''}${kv(L('اتبعتت', 'Sent'), esc(when(t.createdAt)))}${t.solvedAt && t.status === 'solved' ? kv(L('اتحلّت', 'Solved'), esc(when(t.solvedAt)) + (t.solvedBy === 'bot' ? ` · ${esc(L('ردّ عليها البوت', 'answered by the bot'))}` : '')) : ''}</dl>`;
+    const acts = [];
+    if (own && t.status === 'new') acts.push(`<button type="button" class="btn sm" data-action="supWorking" data-arg="${esc(id)}">${icon('edit')}<span>${esc(L('بنشتغل عليها', 'Working on it'))}</span></button>`);
+    if (own && t.status !== 'solved') acts.push(`<button type="button" class="btn sm p" data-action="supSolve" data-arg="${esc(id)}">${icon('check')}<span>${esc(L('اتحلت', 'Solved'))}</span></button>`);
+    if (t.status === 'solved') acts.push(`<button type="button" class="btn sm" data-action="supReopen" data-arg="${esc(id)}">${icon('refresh')}<span>${esc(own ? L('افتحها تاني', 'Reopen') : L('لسه المشكلة موجودة؟ افتحها تاني', 'Still there? Reopen it'))}</span></button>`);
+    const head = `<div class="card suphead"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><b class="notr" style="font-size:16px">${esc(t.subj || '')}</b>${badge(t.status)}${own ? devChip(t) : ''}<span class="muted tiny">${esc(code(t))}</span></div>${t.report ? `<div class="suprep"><div class="h">${icon('star')}<b>${esc(L('ملخص المشكلة', 'Summary of the problem'))}</b></div><div class="notr">${nl(t.report)}</div></div>` : t.sum && own ? `<div class="small muted notr" style="margin-top:4px">${esc(t.sum)}</div>` : ''}${info}${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${acts.join('')}</div>` : ''}</div>`;
+    const th = `<div class="card supchat"><div class="supmsgs">${(t.thread || []).map(m => bubble(m, own)).join('')}</div>${composer('supr', 'reply', 'supReply', own ? L('ردّك على الموظف…', 'Your reply to the person…') : L('زوّد تفاصيل أو ردّ…', 'Add details or reply…'), id)}</div>`;
+    return head + th;
+  }
+  ACTIONS.supReply = async id => {
+    const t = byId(COL, id); if (!t) return; const own = isOwner();
+    const el = document.getElementById('supr'); const text = String((el ? el.value : SUP.draft.supr) || '').trim();
+    if (REC.voice) { toast(L('وقّف تسجيل الصوت الأول', 'Stop the voice recording first'), 'err'); return; }
+    if (busyFiles('reply')) { toast(L('استنى الصورة تخلص رفع', 'Wait for the picture to finish uploading'), 'err'); return; }
+    const tps = (SUP.files.reply || []).filter(x => x.tp).map(x => x.tp); if (tps.length) await Promise.race([Promise.all(tps), new Promise(r => setTimeout(r, 15000))]);
+    const files = readyFiles('reply'); if (!text && !files.length) { toast(L('اكتب الرد الأول', 'Write the reply first'), 'err'); return; }
+    const now = nowISO(); const m = { id: uid(), at: now, from: own ? 'owner' : 'me', by: myId(), byName: me().name || '', text, files };
+    const patch = { thread: (t.thread || []).concat([m]).slice(-200), lastAt: now };
+    if (own) { patch.unreadMe = true; if (t.status === 'new') patch.status = 'working'; }
+    else { patch.unreadOwner = true; if (t.status === 'solved') { patch.status = 'new'; patch.reopenedAt = now; patch.solvedAt = null; } }
+    try { await Store.update(COL, id, patch); } catch (e) { return; }
+    const replyAtt = (SUP.files.reply || []).slice(); SUP.draft.supr = ''; SUP.files.reply = [];
+    if (!own && files.some(f => f.kind === 'video' || f.kind === 'audio')) followUpReport(id, text, replyAtt, files);
+    const what = text || (files.some(f => f.kind === 'video') ? 'فيديو' : files.some(f => f.kind === 'audio') ? 'رسالة صوت' : 'صورة');
+    if (own) push([t.byId], 'رد من الدعم الفني', `${t.subj || ''} — ${what}`, `/#/support/${id}`, 'sup-' + id);
+    else push(ownerTo(), `رد من ${t.byName || ''} على مشكلته`, `${t.subj || ''} — ${what}`, `/#/support/${id}`, 'sup-' + id);
+    render(false);
+  };
+  async function followUpReport(id, text, att, files) {
+    try {
+      await Promise.race([Promise.all(att.map(x => x.fp).filter(Boolean)), new Promise(r => setTimeout(r, 20000))]);
+      const heard = files.filter(f => f.text).map(f => f.text); const frames = att.filter(x => x.frames && x.frames.length).flatMap(x => x.frames).slice(0, 8);
+      const t0 = byId(COL, id); if (!t0) return;
+      const bot = await botThink([text].concat(heard).filter(Boolean).join('\n'), t0.page, att.filter(x => x.kind === 'image' && x.blob).map(x => x.blob), { frames, said: heard, kinds: true });
+      const rep = clean((bot && bot.report) || (heard.length ? `${L('بيقول', 'Says')}: ${heard.join(' ')}` : '')).slice(0, 1200); if (!rep) return;
+      const t = byId(COL, id); if (!t) return; const now = nowISO();
+      await Store.update(COL, id, { thread: (t.thread || []).concat([{ id: uid(), at: now, from: 'bot', text: L('ملخص الرد:', 'Summary of the reply:') + '\n' + rep }]).slice(-200), report: rep });
+    } catch (e) { /* the video is there anyway */ }
+  }
+  ACTIONS.supWorking = async id => { const t = byId(COL, id); if (!t || !isOwner()) return; const now = nowISO(); await Store.update(COL, id, { status: 'working', workingAt: now, thread: (t.thread || []).concat([{ id: uid(), at: now, from: 'sys', text: L('بنشتغل عليها', 'Working on it') }]).slice(-200), unreadMe: true }); };
+  ACTIONS.supSolve = id => {
+    const t = byId(COL, id); if (!t || !isOwner()) return;
+    openModal({ title: L('اتحلت', 'Solved'), submitLabel: L('اتحلت ✓', 'Solved ✓'), body: `<div class="form">${field(L('رسالة للموظف (اختياري)', 'A note to the person (optional)'), `<textarea name="note" rows="3" placeholder="${esc(L('مثال: اتصلحت — حدّث الصفحة وجرّب تاني', 'e.g. Fixed — refresh the page and try again'))}"></textarea>`, 'full')}</div>`, onSubmit: async f => {
+      const d = formData(f); const now = nowISO(); const add = []; if (d.note) add.push({ id: uid(), at: now, from: 'owner', by: myId(), byName: me().name || '', text: d.note }); add.push({ id: uid(), at: now, from: 'sys', text: L('✓ اتحلّت', '✓ Solved') });
+      await Store.update(COL, id, { status: 'solved', solvedAt: now, solvedBy: myId(), thread: (t.thread || []).concat(add).slice(-200), lastAt: now, unreadMe: true, unreadOwner: false });
+      push([t.byId], 'مشكلتك اتحلت ✓', d.note ? `${t.subj || ''} — ${d.note}` : (t.subj || ''), `/#/support/${id}`, 'sup-' + id); toast(L('اتعلّمت إنها اتحلت', 'Marked as solved'));
+    } });
+  };
+  ACTIONS.supReopen = async id => {
+    const t = byId(COL, id); if (!t) return; const own = isOwner(); if (!own && t.byId !== myId()) return; const now = nowISO();
+    await Store.update(COL, id, { status: own ? 'working' : 'new', reopenedAt: now, solvedAt: null, thread: (t.thread || []).concat([{ id: uid(), at: now, from: 'sys', text: own ? L('اتفتحت تاني', 'Reopened') : L('الموظف قال إن المشكلة لسه موجودة', 'The person says the problem is still there') }]).slice(-200), lastAt: now, unreadOwner: !own, unreadMe: own });
+    if (!own) push(ownerTo(), `${t.byName || ''}: المشكلة لسه موجودة`, t.subj || '', `/#/support/${id}`, 'sup-' + id);
+  };
+
+  /* ---------- lists ---------- */
+  const PEER_CO = p => /stud/i.test(p.name || '') ? 'studio' : /fact/i.test(p.name || '') ? 'factory' : /constr/i.test(p.name || '') ? 'construction' : '';
+  const coUrl = co => { const self = sysKey(); const root = self === 'factory' ? '' : '../'; return root + (co === 'factory' ? 'index.html' : co === 'studio' ? 'studioz/index.html' : 'construction/index.html'); };
+  function loadPeers() {
+    if (!isOwner() || SUP.peers.busy || Date.now() - SUP.peers.at < 90000 || typeof window.nfPeerSession !== 'function' || typeof NF_PEERS !== 'function') return;
+    const cos = Array.from(new Set(NF_PEERS().map(PEER_CO).filter(c => c && c !== sysKey()))); if (!cos.length) return;
+    SUP.peers.busy = true;
+    Promise.all(cos.map(async co => { try { const ps = await window.nfPeerSession(co); if (!ps) return []; const r = await ps.c.from('docs').select('id, data').eq('col', COL).order('updated_at', { ascending: false }).limit(150); if (r.error) return []; return (r.data || []).map(x => { const t = Object.assign({}, x.data || {}, { id: x.id, _co: co }); (t.thread || []).forEach(m => { (m.files || []).forEach(f => { if (f) f._co = co; }); }); return t; }); } catch (e) { return []; } }))
+      .then(a => { SUP.peers.rows = [].concat(...a); }).catch(() => { }).finally(() => { SUP.peers.busy = false; SUP.peers.at = Date.now(); if (S.route && S.route.view === 'support' && (!S.route.id || S.route.id === 'session')) render(false); });
+  }
+  const initials = n => (String(n || '?').trim()[0] || '?'); /* one letter: two Arabic initials join into a word */
+  function row(t, own) {
+    const href = t._co ? `${coUrl(t._co)}#/support/${t.id}` : `#/support/${t.id}`; const unread = own ? t.unreadOwner : t.unreadMe;
+    const last = (t.thread || []).slice(-1)[0] || {}; const lastTx = last.from === 'sys' ? '' : clean(firstLine(last.text || '')).slice(0, 80);
+    const sub = own ? [t.dept, t.page && t.page.title, devTxt(t.dev), when(t.lastAt || t.createdAt)].filter(Boolean).join(' · ') : [when(t.lastAt || t.createdAt), lastTx].filter(Boolean).join(' · ');
+    return `<a class="suprow${unread ? ' un' : ''}" href="${esc(href)}">${own ? `<span class="av notr">${esc(initials(t.byName))}</span>` : `<span class="av">${icon('lifebuoy')}</span>`}<div class="b"><div class="t"><span class="notr">${own ? esc(t.byName || '') + ' — ' : ''}${esc(clean(t.subj || ''))}</span></div><div class="s notr">${esc(sub)}</div>${t._co ? `<span class="supco">${esc(sysName(t._co))}</span>` : ''}${t.solvedBy === 'bot' ? `<span class="supco">${esc(L('ردّ عليها البوت', 'answered by the bot'))}</span>` : ''}${own ? devChip(t) : ''}</div><div class="e">${badge(t.status)}${unread ? '<span class="dot"></span>' : ''}</div></a>`;
+  }
+  function inboxHTML() {
+    loadPeers();
+    const all = tickets().concat(SUP.peers.rows || []); const by = s => all.filter(t => t.status === s || (s === 'new' && !t.status));
+    const tab = SUP.tab || (by('new').length ? 'new' : by('working').length ? 'working' : 'all');
+    const tabs = [['new', 'جديدة', 'New'], ['working', 'بنشتغل عليها', 'Working on it'], ['solved', 'اتحلّت', 'Solved'], ['all', 'الكل', 'All']];
+    const shown = sortBy(tab === 'all' ? all : by(tab), t => t.lastAt || t.createdAt || '', true);
+    const peers = (typeof NF_PEERS === 'function' ? NF_PEERS().map(PEER_CO).filter(c => c && c !== sysKey()) : []);
+    const ses = typeof window.nfTriageCard === 'function' ? window.nfTriageCard(all) : '';
+    return `${ses}<div class="suptabs">${tabs.map(([k, a, b]) => { const n = k === 'all' ? all.length : by(k).length; return `<button type="button" class="${tab === k ? 'on' : ''}" data-action="supTab" data-arg="${k}">${esc(L(a, b))}${n ? ` <span class="n${k === 'new' ? '' : ' q'}">${n}</span>` : ''}</button>`; }).join('')}</div>
+      <div class="card"><div class="list suplist">${shown.length ? shown.map(t => row(t, true)).join('') : `<div class="empty">${esc(tab === 'new' ? L('مفيش مشاكل جديدة 👌', 'No new problems 👌') : L('مفيش حاجة هنا', 'Nothing here'))}</div>`}</div></div>
+      <div class="tiny muted" style="margin-top:8px">${esc(L(`بتشوف هنا مشاكل ${sysName(sysKey())}${peers.length ? ' + ' + peers.map(sysName).join(' + ') : ''} — ملخص بالمفتوح بيوصلك كل يوم الساعة 9 بالليل.`, `You see the problems of ${sysName(sysKey())}${peers.length ? ' + ' + peers.map(sysName).join(' + ') : ''} here — a summary of the open ones reaches you every day at 9 PM.`))}</div>`;
+  }
+  ACTIONS.supTab = k => { SUP.tab = k; render(false); };
+  function myListHTML() {
+    const xs = sortBy(mine(), t => t.lastAt || t.createdAt || '', true); if (!xs.length) return '';
+    return `<div class="card"><div class="cardhead"><h3>${esc(L('مشاكلي', 'My problems'))}</h3><span class="muted small">${xs.length}</span></div><div class="list suplist">${xs.slice(0, 30).map(t => row(t, false)).join('')}</div></div>`;
+  }
+  function pageHTML(r) {
+    if (r.id === 'session' && isOwner() && typeof window.nfTriageHTML === 'function') return window.nfTriageHTML();
+    if (r.id) return ticketHTML(r.id);
+    if (isOwner()) return inboxHTML();
+    return chatHTML() + myListHTML();
+  }
+  EXTRA_VIEWS.support = r => (canUse() ? pageHTML(r) : `<div class="card"><div class="empty">${esc(L('مش متاح', 'Not available'))}</div></div>`);
+  EXTRA_TITLES.support = r => {
+    if (r.id) { const t = byId(COL, r.id); return { title: L('الدعم الفني', 'Support'), sub: t ? `${clean(t.subj || '')} · ${code(t)}` : '' }; } /* the top bar's own «Back» returns to the list */
+    return isOwner() ? { title: L('الدعم الفني', 'Support'), sub: L('مشاكل السيستم اللي الموظفين بعتوها — رد عليها أو علّمها اتحلت', 'System problems people sent — reply, or mark them solved') } : { title: L('الدعم الفني', 'Support'), sub: L('قابلتك مشكلة في السيستم؟ اكتبها هنا وهتوصل للإدارة على طول', 'Ran into a problem in the system? Write it here and it reaches the management right away') };
+  };
+  if (typeof VIEW_TITLES === 'object') VIEW_TITLES.support = 'الدعم الفني';
+  canSee = (base => function (v) { if (v === 'support') return canUse(); return base.apply(this, arguments); })(canSee);
+  const navCount = () => { if (!canUse()) return 0; return isOwner() ? tickets().filter(t => t.status === 'new' || t.unreadOwner).length : mine().filter(t => t.unreadMe).length; };
+  (() => {
+    if (NAV.some(n => n.id === 'support')) return; let i = NAV.findIndex(n => n.id === 'regulation'); if (i < 0) i = NAV.findIndex(n => n.id === 'me');
+    const e = { id: 'support', label: 'الدعم الفني', icon: 'lifebuoy', countCls: 'warn', count: navCount };
+    if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e);
+  })();
+
+  /* ---------- the doors: the assistant panel, «My portal» ---------- */
+  function go() { if (!isOwner()) { if (!SUP.chat || SUP.chat.step === 'sent') newChat(); else if (SUP.last) SUP.chat.page = SUP.chat.page || SUP.last; } const p = document.querySelector('#aipanel'); if (p && !p.hidden) { const x = p.querySelector('[data-aiclose]'); if (x) x.click(); } if (location.hash !== '#/support') location.hash = '#/support'; else render(false); }
+  window.nfSupportOpen = go;
+  /* «Screenshot» in the «+» → «Send it to support»: the drawn picture lands in a new problem with the page it was taken on */
+  window.nfSupportCan = () => canUse() && !isOwner();
+  /* v7.69: the owner's «Support session» (99zzZzZZzzm-triage.js) works through these */
+  window.nfSupportApi = { COL, L, en, clean, isOwner, isOeko, sysKey, sysName, coName, badge, devChip, devTxt, tickets, code, firstLine, when, nl, push, media, bubble, ctxChips, initials,
+    peers: () => SUP.peers.rows || [], loadPeers: force => { if (force) SUP.peers.at = 0; loadPeers(); }, coUrl, liveSpeech, sttReady, transcribe, isNative, device, MIME_A };
+  window.nfSupportFromSnap = async o => {
+    if (!canUse() || isOwner() || !o || !o.blob) return false;
+    newChat(); if (o.page && (o.page.hash || o.page.title)) SUP.chat.page = { hash: o.page.hash || '', view: '', id: null, title: String(o.page.title || o.page.hash || '').slice(0, 120) }; SUP.draft.supq = String(o.note || '');
+    if (location.hash !== '#/support') location.hash = '#/support'; else render(false);
+    await addBlob(o.blob, 'chat', { kind: 'image' }); return true;
+  };
+  document.addEventListener('click', e => {
+    const g = e.target.closest && e.target.closest('[data-supgo]'); if (g) { e.preventDefault(); go(); return; }
+    const v = e.target.closest && e.target.closest('[data-supvoice]'); if (v) { e.preventDefault(); voiceToggle(v.getAttribute('data-supvoice')); return; }
+    const rc = e.target.closest && e.target.closest('[data-suprec]'); if (rc) { e.preventDefault(); screenStart(rc.getAttribute('data-suprec'), location.hash); return; }
+    if (e.target.closest && e.target.closest('[data-suprecstop]')) { e.preventDefault(); if (REC.screen) REC.screen.stop(); return; }
+    if (e.target.closest && e.target.closest('[data-supreccancel]')) { e.preventDefault(); if (REC.screen) REC.screen.cancel(); return; }
+    const d = e.target.closest && e.target.closest('[data-supdel]'); if (d) { e.preventDefault(); const [slot, k] = d.getAttribute('data-supdel').split(':'); SUP.files[slot] = (SUP.files[slot] || []).filter(x => x.k !== k); render(false); return; }
+    if (e.target.closest && e.target.closest('[data-aifab]')) setTimeout(fabBtn, 30);
+  });
+  function fabBtn() {
+    const p = document.querySelector('#aipanel'); if (!p || !canUse()) return; const h = p.querySelector('.aih'); if (!h || h.querySelector('[data-supgo]')) return;
+    const n = isOwner() ? navCount() : 0;
+    const ref = h.querySelector('.newc') || h.querySelector('[data-aiclose]');
+    const html = `<button type="button" class="btn xs supfab" data-supgo>${icon('lifebuoy')}<span>${esc(isOwner() ? L('الدعم الفني', 'Support') : L('مشكلة في السيستم؟', 'Problem in the system?'))}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`;
+    if (ref) ref.insertAdjacentHTML('beforebegin', html); else h.insertAdjacentHTML('beforeend', html);
+  }
+  RENDER_HOOKS.push(fabBtn);
+  function meCard() {
+    if (!canUse() || isOwner()) return ''; const xs = mine(); const open = xs.filter(t => t.status !== 'solved').length; const un = xs.filter(t => t.unreadMe).length;
+    return `<div class="card supme"><div class="cardhead"><h3>${icon('lifebuoy')} ${esc(L('الدعم الفني', 'Support'))}</h3>${un ? `<span class="badge warn">${esc(L(`${un} رد جديد`, `${un} new repl${un > 1 ? 'ies' : 'y'}`))}</span>` : ''}</div><div class="small muted">${esc(L('قابلتك مشكلة في السيستم؟ ابعتها وهتوصل للإدارة على طول — بالكتابة أو بصوتك، ومعاها صورة أو فيديو للشاشة.', 'Ran into a problem in the system? Send it and it reaches the management right away — in writing or by voice, with a picture or a screen video.'))}</div><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn p" data-supgo>${icon('lifebuoy')}<span>${esc(L('مشكلة في السيستم؟', 'Problem in the system?'))}</span></button>${xs.length ? `<a class="btn ghost" href="#/support">${esc(L(`مشاكلي (${xs.length})`, `My problems (${xs.length})`))}${open ? ` · ${esc(L(`${open} مفتوحة`, `${open} open`))}` : ''}</a>` : ''}</div></div>`;
+  }
+  if (typeof vMe === 'function') vMe = (base => function () { const h = base.apply(this, arguments); try { return h + meCard(); } catch (e) { return h; } })(vMe);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.supchat .supmsgs{display:flex;flex-direction:column;gap:8px;padding:2px 0 10px}
+.supb{max-width:86%;padding:9px 12px;border-radius:14px;line-height:1.65;word-break:break-word;font-size:14.5px}
+.supb .tx{white-space:pre-wrap}
+.supb.bot{align-self:flex-start;background:var(--surface-2,var(--surface));border:1px solid var(--line)}
+.supb.me{align-self:flex-end;background:color-mix(in srgb,var(--accent) 13%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line))}
+.supb.sys{align-self:center;max-width:100%;background:none;border:0;padding:2px 8px;font-size:12.5px;color:var(--ink-2)}
+.supb .who{font-size:11.5px;color:var(--ink-2);margin-bottom:2px;font-weight:600}
+.supctx{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.supctx>span{display:inline-flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.supctx svg{width:13px;height:13px}
+.supcomp textarea{display:block;width:100%;min-height:86px;resize:vertical;font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-sizing:border-box}
+.supcomp .row,.supacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.supatt{cursor:pointer}.supmic.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}
+.supthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.supthumbs .th{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}.supthumbs .th.busy{opacity:.55}
+.supthumbs img{width:100%;height:100%;object-fit:cover;display:block}.supthumbs .th button{position:absolute;top:3px;inset-inline-end:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer}.supthumbs .th button svg{width:13px;height:13px}
+.supimgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.supimgs img{width:112px;height:112px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--surface-2,var(--surface));display:block}
+.supkv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13.5px;margin:10px 0 0}.supkv dt{color:var(--ink-2)}.supkv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.suprow{display:flex;gap:10px;align-items:flex-start;padding:11px 6px;border-bottom:1px solid var(--line);text-decoration:none;color:inherit}.suprow:last-child{border-bottom:0}
+.suprow .av{flex:0 0 36px;height:36px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--accent);font-weight:700;font-size:13px}.suprow .av svg{width:18px;height:18px}
+.suprow .b{flex:1;min-width:0}.suprow .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.suprow.un .t{font-weight:800}
+.suprow .s{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.suprow .e{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:0 0 auto}.suprow .dot{width:9px;height:9px;border-radius:50%;background:#e5484d}
+.supco{display:inline-block;margin-top:4px;margin-inline-end:4px;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--ink-2)}
+.suptabs{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 0 12px;padding:2px 0 4px}.suptabs::-webkit-scrollbar{display:none}
+.suptabs button{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:6px 13px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}.suptabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.suptabs .n,.supfab .n{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;font-weight:700;margin-inline-start:4px}
+.suptabs .n.q{background:color-mix(in srgb,var(--ink-2) 22%,transparent);color:inherit}
+.supthumbs .th:not(.k-image){width:auto;min-width:92px;padding:0 30px 0 10px;display:flex;align-items:center;gap:6px;background:var(--surface-2,var(--surface));font-size:13px}.supthumbs .th .ico svg{width:18px;height:18px}
+.supav{margin-top:6px}.supav audio{width:260px;max-width:100%;display:block}.supav video{width:100%;max-width:420px;max-height:320px;border-radius:10px;background:#000;display:block}
+.suptr{display:flex;gap:6px;align-items:flex-start;margin-top:4px;font-size:13px;color:var(--ink-2);white-space:pre-wrap}.suptr svg{width:14px;height:14px;flex:0 0 14px;margin-top:3px}
+.supvoice.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}.suphint{margin-top:6px}
+.suprecbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:2147483000;display:flex;align-items:center;gap:10px;padding:8px 10px 8px 14px;border-radius:999px;background:var(--surface);border:1px solid var(--line);box-shadow:0 10px 30px -10px rgba(0,0,0,.45);font-size:14px;white-space:nowrap}
+.suprecbar .dot{width:10px;height:10px;border-radius:50%;background:#e5484d;animation:supblink 1.1s infinite}.suprecbar .t{font-variant-numeric:tabular-nums;color:var(--ink-2)}@keyframes supblink{50%{opacity:.25}}
+.nfsnap .sn-foot .sn-sup{margin-bottom:8px}
+.suprep{margin-top:10px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 22%,var(--line));font-size:14px;line-height:1.7;white-space:pre-wrap}.suprep .h{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--accent)}.suprep .h svg{width:16px;height:16px}
+.supdev{border-color:color-mix(in srgb,#e8a33d 55%,var(--line));color:#b97a12}
+.supfab{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.supfab svg{width:14px;height:14px}
+@media (max-width:560px){.supb{max-width:94%}.supfab span:not(.n){max-width:120px;overflow:hidden;text-overflow:ellipsis}}
+</style>`);
+})();
+/* =====================================================================
+   v7.69 — «Support session» (brief support-triage-brief, 14 Oct — Mahmoud said go).
+   The owner's support chat bot: instead of opening the problems one by one, he opens «Support session» (#/support/session):
+   · the opening: «N problems from M people», split by system (this one + the systems he is signed in to), a list of the people
+     (job · department · system · how many · how long waiting · «work stuck»), in a suggested order (stuck first, then the oldest);
+   · he picks the order by typing or talking («Ghaya first», «Ahmed Abdel Zaher first», «start with the factory», «go with your
+     order») or by tapping a name — names match even when written differently (alef / hamza, ta marbuta / ha, «Abd al…»);
+   · one person at a time: who he is (job, department, manager, role in the system, the system, how many problems before), the
+     problem (the written summary, page, device, the pictures / voice / video), and the bot's suggestion (the likely cause, the fix,
+     reply / a change / a code fix) with a reply ready;
+   · his decision (typed or spoken) → the bot writes the reply to the person in the person's language → he sees it, edits it, and
+     sends it as: «solved», «keep it open», or «for the developer» (stays «working on it», the person is told it is fixed in the next
+     update; Claude fixes it from the chat and after the publish everybody gets «fixed in the new version» — nf_support_ship).
+     A data / permission change: the bot shows «before → after» and opens the person's page; he makes it there and then sends;
+   · «Next» comes by itself; «leave it for the end», «pick someone else»; at the end: «done — X solved · Y for the developer».
+   Peer tickets are written and notified in their own system (the owner's peer session). No money amounts anywhere.
+   Arabic and English; phone and computer.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TRI__) return; window.__NF_TRI__ = 1;
+  const A = window.nfSupportApi; if (!A || typeof EXTRA_VIEWS === 'undefined' || typeof ACTIONS === 'undefined') return;
+  const { L, en, clean } = A;
+  const T = { step: 'overview', order: [], skip: {}, log: [], sug: {}, dec: {}, dr: {}, cmd: '', msg: '', n0: 0, started: false, cur: null };
+  window.nfTriage = T;
+  const isAr = t => (t && t.lang) !== 'en';
+  const TL = (t, a, b) => (isAr(t) ? a : b); /* in the person's own language */
+  const kOf = t => (t._co || A.sysKey()) + ':' + t.id;
+  const pOf = t => (t._co || A.sysKey()) + ':' + (t.byId || t.byName || '?');
+  const lastFrom = t => { const th = (t.thread || []).filter(m => m.from !== 'sys'); return (th[th.length - 1] || {}).from || ''; };
+  const openT = t => t && !t.deleted && (t.status || 'new') !== 'solved';
+  /* waiting for the owner: new, or the person wrote again; not the ones already with the developer */
+  const waiting = t => openT(t) && t.dev !== 'open' && t.dev !== 'fixed' && ((t.status || 'new') === 'new' || t.unreadOwner || lastFrom(t) !== 'owner');
+  const devOpen = t => openT(t) && (t.dev === 'open' || t.dev === 'fixed');
+  const all = () => A.tickets().concat(A.peers()).filter(t => t && t.id && t.solvedBy !== 'bot');
+  const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso || Date.now()).getTime()) / 60000)); if (m < 60) return L(`${m || 1} دقيقة`, `${m || 1} min`); const h = Math.round(m / 60); if (h < 24) return L(`${h} ساعة`, `${h} h`); const d = Math.round(h / 24); return L(`${d} يوم`, `${d} d`); };
+  const wOf = t => (!t._co && t.workerId ? byId('workers', t.workerId) : null);
+  const jobOf = t => { const w = wOf(t); return t.job || (w && (w.trade || w.job)) || ''; };
+  const mgrOf = t => { const w = wOf(t); return (w && w.managerId && (byId('workers', w.managerId) || {}).name) || t.mgr || ''; };
+  const photoOf = t => { try { const p = !t._co && typeof window.nfPhoto === 'function' ? window.nfPhoto(t.workerId || '') : null; return typeof p === 'string' && /^(data:image|https?:|blob:|\.?\/)/.test(p) ? p : ''; } catch (e) { return ''; } };
+  const roleOf = p => { const t = p.tickets[0] || {}; return (!t._co && t.role && typeof ROLES === 'object' && ROLES[t.role]) || p.role || ''; };
+  const isUrgent = t => !!t.urgent || /(?:واقف|مش قادر|مستعجل|ضروري|urgent|blocked|can.?t work)/i.test([t.subj, t.sum, t.report].join(' '));
+
+  /* ---------- the people ---------- */
+  function people() {
+    const map = new Map();
+    all().filter(waiting).forEach(t => {
+      const k = pOf(t); let p = map.get(k);
+      if (!p) { p = { key: k, name: t.byName || '?', sys: t._co || A.sysKey(), job: '', dept: '', role: '', mgr: '', tickets: [], urgent: false, oldest: '' }; map.set(k, p); }
+      p.tickets.push(t); p.job = p.job || jobOf(t); p.dept = p.dept || t.dept || ''; p.role = p.role || t.roleName || ''; p.mgr = p.mgr || mgrOf(t); p.urgent = p.urgent || isUrgent(t);
+      const at = t.createdAt || t.lastAt || ''; if (!p.oldest || (at && at < p.oldest)) p.oldest = at;
+    });
+    const ps = Array.from(map.values());
+    ps.forEach(p => { p.tickets.sort((a, b) => ((T.skip[kOf(a)] || 0) - (T.skip[kOf(b)] || 0)) || (isUrgent(b) - isUrgent(a)) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))); p.skipped = p.tickets.every(t => T.skip[kOf(t)]); });
+    return ps;
+  }
+  const suggested = ps => ps.slice().sort((a, b) => (b.urgent - a.urgent) || String(a.oldest).localeCompare(String(b.oldest)));
+  function ordered() {
+    const ps = suggested(people()); const pos = k => { const i = T.order.indexOf(k); return i < 0 ? 1e6 : i; };
+    return ps.map((p, i) => ({ p, i })).sort((a, b) => (a.p.skipped - b.p.skipped) || (pos(a.p.key) - pos(b.p.key)) || (a.i - b.i)).map(x => x.p);
+  }
+
+  /* ---------- names: «غاية الأول», «احمد عبد الظهور» ---------- */
+  const NIL = String();
+  const norm = s => String(s || '').toLowerCase().replace(/[ً-ْٰـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/عبد\s+ال/g, m => m.replace(/\s+/g, NIL)).replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const lev = (a, b) => { const m = a.length, n = b.length; if (Math.abs(m - n) > 2) return 9; let prev = Array.from({ length: n + 1 }, (_, j) => j); for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[n]; };
+  const tokEq = (a, b) => { const v = [a, a.replace(/^ال/, NIL), a.replace(/^و/, NIL), a.replace(/^ب/, NIL), a.replace(/^ل/, NIL)]; const w = [b, b.replace(/^ال/, NIL)]; return v.some(x => x.length >= 2 && w.some(y => x === y || (x.length >= 4 && y.length >= 4 && lev(x, y) <= (x.length >= 7 ? 2 : 1)) || (x.length >= 3 && y.length > x.length && y.startsWith(x)))); };
+  const FILL = /^(الاول|اول|الأول|ابدا|ابدأ|ابدء|بدا|خش|ادخل|روح|على|علي|عند|مشكله|مشكلة|مشاكل|بتاع|بتاعة|بتاعه|من|في|يا|و|ب|بال|ل|first|start|with|the|problem|problems|of|go|to|open|please|then|and|by)$/;
+  const SYSW = Object.entries({ factory: /(?:مصنع|factory|fabrication|فابريكيشن)/, studio: /(?:استوديو|ستوديو|ستديو|studio)/, construction: /(?:مقاولات|كونستراكشن|construction)/, oekoplan: /(?:اوكوبلان|أوكوبلان|اوكو|oekoplan|okoplan|ökoplan)/ });
+  function parseCmd(text, ps) {
+    const out = { keys: [], sys: [], start: false, unknown: [], urgent: false, oldest: false };
+    const raw = String(text || '').trim(); if (!raw) return out;
+    if (/ترتيبك|ماشي|يلا|تمام|اوك|^ابدا$|^ابدأ$|^ابدأ يلا|your order|^ok$|^go$|^start$|as you suggest/i.test(norm(raw)) || /ترتيبك/.test(raw)) out.start = true;
+    if (/(?:مستعجل|الاهم|المهم|urgent|stuck)/i.test(norm(raw))) out.urgent = true;
+    if (/(?:الاقدم|اقدم|oldest)/i.test(norm(raw))) out.oldest = true;
+    const segs = norm(raw).split(/\s*(?:\n|،|,|;|\bثم\b|وبعدين|بعدين|بعده|بعدها|then|after that|and then)\s*/i).filter(Boolean);
+    segs.forEach(seg => {
+      const sy = SYSW.filter(([, re]) => re.test(seg)).map(([k]) => k); sy.forEach(k => { if (!out.sys.includes(k)) out.sys.push(k); });
+      const toks = seg.split(' ').filter(x => x && !FILL.test(x) && !SYSW.some(([, re]) => re.test(x)) && !/ترتيبك|ماشي|يلا|تمام|مستعجل|اقدم|الاقدم|urgent|oldest/.test(x));
+      if (!toks.length) return;
+      /* best person for these words; two names in one segment («غاية وأحمد») split on a leading و */
+      const groups = []; let g = []; toks.forEach(x => { if (/^و\S{2,}/.test(x) && g.length) { groups.push(g); g = [x.slice(1)]; } else g.push(x); }); if (g.length) groups.push(g);
+      groups.forEach(gt => {
+        let best = null, bs = 0;
+        ps.forEach(p => { const nt = norm(p.name).split(' '); const sc = gt.filter(x => nt.some(y => tokEq(x, y))).length; const lead = nt.length && tokEq(gt[0], nt[0]) ? 0.5 : 0; if (sc + lead > bs) { bs = sc + lead; best = p; } });
+        if (best && bs >= 1) { if (!out.keys.includes(best.key)) out.keys.push(best.key); } else out.unknown.push(gt.join(' '));
+      });
+    });
+    return out;
+  }
+
+  /* ---------- the bot: the suggestion, and the reply from his decision ---------- */
+  const aiOn = () => typeof aiAvailable === 'function' && aiAvailable() && typeof aiJson === 'function';
+  const coOf = t => ({ factory: 'Ninety Fabrication', studio: 'Ökoplan Landscaping', construction: 'Ninety Construction', oekoplan: 'Ökoplan Landscaping' })[t._co || A.sysKey()] || '';
+  function ctx(t) {
+    const th = (t.thread || []).filter(m => m.from !== 'sys').slice(-6).map(m => `${m.from === 'owner' ? 'محمود' : m.from === 'bot' ? 'البوت' : (t.byName || 'الموظف')}: ${clean(m.text || '').slice(0, 400)}${(m.files || []).filter(f => f && f.text).map(f => ` [${f.kind === 'video' ? 'فيديو' : 'صوت'}: ${clean(f.text).slice(0, 300)}]`).join('')}${(m.files || []).some(f => f && (!f.kind || f.kind === 'image')) ? ' [صورة]' : ''}`).join('\n');
+    return `الموظف: ${t.byName || ''} — الوظيفة: ${jobOf(t) || '—'} — القسم: ${t.dept || '—'} — مديره: ${mgrOf(t) || '—'} — الدور في السيستم: ${t.roleName || t.role || '—'} — السيستم: ${A.sysName(t._co || A.sysKey())}
+المشكلة: ${clean(t.subj || '')}${t.sum ? '\nالملخص: ' + clean(t.sum) : ''}${t.report ? '\nملخص الفيديو/الصوت:\n' + clean(t.report) : ''}
+النوع: ${t.kind || '—'} · الصفحة: ${(t.page && t.page.title) || '—'} · الجهاز: ${A.devTxt(t.dev) || '—'}
+الرسايل:\n${th || '—'}`;
+  }
+  const ACTS = ['solve', 'reply', 'dev', 'change'];
+  const tidy = (j, t) => ({ act: ACTS.includes(j.act) ? j.act : (j.act === 'reply' ? 'reply' : 'solve'), cause: clean(String(j.cause || '').trim()).slice(0, 300), fix: clean(String(j.fix || '').trim()).slice(0, 400), draft: clean(String(j.draft || '').trim()).slice(0, 900), note: clean(String(j.note || '').trim()).slice(0, 500), change: j.change && typeof j.change === 'object' && (j.change.what || j.change.after) ? { what: clean(String(j.change.what || '')).slice(0, 160), before: clean(String(j.change.before || '')).slice(0, 160), after: clean(String(j.change.after || '')).slice(0, 160) } : null, perm: j.perm === true, lang: isAr(t) ? 'ar' : 'en' });
+  async function suggest(t) {
+    const k = kOf(t); if (T.sug[k]) return; if (!aiOn()) { T.sug[k] = { none: 1 }; return; }
+    T.sug[k] = { busy: 1 };
+    const prompt = `إنت مساعد محمود (صاحب الشركة) في «جلسة الدعم الفني» لسيستم إدارة ${coOf(t)}. قدامك مشكلة بعتها موظف في السيستم.
+رجّع JSON بس من غير أي كلام تاني:
+{"cause":"","fix":"","act":"solve|reply|change|dev","change":{"what":"","before":"","after":""},"perm":false,"draft":""}
+- cause: السبب الأرجح في سطر واحد بالمصري.
+- fix: الحل المقترح في سطر أو اتنين.
+- act: solve = رد أو شرح أو بديل يحل المشكلة؛ reply = محتاج سؤال للموظف الأول؛ change = محتاجة تعديل في بيانات أو صلاحية أو إعداد (محمود يعمله من صفحة الموظف أو الإعدادات)؛ dev = عطل محتاج تعديل في كود السيستم.
+- change: لو act = change: what (إيه اللي يتغيّر) و before (دلوقتي) و after (المفروض). غير كده سيبها فاضية.
+- perm: true لو التعديل في صلاحية أو سلسلة اعتماد أو مين يشوف إيه.
+- draft: رد قصير للموظف (من سطرين لـ 4) ${isAr(t) ? 'بالمصري' : 'بالإنجليزي'}، بيقول له اللي هيحصل أو البديل اللي يمشي بيه لحد ما تتصلح. من غير أي مبالغ فلوس ومن غير مواعيد ولا وعود بقرارات.
+${ctx(t)}`;
+    try { const j = await Promise.race([aiJson(prompt, { max_tokens: 700 }), new Promise(r => setTimeout(() => r(null), 30000))]); T.sug[k] = j && typeof j === 'object' ? tidy(j, t) : { none: 1 }; } catch (e) { T.sug[k] = { none: 1 }; }
+  }
+  const DEVRE = /(?:كود|هنصلح|نصلح|هتتصلح|اصلح|أصلح|التحديث|النسخه الجايه|النسخة الجاية|عطل|bug|code|fix it in|next (update|version))/i;
+  const CHGRE = /(?:صلاحي|ادّيله|اديله|اديها|ادّيها|افتح له|افتحله|ضيفه|ضيف له|غيّر|غير له|انقله|permission|access|give (him|her)|move (him|her))/i;
+  async function decide(t, text) {
+    const k = kOf(t); const sg = T.sug[k] && !T.sug[k].busy && !T.sug[k].none ? T.sug[k] : null;
+    const guess = DEVRE.test(text) ? 'dev' : CHGRE.test(text) ? 'change' : 'solve';
+    if (!aiOn()) return { act: guess, draft: clean(text), note: guess === 'dev' ? clean(text) : '', change: null, perm: false };
+    const prompt = `إنت مساعد محمود (صاحب الشركة) في «جلسة الدعم الفني» لسيستم إدارة ${coOf(t)}. محمود قرّر يعمل إيه في مشكلة موظف، وإنت تكتب الرد اللي هيتبعت للموظف.
+رجّع JSON بس من غير أي كلام تاني:
+{"act":"solve|reply|dev|change","draft":"","note":"","change":{"what":"","before":"","after":""},"perm":false}
+- act: solve = الرد ده بيحل المشكلة (تتقفل)؛ reply = رد أو سؤال والمشكلة تفضل مفتوحة؛ dev = محتاجة تعديل في كود السيستم (تتعلّم «للمطوّر» وتتصلح في التحديث الجاي)؛ change = محتاجة تعديل بيانات أو صلاحية محمود هيعمله بنفسه.
+- draft: الرد للموظف ${isAr(t) ? 'بالمصري' : 'بالإنجليزي'} مبني على قرار محمود بالظبط — ما تزودش وعود ولا قرارات هو ما قالهاش. من سطرين لـ 4، بأسلوب لطيف ومحترم. من غير أي مبالغ فلوس.
+- note: لو dev: وصف قصير للتعديل المطلوب للمطوّر (الصفحة والزرار وإيه اللي المفروض يحصل). غير كده فاضية.
+- change / perm: لو act = change: إيه اللي يتغيّر (قبل ← بعد)، و perm = true لو في صلاحية أو سلسلة اعتماد أو مين يشوف إيه.
+${ctx(t)}
+${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''}قرار محمود: ${clean(text)}`;
+    try { const j = await Promise.race([aiJson(prompt, { max_tokens: 700 }), new Promise(r => setTimeout(() => r(null), 30000))]); if (j && typeof j === 'object' && j.draft) { const d = tidy(j, t); if (guess === 'dev' && d.act !== 'dev' && DEVRE.test(text)) d.act = 'dev'; if (d.act === 'dev' && !d.note) d.note = clean(text); return d; } } catch (e) { /* fall back */ }
+    return { act: guess, draft: clean(text), note: guess === 'dev' ? clean(text) : '', change: null, perm: false };
+  }
+  const devDraft = t => TL(t, 'وصلت ✓ — دي محتاجة تعديل في السيستم، وهتتصلح في التحديث الجاي. هيوصلك إشعار أول ما تتصلح.', 'Got it ✓ — this needs a change in the system and will be fixed in the next update. You will get a notice as soon as it is fixed.');
+
+  /* ---------- writing the ticket (here or in its own system) + the notice to the person ---------- */
+  async function writeT(t, patch) {
+    if (!t._co) { await Store.update(A.COL, t.id, patch); return; }
+    const ps = typeof window.nfPeerSession === 'function' ? await window.nfPeerSession(t._co) : null; if (!ps) throw new Error('peer');
+    const r = await ps.c.from('docs').select('data').eq('col', A.COL).eq('id', t.id).maybeSingle(); if (r.error) throw new Error('peer-read');
+    const data = Object.assign({}, (r.data && r.data.data) || {}, patch, { updatedAt: nowISO() });
+    const w = await ps.c.from('docs').upsert({ col: A.COL, id: t.id, data }, { onConflict: 'col,id' }); if (w.error) throw new Error('peer-write');
+    Object.assign(t, patch);
+  }
+  async function pushT(t, title, body) {
+    if (!t.byId) return; const url = `/#/support/${t.id}`; const tag = 'sup-' + t.id;
+    if (!t._co) { A.push([t.byId], title, body, url, tag); return; }
+    try { const ps = await window.nfPeerSession(t._co); if (ps) await ps.c.functions.invoke('push', { body: { action: 'send', to: [t.byId], title: clean(title).slice(0, 100), body: clean(body).slice(0, 160), url, tag } }); } catch (e) { /* the ticket has it anyway */ }
+  }
+  async function send(t, d) {
+    const now = nowISO(); const msg = { id: uid(), at: now, from: 'owner', by: (S.session && S.session.id) || 'owner', byName: (S.session && S.session.name) || '', text: clean(d.draft) };
+    const add = [msg]; const patch = { lastAt: now, unreadMe: true, unreadOwner: false, triAt: now };
+    if (d.act === 'solve' || d.act === 'change') { add.push({ id: uid(), at: now, from: 'sys', text: TL(t, '✓ اتحلّت', '✓ Solved') }); Object.assign(patch, { status: 'solved', solvedAt: now, solvedBy: (S.session && S.session.id) || 'owner' }); }
+    else { if ((t.status || 'new') === 'new') Object.assign(patch, { status: 'working', workingAt: now }); }
+    if (d.act === 'dev') Object.assign(patch, { status: 'working', dev: 'open', devAt: now, devNote: clean(d.note || T.dec[kOf(t)] || '').slice(0, 600) });
+    patch.thread = (t.thread || []).concat(add).slice(-200);
+    await writeT(t, patch);
+    const solved = patch.status === 'solved';
+    await pushT(t, solved ? TL(t, 'مشكلتك اتحلت ✓', 'Your problem is solved ✓') : TL(t, 'رد من الدعم الفني', 'A reply from support'), `${clean(t.subj || '')} — ${clean(d.draft)}`);
+    T.log.push({ k: kOf(t), p: pOf(t), act: d.act, name: t.byName || '' });
+  }
+
+  /* ---------- speaking instead of typing (the browser's speech service; on a phone the keyboard's mic, or the server's) ---------- */
+  const DIC = { on: null };
+  function dicState() { document.querySelectorAll('[data-tridic]').forEach(b => { const on = DIC.on && DIC.on.id === b.getAttribute('data-tridic'); b.classList.toggle('on', !!on); const sp = b.querySelector('span'); if (sp) sp.textContent = on ? L('وقّف', 'Stop') : L('اتكلم', 'Speak'); }); }
+  const putText = (id, txt) => { if (!txt) return; const el = document.getElementById(id); const cur = el ? el.value : (id === 'tricmd' ? T.cmd : ''); const v = (cur ? cur.replace(/\s+$/, '') + ' ' : '') + txt; if (el) el.value = v; store(id, v); };
+  async function dictate(id) {
+    if (DIC.on) { const same = DIC.on.id === id; DIC.on.stop(); if (same) return; }
+    const C = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (C && !A.isNative()) {
+      let r; try { r = new C(); } catch (e) { r = null; }
+      if (r) {
+        r.lang = en() ? 'en-US' : 'ar-EG'; r.continuous = true; r.interimResults = false;
+        r.onresult = ev => { for (let i = ev.resultIndex || 0; i < ev.results.length; i++) { const x = ev.results[i]; if (x && x.isFinal && x[0]) putText(id, String(x[0].transcript || '').trim()); } };
+        r.onerror = ev => { if (ev && ['not-allowed', 'service-not-allowed'].includes(ev.error)) toast(L('اسمح للمتصفح يستخدم المايك', 'Allow the browser to use the microphone'), 'err'); };
+        r.onend = () => { if (DIC.on && DIC.on.r === r) { DIC.on = null; dicState(); } };
+        try { r.start(); DIC.on = { id, r, stop: () => { try { r.stop(); } catch (e) { /* ignore */ } DIC.on = null; dicState(); } }; dicState(); return; } catch (e) { /* fall through */ }
+      }
+    }
+    if (window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && await A.sttReady()) {
+      let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { toast(L('اسمح للتطبيق يستخدم المايك', 'Allow the app to use the microphone'), 'err'); return; }
+      const mime = A.MIME_A.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || ''; const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); const ch = [];
+      mr.ondataavailable = ev => { if (ev.data && ev.data.size) ch.push(ev.data); };
+      mr.onstop = async () => { stream.getTracks().forEach(x => x.stop()); DIC.on = null; dicState(); toast(L('بكتب كلامك…', 'Writing out what you said…')); const txt = await A.transcribe(new Blob(ch, { type: mr.mimeType || mime || 'audio/webm' })); if (txt) putText(id, txt); else toast(L('ماقدرتش أكتب الكلام — اكتبه', 'Could not write it out — type it'), 'err'); };
+      const cap = setTimeout(() => { if (mr.state !== 'inactive') mr.stop(); }, 60000);
+      DIC.on = { id, stop: () => { clearTimeout(cap); if (mr.state !== 'inactive') mr.stop(); } }; mr.start(250); dicState(); return;
+    }
+    toast(L('على الموبايل: دوس على المايك اللي في الكيبورد واتكلم', 'On a phone: tap the microphone on the keyboard and talk'));
+  }
+  function store(id, v) { if (id === 'tricmd') T.cmd = v; else if (id === 'tridec' && T.cur) T.dec[T.cur] = v; else if (id === 'tridraft' && T.cur && T.dr[T.cur]) T.dr[T.cur].draft = v; }
+  document.addEventListener('input', e => { const x = e.target; if (x && ['tricmd', 'tridec', 'tridraft'].includes(x.id)) store(x.id, x.value); });
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-tridic]'); if (b) { e.preventDefault(); dictate(b.getAttribute('data-tridic')); return; } const g = e.target.closest && e.target.closest('[data-trigo]'); if (g) { e.preventDefault(); startWith([g.getAttribute('data-trigo')]); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && e.target && e.target.id === 'tricmd') { e.preventDefault(); ACTIONS.triCmd(); } });
+
+  /* ---------- the pieces ---------- */
+  const av = (name, ph) => ph ? `<span class="triav"><img src="${esc(ph)}" alt=""></span>` : `<span class="triav notr">${esc(A.initials(name))}</span>`;
+  const sysCounts = ps => { const m = {}; ps.forEach(p => { const x = m[p.sys] || (m[p.sys] = { n: 0, people: 0 }); x.n += p.tickets.length; x.people += 1; }); return m; };
+  const micBtn = id => `<button type="button" class="btn ghost tridicb${DIC.on && DIC.on.id === id ? ' on' : ''}" data-tridic="${id}">${icon('mic')}<span>${esc(DIC.on && DIC.on.id === id ? L('وقّف', 'Stop') : L('اتكلم', 'Speak'))}</span></button>`;
+  const botLine = (html, cls) => `<div class="tribot${cls ? ' ' + cls : ''}"><span class="tribi">${icon('lifebuoy')}</span><div class="tribt">${html}</div></div>`;
+  function headline(ps) {
+    const n = ps.reduce((s, p) => s + p.tickets.length, 0);
+    return L(`عندك ${n} ${n === 1 ? 'مشكلة' : n === 2 ? 'مشكلتين' : n <= 10 ? 'مشاكل' : 'مشكلة'} من ${ps.length} ${ps.length === 1 ? 'شخص' : ps.length === 2 ? 'شخصين' : ps.length <= 10 ? 'أشخاص' : 'شخص'}`, `You have ${n} problem${n === 1 ? '' : 's'} from ${ps.length} ${ps.length === 1 ? 'person' : 'people'}`);
+  }
+  function sysChips(ps) {
+    const m = sysCounts(ps); const ks = Object.keys(m); if (!ks.length) return '';
+    return `<div class="trisys">${ks.map(k => `<span class="trichip"><b>${esc(A.sysName(k))}</b> ${m[k].n}${m[k].people !== m[k].n || m[k].people > 1 ? ` <span class="muted">(${esc(L(`${m[k].people} ${m[k].people === 1 ? 'شخص' : m[k].people === 2 ? 'شخصين' : 'أشخاص'}`, `${m[k].people} ${m[k].people === 1 ? 'person' : 'people'}`))})</span>` : ''}</span>`).join('')}</div>`;
+  }
+  function devBlock() {
+    const xs = all().filter(devOpen); if (!xs.length) return '';
+    return `<details class="card tridev"><summary>${icon('edit')} <b>${esc(L('للمطوّر', 'For the developer'))}</b> <span class="muted small">${xs.length} — ${esc(L('بتتصلح في التحديث الجاي، والموظف بيوصله لوحده', 'fixed in the next update; the person is told by itself'))}</span></summary><div class="list">${xs.map(t => `<a class="trirow sm" href="${esc(t._co ? A.coUrl(t._co) + '#/support/' + t.id : '#/support/' + t.id)}"><span class="b"><span class="t notr">${esc(t.byName || '')} — ${esc(clean(t.subj || ''))}</span><span class="s notr">${esc(clean(t.devNote || '') || A.sysName(t._co || A.sysKey()))}</span></span>${A.devChip(t)}</a>`).join('')}</div></details>`;
+  }
+  function overviewHTML() {
+    const ps = ordered(); A.loadPeers();
+    if (!ps.length) return `<div class="card trihead">${botLine(`<b>${esc(L('مفيش مشاكل مستنياك دلوقتي 👌', 'No problems waiting for you now 👌'))}</b>${T.log.length ? `<div class="small muted">${esc(doneLine())}</div>` : ''}`)}</div>${devBlock()}`;
+    const first = ps[0]; const why = first.urgent ? L('شغله واقف', 'his work is stuck') : L('الأقدم', 'the oldest');
+    const rows = ps.map((p, i) => `<button type="button" class="trirow${p.skipped ? ' sk' : ''}" data-trigo="${esc(p.key)}"><span class="trinum">${i + 1}</span>${av(p.name, photoOf(p.tickets[0]))}<span class="b"><span class="t notr">${esc(p.name)}${p.urgent ? ` <span class="badge bad">${esc(L('شغله واقف', 'work stuck'))}</span>` : ''}</span><span class="s">${p.job ? `<span class="notr">${esc(p.job)}</span> · ` : ''}${p.dept ? `${esc(p.dept)} · ` : ''}${esc(A.sysName(p.sys))}</span><span class="s notr">${esc(clean(p.tickets[0].subj || ''))}</span></span><span class="e"><span class="trin">${p.tickets.length}</span><span class="tiny muted">${esc(ago(p.oldest))}</span></span></button>`).join('');
+    return `<div class="card trihead"><div class="trititle">${icon('lifebuoy')}<b>${esc(headline(ps))}</b></div>${sysChips(ps)}</div>
+      <div class="card">${botLine(esc(L(`اقتراحي نبدأ بـ ${first.name} (${why})، وبعدين الأقدم فالأحدث. قولّي تبدأ بمين — اكتب أو اتكلم — أو دوس على الاسم.`, `I suggest we start with ${first.name} (${why}), then oldest first. Tell me who to start with — type or talk — or tap a name.`)))}
+        ${T.msg ? botLine(esc(T.msg), 'warn') : ''}
+        <div class="list tripl">${rows}</div>
+        <div class="tricmd"><textarea id="tricmd" rows="2" placeholder="${esc(L('مثال: غاية الأول وبعدين أحمد عبد الظاهر — أو: ابدأ بالمصنع — أو: ماشي على ترتيبك', 'e.g. Ghaya first, then Ahmed — or: start with the factory — or: go with your order'))}">${esc(T.cmd)}</textarea>
+          <div class="row"><button type="button" class="btn p" data-action="triCmd">${icon('send')}<span>${esc(L('يلا', 'Go'))}</span></button>${micBtn('tricmd')}<button type="button" class="btn ghost" data-action="triGo">${icon('check')}<span>${esc(L('ماشي على ترتيبك', 'Go with your order'))}</span></button></div></div>
+      </div>${devBlock()}`;
+  }
+  const doneLine = () => { const c = a => T.log.filter(x => x.act === a).length; const s = c('solve') + c('change'), d = c('dev'), r = c('reply'); return L(`${s} اتحلّت · ${d} للمطوّر · ${r} مستنية رده`, `${s} solved · ${d} for the developer · ${r} waiting for his answer`); };
+  function progress(ps) {
+    const chips = ps.slice(0, 12).map((p, i) => `<button type="button" class="tripc${i === 0 ? ' on' : ''}" data-trigo="${esc(p.key)}"><span class="notr">${esc(p.name)}</span>${p.tickets.length > 1 ? ` <span class="trin sm">${p.tickets.length}</span>` : ''}</button>`).join('');
+    const left = ps.reduce((s, p) => s + p.tickets.length, 0);
+    return `<div class="triprog"><div class="small muted">${esc(L(`فاضل ${ps.length} ${ps.length === 1 ? 'شخص' : ps.length === 2 ? 'شخصين' : 'أشخاص'} · ${left} ${left === 1 ? 'مشكلة' : 'مشاكل'}`, `${ps.length} ${ps.length === 1 ? 'person' : 'people'} · ${left} problem${left === 1 ? '' : 's'} left`))}${T.log.length ? ' · ' + esc(doneLine()) : ''}</div><div class="tripcs">${chips}</div></div>`;
+  }
+  function sugBox(t) {
+    const k = kOf(t); const g = T.sug[k];
+    if (!g || g.busy) return `<div class="trisug" id="trisug">${botLine(`<span class="muted">${esc(L('بقرا المشكلة وبفكّر في الحل…', 'Reading the problem and thinking of a fix…'))}</span>`)}</div>`;
+    if (g.none) return `<div class="trisug" id="trisug"></div>`;
+    const act = { solve: L('رد يحلها', 'a reply solves it'), reply: L('محتاج سؤال الأول', 'needs a question first'), change: L('تعديل بيانات أو صلاحية', 'a data / permission change'), dev: L('تعديل في الكود', 'a code fix') }[g.act] || '';
+    return `<div class="trisug" id="trisug">${botLine(`<div class="h"><b>${esc(L('اقتراحي', 'My suggestion'))}</b> <span class="trichip sm">${esc(act)}</span></div>${g.cause ? `<div class="notr"><b>${esc(L('السبب غالبًا:', 'Likely cause:'))}</b> ${esc(g.cause)}</div>` : ''}${g.fix ? `<div class="notr"><b>${esc(L('الحل:', 'Fix:'))}</b> ${esc(g.fix)}</div>` : ''}${g.change ? chgBox(t, g) : ''}${g.draft ? `<div class="row" style="margin-top:8px"><button type="button" class="btn sm p" data-action="triUseSug">${icon('check')}<span>${esc(L('موافق — جهّز الرد', 'Agree — prepare the reply'))}</span></button></div>` : ''}`, 'sug')}</div>`;
+  }
+  function chgBox(t, d) {
+    const c = d.change || {}; const wid = t.workerId; const base = t._co ? A.coUrl(t._co) : '';
+    const prof = wid ? `${base}#/workers/${wid}` : `${base}#/workers`; const pg = t.page && t.page.hash ? base + t.page.hash : '';
+    return `<div class="trichg"><div><b>${esc(L('التعديل:', 'The change:'))}</b> <span class="notr">${esc(c.what || '')}</span></div>${c.before || c.after ? `<div class="triba"><span class="notr">${esc(c.before || '—')}</span><span class="ar">←</span><span class="notr">${esc(c.after || '—')}</span></div>` : ''}${d.perm ? `<div class="small trwarn">${esc(L('ده تغيير في صلاحية أو مين يشوف إيه — اعمله من ملفه وبعدين ابعت الرد.', 'This changes a permission or who sees what — make it from his page, then send the reply.'))}</div>` : ''}<div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap"><a class="btn sm" href="${esc(prof)}"${t._co ? ' target="_blank" rel="noopener"' : ''}>${icon('user')}<span>${esc(L('افتح ملفه', 'Open his page'))}</span></a>${pg ? `<a class="btn sm ghost" href="${esc(pg)}"${t._co ? ' target="_blank" rel="noopener"' : ''}>${icon('link')}<span>${esc(L('افتح الصفحة', 'Open the page'))}</span></a>` : ''}</div></div>`;
+  }
+  function personHTML(ps) {
+    const p = ps[0]; const t = p.tickets[0]; const k = kOf(t); T.cur = k; T.curP = p.key;
+    const prev = all().filter(x => pOf(x) === p.key && x.id !== t.id).length;
+    const kv = (a, v, tr) => v ? `<dt>${esc(a)}</dt><dd${tr ? '' : ' class="notr"'}>${esc(v)}</dd>` : '';
+    const card = `<div class="card triwho"><div class="row" style="gap:12px;align-items:center">${av(p.name, photoOf(t))}<div><div class="trinm notr">${esc(p.name)}</div><div class="small muted">${p.job ? `<span class="notr">${esc(p.job)}</span> · ` : ''}${esc(A.sysName(p.sys))}</div></div>${p.urgent ? `<span class="badge bad" style="margin-inline-start:auto">${esc(L('شغله واقف', 'work stuck'))}</span>` : ''}</div>
+      <dl class="supkv">${kv(L('الوظيفة', 'Job'), p.job)}${kv(L('القسم', 'Department'), p.dept, 1)}${kv(L('مديره', 'Manager'), p.mgr)}${kv(L('الدور في السيستم', 'Role in the system'), roleOf(p), 1)}${kv(L('السيستم', 'System'), A.sysName(p.sys), 1)}${kv(L('مشاكله قبل كده', 'Problems before'), prev ? String(prev) : L('دي أول مرة', 'first time'), 1)}</dl></div>`;
+    const files = (t.thread || []).filter(m => m.from === 'me').flatMap(m => m.files || []);
+    const th = (t.thread || []); const shown = th.length > 5 ? th.slice(-4) : th;
+    const tk = `<div class="card trit"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">${p.tickets.length > 1 ? `<span class="trichip sm">${esc(L(`مشكلة 1 من ${p.tickets.length}`, `problem 1 of ${p.tickets.length}`))}</span>` : ''}<b class="notr" style="font-size:16px">${esc(clean(t.subj || ''))}</b>${A.badge(t.status || 'new')}<span class="muted tiny">${esc(A.code(t))}</span><a class="tiny" style="margin-inline-start:auto" href="${esc(t._co ? A.coUrl(t._co) + '#/support/' + t.id : '#/support/' + t.id)}"${t._co ? ' target="_blank" rel="noopener"' : ''}>${esc(L('افتح التذكرة', 'Open the ticket'))}</a></div>
+      ${t.report ? `<div class="suprep"><div class="h">${icon('star')}<b>${esc(L('ملخص المشكلة', 'Summary of the problem'))}</b></div><div class="notr">${A.nl(clean(t.report))}</div></div>` : t.sum ? `<div class="suprep"><div class="notr">${esc(clean(t.sum))}</div></div>` : ''}
+      <div class="supctx" style="margin-top:8px">${t.page && t.page.title ? `<span>${icon('link')}<span class="notr">${esc(t.page.title)}</span></span>` : ''}${t.dev ? `<span>${esc(A.devTxt(t.dev))}</span>` : ''}<span>${esc(ago(t.createdAt || t.lastAt))}</span></div>
+      ${files.length ? `<div class="trimedia">${A.media(files)}</div>` : ''}
+      <details class="trith"${th.length <= 3 ? ' open' : ''}><summary class="small muted">${esc(L(`الرسايل (${th.length})`, `Messages (${th.length})`))}</summary><div class="supmsgs">${shown.map(m => A.bubble(Object.assign({}, m, { files: [] }), true)).join('')}</div></details></div>`;
+    return progress(ps) + card + tk + sugBox(t) + decideHTML(t);
+  }
+  function decideHTML(t) {
+    const k = kOf(t); const d = T.dr[k]; const g = T.sug[k];
+    if (d && d.busy) return `<div class="card tridec">${botLine(`<span class="muted">${esc(L('بكتب الرد…', 'Writing the reply…'))}</span>`)}</div>`;
+    if (d) {
+      const opt = (a, lab) => `<label class="triopt${d.act === a || (a === 'solve' && d.act === 'change') ? ' on' : ''}"><input type="radio" name="triact" value="${a}"${d.act === a || (a === 'solve' && d.act === 'change') ? ' checked' : ''} data-triact="${a}"><span>${esc(lab)}</span></label>`;
+      return `<div class="card tridec"><div class="h"><b>${esc(L(`الرد اللي هيتبعت لـ ${t.byName || ''}`, `The reply that goes to ${t.byName || ''}`))}</b> <span class="muted tiny">${esc(isAr(t) ? L('بالعربي', 'in Arabic') : L('بالإنجليزي', 'in English'))}</span></div>
+        ${d.act === 'change' && d.change ? chgBox(t, d) : ''}
+        <textarea id="tridraft" rows="4">${esc(d.draft || '')}</textarea>
+        <div class="triopts">${opt('solve', d.act === 'change' ? L('اتعملت — ابعت والمشكلة اتحلّت', 'Done — send, and it is solved') : L('ابعت والمشكلة اتحلّت', 'Send, and it is solved'))}${opt('reply', L('ابعت وسيبها مفتوحة', 'Send and keep it open'))}${opt('dev', L('للمطوّر — هتتصلح في التحديث الجاي', 'For the developer — fixed in the next update'))}</div>
+        ${d.act === 'dev' ? `<div class="small muted notr" style="margin-top:6px">${esc(L('ملاحظة للمطوّر:', 'Note for the developer:'))} ${esc(d.note || T.dec[k] || '')}</div>` : ''}
+        <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn p" data-action="triSend">${icon('send')}<span>${esc(L('ابعت', 'Send'))}</span></button><button type="button" class="btn ghost" data-action="triRedo">${icon('edit')}<span>${esc(L('غيّر القرار', 'Change the decision'))}</span></button></div></div>`;
+    }
+    return `<div class="card tridec">${botLine(esc(L('إيه اللي يتعمل؟ اكتب أو اتكلم — وأنا أكتب الرد له.', 'What should be done? Type or talk — I will write the reply to him.')))}
+      <textarea id="tridec" rows="3" placeholder="${esc(L('مثال: قوله يستخدم صفحة الطلبات لحد ما نصلحها — أو: هنصلحها في التحديث الجاي', 'e.g. Tell him to use the Requests page until we fix it — or: we will fix it in the next update'))}">${esc(T.dec[k] || '')}</textarea>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn p" data-action="triDecide">${icon('send')}<span>${esc(L('اكتب الرد', 'Write the reply'))}</span></button>${micBtn('tridec')}${g && g.draft ? `<button type="button" class="btn" data-action="triUseSug">${icon('check')}<span>${esc(L('اقتراحك تمام', 'Your suggestion is fine'))}</span></button>` : ''}<button type="button" class="btn ghost" data-action="triDev">${icon('edit')}<span>${esc(L('للمطوّر', 'For the developer'))}</span></button></div>
+      <div class="row tri2" style="gap:8px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn sm ghost" data-action="triSkip">${esc(L('سيبها للآخر', 'Leave it for the end'))}</button><button type="button" class="btn sm ghost" data-action="triPick">${esc(L('اختار حد تاني', 'Pick someone else'))}</button></div></div>`;
+  }
+  function endHTML() {
+    return `<div class="card trihead">${botLine(`<b>${esc(L('خلصنا ✓', 'Done ✓'))}</b><div class="notr">${esc(doneLine())}</div>${people().some(p => p.tickets.some(t => T.skip[kOf(t)])) ? `<div class="small muted">${esc(L('اللي سبته للآخر لسه هنا لما ترجع.', 'What you left for the end is still here when you come back.'))}</div>` : ''}`)}<div class="row" style="gap:8px;margin-top:8px"><a class="btn" href="#/support">${esc(L('ارجع للدعم الفني', 'Back to Support'))}</a></div></div>${devBlock()}`;
+  }
+  window.nfTriageHTML = () => {
+    if (!A.isOwner()) return `<div class="card"><div class="empty">${esc(L('مش متاح', 'Not available'))}</div></div>`;
+    if (!T.peersAsked) { T.peersAsked = 1; A.loadPeers(true); }
+    const ps = ordered();
+    if (T.step === 'person' && !ps.length) return endHTML();
+    if (T.step === 'person') return personHTML(ps);
+    return overviewHTML();
+  };
+  /* the card on top of the owner's «Support» list */
+  window.nfTriageCard = rows => {
+    const ps = people(); const n = ps.reduce((s, p) => s + p.tickets.length, 0); const dv = (rows || all()).filter(devOpen).length;
+    return `<div class="card tricard"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="tribi lg">${icon('lifebuoy')}</span><div style="flex:1;min-width:180px"><b>${esc(L('جلسة الدعم', 'Support session'))}</b><div class="small muted">${esc(n ? headline(ps) + ' — ' + L('نمشي عليهم واحد واحد، وإنت تقول الحل والبوت يبعته', 'we go through them one by one; you say the fix and the bot sends it') : L('مفيش حاجة مستنياك دلوقتي', 'Nothing is waiting for you now'))}${dv ? ' · ' + esc(L(`للمطوّر ${dv}`, `for the developer ${dv}`)) : ''}</div></div><a class="btn p" href="#/support/session" data-action="triOpen">${icon('play')}<span>${esc(n ? L('ابدأ الجلسة', 'Start the session') : L('افتح', 'Open'))}</span></a></div></div>`;
+  };
+
+  /* ---------- actions ---------- */
+  function startWith(keys) { const ps = suggested(people()); T.order = keys.filter(Boolean).concat(T.order.filter(k => !keys.includes(k))); if (!T.started) { T.started = true; T.n0 = ps.length; } T.step = 'person'; T.msg = ''; T.cmd = ''; render(false); scrollTop(); }
+  const scrollTop = () => { try { const v = document.getElementById('view') || document.scrollingElement; if (v && v.scrollTo) v.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); } catch (e) { /* ignore */ } };
+  ACTIONS.triOpen = () => { T.step = T.started && people().length ? 'person' : 'overview'; if (location.hash !== '#/support/session') location.hash = '#/support/session'; else render(false); };
+  ACTIONS.triGo = () => { const ps = suggested(people()); startWith(ps.map(p => p.key)); };
+  ACTIONS.triCmd = () => {
+    const el = document.getElementById('tricmd'); const text = String((el ? el.value : T.cmd) || '').trim(); if (!text) { toast(L('قولّي تبدأ بمين', 'Tell me who to start with'), 'err'); return; }
+    const ps = people(); const c = parseCmd(text, ps);
+    let base = suggested(ps); if (c.oldest && !c.urgent) base = ps.slice().sort((a, b) => String(a.oldest).localeCompare(String(b.oldest)));
+    const bySys = base.filter(p => c.sys.includes(p.sys)).map(p => p.key);
+    if (!c.keys.length && !bySys.length && !c.start && !c.urgent && !c.oldest) { T.msg = L(`مش لاقي «${c.unknown.join('، ') || text}» — الأسماء اللي عندي: ${ps.map(p => p.name).join('، ')}`, `I could not find «${c.unknown.join(', ') || text}» — the names I have: ${ps.map(p => p.name).join(', ')}`); T.cmd = text; render(false); return; }
+    if (c.sys.length && !bySys.length && !c.keys.length) { T.msg = L(`مفيش مشاكل مستنياك في ${c.sys.map(A.sysName).join(' / ')}`, `Nothing is waiting in ${c.sys.map(A.sysName).join(' / ')}`); T.cmd = text; render(false); return; }
+    const keys = c.keys.concat(bySys.filter(k => !c.keys.includes(k))).concat(base.map(p => p.key).filter(k => !c.keys.includes(k) && !bySys.includes(k)));
+    startWith(keys);
+    if (c.unknown.length) { toast(L(`مش لاقي: ${c.unknown.join('، ')}`, `Not found: ${c.unknown.join(', ')}`)); }
+  };
+  const curT = () => { const ps = ordered(); const p = ps[0]; return p ? p.tickets[0] : null; };
+  ACTIONS.triPick = () => { T.step = 'overview'; render(false); scrollTop(); };
+  ACTIONS.triSkip = () => { const t = curT(); if (!t) return; T.skip[kOf(t)] = Date.now(); render(false); scrollTop(); };
+  ACTIONS.triUseSug = () => { const t = curT(); if (!t) return; const g = T.sug[kOf(t)]; if (!g || !g.draft) return; T.dr[kOf(t)] = { act: g.act === 'reply' ? 'reply' : g.act, draft: g.draft, note: g.act === 'dev' ? [g.cause, g.fix].filter(Boolean).join(' — ') : '', change: g.change, perm: g.perm }; render(false); };
+  ACTIONS.triDecide = async () => {
+    const t = curT(); if (!t) return; const k = kOf(t); const el = document.getElementById('tridec'); const text = String((el ? el.value : T.dec[k]) || '').trim();
+    if (DIC.on) DIC.on.stop(); if (!text) { toast(L('اكتب أو قول إيه اللي يتعمل', 'Type or say what should be done'), 'err'); return; }
+    T.dec[k] = text; T.dr[k] = { busy: 1 }; render(false);
+    const d = await decide(t, text); T.dr[k] = d; render(false);
+  };
+  ACTIONS.triDev = () => { const t = curT(); if (!t) return; const k = kOf(t); const el = document.getElementById('tridec'); const text = String((el ? el.value : T.dec[k]) || '').trim(); T.dec[k] = text; const g = T.sug[k]; T.dr[k] = { act: 'dev', draft: devDraft(t), note: text || (g && !g.none && !g.busy ? [g.cause, g.fix].filter(Boolean).join(' — ') : '') || clean(t.subj || ''), change: null, perm: false }; render(false); };
+  ACTIONS.triRedo = () => { const t = curT(); if (!t) return; delete T.dr[kOf(t)]; render(false); };
+  document.addEventListener('change', e => { const r = e.target; if (!r || !r.matches || !r.matches('input[data-triact]')) return; const t = curT(); if (!t) return; const d = T.dr[kOf(t)]; if (!d) return; const a = r.getAttribute('data-triact'); if (a === 'dev' && d.act !== 'dev') { d.prevDraft = d.draft; d.draft = devDraft(t); d.note = d.note || T.dec[kOf(t)] || clean(t.subj || ''); } else if (a !== 'dev' && d.act === 'dev' && d.prevDraft) d.draft = d.prevDraft; d.act = a === 'solve' && d.act === 'change' ? 'change' : a; render(false); });
+  ACTIONS.triSend = async () => {
+    const t = curT(); if (!t) return; const k = kOf(t); const d = T.dr[k]; if (!d || d.busy || d.sending) return;
+    const el = document.getElementById('tridraft'); d.draft = String((el ? el.value : d.draft) || '').trim(); if (!d.draft) { toast(L('الرد فاضي', 'The reply is empty'), 'err'); return; }
+    d.sending = 1;
+    try { await send(t, d); } catch (e) { d.sending = 0; toast(L('ماتبعتش — اتأكد من النت وجرّب تاني', 'Not sent — check the connection and try again'), 'err'); return; }
+    delete T.dr[k]; delete T.dec[k]; toast(L(`اتبعت لـ ${t.byName || ''} ✓`, `Sent to ${t.byName || ''} ✓`)); render(false); scrollTop();
+  };
+  /* the suggestion arrives while he may be typing: patch only its box */
+  RENDER_HOOKS.push(() => {
+    if (!S.route || S.route.view !== 'support' || S.route.id !== 'session' || T.step !== 'person') return;
+    const t = curT(); if (!t) return; const k = kOf(t); if (T.sug[k]) return;
+    suggest(t).then(() => { const box = document.getElementById('trisug'); const c = curT(); if (!box || !c || kOf(c) !== k) return; const tmp = document.createElement('div'); tmp.innerHTML = sugBox(c); box.replaceWith(tmp.firstElementChild); const dec = document.querySelector('.tridec'); const act = document.activeElement; if (dec && !(act && act.id === 'tridec') && T.sug[k] && T.sug[k].draft && !T.dr[k]) { const tmp2 = document.createElement('div'); tmp2.innerHTML = decideHTML(c); dec.replaceWith(tmp2.firstElementChild); } });
+  });
+  if (typeof EXTRA_TITLES === 'object' && EXTRA_TITLES.support) EXTRA_TITLES.support = (base => function (r) { if (r && r.id === 'session') return { title: L('جلسة الدعم', 'Support session'), sub: L('المشاكل واحدة واحدة — إنت تقول الحل والبوت يكتب الرد ويبعته', 'The problems one by one — you say the fix, the bot writes the reply and sends it') }; return base.apply(this, arguments); })(EXTRA_TITLES.support);
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
+.trihead,.triwho,.trit,.tridec,.tricard,.tridev,.trisug{margin-bottom:12px}.trisug:empty{display:none}
+.tricard{border-color:color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
+.tribi{flex:0 0 30px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 16%,var(--surface));color:var(--accent)}.tribi svg{width:17px;height:17px}.tribi.lg{flex-basis:40px;width:40px;height:40px}.tribi.lg svg{width:22px;height:22px}
+.tribot{display:flex;gap:10px;align-items:flex-start;margin:0 0 10px}.tribt{flex:1;min-width:0;background:var(--surface-2,var(--surface));border:1px solid var(--line);border-radius:14px;padding:9px 12px;line-height:1.7;font-size:14.5px}
+.tribot.warn .tribt{border-color:color-mix(in srgb,#e8a33d 60%,var(--line))}.tribot.sug .tribt{background:color-mix(in srgb,var(--accent) 7%,var(--surface));border-color:color-mix(in srgb,var(--accent) 28%,var(--line))}.tribt .h{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:2px}
+.trititle{display:flex;gap:8px;align-items:center;font-size:18px}.trititle svg{width:22px;height:22px;color:var(--accent)}
+.trisys{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.trichip{display:inline-flex;gap:4px;align-items:center;font-size:13px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--surface)}.trichip.sm{font-size:11.5px;padding:1px 8px}
+.tripl{margin:4px 0 10px}.trirow{display:flex;gap:10px;align-items:center;width:100%;text-align:start;padding:10px 6px;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;font:inherit;cursor:pointer;text-decoration:none}.trirow:last-child{border-bottom:0}.trirow:hover{background:color-mix(in srgb,var(--accent) 5%,transparent)}.trirow.sk{opacity:.6}
+.trirow .b{flex:1;min-width:0;display:flex;flex-direction:column}.trirow .t{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trirow .s{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trirow .e{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.trinum{flex:0 0 22px;font-size:12px;color:var(--ink-2);text-align:center}.trin{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:#e5484d;color:#fff;font-size:12px;font-weight:700}.trin.sm{min-width:18px;height:18px;font-size:11px}
+.triav{flex:0 0 40px;width:40px;height:40px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--accent);font-weight:700}.triav img{width:100%;height:100%;object-fit:cover;display:block}.triwho .triav{flex-basis:54px;width:54px;height:54px;font-size:20px}
+.trinm{font-size:18px;font-weight:800}
+.tricmd textarea,.tridec textarea{display:block;width:100%;resize:vertical;font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-sizing:border-box}
+.tricmd .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.tridicb.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}
+.triprog{margin:0 0 10px}.tripcs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:6px 0 2px}.tripcs::-webkit-scrollbar{display:none}.tripc{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}.tripc.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.trit .supmsgs{display:flex;flex-direction:column;gap:8px;padding-top:8px}.trith summary{cursor:pointer;margin-top:10px}.trimedia{margin-top:6px}
+.trichg{margin-top:8px;padding:9px 11px;border-radius:12px;border:1px dashed color-mix(in srgb,#e8a33d 60%,var(--line));background:color-mix(in srgb,#e8a33d 6%,var(--surface))}
+.trichg .triba{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;font-weight:600;overflow-wrap:anywhere}.trichg .ar{color:var(--ink-2)}.trwarn{margin-top:6px;color:#b97a12}
+.triopts{display:flex;flex-direction:column;gap:6px;margin-top:10px}.triopt{display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:14px}.triopt.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}.triopt input{margin:0}
+.tridec .h{margin-bottom:6px}
+.tridev summary{cursor:pointer;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.tridev summary svg{width:16px;height:16px}.trirow.sm{padding:8px 4px}
+@media (max-width:560px){.trititle{font-size:16px}.trirow .t{white-space:normal}.tricmd .row .btn,.tridec .row .btn{flex:1 1 auto;justify-content:center}}
+</style>`);
 })();
