@@ -125,9 +125,31 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clone = o => JSON.parse(JSON.stringify(o));
-const nowISO = () => new Date().toISOString();
+/* v7.67: the server clock. A phone whose clock is off (set an hour ahead by hand, or an old time-zone table) still stamps Egypt's
+   real time: NFCLK is filled by nfClockSync (99zzZzZZzzk-srv-clock) only when the phone is really off — otherwise everything stays on
+   the phone own clock exactly as before. skew = server − phone (ms) · off = Cairo's UTC offset from the server (minutes). */
+const NFCLK = { skew: 0, off: null, at: 0, diff: 0 };
+const nfNowMs = () => Date.now() + NFCLK.skew;
+const nfWall = () => NFCLK.off == null ? null : new Date(nfNowMs() + NFCLK.off * 60000); /* read with getUTC* */
+const nowISO = () => new Date(nfNowMs()).toISOString();
 function localISO(d) { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10); }
-const todayISO = () => localISO(new Date());
+const todayISO = () => { const w = nfWall(); return w ? w.toISOString().slice(0, 10) : localISO(new Date()); };
+/* v7.67 (Mahmoud 14 Oct): clock times on screen are 12-hour — «9:20 ص / 6:00 م» in Arabic, «9:20 AM / 6:00 PM» in English.
+   Stored values stay «HH:MM» (24 h) and every calculation still uses them; these two only format what is shown.
+   fmtTm('21:05') → '9:05 PM' (the Arabic letter for PM in Arabic) · fmtAtTm(iso | Date | ms) → the Egypt clock time of that moment, 12-hour. */
+const nfLangEn = () => { try { return I18N.lang === 'en'; } catch (e) { return false; } };
+function fmtTm(t) {
+  const m = /^\s*(\d{1,2}):(\d{2})/.exec(String(t ?? '')); if (!m) return t == null ? '' : String(t);
+  const h = +m[1] % 24; const pm = h >= 12; const en = nfLangEn();
+  return `${h % 12 || 12}:${m[2]} ${pm ? (en ? 'PM' : 'م') : (en ? 'AM' : 'ص')}`;
+}
+/* the Egypt wall clock (HH:MM, 24h — for storage) of any moment: uses the server offset when the phone clock / zone is off */
+function nfHM(v) {
+  const ms = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : Date.parse(v); if (!isFinite(ms)) return '';
+  let h, mi; if (NFCLK.off != null) { const w = new Date(ms + NFCLK.off * 60000); h = w.getUTCHours(); mi = w.getUTCMinutes(); } else { const d = new Date(ms); h = d.getHours(); mi = d.getMinutes(); }
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+}
+function fmtAtTm(v) { if (v == null || v === '') return ''; const t = nfHM(v); return t ? fmtTm(t) : ''; }
 const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return localISO(d); };
 const fmtDate = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—';
 const fmtDateLong = iso => { if (!iso) return '—'; const d = new Date(iso + 'T00:00:00'); return `${AR_DAYS[d.getDay()]} ${+iso.slice(8, 10)} ${AR_MONTHS[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`; };
@@ -1588,7 +1610,7 @@ document.addEventListener('nf:login', async () => { const st = S.session; if (!s
 /* =====================================================================
    Kiosk (check-in / check-out at the factory gate) · Attendance import
    ===================================================================== */
-const nowTm = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const nowTm = () => { const w = nfWall(); if (w) return `${String(w.getUTCHours()).padStart(2, '0')}:${String(w.getUTCMinutes()).padStart(2, '0')}`; const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 let _kioskTimer = null;
 function kioskHTML() { return kioskInner() + `<div id="modalroot"></div><div class="toasts" id="toasts"></div>`; }
 function kioskInner() {
@@ -1596,7 +1618,7 @@ function kioskInner() {
   let ws = list('workers').filter(w => w.status !== 'inactive'); if (f.dept) ws = ws.filter(w => w.deptId === f.dept); if (f.q) ws = ws.filter(w => (w.name + ' ' + (w.code || '')).toLowerCase().includes(f.q.toLowerCase()));
   ws = sortBy(ws, w => (w.deptId || '') + w.name);
   const present = list('workers').filter(w => att[w.id]?.in).length; const left = list('workers').filter(w => att[w.id]?.out).length;
-  const tile = w => { const r = att[w.id] || {}; const st = r.out ? `<span class="ks out">انصرف ${esc(r.out)}</span>` : r.in ? `<span class="ks in">حضر ${esc(r.in)}</span>` : r.s === 'A' ? `<span class="ks abs">غائب</span>` : r.s === 'L' ? `<span class="ks abs">إجازة</span>` : `<span class="ks none">لم يسجّل</span>`; return `<button type="button" class="ktile ${r.out ? 'done' : r.in ? 'in' : ''}" data-action="kioskTap" data-arg="${w.id}">${avatarHTML(w, 40)}<span class="kn">${esc(w.name)}</span><span class="kd">${esc(deptName(w.deptId))}${w.trade ? ' · ' + esc(w.trade) : ''}</span>${st}</button>`; };
+  const tile = w => { const r = att[w.id] || {}; const st = r.out ? `<span class="ks out">انصرف ${esc(fmtTm(r.out))}</span>` : r.in ? `<span class="ks in">حضر ${esc(fmtTm(r.in))}</span>` : r.s === 'A' ? `<span class="ks abs">غائب</span>` : r.s === 'L' ? `<span class="ks abs">إجازة</span>` : `<span class="ks none">لم يسجّل</span>`; return `<button type="button" class="ktile ${r.out ? 'done' : r.in ? 'in' : ''}" data-action="kioskTap" data-arg="${w.id}">${avatarHTML(w, 40)}<span class="kn">${esc(w.name)}</span><span class="kd">${esc(deptName(w.deptId))}${w.trade ? ' · ' + esc(w.trade) : ''}</span>${st}</button>`; };
   return `<div class="kiosk">
     <header class="khead">${logoImg(26)}<div class="grow"><div class="kt">${esc(S.settings.company)} — تسجيل الحضور والانصراف</div><div class="kdate">${fmtDateLong(date)}</div></div><div class="kclock num" id="kclock">${nowTm()}</div>${faceCfg().enabled && camAvailable() ? `<button class="btn" data-action="kioskFace">${icon('user')}بصمة الوجه</button>` : ''}<button class="iconbtn" data-action="logout" title="خروج من الكشك">${icon('logout')}</button></header>
     <div class="kbar"><div class="search"><input id="kq" placeholder="ابحث باسمك…" value="${esc(f.q)}" data-kq="1">${icon('search')}</div><select class="sel" id="kdept" data-filter="kiosk:dept"><option value="">كل الأقسام</option>${opts(S.settings.departments, f.dept)}</select><span class="muted small">حضر اليوم ${present} · انصرف ${left}</span></div>
@@ -1617,12 +1639,13 @@ ACTIONS.kioskTap = id => {
     onSubmit: async f => { const pin = $$('.pinbox input', f).map(i => i.value).join(''); const h = await hashPin(w.id, pin); if (h === w.pinHash) { closeModal(); await kioskPunch(w); return true; } $('#pinerr', f).textContent = 'الرقم السري غير صحيح'; $$('.pinbox input', f).forEach(i => i.value = ''); $$('.pinbox input', f)[0].focus(); return false; } });
 };
 async function kioskPunchBase(w, opts = {}) {
+  if (typeof nfClockSync === 'function') await nfClockSync(120000, 2500); /* v7.67: the server time, not the phone time */
   const date = todayISO(); const cur = attendanceFor(date)[w.id] || {}; const t = nowTm(); let msg, sub = '';
   const method = opts.method || 'pin'; const src = method === 'self' ? 'self' : 'kiosk';
   const gp = await punchGeo(w, method); if (gp.blocked) { if (!opts.silent) toast(gp.msg, 'err'); return { blocked: true, msg: gp.msg }; }
-  let row; const extra = { method, device: S.session?.name || src }; if (gp.geo) extra.geo = gp.geo; if (opts.faceScore != null) extra.faceScore = opts.faceScore; if (opts.verify && !cur.in) extra.verify = opts.verify;
-  if (!cur.in) { row = computeAttRow(Object.assign({}, cur, { in: t, out: cur.out || null, s: 'P', src, kioskIn: nowISO() }, extra), w); msg = `تم تسجيل الحضور ${t}`; if (row.late) sub = `متأخر ${row.late} دقيقة`; }
-  else { row = autoAllocRow(w, computeAttRow(Object.assign({}, cur, { out: t, src: cur.src || src, kioskOut: nowISO(), outMethod: method }, gp.geo ? { geoOut: gp.geo } : {}, opts.verify ? { verifyOut: opts.verify } : {}), w)); msg = cur.out ? `تم تحديث الانصراف ${t}` : `تم تسجيل الانصراف ${t}`; sub = `${fmtHrs(row.hrs)} ساعة عمل${row.ot ? ` · ${fmtHrs(row.ot)} إضافي` : ''}`; }
+  let row; const extra = { method, device: S.session?.name || src }; if (gp.geo) extra.geo = gp.geo; if (Math.abs(NFCLK.diff || 0) >= 5) extra.clkIn = NFCLK.diff; if (opts.faceScore != null) extra.faceScore = opts.faceScore; if (opts.verify && !cur.in) extra.verify = opts.verify;
+  if (!cur.in) { row = computeAttRow(Object.assign({}, cur, { in: t, out: cur.out || null, s: 'P', src, kioskIn: nowISO() }, extra), w); msg = `تم تسجيل الحضور ${fmtTm(t)}`; if (row.late) sub = `متأخر ${row.late} دقيقة`; }
+  else { row = autoAllocRow(w, computeAttRow(Object.assign({}, cur, { out: t, src: cur.src || src, kioskOut: nowISO(), outMethod: method }, gp.geo ? { geoOut: gp.geo } : {}, Math.abs(NFCLK.diff || 0) >= 5 ? { clkOut: NFCLK.diff } : {}, opts.verify ? { verifyOut: opts.verify } : {}), w)); msg = cur.out ? `تم تحديث الانصراف ${fmtTm(t)}` : `تم تسجيل الانصراف ${fmtTm(t)}`; sub = `${fmtHrs(row.hrs)} ساعة عمل${row.ot ? ` · ${fmtHrs(row.ot)} إضافي` : ''}`; }
   if (gp.geo && gp.geo.inside === false) sub += (sub ? ' · ' : '') + `خارج النطاق المسموح (${fmtNum(gp.geo.dist)} م)`;
   const tw = todayOrdersFor(w); const todayOrders = !cur.in ? tw.orders : [];
   try { await setAtt(date, w, row); } catch (e) { return { blocked: true, msg: 'تعذّر الحفظ' }; }
@@ -1930,7 +1953,7 @@ function workerFormBase(w) {
     ${field('الموبايل الشخصي (يدخل به على السيستم)', inp('phone', w.phone || '', 'inputmode="tel" class="ltr" style="text-align:right" placeholder="01xxxxxxxxx"'))}${field('موبايل الشركة (لمن يُصرف له)', inp('workPhone', w.workPhone || '', 'inputmode="tel" class="ltr" style="text-align:right" placeholder="اختياري"'))}${field('الرقم القومي', inp('nationalId', w.nationalId || '', 'inputmode="numeric" class="ltr" style="text-align:right"'))}
     ${field('تاريخ الميلاد', inp('birthDate', w.birthDate || '', 'type="date"'))}${field('تاريخ التعيين', inp('joined', w.joined || todayISO(), 'type="date"'))}
     ${field('العنوان', inp('address', w.address || ''), 'full')}
-    ${field('نوع التعاقد', `<select id="f-contract" name="contract">${opts(Object.keys(CONTRACTS), w.contract || 'daily', k => CONTRACTS[k])}</select>`)}${field('الوردية', `<select id="f-shiftId" name="shiftId">${opts(S.settings.shifts, w.shiftId || S.settings.shifts[0].id, x => `${x.name}${x.remote ? ' 🏠' : ''} (${x.start}–${x.end})`)}</select><div class="hint">وردية «عمل من البيت» = يبصم من أي مكان بدون قيد الموقع</div>`)}
+    ${field('نوع التعاقد', `<select id="f-contract" name="contract">${opts(Object.keys(CONTRACTS), w.contract || 'daily', k => CONTRACTS[k])}</select>`)}${field('الوردية', `<select id="f-shiftId" name="shiftId">${opts(S.settings.shifts, w.shiftId || S.settings.shifts[0].id, x => `${x.name}${x.remote ? ' 🏠' : ''} (${fmtTm(x.start)} – ${fmtTm(x.end)})`)}</select><div class="hint">وردية «عمل من البيت» = يبصم من أي مكان بدون قيد الموقع</div>`)}
     ${seesWages() ? `${field(`اليومية (${CUR()}) — للتعاقد اليومي`, inp('dailyWage', w.dailyWage ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field(`الراتب الأساسي الشهري (${CUR()})`, inp('basic', w.basic ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field(`بدلات شهرية (${CUR()})`, inp('allowances', w.allowances ?? '', 'type="number" step="any" min="0" inputmode="decimal"'))}${field('رقم التأمينات', inp('insuranceNo', w.insuranceNo || '', 'class="ltr" style="text-align:right"'))}${field(`اشتراك التأمين الصحي الشهري (${CUR()}) — الشركة تتحمل ${S.settings.policy?.healthInsCompanyPct ?? 50}%`, inp('healthIns', w.healthIns ?? '', 'type="number" step="any" min="0"'))}` : ''}
     <div class="field full"><label>أيام الراحة الأسبوعية (اتركها فارغة لاتباع الوردية)</label><div class="row" style="gap:6px">${AR_DAYS.map((d, i) => `<label class="check ${(w.offDays || []).map(Number).includes(i) ? 'on' : ''}"><input type="checkbox" name="off-${i}" id="f-off-${i}" ${(w.offDays || []).map(Number).includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
     ${field('رصيد الإجازة السنوية (يوم/سنة)', inp('annualDays', w.annualDays ?? '', 'type="number" min="0" placeholder="افتراضي ' + (lt('annual')?.days ?? 21) + '"'))}${field('جهة اتصال للطوارئ', inp('emergency', w.emergency || ''))}
@@ -1983,7 +2006,7 @@ function vWorkerDetailBase(id) {
   const tabs = [['attendance', 'الحضور'], ['orders', 'أوامر التشغيل'], ['requests', 'الطلبات'], ['penalties', 'الجزاءات والسلف']]; if (seesWages()) tabs.push(['pay', 'الرواتب']); tabs.push(['eval', 'التقييم'], ['info', 'البيانات']);
   let body = '';
   if (tab === 'attendance') {
-    body = `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>اليوم</th><th>الحالة</th><th>حضور</th><th>انصراف</th><th class="n">ساعات</th><th class="n">تأخير</th><th class="n">مبكر</th><th class="n">إضافي</th><th>إذن / ملاحظة</th></tr></thead><tbody>${monthDates(ym).filter(d => d <= todayISO()).map(d => { const r = rows[d]; const c = classifyDay(w, d, r); const cls = c.kind === 'absent' ? 'style="color:var(--crit-ink)"' : c.kind === 'off' || c.kind === 'holiday' ? 'style="color:var(--muted)"' : ''; return `<tr ${cls}><td>${fmtDate(d)}</td><td>${dayName(d)}</td><td>${esc(c.label)} ${r ? methodBadge(r) : ''} ${geoBadge(r?.geo)} ${verifyBadge(r)}</td><td>${esc(r?.in || '')}</td><td>${esc(r?.out || '')}</td><td class="n">${r?.hrs != null ? fmtHrs(r.hrs) : ''}</td><td class="n">${r?.late ? r.late + ' د' : ''}</td><td class="n">${r?.early ? r.early + ' د' : ''}</td><td class="n">${r?.ot ? fmtHrs(r.ot) : ''}</td><td class="small">${r?.perm ? `<span class="badge acc">إذن ${fmtNum(r.perm.h)} س</span> ` : ''}${esc(r?.note || '')}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+    body = `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>اليوم</th><th>الحالة</th><th>حضور</th><th>انصراف</th><th class="n">ساعات</th><th class="n">تأخير</th><th class="n">مبكر</th><th class="n">إضافي</th><th>إذن / ملاحظة</th></tr></thead><tbody>${monthDates(ym).filter(d => d <= todayISO()).map(d => { const r = rows[d]; const c = classifyDay(w, d, r); const cls = c.kind === 'absent' ? 'style="color:var(--crit-ink)"' : c.kind === 'off' || c.kind === 'holiday' ? 'style="color:var(--muted)"' : ''; return `<tr ${cls}><td>${fmtDate(d)}</td><td>${dayName(d)}</td><td>${esc(c.label)} ${r ? methodBadge(r) : ''} ${geoBadge(r?.geo)} ${verifyBadge(r)}</td><td>${esc(fmtTm(r?.in || ''))}</td><td>${esc(fmtTm(r?.out || ''))}</td><td class="n">${r?.hrs != null ? fmtHrs(r.hrs) : ''}</td><td class="n">${r?.late ? r.late + ' د' : ''}</td><td class="n">${r?.early ? r.early + ' د' : ''}</td><td class="n">${r?.ot ? fmtHrs(r.ot) : ''}</td><td class="small">${r?.perm ? `<span class="badge acc">إذن ${fmtNum(r.perm.h)} س</span> ` : ''}${esc(r?.note || '')}</td></tr>`; }).join('')}</tbody></table></div></div>`;
   } else if (tab === 'orders') {
     const byO = {}; Object.entries(rows).forEach(([date, r]) => (r.alloc || []).forEach(a => { const b = byO[a.orderId] ||= { h: 0, days: 0 }; b.h += +a.h || 0; b.days++; })); const arr = sortBy(Object.entries(byO).map(([oid, b]) => ({ o: byId('orders', oid), oid, b })), x => -x.b.h);
     body = arr.length ? `<div class="card tight"><div class="tablewrap"><table><thead><tr><th>أمر التشغيل</th><th>العميل</th><th>الحالة</th><th class="n">أيام</th><th class="n">ساعات</th>${seesWages() ? '<th class="n">تكلفة</th>' : ''}</tr></thead><tbody>${arr.map(x => `<tr class="click" data-action="go" data-arg="orders/${x.oid}"><td><span class="code">${esc(x.o?.code || '?')}</span> ${esc(x.o?.title || '')}</td><td>${esc(clientName(x.o?.clientId))}</td><td>${x.o ? badge(ORDER_STATUS, x.o.status) : ''}</td><td class="n">${x.b.days}</td><td class="n">${fmtHrs(x.b.h)}</td>${seesWages() ? `<td class="n">${fmtMoney(x.b.h * hourlyRate(w))}</td>` : ''}</tr>`).join('')}</tbody></table></div></div><p class="tiny muted" style="margin-top:8px">ساعات ${fmtMonth(ym)} موزعة على أوامر التشغيل (تلقائيًا عند الانصراف أو يدويًا من الحضور اليومي)</p>` : `<div class="empty"><b>لا توجد ساعات موزعة على أوامر تشغيل في ${fmtMonth(ym)}</b></div>`;
@@ -1999,7 +2022,7 @@ function vWorkerDetailBase(id) {
     body = `<div class="card"><div class="cardhead"><h3>التقييم الشهري</h3><div class="grow"></div>${canEditHr() || (role() === 'head' && myDepts().includes(w.deptId)) ? `<button class="btn sm" data-action="evalNew" data-arg="${w.id}">${icon('star')}تقييم</button>` : ''}</div>${evals.length ? `<div class="tablewrap"><table><thead><tr><th>الشهر</th><th>الإنتاجية</th><th>الجودة</th><th>الالتزام</th><th>السلوك</th><th class="n">المتوسط</th><th>ملاحظات</th><th>بواسطة</th></tr></thead><tbody>${evals.map(e => `<tr><td>${fmtMonth(e.month)}</td><td>${stars(e.productivity)}</td><td>${stars(e.quality)}</td><td>${stars(e.discipline)}</td><td>${stars(e.behavior)}</td><td class="n"><b>${fmtNum(e.avg)}</b> / 5</td><td class="small">${esc(e.note || '')}</td><td class="small muted">${esc(e.byName || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد تقييمات بعد</div>'}</div>`;
   } else {
     const row = (l, v) => `<div><div class="tiny muted">${l}</div><div>${v || '—'}</div></div>`;
-    body = `<div class="card"><div class="grid g3" style="gap:12px 16px;font-size:13px">${row('الكود', `<span class="code">${esc(w.code || '')}</span>`)}${row('القسم', esc(deptName(w.deptId)))}${row('الوظيفة', esc(w.trade))}${row('الموبايل الشخصي', `<span class="ltr">${esc(w.phone || '')}</span>`)}${row('موبايل الشركة', `<span class="ltr">${esc(w.workPhone || '')}</span>`)}${row('الرقم القومي', `<span class="ltr">${esc(w.nationalId || '')}</span>`)}${row('تاريخ الميلاد', fmtDate(w.birthDate))}${row('تاريخ التعيين', fmtDate(w.joined))}${row('نوع التعاقد', CONTRACTS[w.contract] || CONTRACTS.daily)}${row('الوردية', esc(shiftName(w)) + ` <span class="muted small">${esc(shiftFor(w).start)}–${esc(shiftFor(w).end)}</span>`)}${row('أيام الراحة', offDaysFor(w).map(i => AR_DAYS[i]).join('، '))}${seesWages() ? row('الأجر', w.contract === 'monthly' ? `${fmtMoney(w.basic)} أساسي + ${fmtMoney(w.allowances)} بدلات` : `${fmtMoney(w.dailyWage)} / يوم`) : ''}${seesWages() ? row('رقم التأمينات', `<span class="ltr">${esc(w.insuranceNo || '')}</span>`) : ''}${row('العنوان', esc(w.address))}${row('طوارئ', esc(w.emergency))}${row('المدير المباشر', managerLink(w))}${row('الدخول للسيستم', w.role && w.role !== 'none' ? `${esc(ROLES[w.role])}${w.role === 'head' ? ' — ' + sessFromWorker(w).deptIds.map(deptName).join('، ') : ''} · يدخل بـ: <span class="code">${esc(w.username || w.phone || w.workPhone || '—')}</span>${w.passHash ? ' + كلمة سر' : ''}${w.face && w.face.d && punchMethodsOf(w).selfie !== false ? ' / بصمة الوجه' : ''}${w.deviceCred ? ' / بصمة الجهاز' : ''}` : 'بدون دخول (كشك فقط)')}${row('الرقم السري', w.pinHash ? 'مضبوط' : 'غير مضبوط')}${row('بصمة الوجه', w.face && w.face.d ? `مسجّلة (${w.face.n || w.face.d.length} صور) — ${fmtDate((w.face.at || '').slice(0, 10))}` : 'غير مسجّلة')}${row('مكان البصمة', PUNCH_AT[punchAtOf(w)] + ' — ' + esc(zoneSummary(w)))}${row('طرق البصمة', Object.entries(punchMethodsOf(w)).filter(x => x[1]).map(x => ({ face: 'وجه بالكشك', pin: 'رقم سري', device: 'بصمة الجهاز', selfie: 'تحقق بالوجه من الموبايل' })[x[0]]).join('، '))}${row('كود Mawared', esc(w.extId))}${row('الموظفون التابعون له', list('workers').filter(x => x.managerId === w.id).map(x => esc(x.name)).join('، '))}</div>${w.notes ? `<div class="sep"></div><div class="small" style="white-space:pre-wrap">${esc(w.notes)}</div>` : ''}</div>`;
+    body = `<div class="card"><div class="grid g3" style="gap:12px 16px;font-size:13px">${row('الكود', `<span class="code">${esc(w.code || '')}</span>`)}${row('القسم', esc(deptName(w.deptId)))}${row('الوظيفة', esc(w.trade))}${row('الموبايل الشخصي', `<span class="ltr">${esc(w.phone || '')}</span>`)}${row('موبايل الشركة', `<span class="ltr">${esc(w.workPhone || '')}</span>`)}${row('الرقم القومي', `<span class="ltr">${esc(w.nationalId || '')}</span>`)}${row('تاريخ الميلاد', fmtDate(w.birthDate))}${row('تاريخ التعيين', fmtDate(w.joined))}${row('نوع التعاقد', CONTRACTS[w.contract] || CONTRACTS.daily)}${row('الوردية', esc(shiftName(w)) + ` <span class="muted small">${esc(fmtTm(shiftFor(w).start))} – ${esc(fmtTm(shiftFor(w).end))}</span>`)}${row('أيام الراحة', offDaysFor(w).map(i => AR_DAYS[i]).join('، '))}${seesWages() ? row('الأجر', w.contract === 'monthly' ? `${fmtMoney(w.basic)} أساسي + ${fmtMoney(w.allowances)} بدلات` : `${fmtMoney(w.dailyWage)} / يوم`) : ''}${seesWages() ? row('رقم التأمينات', `<span class="ltr">${esc(w.insuranceNo || '')}</span>`) : ''}${row('العنوان', esc(w.address))}${row('طوارئ', esc(w.emergency))}${row('المدير المباشر', managerLink(w))}${row('الدخول للسيستم', w.role && w.role !== 'none' ? `${esc(ROLES[w.role])}${w.role === 'head' ? ' — ' + sessFromWorker(w).deptIds.map(deptName).join('، ') : ''} · يدخل بـ: <span class="code">${esc(w.username || w.phone || w.workPhone || '—')}</span>${w.passHash ? ' + كلمة سر' : ''}${w.face && w.face.d && punchMethodsOf(w).selfie !== false ? ' / بصمة الوجه' : ''}${w.deviceCred ? ' / بصمة الجهاز' : ''}` : 'بدون دخول (كشك فقط)')}${row('الرقم السري', w.pinHash ? 'مضبوط' : 'غير مضبوط')}${row('بصمة الوجه', w.face && w.face.d ? `مسجّلة (${w.face.n || w.face.d.length} صور) — ${fmtDate((w.face.at || '').slice(0, 10))}` : 'غير مسجّلة')}${row('مكان البصمة', PUNCH_AT[punchAtOf(w)] + ' — ' + esc(zoneSummary(w)))}${row('طرق البصمة', Object.entries(punchMethodsOf(w)).filter(x => x[1]).map(x => ({ face: 'وجه بالكشك', pin: 'رقم سري', device: 'بصمة الجهاز', selfie: 'تحقق بالوجه من الموبايل' })[x[0]]).join('، '))}${row('كود Mawared', esc(w.extId))}${row('الموظفون التابعون له', list('workers').filter(x => x.managerId === w.id).map(x => esc(x.name)).join('، '))}</div>${w.notes ? `<div class="sep"></div><div class="small" style="white-space:pre-wrap">${esc(w.notes)}</div>` : ''}</div>`;
   }
   return `<div class="stack">
     <div class="card"><div class="row" style="align-items:flex-start"><div style="cursor:${canEditHr() ? 'pointer' : 'default'}" ${canEditHr() ? `data-action="photoSet" data-arg="${w.id}" title="تغيير الصورة"` : ''}>${avatarHTML(w, 64)}</div><div class="grow"><h2 style="margin:0">${esc(w.name)} <span class="code muted" style="font-size:12px">${esc(w.code || '')}</span></h2><div class="muted small">${esc(deptName(w.deptId))} · ${esc(w.trade || '')} · ${CONTRACTS[w.contract] || CONTRACTS.daily} · ${esc(shiftName(w))} · منذ ${fmtDate(w.joined)}${w.managerId ? ` · المدير المباشر: <a href="#/workers/${w.managerId}">${esc(byId('workers', w.managerId)?.name || '')}</a>` : ''}${w.role && w.role !== 'none' ? ` · <span class="badge acc">${esc(ROLES[w.role] || w.role)}</span>` : ''}${w.status === 'inactive' ? ' · <span class="badge">ترك العمل</span>' : ''}</div></div>
@@ -2022,7 +2045,7 @@ function reqDescBase(r) {
   if (r.type === 'permission') return `${PERM_KINDS[r.kind] || 'إذن'} · ${fmtDate(r.from)} · ${fmtNum(r.hours)} ساعة`;
   if (r.type === 'advance') return `سلفة ${fmtMoney(r.amount)} ${CUR()} على ${r.installments || 1} شهر`;
   if (r.type === 'password') return `كلمة سر جديدة للدخول · التحقق: ${VERIFY_LABEL[r.verified] || VERIFY_LABEL.none}`;
-  if (r.type === 'punch') return `نسي بصمة ${PUNCH_KINDS[r.punchKind] || ''} · ${fmtDate(r.from)}${r.timeIn ? ` · حضور ${r.timeIn}` : ''}${r.timeOut ? ` · انصراف ${r.timeOut}` : ''}`;
+  if (r.type === 'punch') return `نسي بصمة ${PUNCH_KINDS[r.punchKind] || ''} · ${fmtDate(r.from)}${r.timeIn ? ` · حضور ${fmtTm(r.timeIn)}` : ''}${r.timeOut ? ` · انصراف ${fmtTm(r.timeOut)}` : ''}`;
   if (r.type === 'regchange') return `${r.paramLabel || regParam(r.paramId)?.label || r.paramId}: من ${regFmt(r.paramId, r.oldValue)} إلى ${regFmt(r.paramId, r.newValue)}`;
   return r.type;
 }
@@ -2170,7 +2193,7 @@ ACTIONS.payslipsAll = ym => { const f = S.ui.filter.payroll || {}; const ws = hr
 /* ---------------- HR settings tabs ---------------- */
 function settingsShiftsTab() {
   return `<div class="card"><div class="cardhead"><h3>الورديات</h3><span class="muted small">كل موظف يتبع وردية تحدد أوقاته وأيام راحته وقواعد التأخير والإضافي</span><div class="grow"></div><button class="btn p sm" data-action="shiftEdit" data-arg="">${icon('plus')}وردية</button></div>
-    <div class="list">${S.settings.shifts.map(s => `<div class="item" data-action="shiftEdit" data-arg="${s.id}"><div class="main"><div class="title">${esc(s.name)} <span class="code muted">${esc(s.start)}–${esc(s.end)}</span>${s.remote ? '<span class="badge acc">من البيت</span>' : ''}</div><div class="meta"><span>بريك ${s.breakMinutes || 0} د</span><span>سماح ${s.graceMinutes || 0} د</span><span>الإضافي بعد ${s.otAfterMinutes || 0} د</span><span>راحة: ${(s.offDays || []).map(i => AR_DAYS[i]).join('، ') || '—'}</span><span>${list('workers').filter(w => (w.shiftId || S.settings.shifts[0].id) === s.id).length} موظف</span></div></div><div class="end">${icon('edit')}</div></div>`).join('')}</div></div>`;
+    <div class="list">${S.settings.shifts.map(s => `<div class="item" data-action="shiftEdit" data-arg="${s.id}"><div class="main"><div class="title">${esc(s.name)} <span class="code muted">${esc(fmtTm(s.start))} – ${esc(fmtTm(s.end))}</span>${s.remote ? '<span class="badge acc">من البيت</span>' : ''}</div><div class="meta"><span>بريك ${s.breakMinutes || 0} د</span><span>سماح ${s.graceMinutes || 0} د</span><span>الإضافي بعد ${s.otAfterMinutes || 0} د</span><span>راحة: ${(s.offDays || []).map(i => AR_DAYS[i]).join('، ') || '—'}</span><span>${list('workers').filter(w => (w.shiftId || S.settings.shifts[0].id) === s.id).length} موظف</span></div></div><div class="end">${icon('edit')}</div></div>`).join('')}</div></div>`;
 }
 ACTIONS.shiftEdit = id => {
   const s = id ? S.settings.shifts.find(x => x.id === id) : {}; const isNew = !id;
@@ -2219,7 +2242,7 @@ function rLateness() {
   ws.forEach(w => { const rows = attMonthRows(w, ym); Object.entries(rows).forEach(([date, r]) => { const ex = excused(r); if ((r.late && !ex.late) || (r.early && !ex.early)) out.push({ w, date, r, ex }); }); });
   out.sort((a, b) => (a.date < b.date ? 1 : -1));
   return `<div class="toolbar no-print">${monthNavBar('rLate')}${role() !== 'head' ? `<select class="sel" id="fl-rlatedept" data-filter="rLate:dept"><option value="">كل الأقسام</option>${opts(S.settings.departments, f.dept)}</select>` : ''}<div class="grow"></div><button class="btn sm p" data-action="printReport">${icon('print')}طباعة</button></div>
-  <div class="report" id="printarea">${reportHead('تقرير التأخير والانصراف المبكر', fmtMonth(ym))}${out.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>القسم</th><th>حضور</th><th>انصراف</th><th class="n">تأخير (د)</th><th class="n">مبكر (د)</th><th>الخصم المتوقع</th></tr></thead><tbody>${out.map(x => `<tr><td>${fmtDate(x.date)} <span class="tiny muted">${dayName(x.date)}</span></td><td>${esc(x.w.name)}</td><td class="small">${esc(deptName(x.w.deptId))}</td><td>${esc(x.r.in || '')}</td><td>${esc(x.r.out || '')}</td><td class="n">${x.r.late && !x.ex.late ? x.r.late : ''}</td><td class="n">${x.r.early && !x.ex.early ? x.r.early : ''}</td><td class="n">${fmtNum(tierDays(S.settings.policy.lateTiers, x.r.late && !x.ex.late ? +x.r.late : 0) + tierDays(S.settings.policy.earlyTiers, x.r.early && !x.ex.early ? +x.r.early : 0))} يوم</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">لا يوجد تأخير مسجّل هذا الشهر</p>'}</div>`;
+  <div class="report" id="printarea">${reportHead('تقرير التأخير والانصراف المبكر', fmtMonth(ym))}${out.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>القسم</th><th>حضور</th><th>انصراف</th><th class="n">تأخير (د)</th><th class="n">مبكر (د)</th><th>الخصم المتوقع</th></tr></thead><tbody>${out.map(x => `<tr><td>${fmtDate(x.date)} <span class="tiny muted">${dayName(x.date)}</span></td><td>${esc(x.w.name)}</td><td class="small">${esc(deptName(x.w.deptId))}</td><td>${esc(fmtTm(x.r.in || ''))}</td><td>${esc(fmtTm(x.r.out || ''))}</td><td class="n">${x.r.late && !x.ex.late ? x.r.late : ''}</td><td class="n">${x.r.early && !x.ex.early ? x.r.early : ''}</td><td class="n">${fmtNum(tierDays(S.settings.policy.lateTiers, x.r.late && !x.ex.late ? +x.r.late : 0) + tierDays(S.settings.policy.earlyTiers, x.r.early && !x.ex.early ? +x.r.early : 0))} يوم</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">لا يوجد تأخير مسجّل هذا الشهر</p>'}</div>`;
 }
 function rLeaves() {
   const f = S.ui.filter.rLeaves ||= { dept: '' }; const year = todayISO().slice(0, 4); const ws = hrWorkers(f.dept).filter(w => w.status !== 'inactive'); const types = S.settings.leaveTypes.filter(t => !t.noBalance);
@@ -2340,7 +2363,7 @@ function vMeBase() {
   const w = S.session?.workerId ? byId('workers', S.session.workerId) : null; if (!w) return `<div class="empty"><b>هذه الصفحة للموظفين المرتبطين بملف موظف</b></div>`;
   const date = todayISO(); const r = attendanceFor(date)[w.id] || {}; const ym = monthOf(date); const s = hrMonthSummary(w, ym); const bal = leaveBalances(w); const g = geoCfg();
   const reqs = sortBy(list('requests').filter(x => x.workerId === w.id), x => x.createdAt || '', true).slice(0, 6); const tw = todayOrdersFor(w); const orders = tw.orders;
-  const st = r.out ? `انصرفت ${esc(r.out)}` : r.in ? `حضرت ${esc(r.in)}` : r.s === 'L' ? 'إجازة' : r.s === 'A' ? 'غياب' : 'لم تسجّل حضورك بعد';
+  const st = r.out ? `انصرفت ${esc(fmtTm(r.out))}` : r.in ? `حضرت ${esc(fmtTm(r.in))}` : r.s === 'L' ? 'إجازة' : r.s === 'A' ? 'غياب' : 'لم تسجّل حضورك بعد';
   const pm = punchMethodsOf(w); const z = zonesFor(w); const zoneLine = z.unrestricted ? 'بدون قيد موقع' : (z.zones.length ? `${z.projectDay ? 'أنت اليوم ضمن فريق تركيب — ' : ''}مسموح لك البصمة في: ${z.zones.map(x => `${esc(x.name)} (${x.radius} م${x.to ? `، حتى ${fmtDate(x.to)}` : ''})`).join(' · ')}` : 'لم يُحدَّد لك موقع بصمة بعد — راجع الموارد البشرية');
   return `<div class="stack" style="max-width:720px">
     <div class="card" style="text-align:center;padding:24px 16px"><div style="display:flex;justify-content:center;margin-bottom:8px">${avatarHTML(w, 64)}</div><div class="muted small">${fmtDateLong(date)}</div><div style="font-size:22px;font-weight:700;margin:6px 0">${st}</div>${r.geo ? `<div style="margin-bottom:8px">${geoBadge(r.geo)}</div>` : ''}<div id="geo-live" class="tiny muted" style="min-height:16px">${zoneLine}</div>
@@ -2896,7 +2919,7 @@ function punchFailBox(w, res) {
   S._bioFail = { wid: w.id, kind, at: nowISO(), frame: res.frame || null, tried: res.tried || [] };
   try { Promise.resolve(typeof getGeoBase === 'function' ? getGeoBase(6000) : null).then(g => { if (S._bioFail && S._bioFail.wid === w.id && g) S._bioFail.geo = { lat: g.lat, lng: g.lng, acc: g.acc }; }).catch(() => { }); } catch (e) { /* no location */ }
   openModal({ title: 'ماقدرناش نتأكد منك دلوقتي', footer: `${done ? '' : `<button type="button" class="btn p" id="pf-req">${icon('plus')}قدّم طلب بصمة</button>`}<button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
-    body: `<p>${esc(why)}.</p><p class="small ink2">${done ? `انصرافك متسجّل الساعة ${esc(cur.out)} — جرّب تاني في مكان فيه نور لو عايز تحدّثه.` : 'جرّب تاني في مكان فيه نور، أو قدّم طلب بصمة بالوقت دلوقتي — بيروح لرئيس قسمك ومعاه مكانك والصورة.'}</p>${res.frame ? `<div style="text-align:center"><img src="${res.frame}" alt="" style="max-width:140px;border-radius:10px"></div>` : ''}`,
+    body: `<p>${esc(why)}.</p><p class="small ink2">${done ? `انصرافك متسجّل الساعة ${esc(fmtTm(cur.out))} — جرّب تاني في مكان فيه نور لو عايز تحدّثه.` : 'جرّب تاني في مكان فيه نور، أو قدّم طلب بصمة بالوقت دلوقتي — بيروح لرئيس قسمك ومعاه مكانك والصورة.'}</p>${res.frame ? `<div style="text-align:center"><img src="${res.frame}" alt="" style="max-width:140px;border-radius:10px"></div>` : ''}`,
     onOpen: f => { const rb = $('#pf-req', f); if (rb) rb.addEventListener('click', () => { closeModal(); ACTIONS.kioskReq(w.id); setTimeout(() => punchReqFill(kind), 60); }); } });
 }
 function punchReqFill(kind) {
@@ -2994,10 +3017,10 @@ function reqStepsHTML(r) {
 ACTIONS.reqOpen = id => {
   const r = byId('requests', id); if (!r) return; const w = byId('workers', r.workerId); const mine = !!r.workerId && S.session?.workerId === r.workerId; if (!mine && !requestVisible(r)) return;
   const me = S.session || {}; const can = awaitingMe(r); const canCancel = r.status === 'pending' && (canEditHr() || mine || r.createdBy === me.id);
-  const msgs = reqTimeline(r).map(m => m.kind === 'system' ? `<div class="msg sys">${esc(m.text)} · ${fmtDate((m.at || '').slice(0, 10))}</div>` : `<div class="msg ${m.by === me.id ? 'me' : ''} ${m.kind === 'decision' ? 'dec' : ''}"><div class="tiny muted">${esc(m.byName || '')}${threadRoleLabel(m) ? ` · ${threadRoleLabel(m)}` : ''} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div><div>${esc(m.text)}</div></div>`).join('');
+  const msgs = reqTimeline(r).map(m => m.kind === 'system' ? `<div class="msg sys">${esc(m.text)} · ${fmtDate((m.at || '').slice(0, 10))}</div>` : `<div class="msg ${m.by === me.id ? 'me' : ''} ${m.kind === 'decision' ? 'dec' : ''}"><div class="tiny muted">${esc(m.byName || '')}${threadRoleLabel(m) ? ` · ${threadRoleLabel(m)}` : ''} · ${fmtDate((m.at || '').slice(0, 10))} ${fmtAtTm(m.at)}</div><div>${esc(m.text)}</div></div>`).join('');
   openModal({ title: `${REQ_TYPES[r.type] || r.type} — ${w?.name || ''}`, wide: true, footer: `${canCancel ? `<button type="button" class="btn ghost" data-action="reqCancel" data-arg="${r.id}">إلغاء الطلب</button>` : ''}<div class="grow"></div><button type="button" class="btn" data-action="closemodal">إغلاق</button>`,
     body: `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="badge acc">${REQ_TYPES[r.type] || r.type}</span><span class="small">${esc(reqDesc(r))}</span>${stageChip(r)}</div>
-      <div class="tiny muted" style="margin-bottom:10px">${esc(deptName(r.deptId))} · قُدّم ${fmtDate((r.createdAt || '').slice(0, 10))} ${(r.createdAt || '').slice(11, 16)} بواسطة ${esc(r.createdByName || '')}${r.reason ? ` · السبب: «${esc(r.reason)}»` : ''}</div>
+      <div class="tiny muted" style="margin-bottom:10px">${esc(deptName(r.deptId))} · قُدّم ${fmtDate((r.createdAt || '').slice(0, 10))} ${fmtAtTm(r.createdAt)} بواسطة ${esc(r.createdByName || '')}${r.reason ? ` · السبب: «${esc(r.reason)}»` : ''}</div>
       ${reqStepsHTML(r)}
       <div class="thread" id="rq-thread">${msgs || '<div class="msg sys">لا توجد ردود بعد</div>'}</div>
       <div class="row" style="margin-top:10px;gap:6px"><input id="rq-msg" class="inp" style="flex:1;min-width:160px" placeholder="${can ? 'اكتب ردك أو ملاحظة القرار…' : 'اكتب ردًا…'}"><button type="button" class="btn" data-action="reqComment" data-arg="${r.id}">إرسال رد</button>${can ? `<button type="button" class="btn p" data-action="reqAct" data-arg="${r.id}:approved">${icon('check')}موافقة</button><button type="button" class="btn d" data-action="reqAct" data-arg="${r.id}:rejected">رفض</button>` : ''}</div>
@@ -3101,7 +3124,7 @@ function vRegulation(gate) {
     <p class="small muted">السادة الزملاء… تحية طيبة وبعد، إليكم لائحة العمل الخاصة بشركة نينتي ديجري.</p>
     <div id="regtext" class="regtext">${regulationHTML(reg.text)}</div>
     <div class="sep"></div>
-    ${ack ? `<div class="banner info" style="margin:0">${icon('check')}<span>تمت الموافقة على هذه اللائحة${ack.via === 'paper' ? ' (توقيع ورقي سجّلته الموارد البشرية)' : ''} بتاريخ ${fmtDate((ack.at || '').slice(0, 10))} ${(ack.at || '').slice(11, 16)}</span></div>` : canAck ? `<form id="regackform" class="stack" style="gap:10px"><label class="check"><input type="checkbox" name="agree" id="f-agree" required> أقرّ بأنني قرأت لائحة العمل الداخلية كاملة وفهمتها وأوافق على كل شروطها وبنودها</label><button type="submit" class="btn p" style="align-self:flex-start;padding:10px 24px">${icon('check')}أوافق على اللائحة</button><div class="tiny muted">تُسجَّل الموافقة باسمك ووقتها في ملفك، وتُعتبر إقرارًا بالعلم باللائحة وجزاءاتها.</div></form>` : (m && m.rec ? '' : `<div class="tiny muted">هذا الحساب غير مرتبط بملف موظف، لذا لا تُطلب منه الموافقة.</div>`)}
+    ${ack ? `<div class="banner info" style="margin:0">${icon('check')}<span>تمت الموافقة على هذه اللائحة${ack.via === 'paper' ? ' (توقيع ورقي سجّلته الموارد البشرية)' : ''} بتاريخ ${fmtDate((ack.at || '').slice(0, 10))} ${fmtAtTm(ack.at)}</span></div>` : canAck ? `<form id="regackform" class="stack" style="gap:10px"><label class="check"><input type="checkbox" name="agree" id="f-agree" required> أقرّ بأنني قرأت لائحة العمل الداخلية كاملة وفهمتها وأوافق على كل شروطها وبنودها</label><button type="submit" class="btn p" style="align-self:flex-start;padding:10px 24px">${icon('check')}أوافق على اللائحة</button><div class="tiny muted">تُسجَّل الموافقة باسمك ووقتها في ملفك، وتُعتبر إقرارًا بالعلم باللائحة وجزاءاتها.</div></form>` : (m && m.rec ? '' : `<div class="tiny muted">هذا الحساب غير مرتبط بملف موظف، لذا لا تُطلب منه الموافقة.</div>`)}
   </div>`;
 }
 document.addEventListener('submit', async ev => {
@@ -3120,7 +3143,7 @@ function settingsRegulationTab() {
     <div class="form">${field('العنوان', inp('title', reg.title))}${field('رقم الإصدار', inp('version', reg.version, 'type="number" min="1" step="1"'))}
     ${field('نص اللائحة (سطر يبدأ بـ ## = عنوان قسم، سطر يبدأ بـ - = بند)', `<textarea id="f-text" name="text" style="min-height:360px;direction:rtl;font-family:inherit">${esc(reg.text)}</textarea>`, 'full')}</div>
     <div class="row" style="margin-top:14px"><button type="submit" class="btn p">حفظ اللائحة</button><button type="button" class="btn" data-action="regApply">${icon('settings')}تطبيق بنود اللائحة على الإعدادات</button><span class="tiny muted">التطبيق يضبط: الوردية 9–5، شرائح التأخير، الغياب 3 أيام، نسيان البصمة، الإجازات 12 + مصيف 7، الأعياد، الراتب ÷ 26، الإضافي بتكليف، الوجبات، البونص، السفر، السلف</span></div></form>
-    <div class="card" style="margin-top:14px"><div class="cardhead"><h3>حالة الموافقة</h3></div><div class="tablewrap"><table><thead><tr><th>الموظف</th><th>القسم</th><th>الموافقة</th><th>الوقت</th><th></th></tr></thead><tbody>${sortBy(ws, w => (regAckOf(w) ? '1' : '0') + w.name).map(w => { const a = regAckOf(w); return `<tr><td>${esc(w.name)}</td><td class="small">${esc(deptName(w.deptId))}</td><td>${a ? `<span class="badge good">${a.via === 'paper' ? 'توقيع ورقي' : 'من حسابه'}</span>` : '<span class="badge warn">لم يوافق بعد</span>'}</td><td class="small">${a ? `${fmtDate((a.at || '').slice(0, 10))} ${(a.at || '').slice(11, 16)}` : ''}</td><td>${!a && canEditHr() ? `<button class="btn xs" data-action="regAckPaper" data-arg="${w.id}">تسجيل توقيع ورقي</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+    <div class="card" style="margin-top:14px"><div class="cardhead"><h3>حالة الموافقة</h3></div><div class="tablewrap"><table><thead><tr><th>الموظف</th><th>القسم</th><th>الموافقة</th><th>الوقت</th><th></th></tr></thead><tbody>${sortBy(ws, w => (regAckOf(w) ? '1' : '0') + w.name).map(w => { const a = regAckOf(w); return `<tr><td>${esc(w.name)}</td><td class="small">${esc(deptName(w.deptId))}</td><td>${a ? `<span class="badge good">${a.via === 'paper' ? 'توقيع ورقي' : 'من حسابه'}</span>` : '<span class="badge warn">لم يوافق بعد</span>'}</td><td class="small">${a ? `${fmtDate((a.at || '').slice(0, 10))} ${fmtAtTm(a.at)}` : ''}</td><td>${!a && canEditHr() ? `<button class="btn xs" data-action="regAckPaper" data-arg="${w.id}">تسجيل توقيع ورقي</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
 }
 document.addEventListener('submit', async ev => {
   if (ev.target.id !== 'regform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target);
@@ -3183,7 +3206,7 @@ function penCatalogAll() {
     { id: 'install_supplies', name: 'نقص مستلزمات التركيب + تكلفة الذهاب للعميل مرة أخرى', days: +g('installSuppliesDays'), amountHint: 'اكتب تكلفة الذهاب للعميل في خانة المبلغ' },
     { id: 'fight', name: 'سب أو قذف أو شجار بين العاملين (التكرار = تصفية)', days: +g('fightDays') },
     { id: 'drugs', name: `ثبوت تعاطي مواد مخدرة (تصفية الحساب مع خصم ${g('drugsPct')}% من المستحقات)`, days: 0, amountHint: 'يُحسب من مستحقاته عند التصفية' },
-    { id: 'meal', name: `عدم إكمال الأوفر تايم حتى ${pol.mealUntil || '21:00'} بعد صرف وجبة (ثمن الوجبة)`, days: 0, amount: +pol.mealCost || 50 },
+    { id: 'meal', name: `عدم إكمال الأوفر تايم حتى ${fmtTm(pol.mealUntil || '21:00')} بعد صرف وجبة (ثمن الوجبة)`, days: 0, amount: +pol.mealCost || 50 },
     { id: 'assignment_noshow', name: 'التخلف عن تكليف موقع صباحي (+ أوفر تايم الزملاء)', days: 0, amountHint: 'يُحتسب تلقائيًا من احتساب الجزاءات' },
   ];
 }
@@ -3230,7 +3253,7 @@ function computeAutoPenalties(w, ym) {
       else if (!exc.late && grace && +row.lateRaw > 0 && +row.lateRaw <= grace && !tol) { graceCount++; if (+pol.graceTimesPerMonth > 0 && graceCount > +pol.graceTimesPerMonth && +pol.graceExceedDays > 0) out.push(mk(date, 'late', +pol.graceExceedDays, +row.lateRaw, `تأخير ضمن الـ${grace} دقيقة للمرة ${graceCount} (المسموح ${pol.graceTimesPerMonth} مرات شهريًا)`)); }
       if (row.early && !exc.early) { const d = tierDays(pol.earlyTiers, +row.early); if (d > 0) out.push(mk(date, 'early', d, +row.early, `انصراف مبكر ${row.early} دقيقة`)); }
       if (row.in && !row.out && date < today && +pol.missingPunchDays > 0) { missingCount++; const dd = missingCount > 1 && +pol.missingPunchRepeatDays > 0 ? +pol.missingPunchRepeatDays : +pol.missingPunchDays; out.push(mk(date, 'missing', dd, 0, missingCount > 1 ? `لم يسجّل الانصراف (تكرار ${missingCount})` : 'لم يسجّل الانصراف')); }
-      if (row.meal && row.out && pol.mealUntil && tmToMin(row.out) < tmToMin(pol.mealUntil) && +pol.mealCost > 0) out.push(mk(date, 'meal', 0, 0, `صُرفت وجبة ولم يكمل الإضافي حتى ${pol.mealUntil}`, { amount: +pol.mealCost, catId: 'meal' }));
+      if (row.meal && row.out && pol.mealUntil && tmToMin(row.out) < tmToMin(pol.mealUntil) && +pol.mealCost > 0) out.push(mk(date, 'meal', 0, 0, `صُرفت وجبة ولم يكمل الإضافي حتى ${fmtTm(pol.mealUntil)}`, { amount: +pol.mealCost, catId: 'meal' }));
     }
     if (c.kind === 'absent') { const ap = typeof absencePenaltyFor === 'function' ? absencePenaltyFor(w, ym, date, pol) : (+pol.absencePenaltyDays > 0 ? { days: +pol.absencePenaltyDays, reason: `غياب بدون إذن (يُخصم اليوم بـ${1 + +pol.absencePenaltyDays} أيام)` } : null); if (ap && ap.days > 0) out.push(mk(date, 'absence', ap.days, 0, ap.reason)); const amt = assignmentNoShowAmount(w, date); if (amt > 0) out.push(mk(date, 'assignment', 0, 0, 'تخلف عن تكليف موقع صباحي — أوفر تايم الزملاء الذين حضروا', { amount: amt, catId: 'assignment_noshow' })); }
   });
@@ -3331,7 +3354,7 @@ const arDays = v => { v = +v; if (isNaN(v)) return '—'; if (v === 0.25) return
 function regFmt(id, v) {
   const p = regParam(id); if (!p) return String(v ?? '');
   if (v === undefined || v === null || v === '') return '—';
-  switch (p.unit) { case 'day': return arDays(v); case 'money': return `${fmtMoney(v)} ${CUR()}`; case 'pct': return `${fmtNum(v)}%`; case 'min': return `${fmtNum(v)} دقيقة`; case 'hour': return `${fmtNum(v)} ساعة`; case 'times': return `${fmtNum(v)} مرات`; case 'mult': return `${fmtNum(v)}×`; case 'month': return `${fmtNum(v)} شهور`; case 'bool': return v ? 'نعم' : 'لا'; default: return String(v); }
+  switch (p.unit) { case 'day': return arDays(v); case 'money': return `${fmtMoney(v)} ${CUR()}`; case 'pct': return `${fmtNum(v)}%`; case 'min': return `${fmtNum(v)} دقيقة`; case 'hour': return `${fmtNum(v)} ساعة`; case 'times': return `${fmtNum(v)} مرات`; case 'mult': return `${fmtNum(v)}×`; case 'month': return `${fmtNum(v)} شهور`; case 'bool': return v ? 'نعم' : 'لا'; case 'time': return fmtTm(v); default: return String(v); }
 }
 const addMin = (t, m) => { const x = tmToMin(t); if (x == null) return t; const y = (x + m + 1440) % 1440; return `${String(Math.floor(y / 60)).padStart(2, '0')}:${String(y % 60).padStart(2, '0')}`; };
 /* placeholders in the regulation text: {{id}} for parameters plus a few derived values */
@@ -3346,7 +3369,8 @@ function regValueText(key) {
     default: return regParam(key) ? regFmt(key, g(key)) : `{{${key}}}`;
   }
 }
-const regRender = txt => String(txt || '').replace(/\{\{(\w+)\}\}/g, (m, k) => `<b class="regv" title="بند قابل للتعديل من الإدارة">${esc(regValueText(k))}</b>`);
+/* times show as 12h; «{{shiftStart}} صباحًا» keeps the word and drops the ص / م so it does not say it twice */
+const regRender = txt => String(txt || '').replace(/\{\{(\w+)\}\}( (?:صباحًا|مساءً))?/g, (m, k, w) => { let v = String(regValueText(k)); const t = /^(\d{1,2}):(\d{2})$/.exec(v); if (t) v = w ? `${+t[1] % 12 || 12}:${t[2]}` : fmtTm(v); else if (w && /^\d{1,2}:\d{2} (ص|م|AM|PM)$/.test(v)) v = v.replace(/ (ص|م|AM|PM)$/, ''); return `<b class="regv" title="بند قابل للتعديل من الإدارة">${esc(v)}</b>${w || ''}`; });
 /* change log + apply */
 function regChanges() { return (S.settings.regulation && S.settings.regulation.changes) || []; }
 async function regParamApply(id, value, meta = {}) {
@@ -3367,7 +3391,7 @@ function regParamsTable() {
   const ch = regChanges().slice().reverse().slice(0, 20);
   return `<div class="card"><div class="cardhead"><h3>بنود اللائحة القابلة للتعديل</h3><div class="grow"></div><span class="tiny muted">${isAdmin() ? 'رئيس مجلس الإدارة يعدّل مباشرة أو يعتمد طلبات مدير الحسابات والموارد البشرية' : role() === 'hr' ? 'اطلب تعديل أي بند — يُنفَّذ بعد اعتماد رئيس مجلس الإدارة' : 'القيم الحالية المعتمدة'}</span></div>
     <div class="tablewrap"><table><thead><tr><th>البند</th><th class="n">القيمة الحالية</th><th>طلبات</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
-    <div class="card" style="margin-top:14px"><div class="cardhead"><h3>سجل التعديلات</h3><span class="muted small">${regChanges().length} تعديل</span></div>${ch.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من</th><th>إلى</th><th>بواسطة</th><th>ملاحظة</th></tr></thead><tbody>${ch.map(c => `<tr><td class="small">${fmtDate((c.at || '').slice(0, 10))} ${(c.at || '').slice(11, 16)}</td><td>${esc(regParam(c.paramId)?.label || c.paramId)}</td><td class="small">${esc(regFmt(c.paramId, c.from))}</td><td class="small"><b>${esc(regFmt(c.paramId, c.to))}</b></td><td class="small">${esc(c.byName || '')}${c.reqId ? ' (بطلب)' : ''}</td><td class="small">${esc(c.note || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد تعديلات بعد — القيم كما وردت في اللائحة</div>'}</div>`;
+    <div class="card" style="margin-top:14px"><div class="cardhead"><h3>سجل التعديلات</h3><span class="muted small">${regChanges().length} تعديل</span></div>${ch.length ? `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>البند</th><th>من</th><th>إلى</th><th>بواسطة</th><th>ملاحظة</th></tr></thead><tbody>${ch.map(c => `<tr><td class="small">${fmtDate((c.at || '').slice(0, 10))} ${fmtAtTm(c.at)}</td><td>${esc(regParam(c.paramId)?.label || c.paramId)}</td><td class="small">${esc(regFmt(c.paramId, c.from))}</td><td class="small"><b>${esc(regFmt(c.paramId, c.to))}</b></td><td class="small">${esc(c.byName || '')}${c.reqId ? ' (بطلب)' : ''}</td><td class="small">${esc(c.note || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد تعديلات بعد — القيم كما وردت في اللائحة</div>'}</div>`;
 }
 ACTIONS.regTab = t => { S.ui.tab.regulation = t; render(false); };
 ACTIONS.regEdit = id => {
@@ -3740,7 +3764,7 @@ function vAIBase() {
       ${validActs.length ? `<div class="stack" id="ai-actions">${validActs.map((a, i) => `<label class="check" style="align-items:flex-start"><input type="checkbox" name="act-${i}" checked ${isAdmin() ? '' : 'disabled'}><div><div class="small"><b>${esc(aiActionText(a))}</b></div>${a.why ? `<div class="tiny muted">${esc(a.why)}</div>` : ''}</div></label>`).join('')}</div>` : '<div class="muted small">لا توجد إجراءات قابلة للتنفيذ في هذا الرد</div>'}
       ${out.actions && out.actions.length > validActs.length ? `<div class="tiny muted" style="margin-top:6px">${out.actions.length - validActs.length} اقتراح تجاهله السيستم لأنه يشير لبيانات غير موجودة</div>` : ''}
       ${out.applied ? `<div class="banner info" style="margin-top:8px">${icon('check')}<span>تم تنفيذ ${out.applied} إجراء — وصلت التحديثات للأقسام كمهام</span></div>` : ''}</div>` : `<div class="card"><div class="cardhead"><h3>كيف يعمل</h3></div><div class="small" style="line-height:1.9">1. اكتب السيناريو (تأخير توريد، تأخر تحصيل، غياب، أمر عاجل…) أو اختر من الأزرار.<br>2. المساعد يقرأ بيانات السيستم الحالية ويحلّل ويحاكي الأثر.<br>3. تظهر لك الإجراءات المقترحة — تعلّم على ما توافق عليه وتضغط «نفّذ».<br>4. السيستم يعدّل المواعيد/الأولويات/طلبات الشراء ويرسل تحديثات ومهامًا لكل قسم معني.</div></div>`}
-    <div class="card"><div class="cardhead"><h3>آخر التحليلات</h3></div>${(() => { const runs = sortBy(list('airuns'), r => r.at || '', true).slice(0, 8); return runs.length ? `<div class="list">${runs.map(r => `<div class="item" data-action="aiOpen" data-arg="${r.id}" style="padding:8px 12px"><div class="main"><div class="small">${esc((r.prompt || '').slice(0, 80))}</div><div class="meta"><span>${fmtDate((r.at || '').slice(0, 10))} ${(r.at || '').slice(11, 16)}</span><span>${esc(r.byName || '')}</span>${r.applied ? `<span>نُفِّذ ${r.applied} إجراء</span>` : ''}</div></div><div class="end">${icon('back')}</div></div>`).join('')}</div>` : '<div class="muted small">لا توجد تحليلات سابقة</div>'; })()}</div>
+    <div class="card"><div class="cardhead"><h3>آخر التحليلات</h3></div>${(() => { const runs = sortBy(list('airuns'), r => r.at || '', true).slice(0, 8); return runs.length ? `<div class="list">${runs.map(r => `<div class="item" data-action="aiOpen" data-arg="${r.id}" style="padding:8px 12px"><div class="main"><div class="small">${esc((r.prompt || '').slice(0, 80))}</div><div class="meta"><span>${fmtDate((r.at || '').slice(0, 10))} ${fmtAtTm(r.at)}</span><span>${esc(r.byName || '')}</span>${r.applied ? `<span>نُفِّذ ${r.applied} إجراء</span>` : ''}</div></div><div class="end">${icon('back')}</div></div>`).join('')}</div>` : '<div class="muted small">لا توجد تحليلات سابقة</div>'; })()}</div>
   </div></div>`;
 }
 ACTIONS.aiScenario = i => { const s = AI_SCENARIOS[+i]; if (!s) return; (S.ui.ai ||= { turns: [], out: null }).prompt = s[1]; render(false); const ta = $('#ai-prompt'); if (ta) { ta.focus(); } };
@@ -5258,7 +5282,7 @@ document.addEventListener('nf:ready', () => { if (sbOn()) sbBackupList(true).the
 function backupListHTML() {
   const rows = backupRows().slice(0, 30);
   if (!rows.length) return `<div class="muted small">لا توجد نسخ محفوظة بعد — أول نسخة تلقائية تُؤخذ اليوم عند ${BACKUP_SLOTS.map(s => s.label.match(/\d+:\d+/)[0]).join(' و')}.</div>`;
-  return `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th class="n">السجلات</th><th class="n">الحجم</th><th></th></tr></thead><tbody>${rows.map(b => `<tr><td>${fmtDate(b.date)} <span class="tiny muted ltr">${(b.at || '').slice(11, 16) ? new Date(b.at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : ''}</span></td><td><span class="badge ${b.slot === 'manual' ? 'acc' : b.slot === 'pre-restore' ? 'warn' : 'good'}">${esc(slotLabel(b.slot))}</span>${b.note && b.slot !== 'manual' ? ` <span class="tiny muted">${esc(b.note)}</span>` : ''}</td><td class="n">${b.count != null ? fmtNum(b.count) : '—'}</td><td class="n">${b.size ? fmtBytes(b.size) : (b.server ? 'على السيرفر' : '—')}</td><td class="n nowrap"><button class="btn xs" data-action="backupGet" data-arg="${esc(b.id)}">${icon('down')}تنزيل</button>${isAdmin() ? `<button class="btn xs ghost" data-action="backupRestore" data-arg="${esc(b.id)}">استعادة</button>${b.server ? '' : `<button class="iconbtn" data-action="backupDel" data-arg="${esc(b.id)}" title="حذف">${icon('trash')}</button>`}` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th class="n">السجلات</th><th class="n">الحجم</th><th></th></tr></thead><tbody>${rows.map(b => `<tr><td>${fmtDate(b.date)} <span class="tiny muted ltr">${fmtAtTm(b.at)}</span></td><td><span class="badge ${b.slot === 'manual' ? 'acc' : b.slot === 'pre-restore' ? 'warn' : 'good'}">${esc(slotLabel(b.slot))}</span>${b.note && b.slot !== 'manual' ? ` <span class="tiny muted">${esc(b.note)}</span>` : ''}</td><td class="n">${b.count != null ? fmtNum(b.count) : '—'}</td><td class="n">${b.size ? fmtBytes(b.size) : (b.server ? 'على السيرفر' : '—')}</td><td class="n nowrap"><button class="btn xs" data-action="backupGet" data-arg="${esc(b.id)}">${icon('down')}تنزيل</button>${isAdmin() ? `<button class="btn xs ghost" data-action="backupRestore" data-arg="${esc(b.id)}">استعادة</button>${b.server ? '' : `<button class="iconbtn" data-action="backupDel" data-arg="${esc(b.id)}" title="حذف">${icon('trash')}</button>`}` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function backupAutoCard() {
   const last = backupRows()[0]; const can = backupCanRun();
@@ -5711,7 +5735,7 @@ function docLogCard(o) {
   if (!rows.length && !pend.length) return '';
   return `<div class="card"><div class="cardhead"><h3>سجل التوثيق</h3><span class="muted small">${rows.length} إثبات</span></div>
     ${pend.map(d => `<div class="banner warn" style="margin-bottom:8px">${icon('alert')}<span>قسم ${esc(deptName(d))} لم يسجّل استلام الشغل من ${esc(deptName(needsHandover(o, d)))} بعد${canDo('stage.update', { deptId: d }) ? ` — <button class="lnk" data-action="handoverReceive" data-arg="${o.id}:${d}:${needsHandover(o, d)}">تسجيل الاستلام الآن</button>` : ''}</span></div>`).join('')}
-    <div class="hlog">${sortBy(rows, r => r.at || '', true).map(r => `<div class="hrow">${r.pr.thumb ? `<img src="${esc(r.pr.thumb)}" alt="" data-action="lightbox" data-arg="${esc(r.arg)}">` : `<div class="noimg">${icon(r.icon)}</div>`}<div class="grow"><div class="small bold">${r.cls ? `<span class="badge ${r.cls}">${icon(r.icon)}</span> ` : ''}${esc(r.title)}</div>${r.pr.note ? `<div class="small" style="white-space:pre-wrap">${esc(r.pr.note)}</div>` : ''}<div class="tiny muted">${esc(r.pr.byName || '')} · ${fmtDate((r.pr.at || '').slice(0, 10))} ${(r.pr.at || '').slice(11, 16)}${r.pr.fileIds && r.pr.fileIds.length > 1 ? ` · ${r.pr.fileIds.length} ملفات` : ''}</div></div></div>`).join('')}</div></div>`;
+    <div class="hlog">${sortBy(rows, r => r.at || '', true).map(r => `<div class="hrow">${r.pr.thumb ? `<img src="${esc(r.pr.thumb)}" alt="" data-action="lightbox" data-arg="${esc(r.arg)}">` : `<div class="noimg">${icon(r.icon)}</div>`}<div class="grow"><div class="small bold">${r.cls ? `<span class="badge ${r.cls}">${icon(r.icon)}</span> ` : ''}${esc(r.title)}</div>${r.pr.note ? `<div class="small" style="white-space:pre-wrap">${esc(r.pr.note)}</div>` : ''}<div class="tiny muted">${esc(r.pr.byName || '')} · ${fmtDate((r.pr.at || '').slice(0, 10))} ${fmtAtTm(r.pr.at)}${r.pr.fileIds && r.pr.fileIds.length > 1 ? ` · ${r.pr.fileIds.length} ملفات` : ''}</div></div></div>`).join('')}</div></div>`;
 }
 /* v7.31 (Mahmoud, on a driver's phone: «messy, big text — keep it simple and clear for technicians»): the raw «choose file /
    no file chosen» box became one big «take or pick a photo» button with the photo shown under it */
@@ -5947,13 +5971,13 @@ async function saveTripBase(f, t) {
 if (typeof REQ_TYPES === 'object' && !REQ_TYPES.trip) REQ_TYPES.trip = 'تكليف مشوار'; /* v7.10: the trip request showed its raw type («trip») */
 async function createTripRequest(t) {
   const w = byId('workers', t.driverId); const r = { id: uid(), type: 'trip', tripId: t.id, workerId: t.driverId, deptId: (w && w.deptId) || 'fleet', reason: `${TRIP_KINDS[t.kind] || ''} — ${t.purpose}`, status: 'pending', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), chain: chainFor('trip'), step: 0, stepAt: nowISO() };
-  r.thread = [{ id: uid(), at: r.createdAt, by: r.createdBy, byName: r.createdByName, role: role(), kind: 'system', text: `تكليف مشوار ${t.number}: ${vehicleName(t.vehicleId)} · ${assigneeName(t.driverId)} · ${fmtDate(t.date)} ${t.time || ''}` }];
+  r.thread = [{ id: uid(), at: r.createdAt, by: r.createdBy, byName: r.createdByName, role: role(), kind: 'system', text: `تكليف مشوار ${t.number}: ${vehicleName(t.vehicleId)} · ${assigneeName(t.driverId)} · ${fmtDate(t.date)} ${fmtTm(t.time || '')}` }];
   await Store.save('requests', r, { silent: true }); await Store.update('trips', t.id, { reqId: r.id, status: 'planned' });
 }
 async function tripApprovedBase(t, direct) {
   t = byId('trips', t.id) || t;
   await Store.update('trips', t.id, { status: 'approved', approvedAt: nowISO(), approvedByName: S.session?.name || '' });
-  const task = { id: `trip_${t.id}`, title: `مشوار ${t.number}: ${t.purpose}`, desc: `${TRIP_KINDS[t.kind] || ''}\n${t.from || ''} ← ${t.to || ''} · ${fmtDate(t.date)} ${t.time || ''} · ${vehicleName(t.vehicleId)}\nابدأ المشوار من «بوابتي» أو «حركة النقل» وأنهه بصورة عند التسليم/الاستلام.`, deptId: null, assigneeId: t.driverId, orderId: t.orderId || null, dueDate: t.date, priority: 'high', status: 'open', kind: 'task', source: 'trip', tripId: t.id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() };
+  const task = { id: `trip_${t.id}`, title: `مشوار ${t.number}: ${t.purpose}`, desc: `${TRIP_KINDS[t.kind] || ''}\n${t.from || ''} ← ${t.to || ''} · ${fmtDate(t.date)} ${fmtTm(t.time || '')} · ${vehicleName(t.vehicleId)}\nابدأ المشوار من «بوابتي» أو «حركة النقل» وأنهه بصورة عند التسليم/الاستلام.`, deptId: null, assigneeId: t.driverId, orderId: t.orderId || null, dueDate: t.date, priority: 'high', status: 'open', kind: 'task', source: 'trip', tripId: t.id, createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() };
   await Store.save('tasks', task, { silent: true });
   const pk = t.extId ? byId('tasks', `pickup_${t.extId}`) : (t.orderId ? byId('tasks', `deliver_${t.orderId}`) : null); if (pk && pk.status !== 'done') await Store.update('tasks', pk.id, { status: 'done', doneAt: nowISO(), doneByName: S.session?.name || '', proof: { note: `تحوّل إلى مشوار ${t.number}`, at: nowISO(), byName: S.session?.name || '' } });
   if (!direct) await notifyRole('fleet', `اعتمد مدير المصنع المشوار ${t.number}`, `${t.purpose} — ${assigneeName(t.driverId)} · ${vehicleName(t.vehicleId)}`, { id: `trip_ok_${t.id}` });
@@ -6010,7 +6034,7 @@ let _fleetSweepAt = 0; RENDER_HOOKS.push(() => { if (Date.now() - _fleetSweepAt 
 /* ---------------- views ---------------- */
 function tripItemBase(t, o = {}) {
   const m = t.status === 'done' ? trackMatch(t) : null;
-  return `<div class="item" data-action="go" data-arg="fleet/${t.id}"><div class="main"><div class="title"><span class="code">${esc(t.number)}</span><span>${esc(t.purpose)}</span></div><div class="meta"><span>${esc(TRIP_KINDS[t.kind] || '')}</span><span>${fmtDate(t.date)} ${esc(t.time || '')}</span><span>${esc(vehicleName(t.vehicleId))}</span><span>${esc(assigneeName(t.driverId))}</span>${t.to ? `<span>← ${esc(t.to)}</span>` : ''}${m ? `<span class="${m.pct >= 70 ? '' : 'bold'}" style="color:${m.pct >= 70 ? 'var(--good-ink, #1b7f4b)' : 'var(--crit-ink)'}">تطابق GPS ${m.pct}%</span>` : ''}</div></div><div class="end">${badge(TRIP_STATUS, t.status)}${!o.compact && t.status === 'approved' && (t.driverId === myDriverId() || canFleet()) ? `<button class="btn xs p" data-action="tripStart" data-arg="${t.id}" data-stop="1">${icon('play')}انطلاق</button>` : ''}${!o.compact && t.status === 'started' && (t.driverId === myDriverId() || canFleet()) ? `<button class="btn xs p" data-action="tripEnd" data-arg="${t.id}" data-stop="1">${icon('check')}إنهاء</button>` : ''}</div></div>`;
+  return `<div class="item" data-action="go" data-arg="fleet/${t.id}"><div class="main"><div class="title"><span class="code">${esc(t.number)}</span><span>${esc(t.purpose)}</span></div><div class="meta"><span>${esc(TRIP_KINDS[t.kind] || '')}</span><span>${fmtDate(t.date)} ${esc(fmtTm(t.time || ''))}</span><span>${esc(vehicleName(t.vehicleId))}</span><span>${esc(assigneeName(t.driverId))}</span>${t.to ? `<span>← ${esc(t.to)}</span>` : ''}${m ? `<span class="${m.pct >= 70 ? '' : 'bold'}" style="color:${m.pct >= 70 ? 'var(--good-ink, #1b7f4b)' : 'var(--crit-ink)'}">تطابق GPS ${m.pct}%</span>` : ''}</div></div><div class="end">${badge(TRIP_STATUS, t.status)}${!o.compact && t.status === 'approved' && (t.driverId === myDriverId() || canFleet()) ? `<button class="btn xs p" data-action="tripStart" data-arg="${t.id}" data-stop="1">${icon('play')}انطلاق</button>` : ''}${!o.compact && t.status === 'started' && (t.driverId === myDriverId() || canFleet()) ? `<button class="btn xs p" data-action="tripEnd" data-arg="${t.id}" data-stop="1">${icon('check')}إنهاء</button>` : ''}</div></div>`;
 }
 EXTRA_VIEWS.fleet = r => r.id ? vTripDetail(r.id) : vFleet();
 EXTRA_TITLES.fleet = (r, addBtn) => { if (r.id) { const t = byId('trips', r.id); return { title: t ? t.number : 'مشوار', sub: t ? esc(t.purpose) : '', actions: `<a class="btn ghost" href="#/fleet">${icon('back')}<span>حركة النقل</span></a>` }; } return { sub: isDriver() ? 'مشاويرك: ابدأ وأنهِ كل مشوار من هنا' : 'العربيات والسواقين والمشاوير — التكليف يعتمده مدير المصنع، ومسار الهاتف يُقارن بـ GPS العربية', actions: canFleet() ? addBtn('مشوار', 'tripNew') : '' }; };
@@ -6056,13 +6080,13 @@ function vTripDetailBase(id) {
   if (typeof tripGpsActions === 'function' && (canFleet() || isAdmin() || role() === 'manager' || role() === 'vice')) acts.push(tripGpsActions(t));
   return `<div class="grid gmain"><div class="stack">
     <div class="card"><div class="cardhead"><h2 style="margin:0">${esc(t.number)}</h2><div class="grow"></div>${badge(TRIP_STATUS, t.status)}</div>
-      <div class="grid g4" style="gap:10px 14px;font-size:13px"><div><div class="tiny muted">النوع</div>${esc(TRIP_KINDS[t.kind] || '')}</div><div><div class="tiny muted">الموعد</div>${fmtDate(t.date)} ${esc(t.time || '')}</div><div><div class="tiny muted">العربية</div>${esc(vehicleName(t.vehicleId))}</div><div><div class="tiny muted">السائق</div>${esc(assigneeName(t.driverId))}</div><div><div class="tiny muted">من</div>${esc(t.from || '—')}</div><div><div class="tiny muted">إلى</div>${esc(t.to || '—')}</div><div><div class="tiny muted">أمر خارجي</div>${x ? `<a href="#/external/${x.id}"><span class="code">${esc(x.number)}</span></a>` : '—'}</div><div><div class="tiny muted">أمر تشغيل</div>${o ? `<a href="#/orders/${o.id}"><span class="code">${esc(o.code)}</span></a>` : '—'}</div></div>
+      <div class="grid g4" style="gap:10px 14px;font-size:13px"><div><div class="tiny muted">النوع</div>${esc(TRIP_KINDS[t.kind] || '')}</div><div><div class="tiny muted">الموعد</div>${fmtDate(t.date)} ${esc(fmtTm(t.time || ''))}</div><div><div class="tiny muted">العربية</div>${esc(vehicleName(t.vehicleId))}</div><div><div class="tiny muted">السائق</div>${esc(assigneeName(t.driverId))}</div><div><div class="tiny muted">من</div>${esc(t.from || '—')}</div><div><div class="tiny muted">إلى</div>${esc(t.to || '—')}</div><div><div class="tiny muted">أمر خارجي</div>${x ? `<a href="#/external/${x.id}"><span class="code">${esc(x.number)}</span></a>` : '—'}</div><div><div class="tiny muted">أمر تشغيل</div>${o ? `<a href="#/orders/${o.id}"><span class="code">${esc(o.code)}</span></a>` : '—'}</div></div>
       <div class="sep"></div><div class="bold">${esc(t.purpose)}</div>${t.notes ? `<div class="small" style="white-space:pre-wrap;margin-top:4px">${esc(t.notes)}</div>` : ''}
       ${req ? `<div class="small" style="margin-top:6px">اعتماد مدير المصنع: ${stageChip(req)}</div>` : t.approvedByName ? `<div class="tiny muted" style="margin-top:6px">اعتمده ${esc(t.approvedByName)}</div>` : ''}
       <div class="row no-print" style="margin-top:12px;flex-wrap:wrap">${acts.join('')}</div></div>
     <div class="card"><div class="cardhead"><h3>المسار</h3>${m ? `<span class="badge ${m.pct >= 70 ? 'good' : 'crit'}">تطابق هاتف السائق مع GPS العربية ${m.pct}%</span>` : ''}</div>
-      ${(t.track || []).length > 1 || (t.gpsTrack || []).length > 1 ? trackSvg(t) : '<div class="muted small">لا توجد نقاط مسار بعد — تُسجَّل تلقائيًا من هاتف السائق أثناء المشوار</div>'}${t.gpsPulledAt ? `<div class="tiny muted">مسار العربية من eTrack: ${(t.gpsTrack || []).length} نقطة${t.gpsKm ? ` · ${fmtNum(t.gpsKm)} كم` : ''} · سُحب ${fmtDate(t.gpsPulledAt.slice(0, 10))} ${t.gpsPulledAt.slice(11, 16)}</div>` : ''}
-      <div class="grid g3" style="gap:8px;font-size:13px;margin-top:8px"><div><div class="tiny muted">الانطلاق</div>${t.startedAt ? `${fmtDate(t.startedAt.slice(0, 10))} ${t.startedAt.slice(11, 16)}` : '—'}${t.startPos ? `<div class="tiny muted ltr">${(+t.startPos.lat).toFixed(5)}, ${(+t.startPos.lng).toFixed(5)}${t.startPos.acc != null ? ` (±${Math.round(t.startPos.acc)}م)` : ''}</div>` : ''}</div><div><div class="tiny muted">الوصول</div>${t.endedAt ? `${fmtDate(t.endedAt.slice(0, 10))} ${t.endedAt.slice(11, 16)}` : '—'}${t.endPos ? `<div class="tiny muted ltr">${(+t.endPos.lat).toFixed(5)}, ${(+t.endPos.lng).toFixed(5)}</div>` : ''}</div><div><div class="tiny muted">المسافة (هاتف)</div>${t.km ? `${fmtNum(t.km)} كم` : '—'}</div></div>
+      ${(t.track || []).length > 1 || (t.gpsTrack || []).length > 1 ? trackSvg(t) : '<div class="muted small">لا توجد نقاط مسار بعد — تُسجَّل تلقائيًا من هاتف السائق أثناء المشوار</div>'}${t.gpsPulledAt ? `<div class="tiny muted">مسار العربية من eTrack: ${(t.gpsTrack || []).length} نقطة${t.gpsKm ? ` · ${fmtNum(t.gpsKm)} كم` : ''} · سُحب ${fmtDate(t.gpsPulledAt.slice(0, 10))} ${fmtAtTm(t.gpsPulledAt)}</div>` : ''}
+      <div class="grid g3" style="gap:8px;font-size:13px;margin-top:8px"><div><div class="tiny muted">الانطلاق</div>${t.startedAt ? `${fmtDate(t.startedAt.slice(0, 10))} ${fmtAtTm(t.startedAt)}` : '—'}${t.startPos ? `<div class="tiny muted ltr">${(+t.startPos.lat).toFixed(5)}, ${(+t.startPos.lng).toFixed(5)}${t.startPos.acc != null ? ` (±${Math.round(t.startPos.acc)}م)` : ''}</div>` : ''}</div><div><div class="tiny muted">الوصول</div>${t.endedAt ? `${fmtDate(t.endedAt.slice(0, 10))} ${fmtAtTm(t.endedAt)}` : '—'}${t.endPos ? `<div class="tiny muted ltr">${(+t.endPos.lat).toFixed(5)}, ${(+t.endPos.lng).toFixed(5)}</div>` : ''}</div><div><div class="tiny muted">المسافة (هاتف)</div>${t.km ? `${fmtNum(t.km)} كم` : '—'}</div></div>
       ${m && m.pct < 70 ? `<div class="banner warn" style="margin-top:8px">${icon('alert')}<span>مسار السائق لا يطابق مسار العربية بنسبة كافية — راجع مع مدير الحركة</span></div>` : ''}</div>
     </div><div class="stack">
     <div class="card"><div class="cardhead"><h3>التوثيق</h3></div>${t.proof ? `<div class="small">${badge({ ok: ['تم بدون مشاكل', 'good'], issue: ['توجد مشكلة', 'crit'] }, t.proof.status || 'ok')}</div><div class="small" style="white-space:pre-wrap;margin-top:4px">${esc(t.proof.note || '')}</div><div style="margin-top:6px">${proofChip(t.proof, `trip:${id}:proof`, 'صورة الإنهاء')}</div>` : '<div class="muted small">يُوثَّق المشوار بصورة وتقرير عند الإنهاء</div>'}</div>
@@ -7430,7 +7454,7 @@ function poApprovalCard(p) {
 function poReceiptCard(p) {
   if (['draft', 'approval', 'cancelled'].includes(p.status)) return '';
   const R = p.receipts || {}; const pk = p.pickup; const trip = pk && pk.tripId ? byId('trips', pk.tripId) : null; const pkTask = byId('tasks', `po_pickup_${p.id}`);
-  const box = (who, label, actor) => { const r = R[who]; const can = writable() && ['approved', 'ordered', 'arrived', 'partial'].includes(p.status) && actor; return `<div class="recbox ${r ? (r.status === 'ok' ? 'ok' : 'issue') : ''}"><h4>${label}</h4>${r ? `<div class="small">${badge({ ok: ['مطابق — سليم', 'good'], issue: ['به مشكلة / مرفوض', 'crit'] }, r.status)} <span class="muted">${esc(r.byName || '')} · ${fmtDate((r.at || '').slice(0, 10))} ${(r.at || '').slice(11, 16)}</span></div><div class="small" style="margin-top:4px;white-space:pre-wrap">${esc(r.note || '')}</div><div style="margin-top:6px">${proofChip(r, `ext:${p.id}:receipts.${who}`, 'صورة الاستلام')}</div><div class="tiny muted" style="margin-top:4px">${(r.items || []).filter(it => it.rejected > 0).map(it => `${esc(it.name)}: مرفوض ${fmtNum(it.rejected)}`).join(' · ') || 'كل البنود مقبولة'}${(r.items || []).some(it => it.dest === 'floor') ? ' · بنود لأرضية المصنع مباشرة' : ''}</div>` : `<div class="small muted">لم يُسجَّل بعد</div>${can ? `<button class="btn sm p" style="margin-top:8px" data-action="poReceiveAs" data-arg="${p.id}:${who}">${icon('check')}سجّل استلامك (صورة + الكميات)</button>` : ''}`}</div>`; };
+  const box = (who, label, actor) => { const r = R[who]; const can = writable() && ['approved', 'ordered', 'arrived', 'partial'].includes(p.status) && actor; return `<div class="recbox ${r ? (r.status === 'ok' ? 'ok' : 'issue') : ''}"><h4>${label}</h4>${r ? `<div class="small">${badge({ ok: ['مطابق — سليم', 'good'], issue: ['به مشكلة / مرفوض', 'crit'] }, r.status)} <span class="muted">${esc(r.byName || '')} · ${fmtDate((r.at || '').slice(0, 10))} ${fmtAtTm(r.at)}</span></div><div class="small" style="margin-top:4px;white-space:pre-wrap">${esc(r.note || '')}</div><div style="margin-top:6px">${proofChip(r, `ext:${p.id}:receipts.${who}`, 'صورة الاستلام')}</div><div class="tiny muted" style="margin-top:4px">${(r.items || []).filter(it => it.rejected > 0).map(it => `${esc(it.name)}: مرفوض ${fmtNum(it.rejected)}`).join(' · ') || 'كل البنود مقبولة'}${(r.items || []).some(it => it.dest === 'floor') ? ' · بنود لأرضية المصنع مباشرة' : ''}</div>` : `<div class="small muted">لم يُسجَّل بعد</div>${can ? `<button class="btn sm p" style="margin-top:8px" data-action="poReceiveAs" data-arg="${p.id}:${who}">${icon('check')}سجّل استلامك (صورة + الكميات)</button>` : ''}`}</div>`; };
   return `<div class="card"><div class="cardhead"><h3>النقل والاستلام الثنائي</h3><span class="muted small">السائق يسلّم لرئيس القسم وأمين المخزن معًا</span></div>
     <div class="small" style="margin-bottom:10px">${trip ? `مشوار النقل: <a href="#/fleet/${trip.id}"><span class="code">${esc(trip.number)}</span></a> ${badge(TRIP_STATUS, trip.status)} · ${esc(assigneeName(trip.driverId))} · ${esc(vehicleName(trip.vehicleId))}` : pkTask && pkTask.status !== 'done' ? `<span class="badge warn">بانتظار تكليف عربية من حركة النقل</span> ${canFleet() ? `<button class="btn xs p" data-action="tripNew" data-arg="po:${p.id}">${icon('plus')}تكليف عربية</button>` : ''}` : p.status === 'arrived' || p.status === 'received' ? '<span class="badge good">وصل التوريد</span>' : '<span class="muted">لم يُكلَّف مشوار بعد</span>'}${p.arrivedTrip ? ` <span class="tiny muted">وصل بالمشوار ${esc(p.arrivedTrip)}</span>` : ''}</div>
     ${p.pending && p.pending.length ? `<div class="banner info" style="margin-bottom:10px">${icon('info')}<span>استلام ثانٍ للبديل: ${p.pending.map(it => `${esc(it.name)} × ${fmtNum(it.pendingQty)}`).join('، ')}</span></div>` : ''}
@@ -8109,7 +8133,7 @@ async function taskPostBase(t, text, photoFile) {
 async function taskMarkSeen(t) { const me = S.session?.id; if (!me || !taskThread(t).length) return; const last = taskThread(t)[taskThread(t).length - 1].at; const seen = t.threadSeen || {}; if (seen[me] === last) return; try { await Store.update('tasks', t.id, { threadSeen: Object.assign({}, seen, { [me]: last }, S.session?.workerId ? { [S.session.workerId]: last } : {}) }, { silent: true }); } catch (e) { /* read-only */ } }
 function chatHTMLBase(t) {
   const me = myIds(); const th = taskThread(t);
-  return `<div class="chat" id="tchat">${th.length ? th.map(m => `<div class="msg ${me.includes(m.by) ? 'me' : ''}"><div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}${m.fileId ? `<img src="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}" alt="" data-action="lightboxSrc" data-arg="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}">` : ''}</div>`).join('') : '<div class="muted small" style="text-align:center;padding:12px">لا توجد رسائل بعد — ابدأ المحادثة مع الأطراف المعنيين</div>'}</div>
+  return `<div class="chat" id="tchat">${th.length ? th.map(m => `<div class="msg ${me.includes(m.by) ? 'me' : ''}"><div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${fmtAtTm(m.at)}</div>${m.text ? `<div class="tx">${esc(m.text)}</div>` : ''}${m.fileId ? `<img src="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}" alt="" data-action="lightboxSrc" data-arg="${esc(m.thumb || (byId('files', m.fileId) || {}).thumb || '')}">` : ''}</div>`).join('') : '<div class="muted small" style="text-align:center;padding:12px">لا توجد رسائل بعد — ابدأ المحادثة مع الأطراف المعنيين</div>'}</div>
     ${writable() && taskIsParty(t) ? `<div class="chatbox"><textarea id="tmsg" placeholder="اكتب رسالة للأطراف المعنيين…"></textarea><button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">${icon('camera')}</button><button class="btn p" data-action="taskChatSend" data-arg="${t.id}">${icon('send')}إرسال</button></div>` : ''}`;
 }
 ACTIONS.lightboxSrc = src => { if (src) lightbox(src, ''); };
@@ -8732,7 +8756,7 @@ function legsWithState(t) {
 const tripNextLeg = t => legsWithState(t).find(x => x.next) || null;
 function legsHTML(t) {
   const st = legsWithState(t); const total = st.filter(x => x.legKm != null).reduce((a, x) => a + x.legKm, 0);
-  return `<div class="legs">${st.map((x, i) => `<div class="leg ${x.done ? 'done' : x.next ? 'next' : ''}"><div class="dot">${x.done ? '✓' : i + 1}</div><div><div class="t">${esc(x.label)}</div><div class="m">${x.rec ? `${fmtDate((x.rec.at || '').slice(0, 10))} ${(x.rec.at || '').slice(11, 16)}${x.rec.km != null ? ` · عداد ${fmtNum(x.rec.km)} كم` : ''}${x.rec.pos ? ` · موقع ✓` : ''}${x.rec.note ? ' · ' + esc(x.rec.note) : ''}` : x.next ? 'الخطوة التالية' : '—'}</div></div><div class="km">${x.legKm != null ? `<b>${fmtNum(x.legKm)}</b> كم` : ''}${x.rec && x.rec.thumb ? `<div><img src="${esc(x.rec.thumb)}" alt="" style="width:44px;height:34px;object-fit:cover;border-radius:6px;margin-top:2px;cursor:zoom-in" data-action="lightboxSrc" data-arg="${esc(x.rec.thumb)}"></div>` : ''}</div></div>`).join('')}</div>${total ? `<div class="tiny muted" style="margin-top:4px">إجمالي بالعداد: <b>${fmtNum(total)}</b> كم${t.km ? ` · بالـGPS: ${fmtNum(t.km)} كم` : ''}</div>` : ''}`;
+  return `<div class="legs">${st.map((x, i) => `<div class="leg ${x.done ? 'done' : x.next ? 'next' : ''}"><div class="dot">${x.done ? '✓' : i + 1}</div><div><div class="t">${esc(x.label)}</div><div class="m">${x.rec ? `${fmtDate((x.rec.at || '').slice(0, 10))} ${fmtAtTm(x.rec.at)}${x.rec.km != null ? ` · عداد ${fmtNum(x.rec.km)} كم` : ''}${x.rec.pos ? ` · موقع ✓` : ''}${x.rec.note ? ' · ' + esc(x.rec.note) : ''}` : x.next ? 'الخطوة التالية' : '—'}</div></div><div class="km">${x.legKm != null ? `<b>${fmtNum(x.legKm)}</b> كم` : ''}${x.rec && x.rec.thumb ? `<div><img src="${esc(x.rec.thumb)}" alt="" style="width:44px;height:34px;object-fit:cover;border-radius:6px;margin-top:2px;cursor:zoom-in" data-action="lightboxSrc" data-arg="${esc(x.rec.thumb)}"></div>` : ''}</div></div>`).join('')}</div>${total ? `<div class="tiny muted" style="margin-top:4px">إجمالي بالعداد: <b>${fmtNum(total)}</b> كم${t.km ? ` · بالـGPS: ${fmtNum(t.km)} كم` : ''}</div>` : ''}`;
 }
 /* a driver action for the next leg (start/back reuse the existing odometer + proof flows) */
 ACTIONS.tripLeg = async id => {
@@ -8821,7 +8845,7 @@ async function kioskPunch(w, opts = {}) {
 function siteDayCard(w) {
   const rows = myTeamStagesToday(w); if (!rows.length) return ''; const date = todayISO();
   return rows.map(({ o, deptId, s }) => { const d = siteDayOf(o, deptId, date, w.id); const site = o.site || {}; const step = !d.arrive ? 'arrive' : !d.start ? 'start' : !d.result ? 'result' : !d.leave ? 'leave' : 'done';
-    const st = (k, label, v) => `<div class="st ${v ? 'done' : ''}"><div>${label}</div><div class="v">${v ? (v.at || '').slice(11, 16) : '—'}</div></div>`;
+    const st = (k, label, v) => `<div class="st ${v ? 'done' : ''}"><div>${label}</div><div class="v">${v ? fmtAtTm(v.at) : '—'}</div></div>`;
     return `<div class="card"><div class="cardhead"><h3>يوم التركيب — <span class="code">${esc(o.code)}</span></h3><div class="grow"></div><span class="badge acc">${esc(deptName(deptId))}</span></div><div class="small">${esc(site.address || o.title)}${s.plannedEnd ? ` · حتى ${fmtDate(s.plannedEnd)}` : ''} · الفريق ${(s.team || []).length}</div>
       <div class="sday">${st('arrive', 'الوصول', d.arrive)}${st('start', 'بدء التركيب', d.start)}<div class="st ${d.result ? 'done' : ''}"><div>النتيجة</div><div class="v">${d.result ? (d.result.kind === 'delivered' ? 'تسليم' : 'يوم آخر') + ' · ' + (DAY_SIZES.find(x => x[0] === d.result.daySize)?.[1] || '') : '—'}</div></div>${st('leave', 'المغادرة', d.leave)}</div>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${step === 'arrive' ? `<button class="btn p" data-action="siteArrive" data-arg="${o.id}:${deptId}">${icon('map')}تم الوصول للموقع</button>` : step === 'start' ? `<button class="btn p" data-action="siteStart" data-arg="${o.id}:${deptId}">${icon('play')}بدء التركيبات</button>` : step === 'result' ? `<button class="btn p" data-action="siteResult" data-arg="${o.id}:${deptId}:delivered">${icon('check')}تسليم للعميل</button><button class="btn" data-action="siteResult" data-arg="${o.id}:${deptId}:another">محتاج يوم آخر</button>` : step === 'leave' ? `<button class="btn p" data-action="siteLeave" data-arg="${o.id}:${deptId}">${icon('logout')}مغادرة الموقع</button>` : `<span class="badge good">اكتمل يومك في الموقع${d.leave && d.leave.mode === 'factory' ? ' — الشغل في المصنع الآن إضافي' : ''}</span>`}</div>
@@ -8834,7 +8858,7 @@ function vMeSite() { const html = vMeHelp(); const w = S.session?.workerId ? byI
 function siteDaysCard(o) {
   const days = o.siteDays || {}; const rows = []; Object.entries(days).forEach(([deptId, byDate]) => Object.entries(byDate).forEach(([date, byW]) => Object.entries(byW).forEach(([wid, d]) => rows.push({ deptId, date, w: byId('workers', wid), d }))));
   if (!rows.length) return '';
-  return `<div class="card"><div class="cardhead"><h3>أيام التركيب في الموقع</h3><span class="muted small">${rows.length} تسجيل</span></div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>الفرد</th><th>وصول</th><th>بدء</th><th>النتيجة</th><th>مغادرة</th></tr></thead><tbody>${sortBy(rows, r => r.date + (r.w ? r.w.name : ''), true).map(r => `<tr><td>${fmtDate(r.date)}<div class="tiny muted">${esc(deptName(r.deptId))}</div></td><td>${r.w ? `<a href="#/workers/${r.w.id}">${esc(r.w.name.split(' — ')[0])}</a>` : '—'}</td><td>${r.d.arrive ? (r.d.arrive.at || '').slice(11, 16) + (r.d.arrive.punched ? ' <span class="badge good">حضور</span>' : '') : '—'}</td><td>${r.d.start ? (r.d.start.at || '').slice(11, 16) : '—'}</td><td>${r.d.result ? `${r.d.result.kind === 'delivered' ? '<span class="badge good">تسليم</span>' : '<span class="badge warn">يوم آخر</span>'} ${DAY_SIZES.find(x => x[0] === r.d.result.daySize)?.[1] || ''}${r.d.result.note ? `<div class="tiny muted">${esc(r.d.result.note)}</div>` : ''}${r.d.result.thumb ? ` <img src="${esc(r.d.result.thumb)}" alt="" style="width:36px;height:28px;object-fit:cover;border-radius:5px;vertical-align:middle;cursor:zoom-in" data-action="lightboxSrc" data-arg="${esc(r.d.result.thumb)}">` : ''}` : '—'}</td><td>${r.d.leave ? `${(r.d.leave.at || '').slice(11, 16)} ${r.d.leave.mode === 'end' ? '<span class="badge">انصراف من الموقع</span>' : '<span class="badge acc">عودة للمصنع — إضافي</span>'}` : '—'}</td></tr>`).join('')}</tbody></table></div></div>`;
+  return `<div class="card"><div class="cardhead"><h3>أيام التركيب في الموقع</h3><span class="muted small">${rows.length} تسجيل</span></div><div class="tablewrap"><table><thead><tr><th>التاريخ</th><th>الفرد</th><th>وصول</th><th>بدء</th><th>النتيجة</th><th>مغادرة</th></tr></thead><tbody>${sortBy(rows, r => r.date + (r.w ? r.w.name : ''), true).map(r => `<tr><td>${fmtDate(r.date)}<div class="tiny muted">${esc(deptName(r.deptId))}</div></td><td>${r.w ? `<a href="#/workers/${r.w.id}">${esc(r.w.name.split(' — ')[0])}</a>` : '—'}</td><td>${r.d.arrive ? fmtAtTm(r.d.arrive.at) + (r.d.arrive.punched ? ' <span class="badge good">حضور</span>' : '') : '—'}</td><td>${r.d.start ? fmtAtTm(r.d.start.at) : '—'}</td><td>${r.d.result ? `${r.d.result.kind === 'delivered' ? '<span class="badge good">تسليم</span>' : '<span class="badge warn">يوم آخر</span>'} ${DAY_SIZES.find(x => x[0] === r.d.result.daySize)?.[1] || ''}${r.d.result.note ? `<div class="tiny muted">${esc(r.d.result.note)}</div>` : ''}${r.d.result.thumb ? ` <img src="${esc(r.d.result.thumb)}" alt="" style="width:36px;height:28px;object-fit:cover;border-radius:5px;vertical-align:middle;cursor:zoom-in" data-action="lightboxSrc" data-arg="${esc(r.d.result.thumb)}">` : ''}` : '—'}</td><td>${r.d.leave ? `${fmtAtTm(r.d.leave.at)} ${r.d.leave.mode === 'end' ? '<span class="badge">انصراف من الموقع</span>' : '<span class="badge acc">عودة للمصنع — إضافي</span>'}` : '—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function vOrderDetail(id) { let html = vOrderDetailRoute(id); const o = byId('orders', id); if (!o) return html; const c = siteDaysCard(o); if (!c) return html; const i = html.indexOf('<div class="card"><div class="cardhead"><h3>مراحل التصنيع</h3>'); return i < 0 ? html + c : html.slice(0, i) + c + html.slice(i); }
 /* =====================================================================
@@ -9096,10 +9120,10 @@ ACTIONS.trashPurge = async id => { if (!isAdmin()) return; if (!await confirmDlg
 RENDER_HOOKS.push(async () => { if (!isAdmin() || S._purged || !writable()) return; S._purged = true; const cut = new Date(Date.now() - 30 * 864e5).toISOString(), cut2 = new Date(Date.now() - 90 * 864e5).toISOString(); for (const t of list('trash')) if (t.deletedAt < cut) { try { await _storeRemove('trash', t.id); } catch (e) { /* ignore */ } } for (const c of list('changes')) if (c.at < cut2) { try { await _storeRemove('changes', c.id); } catch (e) { /* ignore */ } } });
 /* ---------------- sync chip in the topbar ---------------- */
 function syncState() { const n = outboxRead().length; return { off: !navigator.onLine, n, last: _lastSync }; }
-function syncChipHTML() { const s = syncState(); const cls = s.off ? 'off' : s.n ? 'pend' : ''; const label = s.off ? `أوفلاين${s.n ? ` · ${s.n} بانتظار الإرسال` : ''}` : s.n ? `${s.n} بانتظار الإرسال` : S.mode === 'sb' || S.mode === 'db' ? 'متصل — حفظ لحظي' : 'محفوظ على هذا الجهاز'; return `<button class="syncchip ${cls}" data-action="syncInfo" title="${esc(label)}${s.last ? ' · آخر مزامنة ' + s.last.slice(11, 16) : ''}"><span class="d"></span><span class="t">${esc(label)}</span></button>`; }
+function syncChipHTML() { const s = syncState(); const cls = s.off ? 'off' : s.n ? 'pend' : ''; const label = s.off ? `أوفلاين${s.n ? ` · ${s.n} بانتظار الإرسال` : ''}` : s.n ? `${s.n} بانتظار الإرسال` : S.mode === 'sb' || S.mode === 'db' ? 'متصل — حفظ لحظي' : 'محفوظ على هذا الجهاز'; return `<button class="syncchip ${cls}" data-action="syncInfo" title="${esc(label)}${s.last ? ' · آخر مزامنة ' + fmtAtTm(s.last) : ''}"><span class="d"></span><span class="t">${esc(label)}</span></button>`; }
 function updateSyncChip() { const el = document.querySelector('.syncchip'); if (el) el.outerHTML = syncChipHTML(); }
 RENDER_HOOKS.push(() => { const box = document.querySelector('.tb-actions'); if (!box || box.querySelector('.syncchip')) return; box.insertAdjacentHTML('afterbegin', syncChipHTML()); });
-ACTIONS.syncInfo = () => { const s = syncState(); const q = outboxRead(); openModal({ title: 'حالة الاتصال والحفظ', footer: `<button type="button" class="btn" data-action="closeModal">إغلاق</button>${q.length ? `<button type="button" class="btn p" data-action="syncNow">${icon('play')}إرسال الآن</button>` : ''}`, body: `<div class="stack"><div class="row" style="gap:10px;align-items:center"><span class="syncchip ${s.off ? 'off' : s.n ? 'pend' : ''}"><span class="d"></span></span><b>${s.off ? 'لا يوجد اتصال بالإنترنت' : 'متصل'}</b></div><div class="small">كل عملية تُحفظ فورًا لحظة الضغط${S.mode === 'sb' || S.mode === 'db' ? ' في قاعدة البيانات المشتركة وتصل لكل الأجهزة خلال ثوانٍ' : ' على هذا الجهاز'}. لو انقطع النت تُحفظ العمليات والصور محليًا وتُرسل تلقائيًا عند عودته.</div><div class="small">آخر مزامنة: <b>${s.last ? fmtDate(s.last.slice(0, 10)) + ' ' + s.last.slice(11, 16) : '—'}</b> · عمليات بانتظار الإرسال: <b>${q.length}</b></div>${q.length ? `<div class="list">${q.slice(0, 20).map(op => `<div class="item" style="cursor:default;padding:6px 10px"><div class="main"><div class="title">${op.kind === 'delete' ? 'حذف' : 'حفظ'} — ${esc(op.col)} / ${esc(op.id)}</div><div class="meta"><span>${fmtDate(op.at.slice(0, 10))} ${op.at.slice(11, 16)}</span></div></div></div>`).join('')}</div>` : ''}<div class="tiny muted">النسخ الاحتياطية: تلقائيًا مرتين يوميًا (الإعدادات ← قاعدة البيانات والنسخ الاحتياطي) + سلة محذوفات 30 يومًا + سجل تغييرات (الإعدادات ← أمان البيانات).</div></div>` }); };
+ACTIONS.syncInfo = () => { const s = syncState(); const q = outboxRead(); openModal({ title: 'حالة الاتصال والحفظ', footer: `<button type="button" class="btn" data-action="closeModal">إغلاق</button>${q.length ? `<button type="button" class="btn p" data-action="syncNow">${icon('play')}إرسال الآن</button>` : ''}`, body: `<div class="stack"><div class="row" style="gap:10px;align-items:center"><span class="syncchip ${s.off ? 'off' : s.n ? 'pend' : ''}"><span class="d"></span></span><b>${s.off ? 'لا يوجد اتصال بالإنترنت' : 'متصل'}</b></div><div class="small">كل عملية تُحفظ فورًا لحظة الضغط${S.mode === 'sb' || S.mode === 'db' ? ' في قاعدة البيانات المشتركة وتصل لكل الأجهزة خلال ثوانٍ' : ' على هذا الجهاز'}. لو انقطع النت تُحفظ العمليات والصور محليًا وتُرسل تلقائيًا عند عودته.</div><div class="small">آخر مزامنة: <b>${s.last ? fmtDate(s.last.slice(0, 10)) + ' ' + fmtAtTm(s.last) : '—'}</b> · عمليات بانتظار الإرسال: <b>${q.length}</b></div>${q.length ? `<div class="list">${q.slice(0, 20).map(op => `<div class="item" style="cursor:default;padding:6px 10px"><div class="main"><div class="title">${op.kind === 'delete' ? 'حذف' : 'حفظ'} — ${esc(op.col)} / ${esc(op.id)}</div><div class="meta"><span>${fmtDate(op.at.slice(0, 10))} ${fmtAtTm(op.at)}</span></div></div></div>`).join('')}</div>` : ''}<div class="tiny muted">النسخ الاحتياطية: تلقائيًا مرتين يوميًا (الإعدادات ← قاعدة البيانات والنسخ الاحتياطي) + سلة محذوفات 30 يومًا + سجل تغييرات (الإعدادات ← أمان البيانات).</div></div>` }); };
 ACTIONS.syncNow = async () => { await outboxFlush(); closeModal(); };
 /* ---------------- drafts: every open form autosaves each second ---------------- */
 const DRAFT_KEY = 'nf.drafts.v1';
@@ -9111,7 +9135,7 @@ let _draftTimer = null;
 document.addEventListener('input', e => { const f = e.target.closest('#mform'); if (!f) return; clearTimeout(_draftTimer); _draftTimer = setTimeout(() => { if (!document.contains(f)) return; /* v5.01: form already submitted/closed — don't resurrect its draft */ const v = draftCapture(f); const d = draftsRead(); if (v) d[draftKey(f)] = { v, at: nowISO(), path: location.hash }; else delete d[draftKey(f)]; draftsWrite(d); }, 1000); });
 document.addEventListener('submit', e => { const f = e.target.closest('#mform'); if (!f) return; const d = draftsRead(); delete d[draftKey(f)]; draftsWrite(d); }, true);
 /* restore a draft when the same form opens again (only fills empty fields) */
-const _mo = new MutationObserver(() => { const f = document.querySelector('#mform'); if (!f || f._draftChecked) return; f._draftChecked = true; const d = draftsRead(); const k = draftKey(f); const dr = d[k]; if (!dr || !dr.v) return; if (Date.now() - new Date(dr.at).getTime() > 3 * 864e5) { delete d[k]; draftsWrite(d); return; } let n = 0; Object.entries(dr.v).forEach(([name, v]) => { const [nm, rv] = name.split(':'); const els = $$(`[name="${nm}"]`, f); els.forEach(el => { if (el.type === 'checkbox') { if (!el.checked && v) { el.checked = true; n++; } } else if (el.type === 'radio') { if (el.value === rv && v && !el.checked) { el.checked = true; n++; } } else if (!el.value && v) { el.value = v; n++; } }); }); if (n) toast(`استُعيدت مسودة لم تُحفظ (${fmtDate(dr.at.slice(0, 10))} ${dr.at.slice(11, 16)}) — راجعها ثم احفظ`); });
+const _mo = new MutationObserver(() => { const f = document.querySelector('#mform'); if (!f || f._draftChecked) return; f._draftChecked = true; const d = draftsRead(); const k = draftKey(f); const dr = d[k]; if (!dr || !dr.v) return; if (Date.now() - new Date(dr.at).getTime() > 3 * 864e5) { delete d[k]; draftsWrite(d); return; } let n = 0; Object.entries(dr.v).forEach(([name, v]) => { const [nm, rv] = name.split(':'); const els = $$(`[name="${nm}"]`, f); els.forEach(el => { if (el.type === 'checkbox') { if (!el.checked && v) { el.checked = true; n++; } } else if (el.type === 'radio') { if (el.value === rv && v && !el.checked) { el.checked = true; n++; } } else if (!el.value && v) { el.value = v; n++; } }); }); if (n) toast(`استُعيدت مسودة لم تُحفظ (${fmtDate(dr.at.slice(0, 10))} ${fmtAtTm(dr.at)}) — راجعها ثم احفظ`); });
 _mo.observe(document.body, { childList: true, subtree: true });
 /* ---------------- settings tab ---------------- */
 EXTRA_SETTINGS.datasafe = { label: 'أمان البيانات', render: () => {
@@ -9119,8 +9143,8 @@ EXTRA_SETTINGS.datasafe = { label: 'أمان البيانات', render: () => {
   const colName = c => ({ orders: 'أمر تشغيل', tasks: 'مهمة', workers: 'موظف', clients: 'عميل', quotations: 'عرض سعر', materials: 'خامة', purchases: 'طلب شراء', suppliers: 'مورد', leads: 'عميل محتمل', trips: 'مشوار', vehicles: 'عربية', requests: 'طلب', penalties: 'جزاء', expenses: 'مصروف', products: 'منتج', attendance: 'حضور', movements: 'حركة مخزن', sites: 'موقع', staff: 'مستخدم', extorders: 'تشغيل خارجي', servfactories: 'مصنع خدمي', advances: 'سلفة', payrolls: 'مرتبات' }[c] || c);
   return `<div class="stack">
     <div class="card"><div class="cardhead"><h3>${icon('shield')} الحفظ اللحظي والاتصال</h3><div class="grow"></div>${syncChipHTML()}</div><div class="small">كل ضغطة تُحفظ فورًا (لا يوجد زر حفظ)؛ ${S.mode === 'sb' || S.mode === 'db' ? 'قاعدة البيانات المشتركة تُرسل التحديث لكل الأجهزة المفتوحة خلال ثوانٍ (اشتراك لحظي)' : 'في هذه النسخة تُحفظ على هذا الجهاز'}. لو انقطع النت: العمليات والصور تُحفظ محليًا في طابور وتُرسل تلقائيًا عند عودته (${outboxRead().length} بانتظار الإرسال الآن). المسودّات المفتوحة تُحفظ كل ثانية وتُستعاد عند إعادة فتح النموذج (${Object.keys(dr).length} مسودة محفوظة).</div><div class="tiny muted" style="margin-top:6px">النسخ الاحتياطية الكاملة: مرتان يوميًا تلقائيًا + يدوي — تبويب «قاعدة البيانات والنسخ الاحتياطي».</div></div>
-    <div class="card"><div class="cardhead"><h3>سلة المحذوفات — 30 يومًا</h3><span class="muted small">${tr.length}</span></div>${tr.length ? `<div class="tablewrap"><table><thead><tr><th>النوع</th><th>العنصر</th><th>حُذف</th><th>بواسطة</th><th></th></tr></thead><tbody>${tr.slice(0, 60).map(t => `<tr><td>${esc(colName(t.col))}</td><td>${esc(t.label || t.docId)}</td><td>${fmtDate((t.deletedAt || '').slice(0, 10))} ${(t.deletedAt || '').slice(11, 16)}</td><td>${esc(t.byName || '')}</td><td class="row" style="gap:4px"><button class="btn xs" data-action="trashRestore" data-arg="${t.id}">استعادة</button>${isAdmin() ? `<button class="btn xs ghost" data-action="trashPurge" data-arg="${t.id}">${icon('trash')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد عناصر محذوفة — أي حذف يبقى هنا 30 يومًا قبل الحذف النهائي</div>'}</div>
-    <div class="card"><div class="cardhead"><h3>سجل التغييرات — آخر ${ch.length}</h3><span class="muted small">من عدّل ماذا ومتى (يُحتفظ به 90 يومًا)</span></div>${ch.length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>من</th><th>العملية</th><th>العنصر</th><th>الحقول</th></tr></thead><tbody>${ch.map(c => `<tr><td class="small">${fmtDate((c.at || '').slice(0, 10))} ${(c.at || '').slice(11, 16)}</td><td>${esc(c.byName || '')}</td><td>${c.kind === 'save' ? 'حفظ' : c.kind === 'update' ? 'تعديل' : 'حذف'}</td><td>${esc(colName(c.col))}: ${esc(c.label || c.docId)}</td><td class="tiny muted">${esc((c.keys || []).join('، '))}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد تغييرات مسجّلة بعد</div>'}</div></div>`;
+    <div class="card"><div class="cardhead"><h3>سلة المحذوفات — 30 يومًا</h3><span class="muted small">${tr.length}</span></div>${tr.length ? `<div class="tablewrap"><table><thead><tr><th>النوع</th><th>العنصر</th><th>حُذف</th><th>بواسطة</th><th></th></tr></thead><tbody>${tr.slice(0, 60).map(t => `<tr><td>${esc(colName(t.col))}</td><td>${esc(t.label || t.docId)}</td><td>${fmtDate((t.deletedAt || '').slice(0, 10))} ${fmtAtTm(t.deletedAt)}</td><td>${esc(t.byName || '')}</td><td class="row" style="gap:4px"><button class="btn xs" data-action="trashRestore" data-arg="${t.id}">استعادة</button>${isAdmin() ? `<button class="btn xs ghost" data-action="trashPurge" data-arg="${t.id}">${icon('trash')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد عناصر محذوفة — أي حذف يبقى هنا 30 يومًا قبل الحذف النهائي</div>'}</div>
+    <div class="card"><div class="cardhead"><h3>سجل التغييرات — آخر ${ch.length}</h3><span class="muted small">من عدّل ماذا ومتى (يُحتفظ به 90 يومًا)</span></div>${ch.length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>من</th><th>العملية</th><th>العنصر</th><th>الحقول</th></tr></thead><tbody>${ch.map(c => `<tr><td class="small">${fmtDate((c.at || '').slice(0, 10))} ${fmtAtTm(c.at)}</td><td>${esc(c.byName || '')}</td><td>${c.kind === 'save' ? 'حفظ' : c.kind === 'update' ? 'تعديل' : 'حذف'}</td><td>${esc(colName(c.col))}: ${esc(c.label || c.docId)}</td><td class="tiny muted">${esc((c.keys || []).join('، '))}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">لا توجد تغييرات مسجّلة بعد</div>'}</div></div>`;
 } };
 /* =====================================================================
    v4.6.1 — الهيكل التنظيمي مخططًا أفقيًا تفاعليًا: مربعات وخطوط، سحب أي موظف من
@@ -9858,7 +9882,7 @@ function askLocal(w, q) {
   if (has('طلب', 'طلبات', 'موافق')) {
     out.push(F.reqs.length ? `آخر طلباتك:\n${F.reqs.map(r => `• ${REQ_TYPES[r.type] || r.type} — ${fmtDate((r.createdAt || '').slice(0, 10))}: ${r.status === 'pending' ? (typeof stageChip === 'function' ? 'معلّق عند ' + (CHAIN_LABEL[reqStage(r).role] || '') : 'معلّق') : r.status === 'approved' ? 'موافق عليه' : r.status === 'rejected' ? 'مرفوض' : r.status}`).join('\n')}` : 'ليس لديك طلبات مسجّلة.');
   }
-  if (has('مواعيد', 'وردية', 'شيفت', 'ميعاد')) out.push(`مواعيد عملك: من ${F.shift.start || '08:00'} إلى ${F.shift.end || '17:00'}${F.shift.name ? ` (${F.shift.name})` : ''}. الأوفر تايم يُحسب ×${S.settings.otMultiplier || 1.5}${F.pol.otNeedsApproval ? ' بعد اعتماد رئيس القسم' : ''}، والعطلات ×${F.pol.otHolidayMultiplier || 2}.`);
+  if (has('مواعيد', 'وردية', 'شيفت', 'ميعاد')) out.push(`مواعيد عملك: من ${fmtTm(F.shift.start || '08:00')} إلى ${fmtTm(F.shift.end || '17:00')}${F.shift.name ? ` (${F.shift.name})` : ''}. الأوفر تايم يُحسب ×${S.settings.otMultiplier || 1.5}${F.pol.otNeedsApproval ? ' بعد اعتماد رئيس القسم' : ''}، والعطلات ×${F.pol.otHolidayMultiplier || 2}.`);
   if (has('مرتب', 'راتب', 'صرف', 'قبض')) out.push(`المرتب يُصرف يوم ${F.pol.payDay || 5} من كل شهر عن الشهر السابق، ويُحسب على ${F.pol.monthDays || 26} يوم عمل. تفاصيل حسابك الشهري تظهر في بوابتي بعد إقفال الشهر.`);
   if (has('لائحة', 'لايحة', 'قانون', 'قواعد')) out.push('اللائحة الداخلية كاملة موجودة في القائمة ← «اللائحة الداخلية»، وكل بند فيها هو المرجع لأي خصم أو استحقاق.');
   return out.join('\n\n');
@@ -10008,7 +10032,7 @@ body.nfnocopy input,body.nfnocopy textarea,body.nfnocopy [contenteditable]{-webk
 const privacyCfg = () => Object.assign({ watermark: true, blur: true, nocopy: true }, (S.settings && S.settings.privacy) || {});
 const privacyExempt = () => !S.session || isAdmin() || (typeof isViewing === 'function' && isViewing());
 /* v6.37: name + date/time only (no phone number — Mahmoud), and a lighter grid: rows 110px apart, wide gaps */
-function wmText() { const s = S.session || {}; const d = new Date(); const pad = n => String(n).padStart(2, '0'); return `${s.name || ''} · ${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function wmText() { const s = S.session || {}; const d = new Date(); const pad = n => String(n).padStart(2, '0'); return `${s.name || ''} · ${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${fmtAtTm(d)}`; }
 function wmRender() {
   let el = document.getElementById('nfwm'); const c = privacyCfg();
   if (!c.watermark || privacyExempt()) { if (el) el.remove(); return; }
@@ -10253,7 +10277,7 @@ async function taskPost(t, text, file, opts = {}) {
 }
 function chatHTMLNotif(t) {
   let h = chatHTMLBase(t); const th = taskThread(t); const me = myIds();
-  th.forEach(m => { if (!m.audioFileId) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; h = h.slice(0, j) + `<div class="tx">🎤 رسالة صوتية${m.dur ? ` (${m.dur} ث)` : ''}</div><button class="btn ghost" data-action="voicePlay" data-arg="${esc(m.audioFileId)}">▶ تشغيل</button>` + h.slice(j); });
+  th.forEach(m => { if (!m.audioFileId) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${fmtAtTm(m.at)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; h = h.slice(0, j) + `<div class="tx">🎤 رسالة صوتية${m.dur ? ` (${m.dur} ث)` : ''}</div><button class="btn ghost" data-action="voicePlay" data-arg="${esc(m.audioFileId)}">▶ تشغيل</button>` + h.slice(j); });
   if (writable() && taskIsParty(t)) h = h.replace(`<button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`, `<button class="btn ghost recbtn" id="recbtn" data-action="taskChatVoice" data-arg="${t.id}" title="رسالة صوتية">${icon('mic')}</button><button class="btn ghost" data-action="taskChatPhoto" data-arg="${t.id}" title="صورة">`);
   return h;
 }
@@ -10863,7 +10887,7 @@ async function taskPostVideo(t, file) {
 /* chat: video + system messages */
 function chatHTML(t) {
   let h = chatHTMLNotif(t); const th = taskThread(t);
-  th.forEach(m => { if (!m.videoFileId && !m.sys) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; if (m.videoFileId) h = h.slice(0, j) + `<button type="button" class="vid" data-action="fileOpen" data-arg="${esc(m.videoFileId)}">${icon('play')} فيديو${m.name ? ' — ' + esc(m.name.slice(0, 30)) : ''}</button>` + h.slice(j); });
+  th.forEach(m => { if (!m.videoFileId && !m.sys) return; const marker = `<div class="by">${esc(m.byName || '')} · ${fmtDate((m.at || '').slice(0, 10))} ${fmtAtTm(m.at)}</div>`; const i = h.indexOf(marker); if (i < 0) return; const j = i + marker.length; if (m.videoFileId) h = h.slice(0, j) + `<button type="button" class="vid" data-action="fileOpen" data-arg="${esc(m.videoFileId)}">${icon('play')} فيديو${m.name ? ' — ' + esc(m.name.slice(0, 30)) : ''}</button>` + h.slice(j); });
   return h;
 }
 /* add a party: system line + push */
@@ -11448,7 +11472,7 @@ const whoColor = id => WA_COLORS[Math.abs(String(id || '').split('').reduce((a, 
 function chatHTML(t) {
   const th = taskThread(t); let last = null, lastBy = null; const rows = [];
   th.forEach((m, mi) => {
-    const mid = m.id || ('i' + mi); const d = (m.at || '').slice(0, 10), tm = (m.at || '').slice(11, 16);
+    const mid = m.id || ('i' + mi); const d = (m.at || '').slice(0, 10), tm = fmtAtTm(m.at);
     if (d !== last) { rows.push(`<div class="day">${waDay(d)}</div>`); last = d; lastBy = null; }
     if (m.sys) { rows.push(`<div class="sysl">${esc(m.text || '')}</div>`); lastBy = null; return; }
     const mine = msgMine(m); const first = lastBy !== m.by; lastBy = m.by;
@@ -11502,11 +11526,11 @@ function missedCheckouts(w) {
 }
 function outFixDialog(w, date, after) {
   const sh = shiftFor(w); const row = attendanceFor(date)[w.id] || {};
-  openModal({ title: `انصراف منسي — ${fmtDate(date)}`, body: `<div class="form"><div class="banner warn full">${icon('alert')}<span>سجّلت حضور يوم ${fmtDate(date)} الساعة ${esc(row.in || '')} ولم تسجّل انصراف. اكتب وقت انصرافك الفعلي وسبب نسيان البصمة — يعتمده رئيس القسم ثم مدير المصنع، وبعدها تقدر تبصم حضور النهارده.</span></div>${field('وقت الانصراف الفعلي', inp('out', sh.end || '17:00', 'type="time" required'))}${field('السبب', `<textarea id="f-reason" name="reason" required placeholder="مثال: نسيت أبصم وأنا خارج"></textarea>`, 'full')}</div>`, onSubmit: async f => {
+  openModal({ title: `انصراف منسي — ${fmtDate(date)}`, body: `<div class="form"><div class="banner warn full">${icon('alert')}<span>سجّلت حضور يوم ${fmtDate(date)} الساعة ${esc(fmtTm(row.in || ''))} ولم تسجّل انصراف. اكتب وقت انصرافك الفعلي وسبب نسيان البصمة — يعتمده رئيس القسم ثم مدير المصنع، وبعدها تقدر تبصم حضور النهارده.</span></div>${field('وقت الانصراف الفعلي', inp('out', sh.end || '17:00', 'type="time" required'))}${field('السبب', `<textarea id="f-reason" name="reason" required placeholder="مثال: نسيت أبصم وأنا خارج"></textarea>`, 'full')}</div>`, onSubmit: async f => {
     const d = formData(f); if (!d.out) { toast('اكتب وقت الانصراف', 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب السبب', 'err'); return false; }
-    const me = S.session || {}; const r = { id: uid(), type: 'outfix', workerId: w.id, deptId: w.deptId || null, date, out: d.out, reason: d.reason.trim(), status: 'pending', requesterId: me.workerId || w.id, requesterName: me.name || w.name, createdBy: me.id || ('w:' + w.id), createdByName: me.name || w.name, createdAt: nowISO(), chain: chainFor('outfix'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || w.name, role: role(), kind: 'system', text: `طلب تصحيح انصراف ${fmtDate(date)} — ${d.out}` }] };
+    const me = S.session || {}; const r = { id: uid(), type: 'outfix', workerId: w.id, deptId: w.deptId || null, date, out: d.out, reason: d.reason.trim(), status: 'pending', requesterId: me.workerId || w.id, requesterName: me.name || w.name, createdBy: me.id || ('w:' + w.id), createdByName: me.name || w.name, createdAt: nowISO(), chain: chainFor('outfix'), step: 0, stepAt: nowISO(), thread: [{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || w.name, role: role(), kind: 'system', text: `طلب تصحيح انصراف ${fmtDate(date)} — ${fmtTm(d.out)}` }] };
     await Store.save('requests', r, { silent: true }); await setAtt(date, w, Object.assign({}, row, { outFixReqId: r.id, outFixPending: d.out }));
-    pushSend(reqStepTargets(r), `انصراف منسي — ${w.name}`, `${fmtDate(date)} · انصراف ${d.out} · ${d.reason.trim()}`.slice(0, 140), '/#/approvals', 'req-' + r.id);
+    pushSend(reqStepTargets(r), `انصراف منسي — ${w.name}`, `${fmtDate(date)} · انصراف ${fmtTm(d.out)} · ${d.reason.trim()}`.slice(0, 140), '/#/approvals', 'req-' + r.id);
     toast('تم إرسال طلب التصحيح لرئيس القسم'); closeModal(); if (after) setTimeout(after, 250);
   } });
 }
@@ -11518,7 +11542,7 @@ kioskPunch = (base => async (w, opts = {}) => {
   }
   return base(w, opts);
 })(kioskPunch);
-function reqDescOutfix(r) { if (r.type === 'outfix') return `تصحيح انصراف ${fmtDate(r.date)} — انصراف ${r.out}${r.reason ? ' · ' + r.reason : ''}`; return ''; }
+function reqDescOutfix(r) { if (r.type === 'outfix') return `تصحيح انصراف ${fmtDate(r.date)} — انصراف ${fmtTm(r.out)}${r.reason ? ' · ' + r.reason : ''}`; return ''; }
 reqDesc = (base => r => reqDescOutfix(r) || base(r))(reqDesc);
 applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   if (r.type === 'outfix') { const wk = byId('workers', r.workerId); if (!wk) return; const row = attendanceFor(r.date)[wk.id] || {}; const fixed = computeAttRow(Object.assign({}, row, { out: r.out, outMethod: 'fix', outFixed: true, outFixNote: r.reason || '', outFixPending: null }), wk); await setAtt(r.date, wk, fixed); return; }
@@ -12932,9 +12956,9 @@ ACTIONS.cctvOpen = wid => {
   const w = byId('workers', wid); const day = S.cctv.day; const d = day && day.workers ? day.workers[wid] : null; if (!w) return;
   const zones = d ? Object.entries(d.zones || {}).sort((a, b) => b[1] - a[1]) : []; const total = zones.reduce((a, x) => a + x[1], 0) || 1;
   const track = d ? (d.track || []).slice(-120) : []; const colors = {}; let ci = 0; const pal = ['#3d5f8a', '#9a7a3a', '#4f8a6d', '#b35c5c', '#6b7482', '#7c3aed'];
-  openModal({ title: `${w.name} — حركته اليوم`, wide: true, footer: null, body: d ? `<div class="row" style="gap:12px;align-items:center;margin-bottom:10px">${d.thumb ? `<img src="${d.thumb}" style="width:64px;height:64px;border-radius:12px;object-fit:cover">` : avatarHTML(w, 64)}<div><b>${esc(deptName(w.deptId))}</b><div class="small">أول رؤية ${new Date(d.first).toTimeString().slice(0, 5)} · آخر رؤية ${new Date(d.last).toTimeString().slice(0, 5)} في ${esc(cctvZoneName(d.zone))} (${esc(d.camName || '')}) · ${d.n} رؤية</div></div></div>
+  openModal({ title: `${w.name} — حركته اليوم`, wide: true, footer: null, body: d ? `<div class="row" style="gap:12px;align-items:center;margin-bottom:10px">${d.thumb ? `<img src="${d.thumb}" style="width:64px;height:64px;border-radius:12px;object-fit:cover">` : avatarHTML(w, 64)}<div><b>${esc(deptName(w.deptId))}</b><div class="small">أول رؤية ${fmtAtTm(d.first)} · آخر رؤية ${fmtAtTm(d.last)} في ${esc(cctvZoneName(d.zone))} (${esc(d.camName || '')}) · ${d.n} رؤية</div></div></div>
     <h4 style="margin:8px 0 4px">الوقت حسب المنطقة</h4>${zones.map(([z, ms]) => `<div class="row" style="gap:8px;align-items:center;margin:3px 0"><span style="min-width:140px">${esc(cctvZoneName(z))}${z === w.deptId ? ' <span class="badge good">قسمه</span>' : ''}</span><div class="zbar" style="flex:1"><i style="width:${Math.round(ms / total * 100)}%;background:${z === w.deptId ? '#4f8a6d' : '#9a7a3a'}"></i></div><span class="tiny" style="min-width:60px">${Math.round(ms / 60000)} د</span></div>`).join('') || '<div class="muted small">رؤية واحدة فقط</div>'}
-    <h4 style="margin:12px 0 4px">خط الزمن (كل شريحة = رؤية)</h4><div class="track">${track.map(t => { const z = t[2] || '?'; if (!colors[z]) colors[z] = pal[ci++ % pal.length]; return `<i title="${new Date(t[0]).toTimeString().slice(0, 5)} — ${esc(cctvZoneName(z))}" style="background:${colors[z]}"></i>`; }).join('')}</div><div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${Object.entries(colors).map(([z, c]) => `<span class="tiny"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};vertical-align:middle"></i> ${esc(cctvZoneName(z))}</span>`).join('')}</div>` : '<div class="muted">لم تشاهده الكاميرات اليوم</div>' });
+    <h4 style="margin:12px 0 4px">خط الزمن (كل شريحة = رؤية)</h4><div class="track">${track.map(t => { const z = t[2] || '?'; if (!colors[z]) colors[z] = pal[ci++ % pal.length]; return `<i title="${fmtAtTm(t[0])} — ${esc(cctvZoneName(z))}" style="background:${colors[z]}"></i>`; }).join('')}</div><div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${Object.entries(colors).map(([z, c]) => `<span class="tiny"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};vertical-align:middle"></i> ${esc(cctvZoneName(z))}</span>`).join('')}</div>` : '<div class="muted">لم تشاهده الكاميرات اليوم</div>' });
 };
 /* alerts → tasks/push for supervisors (once per worker per kind per hour), only while the page is used by a supervisor or every 5 min in the background */
 let _cctvTick = 0; const _cctvSent = {};
@@ -14142,7 +14166,7 @@ tripDest = (base => function (t) {
 saveTrip = (base => async function (f, t) {
   const r = await base.apply(this, arguments); if (r === false || !t || !t.id) return r;
   const tr = byId('trips', t.id); const tk = tr && byId('tasks', `trip_${tr.id}`); if (!tr || !tk || tk.status === 'done' || !tr.driverId) return r;
-  const desc = `${TRIP_KINDS[tr.kind] || ''}\n${tr.from || ''} ← ${tr.to || ''} · ${fmtDate(tr.date)} ${tr.time || ''} · ${vehicleName(tr.vehicleId)}\nابدأ المشوار من «بوابتي» أو «حركة النقل» وأنهه بصورة عند التسليم/الاستلام.`;
+  const desc = `${TRIP_KINDS[tr.kind] || ''}\n${tr.from || ''} ← ${tr.to || ''} · ${fmtDate(tr.date)} ${fmtTm(tr.time || '')} · ${vehicleName(tr.vehicleId)}\nابدأ المشوار من «بوابتي» أو «حركة النقل» وأنهه بصورة عند التسليم/الاستلام.`;
   if (tk.assigneeId !== tr.driverId || tk.dueDate !== tr.date || tk.desc !== desc) {
     const moved = tk.assigneeId !== tr.driverId;
     await Store.save('tasks', Object.assign({}, tk, { assigneeId: tr.driverId, title: `مشوار ${tr.number}: ${tr.purpose}`, desc, dueDate: tr.date, orderId: tr.orderId || null, updatedAt: nowISO() }), { silent: true });
@@ -14358,7 +14382,7 @@ function myAttCard(w) {
     const note = r && r.editReqId ? '<span class="fixed">اتعدّل بطلب معتمد</span>' : r && (r.reqId || r.outFixed) && (r.method === 'request' || r.outMethod === 'request' || r.outFixed) ? '<span class="fixed">اتصلّح بطلب</span>' : '';
     const noBtn = ['off', 'holiday'].includes(c.kind) && !r;
     const btn = noBtn ? '' : pend ? '<span class="pend">قيد الاعتماد</span>' : `<button class="btn xs" data-action="attEditAsk" data-arg="${d}">${icon('edit')}<span class="bt">طلب تعديل</span></button>`;
-    return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ' <span class="badge warn" style="padding:0 5px">ناقص بصمة</span>' : ''}${note}</td><td class="ltr">${esc((r && r.in) || '—')}</td><td class="ltr">${esc((r && r.out) || '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td><td>${btn}</td></tr>`;
+    return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ' <span class="badge warn" style="padding:0 5px">ناقص بصمة</span>' : ''}${note}</td><td class="ltr">${esc(r && r.in ? fmtTm(r.in) : '—')}</td><td class="ltr">${esc(r && r.out ? fmtTm(r.out) : '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td><td>${btn}</td></tr>`;
   }).join('');
   return `<div class="card myatt" id="myattcard"><div class="cardhead"><h3>${icon('attendance')}حضوري</h3><div class="grow"></div>${monthNavBar('meatt')}</div>
     <div class="kp"><div><b class="num">${s.present + (s.half ? ' + ' + s.half + '½' : '')}</b><span>أيام حضور</span></div><div><b class="num">${s.absent}</b><span>غياب</span></div><div><b class="num">${s.late}</b><span>تأخير (دقيقة)</span></div><div><b class="num">${miss}</b><span>نسيان بصمة</span></div></div>
@@ -14375,7 +14399,7 @@ ACTIONS.attEditAsk = date => {
   if (attEditPending(w.id, date)) { toast('في طلب تعديل لليوم ده لسه قيد الاعتماد', 'err'); return; }
   const r0 = attendanceFor(date)[w.id] || {}; const sh = shiftFor(w);
   openModal({ title: `طلب تعديل حضور — ${fmtDate(date)} (${dayName(date)})`, submitLabel: 'إرسال الطلب', body: `<div class="form">
-    <div class="small full" style="margin-bottom:4px">المسجّل دلوقتي: حضور <b class="ltr">${esc(r0.in || '—')}</b> · انصراف <b class="ltr">${esc(r0.out || '—')}</b></div>
+    <div class="small full" style="margin-bottom:4px">المسجّل دلوقتي: حضور <b class="ltr">${esc(r0.in ? fmtTm(r0.in) : '—')}</b> · انصراف <b class="ltr">${esc(r0.out ? fmtTm(r0.out) : '—')}</b></div>
     ${field('وقت الحضور الصحيح', inp('in', r0.in || sh.start || '', 'type="time"'))}${field('وقت الانصراف الصحيح', inp('out', r0.out || sh.end || '', 'type="time"'))}
     ${field('السبب', '<textarea id="f-reason" name="reason" required placeholder="مثلاً: نسيت أبصم انصراف — كنت في موقع تركيب"></textarea>', 'full')}
     <div class="tiny muted full">الطلب بيروح لرئيس القسم ← مدير المصنع ← مدير الحسابات والموارد البشرية.</div></div>`,
@@ -14392,7 +14416,7 @@ ACTIONS.attEditAsk = date => {
       toast('تم إرسال الطلب لرئيس القسم'); rerender();
     } });
 };
-const attEditLine = r => [r.newIn && r.newIn !== r.oldIn ? `حضور ${r.newIn}${r.oldIn ? ' بدل ' + r.oldIn : ''}` : '', r.newOut && r.newOut !== r.oldOut ? `انصراف ${r.newOut}${r.oldOut ? ' بدل ' + r.oldOut : ''}` : ''].filter(Boolean).join(' · ') || '—';
+const attEditLine = r => [r.newIn && r.newIn !== r.oldIn ? `حضور ${fmtTm(r.newIn)}${r.oldIn ? ' بدل ' + fmtTm(r.oldIn) : ''}` : '', r.newOut && r.newOut !== r.oldOut ? `انصراف ${fmtTm(r.newOut)}${r.oldOut ? ' بدل ' + fmtTm(r.oldOut) : ''}` : ''].filter(Boolean).join(' · ') || '—';
 reqDesc = (base => r => (r && r.type === 'attedit' ? `تعديل حضور ${fmtDate(r.from)}: ${attEditLine(r)}` : base(r)))(reqDesc);
 /* final approval → the day is corrected automatically */
 applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
@@ -15495,7 +15519,7 @@ function instItemHTML(o, it, showOrder) {
   const tr = instTrip(it); const can = instCan(it.deptId);
   return `<div class="instit ${it.status === 'done' ? 'done' : ''} ${instLate(it) ? 'late' : ''}"><div class="hd"><b>${esc(it.title)}</b>${badge(INST_ST, it.status)}${instLate(it) ? '<span class="badge crit">متأخر</span>' : ''}<span class="small muted">${esc(deptName(it.deptId))}</span></div>
     ${showOrder ? `<div class="small" style="margin-top:4px"><a href="#/orders/${o.id}"><span class="code">${esc(o.code)}</span> ${esc(o.title || '')}</a></div>` : ''}
-    <div class="small" style="margin-top:4px">${icon('calendar')}${fmtDate(it.date)}${it.time ? ' · الساعة ' + esc(it.time) : ''}${o.site && o.site.address ? ` · ${esc(o.site.address)}` : ''}</div>
+    <div class="small" style="margin-top:4px">${icon('calendar')}${fmtDate(it.date)}${it.time ? ' · الساعة ' + esc(fmtTm(it.time)) : ''}${o.site && o.site.address ? ` · ${esc(o.site.address)}` : ''}</div>
     <div class="small" style="margin-top:2px">${icon('workers')}${(it.team || []).map(id => esc(instWName(id))).join('، ') || '—'}</div>
     ${it.needCar ? `<div class="small" style="margin-top:2px">${icon('map')}${tr ? `مشوار <a href="#/fleet/${tr.id}">${esc(tr.number || '')}</a>${tr.status ? ' — ' + esc((typeof TRIP_STATUS !== 'undefined' && TRIP_STATUS[tr.status] ? TRIP_STATUS[tr.status][0] : tr.status)) : ''}` : '<span class="badge warn">محتاج عربية — حركة النقل لسه ماعملتش المشوار</span>'}${it.load ? ` · الحمولة: ${esc(it.load)}` : ''}</div>` : ''}
     ${it.notes ? `<div class="tiny muted" style="margin-top:4px">${esc(it.notes)}</div>` : ''}
@@ -15530,10 +15554,10 @@ async function instSave(o, prev, d) {
   await Store.update('orders', o.id, { installs: items, stages: { [it.deptId]: stPatch } });
   /* one task per technician */
   const site = cur.site && cur.site.address ? cur.site.address : clientName(cur.clientId);
-  for (const wid of team) { const tid = `inst_${it.id}_${wid}`; await Store.save('tasks', Object.assign({}, byId('tasks', tid) || {}, { id: tid, title: `تركيب: ${it.title} — ${cur.code}`, desc: `${fmtDate(it.date)}${it.time ? ' الساعة ' + it.time : ''} · ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.needCar ? '\nفيه عربية من المصنع' + (it.load ? ' — الحمولة: ' + it.load : '') : ''}${it.notes ? '\n' + it.notes : ''}`, assigneeId: wid, deptId: it.deptId, orderId: cur.id, dueDate: it.date, priority: 'normal', status: (byId('tasks', tid) || {}).status || 'open', kind: 'install', installId: it.id, createdBy: me.id || null, createdByName: me.name || '', createdAt: (byId('tasks', tid) || {}).createdAt || now, updatedAt: now }), { silent: true }); }
+  for (const wid of team) { const tid = `inst_${it.id}_${wid}`; await Store.save('tasks', Object.assign({}, byId('tasks', tid) || {}, { id: tid, title: `تركيب: ${it.title} — ${cur.code}`, desc: `${fmtDate(it.date)}${it.time ? ' الساعة ' + fmtTm(it.time) : ''} · ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.needCar ? '\nفيه عربية من المصنع' + (it.load ? ' — الحمولة: ' + it.load : '') : ''}${it.notes ? '\n' + it.notes : ''}`, assigneeId: wid, deptId: it.deptId, orderId: cur.id, dueDate: it.date, priority: 'normal', status: (byId('tasks', tid) || {}).status || 'open', kind: 'install', installId: it.id, createdBy: me.id || null, createdByName: me.name || '', createdAt: (byId('tasks', tid) || {}).createdAt || now, updatedAt: now }), { silent: true }); }
   if (prev) for (const wid of (prev.team || [])) if (!team.includes(wid)) { const t = byId('tasks', `inst_${it.id}_${wid}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'cancelled', updatedAt: now }, { silent: true }); }
   /* fleet: a heads-up task with the details (they create the trip from the item) */
-  if (it.needCar && !instTrip(it) && typeof notifyRole === 'function') { try { await notifyRole('fleet', `مشوار تركيب — ${cur.code} — ${fmtDate(it.date)}${it.time ? ' ' + it.time : ''}`, `${it.title}\nالمكان: ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.load ? '\nالحمولة: ' + it.load : ''}\nافتح أمر التشغيل ← «بنود التركيب» ← «اعمل المشوار».`, { id: `insttrip_${it.id}`, orderId: cur.id, fields: { kind: 'notice', link: `/#/orders/${cur.id}` } }); } catch (e) { /* ignore */ } }
+  if (it.needCar && !instTrip(it) && typeof notifyRole === 'function') { try { await notifyRole('fleet', `مشوار تركيب — ${cur.code} — ${fmtDate(it.date)}${it.time ? ' ' + fmtTm(it.time) : ''}`, `${it.title}\nالمكان: ${site}\nالفريق: ${team.map(instWName).join('، ')}${it.load ? '\nالحمولة: ' + it.load : ''}\nافتح أمر التشغيل ← «بنود التركيب» ← «اعمل المشوار».`, { id: `insttrip_${it.id}`, orderId: cur.id, fields: { kind: 'notice', link: `/#/orders/${cur.id}` } }); } catch (e) { /* ignore */ } }
   if (!isAdmin() && role() !== 'manager' && typeof notifyRole === 'function') { try { await notifyRole('manager', `بند تركيب ${prev ? 'اتعدّل' : 'جديد'} — ${cur.code}`, `${it.title} · ${fmtDate(it.date)} · ${me.name || ''}`, { id: `instmgr_${it.id}_${prev ? 'e' : 'n'}`, orderId: cur.id, fields: { kind: 'notice', link: `/#/orders/${cur.id}` } }); } catch (e) { /* ignore */ } }
   await instRecalc(cur.id, it.deptId);
   return it;
@@ -16629,7 +16653,7 @@ ACTIONS.cxSnagBack = id => { const s = byId('snags', id); if (!s || s.status !==
 ACTIONS.cxSnagClose = async id => { const s = byId('snags', id); if (!s || !['fixed', 'verified'].includes(s.status) || !cxCanManage()) return; await cxSnagSet(s, 'closed', '', []); toast('اتقفلت'); };
 ACTIONS.cxSnagOpen = (id, el, ev) => { if (ev && ev.target.closest('[data-stop]')) return; const s = byId('snags', id); if (!s) return; const sub = s.subId ? byId('subcons', s.subId) : null; const pr = cxPrio[s.priority] || cxPrio.normal;
   openModal({ title: 'ملاحظة', footer: null, body: `<div class="form"><div class="full"><b>${esc(s.text)}</b></div><div class="kv full"><div><span>الحالة</span><b>${(cxSnagStatus[s.status] || [''])[0]}</b></div><div><span>الأولوية</span><b>${pr[0]}</b></div><div><span>المكان</span><b>${esc(cxLocName(s.locId) || '—')}</b></div><div><span>الحرفة / المقاول</span><b>${esc(s.trade || '')}${sub ? ' — ' + esc(sub.name) : ''}</b></div><div><span>آخر موعد</span><b class="${cxSnagLate(s) ? 'cxlate' : ''}">${s.due ? fmtDate(s.due) : '—'}</b></div><div><span>سجّلها</span><b>${esc(s.byName || '')} · ${fmtDate(String(s.at || '').slice(0, 10))}</b></div></div>
-    <div class="full">${cxThumbs(s.fileIds)}</div><div class="full"><h4>السجل</h4><div class="hlog">${(s.history || []).map(h => `<div class="hrow"><div class="grow"><div class="small bold"><span class="badge ${(cxSnagStatus[h.status] || ['', ''])[1]}">${(cxSnagStatus[h.status] || [''])[0]}</span> ${esc(h.byName || '')}</div>${h.note ? `<div class="small">${esc(h.note)}</div>` : ''}<div class="tiny muted">${fmtDate(String(h.at || '').slice(0, 10))} ${String(h.at || '').slice(11, 16)}</div></div></div>`).join('')}</div></div></div>` }); };
+    <div class="full">${cxThumbs(s.fileIds)}</div><div class="full"><h4>السجل</h4><div class="hlog">${(s.history || []).map(h => `<div class="hrow"><div class="grow"><div class="small bold"><span class="badge ${(cxSnagStatus[h.status] || ['', ''])[1]}">${(cxSnagStatus[h.status] || [''])[0]}</span> ${esc(h.byName || '')}</div>${h.note ? `<div class="small">${esc(h.note)}</div>` : ''}<div class="tiny muted">${fmtDate(String(h.at || '').slice(0, 10))} ${fmtAtTm(h.at)}</div></div></div>`).join('')}</div></div></div>` }); };
 /* =================== 3. daily reports =================== */
 const cxReports = pid => list('dailyreports').filter(d => d.projectId === pid).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.at || '').localeCompare(String(a.at || '')));
 const cxManpower = r => (r.manpower || []).reduce((s, m) => s + (+m.count || 0), 0);
@@ -19133,7 +19157,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   async function vRestore(id) {
     if (rank() < 4) { toast(L2('الاسترجاع لصاحب اللوحة بس', 'Only the board owner can restore'), 'err'); return; } const v = (NB.vers || []).find(x => x.id === id); if (!v) return;
-    if (!(await confirmDlg(L2(`ترجّع اللوحة لنسخة ${new Date(v.at).toLocaleString('ar-EG')}؟ النسخة الحالية هتتحفظ الأول.`, `Restore the board to the version of ${new Date(v.at).toLocaleString('en-GB')}? The current state is saved first.`), L2('رجّعها', 'Restore')))) return;
+    if (!(await confirmDlg(L2(`ترجّع اللوحة لنسخة ${fmtDate(localISO(new Date(v.at)))} ${fmtAtTm(v.at)}؟ النسخة الحالية هتتحفظ الأول.`, `Restore the board to the version of ${fmtDate(localISO(new Date(v.at)))} ${fmtAtTm(v.at)}? The current state is saved first.`), L2('رجّعها', 'Restore')))) return;
     toast(L2('جارٍ الاسترجاع…', 'Restoring…')); await vSave(L2('قبل الاسترجاع', 'Before restore'), false); const target = await vItems(id); if (!target.length) { toast(L2('النسخة فاضية أو مش متاحة', 'Version is empty or unavailable'), 'err'); return; }
     const keep = new Set(target.map(i => i.id)); endEdit(true); WB.sel = new Set();
     for (const i of items()) if (!keep.has(i.id)) { try { await Store.remove('bitems', i.id); } catch (e) { /* keep going */ } }
@@ -19141,11 +19165,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     NB.undo = []; NB.redo = []; NB.vers = null; NB.sigs.clear(); sync(); toast(L2('اترجعت النسخة ✓', 'Version restored ✓')); top();
   }
   async function vPreview(id) { const v = (NB.vers || []).find(x => x.id === id); const its = await vItems(id); if (!its.length) { toast(L2('النسخة فاضية أو مش متاحة', 'Version is empty or unavailable'), 'err'); return; } const box = boxPad(union(its.filter(i => i.type !== 'conn').map(i => (i.type === 'stroke' ? boxOf(i) : R(i)))), 40); const cv = await renderItems(its, box, scaleFor(box, 1400), boardBg());
-    openModal({ title: `${v && v.label ? v.label + ' · ' : ''}${v ? new Date(v.at).toLocaleString(enOn() ? 'en-GB' : 'ar-EG') : ''}`, wide: true, footer: null, body: `<img src="${cv.toDataURL('image/png')}" alt="" style="width:100%;border-radius:10px;border:1px solid var(--line)"><p class="tiny muted" style="margin:8px 0 0">${its.length} ${L2('عنصر', 'items')}${rank() >= 4 ? ` · <a href="#" data-nb2="vrestore:${id}">${L2('رجّع اللوحة للنسخة دي', 'Restore the board to this version')}</a>` : ''}</p>` }); }
+    openModal({ title: `${v && v.label ? v.label + ' · ' : ''}${v ? fmtDate(localISO(new Date(v.at))) + ' ' + fmtAtTm(v.at) : ''}`, wide: true, footer: null, body: `<img src="${cv.toDataURL('image/png')}" alt="" style="width:100%;border-radius:10px;border:1px solid var(--line)"><p class="tiny muted" style="margin:8px 0 0">${its.length} ${L2('عنصر', 'items')}${rank() >= 4 ? ` · <a href="#" data-nb2="vrestore:${id}">${L2('رجّع اللوحة للنسخة دي', 'Restore the board to this version')}</a>` : ''}</p>` }); }
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-nb2^="vrestore:"]'); if (!a) return; e.preventDefault(); closeModal(); vRestore(a.dataset.nb2.split(':')[1]); });
   async function histPanel(p) {
     if (!NB.vers) { if (!NB.versLoading) { NB.versLoading = true; vList().then(v => { NB.vers = v; NB.versLoading = false; p.__h = ''; panel(); }); } }
-    const vs = NB.vers || []; const h = `<div class="ph">${I(IC.hist)}<b>${L2('تاريخ النسخ', 'Version history')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div>${can() ? `<div class="nbpinbar"><button type="button" class="btn sm p" data-nb="vsave">${L2('احفظ نسخة دلوقتي', 'Save a version now')}</button></div>` : ''}<div class="pb">${!NB.vers ? `<p class="muted small">…</p>` : vs.length ? vs.map(v => `<div class="nbver"><div><b>${esc(v.label || (v.auto ? L2('حفظ تلقائي', 'Auto-save') : L2('نسخة', 'Version')))}</b><small>${esc(new Date(v.at).toLocaleString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${esc(v.byName || '')} · ${+v.n || 0} ${L2('عنصر', 'items')}</small></div><span><button type="button" class="btn sm" data-nb="vprev:${v.id}">${L2('معاينة', 'Preview')}</button>${rank() >= 4 ? `<button type="button" class="btn sm" data-nb="vrest:${v.id}">${L2('رجّعها', 'Restore')}</button>` : ''}</span></div>`).join('') : `<p class="muted small">${L2('لسه مفيش نسخ — السيستم بيحفظ نسخة تلقائي كل ما اللوحة تتغير (كل نص ساعة بالكتير)', 'No versions yet — the board is auto-saved when it changes (at most every 30 minutes)')}</p>`}</div>`;
+    const vs = NB.vers || []; const h = `<div class="ph">${I(IC.hist)}<b>${L2('تاريخ النسخ', 'Version history')}</b><span class="grow"></span><button type="button" data-nb="panel:">✕</button></div>${can() ? `<div class="nbpinbar"><button type="button" class="btn sm p" data-nb="vsave">${L2('احفظ نسخة دلوقتي', 'Save a version now')}</button></div>` : ''}<div class="pb">${!NB.vers ? `<p class="muted small">…</p>` : vs.length ? vs.map(v => `<div class="nbver"><div><b>${esc(v.label || (v.auto ? L2('حفظ تلقائي', 'Auto-save') : L2('نسخة', 'Version')))}</b><small>${esc(new Date(v.at).toLocaleString(enOn() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }))} · ${esc(v.byName || '')} · ${+v.n || 0} ${L2('عنصر', 'items')}</small></div><span><button type="button" class="btn sm" data-nb="vprev:${v.id}">${L2('معاينة', 'Preview')}</button>${rank() >= 4 ? `<button type="button" class="btn sm" data-nb="vrest:${v.id}">${L2('رجّعها', 'Restore')}</button>` : ''}</span></div>`).join('') : `<p class="muted small">${L2('لسه مفيش نسخ — السيستم بيحفظ نسخة تلقائي كل ما اللوحة تتغير (كل نص ساعة بالكتير)', 'No versions yet — the board is auto-saved when it changes (at most every 30 minutes)')}</p>`}</div>`;
     if (p.__h !== h) { p.__h = h; p.innerHTML = h; tr(p); } p.style.display = '';
   }
   setInterval(() => { if (onBoard() && can()) vAuto().catch(() => {}); }, 10 * 60000);
@@ -19199,7 +19223,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (moodCan(b, 'ok1')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:ok1">${L2('موافقة مبدئية (Owner)', 'Owner approval')}</button>`);
     if (moodCan(b, 'ok')) acts.push(`<button type="button" class="btn sm p" data-nb="mood:ok">${L2('اعتماد نهائي', 'Final approval')}</button>`);
     if (moodCan(b, 'back')) acts.push(`<button type="button" class="btn sm" data-nb="mood:back">${L2('رجّعه بملاحظات', 'Return with notes')}</button>`);
-    const hist = (m.hist || []).slice(-6).reverse().map(h => `<div class="nbmh"><i style="background:${(MOODS[h.s] || MOODS.draft)[1]}"></i><span><b>${esc((MOODS[h.s] || MOODS.draft)[0])}</b> · ${esc(h.byName || '')} · ${esc(new Date(h.at).toLocaleString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${h.note ? `<br><em dir="auto">${esc(h.note)}</em>` : ''}</span></div>`).join('');
+    const hist = (m.hist || []).slice(-6).reverse().map(h => `<div class="nbmh"><i style="background:${(MOODS[h.s] || MOODS.draft)[1]}"></i><span><b>${esc((MOODS[h.s] || MOODS.draft)[0])}</b> · ${esc(h.byName || '')} · ${esc(new Date(h.at).toLocaleString(enOn() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }))}${h.note ? `<br><em dir="auto">${esc(h.note)}</em>` : ''}</span></div>`).join('');
     return `<span class="nbpop nbmoodpop"><b>${L2('اعتماد المود بورد', 'Moodboard approval')}</b><small>${L2('الـOwner يراجع ← الآرت دايركتور يعتمد', 'Owner reviews → art director approves')}${p && !p.ownerId ? ' · ' + L2('المشروع مالوش Owner — الآرت دايركتور يعتمد على طول', 'No project owner — the art director approves directly') : ''}</small>${m.note && s === 'back' ? `<div class="nbmnote" dir="auto">${esc(m.note)}</div>` : ''}<span class="nbmacts">${acts.join('') || `<span class="muted small">${L2('مفيش حاجة مطلوبة منك دلوقتي', 'Nothing needed from you now')}</span>`}</span>${hist ? `<div class="nbmhist">${hist}</div>` : ''}</span>`;
   }
   async function moodAct(act) {
@@ -19568,7 +19592,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (r.dist) body = `<div class="nbengavg"><b>${r.avg.toFixed(1)}</b><span>/ 5</span></div>` + r.dist.map((c, k) => `<div class="nbengbar"><div class="t"><span>${'★'.repeat(k + 1)}</span><b>${c}</b></div><i style="width:${Math.round(c / Math.max(1, ...r.dist) * 100)}%"></i></div>`).reverse().join('');
     if (r.texts) body = r.texts.map(x => `<div class="nbengtx notr" dir="auto">${esc(x.t)}${a.anon ? '' : `<small>${esc(x.by || '')}</small>`}</div>`).join('') || `<p class="muted small">${L2('مفيش إجابات', 'No answers')}</p>`;
     if (r.words) body = `<div class="nbengwc">${r.words.map(([w, c]) => `<span class="notr" style="font-size:${Math.round(12 + Math.min(26, c * 5))}px">${esc(w)}</span>`).join(' ')}</div>`;
-    return `<div class="nbengres"><div class="h"><span class="pill">${esc(engL(a.type))}</span><b class="notr" dir="auto">${esc(a.q)}</b></div><div class="small muted">${L2(`${r.n} إجابة`, `${r.n} answers`)} · ${esc(a.byName || '')} · ${esc(new Date(a.at).toLocaleString(enOn() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${a.state === 'live' ? ' · ' + L2('شغال', 'live') : ''}</div>${body}
+    return `<div class="nbengres"><div class="h"><span class="pill">${esc(engL(a.type))}</span><b class="notr" dir="auto">${esc(a.q)}</b></div><div class="small muted">${L2(`${r.n} إجابة`, `${r.n} answers`)} · ${esc(a.byName || '')} · ${esc(new Date(a.at).toLocaleString(enOn() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }))}${a.state === 'live' ? ' · ' + L2('شغال', 'live') : ''}</div>${body}
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${can() && r.n ? `<button type="button" class="btn sm p" data-nb="engplace:${a.id}">${L2('حط النتيجة على اللوحة', 'Put the result on the board')}</button>` : ''}${can() && r.n ? `<button type="button" class="btn sm" data-nb="engai:${a.id}">✦ ${L2('تقرير AI', 'AI report')}</button>` : ''}${a.state === 'live' && owner ? `<button type="button" class="btn sm" data-nb="engend:${a.id}">${L2('أنهِ', 'End')}</button>` : ''}${owner && a.state !== 'live' ? `<button type="button" class="btn sm ghost" data-nb="engdel:${a.id}">${L2('مسح', 'Delete')}</button>` : ''}</div></div>`;
   }
   function engagePanel(p) {
@@ -20658,7 +20682,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   }
   function dAct(b, it) {
     const txt = l => { const who = esc(pName(l.by)); switch (l.k) { case 'created': return `${who} أنشأ المهمة`; case 'status': return `${who} غيّر الحالة إلى <b>${st(l.x).l}</b>`; case 'owner': return `${who} غيّر المسؤول إلى <b>${esc(pName(l.x) || '—')}</b>`; case 'due': return `${who} غيّر التسليم إلى <b class="mono">${fmtD(l.x)}</b>`; case 'ver': return `${who} رفع نسخة <b class="mono">V${l.x}</b>`; case 'round': return `${who} سجّل جولة تعديل من العميل رقم <b class="mono">${l.x}</b>`; case 'approve': return `العميل وافق · ${who}`; case 'pin': return `${who} أضاف ملاحظة على <b class="mono">V${l.x}</b>`; case 'shot': return `اتنقلت من لوحة التشغيل (Studio OS)`; case 'time': return `${who} سجّل وقت <b class="mono">${fmtMin(l.x)}</b>`; case 'idea': return `${who} عمل المهمة من فكرة على البورد`; case 'ai': return `${who} ولّد نسخة بالذكاء الاصطناعي <b class="mono">V${l.x}</b>`; default: return who; } };
-    return (it.log || []).map(l => `<div class="act"><time>${new Date(l.at).toLocaleString(loc(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time><span>${txt(l)}</span></div>`).join('') || `<div class="qempty">لا يوجد</div>`;
+    return (it.log || []).map(l => `<div class="act"><time>${new Date(l.at).toLocaleString(loc(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })}</time><span>${txt(l)}</span></div>`).join('') || `<div class="qempty">لا يوجد</div>`;
   }
   function ruleText(b, r) {
     const tr = r.tr === 'status' ? `الحالة تتغير إلى <b>${st(r.tv).l}</b>` : ({ created: 'مهمة جديدة تتضاف', due: 'ميعاد التسليم يعدّي والمهمة لسه ما خلصتش', rev: 'جولات التعديل تعدّي المتفق عليه', dep: 'المهمة اللي قبلها تخلص' })[r.tr];
@@ -23341,7 +23365,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       </div>
       ${hasStages(j) ? stagesCardHTML(j) : ''}
       <div class="card" style="margin-top:12px"><div class="tablewrap"><table><thead><tr><th>القطعة</th><th class="n">العدد</th><th class="n">سعر القطعة</th><th class="n">الإجمالي</th><th class="n">اتسلّم</th></tr></thead><tbody>${(j.items || []).map(it => `<tr><td><b>${esc(it.name)}</b></td><td class="n">${fmtNum(it.qty)}</td><td class="n">${fmtMoney(it.price)}</td><td class="n">${fmtMoney(R2((+it.qty || 0) * (+it.price || 0)))}</td><td class="n">${fmtNum(+it.done || 0)} / ${fmtNum(it.qty)}</td></tr>`).join('')}<tr><td colspan="3"><b>الإجمالي</b></td><td class="n"><b>${fmtMoney(tot)}</b></td><td></td></tr></tbody></table></div></div>
-      ${(j.log || []).length ? `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>السجل</h3></div><div class="pjlog">${[...j.log].reverse().map(l => `<div>${fmtDate((l.at || '').slice(0, 10))} ${(l.at || '').slice(11, 16)} — <b>${esc(l.byName || '')}</b>: ${esc(LOGTXT[l.action] || l.action)}${l.note ? ` — ${esc(l.note)}` : ''}</div>`).join('')}</div></div>` : ''}`;
+      ${(j.log || []).length ? `<div class="card" style="margin-top:12px"><div class="cardhead"><h3>السجل</h3></div><div class="pjlog">${[...j.log].reverse().map(l => `<div>${fmtDate((l.at || '').slice(0, 10))} ${fmtAtTm(l.at)} — <b>${esc(l.byName || '')}</b>: ${esc(LOGTXT[l.action] || l.action)}${l.note ? ` — ${esc(l.note)}` : ''}</div>`).join('')}</div></div>` : ''}`;
   }
   function stagesCardHTML(j) {
     const pre = R2(sum(j.stages.filter(s => !s.final), s => +s.pct || 0));
@@ -25425,10 +25449,10 @@ body.printing .aifab,body.fab-hide .aifab,body.nf-typing .aifab,body.nf-chatpage
     lines.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
     return lines.length ? lines.slice(0, 40).map(([at, t]) => `${String(at).slice(0, 16).replace('T', ' ')} | ${t}`).join('\n') : 'ملقتش حركات بالشروط دي في السجل.';
   }
-  const tAttendance = ({ date }) => { if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : todayISO(); const at = attendanceFor(d); const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const lab = { P: 'حاضر', H: 'نص يوم', A: 'غايب', L: 'إجازة' }; return `${d}:\n` + ws.map(w => { const r = at[w.id]; const gz = g => g && g.inside === false ? ` (خارج النطاق ${g.dist != null ? g.dist + 'م' : ''}${g.zone ? ' من ' + g.zone : ''})` : g && g.inside === true ? ' (جوه النطاق)' : ''; return `${w.name} | ${r ? (lab[r.s] || r.s) + (+r.late > 0 ? ` متأخر ${r.late}د` : '') + (r.in ? ` دخول ${r.in}${gz(r.geo)}` : '') + (r.out ? ` انصراف ${r.out}${gz(r.geoOut)}` : '') : 'لسه متسجّلش'}`; }).join('\n'); };
+  const tAttendance = ({ date }) => { if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const d = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : todayISO(); const at = attendanceFor(d); const ws = list('workers').filter(w => w.status !== 'inactive' && (role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId)))); const lab = { P: 'حاضر', H: 'نص يوم', A: 'غايب', L: 'إجازة' }; return `${d}:\n` + ws.map(w => { const r = at[w.id]; const gz = g => g && g.inside === false ? ` (خارج النطاق ${g.dist != null ? g.dist + 'م' : ''}${g.zone ? ' من ' + g.zone : ''})` : g && g.inside === true ? ' (جوه النطاق)' : ''; return `${w.name} | ${r ? (lab[r.s] || r.s) + (+r.late > 0 ? ` متأخر ${r.late}د` : '') + (r.in ? ` دخول ${fmtTm(r.in)}${gz(r.geo)}` : '') + (r.out ? ` انصراف ${fmtTm(r.out)}${gz(r.geoOut)}` : '') : 'لسه متسجّلش'}`; }).join('\n'); };
   async function tOutzone({ days }) {
     if (!seeView('attendance') || typeof attendanceFor !== 'function') return 'مش مسموح.'; const n = Math.min(Math.max(+days || 1, 1), 31); const ws = list('workers').filter(w => role() !== 'head' || (typeof myDepts === 'function' && myDepts().includes(w.deptId))); const out = [];
-    for (let i = 0; i < n; i++) { const d = new Date(Date.now() - i * 864e5); const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; const at = attendanceFor(iso); ws.forEach(w => { const r = at[w.id]; if (!r) return; if (r.geo && r.geo.inside === false) out.push(`${iso} | ${w.name} | بصمة حضور ${r.in || ''} خارج النطاق ${r.geo.dist != null ? r.geo.dist + 'م' : ''}`); if (r.geoOut && r.geoOut.inside === false) out.push(`${iso} | ${w.name} | بصمة انصراف ${r.out || ''} خارج النطاق ${r.geoOut.dist != null ? r.geoOut.dist + 'م' : ''}`); }); }
+    for (let i = 0; i < n; i++) { const d = new Date(Date.now() - i * 864e5); const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; const at = attendanceFor(iso); ws.forEach(w => { const r = at[w.id]; if (!r) return; if (r.geo && r.geo.inside === false) out.push(`${iso} | ${w.name} | بصمة حضور ${fmtTm(r.in || '')} خارج النطاق ${r.geo.dist != null ? r.geo.dist + 'م' : ''}`); if (r.geoOut && r.geoOut.inside === false) out.push(`${iso} | ${w.name} | بصمة انصراف ${fmtTm(r.out || '')} خارج النطاق ${r.geoOut.dist != null ? r.geoOut.dist + 'م' : ''}`); }); }
     const since = new Date(Date.now() - n * 864e5).toISOString(); ws.forEach(w => (w.suspects || []).filter(x => x.at >= since).forEach(x => out.push(`${String(x.at).slice(0, 16).replace('T', ' ')} | ${w.name} | محاولة بصمة مشبوهة: ${(x.flags || []).map(f => (typeof SUSPECT_LABEL === 'object' && SUSPECT_LABEL[f]) || f).join('، ')}`)));
     if (isAdmin() && typeof sbOn === 'function' && sbOn() && S.sb && S.sb.from) { try { const { data } = await S.sb.from('nf_audit').select('at,name,label').eq('kind', 'denied').ilike('label', 'بصمة%').gte('at', since).limit(100); (data || []).forEach(r => out.push(`${String(r.at).slice(0, 16).replace('T', ' ')} | ${r.name || '؟'} | ${r.label}`)); } catch (e) { /* offline */ } }
     return out.length ? `آخر ${n} يوم:\n` + out.join('\n') : `مفيش بصمات خارج النطاق ولا محاولات مشبوهة في آخر ${n} يوم.` + (isAdmin() ? '' : ' (المحاولات المرفوضة اللي ماتسجلتش بتظهر في سجل النشاط للمالك بس)');
@@ -25654,7 +25678,7 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
   const GROUPS = { all: 'كل الحركات', writes: 'إضافة / تعديل / حذف', views: 'فتح الصفحات', logins: 'الدخول والخروج', bad: 'المرفوض والفاشل فقط' };
   const GK = { writes: ['create', 'update', 'delete'], views: ['view'], logins: ['login', 'logout', 'login_fail'], bad: ['denied', 'login_fail'] };
   const uaShort = u => { u = u || ''; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac OS/.test(u) ? 'Mac' : u ? 'جهاز' : ''; };
-  const hm = iso => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const hm = iso => fmtAtTm(iso);
   const dayOf = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const val = v => { if (v === null || v === undefined || v === '') return '—'; if (typeof v === 'object') { const s = JSON.stringify(v); return s.length > 70 ? s.slice(0, 70) + '…' : s; } const s = String(v); return s.length > 70 ? s.slice(0, 70) + '…' : s; };
   const st = { rows: [], pres: [], people: [], loading: false, more: true, err: '' };
@@ -25791,7 +25815,7 @@ EXTRA_SETTINGS.voice = { label: 'صوت المساعد', render: () => {
     const res = r.result || {};
     return `<div class="card">
       <div class="cardhead"><h3>${esc(d.code || '')}${d.code ? ' — ' : ''}${esc(d.name || '')}</h3><div class="grow"></div>${d.revision ? `<span class="badge">${esc(d.revision)}</span>` : ''}${d.stage ? `<span class="badge warn">${esc(d.stage)}</span>` : ''}</div>
-      <div class="small ink2">${[d.project && `المشروع: ${d.project}`, d.client && `العميل: ${d.client}`, d.issueDate && `إصدار: ${d.issueDate}`, `وصل ${fmtDate(String(r.at).slice(0, 10))} ${String(new Date(r.at).toTimeString()).slice(0, 5)}`].filter(Boolean).map(esc).join(' · ')}</div>
+      <div class="small ink2">${[d.project && `المشروع: ${d.project}`, d.client && `العميل: ${d.client}`, d.issueDate && `إصدار: ${d.issueDate}`, `وصل ${fmtDate(String(r.at).slice(0, 10))} ${fmtAtTm(r.at)}`].filter(Boolean).map(esc).join(' · ')}</div>
       ${d.summary ? `<div class="gpt-sec"><h4>الوصف</h4><div class="small" style="white-space:pre-wrap">${esc(d.summary)}</div></div>` : ''}
       ${(d.dims || []).length ? `<div class="gpt-sec"><h4>المقاسات</h4><div class="gpt-dims">${d.dims.map(x => `<div>${esc(x.label)}: <b>${esc(x.value)}</b> ${esc(x.unit || '')}</div>`).join('')}</div></div>` : ''}
       ${(d.materials || []).length ? `<div class="gpt-sec"><h4>الخامات</h4><ul class="gpt-list">${d.materials.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
@@ -26263,7 +26287,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
     <p class="tiny muted" style="margin-top:6px">الأمان: الرابط بيفتح «الوارد» بس — مايقراش فلوس ولا موظفين ولا يعدّل حاجة. لو الرابط اتسرّب اضغط «رابط MCP جديد» والقديم يقف فورًا.</p></div>`;
   EXTRA_SETTINGS.gptlink.render = (base => function () {
     const h = base.apply(this, arguments); if (!isAdmin()) return h;
-    setTimeout(async () => { const box = document.getElementById('mcpstate'); if (!box || !hosted()) return; try { const { data } = await S.sb.rpc('nf_mcp_key_status'); let last = null; try { last = data && data.last ? JSON.parse(data.last) : null; } catch (e) { /* ignore */ } box.innerHTML = data && data.set ? `<span class="badge good">متفعّل${data.at ? ' من ' + esc(fmtDate(String(data.at).slice(0, 10))) : ''}</span>${last ? ` <span class="badge">آخر استخدام ${esc(fmtDate(String(last.at).slice(0, 10)))} ${esc(String(new Date(last.at).toTimeString()).slice(0, 5))}</span>` : ' <span class="badge warn">لسه ماتجربش</span>'}` : '<span class="badge warn">مش متفعّل</span>'; } catch (e) { box.textContent = '—'; } }, 60);
+    setTimeout(async () => { const box = document.getElementById('mcpstate'); if (!box || !hosted()) return; try { const { data } = await S.sb.rpc('nf_mcp_key_status'); let last = null; try { last = data && data.last ? JSON.parse(data.last) : null; } catch (e) { /* ignore */ } box.innerHTML = data && data.set ? `<span class="badge good">متفعّل${data.at ? ' من ' + esc(fmtDate(String(data.at).slice(0, 10))) : ''}</span>${last ? ` <span class="badge">آخر استخدام ${esc(fmtDate(String(last.at).slice(0, 10)))} ${esc(fmtAtTm(last.at))}</span>` : ' <span class="badge warn">لسه ماتجربش</span>'}` : '<span class="badge warn">مش متفعّل</span>'; } catch (e) { box.textContent = '—'; } }, 60);
     return card() + h;
   })(EXTRA_SETTINGS.gptlink.render);
   document.addEventListener('click', async e => {
@@ -27067,7 +27091,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   /* ---------- v7.30: «remind me in an hour» (a reminder on the server — the notification comes even if the system is closed) ---------- */
   async function remindLater(u) {
     const at = new Date(Date.now() + 3600e3);
-    try { const { error } = await S.sb.from('nf_call_remind').insert({ target: u, at: at.toISOString() }); if (error) throw error; toast(`هفكّرك الساعة ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')} تكلّم ${nameOf(u)}`); }
+    try { const { error } = await S.sb.from('nf_call_remind').insert({ target: u, at: at.toISOString() }); if (error) throw error; toast(`هفكّرك الساعة ${fmtAtTm(at)} تكلّم ${nameOf(u)}`); }
     catch (e) { console.warn('remind', e); toast('التذكير ماتسجّلش — جرّب تاني', 'err'); }
   }
   document.addEventListener('click', e => {
@@ -27081,7 +27105,7 @@ window.nfStripSrc = nfStripSrc; window.isSecretLink = isSecretLink;
   const callBtns = uid => `<button class="nfc-btn" data-nfcall="${esc(uid)}" title="اتصال صوت" aria-label="اتصال صوت">${svg('phone', 18)}</button><button class="nfc-btn v" data-nfcall="${esc(uid)}" data-v="1" title="اتصال فيديو" aria-label="اتصال فيديو">${svg('video', 18)}</button>`;
   const stTxt = c => { const out = c.caller === me(); if (c.status === 'missed' || c.status === 'busy') return out ? 'مردّش' : 'فايتة'; if (c.status === 'declined') return out ? 'رفض' : 'رفضتها'; if (c.status === 'failed') return 'ماوصلتش'; return out ? 'صادرة' : 'واردة'; };
   const dur = c => c.answered_at && c.ended_at ? fmtT(Math.max(0, Math.round((Date.parse(c.ended_at) - Date.parse(c.answered_at)) / 1000))) : '';
-  const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : fmtDate(String(iso).slice(0, 10)); };
+  const whenTxt = iso => { const d = new Date(iso); const today = new Date(); return d.toDateString() === today.toDateString() ? fmtAtTm(d) : fmtDate(String(iso).slice(0, 10)); };
   const lastWith = u => (C.log || []).find(x => x.caller === u || x.callee === u) || null;
   /* v7.30: favourites on top — starred on this phone, then the people called most */
   function favList() {
@@ -27604,7 +27628,7 @@ body.printing .memofab,body.fab-hide .memofab,body.nf-typing .memofab,body.nf-ch
   const localIn = iso => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const toIso = v => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d.toISOString(); };
   const tomorrow9 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); };
-  const fmtWhen = iso => { if (!iso) return 'من غير ميعاد'; const d = new Date(iso); const t = `${pad(d.getHours())}:${pad(d.getMinutes())}`; const day = localIn(iso).slice(0, 10); const today = todayISO(); return (day === today ? 'النهارده' : day === addDays(today, 1) ? 'بكرة' : day === addDays(today, -1) ? 'امبارح' : fmtDate(day)) + ' ' + t; };
+  const fmtWhen = iso => { if (!iso) return 'من غير ميعاد'; const d = new Date(iso); const t = fmtAtTm(d); const day = localIn(iso).slice(0, 10); const today = todayISO(); return (day === today ? 'النهارده' : day === addDays(today, 1) ? 'بكرة' : day === addDays(today, -1) ? 'امبارح' : fmtDate(day)) + ' ' + t; };
   const wName = id => { const w = id && byId('workers', id); return w ? w.name : ''; };
   const poLabel = p => (typeof PO_STATUS !== 'undefined' && PO_STATUS[p.status] ? PO_STATUS[p.status][0] : p.status);
   const taskLabel = t => (typeof TASK_STATUS !== 'undefined' && TASK_STATUS[t.status] ? TASK_STATUS[t.status][0] : t.status);
@@ -28330,7 +28354,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
     return `<div class="card"><h3>نت المصنع (الواي فاي)</h3><p class="small ink2" style="margin:6px 0 10px">رسومات المنتجات لرؤساء الأقسام والفنيين بتفتح بس من المصنع (واي فاي المصنع أو فور جي جوه نطاق المصنع) أو من موقع مشروع مفتوح لفرق التركيبات. افتح الصفحة دي وإنت على واي فاي المصنع ودوس «سجّل نت المصنع» — لو فيه أكتر من راوتر/خط، سجّل كل واحد.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn p" data-action="fgRegIp">${icon('plus')}سجّل نت المصنع (أنا على الواي فاي دلوقتي)</button><span class="tiny muted">النت اللي إنت عليه دلوقتي: <b class="ltr">${esc(ipsState.ip || '—')}</b>${ips.some(x => x.ip === ipsState.ip) ? ' <span class="badge good">متسجّل ✓</span>' : ''}</span></div>
       ${ips.length ? `<div class="tablewrap" style="margin-top:10px"><table class="fgips"><thead><tr><th>النت</th><th>الاسم</th><th>اتسجّل</th><th></th></tr></thead><tbody>${ips.map(x => `<tr><td class="ltr">${esc(x.ip)}</td><td>${esc(x.label || '')}${x.asn ? ` <span class="tiny muted">${esc(x.asn)}</span>` : ''}</td><td>${x.at ? fmtDate(String(x.at).slice(0, 10)) : ''}</td><td><button class="btn xs ghost" data-action="fgDelIp" data-arg="${esc(x.ip)}">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="banner warn" style="margin-top:10px">لسه مفيش نت مصنع متسجّل — لحد ما تسجّله، الرسومات في المصنع بتفتح بالفور جي/الداتا بس (بالفحص الكامل).</div>'}</div>
-      <div class="card fglog"><div class="cardhead"><h3>آخر محاولات فتح الرسومات</h3><div class="grow"></div><button class="btn xs" data-action="fgReload">${icon('arrow')}تحديث</button></div>${(logState || []).length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>الشخص</th><th>الملف</th><th>النت</th><th>المكان</th><th>النتيجة</th></tr></thead><tbody>${logState.map(x => `<tr><td class="ltr tiny">${esc(new Date(x.at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</td><td>${esc(x.name || '')}</td><td class="small">${esc(x.file_name || '')}</td><td class="tiny">${x.net === 'wifi' ? 'واي فاي المصنع' : x.net === 'mobile' ? 'موبايل' : esc(x.net || '—')}</td><td class="tiny">${x.zone === 'factory' ? 'المصنع' : x.zone ? esc(String(x.zone).replace('site:', 'موقع ')) : '—'}${x.acc != null ? ` · ±${Math.round(x.acc)}م` : ''}</td><td class="${x.ok ? 'good' : 'bad'} small">${x.ok ? '✓ اتفتح' : '✗ ' + (x.reasons || []).map(r => RLABEL[r] || r).join('، ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">مفيش محاولات لسه</div>'}</div>`;
+      <div class="card fglog"><div class="cardhead"><h3>آخر محاولات فتح الرسومات</h3><div class="grow"></div><button class="btn xs" data-action="fgReload">${icon('arrow')}تحديث</button></div>${(logState || []).length ? `<div class="tablewrap"><table><thead><tr><th>الوقت</th><th>الشخص</th><th>الملف</th><th>النت</th><th>المكان</th><th>النتيجة</th></tr></thead><tbody>${logState.map(x => `<tr><td class="ltr tiny">${esc(new Date(x.at).toLocaleString('en-US', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', hour: 'numeric', minute: '2-digit', hour12: true }))}</td><td>${esc(x.name || '')}</td><td class="small">${esc(x.file_name || '')}</td><td class="tiny">${x.net === 'wifi' ? 'واي فاي المصنع' : x.net === 'mobile' ? 'موبايل' : esc(x.net || '—')}</td><td class="tiny">${x.zone === 'factory' ? 'المصنع' : x.zone ? esc(String(x.zone).replace('site:', 'موقع ')) : '—'}${x.acc != null ? ` · ±${Math.round(x.acc)}م` : ''}</td><td class="${x.ok ? 'good' : 'bad'} small">${x.ok ? '✓ اتفتح' : '✗ ' + (x.reasons || []).map(r => RLABEL[r] || r).join('، ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">مفيش محاولات لسه</div>'}</div>`;
   } };
   ACTIONS.fgReload = () => { ipsState = null; render(false); };
   ACTIONS.fgRegIp = async () => {
@@ -28621,7 +28645,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   const hubDue = () => isHubUser() && !ninetyCo() && ['', 'dashboard', 'ninety'].includes(hashv());
   function portalHTML(w) {
     const home = attHomeOf(w) || SELF; const c = CO[home];
-    let st = ''; if (home === SELF) { const r = (attendanceFor(todayISO()) || {})[w.id] || {}; st = r.out ? `انصرفت ${esc(r.out)}` : r.in ? `حضرت ${esc(r.in)}` : r.s === 'L' ? 'إجازة' : 'لم تسجّل حضورك بعد'; } else st = 'البصمة على ' + c.name;
+    let st = ''; if (home === SELF) { const r = (attendanceFor(todayISO()) || {})[w.id] || {}; st = r.out ? `انصرفت ${esc(fmtTm(r.out))}` : r.in ? `حضرت ${esc(fmtTm(r.in))}` : r.s === 'L' ? 'إجازة' : 'لم تسجّل حضورك بعد'; } else st = 'البصمة على ' + c.name;
     return `<div class="portal" style="--c:${c.color}"><div class="row1">${typeof avatarHTML === 'function' ? avatarHTML(w, 46) : ''}<div><div class="tiny muted">بوابتي · ${c.name}</div><div class="st">${st}</div><div class="tiny muted">${fmtDateLong ? fmtDateLong(todayISO()) : todayISO()}</div></div></div>
       <div class="acts"><button class="btn p" data-action="nfHubOpen" data-arg="${home}|#/me">${icon('play')}تسجيل الحضور / الانصراف</button><button class="btn" data-action="nfHubOpen" data-arg="${home}|#/regulation">${icon('file')}اللائحة</button><button class="btn" data-action="nfHubOpen" data-arg="${home}|#/requests">${icon('plus')}طلب إجازة / إذن / سلفة</button></div></div>`;
   }
@@ -30757,7 +30781,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const D = iso => new Date(iso);
   const dayKey = iso => String(iso).slice(0, 10);
   const fmtDay = iso => D(iso).toLocaleDateString(isEn() ? 'en-GB' : 'ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
-  const fmtTime = iso => D(iso).toLocaleTimeString(isEn() ? 'en-GB' : 'ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const fmtTime = iso => fmtAtTm(D(iso));
   const titleOf = (p, id) => { const m = (p.storyPeople || []).find(x => x.id === id); return m ? (isEn() ? (m.en || m.t) : m.t) : ''; };
   const CL_STEPS = ['client', 'sales']; /* v6.24: the client part of the story is for the owner only */
   const entries = p => (p.story || []).filter(e => (!e.fin || canMoney()) && (isAdmin() || (e.by !== 'client' && !CL_STEPS.includes(e.step)))).slice().sort((a, b) => String(a.at).localeCompare(String(b.at)));
@@ -31076,7 +31100,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const isMine = id => !!id && myIds().includes(String(id).replace(/^w:/, ''));
   const isMob = () => { try { return matchMedia('(max-width: 760px)').matches; } catch (e) { return innerWidth <= 760; } };
   const loc = () => (en() ? 'en-GB' : 'ar-EG');
-  const hm = t => new Date(t).toLocaleTimeString(loc(), { hour: 'numeric', minute: '2-digit' });
+  const hm = t => fmtAtTm(t);
   const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
   const dayLabel = t => { const d = new Date(t); const t0 = new Date(); t0.setHours(0, 0, 0, 0); const diff = Math.round((t0 - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5); if (diff === 0) return L('النهارده', 'Today'); if (diff === 1) return L('امبارح', 'Yesterday'); if (diff < 7) return d.toLocaleDateString(loc(), { weekday: 'long' }); return d.toLocaleDateString(loc(), { day: 'numeric', month: 'long', year: 'numeric' }); };
   const listTime = t => { const k = dayKey(t); if (k === dayKey(now())) return hm(t); if (k === dayKey(now() - 864e5)) return L('امبارح', 'Yesterday'); const d = new Date(t); return now() - t < 6 * 864e5 ? d.toLocaleDateString(loc(), { weekday: 'short' }) : d.toLocaleDateString(loc(), { day: 'numeric', month: 'numeric', year: '2-digit' }); };
@@ -32933,7 +32957,7 @@ if (STU_ON) {
   const L = (a, b) => (en() ? b : a);
   const MB = { boxes: null, box: '', list: {}, msg: null, busy: false, unread: 0, cacheAt: {} };
   const call = async body => { const r = await S.sb.functions.invoke('mailbox', { body }); const j = (r && r.data) || {}; if (r.error && !j.error) throw new Error(String(r.error.message || r.error)); if (j.error) throw new Error(j.error + (j.detail ? ': ' + j.detail : '')); return j; };
-  const fmtAt = iso => { if (!iso) return ''; const d = new Date(iso); const today = todayISO(); const day = iso.slice(0, 10); return (day === today ? '' : fmtDate(day) + ' ') + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const fmtAt = iso => { if (!iso) return ''; const d = new Date(iso); const today = todayISO(); const day = iso.slice(0, 10); return (day === today ? '' : fmtDate(day) + ' ') + fmtAtTm(d); };
   const who = p => p ? (p.name && p.name !== p.addr ? `${p.name} <${p.addr}>` : p.addr) : '';
   async function loadBoxes(force) { if (MB.boxes && !force) return MB.boxes; try { const j = await call({ action: 'boxes' }); MB.boxes = j.boxes || []; MB.ms = !!j.ms; } catch (e) { MB.boxes = []; MB.err = String(e.message || e); } if (!MB.box && MB.boxes.length) MB.box = MB.boxes[0].addr; return MB.boxes; }
   async function loadList(box, force) {
@@ -33560,7 +33584,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       <div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الموظف', 'Employee')}</th><th>${L('رقم الكارت', 'Card number')}</th><th>${L('منع', 'Block')}</th></tr></thead><tbody>${ws.map(w => `<tr><td>${esc(w.name)}</td><td><input name="card_${w.id}" class="ltr notr" inputmode="numeric" value="${esc(w.doorCard || '')}" style="max-width:180px"></td><td><input type="checkbox" name="deny_${w.id}" ${deny.has(w.id) ? 'checked' : ''}></td></tr>`).join('')}</tbody></table></div>
       <div class="row" style="gap:8px;margin-top:10px;align-items:center"><button type="submit" class="btn p">${L('حفظ', 'Save')}</button><button type="button" class="btn" data-action="doorCards">${L('مزامنة مع الانتركم', 'Sync with the door station')}</button><span class="small" id="doorcardmsg"></span></div></form>
     <div class="card" style="margin-top:14px"><div class="cardhead"><h3>${L('سجل الباب', 'Door log')}</h3><div class="grow"></div><button type="button" class="btn xs" data-action="doorLog">${L('تحديث', 'Refresh')}</button></div>
-      ${(DOOR.log || []).length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الوقت', 'Time')}</th><th>${L('الاسم', 'Name')}</th><th>${L('من', 'Via')}</th><th>${L('النتيجة', 'Result')}</th></tr></thead><tbody>${DOOR.log.map(x => `<tr><td class="small">${esc(new Date(x.at).toLocaleString())}</td><td>${esc(x.name || '')}</td><td class="small">${esc(L(...(VIA_TXT[x.via] || [x.via || '', x.via || ''])))}</td><td class="small ${x.result === 'opened' ? 'doorok' : 'doorno'}">${esc(L(...(RES_TXT[x.result] || [x.result || '', x.result || ''])))}${x.reason ? ' — ' + esc(why(x.reason)) : ''}${x.dist != null && x.reason === 'far' ? ` (${x.dist} m)` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="small muted">${L('لسه مفيش فتحات.', 'No openings yet.')}</p>`}</div>`;
+      ${(DOOR.log || []).length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${L('الوقت', 'Time')}</th><th>${L('الاسم', 'Name')}</th><th>${L('من', 'Via')}</th><th>${L('النتيجة', 'Result')}</th></tr></thead><tbody>${DOOR.log.map(x => `<tr><td class="small">${esc(x.at ? fmtDate(localISO(new Date(x.at))) + ' ' + fmtAtTm(x.at) : '')}</td><td>${esc(x.name || '')}</td><td class="small">${esc(L(...(VIA_TXT[x.via] || [x.via || '', x.via || ''])))}</td><td class="small ${x.result === 'opened' ? 'doorok' : 'doorno'}">${esc(L(...(RES_TXT[x.result] || [x.result || '', x.result || ''])))}${x.reason ? ' — ' + esc(why(x.reason)) : ''}${x.dist != null && x.reason === 'far' ? ` (${x.dist} m)` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="small muted">${L('لسه مفيش فتحات.', 'No openings yet.')}</p>`}</div>`;
   } };
   function doorUrl() { const base = location.origin + location.pathname.replace(/[^/]*$/, ''); return base + '#/door'; }
   async function saveCfg(patch) { const c = Object.assign(dcfg(), patch); const { error } = await S.sb.rpc('nf_set_secret', { p_key: 'door_cfg', p_value: JSON.stringify(c) }); if (error) throw error; S.ui.stuSecret = Object.assign({}, S.ui.stuSecret, { door_cfg: JSON.stringify(c) }); }
@@ -33621,7 +33645,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const L = (a, b) => (en() ? b : a);
   const isErr = t => !!(t && t.errand);
   const mine = t => !!(t && t.assigneeId && typeof myIds === 'function' && myIds().includes(t.assigneeId));
-  const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => nfHM(iso);
   const mapUrl = (lat, lng) => `https://maps.google.com/?q=${(+lat).toFixed(6)},${(+lng).toFixed(6)}`;
   const hav = (a, b) => { const R = 6371000, r = x => x * Math.PI / 180; const dLa = r(b.lat - a.lat), dLo = r(b.lng - a.lng); const h = Math.sin(dLa / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
   const getPos = () => new Promise(res => { if (!navigator.geolocation) return res(null); navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy || 0) }), () => res(null), { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }); });
@@ -33680,11 +33704,11 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
       await Store.update('tasks', t.id, { errandArr: arr, photos: (t.photos || []).concat([ph]), status: t.status === 'open' ? 'doing' : t.status, updatedAt: at });
       /* phone clock vs server save time */
       try { if (typeof sbOn === 'function' && sbOn()) { const { data } = await S.sb.from('docs').select('updated_at').eq('col', 'tasks').eq('id', t.id).maybeSingle(); const skew = data && data.updated_at ? Math.round((new Date(data.updated_at).getTime() - new Date(at).getTime()) / 60000) : 0; if (Math.abs(skew) > 10) await Store.update('tasks', t.id, { errandArr: Object.assign({}, arr, { clockSkew: skew }) }, { silent: true }); arr.clockSkew = Math.abs(skew) > 10 ? skew : 0; } } catch (e) { /* offline */ }
-      toast(mode === 'checkin' ? L(`اتسجّل حضورك من ${place} الساعة ${hhmm(at)}`, `Check-in logged from ${place} at ${hhmm(at)}`) : L(`اتسجّل وصولك ${place} الساعة ${hhmm(at)}`, `Arrival at ${place} logged at ${hhmm(at)}`));
+      toast(mode === 'checkin' ? L(`اتسجّل حضورك من ${place} الساعة ${fmtAtTm(at)}`, `Check-in logged from ${place} at ${fmtAtTm(at)}`) : L(`اتسجّل وصولك ${place} الساعة ${fmtAtTm(at)}`, `Arrival at ${place} logged at ${fmtAtTm(at)}`));
       if (!isAdmin() && typeof notifyOwner === 'function') {
         const nid = `errand_${t.id}`;
         try {
-          await notifyOwner(L(`مأمورية: ${me.name || ''} وصل ${place}`, `Errand: ${me.name || ''} arrived at ${place}`), `${t.title} — ${mode === 'checkin' ? L('اتسجّل حضوره من هناك', 'his check-in was logged there') : L('زيارة أثناء اليوم', 'a visit during the day')} ${L('الساعة', 'at')} ${hhmm(at)} · ${mapUrl(p.lat, p.lng)}${arr.clockSkew ? ' · ' + L(`⚠ ساعة الموبايل مختلفة عن السيرفر بـ ${arr.clockSkew} دقيقة`, `⚠ phone clock differs from the server by ${arr.clockSkew} min`) : ''}`, { id: nid });
+          await notifyOwner(L(`مأمورية: ${me.name || ''} وصل ${place}`, `Errand: ${me.name || ''} arrived at ${place}`), `${t.title} — ${mode === 'checkin' ? L('اتسجّل حضوره من هناك', 'his check-in was logged there') : L('زيارة أثناء اليوم', 'a visit during the day')} ${L('الساعة', 'at')} ${fmtAtTm(at)} · ${mapUrl(p.lat, p.lng)}${arr.clockSkew ? ' · ' + L(`⚠ ساعة الموبايل مختلفة عن السيرفر بـ ${arr.clockSkew} دقيقة`, `⚠ phone clock differs from the server by ${arr.clockSkew} min`) : ''}`, { id: nid });
           await Store.update('tasks', nid, { link: '/#/tasks/' + t.id, taskRef: t.id }, { silent: true });
         } catch (e) { /* ignore */ }
       }
@@ -33713,7 +33737,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   if (typeof taskItem === 'function') taskItem = (base => function (t, o) {
     let h = base.apply(this, arguments); if (!isErr(t)) return h;
     const a = t.errandArr; let line = `<span class="badge acc" style="padding:0 6px">🚗 ${L('مأمورية', 'Errand')}</span>`;
-    if (a) line += ` <span class="small">📍 ${esc(a.place)} · ${hhmm(a.at)}${a.date && a.date !== todayISO() ? ' ' + fmtDate(a.date) : ''} · ${a.mode === 'checkin' ? L('حضور', 'check-in') : L('زيارة', 'visit')} · <a href="${mapUrl(a.lat, a.lng)}" target="_blank" rel="noopener">${L('خريطة', 'map')}</a>${a.clockSkew ? ` · <span style="color:var(--serious-ink,#dc2626)">⚠ ${L('ساعة الموبايل مختلفة', 'phone clock differs')} ${a.clockSkew} ${L('د', 'min')}</span>` : ''}${a.rejected ? ` · <b style="color:var(--serious-ink,#dc2626)">${L('البصمة اترفضت', 'punch rejected')}</b>` : ''}</span>`;
+    if (a) line += ` <span class="small">📍 ${esc(a.place)} · ${fmtAtTm(a.at)}${a.date && a.date !== todayISO() ? ' ' + fmtDate(a.date) : ''} · ${a.mode === 'checkin' ? L('حضور', 'check-in') : L('زيارة', 'visit')} · <a href="${mapUrl(a.lat, a.lng)}" target="_blank" rel="noopener">${L('خريطة', 'map')}</a>${a.clockSkew ? ` · <span style="color:var(--serious-ink,#dc2626)">⚠ ${L('ساعة الموبايل مختلفة', 'phone clock differs')} ${a.clockSkew} ${L('د', 'min')}</span>` : ''}${a.rejected ? ` · <b style="color:var(--serious-ink,#dc2626)">${L('البصمة اترفضت', 'punch rejected')}</b>` : ''}</span>`;
     let btns = '';
     if ((!a || a.rejected) && mine(t) && ['open', 'doing'].includes(t.status)) btns += `<button class="btn xs p" data-action="errandArrive" data-arg="${t.id}">📍 ${L('وصلت — سجّل المكان', 'I arrived — log the place')}</button>`;
     if (a && !a.rejected && isAdmin()) btns += `<button class="btn xs" data-action="errandReject" data-arg="${t.id}">${L('ارفض البصمة', 'Reject the punch')}</button>`;
@@ -34077,7 +34101,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     const COLN = { orders: 'الأمر', tasks: 'مهمة', purchases: 'مشتريات', extorders: 'تشغيل خارجي', invoices: 'فاتورة' };
     const KIND = { create: 'إضافة', update: 'تعديل', delete: 'حذف' };
     const ch = sortBy(list('changes').filter(x => ids.has(x.docId)), x => x.at || '', true).slice(0, 60);
-    const chRows = ch.map(x => [`${dt(x.at)} <span class="muted tiny">${String(x.at || '').slice(11, 16)}</span>`, esc(x.byName || ''), esc((COLN[x.col] || x.col) + ' · ' + (KIND[x.kind] || x.kind || '')), esc(x.label || '')]);
+    const chRows = ch.map(x => [`${dt(x.at)} <span class="muted tiny">${fmtAtTm(x.at)}</span>`, esc(x.byName || ''), esc((COLN[x.col] || x.col) + ' · ' + (KIND[x.kind] || x.kind || '')), esc(x.label || '')]);
     return `<h4>الطلبات والموافقات</h4>` + (table(['الطلب', 'مين', 'الحالة', 'التاريخ'], reqRows) || empty('مفيش طلبات مربوطة بالأمر')) +
       `<h4>سجل اللي حصل</h4>` + (table(['إمتى', 'مين', 'إيه', 'على'], chRows) || empty('مفيش تعديلات متسجلة لسه'));
   }
@@ -34307,7 +34331,7 @@ if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
   if (typeof chatHTML !== 'function' || typeof taskParties !== 'function') return;
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const when = iso => iso ? `${fmtDate(String(iso).slice(0, 10))} ${String(iso).slice(11, 16)}` : '';
+  const when = iso => iso ? `${fmtDate(String(iso).slice(0, 10))} ${fmtAtTm(iso)}` : '';
   /* the other parties of a message + whether each saw it */
   function seenList(t, m) {
     const seen = t.threadSeen || {}; const by = new Set([m.by].concat(myIds().includes(m.by) ? myIds() : []));
@@ -34943,8 +34967,8 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
     return `<div class="trf-row"><span class="trf-dot ${r.level}"></span><div class="grow"><div class="bold">${lv[1]}</div><div class="small ink2">${r.back ? L('الرجوع للمصنع', 'Back to the factory') : L('للوجهة', 'To the destination')}${r.to ? `: ${esc(r.to)}` : ''}${r.src === 'phone' ? ` · ${L('من مكان السواق دلوقتي', 'from the driver\'s current position')}` : ''}</div></div></div>
       <div class="grid g3" style="gap:8px;font-size:13px;margin-top:10px"><div><div class="tiny muted">${L('الوقت المتوقع بالزحمة', 'Expected time with traffic')}</div><b class="num">${r.min}</b> ${L('دقيقة', 'min')}</div><div><div class="tiny muted">${L('الوقت العادي', 'Normal time')}</div><b class="num">${r.base}</b> ${L('دقيقة', 'min')}${r.delay ? ` <span class="badge ${lv[0]}">+${r.delay}</span>` : ''}</div><div><div class="tiny muted">${L('المسافة', 'Distance')}</div><b class="num">${fmtNum(r.km)}</b> ${L('كم', 'km')}${r.via ? `<div class="tiny muted">${L('عن طريق', 'via')} ${esc(r.via)}</div>` : ''}</div></div>
       ${r.alt ? `<div class="banner good" style="margin-top:10px">${icon('map')}<span>${L('في طريق أسرع', 'A faster road')}${r.alt.via ? ` ${L('عن طريق', 'via')} <b>${esc(r.alt.via)}</b>` : ''}: <b class="num">${r.alt.min}</b> ${L('دقيقة', 'min')} (${L('يوفر', 'saves')} ${r.alt.save}) — ${L('جوجل ماب هيقترحه لما تفتح الطريق', 'Google Maps offers it when you open the road')}</span></div>` : ''}
-      ${r.depart ? `<div class="tiny muted" style="margin-top:6px">${L('محسوب على ميعاد التحرك', 'Calculated for the departure time')} ${esc(t.time || '')}${r.delay >= 10 ? ` — ${L('يُفضّل تتحرك بدري', 'better leave earlier by')} ~${r.delay} ${L('دقيقة', 'min')}` : ''}</div>` : ''}
-      <div class="tiny muted" style="margin-top:6px">${L('آخر تحديث', 'Updated')} ${typeof agoTxt === 'function' ? agoTxt(r.at) : esc(String(r.at || '').slice(11, 16))}</div>`;
+      ${r.depart ? `<div class="tiny muted" style="margin-top:6px">${L('محسوب على ميعاد التحرك', 'Calculated for the departure time')} ${esc(fmtTm(t.time || ''))}${r.delay >= 10 ? ` — ${L('يُفضّل تتحرك بدري', 'better leave earlier by')} ~${r.delay} ${L('دقيقة', 'min')}` : ''}</div>` : ''}
+      <div class="tiny muted" style="margin-top:6px">${L('آخر تحديث', 'Updated')} ${typeof agoTxt === 'function' ? agoTxt(r.at) : esc(fmtAtTm(r.at))}</div>`;
   }
   async function fillCard(id, force) {
     const t = byId('trips', id); const box = document.getElementById('trf-' + id); if (!t || !box) return;
@@ -34981,7 +35005,7 @@ html body .tablewrap td.nf-w2,html body .tablewrap th.nf-w2{min-width:13em}
     setTimeout(loadTab, 30);
     const ts = todays();
     return `<div class="card"><div class="cardhead"><h3>${L('خريطة الزحمة', 'Traffic map')}</h3><span class="tiny muted">${L('أخضر = فاضي · برتقالي = متوسط · أحمر = زحمة', 'green = clear · orange = moderate · red = heavy')}</span></div><div id="trf-map" class="trf-map"><div class="muted small" style="padding:14px">${L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div></div>
-      <div class="card"><div class="cardhead"><h3>${L('مشاوير النهارده', 'Today\'s trips')}</h3><span class="muted small">${ts.length}</span></div>${ts.length ? `<div class="list">${ts.map(t => `<div class="item" data-action="go" data-arg="fleet/${esc(t.id)}"><div class="main"><div class="title"><span class="code">${esc(t.number || '')}</span><span>${esc(t.purpose || '')}</span></div><div class="meta"><span>${esc(t.time || '')}</span><span>${esc(typeof assigneeName === 'function' ? assigneeName(t.driverId) : '')}</span><span>${esc((TRIP_STATUS[t.status] || [''])[0])}</span></div></div><div class="end" id="trfb-${esc(t.id)}">${badge(TR.res[t.id] && TR.res[t.id].r, true)}</div></div>`).join('')}</div>` : `<div class="muted small">${L('مفيش مشاوير النهارده', 'No trips today')}</div>`}</div>`;
+      <div class="card"><div class="cardhead"><h3>${L('مشاوير النهارده', 'Today\'s trips')}</h3><span class="muted small">${ts.length}</span></div>${ts.length ? `<div class="list">${ts.map(t => `<div class="item" data-action="go" data-arg="fleet/${esc(t.id)}"><div class="main"><div class="title"><span class="code">${esc(t.number || '')}</span><span>${esc(t.purpose || '')}</span></div><div class="meta"><span>${esc(fmtTm(t.time || ''))}</span><span>${esc(typeof assigneeName === 'function' ? assigneeName(t.driverId) : '')}</span><span>${esc((TRIP_STATUS[t.status] || [''])[0])}</span></div></div><div class="end" id="trfb-${esc(t.id)}">${badge(TR.res[t.id] && TR.res[t.id].r, true)}</div></div>`).join('')}</div>` : `<div class="muted small">${L('مفيش مشاوير النهارده', 'No trips today')}</div>`}</div>`;
   }
   async function loadTab() {
     const st = await status(); const box = document.getElementById('trf-map'); if (!box) return;
@@ -35382,7 +35406,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
   const mineTask = t => !!(t && ((t.assigneeId && typeof myIds === 'function' && myIds().includes(t.assigneeId)) || (meId() && (t.participants || []).includes(meId()))));
   const tripOf = t => (t && t.tripId ? byId('trips', t.tripId) : null);
   const busy = vid => list('trips').find(x => x.status === 'started' && x.vehicleId === vid);
-  const hhmm = iso => { if (!iso) return '—'; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => { if (!iso) return '—'; return nfHM(iso); };
   const posNow2 = async () => { try { const g = await getGeo(8000); return g ? { lat: g.lat, lng: g.lng, acc: g.acc, at: nowISO() } : null; } catch (e) { return null; } };
   const open = t => t && !['done', 'cancelled'].includes(t.status);
 
@@ -35393,7 +35417,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     if (tr) {
       const done = tr.status !== 'started';
       card = `<div class="card" id="tv-card"><div class="cardhead"><h3>${icon('map')}${L('العربية في المشوار ده', 'The vehicle on this errand')}</h3><span class="badge ${done ? 'good' : 'acc'}">${done ? L('رجع', 'Back') : L('في الطريق', 'On the road')}</span></div>
-        <div class="meta"><span>${esc(vehicleName(tr.vehicleId))}</span><span>${esc(assigneeName(tr.driverId))}</span><span>${L('خرج', 'Out')} ${hhmm(tr.startedAt)}</span>${done ? `<span>${L('رجع', 'Back')} ${hhmm(tr.endedAt)}</span><span>${fmtNum(tr.km || 0)} ${L('كم', 'km')}</span>` : `<span>${(tr.track || []).length} ${L('نقطة', 'points')}</span>`}</div>
+        <div class="meta"><span>${esc(vehicleName(tr.vehicleId))}</span><span>${esc(assigneeName(tr.driverId))}</span><span>${L('خرج', 'Out')} ${fmtAtTm(tr.startedAt) || '—'}</span>${done ? `<span>${L('رجع', 'Back')} ${fmtAtTm(tr.endedAt) || '—'}</span><span>${fmtNum(tr.km || 0)} ${L('كم', 'km')}</span>` : `<span>${(tr.track || []).length} ${L('نقطة', 'points')}</span>`}</div>
         ${typeof trackSvg === 'function' && trackSvg(tr) ? trackSvg(tr) : `<div class="muted small">${L('المسار بيتسجل من موبايل السواق…', 'The route is being recorded from the driver phone…')}</div>`}
         <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><a class="btn sm" href="#/fleet/${esc(tr.id)}">${icon('map')}${L('افتح المشوار', 'Open the trip')}</a>${!done && drv() && tr.driverId === meId() ? `<button type="button" class="btn sm p" data-action="taskVehBack" data-arg="${esc(t.id)}">${icon('check')}${L('رجعت', 'I am back')}</button>` : ''}</div></div>`;
     } else if (drv() && mineTask(t) && open(t)) {
@@ -35966,7 +35990,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   window.nfDrivesToo = wid => !!wid && Array.isArray(((S.settings || {}).fleet || {}).extraDrivers) && S.settings.fleet.extraDrivers.includes(wid);
   const meId = () => (typeof myDriverId === 'function' ? myDriverId() : null);
   const drv = () => (typeof isDriver === 'function' && isDriver()) || window.nfDrivesToo(meId());
-  const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => nfHM(iso);
   const ago = iso => { if (!iso) return '—'; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); return s < 60 ? L(`منذ ${s} ث`, `${s} s ago`) : s < 3600 ? L(`منذ ${Math.round(s / 60)} د`, `${Math.round(s / 60)} min ago`) : L(`منذ ${Math.round(s / 3600)} س`, `${Math.round(s / 3600)} h ago`); };
   if (typeof COLS !== 'undefined' && !COLS.includes('driverpos')) COLS.push('driverpos');
   S.data.driverpos = S.data.driverpos || new Map();
@@ -36138,7 +36162,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     ['fleetalerts', 'fleetday'].forEach(c => S.unsub.push(db.collection(c).onSnapshot(snap => { S.data[c] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[c] = true; faPaint(); }, e => console.warn('snapshot ' + c, e))));
   })(Store.subscribeAll);
   const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : iso);
-  const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => fmtAtTm(iso);
   const AT = {
     afterhours: { ar: 'حركة خارج ساعات الشغل', en: 'Moving outside working hours', ic: 'alert' },
     night_trip: { ar: 'مشوار بالليل / يوم إجازة', en: 'Trip at night / on a day off', ic: 'map' },
@@ -36306,7 +36330,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
   const FMX = () => window.nfFleetMap || {};
   if (typeof COLS !== 'undefined' && !COLS.includes('geofences')) COLS.push('geofences'); S.data.geofences = S.data.geofences || new Map();
-  const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => fmtAtTm(iso);
   const dur = m => (m == null ? '—' : m < 60 ? L(`${m} د`, `${m}m`) : L(`${Math.floor(m / 60)} س ${m % 60} د`, `${Math.floor(m / 60)}h ${m % 60}m`));
   const fences = () => sortBy(list('geofences').filter(f => f && f.id), f => f.name || '');
   const homeZone = () => { const g = typeof geoCfg === 'function' ? geoCfg() : {}; const a = (S.settings.fleet && S.settings.fleet.alerts) || {}; return g.lat != null && g.lat !== '' && g.lng != null && g.lng !== '' ? { lat: +g.lat, lng: +g.lng, radius: +a.homeRadius > 0 ? +a.homeRadius : 300 } : null; };
@@ -36492,7 +36516,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet', 'acc'].includes(R()));
   const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
   const FA = () => window.nfFleetAlerts || { types: {} };
-  const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => fmtAtTm(iso);
   const dur = m => (m == null || isNaN(m) ? '—' : m < 60 ? L(`${Math.round(m)} د`, `${Math.round(m)}m`) : L(`${Math.floor(m / 60)} س ${Math.round(m % 60)} د`, `${Math.floor(m / 60)}h ${Math.round(m % 60)}m`));
   const r1 = x => Math.round((+x || 0) * 10) / 10;
   const dayN = iso => { const d = new Date(iso + 'T00:00:00'); return L(['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][d.getDay()], ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]); };
@@ -37019,7 +37043,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const canPlaces = () => !!S.session && W() && (isAdmin() || ['manager', 'fleet', 'purch'].includes(R()));
   window.nfCanPlaces = canPlaces;
   const later = f => setTimeout(f, 90);
-  const hhmm = iso => { if (!iso) return ''; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => (iso ? nfHM(iso) : '');
   const okLL = x => !!x && x.lat != null && x.lat !== '' && x.lng != null && x.lng !== '' && isFinite(+x.lat) && isFinite(+x.lng);
   if (typeof COLS !== 'undefined' && !COLS.includes('places')) COLS.push('places'); S.data.places = S.data.places || new Map();
 
@@ -37252,7 +37276,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     let html = base(id); const t = byId('trips', id); if (!t || !t.selfOpened) return html;
     const canX = !['done', 'cancelled'].includes(t.status) && (fleetOk() || (drv() && t.driverId === me() && t.status === 'approved'));
     const np = [t.fromLoc, t.toLoc].filter(x => x && x.newPlace);
-    const ban = `<div class="banner info" style="margin-bottom:12px">${icon('info')}<span>${esc(L('فتحه السواق بنفسه', 'Opened by the driver himself'))} — ${esc(assigneeName(t.driverId))} ${esc(hhmm(t.createdAt))}${np.length ? ` · ${esc(L('مكان جديد', 'new place'))}: ${np.map(x => esc(x.name)).join('، ')}` : ''}${t.cancelledAt ? ` · ${esc(L('اتلغى', 'cancelled'))} ${esc(hhmm(t.cancelledAt))} — ${esc(t.cancelledByName || '')}` : ''}</span>${canX ? `<button type="button" class="btn sm ghost" style="margin-inline-start:auto" data-action="drvTripCancel" data-arg="${esc(t.id)}">${esc(L('إلغاء المشوار', 'Cancel the trip'))}</button>` : ''}</div>`;
+    const ban = `<div class="banner info" style="margin-bottom:12px">${icon('info')}<span>${esc(L('فتحه السواق بنفسه', 'Opened by the driver himself'))} — ${esc(assigneeName(t.driverId))} ${esc(fmtAtTm(t.createdAt))}${np.length ? ` · ${esc(L('مكان جديد', 'new place'))}: ${np.map(x => esc(x.name)).join('، ')}` : ''}${t.cancelledAt ? ` · ${esc(L('اتلغى', 'cancelled'))} ${esc(fmtAtTm(t.cancelledAt))} — ${esc(t.cancelledByName || '')}` : ''}</span>${canX ? `<button type="button" class="btn sm ghost" style="margin-inline-start:auto" data-action="drvTripCancel" data-arg="${esc(t.id)}">${esc(L('إلغاء المشوار', 'Cancel the trip'))}</button>` : ''}</div>`;
     return ban + html;
   })(vTripDetail);
 
@@ -37294,7 +37318,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     const tile = (n, lab, c) => `<div class="dtc-t"><b style="${c ? `color:${c}` : ''}">${n}</b><span>${esc(lab)}</span></div>`;
     const row = t => {
       const [lab, cls] = stepLine(t); const veh = String(vehicleName(t.vehicleId) || '').split('—')[0].trim(); const drvN = t.driverId ? assigneeName(t.driverId) : '';
-      return `<a class="dtc-r" href="#/fleet/${esc(t.id)}"><span class="dtc-dot" style="background:${DOT[cls] || DOT['']}"></span><b class="dtc-code">${esc(t.number || '')}</b><span class="dtc-who">${esc([drvN, veh].filter(Boolean).join(' · '))}${t.to ? ` <span class="muted">← ${esc(t.to)}</span>` : ''}</span>${t.status !== 'done' ? `<span class="badge ${cls} dtc-b">${esc(lab)}</span>` : ''}<span class="dtc-h">${esc(hhmm(when(t)))}</span></a>`;
+      return `<a class="dtc-r" href="#/fleet/${esc(t.id)}"><span class="dtc-dot" style="background:${DOT[cls] || DOT['']}"></span><b class="dtc-code">${esc(t.number || '')}</b><span class="dtc-who">${esc([drvN, veh].filter(Boolean).join(' · '))}${t.to ? ` <span class="muted">← ${esc(t.to)}</span>` : ''}</span>${t.status !== 'done' ? `<span class="badge ${cls} dtc-b">${esc(lab)}</span>` : ''}<span class="dtc-h">${esc(fmtAtTm(when(t)))}</span></a>`;
     };
     return `<div class="card dtoday dtc" id="dt-today"><div class="cardhead"><h3>${icon('map')}${esc(L('مشاوير النهارده', "Today's trips"))}</h3><div class="grow"></div><a class="btn xs ghost" href="#/fleet">${esc(L('الحركة', 'Fleet'))}</a></div>
       <div class="dtc-s">${tile(ts.length, L('مشوار', 'trips'))}${tile(run, L('في الطريق', 'on the road'), run ? DOT.acc : '')}${tile(back.length, L('رجعوا', 'back'), back.length ? DOT.good : '')}${tile(wait, L('مستنيين', 'waiting'), wait ? DOT.warn : '')}</div>
@@ -37476,7 +37500,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   const canDecide = () => !!S.session && W() && (admin() || ['fleet', 'manager'].includes(R()));
   const canSettle = () => !!S.session && W() && (admin() || ['acc', 'hr'].includes(R()));
   const later = f => setTimeout(f, 90);
-  const hhmm = iso => { if (!iso) return ''; const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const hhmm = iso => fmtAtTm(iso);
   const okLL = x => !!x && x.lat != null && x.lat !== '' && x.lng != null && x.lng !== '' && isFinite(+x.lat) && isFinite(+x.lng);
   const pt = x => ({ lat: +x.lat, lng: +x.lng });
   const distM = (a, b) => (typeof haversine === 'function' ? haversine(pt(a), pt(b)) : 1e9);
@@ -37915,7 +37939,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
   const mayView = () => !!S.session && (owner() || ['manager', 'vice', 'fleet'].includes(R()));
   const FA = () => window.nfFleetAlerts || null;
   const p2 = n => String(n).padStart(2, '0');
-  const hm = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  const hm = iso => fmtAtTm(iso);
   const dayOf = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
   const mins = (a, b) => { const x = Date.parse(a), y = b ? Date.parse(b) : Date.now(); return isFinite(x) && isFinite(y) ? Math.max(0, Math.round((y - x) / 60000)) : null; };
   const ago = iso => (typeof agoTxt === 'function' ? agoTxt(iso) : '');
@@ -38142,7 +38166,7 @@ body.fv-flash .camwrap{outline:28px solid #fff}
     base(id); const r = byId('requests', id); if (!r || !r.bioFail) return; const mb = document.querySelector('#mform .mb'); if (!mb || mb.querySelector('.bf-card')) return;
     const b = r.bioFail; const hm = String(b.at || '').slice(11, 16); const g = b.geo && b.geo.lat != null ? b.geo : null;
     const zone = g && typeof geoCheck === 'function' ? geoCheck(g) : null;
-    mb.insertAdjacentHTML('afterbegin', `<div class="card bf-card" style="margin-bottom:10px"><div class="small"><b>${L('البصمة ما اشتغلتش من الموبايل', 'The phone punch did not work')}</b> — ${L('الطلب اتعمل من صفحة البصمة', 'sent from the punch page')} ${esc(fmtDate(String(b.at || '').slice(0, 10)))} ${esc(new Date(b.at).toTimeString().slice(0, 5) || hm)}</div>
+    mb.insertAdjacentHTML('afterbegin', `<div class="card bf-card" style="margin-bottom:10px"><div class="small"><b>${L('البصمة ما اشتغلتش من الموبايل', 'The phone punch did not work')}</b> — ${L('الطلب اتعمل من صفحة البصمة', 'sent from the punch page')} ${esc(fmtDate(String(b.at || '').slice(0, 10)))} ${esc(fmtAtTm(b.at) || hm)}</div>
       <div class="row" style="gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">${b.frame ? `<img src="${b.frame}" alt="" style="width:96px;border-radius:8px">` : ''}<div class="tiny">${g ? `${L('المكان', 'Place')}: <a href="https://www.google.com/maps?q=${g.lat},${g.lng}" target="_blank" rel="noopener">${esc(g.lat + ', ' + g.lng)}</a>${zone && zone.inside === true ? ` <span class="badge good">${L('جوه النطاق', 'inside the zone')}</span>` : zone && zone.inside === false ? ` <span class="badge warn">${L('بره النطاق', 'outside the zone')} (${fmtNum(zone.dist)} ${L('م', 'm')})</span>` : ''}` : L('المكان مش متاح', 'Place not available')}</div></div></div>`);
   })(ACTIONS.reqOpen);
 })();
@@ -38712,7 +38736,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     const i = html.indexOf('<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">');
     if (i >= 0) { const j = i + '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">'.length; html = html.slice(0, j) + btn + html.slice(j); }
     const m = t.missedCall; if (m && m.to === myUid()) {
-      html = `<div class="banner warn tcall-miss">${icon('phone')}<span class="grow">${L(`${esc(m.byName || '')} اتصل بيك بخصوص المهمة دي (هام) ومارديتش`, `${esc(m.byName || '')} called you about this task (important) and you did not answer`)} · ${esc(fmtDate(String(m.at || '').slice(0, 10)))} ${esc(String(m.at || '').slice(11, 16))}</span>${m.by ? `<button class="btn sm p" data-action="taskCallBack" data-arg="${esc(t.id)}|${esc(m.by)}">${L('اتصل بيه', 'Call back')}</button>` : ''}</div>` + html;
+      html = `<div class="banner warn tcall-miss">${icon('phone')}<span class="grow">${L(`${esc(m.byName || '')} اتصل بيك بخصوص المهمة دي (هام) ومارديتش`, `${esc(m.byName || '')} called you about this task (important) and you did not answer`)} · ${esc(fmtDate(String(m.at || '').slice(0, 10)))} ${esc(fmtAtTm(m.at))}</span>${m.by ? `<button class="btn sm p" data-action="taskCallBack" data-arg="${esc(t.id)}|${esc(m.by)}">${L('اتصل بيه', 'Call back')}</button>` : ''}</div>` + html;
       setTimeout(() => { const cur = byId('tasks', t.id); if (cur && cur.missedCall && cur.missedCall.to === myUid()) Store.update('tasks', t.id, { missedCall: null }, { silent: true }).catch(() => {}); }, 4000);
     }
     return html;
@@ -39924,8 +39948,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   const OT_PFX = 'إضافي: ';
   const PLACE = () => ({ factory: L('في المصنع', 'At the factory'), site: L('في موقع المشروع', 'On the project site') });
   const placeShort = p => p === 'site' ? L('الموقع', 'site') : L('المصنع', 'factory');
-  const hm = t => String(t || '').slice(0, 5);
-  const hmOf = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const hm = t => fmtTm(String(t || '').slice(0, 5));
+  const hmOf = iso => fmtAtTm(iso);
   const money = n => `${fmtMoney(n)} ${CUR()}`;
 
   /* ---------- projects open for overtime ---------- */
@@ -40477,7 +40501,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   const homeDefault = () => NEW_ROLES.includes(role());
   const homeOn = () => !!S.session && role() !== 'kiosk' && (ls(prefKey()) ? ls(prefKey()) === 'new' : homeDefault());
   window.nfHomeOn = homeOn;
-  const hm = t => String(t || '').slice(0, 5);
+  const hm = t => fmtTm(String(t || '').slice(0, 5));
   const ago = iso => {
     const t = new Date(iso || '').getTime(); if (!isFinite(t)) return '';
     const m = Math.max(0, Math.round((Date.now() - t) / 60000));
@@ -40643,7 +40667,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     left += '</div>';
     const next = [];
     try {
-      if (role() === 'driver' || role() === 'fleet') list('trips').filter(t => t && t.date === today && t.status !== 'done' && t.status !== 'cancelled' && (role() === 'fleet' || t.driverId === myWid())).slice(0, 3).forEach(t => next.push({ t: `${t.number || ''} ${t.to ? '← ' + t.to : ''}`.trim(), s: t.status === 'started' ? L('في الطريق', 'On the road') : (t.time || ''), h: '#/fleet/' + t.id }));
+      if (role() === 'driver' || role() === 'fleet') list('trips').filter(t => t && t.date === today && t.status !== 'done' && t.status !== 'cancelled' && (role() === 'fleet' || t.driverId === myWid())).slice(0, 3).forEach(t => next.push({ t: `${t.number || ''} ${t.to ? '← ' + t.to : ''}`.trim(), s: t.status === 'started' ? L('في الطريق', 'On the road') : fmtTm(t.time || ''), h: '#/fleet/' + t.id }));
       if (typeof awaitingMe === 'function') { const n = list('requests').filter(awaitingMe).length; if (n) next.push({ t: L(`${n} طلب مستني ردك`, `${n} requests waiting for you`), s: L('الطلبات', 'Requests'), h: '#/requests' }); }
       if (typeof tasksForMe === 'function') sortBy(tasksForMe(), t => ({ urgent: '0', high: '1' }[t.priority] || '2') + (t.dueDate || '9999')).forEach(t => next.push({ t: String(t.title || ''), s: t.dueDate ? (t.dueDate === today ? L('النهارده', 'Today') : fmtDate(t.dueDate)) : L('مهمة', 'Task'), h: '#/tasks/' + t.id }));
     } catch (e) { /* ignore */ }
@@ -44211,7 +44235,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
   function paintVersions(p, hd) {
     const s = byId(COL, CD.id) || CD.rec; const vs = s.versions || [];
-    p.innerHTML = hd(L('النسخ القديمة', 'Older versions')) + (vs.length ? vs.map((v, i) => `<button type="button" class="cd-mi" data-cd="vload" data-k="${i}">${IC.undo}<span>${esc(fmtDate(String(v.at || '').slice(0, 10)))} ${esc(String(v.at || '').slice(11, 16))} · ${esc(ago(v.at))}</span></button>`).join('') : `<p class="cd-hint">${esc(L('مفيش نسخ قديمة لسه.', 'No older versions yet.'))}</p>`) + `<p class="cd-hint">${esc(L('الرجوع لنسخة بيحفظ الحالية كنسخة قديمة الأول.', 'Going back saves the current one as an older version first.'))}</p>`;
+    p.innerHTML = hd(L('النسخ القديمة', 'Older versions')) + (vs.length ? vs.map((v, i) => `<button type="button" class="cd-mi" data-cd="vload" data-k="${i}">${IC.undo}<span>${esc(fmtDate(String(v.at || '').slice(0, 10)))} ${esc(fmtAtTm(v.at))} · ${esc(ago(v.at))}</span></button>`).join('') : `<p class="cd-hint">${esc(L('مفيش نسخ قديمة لسه.', 'No older versions yet.'))}</p>`) + `<p class="cd-hint">${esc(L('الرجوع لنسخة بيحفظ الحالية كنسخة قديمة الأول.', 'Going back saves the current one as an older version first.'))}</p>`;
   }
   function toggleLayers() { if (narrow()) return openPop('layers'); const w = $c('.cd-col .cd-lyw'); if (w) w.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   function setFocus(on) { const ed = CD.ed; if (!ed) return; ed.setFocus(on); paintLayers(); }
@@ -45317,7 +45341,7 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
     if (!src) return; if (baseSrc && byId('purchases', src)) { baseSrc(src); return; }
     const t = S.route && S.route.id ? byId('tasks', S.route.id) : null;
     if (t && typeof taskThread === 'function') {
-      const ims = taskThread(t).filter(m => m && m.fileId && !m.sys).map(m => { const f = byId('files', m.fileId); const th = m.thumb || (f || {}).thumb || ''; return { thumb: th, src: f && f.store !== 'thumb' ? '' : th, caption: `${m.byName || ''} · ${fmtDate((m.at || '').slice(0, 10))} ${(m.at || '').slice(11, 16)}`, load: f && f.store !== 'thumb' && typeof Files !== 'undefined' && Files.url ? () => Files.url(f) : null }; }).filter(x => x.thumb);
+      const ims = taskThread(t).filter(m => m && m.fileId && !m.sys).map(m => { const f = byId('files', m.fileId); const th = m.thumb || (f || {}).thumb || ''; return { thumb: th, src: f && f.store !== 'thumb' ? '' : th, caption: `${m.byName || ''} · ${fmtDate((m.at || '').slice(0, 10))} ${fmtAtTm(m.at)}`, load: f && f.store !== 'thumb' && typeof Files !== 'undefined' && Files.url ? () => Files.url(f) : null }; }).filter(x => x.thumb);
       const i = ims.findIndex(x => x.thumb === src); if (i >= 0) { open(ims, i); return; }
     }
     lb(src, '');
@@ -45791,7 +45815,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     if (!ts.length) return hd(w) + empty('route', L('مفيش مشاوير النهارده', 'No trips today'));
     const st = t => (typeof TRIP_STATUS !== 'undefined' && TRIP_STATUS[t.status] ? TRIP_STATUS[t.status][0] : t.status || '');
     const n = s === 'L' ? 7 : 3;
-    return hd(w, `<span class="nfw-hs">${ts.length}</span>`) + `<div class="nfw-rows">${ts.slice(0, n).map(t => row('#/fleet/' + t.id, esc(`${t.number || ''} ${t.to ? '← ' + t.to : ''}`.trim() || L('مشوار', 'Trip')), esc([st(t), t.driverId && !drv ? shortName(t.driverId) : ''].filter(Boolean).join(' · ')), t.time ? `<small>${esc(String(t.time).slice(0, 5))}</small>` : '')).join('')}</div>`;
+    return hd(w, `<span class="nfw-hs">${ts.length}</span>`) + `<div class="nfw-rows">${ts.slice(0, n).map(t => row('#/fleet/' + t.id, esc(`${t.number || ''} ${t.to ? '← ' + t.to : ''}`.trim() || L('مشوار', 'Trip')), esc([st(t), t.driverId && !drv ? shortName(t.driverId) : ''].filter(Boolean).join(' · ')), t.time ? `<small>${esc(fmtTm(String(t.time).slice(0, 5)))}</small>` : '')).join('')}</div>`;
   }
 
   /* ---------- my tasks ---------- */
@@ -46921,7 +46945,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     if (SYS === 'cx') return list('cprojects').filter(p => !p.deleted).map(p => ['cproject', p.id, p.name]).concat(list('clients').slice(0, 200).map(c => ['client', c.id, c.name]));
     return list('projects').filter(p => p.status !== 'archived').map(p => ['project', p.id, p.name || p.code]);
   };
-  const fmtWhen = iso => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleString(en() ? 'en-GB' : 'ar-EG', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); };
+  const fmtWhen = iso => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleString(en() ? 'en-US' : 'ar-EG', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); };
   const meetings = () => list(COL).filter(canSeeM).sort((a, b) => (a.status === 'live' ? 0 : 1) - (b.status === 'live' ? 0 : 1) || String(b.at || '').localeCompare(String(a.at || '')));
   const linkOf = m => `${MEET_URL}#${SYS}.${m.room}`;
   const statusChip = m => m.status === 'live' ? `<span class="mtchip live">${esc(L('شغال دلوقتي', 'Live now'))}</span>` : m.status === 'ended' ? `<span class="mtchip">${esc(L('خلص', 'Ended'))}</span>` : `<span class="mtchip soon">${esc(fmtWhen(m.at))}</span>`;
@@ -47110,7 +47134,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   async function saveShot(m, blob, name) {
     if (typeof uploadOneBase !== 'function' || !hosted()) return false;
     try {
-      const d = new Date(); const nm = `${L('لقطة اجتماع', 'Meeting shot')} — ${String(m.title || '').slice(0, 60)} — ${d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: '2-digit', minute: '2-digit' })}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+      const d = new Date(); const nm = `${L('لقطة اجتماع', 'Meeting shot')} — ${String(m.title || '').slice(0, 60)} — ${fmtAtTm(d)}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
       const lk = m.link || {}; const file = new File([blob], nm || name, { type: 'image/png' });
       const doc = await uploadOneBase(file, { kind: 'meetshot', orderId: lk.kind === 'order' ? lk.id : null, note: L(`من اجتماع «${m.title}»`, `From the meeting «${m.title}»`) });
       const extra = { meetingId: m.id }; if (lk.kind === 'project') extra.projectId = lk.id; if (lk.kind === 'cproject' || lk.kind === 'client') { extra.ownerKind = lk.kind; extra.ownerId = lk.id; }
@@ -47258,7 +47282,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   const PQ = { active: false, netFail: false, oos: null };
   const pad = n => String(n).padStart(2, '0');
   const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+  const nowMin = () => { const v = typeof tmToMin === 'function' ? tmToMin(nowTm()) : null; if (v != null) return v; const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }; /* v7.67: the server clock */
   const tm = t => (typeof tmToMin === 'function' ? tmToMin(t) : null);
   const lsg = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } };
   const lss = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* full / private */ } };
@@ -47402,7 +47426,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   function forgotDialog(w, date, why) {
     return new Promise(res => {
       let done = false; const fin = v => { if (done) return; done = true; res(v); };
-      const sh = shiftFor(w) || {}; const t = nowTm(); const y = isoDay(new Date(Date.now() - 864e5)); const yRow = (attendanceFor(y) || {})[w.id] || {};
+      const sh = shiftFor(w) || {}; const t = nowTm(); const y = addDays(todayISO(), -1); const yRow = (attendanceFor(y) || {})[w.id] || {};
       const night = why === 'night' || why === 'early'; const { mine, rest } = orderChoices(w);
       const opt = o => `<option value="${esc(o.id)}">${esc(oName(o))}</option>`;
       openModal({ title: L('نسيت تبصم؟', 'Forgot to punch?'),
@@ -47430,7 +47454,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     return r;
   }
   function oosDesc(r) {
-    const k = r.punchKind === 'in' ? L(`حضور ${r.timeIn || ''}`, `in ${r.timeIn || ''}`) : r.punchKind === 'out' ? L(`انصراف ${r.timeOut || ''}`, `out ${r.timeOut || ''}`) : L(`حضور ${r.timeIn || ''} + انصراف ${r.timeOut || ''}`, `in ${r.timeIn || ''} + out ${r.timeOut || ''}`);
+    const k = r.punchKind === 'in' ? L(`حضور ${fmtTm(r.timeIn || '')}`, `in ${fmtTm(r.timeIn || '')}`) : r.punchKind === 'out' ? L(`انصراف ${fmtTm(r.timeOut || '')}`, `out ${fmtTm(r.timeOut || '')}`) : L(`حضور ${fmtTm(r.timeIn || '')} + انصراف ${fmtTm(r.timeOut || '')}`, `in ${fmtTm(r.timeIn || '')} + out ${fmtTm(r.timeOut || '')}`);
     const why = r.oos === 'forgot' ? L('نسي يبصم حضور', 'forgot to punch in') : r.oos === 'night' && r.leaving ? L('انصراف وردية امبارح بعد نص الليل', 'yesterday\'s shift ending after midnight') : (WHY[r.oos] ? WHY[r.oos]() : '');
     return `${L('بصمة برّه الوردية', 'Punch outside the shift')} — ${fmtDate(r.from)} · ${k}${why ? ' · ' + why : ''}${r.orderCode ? ' · ' + L('مشروع', 'project') + ' ' + r.orderCode : ''}${r.reason ? ' · ' + r.reason : ''}`;
   }
@@ -47461,7 +47485,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     if (!w || opts.silent || opts.skipOos) return base.apply(this, arguments);
     const date = todayISO(); const cur = (attendanceFor(date) || {})[w.id] || {}; const k = cur.in ? 'out' : 'in';
     if (k === 'out' && !cur.out && cur.kioskIn && Date.now() - Date.parse(cur.kioskIn) < 120000) {
-      const ok = await ask(L('انصراف؟', 'Check out?'), `<p class="oos-q">${esc(L(`إنت لسه مسجّل حضور من دقيقة (${cur.in}). متأكد إنك ماشي؟`, `You checked in a minute ago (${cur.in}). Are you sure you are leaving?`))}</p>`, [['go', L('أيوه، سجّل انصراف', 'Yes, check out'), 'p'], ['_x', L('لأ، رجوع', 'No, back'), 'ghost']]);
+      const ok = await ask(L('انصراف؟', 'Check out?'), `<p class="oos-q">${esc(L(`إنت لسه مسجّل حضور من دقيقة (${fmtTm(cur.in)}). متأكد إنك ماشي؟`, `You checked in a minute ago (${fmtTm(cur.in)}). Are you sure you are leaving?`))}</p>`, [['go', L('أيوه، سجّل انصراف', 'Yes, check out'), 'p'], ['_x', L('لأ، رجوع', 'No, back'), 'ghost']]);
       if (ok !== 'go') { logTry(w, date, k, false, 'cancel', { msg: 'two-minute guard' }); return { blocked: true, msg: L('اتلغت', 'Cancelled') }; }
     }
     const why = oosWhy(w, k, date); if (!why) return base.apply(this, arguments);
@@ -47553,7 +47577,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     if (row.out) h += line(L('انصراف', 'Out'), row.out, row.kioskOut, !qOut);
     if (row.oos && row.oos.st !== 'ok') h += `<div class="mpt-r"><span class="badge ${row.oos.st === 'rejected' ? 'bad' : 'warn'}">${esc(row.oos.st === 'rejected' ? L('البصمة برّه الوردية اترفضت', 'The punch outside the shift was rejected') : L('مستنية اعتماد (برّه الوردية)', 'Waiting for approval (outside the shift)'))}</span></div>`;
     const bad = tries.filter(x => x && !x.ok && !['net', 'cancel'].includes(x.why));
-    if (bad.length) h += `<div class="tiny muted" style="margin-top:6px">${esc(L('محاولات ماتسجلتش', 'Tries that did not save'))}: ${bad.slice(-4).map(x => `${new Date(x.at).toTimeString().slice(0, 5)} ${WHY_TRY[x.why] ? WHY_TRY[x.why]() : x.why}`).map(esc).join(' · ')}</div>`;
+    if (bad.length) h += `<div class="tiny muted" style="margin-top:6px">${esc(L('محاولات ماتسجلتش', 'Tries that did not save'))}: ${bad.slice(-4).map(x => `${fmtAtTm(x.at)} ${WHY_TRY[x.why] ? WHY_TRY[x.why]() : x.why}`).map(esc).join(' · ')}</div>`;
     if (!h) h = `<div class="muted small">${esc(L('لسه مفيش بصمة النهارده', 'No punch yet today'))}</div>`;
     return `<div class="card mpt" id="nf-mpt"><div class="cardhead"><h3>${icon('attendance')}${esc(L('بصماتي النهارده', 'My punches today'))}</h3></div>${h}</div>`;
   }
@@ -47587,7 +47611,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     const why = x => x.why === 'held' ? L('مستنية اعتماد (برّه الوردية)', 'Waiting for approval (outside the shift)') : x.ok ? (x.late ? L('اتسجلت بعد ما النت رجع', 'saved after the network came back') : L('اتسجلت', 'saved')) : (WHY_TRY[x.why] ? WHY_TRY[x.why]() : x.why);
     return `<div class="card"><div class="cardhead"><h3>${icon('attendance')}${esc(L('سجل محاولات البصمة', 'Punch tries log'))}</h3><div class="grow"></div><input type="date" class="ltr" id="pl-date" value="${esc(date)}" style="max-width:160px"></div>
       <div class="row" style="gap:6px;margin-bottom:8px"><button type="button" class="btn xs ${PL.only === 'bad' ? 'p' : ''}" data-action="plOnly" data-arg="bad">${esc(L('اللي ماتسجلتش / مستنية', 'Not saved / waiting'))} (${nBad})</button><button type="button" class="btn xs ${PL.only === 'all' ? 'p' : ''}" data-action="plOnly" data-arg="all">${esc(L('كل المحاولات', 'All tries'))}</button></div>
-      ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(L('الوقت', 'Time'))}</th><th>${esc(L('الموظف', 'Employee'))}</th><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('النوع', 'Kind'))}</th><th>${esc(L('النتيجة', 'Result'))}</th><th>${esc(L('الإيصال', 'Receipt'))}</th></tr></thead><tbody>${rows.map(x => `<tr><td class="ltr">${esc(x.at ? new Date(x.at).toTimeString().slice(0, 5) : '')}</td><td>${esc(nm(x.wid))}</td><td>${esc(typeof deptName === 'function' ? deptName(x.dept) : x.dept)}</td><td>${esc(x.k === 'out' ? L('انصراف', 'Out') : L('حضور', 'In'))}</td><td><span class="badge ${x.ok && x.why !== 'held' ? 'good' : x.why === 'held' || x.why === 'net' ? 'warn' : 'bad'}">${esc(why(x))}</span>${x.msg && !x.ok ? `<div class="tiny muted">${esc(x.msg)}</div>` : ''}</td><td class="ltr tiny">${esc(x.rc || '')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="muted small">${esc(L('مفيش محاولات في اليوم ده', 'No tries on this day'))}</div>`}
+      ${rows.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(L('الوقت', 'Time'))}</th><th>${esc(L('الموظف', 'Employee'))}</th><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('النوع', 'Kind'))}</th><th>${esc(L('النتيجة', 'Result'))}</th><th>${esc(L('الإيصال', 'Receipt'))}</th></tr></thead><tbody>${rows.map(x => `<tr><td class="ltr">${esc(x.at ? fmtAtTm(x.at) : '')}</td><td>${esc(nm(x.wid))}</td><td>${esc(typeof deptName === 'function' ? deptName(x.dept) : x.dept)}</td><td>${esc(x.k === 'out' ? L('انصراف', 'Out') : L('حضور', 'In'))}</td><td><span class="badge ${x.ok && x.why !== 'held' ? 'good' : x.why === 'held' || x.why === 'net' ? 'warn' : 'bad'}">${esc(why(x))}</span>${x.msg && !x.ok ? `<div class="tiny muted">${esc(x.msg)}</div>` : ''}</td><td class="ltr tiny">${esc(x.rc || '')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="muted small">${esc(L('مفيش محاولات في اليوم ده', 'No tries on this day'))}</div>`}
       <p class="tiny muted" style="margin-top:8px">${esc(L('الإيصال بيتعمل من الموظف ووقت البصمة اللي اتحفظ على السيرفر — لو موظف قال «بصمت ومااتسجلش» قارن رقم الإيصال اللي معاه.', 'The receipt is made from the employee and the time saved on the server — when someone says «I punched and it did not save», compare the receipt he has.'))}</p></div>`;
   }
   ACTIONS.plOnly = a => { PL.only = a === 'all' ? 'all' : 'bad'; if (typeof render === 'function') render(false); else rerender(); };
@@ -48068,7 +48092,7 @@ function oxFlow(k) {
       const r = L.r; const w = get('workers', r.workerId); ic = 'request'; kind = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type; no = w ? w.name : (r.requesterName || r.createdByName || '');
       st = (() => { try { return typeof stageChip === 'function' ? stageChip(r) : ''; } catch (e) { return ''; } })();
       let desc = ''; try { desc = typeof reqDesc === 'function' ? reqDesc(r) : ''; } catch (e) { desc = ''; }
-      rows = row(T('التفاصيل', 'Details'), noMoney(desc)) + row(T('السبب', 'Reason'), noMoney(r.reason || '')) + row(T('القسم', 'Dept'), r.deptId && typeof deptName === 'function' ? deptName(r.deptId) : '') + row(T('اتقدّم', 'Filed'), `${fmtD(r.createdAt)} ${String(r.createdAt || '').slice(11, 16)}${r.createdByName ? ' — ' + r.createdByName : ''}`);
+      rows = row(T('التفاصيل', 'Details'), noMoney(desc)) + row(T('السبب', 'Reason'), noMoney(r.reason || '')) + row(T('القسم', 'Dept'), r.deptId && typeof deptName === 'function' ? deptName(r.deptId) : '') + row(T('اتقدّم', 'Filed'), `${fmtD(r.createdAt)} ${fmtAtTm(r.createdAt)}${r.createdByName ? ' — ' + r.createdByName : ''}`);
       const done = (r.approvals || []).filter(a => a.status === 'approved').map(a => `${lbl(a.role)}${a.byName ? ': ' + a.byName : ''}`); if (done.length) rows += row(T('وافق', 'Approved by'), done.join(' ← '));
       if (r.status === 'pending') wait = waitNames(r);
     } else if (L.k === 'order') {
@@ -48076,7 +48100,7 @@ function oxFlow(k) {
       rows = row(T('المشروع', 'Project'), o.title || '') + row(T('العميل', 'Client'), c ? c.name : '') + row(T('التسليم', 'Due'), fmtD(o.dueDate));
     } else if (L.k === 'trip') {
       const tr = L.tr; ic = 'map'; kind = T('مشوار', 'Trip'); no = tr.number || ''; st = stBadge(typeof TRIP_STATUS !== 'undefined' ? TRIP_STATUS : null, tr.status);
-      rows = row(T('الغرض', 'Purpose'), tr.purpose || '') + row(T('رايح', 'To'), tr.to || '') + row(T('الميعاد', 'When'), `${fmtD(tr.date)} ${tr.time || ''}`.trim()) + row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(tr.vehicleId) : '') + row(T('السواق', 'Driver'), tr.driverId && typeof assigneeName === 'function' ? assigneeName(tr.driverId) : '');
+      rows = row(T('الغرض', 'Purpose'), tr.purpose || '') + row(T('رايح', 'To'), tr.to || '') + row(T('الميعاد', 'When'), `${fmtD(tr.date)} ${fmtTm(tr.time || '')}`.trim()) + row(T('العربية', 'Vehicle'), typeof vehicleName === 'function' ? vehicleName(tr.vehicleId) : '') + row(T('السواق', 'Driver'), tr.driverId && typeof assigneeName === 'function' ? assigneeName(tr.driverId) : '');
     } else if (L.k === 'mat') {
       const m = L.mt; ic = 'cube'; kind = T('صنف', 'Item'); no = m.code || ''; rows = row(T('الاسم', 'Name'), m.name || '') + row(T('الرصيد', 'Stock'), `${typeof fmtNum === 'function' ? fmtNum(+m.qty || 0) : m.qty} ${m.unit || ''}`);
     } else if (['pb', 'ab', 'fuel'].includes(L.k)) {
@@ -48293,7 +48317,7 @@ function oxFlow(k) {
         if (r && r.s === 'P') present++; else if (r && r.s === 'H') half++; if (c.kind === 'absent') absent++; if (r && r.late) late += +r.late || 0;
         const one = r && ((r.in && !r.out) || (!r.in && r.out)) && d < today; if (one) miss++;
         const cls = c.kind === 'absent' ? 'absent' : ['off', 'holiday'].includes(c.kind) ? 'muted' : '';
-        return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ` <span class="badge warn" style="padding:0 5px">${esc(T('ناقص بصمة', 'Missing punch'))}</span>` : ''}</td><td class="ltr">${esc((r && r.in) || '—')}</td><td class="ltr">${esc((r && r.out) || '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td></tr>`;
+        return `<tr class="${cls}"><td>${fmtDate(d).slice(0, 5)} <span class="tiny muted">${dayName(d)}</span></td><td class="st">${esc(c.label)}${one ? ` <span class="badge warn" style="padding:0 5px">${esc(T('ناقص بصمة', 'Missing punch'))}</span>` : ''}</td><td class="ltr">${esc(r && r.in ? fmtTm(r.in) : '—')}</td><td class="ltr">${esc(r && r.out ? fmtTm(r.out) : '—')}</td><td class="n hide-sm">${r && r.hrs ? fmtHrs(r.hrs) : '—'}</td><td class="n hide-sm">${r && r.late ? r.late + ' د' : ''}</td></tr>`;
       }).join('');
       body = `<div class="kp"><div><b class="num">${present + (half ? ' + ' + half + '½' : '')}</b><span>${esc(T('أيام حضور', 'Days present'))}</span></div><div><b class="num">${absent}</b><span>${esc(T('غياب', 'Absent'))}</span></div><div><b class="num">${late}</b><span>${esc(T('تأخير (دقيقة)', 'Late (min)'))}</span></div><div><b class="num">${miss}</b><span>${esc(T('نسيان بصمة', 'Missed punch'))}</span></div></div>
         ${tr ? `<div class="tablewrap"><table><thead><tr><th>${esc(T('اليوم', 'Day'))}</th><th>${esc(T('الحالة', 'Status'))}</th><th>${esc(T('حضور', 'In'))}</th><th>${esc(T('انصراف', 'Out'))}</th><th class="n hide-sm">${esc(T('ساعات', 'Hours'))}</th><th class="n hide-sm">${esc(T('تأخير', 'Late'))}</th></tr></thead><tbody>${tr}</tbody></table></div>` : `<div class="empty small">${esc(T('لا يوجد حضور مسجّل في الشهر ده', 'No attendance this month'))}</div>`}`;
@@ -48309,7 +48333,7 @@ function oxFlow(k) {
       const w = S.session && S.session.workerId ? byId('workers', S.session.workerId) : null; if (!w || !away(w)) return html;
       const home = homeOf(w); const nm = CO[home] || [home, home]; const ym = monthOf(todayISO()); kick(home, ym);
       const st = C[home + '|' + ym]; const r = st && st.rows ? st.rows[todayISO()] : null;
-      const txt = r ? (r.out ? T(`انصرفت ${r.out}`, `Out at ${r.out}`) : r.in ? T(`حضرت ${r.in}`, `In at ${r.in}`) : r.s === 'L' ? T('إجازة', 'Leave') : T('مسجّل', 'Recorded')) : (st && st.rows ? T('لسه مابصمتش النهارده', 'No punch yet today') : '…');
+      const txt = r ? (r.out ? T(`انصرفت ${fmtTm(r.out)}`, `Out at ${fmtTm(r.out)}`) : r.in ? T(`حضرت ${fmtTm(r.in)}`, `In at ${fmtTm(r.in)}`) : r.s === 'L' ? T('إجازة', 'Leave') : T('مسجّل', 'Recorded')) : (st && st.rows ? T('لسه مابصمتش النهارده', 'No punch yet today') : '…');
       html = html.replace(/(<div style="font-size:22px;font-weight:700;margin:6px 0">)[^<]*(<\/div>)/, `$1${esc(txt)} <span class="badge acc" style="font-size:12px;vertical-align:middle">${esc(nm[0])}</span>$2`).replace(KPIS, '');
     } catch (e) { /* ignore */ }
     return html;
@@ -48577,9 +48601,9 @@ function oxFlow(k) {
   async function askHead(date, w, r) {
     const id = tid(date, w.id); const ex = byId('tasks', id); if (ex && ex.status !== 'cancelled' && ex.status !== 'done' && ex.otp && ex.otp.out === r.out) return;
     const heads = typeof deptHeads === 'function' ? deptHeads(w.deptId) : []; const h = heads[0] || null; const sh = shiftFor(w);
-    const doc = { id, title: `ساعات زيادة مستنية اعتمادك — ${w.name} (${fmtDate(date)})`, desc: `انصرف ${r.out} من غير سهر متوافق عليه — اللي بعد ${sh.end} مش محسوب لحد ما توافق. افتح «ساعات زيادة» واعتمد أو ارفض.`, link: '/#/otpend', deptId: w.deptId || null, assigneeId: h ? h.id : null, toRole: h ? null : 'manager', priority: 'high', status: 'open', kind: 'task', source: 'otpend', otp: { date, wid: w.id, out: r.out }, createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: (ex && ex.createdAt) || nowISO(), updatedAt: nowISO() };
+    const doc = { id, title: `ساعات زيادة مستنية اعتمادك — ${w.name} (${fmtDate(date)})`, desc: `انصرف ${fmtTm(r.out)} من غير سهر متوافق عليه — اللي بعد ${fmtTm(sh.end)} مش محسوب لحد ما توافق. افتح «ساعات زيادة» واعتمد أو ارفض.`, link: '/#/otpend', deptId: w.deptId || null, assigneeId: h ? h.id : null, toRole: h ? null : 'manager', priority: 'high', status: 'open', kind: 'task', source: 'otpend', otp: { date, wid: w.id, out: r.out }, createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: (ex && ex.createdAt) || nowISO(), updatedAt: nowISO() };
     await Store.save('tasks', doc, { silent: true });
-    try { if (typeof pushSend === 'function') pushSend(h ? ['w:' + h.id] : ['role:manager'], `ساعات زيادة مستنية اعتمادك — ${w.name}`.slice(0, 100), `انصرف ${r.out} من غير سهر متوافق عليه`, '/#/otpend', 'otp-' + w.id).catch(() => { }); } catch (e) { /* ignore */ }
+    try { if (typeof pushSend === 'function') pushSend(h ? ['w:' + h.id] : ['role:manager'], `ساعات زيادة مستنية اعتمادك — ${w.name}`.slice(0, 100), `انصرف ${fmtTm(r.out)} من غير سهر متوافق عليه`, '/#/otpend', 'otp-' + w.id).catch(() => { }); } catch (e) { /* ignore */ }
   }
   /* ---------- the list + approve / reject ---------- */
   function pending(days = 10) {
@@ -48604,7 +48628,7 @@ function oxFlow(k) {
   };
   function listHTML(rows) {
     if (!rows.length) return `<div class="empty small">${esc(T('مفيش ساعات زيادة مستنية', 'No extra hours waiting'))}</div>`;
-    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span class="ltr">${esc(r.in || '')} → ${esc(r.out || '')}</span><span>${esc(T(`محسوب ${r.countFrom || ''}–${r.countTo || ''}`, `Counted ${r.countFrom || ''}–${r.countTo || ''}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
+    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span class="ltr">${esc(fmtTm(r.in || ''))} → ${esc(fmtTm(r.out || ''))}</span><span>${esc(T(`محسوب ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`, `Counted ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
   }
   if (typeof EXTRA_VIEWS !== 'undefined') {
     VIEW_TITLES.otpend = 'ساعات زيادة';
@@ -48928,7 +48952,7 @@ function oxFlow(k) {
     const rows = all.filter(({ t }) => !q || String(t.title || '').toLowerCase().includes(q) || String(subOf(t)).toLowerCase().includes(q)).slice(0, 30);
     const cur = SH.to && byId('tasks', SH.to); const mo = cur ? moneyOf(cur) : null;
     const th = SH.files.map((f, i) => `<div class="shr-f">${SH.urls[i] ? `<img src="${esc(SH.urls[i])}" alt="">` : `<div class="shr-pdf">${icon('print')}<span>${esc(f.name || 'PDF')}</span></div>`}</div>`).join('');
-    const rowH = ({ t, at }) => `<button type="button" class="shr-t${SH.to === t.id ? ' on' : ''}" data-action="shrPick" data-arg="${esc(t.id)}"><span class="shr-r" aria-hidden="true"></span><span class="shr-tt"><b>${esc(t.title || '')}</b><small>${esc([subOf(t), at ? L('فتحتها', 'opened') + ' ' + new Date(at).toTimeString().slice(0, 5) : ''].filter(Boolean).join(' · '))}</small></span>${moneyOf(t) ? `<span class="badge warn">${esc(L('مستنية تحويل', 'Waits for a transfer'))}</span>` : ''}</button>`;
+    const rowH = ({ t, at }) => `<button type="button" class="shr-t${SH.to === t.id ? ' on' : ''}" data-action="shrPick" data-arg="${esc(t.id)}"><span class="shr-r" aria-hidden="true"></span><span class="shr-tt"><b>${esc(t.title || '')}</b><small>${esc([subOf(t), at ? L('فتحتها', 'opened') + ' ' + fmtAtTm(at) : ''].filter(Boolean).join(' · '))}</small></span>${moneyOf(t) ? `<span class="badge warn">${esc(L('مستنية تحويل', 'Waits for a transfer'))}</span>` : ''}</button>`;
     return `<div class="card shr"><div class="shr-fs">${th}</div>
       <textarea id="shr-cap" class="shr-cap" placeholder="${esc(L('اكتب تعليق (اختياري)', 'Add a caption (optional)'))}">${esc(SH.text)}</textarea>
       <div class="shr-h"><b>${esc(L('ابعت لـ:', 'Send to:'))}</b><input id="shr-q" class="shr-q" type="search" placeholder="${esc(L('دوّر على مهمة', 'Search a task'))}" value="${esc(SH.q)}"></div>
@@ -49817,7 +49841,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const me = () => S.session || {};
   const myIds = () => [me().id, me().workerId ? 'w:' + me().workerId : null].filter(Boolean).map(String);
   const can = p => !!p && !!S.session && (typeof canSee !== 'function' || canSee('purchases'));
-  const when = iso => { if (!iso) return ''; const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); try { return same ? d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleString(en() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
+  const when = iso => { if (!iso) return ''; const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); try { return same ? fmtAtTm(d) : d.toLocaleString(en() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
   const ini = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('');
   function cardHTML(p) {
     const cs = (p.comments || []).filter(c => c && !c.deleted);
@@ -50312,7 +50336,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const badge = s => { const x = ST[s] || [s, s, '']; return `<span class="badge ${x[2]} trb">${esc(L(x[0], x[1]))}</span>`; };
   const WHAT = { created: ['عمل المنتج', 'created the product'], version: ['فتح نسخة جديدة', 'opened a new version'], edited: ['عدّل', 'edited'], file: ['رفع ملف', 'uploaded a file'], submitted: ['بعت للمراجعة', 'sent for review'], approved: ['اعتمد', 'approved'], returned: ['رجّع بملاحظات', 'returned with notes'], restored: ['استرجع نسخة', 'restored a version'] };
   const whatTxt = w => { const x = WHAT[w] || [w, w]; return L(x[0], x[1]); };
-  const when = iso => { if (!iso) return ''; try { const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); return same ? d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleString(en() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
+  const when = iso => { if (!iso) return ''; try { const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); return same ? fmtAtTm(d) : d.toLocaleString(en() ? 'en-US' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
   const entry = (what, note, ver) => ({ at: nowISO(), by: myId(), byName: me().name || '', what, ver: ver || 1, note: String(note || '').slice(0, 300), via: 'app' });
   const withLog = (p, what, note) => (p.tlog || []).concat([entry(what, note, +p.ver || 1)]).slice(-300);
   const push = (to, title, body, url, tag) => { try { if (to && to.length && typeof pushSend === 'function') pushSend(to, String(title).replace(MONEY, '…').slice(0, 100), String(body || '').replace(MONEY, '…').slice(0, 160), url, tag); } catch (e) { /* the page still shows it */ } };
@@ -50742,7 +50766,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const online = d => !!(d && d.seen_at && (Date.now() - new Date(d.seen_at).getTime()) / 1000 < ONLINE_S);
   const myName = () => String((S.session && S.session.name) || 'Ninety').slice(0, 80);
   const touchDev = () => (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) || 'ontouchstart' in window;
-  const fmtWhen = t => { if (!t) return '—'; try { return new Date(t).toLocaleString(en() ? 'en-GB' : 'ar-EG-u-nu-latn', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return String(t).slice(0, 16); } };
+  const fmtWhen = t => { if (!t) return '—'; try { return new Date(t).toLocaleString(en() ? 'en-US' : 'ar-EG-u-nu-latn', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return String(t).slice(0, 16); } };
   const fmtDay = t => { try { return new Date(t).toLocaleDateString(en() ? 'en-GB' : 'ar-EG-u-nu-latn', { day: 'numeric', month: 'long' }); } catch (e) { return String(t).slice(0, 10); } };
   const fmtDur = (a, b) => { if (!a) return '—'; const s = Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); if (!h && !m) return L(`${s} ث`, `${s} s`); return h ? L(`${h} س ${m} د`, `${h} h ${m} min`) : L(`${m} د`, `${m} min`); };
   const ago = t => { if (!t) return L('لسه ما اتفتحش', 'Never online yet'); const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); if (s < 3600) return L(`آخر ظهور من ${Math.max(1, Math.round(s / 60))} د`, `Last seen ${Math.max(1, Math.round(s / 60))} min ago`); if (s < 86400) return L(`آخر ظهور من ${Math.round(s / 3600)} س`, `Last seen ${Math.round(s / 3600)} h ago`); return L('آخر ظهور ', 'Last seen ') + fmtDay(t); };
@@ -51248,4 +51272,71 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
 .rdkb{position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px}
 @media (max-width:700px){.rdgrid{grid-template-columns:1fr}.rdcard .rda{justify-content:stretch}.rdcard .rda .btn{flex:1;justify-content:center}.rdtools{margin-inline-start:0;width:100%}.rdname{max-width:40vw}.rdtools .rdb span{display:none}.rdtools .rdb{padding:0 8px}}`;
   document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.67 — punches on the server clock (Bahaa 14 Oct: punched 9:20, the sheet says 10 — an hour off).
+   Four phones had their clock an hour ahead (set by hand because the phone thought Egypt was on winter time), so every punch from
+   them was an hour late: lateness in the morning that never happened, an extra hour of overtime at night.
+   · nfClockSync asks the server (rpc nf_clock: its own time + the Cairo UTC offset) and fills NFCLK (02-core) ONLY when the phone is
+     really off (≥ 1 minute) — a phone that is right keeps working exactly as before;
+   · nowTm / todayISO / nowISO then give the real Egypt time, so the punch, the lateness and the overtime are right whatever the phone shows;
+   · before every punch the clock is checked again (at most 2.5 s wait — without the network the last known difference is used);
+   · the employee sees on his punch card that his phone clock is off and how to fix it; the punch keeps clkIn / clkOut (minutes).
+   ===================================================================== */
+(function () {
+  if (window.__NF_CLK767__) return; window.__NF_CLK767__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  let busy = null;
+  const CLK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+
+  async function once() {
+    try {
+      if (typeof sbOn !== 'function' || !sbOn() || !S.sb) return;
+      const t0 = Date.now(); const { data, error } = await S.sb.rpc('nf_clock'); const t1 = Date.now();
+      if (error || !data || !(+data.ms > 0) || data.off == null || t1 - t0 > 4000) return; /* a slow answer is not trusted to the minute */
+      const skew = Math.round(+data.ms - (t0 + t1) / 2); const off = Math.round(+data.off);
+      const devOff = -new Date().getTimezoneOffset();
+      const diffMs = skew + (off - devOff) * 60000; /* the real Egypt wall clock minus what this phone browser shows */
+      const off1 = Math.abs(diffMs) >= 60000;
+      NFCLK.skew = off1 ? skew : 0; NFCLK.off = off1 ? off : null; NFCLK.at = t1; NFCLK.diff = off1 ? Math.round(diffMs / 60000) : 0;
+      if (off1) console.info('[nf] phone clock off by', NFCLK.diff, 'min — using the server time');
+    } catch (e) { /* no network: keep the last known difference */ }
+  }
+  /* maxAge: re-ask if the last answer is older than this (ms) · wait: give up waiting after this (ms) — the answer still lands later */
+  async function nfClockSync(maxAge, wait) {
+    if (NFCLK.at && Date.now() - NFCLK.at < (maxAge == null ? 600000 : maxAge)) return;
+    if (!busy) busy = once().finally(() => { busy = null; });
+    const p = busy; if (wait) await Promise.race([p, new Promise(r => setTimeout(r, wait))]); else await p;
+  }
+  window.nfClockSync = nfClockSync;
+
+  /* the card: «the phone clock is off» — on the punch card (my page) and in the punch confirmation */
+  function warnHTML() {
+    const d = NFCLK.diff || 0; if (Math.abs(d) < 5) return '';
+    const m = Math.abs(d); const h = Math.round(m / 60); const amt = h >= 1 && Math.abs(m - h * 60) <= 5 ? (h === 1 ? L('ساعة', 'an hour') : h === 2 ? L('ساعتين', 'two hours') : L(`${h} ساعات`, `${h} hours`)) : L(`${m} دقيقة`, `${m} minutes`);
+    const dir = d < 0 ? L('متقدمة', 'ahead') : L('متأخرة', 'behind');
+    return `<div class="nfclk" role="note">${CLK_SVG}<div><b>${esc(L(`ساعة موبايلك ${dir} ${amt}`, `Your phone's clock is ${amt} ${dir}`))}</b><span>${esc(L('البصمة بتتسجّل بالساعة الصح من السيرفر. ظبّط من إعدادات الموبايل: التاريخ والوقت ← «تلقائي».', 'Punches are saved with the right time from the server. Fix it in the phone settings: Date & time → «Automatic».'))}</span></div></div>`;
+  }
+  window.nfClockWarnHTML = warnHTML;
+
+  if (typeof vMeBase === 'function') vMeBase = (base => function () {
+    const h = base.apply(this, arguments); const w = warnHTML(); if (!w) return h;
+    return h.replace('<div id="geo-live"', w + '<div id="geo-live"');
+  })(vMeBase);
+
+  /* sync first, before the out-of-shift questions — the outermost wrapper of the punch */
+  if (typeof kioskPunch === 'function') kioskPunch = (base => async function () { await nfClockSync(120000, 2500); return base.apply(this, arguments); })(kioskPunch);
+
+  const st = document.createElement('style');
+  st.textContent = `.nfclk{display:flex;gap:10px;align-items:flex-start;text-align:start;margin:10px auto 2px;max-width:460px;padding:10px 12px;border-radius:12px;background:var(--warn-bg,#fff4e0);color:var(--warn-ink,#8a5300);font-size:13px;line-height:1.5}
+.nfclk svg{width:18px;height:18px;flex:none;margin-top:2px}.nfclk b{display:block;font-size:14px}.nfclk span{display:block;opacity:.9}`;
+  document.head.appendChild(st);
+
+  const tick = () => nfClockSync(600000);
+  document.addEventListener('nf:ready', () => { NFCLK.at = 0; nfClockSync(0).then(() => { if (Math.abs(NFCLK.diff || 0) >= 5 && /^#\/me\b/.test(location.hash) && typeof render === 'function') render(); }); });
+  document.addEventListener('nf:login', () => setTimeout(tick, 1500));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(); });
+  setInterval(tick, 600000);
+  setTimeout(tick, 2500);
 })();
