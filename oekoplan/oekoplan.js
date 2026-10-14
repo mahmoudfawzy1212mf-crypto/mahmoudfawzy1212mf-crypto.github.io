@@ -390,8 +390,10 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
     for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (n.id && /^ninety/.test(String(n.id))) NAV.splice(i, 1); }
   }
   if (typeof VIEW_TITLES === 'object') Object.assign(VIEW_TITLES, { workers: 'فريق المكتب', sites: 'مواقع البصمة' });
-  if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || view === 'door' ? false : base(view)))(canSee);
-  if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (NAV[i].id === 'door') NAV.splice(i, 1);
+  /* not in Ökoplan: the NFC door, the remote computers (no rdesk server here) */
+  const HIDDEN = ['door', 'rdesk'];
+  if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || HIDDEN.includes(view) ? false : base(view)))(canSee);
+  if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (HIDDEN.includes(NAV[i].id)) NAV.splice(i, 1);
   if (typeof NINETY_COS === 'object') Object.keys(NINETY_COS).forEach(k => { NINETY_COS[k].url = ''; });
   if (typeof ACTIONS === 'object') { ACTIONS.ninetyGo = () => go('dashboard'); ACTIONS.goHome = () => go('dashboard'); ACTIONS.ninetyHome = () => go('dashboard'); }
   /* no Ninety owner hub: the owner lands on the dashboard (the hub is skipped while sessionStorage says a company is open) */

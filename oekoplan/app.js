@@ -46915,8 +46915,8 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
 (() => {
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
-  const SYS = (typeof STU_ON !== 'undefined' && STU_ON) ? 'stu' : (typeof CX_ON !== 'undefined' && CX_ON) ? 'cx' : 'fab';
-  const COL = 'meetings'; const MEET_URL = (location.protocol === 'https:' && /github\.io$|ninety/i.test(location.hostname) ? location.origin : 'https://mahmoudfawzy1212mf-crypto.github.io') + '/meet.html';
+  const SYS = 'oek';
+  const COL = 'meetings'; const MEET_URL = (location.protocol === 'https:' && /github\.io$|oekoplan/i.test(location.hostname) ? location.origin : 'https://mahmoudfawzy1212mf-crypto.github.io') + '/oekoplan/meet.html';
   if (!COLS.includes(COL)) COLS.push(COL); S.data[COL] = S.data[COL] || new Map();
   Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; S.unsub.push(db.collection(COL).onSnapshot(snap => { S.data[COL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[COL] = true; rerender(); }, e => console.warn('snapshot', COL, e))); })(Store.subscribeAll);
   if (!ICONS.meet) ICONS.meet = '<rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/>';

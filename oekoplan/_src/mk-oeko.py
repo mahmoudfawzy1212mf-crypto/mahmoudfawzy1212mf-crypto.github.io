@@ -156,6 +156,25 @@ rep("L('اختار لقطة الأسبوع', 'Pick the shot of the week')", "L('
 rep("L('لقطة الأسبوع', 'Shot of the week')", "L('صورة الأسبوع', 'Picture of the week')")
 rep("L('اختار أحلى ريندر الأسبوع ده عشان يظهر للفريق كله.', 'Pick the best render of the week to show it to the whole team.')", "L('اختار أحلى لوحة أو صورة الأسبوع ده عشان تظهر للفريق كله.', 'Pick the best drawing or photo of the week to show it to the whole team.')", 1)
 
+# --- meetings: Ökoplan is the fourth system of the factory's «meet» function (sys 'oek') and has its own guest page
+#     (oekoplan/meet.html, built below from the root meet.html). The sketches module keeps the studio's SYS (internal rules only).
+rep("const SYS = (typeof STU_ON !== 'undefined' && STU_ON) ? 'stu' : (typeof CX_ON !== 'undefined' && CX_ON) ? 'cx' : 'fab';\n  const COL = 'meetings'; const MEET_URL = (location.protocol === 'https:' && /github\\.io$|ninety/i.test(location.hostname) ? location.origin : 'https://mahmoudfawzy1212mf-crypto.github.io') + '/meet.html';",
+    "const SYS = 'oek';\n  const COL = 'meetings'; const MEET_URL = (location.protocol === 'https:' && /github\\.io$|oekoplan/i.test(location.hostname) ? location.origin : 'https://mahmoudfawzy1212mf-crypto.github.io') + '/oekoplan/meet.html';", 1)
+OEK_ANON = re.search(r"eyJ[A-Za-z0-9_.-]+", open(os.path.join(DST, 'config.js'), encoding='utf-8').read()).group(0)
+meet = open(os.path.join(ROOT, 'meet.html'), encoding='utf-8').read()
+def mrep(old, new, count=1):
+    global meet
+    assert old in meet, 'meet.html: not found: ' + old[:80]
+    meet = meet.replace(old, new, count)
+mrep("    cx: { url: 'https://zustlqblklcsdphminwn.supabase.co', key: '", "    oek: { url: 'https://hwpffrjvwnbpzpzbpeml.supabase.co', key: '" + OEK_ANON + "' },\n    cx: { url: 'https://zustlqblklcsdphminwn.supabase.co', key: '")
+mrep("/^(fab|stu|cx)\\.([A-Za-z0-9_-]{16,40})$/", "/^(fab|stu|cx|oek)\\.([A-Za-z0-9_-]{16,40})$/")
+mrep('<title>Ninety — Meeting</title>', '<title>Ökoplan — Meeting</title>')
+mrep('<div class="gbrand"><i>90</i><span>Ninety</span></div>', '<div class="gbrand"><img src="./icons/icon-192.png" alt="" style="width:30px;height:30px;border-radius:8px"><span>Ökoplan</span></div>')
+mrep("info.title || 'Ninety'", "info.title || 'Ökoplan'")
+mrep("(info.title || 'Meeting') + ' — Ninety'", "(info.title || 'Meeting') + ' — Ökoplan'")
+meet = meet.replace('href="/manifest', 'href="./manifest').replace("href='/manifest", "href='./manifest")
+open(os.path.join(DST, 'meet.html'), 'w', encoding='utf-8').write(meet)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
