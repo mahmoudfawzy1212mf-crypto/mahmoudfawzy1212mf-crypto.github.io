@@ -892,6 +892,94 @@ html[data-theme="dark"] .spcard .cov.okdev,html[data-theme="dark"] .sphead .cov.
     toast(L('اتمسح', 'Deleted')); if (typeof go === 'function') go('projects'); else render();
   };
   Object.assign(OEKO_I18N, { 'المخرجات انتقلت لمهام المشروع — المتابعة والاعتمادات بقت من لوحة المهام (مرحلة الرسومات التنفيذية).': 'The deliverables moved to the project tasks — tracking and approvals now happen on the task board (construction documents stage).', 'خطوات المرحلة': 'Stage steps', 'الاعتماد': 'Approval gate', 'كل مراحل المشروع السبعة': 'All seven project stages', 'مشروع تجريبي للشرح': 'Demo project for training', 'إنشاء مشروع تجريبي': 'Create the demo project', 'افتح المشروع التجريبي': 'Open the demo project', 'حذف المشروع التجريبي': 'Delete the demo project' });
+
+  /* ---------------------------------------------------------------- the office structure as a live org chart (drag a person onto a new manager; ✕ = out of the chart) */
+  document.head.insertAdjacentHTML('beforeend', `<style id="oeko-org">
+.okorg{overflow:auto;padding:18px 8px 26px;direction:ltr}
+.okorg ul{list-style:none;margin:0;padding:0;display:flex;justify-content:center;align-items:flex-start;position:relative}
+.okorg>ul{width:max-content;min-width:100%}
+.okorg li{position:relative;padding:22px 7px 0;text-align:center;display:flex;flex-direction:column;align-items:center;margin:0}.okorg li>.okn{flex:none}.okorg li>ul{margin-top:0;padding-top:0}
+.okorg li::before,.okorg li::after{content:'';position:absolute;top:0;right:50%;width:50%;height:22px;border-top:1.5px solid var(--line-2,var(--line))}
+.okorg li::after{right:auto;left:50%;border-left:1.5px solid var(--line-2,var(--line))}
+.okorg li:only-child::before,.okorg li:only-child::after{display:none}.okorg li:only-child{padding-top:0}
+.okorg li:first-child::before,.okorg li:last-child::after{border:0}
+.okorg li:last-child::before{border-right:1.5px solid var(--line-2,var(--line));border-radius:0 8px 0 0}
+.okorg li:first-child::after{border-radius:8px 0 0 0}
+.okorg ul ul::before{content:'';position:absolute;top:0;left:50%;width:0;height:22px;border-left:1.5px solid var(--line-2,var(--line))}
+.okorg>ul>li{padding-top:0}.okorg>ul>li::before,.okorg>ul>li::after{display:none}
+.okn{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:128px;max-width:160px;padding:10px 10px 9px;margin-bottom:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);position:relative;cursor:grab;transition:box-shadow .15s,transform .15s,border-color .15s;direction:rtl;box-sizing:border-box}
+.okn:hover{box-shadow:0 8px 22px -12px rgba(0,0,0,.35);transform:translateY(-1px)}
+.okn.over{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.okn.drag{opacity:.45}.okn.root{cursor:default;border-color:transparent;background:linear-gradient(135deg,#70b62e,#38a599 60%,#50b1e7);color:#fff}
+.okn.root .okt{color:rgba(255,255,255,.85)}.okn.root .okav{border-color:#fff}
+.okn.dept{border-style:dashed;background:transparent;cursor:default;min-width:150px}
+.okn .okav{width:44px;height:44px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:2px solid var(--line);display:grid;place-items:center;font-weight:600;font-size:14px;color:var(--muted)}
+.okn .okm{font-weight:600;font-size:12.5px;line-height:1.25;color:inherit;text-decoration:none}.okn .okt{font-size:10.5px;line-height:1.3;color:var(--muted);letter-spacing:.02em}
+.okn .okx{position:absolute;top:-7px;inset-inline-end:-7px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:12px;line-height:18px;display:none;cursor:pointer}
+.okn:hover .okx{display:block}.okn .okx:hover{color:#d9534f;border-color:#d9534f}
+.okn .okc{position:absolute;bottom:-9px;left:50%;transform:translateX(-50%);font-size:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:0 6px;color:var(--muted)}
+.okorg-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.okorg-bar .okpool{display:flex;gap:6px;flex-wrap:wrap}
+.okorg-bar .okn{min-width:0;flex-direction:row;padding:5px 10px 5px 6px;gap:8px;border-radius:999px}.okorg-bar .okn .okav{width:26px;height:26px;font-size:11px}.okorg-bar .okn .okt{display:none}
+html[data-theme="dark"] .okn{background:var(--surface-2)}
+@media (max-width:760px){.okn{min-width:104px;max-width:124px;padding:8px}.okn .okav{width:36px;height:36px}.okn .okm{font-size:11.5px}}</style>`);
+  const okOrgCan = () => !!S.session && (typeof writable !== 'function' || writable()) && ['admin', 'hr', 'manager'].includes(typeof role === 'function' ? role() : '');
+  const okOrgPhoto = w => { const u = (w && (w.avatar || w.photo)) || (typeof nfPhoto === 'function' ? nfPhoto(w.id) : null); return u; };
+  const okIni = n => String(n || '').trim().split(/\s+/).slice(0, 2).map(x => x[0] || '').join('').toUpperCase();
+  const okDept = id => { const d = DEPTS.find(x => x.id === id); return d ? L(d.name, d.en) : ''; };
+  const okOrgChart = () => {
+    const ws = list('workers').filter(w => w.status !== 'inactive' && w.active !== false);
+    const byIdW = new Map(ws.map(w => [w.id, w]));
+    const kids = new Map(); const seen = new Set();
+    /* a person hangs under their manager; a manager chain that loops, or points at nobody, hangs under the owner */
+    const rootOf = w => { let x = w, hops = 0; const path = new Set([w.id]); while (x.managerId && byIdW.has(x.managerId) && hops++ < 20) { if (path.has(x.managerId)) return null; x = byIdW.get(x.managerId); path.add(x.id); } return x; };
+    ws.forEach(w => { const m = w.managerId && byIdW.has(w.managerId) && !rootOf(w) ? null : (w.managerId && byIdW.has(w.managerId) ? w.managerId : 'owner'); if (w.role === 'manager' && w.managerId && (byIdW.get(w.managerId) || {}).managerId === w.id) { kids.set('owner', (kids.get('owner') || []).concat([w])); return; } kids.set(m || 'owner', (kids.get(m || 'owner') || []).concat([w])); });
+    const rank = w => w.role === 'manager' ? 0 : w.role === 'admin' ? 1 : w.role === 'head' ? 2 : w.role === 'hr' ? 3 : 5;
+    const sortK = arr => arr.slice().sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)));
+    const can = okOrgCan();
+    const card = (w, depth) => { const ph = okOrgPhoto(w); const n = (kids.get(w.id) || []).length; return `<div class="okn" draggable="${can ? 'true' : 'false'}" data-okp="${w.id}">${can ? `<span class="okx" data-okout="${w.id}" title="${L('شيله من تحت مديره', 'Take out from under this manager')}">✕</span>` : ''}${ph ? `<img class="okav" src="${esc(ph)}" alt="">` : `<span class="okav">${esc(okIni(w.name))}</span>`}<a class="okm" href="#/workers/${w.id}">${esc(w.name)}</a><span class="okt">${esc(w.trade || w.title || '')}${w.deptId ? `<br>${esc(okDept(w.deptId))}` : ''}</span>${n ? `<span class="okc">${n}</span>` : ''}</div>`; };
+    const tree = (id, depth) => { if (seen.has(id)) return ''; seen.add(id); const ks = sortK(kids.get(id) || []); if (!ks.length) return ''; if (depth >= 4) return `<ul><li><div class="okn dept"><span class="okt">${ks.length} ${L('أشخاص', 'people')}</span></div></li></ul>`; return `<ul>${ks.map(k => `<li>${card(k, depth)}${tree(k.id, depth + 1)}</li>`).join('')}</ul>`; };
+    const ownerName = (S.settings && S.settings.ownerName) || 'د. طارق صبحي'; const ownerPh = typeof nfPhoto === 'function' ? nfPhoto('owner') : null;
+    const root = `<div class="okn root" data-okp="owner">${ownerPh ? `<img class="okav" src="${esc(ownerPh)}" alt="">` : `<span class="okav">${esc(okIni(ownerName))}</span>`}<span class="okm">${esc(ownerName)}</span><span class="okt">${L('صاحب المكتب', 'Office owner')}</span></div>`;
+    const pool = ws.filter(w => !w.managerId && !['manager', 'head', 'admin', 'hr'].includes(w.role) && (kids.get(w.id) || []).length === 0);
+    return `<div class="card"><div class="cardhead"><h3>${L('هيكل Ökoplan Landscaping', 'Ökoplan Landscaping structure')}</h3><span class="muted small">${can ? L('اسحب أي شخص وحطه على مديره الجديد · ✕ تشيله من تحت مديره · الحفظ تلقائي', 'Drag anyone onto their new manager · ✕ takes them out from under their manager · saves automatically') : L('الهيكل حسب المدير المباشر في ملف كل موظف', "The structure follows each person's direct manager")}</span></div>
+      ${can && pool.length ? `<div class="okorg-bar"><span class="small muted">${L('من غير مدير مباشر:', 'No direct manager yet:')}</span><div class="okpool">${pool.map(w => `<div class="okn" draggable="true" data-okp="${w.id}">${okOrgPhoto(w) ? `<img class="okav" src="${esc(okOrgPhoto(w))}" alt="">` : `<span class="okav">${esc(okIni(w.name))}</span>`}<a class="okm" href="#/workers/${w.id}">${esc(w.name)}</a></div>`).join('')}</div></div>` : ''}
+      <div class="okorg"><ul><li>${root}${(() => { seen.add('owner'); const ks = sortK((kids.get('owner') || []).filter(w => !pool.includes(w))); return ks.length ? `<ul>${ks.map(k => `<li>${card(k, 1)}${tree(k.id, 2)}</li>`).join('')}</ul>` : ''; })()}</li></ul></div></div>`;
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { const org = document.querySelector('.okorg'); const root = org && org.querySelector('.okn.root'); if (!org || !root || org.dataset.okc) return; org.dataset.okc = 1; const r = root.getBoundingClientRect(), o = org.getBoundingClientRect(); org.scrollLeft += (r.left + r.width / 2) - (o.left + o.width / 2); });
+  if (typeof vOrg === 'function') vOrg = (base => function () {
+    let h = base.apply(this, arguments);
+    const i = h.indexOf('<div class="card"><div class="cardhead"><h3>هيكل'); const j = h.indexOf('<div class="card"><div class="cardhead"><h3>سلاسل الاعتماد');
+    if (i >= 0 && j > i) h = h.slice(0, i) + okOrgChart() + h.slice(j);
+    return h;
+  })(vOrg);
+  const okMove = async (pid, toId) => {
+    const w = byId('workers', pid); if (!w || !okOrgCan()) return;
+    if (toId === pid) return;
+    if (toId !== 'owner') { let x = byId('workers', toId), hops = 0; while (x && hops++ < 30) { if (x.id === pid) { toast(L('مينفعش — ده تحت نفس الشخص', 'Not possible — that person reports to them'), 'err'); return; } x = x.managerId ? byId('workers', x.managerId) : null; } }
+    const m = toId === 'owner' ? null : byId('workers', toId);
+    const patch = { managerId: m ? m.id : null }; if (m && m.deptId && m.deptId !== w.deptId && !['mgmt', 'acct'].includes(m.deptId)) patch.deptId = m.deptId;
+    await Store.update('workers', pid, patch);
+    toast(m ? L(`${w.name} بقى تحت ${m.name}`, `${w.name} now reports to ${m.name}`) : L(`${w.name} بقى تحت صاحب المكتب مباشرة`, `${w.name} now reports to the owner`)); render();
+  };
+  let okDragId = null;
+  document.addEventListener('dragstart', e => { const n = e.target.closest && e.target.closest('.okn[draggable="true"]'); if (!n) return; okDragId = n.dataset.okp; n.classList.add('drag'); try { e.dataTransfer.setData('text/plain', okDragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) { /* ignore */ } });
+  document.addEventListener('dragend', e => { document.querySelectorAll('.okn.drag,.okn.over').forEach(n => n.classList.remove('drag', 'over')); okDragId = null; });
+  document.addEventListener('dragover', e => { const n = e.target.closest && e.target.closest('.okorg .okn[data-okp]'); if (!n || !okDragId || n.dataset.okp === okDragId) return; e.preventDefault(); document.querySelectorAll('.okn.over').forEach(x => x.classList.remove('over')); n.classList.add('over'); });
+  document.addEventListener('drop', e => { const n = e.target.closest && e.target.closest('.okorg .okn[data-okp]'); if (!n || !okDragId) return; e.preventDefault(); const to = n.dataset.okp, from = okDragId; okDragId = null; okMove(from, to); });
+  document.addEventListener('click', e => { const x = e.target.closest && e.target.closest('[data-okout]'); if (!x) return; e.preventDefault(); e.stopPropagation(); okMove(x.dataset.okout, 'owner'); }, true);
+  /* phones: tap a person, then tap the new manager */
+  let okPick = null;
+  document.addEventListener('click', e => { if (!('ontouchstart' in window)) return; const n = e.target.closest && e.target.closest('.okorg .okn[data-okp]'); if (!n || e.target.closest('a,[data-okout]') || !okOrgCan()) return; if (!okPick) { if (n.dataset.okp === 'owner') return; okPick = n.dataset.okp; n.classList.add('drag'); toast(L('دلوقتي دوس على المدير الجديد', 'Now tap the new manager')); } else { const from = okPick; okPick = null; document.querySelectorAll('.okn.drag').forEach(x => x.classList.remove('drag')); if (n.dataset.okp !== from) okMove(from, n.dataset.okp); } });
+  Object.assign(OEKO_I18N, { 'هيكل Ökoplan Landscaping': 'Ökoplan Landscaping structure', 'صاحب المكتب': 'Office owner', 'من غير مدير مباشر:': 'No direct manager yet:' });
+
+  /* the sidebar chip: the person's own job title (from their file) instead of the access role; the owner keeps «Office owner» */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    try {
+      const r = typeof myRecordRef === 'function' ? myRecordRef() : null; const w = r && r.col === 'workers' ? r.rec : null; if (!w) return;
+      const t = (w.trade || w.title || '').trim(); if (!t) return; const d = w.deptId ? okDept(w.deptId) : '';
+      document.querySelectorAll('.userchip .r').forEach(el => { const want = t + (d ? ' · ' + d : ''); if (el.textContent !== want) el.textContent = want; });
+    } catch (e) { /* ignore */ }
+  });
   window.OEKO_I18N = OEKO_I18N;
   const oekoI18nApply = () => { try { if (!I18N || !I18N.exact) return; const norm = typeof i18nNorm === 'function' ? i18nNorm : (x => String(x).trim()); Object.keys(OEKO_I18N).forEach(k => { I18N.exact.set(norm(k), OEKO_I18N[k]); }); } catch (e) { /* ignore */ } };
   if (typeof i18nCompile === 'function') i18nCompile = (base => function () { const r = base.apply(this, arguments); oekoI18nApply(); return r; })(i18nCompile);
