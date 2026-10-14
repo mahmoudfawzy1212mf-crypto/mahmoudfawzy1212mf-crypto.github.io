@@ -390,8 +390,8 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
     for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (n.id && /^ninety/.test(String(n.id))) NAV.splice(i, 1); }
   }
   if (typeof VIEW_TITLES === 'object') Object.assign(VIEW_TITLES, { workers: 'فريق المكتب', sites: 'مواقع البصمة' });
-  /* not in Ökoplan: the NFC door, the remote computers (no rdesk server here) */
-  const HIDDEN = ['door', 'rdesk'];
+  /* not in Ökoplan: the NFC door (remote computers: server side ready — rd_* + Edge rdesk) */
+  const HIDDEN = ['door'];
   if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || HIDDEN.includes(view) ? false : base(view)))(canSee);
   if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (HIDDEN.includes(NAV[i].id)) NAV.splice(i, 1);
   if (typeof NINETY_COS === 'object') Object.keys(NINETY_COS).forEach(k => { NINETY_COS[k].url = ''; });

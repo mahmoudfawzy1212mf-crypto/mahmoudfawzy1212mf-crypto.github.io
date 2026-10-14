@@ -50814,7 +50814,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
     if (!isMgr()) return '';
     if (d && d.platform && d.platform !== 'win32') return '';
     if (d) return `<div class="card rdlink"><div class="rdlh">${icon('monitor')}<div><b>${esc(L('اربط الكمبيوتر ده', 'Link this computer'))}</b><small>${esc(L('عشان تقدر تدخل عليه من الموبايل أو من أي كمبيوتر', 'So you can reach it from the phone or any computer'))}</small></div></div><button type="button" class="btn sm primary" data-action="rdLink">${icon('plus')}<span>${esc(L('اربط الكمبيوتر ده', 'Link this computer'))}</span></button></div>`;
-    return `<div class="card rdlink soft"><div class="rdlh">${icon('info')}<div><b>${esc(L('إزاي تضيف كمبيوتر', 'How to add a computer'))}</b><small>${esc(L('على الكمبيوتر نفسه: افتح برنامج Ökoplan Landscaping للويندوز (4.30 أو أحدث) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Landscaping Windows app (4.30 or newer) → this page → «Link this computer».'))}</small></div></div></div>`;
+    return `<div class="card rdlink soft"><div class="rdlh">${icon('info')}<div><b>${esc(L('إزاي تضيف كمبيوتر', 'How to add a computer'))}</b><small>${esc(L('على الكمبيوتر نفسه: افتح برنامج Ökoplan للويندوز (النسخة اللي فيها «الوصول عن بُعد» — جاية قريب) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Windows app (the version with «Remote access» — coming soon) → this page → «Link this computer».'))}</small></div></div></div>`;
   }
   function logRows(rows) {
     if (!rows.length) return `<div class="empty"><b>${esc(L('مفيش اتصالات لسه', 'No connections yet'))}</b></div>`;

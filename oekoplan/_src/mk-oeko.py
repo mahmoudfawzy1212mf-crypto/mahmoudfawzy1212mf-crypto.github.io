@@ -175,6 +175,12 @@ mrep("(info.title || 'Meeting') + ' — Ninety'", "(info.title || 'Meeting') + '
 meet = meet.replace('href="/manifest', 'href="./manifest').replace("href='/manifest", "href='./manifest")
 open(os.path.join(DST, 'meet.html'), 'w', encoding='utf-8').write(meet)
 
+
+# --- remote computers (studio v7.66 note 9): the server side exists on Ökoplan (rd_* + Edge rdesk); the Windows side will be the
+#     Ökoplan desktop app with the remote-access part (built from the studio app once that one is proven) — the page says so
+rep("L('على الكمبيوتر نفسه: افتح برنامج Ökoplan Landscaping للويندوز (4.30 أو أحدث) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Landscaping Windows app (4.30 or newer) → this page → «Link this computer».')",
+    "L('على الكمبيوتر نفسه: افتح برنامج Ökoplan للويندوز (النسخة اللي فيها «الوصول عن بُعد» — جاية قريب) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Windows app (the version with «Remote access» — coming soon) → this page → «Link this computer».')", 1)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
