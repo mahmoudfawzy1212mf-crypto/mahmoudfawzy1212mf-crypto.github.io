@@ -12321,10 +12321,10 @@ Object.assign(window, { nameEnOf, myNameEn, saveMyNameEn, nameEnRegister, nameEn
    Loads before 99-boot so the first render is already in the chosen language.
    ===================================================================== */
 /* v6.22 — the office system (Ökoplan Landscaping) defaults to English; its device choice is kept apart from the factory's (same site, two apps) */
-const I18N_STU = false; /* Ökoplan: Arabic by default, choice kept per device (mk-oeko.py) */
+const I18N_STU = false; /* Ökoplan: English by default, choice kept per device (mk-oeko.py) */
 /* v6.65 (Mahmoud, 6 Oct: «المكتب يفتح إنجليزي على طول»): the office ALWAYS opens in English — a device or person
    choice of Arabic lasts for that session only; the factory stays Arabic (its choice is still kept). */
-const I18N_KEY = I18N_STU ? 'nf.lang.stu' : 'nf.lang', I18N_DEF = I18N_STU ? 'en' : 'ar';
+const I18N_KEY = I18N_STU ? 'nf.lang.stu' : 'nf.lang', I18N_DEF = 'en';
 const I18N = { lang: 'ar', dict: null, exact: null, pats: null, ready: false, loading: null, base: new WeakMap() };
 const I18N_AR = /[\u0600-\u06FF]/;
 const I18N_M = '\u0001';

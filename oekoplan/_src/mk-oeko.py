@@ -49,7 +49,8 @@ def rep(old, new, count=None, must=True):
 # --- head
 rep('<title>Ninety Studioz</title>', f'<title>{NAME}</title>', 1)
 rep('<meta name="description" content="نظام إدارة مكتب Ninety Studioz — الحضور والإجازات واللائحة والمشاريع">',
-    f'<meta name="description" content="نظام إدارة مكتب {NAME} — الحضور والإجازات واللائحة والمشاريع">', 1)
+    f'<meta name="description" content="{NAME} office system — attendance, leave, projects and deliverables">\n<meta property="og:title" content="{NAME}">\n<meta property="og:description" content="{NAME} office system — attendance, leave, projects and deliverables">\n<meta property="og:image" content="https://mahmoudfawzy1212mf-crypto.github.io/oekoplan/icons/icon-512.png">\n<meta property="og:locale" content="en_US">', 1)
+rep('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">', 1)
 rep('<meta name="apple-mobile-web-app-title" content="Ninety Studioz">', '<meta name="apple-mobile-web-app-title" content="Ökoplan">', 1)  # iOS shows ~11 characters under the icon
 
 # --- logos: the NINETY wordmark / mark become the Ökoplan lockup / square mark (data URIs, like the originals)
@@ -98,9 +99,10 @@ rep("[L('السنة', 'Year'), e.year], ", "", 1)
 # shots kept as URLs (the profile photos) open at full size in the show
 rep("src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.thumb || ''), load: () => hqUrl(f)", "src: HQ.get(f.id) || (f.store === 'sb' ? '' : f.full || f.thumb || ''), load: () => hqUrl(f)", 1)
 
-# --- language: Ökoplan is not the (English-only) studio — Arabic by default, the device / person choice is kept (nf.lang)
+# --- language: Ökoplan is not the (English-only) studio — English by default (Mahmoud, 14 Oct), the device / person choice is kept (nf.lang)
 rep("const I18N_STU = (() => { try { return (window.NF_CONFIG && window.NF_CONFIG.company === 'studioz') || window.NF_CO === 'studioz'; } catch (e) { return false; } })();",
-    "const I18N_STU = false; /* Ökoplan: Arabic by default, choice kept per device (mk-oeko.py) */", 1)
+    "const I18N_STU = false; /* Ökoplan: English by default, choice kept per device (mk-oeko.py) */", 1)
+rep("const I18N_KEY = I18N_STU ? 'nf.lang.stu' : 'nf.lang', I18N_DEF = I18N_STU ? 'en' : 'ar';", "const I18N_KEY = I18N_STU ? 'nf.lang.stu' : 'nf.lang', I18N_DEF = 'en';", 1)
 
 # --- Projects & Tasks (PM) templates: the landscape pipeline instead of the ArchViz / Interior boards
 _t0 = html.index("  const TPL = {\n    stills:"); _t1 = html.index("  const defaultRules = groups =>", _t0)
@@ -169,6 +171,7 @@ def mrep(old, new, count=1):
 mrep("    cx: { url: 'https://zustlqblklcsdphminwn.supabase.co', key: '", "    oek: { url: 'https://hwpffrjvwnbpzpzbpeml.supabase.co', key: '" + OEK_ANON + "' },\n    cx: { url: 'https://zustlqblklcsdphminwn.supabase.co', key: '")
 mrep("/^(fab|stu|cx)\\.([A-Za-z0-9_-]{16,40})$/", "/^(fab|stu|cx|oek)\\.([A-Za-z0-9_-]{16,40})$/")
 mrep('<title>Ninety — Meeting</title>', '<title>Ökoplan — Meeting</title>')
+mrep('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">')
 mrep('<div class="gbrand"><i>90</i><span>Ninety</span></div>', '<div class="gbrand"><img src="./icons/icon-192.png" alt="" style="width:30px;height:30px;border-radius:8px"><span>Ökoplan</span></div>')
 mrep("info.title || 'Ninety'", "info.title || 'Ökoplan'")
 mrep("(info.title || 'Meeting') + ' — Ninety'", "(info.title || 'Meeting') + ' — Ökoplan'")
