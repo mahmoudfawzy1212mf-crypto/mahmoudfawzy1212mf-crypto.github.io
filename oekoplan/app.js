@@ -1,4 +1,3 @@
-
 'use strict';
 /* =====================================================================
    Ninety Fabrication — نظام إدارة المصنع
@@ -12450,6 +12449,17 @@ function i18nBuildDict(pack, source) {
   if (pack && pack.x) Object.keys(pack.x).forEach(k => { dict[k] = pack.x[k]; });
   return dict;
 }
+/* v7.66 (app speed, step D): the app code lives in app.js — the source the English pack is aligned on is index.html with that code put
+   back inline at its tag (the build packs the same text). Fetched once; the service worker serves both from the shell cache. */
+function nfAppSource() {
+  if (nfAppSource.p) return nfAppSource.p;
+  const getHtml = () => fetch('./index.html', { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('src'))).catch(() => fetch('./index.html').then(r => r.ok ? r.text() : '').catch(() => ''));
+  nfAppSource.p = getHtml().then(html => {
+    const m = /<script src="([^"]+)" data-nf-app><\/script>/.exec(html || ''); if (!m) return html || '';
+    return fetch(m[1]).then(r => (r.ok ? r.text() : Promise.reject(new Error('app')))).then(js => html.replace(m[0], () => '<script>\n' + js + '<\/script>')).catch(() => '');
+  }).then(t => { if (!t) nfAppSource.p = null; return t; });
+  return nfAppSource.p;
+}
 function i18nLoad() {
   if (I18N.exact) return Promise.resolve(true);
   if (I18N.loading) return I18N.loading;
@@ -12459,7 +12469,7 @@ function i18nLoad() {
      lined up and English "didn't switch". Now both come fresh from the server (tagged with the build); offline → cached copies. */
   const bv = encodeURIComponent(window.NF_BUILD || Date.now());
   const getPack = () => fetch('./en.json?b=' + bv, { cache: 'no-cache' }).then(r => r.ok ? r.json() : Promise.reject(new Error('en'))).catch(() => fetch('./en.json').then(r => r.ok ? r.json() : null).catch(() => null));
-  const getSrc = () => { const get = u => fetch(u, { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('src'))).catch(() => fetch(u.split('?')[0] + (u.indexOf('app.js') >= 0 ? '?v=' + bv : '')).then(r => r.ok ? r.text() : '').catch(() => '')); return Promise.all([get('./index.html'), get('./app.js?v=' + bv)]).then(([h, js]) => { if (js) window.NF_APP_SRC = js; return h.replace(/<script src="\.\/app\.js\?v=[^"]*"><\/script>/, () => '<script>' + js + '</' + 'script>'); }); };
+  const getSrc = () => nfAppSource();
   I18N.loading = Promise.all([getPack(), getSrc()])
     .then(([pack, html]) => { if (!pack) return false; const dict = pack.v ? i18nBuildDict(pack, html || document.documentElement.outerHTML) : pack; i18nCompile(dict); return true; }).catch(() => false).finally(() => { I18N.loading = null; });
   return I18N.loading;
@@ -12734,7 +12744,7 @@ const I18A = { mem: { en: new Map(), ar: new Map() }, q: { en: new Set(), ar: ne
   const arCount = s => (s.match(AR) || []).length;
   I18A.eligibleAr = s => s.length <= 2000 && arCount(s) >= 2;
   /* English written on purpose in the app itself (lōf taglines, Sales Kit labels) stays English */
-  const inSource = s => { if (window.NF_APP_SRC == null) { if (!I18A.srcReq) { I18A.srcReq = true; fetch('./app.js?v=' + encodeURIComponent(window.NF_BUILD || ''), { cache: 'force-cache' }).then(r => r.ok ? r.text() : '').then(t => { window.NF_APP_SRC = t || ''; I18A.src = null; }).catch(() => { window.NF_APP_SRC = ''; I18A.src = null; }); } return s.length < 400; /* until the code file is read: treat it as app text (never sent for translation) */ } if (I18A.src == null) { try { I18A.src = Array.from(document.scripts).map(x => x.textContent || '').join('\n') + '\n' + window.NF_APP_SRC; } catch (e) { I18A.src = ''; } } return s.length < 400 && I18A.src.indexOf(s) >= 0; };
+  const inSource = s => { if (I18A.src == null) { try { I18A.src = Array.from(document.scripts).map(x => x.textContent || '').join('\n'); } catch (e) { I18A.src = ''; } if (document.querySelector('script[data-nf-app]') && typeof nfAppSource === 'function') nfAppSource().then(t => { if (t) I18A.src = t; }).catch(() => { }); } return s.length < 400 && I18A.src.indexOf(s) >= 0; };   /* v7.66: the code is in app.js — its text arrives a moment later */
   I18A.eligibleEn = s => { if (s.length > 1200 || /[؀-ۿ]/.test(s) || !LAT.test(s)) return false; const words = s.match(/[A-Za-z][A-Za-z'’-]+/g) || []; if (words.length < 4) return false; if (/^(https?:\/\/|www\.)\S+$/.test(s) || /^\S+@\S+$/.test(s)) return false; return !inSource(s); };
   function want(s, to) { if (!I18A.mem[to].has(s) && !I18A.q[to].has(s)) { I18A.q[to].add(s); clearTimeout(I18A.timer); I18A.timer = setTimeout(flush, 350); } }
   async function flush() {
@@ -14778,26 +14788,40 @@ function opexSummary(ym) {
     ${pend.length ? `<div class="sep"></div><div class="small bold" style="margin-bottom:6px">في الطريق</div><div class="list">${pend.map(r => `<div class="item" data-action="go" data-arg="requests" style="padding:8px 12px"><div class="main"><div class="small">${esc(catLabel(r.cat))}${r.homeId ? ' · ' + esc(homeName(r.homeId)) : ''} — ${fmtMonth(r.month)}</div><div class="tiny muted">${r.status === 'pending' ? 'عند مدير الحسابات' : 'معتمد — بانتظار تحويل المالك'}</div></div><b class="num">${fmtMoney(r.amount)}</b></div>`).join('')}</div>` : ''}</div>
     <div class="card"><div class="cardhead"><h3>السكن</h3><div class="grow"></div>${isAdmin() || role() === 'hr' ? `<button class="btn sm" data-action="homeNew">${icon('plus')}سكن</button>` : ''}</div>${hm ? `<div class="tablewrap"><table><thead><tr><th>السكن</th><th class="n">الإيجار الشهري</th><th class="n">تكلفة ${fmtMonth(ym)}</th></tr></thead><tbody>${hm}</tbody></table></div><div class="tiny muted" style="margin-top:6px">تكلفة الشهر = الإيجار + الكهربا + المية اللي اتسجلوا على السكن.</div>` : '<div class="muted small">ضيف السكن (الاسم والعنوان والإيجار) — وبعدها الكهربا والمية بيتسجلوا عليه.</div>'}</div>`;
 }
+/* v7.66 (Mahmoud, 13 Oct — «everything in its category, no boxes stacked under each other»): the page has three categories with
+   their count — balances (what is due to transfer first) · custody · movement (running costs, housing, quota, suppliers' wallets);
+   one at a time, opening on the one that needs action. Same content and the same people as before. */
+const MONEY_TABS = () => [['bal', 'الأرصدة'], ['wal', 'العهد'], ['mov', 'الحركة']];
 function vMoney(r) {
   if (!moneyOn()) return '<div class="empty">—</div>';
   if (r && r.id && walletOf(r.id)) return vWallet(r.id);
   const f = S.ui.filter.money ||= { ym: monthOf(todayISO()) }; const ym = f.ym; quotaEnsure(ym);
-  let h = `<div class="toolbar">${monthNavBar('money')}<div class="grow"></div>${myWalletIds().length ? `<button class="btn sm" data-action="walletSpend">${icon('plus')}مصروف من عهدتي</button><button class="btn sm" data-action="fundAsk">${icon('money')}طلب مبلغ</button>` : ''}</div><div class="stack">`;
-  if (isAdmin()) {
-    const bal = acctBalances().filter(a => ownerAccts().some(o => o.id === a.id)); const due = moneyDue();
+  const toolbar = `<div class="toolbar">${monthNavBar('money')}<div class="grow"></div>${myWalletIds().length ? `<button class="btn sm" data-action="walletSpend">${icon('plus')}مصروف من عهدتي</button><button class="btn sm" data-action="fundAsk">${icon('money')}طلب مبلغ</button>` : ''}</div>`;
+  const hasBal = isAdmin() || !!(window.nfPbHas && window.nfPbHas()); const hasWal = seesAllWallets() || myWalletIds().length > 0; const hasMov = seesMoneyOps();
+  const tabs = MONEY_TABS().filter(([k]) => (k === 'bal' && hasBal) || (k === 'wal' && hasWal) || (k === 'mov' && hasMov));
+  const tab = tabs.some(t => t[0] === f.tab) ? f.tab : (tabs[0] || ['bal'])[0]; window.__nfMoneyTab = tab;
+  const due = isAdmin() ? moneyDue() : [];
+  const cnt = k => k === 'bal' ? (isAdmin() ? due.length : 0) : k === 'wal' ? (seesAllWallets() ? wallets().length : myWalletIds().length) : 0;
+  const bar = tabs.length > 1 ? `<div class="aptabs mntabs" role="tablist" style="margin-bottom:12px">${tabs.map(([k, l]) => { const n = cnt(k); return `<button type="button" class="${tab === k ? 'on' : ''}" data-mntab="${k}">${l}${n ? ` <span class="mnn ${k === 'bal' ? 'warn' : ''}">${n}</span>` : ''}</button>`; }).join('')}</div>` : '';
+  let h = toolbar + bar + '<div class="stack">';
+  if (tab === 'bal' && isAdmin()) {
+    const bal = acctBalances().filter(a => ownerAccts().some(o => o.id === a.id));
     h += `<div class="kpis">${bal.map(a => `<div class="kpi acc" style="cursor:default"><span class="stripe"></span><div class="l">${esc(a.name)}</div><div class="v num">${fmtMoney(a.balance)}</div><div class="s">دخل ${fmtMoney(a.in)} · طلع ${fmtMoney(a.out)}</div></div>`).join('')}<div class="kpi ${due.length ? 'warn' : ''}" style="cursor:default"><span class="stripe"></span><div class="l">مستحق عليك تحويله</div><div class="v num">${fmtMoney(sum(due, x => x.amount))}</div><div class="s">${due.length} بند</div></div></div>
     ${moneyDueCard(due)}`;
   }
-  if (seesAllWallets() || myWalletIds().length) {
+  if (tab === 'wal' && hasWal) {
     const ids = seesAllWallets() ? wallets().map(w => w.id) : myWalletIds();
     h += `<div class="card"><div class="cardhead"><h3>العُهد</h3><div class="grow"></div>${isAdmin() ? `<button class="btn sm" data-action="walletNew">${icon('plus')}عهدة</button>` : ''}</div>${ids.length ? `<div class="tablewrap"><table><thead><tr><th>العهدة</th><th class="n">اتحوّل لها</th><th class="n">اتصرف ${fmtMonth(monthOf(todayISO()))}</th><th class="n">الرصيد</th></tr></thead><tbody>${walletRows(ids)}</tbody></table></div>` : '<div class="muted small">مفيش عهد متسجلة</div>'}</div>`;
   }
-  if (!seesMoneyOps()) return h + '</div>';
-  h += opexSummary(ym) + quotaCard(ym);
-  const sups = sortBy(list('suppliers').map(s => ({ s, x: supplierWallet(s) })).filter(o => o.x.paid || o.x.pending || o.x.opening), o => -(o.x.paid + o.x.pending));
-  h += `<div class="card"><div class="cardhead"><h3>محافظ الموردين</h3><span class="muted small">${sups.length}</span></div>${sups.length ? `<div class="tablewrap"><table><thead><tr><th>المورد</th><th class="n">اتحوّل له</th><th class="n">قيمة المستلم</th><th class="n">الفرق</th><th class="n">مجمّد</th></tr></thead><tbody>${sups.map(({ s, x }) => `<tr class="click" data-action="go" data-arg="suppliers/${s.id}"><td>${esc(s.name)}</td><td class="n">${fmtMoney(x.paid)}</td><td class="n">${fmtMoney(x.received)}</td><td class="n"><b>${fmtMoney(x.balance)}</b></td><td class="n">${x.hold ? fmtMoney(x.hold) : ''}</td></tr>`).join('')}</tbody></table></div><div class="tiny muted" style="margin-top:6px">الفرق موجب = المورد معاه فلوس لينا (اتحوّل له أكتر من اللي استلمناه).</div>` : '<div class="muted small">لسه مفيش تحويلات لموردين</div>'}</div>`;
+  if (tab === 'mov' && hasMov) {
+    h += opexSummary(ym) + quotaCard(ym);
+    const sups = sortBy(list('suppliers').map(s => ({ s, x: supplierWallet(s) })).filter(o => o.x.paid || o.x.pending || o.x.opening), o => -(o.x.paid + o.x.pending));
+    h += `<div class="card"><div class="cardhead"><h3>محافظ الموردين</h3><span class="muted small">${sups.length}</span></div>${sups.length ? `<div class="tablewrap"><table><thead><tr><th>المورد</th><th class="n">اتحوّل له</th><th class="n">قيمة المستلم</th><th class="n">الفرق</th><th class="n">مجمّد</th></tr></thead><tbody>${sups.map(({ s, x }) => `<tr class="click" data-action="go" data-arg="suppliers/${s.id}"><td>${esc(s.name)}</td><td class="n">${fmtMoney(x.paid)}</td><td class="n">${fmtMoney(x.received)}</td><td class="n"><b>${fmtMoney(x.balance)}</b></td><td class="n">${x.hold ? fmtMoney(x.hold) : ''}</td></tr>`).join('')}</tbody></table></div><div class="tiny muted" style="margin-top:6px">الفرق موجب = المورد معاه فلوس لينا (اتحوّل له أكتر من اللي استلمناه).</div>` : '<div class="muted small">لسه مفيش تحويلات لموردين</div>'}</div>`;
+  }
   return h + '</div>';
 }
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-mntab]'); if (!b) return; e.preventDefault(); (S.ui.filter.money ||= { ym: monthOf(todayISO()) }).tab = b.dataset.mntab; render(true); });
+document.head.insertAdjacentHTML('beforeend', '<style>.mntabs{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;gap:6px;padding:2px 0 4px}.mntabs::-webkit-scrollbar{display:none}.mntabs button{flex:none;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13.5px;white-space:nowrap;cursor:pointer}.mntabs button.on{background:var(--ink,#111);color:var(--surface,#fff);border-color:transparent}.mntabs button.on .mnn{background:rgba(255,255,255,.22);color:inherit}.mntabs .mnn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--surface-2,#f2f2f7);font-size:11.5px;font-weight:700}.mntabs .mnn.warn{background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00)}</style>');
 function walletMoves(id) {
   const ins = xfers().filter(x => x.to === id).map(x => ({ date: x.date, in: +x.amount || 0, label: `تحويل من ${acctLabel(x.from)}${x.cat ? ' — ' + catLabel(x.cat) : ''}`, note: x.note, thumb: x.thumb }));
   const outs = xfers().filter(x => x.from === id).map(x => ({ date: x.date, out: +x.amount || 0, label: `رجع على ${acctLabel(x.to)}`, note: x.note, thumb: x.thumb }));
@@ -15126,7 +15150,7 @@ const finAccess = () => Object.assign({ open: true, state: 'setup' }, (S.data.fi
 const finPendReq = t => list('requests').filter(r => r.type === t && r.status === 'pending').sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0] || null;
 const finHeadOpen = () => finAccess().open !== false;
 const finHeadCanEdit = () => finHeadOpen() && !finPendReq('finlock');
-const finSeesPrice = () => !!S.session && (isAdmin() || ['hr', 'office', 'tech'].includes(role()) || (finPaintHead() && finHeadOpen()));
+const finSeesPrice = () => !!S.session && (isAdmin() || ['hr', 'office'].includes(role()) || (finPaintHead() && finHeadOpen())); /* v7.66 (tech office brief, PIN): the technical office no longer sees paint prices */
 /* تكلفة الدهانات على المشروع (كارت أمر التشغيل + بند المقايسة) — رئيس قسم الدهانات لأ */
 const finSeesProjectCost = () => finSeesPrice() && !finPaintHead(); // v4.68 (بالرقم السري): المدير التجاري مالوش أي علاقة بالدهانات (لا صفحة ولا بند في المقايسة، والسيرفر مانع قراءة finish)
 const finEditPrice = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'hr' || (finPaintHead() && finHeadCanEdit()));
@@ -23669,8 +23693,17 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 @keyframes apspin{to{transform:rotate(360deg)}}
 .wlbig{font-size:20px;font-weight:800;letter-spacing:1px;direction:ltr;display:inline-block}
 .apcard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:grid;gap:8px}
-.apcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.approof{max-width:220px;max-height:260px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in}
+.apcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.approof,.apthumb{width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;display:block}.apthumb{width:40px;height:40px;border-radius:8px}
 .apgrid{display:grid;gap:10px}
+.aptabs .apn,.apsec h4 .apn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00);font-size:11.5px;font-weight:700}
+.apsec{display:grid;gap:8px;margin-bottom:14px}.apsec h4,.apmon h4{margin:2px 2px 0;font-size:13px;color:var(--ink-2)}
+.apmon{display:grid;gap:6px;margin-bottom:12px}.aplines{display:grid;gap:6px}
+#view .apline{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;justify-content:flex-start!important;align-items:center;gap:10px;width:100%;min-height:46px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:inherit;font:inherit;text-align:start;cursor:pointer;overflow:hidden}#view .apline.on{border-color:var(--accent)}#view .apline .grow{flex:1 1 auto;min-width:4px}#view .apline>*{flex:0 0 auto;white-space:nowrap}#view .apline>b:first-child+span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#view .aptabs{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto;scrollbar-width:none;gap:6px;background:none!important;padding:2px 0 4px!important;border:0!important;box-shadow:none!important}#view .aptabs::-webkit-scrollbar{display:none}#view .aptabs button{flex:none!important;width:auto!important;display:inline-flex!important;flex-direction:row!important;align-items:center;gap:6px;height:36px;padding:0 14px!important;border-radius:999px!important;border:1px solid var(--line)!important;background:var(--surface)!important;color:var(--ink)!important;white-space:nowrap;font-size:13.5px}#view .aptabs button.on{background:var(--ink,#111)!important;color:var(--surface,#fff)!important;border-color:transparent!important}#view .aptabs button.on .apn{background:rgba(255,255,255,.22);color:inherit}
+.apopen{margin:-2px 0 4px}.apchips{display:flex;flex-wrap:wrap;gap:6px}
+.apchip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;background:var(--line);font-size:12.5px}.apchip svg{width:13px;height:13px}.apchip.good{background:var(--good-soft,#e3f6e8);color:var(--good-ink,#1b6b34)}.apchip.warn{background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00)}
+.apclear{display:flex;flex-direction:column;align-items:center;gap:6px;padding:36px 16px;text-align:center;border:1px dashed var(--line);border-radius:16px}.apclear svg{width:30px;height:30px;color:var(--good-ink,#1b6b34)}
+
 </style>`);
   /* ------------ the double-typed form ------------ */
   function walletFormHTML(opts, intro) {
@@ -23799,14 +23832,84 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const done = ws.filter(w => walletOf(w.id)).length;
     return pendHTML + `<div class="small muted" style="margin-bottom:8px">سجّلوا: <b>${done}</b> من ${ws.length}</div><div class="card tight"><div class="tablewrap"><table><thead><tr><th>الموظف</th><th>رقم التحويلات</th><th>اتسجّل</th><th></th></tr></thead><tbody>${ws.map(w => { const x = walletOf(w.id); return `<tr><td><b>${esc(w.name)}</b></td><td class="ltr">${x ? esc(wLabel(x)) : '<span class="badge crit">مش متسجّل</span>'}${x && x.pending ? ' <span class="badge warn">طلب تغيير</span>' : ''}</td><td class="small">${x ? fmtDate((x.at || '').slice(0, 10)) + (x.byName ? ' · ' + esc(x.byName) : '') : ''}</td><td class="n">${canWalletAdmin() && writable() ? `<button class="btn xs" data-action="walletSet" data-arg="${esc(w.id)}">${x ? 'تغيير' : 'سجّل'}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
   }
+  /* v7.66 (Mahmoud, 13 Oct — why show me what I must transfer together with the people he transfers to? separate it; everything in
+     its category, no boxes stacked under each other): the owner gets categories — on you (opens on it: batches waiting for his transfer
+     + transfers waiting for his approval) · at the payer (one small card per funded batch: 3 of 5 transferred, names with their state, no
+     employees' wallet numbers, remind) · on the way (one line per batch) · closed (one line per batch, by month, tap = details) · the
+     employees' numbers. The payer sees only his part (to transfer / review / transferred); HR / accounts as before.
+     A display change only — nobody sees anything new. */
+  const OWNER_TABS = [['you', 'عليك'], ['held', 'عند المحوّل'], ['queued', 'في الطريق'], ['closed', 'اتقفلت'], ['wallets', 'أرقام الموظفين']];
+  const PAYER_TABS = [['topay', 'عليك تحوّل'], ['review', 'مراجعة'], ['paid', 'اتحولت']];
+  const bDone = b => { const it = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); return it.length > 0 && it.every(p => p.status === 'paid' || p.status === 'cancelled'); };
+  const ownerSets = () => {
+    const bs = list('advbatch');
+    return {
+      you: { b: sortBy(bs.filter(b => ['sent', 'review'].includes(b.status)), b => b.sentAt || b.createdAt || ''), p: sortBy(list('advpay').filter(p => p.status === 'review'), p => p.createdAt || '') },
+      held: sortBy(bs.filter(b => b.status === 'funded' && !bDone(b)), b => b.fundedAt || ''),
+      queued: sortBy(bs.filter(b => b.status === 'queued' || (b.status === 'open' && (b.items || []).length)), b => b.releaseAt || b.createdAt || ''),
+      closed: sortBy(bs.filter(b => b.status === 'funded' && bDone(b)), b => b.fundedAt || b.createdAt || '', true),
+      loose: sortBy(list('advpay').filter(p => p.status === 'paid' && !p.batchId), p => p.paidAt || '', true)
+    };
+  };
+  const tabsFor = () => isAdmin() ? OWNER_TABS : (isPayer() && !['hr', 'acc'].includes(role())) ? PAYER_TABS : TABS.filter(t => t[0] !== 'wallets' || ['hr', 'acc'].includes(role()));
+  function apCount(k) {
+    if (k === 'wallets') return list('wallets').filter(x => x.pending).length;
+    if (isAdmin() && ['you', 'held', 'queued', 'closed'].includes(k)) { const o = ownerSets(); return k === 'you' ? o.you.b.length + o.you.p.length : k === 'closed' ? 0 : o[k].length; }
+    if (k === 'batches') return list('advbatch').filter(b => (b.status === 'open' && canWalletAdmin()) || (['sent', 'review'].includes(b.status) && isAdmin())).length;
+    return list('advpay').filter(p => p.status === k && (k !== 'topay' || mine(p))).length;
+  }
   EXTRA_VIEWS.advpay = () => {
     if (!canAdvPay()) return `<div class="empty"><b>مش متاحة</b></div>`;
-    const tabs = TABS.filter(t => t[0] !== 'wallets' || isAdmin() || ['hr', 'acc'].includes(role())); const tab = tabs.some(t => t[0] === S._apTab) ? S._apTab : (isPayer() && !isAdmin() ? 'topay' : 'batches');
-    const bar = `<div class="tabs" style="margin-bottom:12px;flex-wrap:wrap">${tabs.map(([k, l]) => { const n = k === 'wallets' ? list('wallets').filter(x => x.pending).length : k === 'batches' ? list('advbatch').filter(b => (b.status === 'open' && canWalletAdmin()) || (['sent', 'review'].includes(b.status) && isAdmin())).length : list('advpay').filter(p => p.status === k && (k !== 'topay' || mine(p))).length; return `<button type="button" class="${tab === k ? 'on' : ''}" data-aptab="${k}">${l}${n ? ` <span class="muted">${n}</span>` : ''}</button>`; }).join('')}</div>`;
+    const tabs = tabsFor(); const tab = tabs.some(t => t[0] === S._apTab) ? S._apTab : tabs[0][0];
+    const bar = `<div class="aptabs" role="tablist" style="margin-bottom:12px">${tabs.map(([k, l]) => { const n = apCount(k); return `<button type="button" class="${tab === k ? 'on' : ''}" data-aptab="${k}">${l}${n ? ` <span class="apn">${n}</span>` : ''}</button>`; }).join('')}</div>`;
     if (tab === 'wallets') return bar + walletsHTML();
     if (tab === 'batches') return bar + batchesHTML();
+    if (isAdmin() && ['you', 'held', 'queued', 'closed'].includes(tab)) return bar + ownerHTML(tab);
     const rows = sortBy(list('advpay').filter(p => p.status === tab && (tab !== 'topay' || mine(p) || ['hr', 'acc'].includes(role()))), p => p.paidAt || p.createdAt || '', tab === 'paid');
-    return bar + (tab === 'topay' && isPayer() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل من عهدتك (الفلوس اللي وصلتك من محمود) على الرقم الظاهر بالظبط وبنفس المبلغ، وبعدين ارفع صورة التحويل — السيستم هيقرأ الرقم والمبلغ ورقم العملية لوحده.</span></div>` : '') + (rows.length ? `<div class="apgrid">${rows.map(cardHTML).join('')}</div>` : `<div class="empty"><b>مفيش حاجة هنا</b></div>`);
+    const compact = tab === 'paid' && tabs === PAYER_TABS;
+    return bar + (tab === 'topay' && isPayer() ? `<div class="banner info small" style="margin-bottom:10px">${icon('info')}<span>حوّل من عهدتك (الفلوس اللي وصلتك من محمود) على الرقم الظاهر بالظبط وبنفس المبلغ، وبعدين ارفع صورة التحويل — السيستم هيقرأ الرقم والمبلغ ورقم العملية لوحده.</span></div>` : '') + (rows.length ? (compact ? paidLines(rows) : `<div class="apgrid">${rows.map(cardHTML).join('')}</div>`) : `<div class="empty"><b>مفيش حاجة هنا</b></div>`);
+  };
+  /* one line per transferred advance, by month; tap = the full card */
+  function paidLines(rows) {
+    const by = {}; rows.forEach(p => { const m = (p.paidAt || p.createdAt || '').slice(0, 7); (by[m] = by[m] || []).push(p); });
+    return Object.keys(by).sort().reverse().map(m => `<div class="apmon"><h4>${esc(monthLabel(m))}</h4><div class="aplines">${by[m].map(p => `<button type="button" class="apline ${S._apOpen === p.id ? 'on' : ''}" data-action="apOpen" data-arg="${esc(p.id)}"><b class="notr">${esc(p.workerName || '')}</b><span class="ltr">${fmtMoney(p.paidAmount || p.amount)}</span><span class="muted small">${fmtDate((p.paidAt || '').slice(0, 10))}</span><span class="grow"></span><span class="muted tiny ltr">${esc(p.ref || '')}</span></button>${S._apOpen === p.id ? `<div class="apopen">${cardHTML(p)}</div>` : ''}`).join('')}</div></div>`).join('');
+  }
+  const monthLabel = m => { if (!/^\d{4}-\d{2}$/.test(m)) return '—'; const d = new Date(m + '-15T12:00:00Z'); try { return d.toLocaleDateString(typeof en === 'function' && en() ? 'en-GB' : 'ar-EG', { month: 'long', year: 'numeric' }); } catch (e) { return m; } };
+  function ownerHTML(tab) {
+    const o = ownerSets();
+    if (tab === 'you') {
+      if (!o.you.b.length && !o.you.p.length) return `<div class="apclear">${icon('check')}<b>مفيش حاجة عليك ✓</b><span class="muted small">أي دفعة سلف مستنية تحويلك أو تحويل محتاج موافقتك هيظهر هنا.</span></div>`;
+      return (o.you.b.length ? `<div class="apsec"><h4>دفعات مستنية تحويلك <span class="apn">${o.you.b.length}</span></h4><div class="apgrid">${o.you.b.map(batchCard).join('')}</div></div>` : '')
+        + (o.you.p.length ? `<div class="apsec"><h4>تحويلات محتاجة موافقتك <span class="apn">${o.you.p.length}</span></h4><div class="apgrid">${o.you.p.map(cardHTML).join('')}</div></div>` : '');
+    }
+    if (tab === 'held') return o.held.length ? `<div class="apgrid">${o.held.map(heldCard).join('')}</div>` : `<div class="apclear"><b>مفيش دفعات عند المحوّل دلوقتي</b><span class="muted small">لما تحوّل دفعة لبهاء (أو أحمد) هتتابع هنا مين اتحوّل له.</span></div>`;
+    if (tab === 'queued') return o.queued.length ? `<div class="aplines">${o.queued.map(b => `<button type="button" class="apline" data-action="apOpenB" data-arg="${esc(b.id)}"><b class="ltr">${esc(b.code || '')}</b><span>${(b.items || []).length} سلفة</span><span class="muted small">${esc(window.nfAdvSched && b.releaseAt ? nfAdvSched.whenLabel(b.releaseAt, true) : 'بتتجمع')}</span><span class="grow"></span><span class="ltr">${fmtMoney(bTotal(b))}</span></button>${S._apOpen === b.id ? `<div class="apopen">${batchCard(b)}</div>` : ''}`).join('')}</div>` : `<div class="apclear"><b>مفيش دفعات في الطريق</b></div>`;
+    /* closed: batches (by month) + the few transferred outside a batch */
+    const all = o.closed.map(b => ({ k: 'b', x: b, at: b.fundedAt || b.createdAt || '' })).concat(o.loose.map(p => ({ k: 'p', x: p, at: p.paidAt || '' })));
+    if (!all.length) return `<div class="apclear"><b>لسه مفيش حاجة اتقفلت</b></div>`;
+    const by = {}; all.forEach(r => { const m = r.at.slice(0, 7); (by[m] = by[m] || []).push(r); });
+    return Object.keys(by).sort().reverse().map(m => `<div class="apmon"><h4>${esc(monthLabel(m))}</h4><div class="aplines">${by[m].sort((a, b) => b.at.localeCompare(a.at)).map(r => r.k === 'b'
+      ? `<button type="button" class="apline ${S._apOpen === r.x.id ? 'on' : ''}" data-action="apOpenB" data-arg="${esc(r.x.id)}"><b class="ltr">${esc(r.x.code || '')}</b><span>${(r.x.items || []).length} سلفة · ${esc(r.x.fundedToName || '')}</span><span class="muted small">${fmtDate(r.at.slice(0, 10))}</span><span class="grow"></span><span class="ltr">${fmtMoney(+r.x.total || bTotal(r.x))}</span></button>${S._apOpen === r.x.id ? `<div class="apopen">${batchCard(r.x)}</div>` : ''}`
+      : `<button type="button" class="apline ${S._apOpen === r.x.id ? 'on' : ''}" data-action="apOpen" data-arg="${esc(r.x.id)}"><b class="notr">${esc(r.x.workerName || '')}</b><span class="muted small">${fmtDate(r.at.slice(0, 10))}</span><span class="grow"></span><span class="ltr">${fmtMoney(r.x.paidAmount || r.x.amount)}</span></button>${S._apOpen === r.x.id ? `<div class="apopen">${cardHTML(r.x)}</div>` : ''}`).join('')}</div></div>`).join('');
+  }
+  /* «عند المحوّل»: who got his transfer — names and their state only (the employees' wallet numbers are the payer's business) */
+  function heldCard(b) {
+    const items = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); const done = items.filter(p => p.status === 'paid' || p.status === 'cancelled').length;
+    const chip = p => p.status === 'paid' ? `<span class="apchip good">${icon('check')}<span class="notr">${esc(p.workerName || '')}</span></span>` : p.status === 'review' ? `<span class="apchip warn"><span class="notr">${esc(p.workerName || '')}</span> · مراجعة</span>` : p.status === 'cancelled' ? `<span class="apchip"><s class="notr">${esc(p.workerName || '')}</s></span>` : `<span class="apchip"><span class="notr">${esc(p.workerName || '')}</span> · لسه</span>`;
+    const fund = +b.fundedAmount || +b.total || bTotal(b); const paid = Math.round(sum(items.filter(p => p.status === 'paid'), p => +p.paidAmount || +p.amount || 0) * 100) / 100;
+    return `<div class="apcard aphold"><div class="t"><b class="ltr">${esc(b.code || '')}</b><span class="badge ${done === items.length ? 'good' : 'warn'}">اتحوّل ${done} من ${items.length}</span><div class="grow"></div><span class="small">عند <b class="notr">${esc(b.fundedToName || '')}</b></span>${b.proofUrl ? `<img class="apthumb" src="${esc(b.proofUrl)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')" onerror="this.style.display='none'">` : ''}</div>
+      <div class="apchips">${items.map(chip).join('')}</div>
+      <div class="tiny muted">اتموّلت ${fmtDate((b.fundedAt || '').slice(0, 10))} · اتوزّع <b>${fmtMoney(paid)}</b> من <b>${fmtMoney(fund)}</b> · باقي معاه <b style="${fund - paid > 0.01 ? 'color:var(--crit-ink)' : ''}">${fmtMoney(Math.round((fund - paid) * 100) / 100)}</b>${b.custodyId ? ` · دخلت <a href="#/money/${esc(b.custodyId)}">عهدة ${esc(b.custodyName || '')}</a>` : ''}</div>
+      ${writable() && done < items.length ? `<div class="row" style="gap:6px"><button class="btn sm" data-action="abRemind" data-arg="${esc(b.id)}">${icon('bell')}فكّر ${esc(b.fundedToName || 'المحوِّل')}</button></div>` : ''}</div>`;
+  }
+  ACTIONS.apOpen = id => { S._apOpen = S._apOpen === id ? '' : id; render(false); };
+  ACTIONS.apOpenB = id => { S._apOpen = S._apOpen === id ? '' : id; render(false); };
+  /* a notification that opens one batch / advance: show the category that holds it */
+  window.nfApShow = id => {
+    const b = byId('advbatch', id), p = b ? null : byId('advpay', id); if (!b && !p) return;
+    if (isAdmin()) { if (b) S._apTab = ['sent', 'review'].includes(b.status) ? 'you' : b.status === 'funded' ? (bDone(b) ? 'closed' : 'held') : 'queued'; else S._apTab = p.status === 'review' ? 'you' : p.status === 'paid' ? (p.batchId ? 'closed' : 'closed') : S._apTab; if (b && (b.status === 'queued' || (b.status === 'funded' && bDone(b)))) S._apOpen = id; }
+    else if (p) S._apTab = p.status === 'paid' ? 'paid' : p.status;
+    render(true);
   };
   EXTRA_TITLES.advpay = () => ({ title: 'تحويل السلف', sub: 'السلف بتتحول على محفظة الموظف المسجّلة بس — مفيش سلف كاش' });
   document.addEventListener('click', e => { const b = e.target.closest('[data-aptab]'); if (!b) return; S._apTab = b.dataset.aptab; render(true); });
@@ -27436,7 +27539,7 @@ body.nfv-open .callfab,body.nfv-open .aifab,body.nfv-open .fab{display:none!impo
   } catch (e) { /* ignore */ } });
   /* monthly report on the money page (owner + accounts) */
   RENDER_HOOKS.push(() => { try {
-    if (S.route.view !== 'money' || S.route.id || !seesMoneyOps()) return; const v = document.getElementById('view'); if (!v || v.querySelector('#tipscard')) return;
+    if (S.route.view !== 'money' || S.route.id || !seesMoneyOps() || (window.__nfMoneyTab && window.__nfMoneyTab !== 'mov')) return; const v = document.getElementById('view'); if (!v || v.querySelector('#tipscard')) return;   /* v7.66: under the movement category */
     const ym = (S.ui.filter.money || {}).ym || monthOf(todayISO()); const rows = sortBy(list('expenses').filter(e => e.cat === 'tips' && e.month === ym), e => e.date || '', true);
     const byH = {}; rows.forEach(e => { const w = walletOf(e.account); const k = w ? w.name : (e.byName || '—'); byH[k] = (byH[k] || 0) + (+e.amount || 0); });
     const tot = r2(sum(rows, e => +e.amount || 0));
@@ -32219,7 +32322,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const stills = () => { const c = (S.settings && S.settings.stuLogin) || {}; return (window.nfMediaUrl ? (c.stills && c.stills.length ? c.stills : DEF_STILLS).map(window.nfMediaUrl) : DEF_STILLS); };
   /* the picture of a project: latest render file → latest task version → board image → a studio still */
   function cover(p, i = 0) {
-    const fs = list('files').filter(f => f.projectId === p.id && f.thumb && String(f.mime || '').startsWith('image/')).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); if (fs.length) return { src: fs[0].thumb, by: fs[0].byId || null };
+    const fs = list('files').filter(f => f.projectId === p.id && f.thumb && f.kind !== 'meetshot' && String(f.mime || '').startsWith('image/')).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); if (fs.length) return { src: fs[0].thumb, by: fs[0].byId || null };
     const vs = []; list('pmtasks').filter(t => t.projectId === p.id).forEach(t => (t.vers || []).forEach(v => { if (v.thumb) vs.push({ src: v.thumb, at: v.at || 0, by: v.by || t.owner }); })); if (vs.length) { vs.sort((a, b) => b.at - a.at); return vs[0]; }
     const bs = list('boards').filter(b => b.projectId === p.id).map(b => b.id); const bi = list('bitems').filter(x => bs.includes(x.boardId) && x.type === 'image' && x.thumb); if (bi.length) return { src: bi[bi.length - 1].thumb, by: null };
     const sm = window.nfStuMedia ? window.nfStuMedia.stills() : []; const st = sm.length ? sm : stills(); return { src: st[i % st.length], by: null, generic: true };   /* v7.58: the office's own stills first */
@@ -32235,7 +32338,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   const isFinished = p => { if (['delivered', 'closed'].includes(p.osStatus) || ['done', 'closed'].includes(p.status)) return true; const sh = shotsOf(p); return sh.length > 0 && sh.every(s => s.state === 'done'); };
   const finished = () => list('projects').filter(p => visible(p) && isFinished(p) && !(p.status === 'archived' && !['delivered', 'closed'].includes(p.osStatus))).sort((a, b) => finTime(b).localeCompare(finTime(a)));
   const isImg = f => !f.deleted && (String(f.mime || '').startsWith('image/') || f.store === 'thumb') && (f.thumb || f.store === 'sb');
-  const finalsOf = p => { const fs = list('files').filter(f => f.projectId === p.id && isImg(f)); const fin = fs.filter(f => f.rev === 'Final' || f.kind === 'render'); return (fin.length ? fin : fs).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true })); };
+  const finalsOf = p => { const fs = list('files').filter(f => f.projectId === p.id && isImg(f) && f.kind !== 'meetshot'); const fin = fs.filter(f => f.rev === 'Final' || f.kind === 'render'); return (fin.length ? fin : fs).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true })); };
   const HQ = new Map();   /* file id → the high-quality url once resolved (so a re-render does not drop back to the small preview) */
   const nShots = n => (en() ? `${n} ${n === 1 ? 'shot' : 'shots'}` : n === 1 ? 'لقطة واحدة' : n === 2 ? 'لقطتين' : n <= 10 ? `${n} لقطات` : `${n} لقطة`);
   const shotName = f => String(f.name || '').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
@@ -32337,7 +32440,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   ACTIONS.shNoticeClear = async () => { if (!canEditHome()) return; await Store.save('stuhome', { id: 'notice', t: '', by: me(), at: nowISO() }, { silent: true }); closeModal(); rerender(); };
   ACTIONS.shSpotPick = () => {
     if (!canEditHome()) return; const cands = [];
-    list('files').filter(f => f.thumb && String(f.mime || '').startsWith('image/') && f.projectId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 24).forEach(f => cands.push({ src: f.thumb, pid: f.projectId, by: f.byId || null, name: f.name }));
+    list('files').filter(f => f.thumb && f.kind !== 'meetshot' && String(f.mime || '').startsWith('image/') && f.projectId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 24).forEach(f => cands.push({ src: f.thumb, pid: f.projectId, by: f.byId || null, name: f.name }));
     list('pmtasks').forEach(t => (t.vers || []).forEach(v => { if (v.thumb) cands.push({ src: v.thumb, pid: t.projectId, by: v.by || t.owner, name: t.name, at: v.at || 0 }); }));
     if (!cands.length) { toast(L('مفيش ريندرات لسه', 'No renders yet'), 'err'); return; }
     openModal({ title: L('صورة الأسبوع', 'Picture of the week'), wide: true, submitLabel: L('اعرضها', 'Show it'), body: `<div class="shpick">${cands.slice(0, 36).map((c, i) => `<label><input type="radio" name="pick" value="${i}" ${i === 0 ? 'checked' : ''}><img src="${esc(c.src)}" alt=""><span class="notr" dir="auto">${esc((byId('projects', c.pid) || {}).name || '')}</span></label>`).join('')}</div><div class="form" style="margin-top:10px">${field(L('كلمة عن اللقطة (اختياري)', 'A line about it (optional)'), `<input name="note" class="notr" dir="auto" maxlength="140">`, 'full')}</div>`,
@@ -38079,13 +38182,13 @@ body.fv-flash .camwrap{outline:28px solid #fff}
     { id: 'people', ic: 'people', t: 0, label: L('الناس والصلاحيات', 'People & permissions'), keys: ['staff', 'depts', 'jobs', 'acctdel'] },
     { id: 'att', ic: 'clock', t: 1, label: L('الحضور والإجازات', 'Attendance & leave'), keys: ['shifts', 'policy', 'leaves', 'geo'] },
     { id: 'hr', ic: 'book', t: 2, label: L('الموارد البشرية واللائحة', 'HR & regulation'), keys: ['regulation', 'advances', 'housing', 'kpi'] },
-    { id: 'work', ic: 'factory', t: 3, label: studio() || cons() ? L('البراندات والشغل', 'Brands & work') : L('المصنع والإنتاج', 'Factory & production'), keys: ['brands', 'brandkit', 'itemcodes', 'rules', 'escalation', 'fgate'] },
+    { id: 'work', ic: 'factory', t: 3, label: studio() || cons() ? L('البراندات والشغل', 'Brands & work') : L('المصنع والإنتاج', 'Factory & production'), keys: ['brands', 'brandkit', 'itemcodes', 'rules', 'escalation', 'fgate', 'portfolio', 'stumedia'] },
     { id: 'cx', ic: 'building', t: 4, label: L('المقاولات', 'Construction'), keys: ['construction', 'cxstages'] },
     { id: 'money', ic: 'money', t: 1, label: L('المشتريات والحسابات', 'Purchasing & accounts'), keys: ['accounting', 'purchflow', 'rfq', 'fx'] },
     { id: 'fleet', ic: 'truck', t: 2, label: L('العربيات والخرايط', 'Vehicles & maps'), keys: ['fleet', 'gmaps'] },
     { id: 'sec', ic: 'shield', t: 4, label: L('الأمان والمراقبة', 'Security & monitoring'), keys: ['security', 'datasafe', 'privacy', 'cctv', 'stulock', 'studoor'] },
     { id: 'ai', ic: 'spark', t: 0, label: L('المساعد الذكي', 'AI assistant'), keys: ['ai', 'stuai', 'voice', 'gptlink'] },
-    { id: 'msg', ic: 'chat', t: 3, label: L('الرسائل والمكالمات', 'Messages & calls'), keys: ['sms', 'calls', 'stumail'] },
+    { id: 'msg', ic: 'chat', t: 3, label: L('الرسائل والمكالمات', 'Messages & calls'), keys: ['sms', 'calls', 'meetings', 'stumail'] },
     { id: 'apps', ic: 'mobile', t: 0, label: L('الأبلكيشن', 'Mobile apps'), keys: ['apns', 'android', 'stulogin'] },
     { id: 'gen', ic: 'cog', t: 5, label: L('عام والبيانات', 'General & data'), keys: ['general', 'data', 'backend', 'stustore', 'help'] },
     { id: 'other', ic: 'grid', t: 5, label: L('أخرى', 'Other'), keys: [] }
@@ -40272,10 +40375,18 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   }
   window.nfMoneyFor = moneyFor;
   window.nfIsMoneyTask = isMoneyTask;
-  const SU = () => (S.ui.omf ||= { on: false, keys: [] });
+  const SU = () => (S.ui.omf ||= { on: false, keys: [], cat: '' });
+  /* v7.66 (Mahmoud, 13 Oct — «everything in its category, no boxes under each other»): the lines sit in categories with their count —
+     advances · custody · running costs · suppliers · cheques (· other) — one category at a time, opening on the first that has lines. */
+  const CATS = () => [['adv', L('سلف', 'Advances')], ['fund', L('عهد', 'Custody')], ['opex', L('تشغيل', 'Running costs')], ['sup', L('موردين', 'Suppliers')], ['chq', L('شيكات', 'Cheques')], ['other', L('تانية', 'Other')], ['all', L('الكل', 'All')]];
+  const catOf = x => ({ adv: 'adv', fund: 'fund', opex: 'opex', po: 'sup', sup: 'sup', pb: 'sup', chq: 'chq' })[x.k] || 'other';
   function card(items) {
     const K = KIND(); const u = SU(); const pickable = items.filter(x => x.sel); const on = u.on && pickable.length > 0;
-    const shown = items;   /* v7.53: every line, always (Mahmoud asked for the whole list) */ const sel = new Set(u.keys);
+    const counts = {}; items.forEach(x => { const c = catOf(x); counts[c] = (counts[c] || 0) + 1; });
+    const cats = CATS().filter(([k]) => k === 'all' ? Object.keys(counts).length > 1 : counts[k]);
+    const cat = cats.some(c => c[0] === u.cat) ? u.cat : (cats[0] || ['all'])[0];
+    const shown = cat === 'all' ? items : items.filter(x => catOf(x) === cat); const sel = new Set(u.keys);
+    const catBar = cats.length > 1 ? `<div class="omf-cats" role="tablist">${cats.map(([k, l]) => `<button type="button" role="tab" class="${k === cat ? 'on' : ''}" aria-selected="${k === cat}" data-omfcat="${k}">${esc(l)} <span>${k === 'all' ? items.length : counts[k]}</span></button>`).join('')}</div>` : '';
     const chosen = items.filter(x => sel.has(x.id) && x.sel);
     const kinds = new Set(chosen.map(x => x.sel));
     const tos = new Set(chosen.filter(x => x.sel === 'pay').map(x => x.to));
@@ -40291,15 +40402,16 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       if (on) return `<label class="omf-r omf-pick ${x.sel ? '' : 'dis'}"><input type="checkbox" data-omfk="${esc(x.id)}" ${sel.has(x.id) ? 'checked' : ''} ${x.sel ? '' : 'disabled'} aria-label="${esc(L('اختار', 'Select'))}">${inner}</label>`;
       return `<a class="omf-r" href="${esc(x.href)}">${inner}<span class="omf-go">${icon('back')}</span></a>`;
     };
-    const total = items.reduce((a, x) => a + (+x.amount || 0), 0);
+    const total = shown.reduce((a, x) => a + (+x.amount || 0), 0);
     return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div>${pickable.length >= 1 && writable() ? `<button type="button" class="btn xs ${on ? '' : 'ghost'}" data-action="omfPick">${esc(on ? L('إلغاء الاختيار', 'Cancel') : L('اختار', 'Pick'))}</button>` : ''}<a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
-      ${on ? `<div class="tiny muted" style="margin:-2px 0 6px">${esc(L('علّم على اللي هيتحوّل مرة واحدة.', 'Tick what goes in one transfer.'))}</div>` : ''}
+      ${catBar}${on ? `<div class="tiny muted" style="margin:-2px 0 6px">${esc(L('علّم على اللي هيتحوّل مرة واحدة.', 'Tick what goes in one transfer.'))}</div>` : ''}
       <div class="omf-l">${shown.map(row).join('')}</div>
       ${on ? `<div class="omf-foot"><span>${esc(L(`المحدد ${chosen.length}`, `${chosen.length} selected`))} · <b>${esc(fmtMoney(chosen.reduce((a, x) => a + (+x.amount || 0), 0)))} ${esc(CUR())}</b></span><div class="grow"></div>${btn}</div>${hint ? `<div class="tiny omf-hint">${esc(hint)}</div>` : ''}`
-        : `${total ? `<div class="omf-tot">${esc(L('المجموع', 'Total'))} <b>${esc(fmtMoney(total))} ${esc(CUR())}</b></div>` : ''}${items.length > shown.length ? `<a class="omf-more" href="#/money">${esc(L(`كل البنود (${items.length})`, `All items (${items.length})`))}</a>` : ''}`}</div>`;
+        : `${total ? `<div class="omf-tot">${esc(cat === 'all' || cats.length < 2 ? L('المجموع', 'Total') : L(`مجموع ${(cats.find(c => c[0] === cat) || ['', ''])[1]}`, `Total — ${(cats.find(c => c[0] === cat) || ['', ''])[1]}`))} <b>${esc(fmtMoney(total))} ${esc(CUR())}</b></div>` : ''}`}</div>`;
   }
   window.nfMoneyCard = () => { const it = moneyFor(); return it.length ? card(it) : ''; };
   ACTIONS.omfPick = () => { const u = SU(); u.on = !u.on; u.keys = []; render(true); };
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-omfcat]'); if (!b) return; e.preventDefault(); SU().cat = b.dataset.omfcat; render(true); });
   document.addEventListener('change', e => { const c = e.target.closest && e.target.closest('input[data-omfk]'); if (!c) return; const u = SU(); const s = new Set(u.keys); if (c.checked) s.add(c.dataset.omfk); else s.delete(c.dataset.omfk); u.keys = [...s]; render(true); });
   ACTIONS.omfGo = () => { const u = SU(); const items = moneyFor(); const sel = new Set(u.keys); const chosen = items.filter(x => sel.has(x.id) && x.sel); if (!chosen.length || typeof window.nfMoneyGo !== 'function') return; window.nfMoneyGo(chosen); };
   RENDER_HOOKS.push(() => {
@@ -40325,6 +40437,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     .omf-a{flex:none;font-size:13.5px;font-variant-numeric:tabular-nums}.omf-tot{display:flex;justify-content:space-between;margin-top:6px;padding:8px 2px 0;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}.omf-tot b{color:var(--ink)}
     .omf-pick{cursor:pointer}.omf-pick input{flex:none;width:20px;height:20px;accent-color:var(--accent);margin:0}.omf-pick.dis{opacity:.55;cursor:default}
     .omf-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}.omf-hint{color:var(--warn,#c77700);margin-top:4px}
+    .omf-cats{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 0 6px;padding:2px 0 4px}.omf-cats::-webkit-scrollbar{display:none}
+    .omf-cats button{flex:none;display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+    .omf-cats button span{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--surface-2,#f2f2f7);font-size:11px;font-weight:700;display:inline-grid;place-items:center}
+    .omf-cats button.on{background:var(--ink,#111);color:var(--surface,#fff);border-color:transparent}.omf-cats button.on span{background:rgba(255,255,255,.22);color:inherit}
     .omf-more{display:block;margin-top:6px;padding:7px;border-radius:10px;background:var(--surface-2);color:var(--accent);text-align:center;font-size:13px;font-weight:600;text-decoration:none}
   </style>`);
 })();
@@ -41496,10 +41612,13 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
       ${rows ? `<div class="list">${rows}</div>` : `<div class="muted small">${esc(L('مفيش حاجة مستنية تحويل', 'Nothing waiting for a transfer'))}</div>`}${foot}</div>`;
   }
   moneyDueCard = () => dueCard();
+  /* v7.66: does the «balances» category have anything for a non-owner (the payer's card / the due list)? → its count */
+  window.nfPbHas = () => { try { if (isAdmin()) return 0; const n = (seesDue() ? 1 : 0) + (payerCard() ? 1 : 0); return n; } catch (e) { return 0; } };
   /* Saeed / Ahmed: the same card on their money page (the owner already has it in place) */
   EXTRA_VIEWS.money = (base => r => {
     let h = base(r); try {
       if (r && r.id) return h;
+      if (window.__nfMoneyTab && window.__nfMoneyTab !== 'bal') return h;   /* v7.66: these cards live under the balances category */
       const mine = payerCard();
       if (!isAdmin() && seesDue()) { const i = h.indexOf('<div class="stack">'); const add = mine + dueCard(); h = i < 0 ? add + h : h.slice(0, i + 19) + add + h.slice(i + 19); }
       else if (mine) { const i = h.indexOf('<div class="stack">'); h = i < 0 ? mine + h : h.slice(0, i + 19) + mine + h.slice(i + 19); }
@@ -45910,11 +46029,55 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
    · recording (only after the host turns it on, and everybody sees it): each device cuts its own microphone into spoken
      sentences (voice detection, 0.4 s before the first word is kept), 16 kHz WAV, and sends each to «meet/chunk», which writes
      the text under the speaker's name — so the transcript knows who said what. A muted microphone sends nothing.
+   · v7.66 (Mahmoud, 13 Oct — «everyone can share his screen and sketch, or sketch on the screen I share» + «all the Zoom options»):
+     ink on any shared screen and on a whiteboard opened for everyone (signed broadcast «ink» / «board»; strokes normalised 0..10000
+     to the picture, each person's own colour and his name next to the line while he draws; «undo» = his own last line, «clear» = the
+     sharer / the whiteboard's opener / the host); a screenshot of the shared screen or the whiteboard with the drawing; quick reactions;
+     pin a tile (for me) and spotlight (host, for everybody); background blur (the platform's own blur when the browser has it, else
+     MediaPipe selfie segmentation — every file fetched from jsDelivr is checked against its SHA-256 before it runs); pictures / files
+     in the chat (stored by the Edge function «meet», signed links).
    ===================================================================== */
 (function () {
   if (window.NFMeetCore) return;
   const FN = 'https://erhcnkjyaumdoixkksbz.supabase.co/functions/v1/meet';
   const MAXV = 6; const TS_WIN = 120000;
+  const REACTS = ['👍', '👏', '❤️', '😂', '😮', '🎉'];
+  const INK_C = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#111111'];
+  const INK_T = ['pen', 'hl', 'arrow'];
+  const STORE = FN.replace(/\/functions\/v1\/meet$/, '') + '/storage/v1/object/sign/meet/';
+  /* background blur on the page: MediaPipe selfie segmentation (Apache-2.0), pinned version, every file checked before use */
+  const MPB = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/';
+  const MPH = {
+    'selfie_segmentation.js': 'a4720d2d2374ec9df3510461ff186a4af427fb5bd402375e135875a991467da3',
+    'selfie_segmentation_solution_simd_wasm_bin.js': '9406e7e30843bdca189689d4bea413f3e468f71e381560e583ef12792d26d46a',
+    'selfie_segmentation_solution_wasm_bin.js': 'ed59858c14c9db26d34abbf0afa9017e5c6583a6ad63dae63d2fe42e19abfea5',
+    'selfie_segmentation_solution_simd_wasm_bin.wasm': 'd93e73677ef1fe791ff5407083c0f9ced6d6050a705bd6c20823fc05919d8dc4',
+    'selfie_segmentation_solution_wasm_bin.wasm': '37665276fd8e38589a28b07ddec805266efb1b7a1a52fd36667ef11dff43a847',
+    'selfie_segmentation.tflite': '8d13b7fae74af625c641226813616a2117bd6bca19eb3b75574621fc08557f27',
+    'selfie_segmentation_landscape.tflite': '4aafe6223bb8dac6fac8ca8ed56852870a33051ef3f6238822d282a109962894',
+    'selfie_segmentation.binarypb': '0007be42c754f111063c0121bba7104880b7c56277d3a9681cdcb17709236aee',
+    'selfie_segmentation_solution_simd_wasm_bin.data': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  };
+  const simdOk = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
+  async function vget(f) {
+    const r = await fetch(MPB + f, { credentials: 'omit' }); if (!r.ok) throw new Error('fetch ' + f); const b = await r.arrayBuffer();
+    const h = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', b)), x => x.toString(16).padStart(2, '0')).join(''); if (h !== MPH[f]) throw new Error('hash ' + f);
+    return URL.createObjectURL(new Blob([b], { type: /\.js$/.test(f) ? 'text/javascript' : /\.wasm$/.test(f) ? 'application/wasm' : 'application/octet-stream' }));
+  }
+  let segP = null;
+  function segLoad() {
+    if (segP) return segP;
+    segP = (async () => {
+      const v = simdOk() ? 'selfie_segmentation_solution_simd_wasm_bin' : 'selfie_segmentation_solution_wasm_bin';
+      const want = ['selfie_segmentation.js', 'selfie_segmentation_solution_simd_wasm_bin.js', 'selfie_segmentation_solution_wasm_bin.js', v + '.wasm', 'selfie_segmentation.tflite', 'selfie_segmentation_landscape.tflite', 'selfie_segmentation.binarypb'].concat(v.includes('simd') ? [v + '.data'] : []);
+      const urls = {}; await Promise.all(want.map(async f => { urls[f] = await vget(f); }));
+      if (!window.SelfieSegmentation) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = urls['selfie_segmentation.js']; sc.onload = res; sc.onerror = () => rej(new Error('script')); document.head.appendChild(sc); });
+      /* only the checked copies are ever handed to the loader — anything else fails closed */
+      const seg = new window.SelfieSegmentation({ locateFile: f => urls[String(f).split('/').pop()] || 'data:,' });
+      seg.setOptions({ modelSelection: 1, selfieMode: false }); await seg.initialize(); return seg;
+    })();
+    segP.catch(() => { segP = null; }); return segP;
+  }
   const enc = s => new TextEncoder().encode(s);
   const b64u = s => Uint8Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(s).length / 4) * 4, '=')), c => c.charCodeAt(0));
   const b64uE = u8 => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
@@ -45950,7 +46113,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
 
   function create(o) {
     /* o: { sb, room, me: {id, name, guest, wid}, eph (from eph()), sig, host, pubKey, hostId, token() → Promise<string>, sfu, video, rec, onUpdate, onChat, onEvent } */
-    const st = { joined: false, admitted: !!o.sig, peers: new Map(), waiting: [], local: null, mic: true, cam: !!o.video, screen: null, hand: false, chat: [], rec: false, speaking: '', ended: false, mode: o.sfu ? 'sfu' : 'mesh', err: '', ice: null, recBusy: 0, recSent: 0, host: !!o.host };
+    const st = { joined: false, admitted: !!o.sig, peers: new Map(), waiting: [], local: null, mic: true, cam: !!o.video, screen: null, hand: false, chat: [], rec: false, speaking: '', ended: false, mode: o.sfu ? 'sfu' : 'mesh', err: '', ice: null, recBusy: 0, recSent: 0, host: !!o.host, ink: {}, board: null, spot: '', reacts: [], fx: '', fxBusy: false, fxTrack: null, fxStream: null };
     let ch = null, raf = 0; const pcs = new Map(); const pending = new Map();
     const upd = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; try { o.onUpdate && o.onUpdate(st); } catch (e) { console.warn(e); } }); };
     const ev = (k, d) => { try { o.onEvent && o.onEvent(k, d); } catch (e) { console.warn(e); } };
@@ -45976,7 +46139,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       try { return await navigator.mediaDevices.getUserMedia({ audio: a, video: video ? { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24 } } : false }); }
       catch (e) { if (video) return media(false); throw e; }
     }
-    const vTrack = () => (st.screen ? st.screen.getVideoTracks()[0] : (st.local && st.local.getVideoTracks()[0])) || null;
+    const vTrack = () => (st.screen ? st.screen.getVideoTracks()[0] : (st.fxTrack || (st.local && st.local.getVideoTracks()[0]))) || null;
     const aTrack = () => (st.local && st.local.getAudioTracks()[0]) || null;
 
     /* ---------- who is in (presence); one check at a time ---------- */
@@ -45992,6 +46155,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
         if (p && p.eph && (p.eph.x !== m.eph.x || p.eph.y !== m.eph.y)) { drop(id); p = null; }
         p = p || { id, stream: new MediaStream(), level: 0 };
         Object.assign(p, { name: String(m.name || '').slice(0, 40), guest: !!m.guest, wid: m.guest ? '' : String(m.wid || '').slice(0, 60), host: id === o.hostId, hand: !!m.hand, mic: m.mic !== false, cam: !!m.cam, screen: !!m.screen, sfu: m.sfu || null, at: m.at || 0, eph: m.eph, sig: m.sig });
+        if (!m.screen && st.ink[id]) delete st.ink[id];
         st.peers.set(id, p);
         if (st.admitted) { if (st.mode === 'mesh') { if (!pcs.has(id) && o.me.id < id) offer(id); else flushPending(id); } else sfuPull(p); }
       }
@@ -45999,7 +46163,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       st.waiting = waiting.sort((a, b) => a.at - b.at); st.hostHere = !!o.host || [...st.peers.values()].some(p => p.host);
       upd();
     }
-    function drop(id) { const pc = pcs.get(id); if (pc) { try { pc.close(); } catch (e) { /* closed */ } pcs.delete(id); } const p = st.peers.get(id); if (p && st.mode === 'sfu' && p.mids) sfuClose(p.mids); st.peers.delete(id); pending.delete(id); upd(); }
+    function drop(id) { const pc = pcs.get(id); if (pc) { try { pc.close(); } catch (e) { /* closed */ } pcs.delete(id); } const p = st.peers.get(id); if (p && st.mode === 'sfu' && p.mids) sfuClose(p.mids); st.peers.delete(id); pending.delete(id); delete st.ink[id]; if (st.board && st.board.by === id) { st.board = null; delete st.ink.board; } upd(); }
 
     /* ---------- mesh: one connection per pair, the smaller id offers ---------- */
     /* the offering side adds an audio + a video line; the answering side fills the lines the offer brought (never adds its own) */
@@ -46133,13 +46297,21 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       ch = o.sb.channel('meet:' + o.room, { config: { presence: { key: o.me.id }, broadcast: { self: false } } });
       ch.on('presence', { event: 'sync' }, () => { sync(); });
       ch.on('broadcast', { event: 'sig' }, ({ payload }) => { syncQ = syncQ.then(() => onSig(payload)).catch(() => {}); });
-      ch.on('broadcast', { event: 'chat' }, async ({ payload }) => { const m = await open('chat', payload); if (!m) return; const c = { from: m.from, name: (st.peers.get(m.from) || {}).name || '', text: String(m.text || '').slice(0, 1000), at: Date.now() }; st.chat.push(c); if (o.onChat) o.onChat(c); upd(); });
+      ch.on('broadcast', { event: 'chat' }, async ({ payload }) => { const m = await open('chat', payload); if (!m) return; const f = cleanFile(m.f); const c = { from: m.from, name: (st.peers.get(m.from) || {}).name || '', text: String(m.text || '').slice(0, 1000), f, at: Date.now() }; if (!c.text && !f) return; st.chat.push(c); if (o.onChat) o.onChat(c); upd(); });
+      ch.on('broadcast', { event: 'ink' }, async ({ payload }) => { const m = await open('ink', payload); if (m) onInk(m); });
+      ch.on('broadcast', { event: 'board' }, async ({ payload }) => {
+        const m = await open('board', payload); if (!m) return;
+        if (m.op === 'open' && !st.board) st.board = { by: m.from, at: Date.now() };
+        if (m.op === 'close' && st.board && (m.from === st.board.by || m.from === o.hostId)) { st.board = null; delete st.ink.board; }
+        upd();
+      });
+      ch.on('broadcast', { event: 'react' }, async ({ payload }) => { const m = await open('react', payload); if (!m || !REACTS.includes(m.e)) return; st.reacts.push({ from: m.from, e: m.e, at: Date.now() }); st.reacts = st.reacts.filter(r => Date.now() - r.at < 6000).slice(-40); upd(); });
       ch.on('broadcast', { event: 'admit' }, async ({ payload }) => {
         let m = {}; try { m = JSON.parse((payload || {}).d || '{}'); } catch (e) { return; } if (m.to !== o.me.id || st.admitted) return;
         if (!(await passOk(o.pubKey, o.room, o.me.id, o.eph.pub, m.sig))) return;
         o.sig = m.sig; st.admitted = true; const ice = await fn('ice').catch(() => ({})); st.ice = ice.iceServers || null;
         if (st.mode === 'sfu') await sfuOpen().catch(e => { st.err = 'sfu: ' + (e && e.message || e); st.mode = 'mesh'; });
-        track(); sync(); ev('admitted'); if (st.rec) recStart();
+        track(); sync(); ev('admitted'); if (st.rec) recStart(); askInk();
       });
       ch.on('broadcast', { event: 'deny' }, async ({ payload }) => { const m = await open('deny', payload); if (m && m.from === o.hostId && m.to === o.me.id && !st.admitted) { ev('denied'); leave(); } });
       ch.on('broadcast', { event: 'host' }, async ({ payload }) => {
@@ -46148,15 +46320,16 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
         if (m.cmd === 'rec') { setRec(!!m.on); ev(m.on ? 'rec-on' : 'rec-off'); }
         if (m.cmd === 'end') { st.ended = true; ev('ended'); leave(); }
         if (m.cmd === 'kick' && m.to === o.me.id) { ev('kicked'); leave(); }
+        if (m.cmd === 'spot') { st.spot = /^(g|u):[A-Za-z0-9_-]{6,60}$/.test(String(m.id || '')) ? String(m.id) : ''; ev('spot'); upd(); }
       });
       await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('realtime')), 15000); ch.subscribe(s => { if (s === 'SUBSCRIBED') { clearTimeout(t); res(); } else if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT') { clearTimeout(t); rej(new Error('realtime ' + s)); } }); });
-      st.joined = true; track();
+      st.joined = true; track(); askInk();
       if (st.admitted && st.mode === 'sfu') await sfuOpen().catch(e => { st.err = 'sfu: ' + (e && e.message || e); st.mode = 'mesh'; track(); sync(); });
       if (o.rec) setRec(true);
       upd();
     }
     async function leave() {
-      recStop(); clearInterval(lvTimer);
+      recStop(); clearInterval(lvTimer); fxStop();
       if (R.q.length) { try { await flush(); } catch (e) { /* offline */ } }
       pcs.forEach(pc => { try { pc.close(); } catch (e) { /* closed */ } }); pcs.clear(); if (spc) { try { spc.close(); } catch (e) { /* closed */ } spc = null; }
       [st.local, st.screen].forEach(s => s && s.getTracks().forEach(t => t.stop()));
@@ -46170,7 +46343,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     async function setCam(on) {
       let v = st.local && st.local.getVideoTracks()[0];
       if (on && !v) { try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24 } } }); v = s.getVideoTracks()[0]; st.local.addTrack(v); replaceVideo(); } catch (e) { st.err = 'camera'; } }
-      if (v) v.enabled = !!on; st.cam = !!on && !!v; track();
+      if (v) v.enabled = !!on; if (st.fxTrack) st.fxTrack.enabled = !!on; st.cam = !!on && !!v; track();
     }
     function replaceVideo() {
       const v = vTrack(); pcs.forEach(pc => { if (pc._v) pc._v.replaceTrack(st.peers.size <= MAXV ? v : null).catch(() => {}); });
@@ -46179,11 +46352,100 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     async function share(on) {
       if (on && !st.screen) {
         try { st.screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15 } }, audio: false }); st.screen.getVideoTracks()[0].onended = () => share(false); } catch (e) { st.screen = null; return false; }
-      } else if (!on && st.screen) { st.screen.getTracks().forEach(t => t.stop()); st.screen = null; }
+      } else if (!on && st.screen) { st.screen.getTracks().forEach(t => t.stop()); st.screen = null; delete st.ink[o.me.id]; }
       replaceVideo(); track(); return true;
     }
     function hand(on) { st.hand = !!on; track(); }
-    function chat(text) { text = String(text || '').trim().slice(0, 1000); if (!text) return; send('chat', { text }); const c = { from: o.me.id, name: o.me.name, text, at: Date.now(), me: true }; st.chat.push(c); upd(); }
+    function chat(text, f) { text = String(text || '').trim().slice(0, 1000); f = cleanFile(f); if (!text && !f) return; send('chat', f ? { text, f } : { text }); const c = { from: o.me.id, name: o.me.name, text, f, at: Date.now(), me: true }; st.chat.push(c); upd(); }
+    /* a picture / file in the chat: stored by the Edge function (participants only), shared as a signed link */
+    function cleanFile(f) {
+      if (!f || typeof f !== 'object') return null; const url = String(f.url || ''), path = String(f.path || '');
+      if (url.indexOf(STORE + o.room + '/files/') !== 0 || path.indexOf(o.room + '/files/') !== 0 || url.length > 2000) return null;
+      return { name: String(f.name || 'file').slice(0, 120), size: Math.max(0, +f.size || 0), mime: String(f.mime || '').slice(0, 80), url, path };
+    }
+    async function upload(file) {
+      const buf = await file.arrayBuffer(); if (buf.byteLength > 4 * 1024 * 1024) { const e = new Error('big'); e.code = 'big'; throw e; }
+      const r = await fn('file', { name: String(file.name || 'file').slice(0, 120), mime: file.type || 'application/octet-stream', data: toB64(new Uint8Array(buf)) });
+      const f = cleanFile(r); if (!f) throw new Error(r.error || 'upload'); return f;
+    }
+
+    /* ---------- drawing on a shared screen / the whiteboard (sid = the sharer's id, or 'board') ---------- */
+    const sidOk = sid => sid === 'board' ? !!st.board : sid === o.me.id ? !!st.screen : !!(st.peers.get(sid) || {}).screen;
+    const ownerOf = sid => (sid === 'board' ? (st.board && st.board.by) : sid) || '';
+    function cleanStroke(x) {
+      if (!x || typeof x !== 'object' || !/^[A-Za-z0-9]{4,16}$/.test(String(x.id || '')) || !INK_T.includes(x.t) || !INK_C.includes(x.c) || !Array.isArray(x.p)) return null;
+      const p = x.p.slice(0, 3000); if (p.length < 2 || p.length % 2 || p.some(v => !Number.isInteger(v) || v < 0 || v > 10000)) return null;
+      return { id: String(x.id), t: x.t, c: x.c, p };
+    }
+    function putStroke(sid, s) { const a = st.ink[sid] || (st.ink[sid] = []); const i = a.findIndex(x => x.id === s.id && x.by === s.by); if (i >= 0) a[i] = s; else { a.push(s); if (a.length > 500) a.shift(); } upd(); }
+    function onInk(m) {
+      const sid = String(m.sid || '').slice(0, 70);
+      if (m.op === 'req') { /* somebody came in late: the owners send what is drawn */
+        if (st.board && st.board.by === o.me.id) send('board', { op: 'open' });
+        [o.me.id, 'board'].forEach(s0 => { if (ownerOf(s0) !== o.me.id || !sidOk(s0)) return; const l = (st.ink[s0] || []).filter(x => x.done).slice(-150).map(x => ({ id: x.id, t: x.t, c: x.c, p: x.p, by: x.by })); if (l.length) send('ink', { op: 'sync', sid: s0, list: l }); });
+        return;
+      }
+      if (!sidOk(sid)) return;
+      if (m.op === 'sync') { if (m.from !== ownerOf(sid) || (st.ink[sid] || []).length) return; st.ink[sid] = (Array.isArray(m.list) ? m.list.slice(0, 150) : []).map(x => { const c = cleanStroke(x); if (!c) return null; const by = /^(g|u):[A-Za-z0-9_-]{6,60}$/.test(String(x.by || '')) ? String(x.by) : m.from; return Object.assign(c, { by, n: (st.peers.get(by) || {}).name || '', done: true, at: 0 }); }).filter(Boolean); upd(); return; }
+      if (m.op === 'part' || m.op === 'add') { const c = cleanStroke(m.s); if (!c) return; putStroke(sid, Object.assign(c, { by: m.from, n: (st.peers.get(m.from) || {}).name || '', done: m.op === 'add', at: Date.now() })); return; }
+      if (m.op === 'del') { const a = st.ink[sid]; if (a) { st.ink[sid] = a.filter(x => !(x.id === m.id && x.by === m.from)); upd(); } return; }
+      if (m.op === 'clear' && (m.from === ownerOf(sid) || m.from === o.hostId)) { st.ink[sid] = []; upd(); }
+    }
+    function inkStroke(sid, s, final) {
+      if (!st.admitted || !sidOk(sid)) return; const c = cleanStroke(s); if (!c) return;
+      if (final) putStroke(sid, Object.assign({}, c, { by: o.me.id, n: o.me.name, done: true, at: Date.now() }));
+      send('ink', { op: final ? 'add' : 'part', sid, s: c });
+    }
+    function inkUndo(sid) { const a = st.ink[sid] || []; for (let i = a.length - 1; i >= 0; i--) if (a[i].by === o.me.id) { const id = a[i].id; a.splice(i, 1); send('ink', { op: 'del', sid, id }); upd(); return true; } return false; }
+    function inkClear(sid) { if (ownerOf(sid) !== o.me.id && !o.host) return false; st.ink[sid] = []; send('ink', { op: 'clear', sid }); upd(); return true; }
+    let askT = []; const askInk = () => { askT.forEach(clearTimeout); askT = [2500, 7000].map(ms => setTimeout(() => { if (st.admitted && ch) send('ink', { op: 'req' }); }, ms)); };
+    function boardOpen() { if (st.board || !st.admitted) return false; st.board = { by: o.me.id, at: Date.now() }; send('board', { op: 'open' }); upd(); return true; }
+    function boardClose() { if (!st.board || (st.board.by !== o.me.id && !o.host)) return false; st.board = null; delete st.ink.board; send('board', { op: 'close' }); upd(); return true; }
+    function react(e) { if (!REACTS.includes(e) || !st.admitted) return; const now = Date.now(); if (now - (st._lr || 0) < 500) return; st._lr = now; st.reacts.push({ from: o.me.id, e, at: now }); st.reacts = st.reacts.filter(r => now - r.at < 6000).slice(-40); send('react', { e }); upd(); }
+    async function spot(id) { if (!o.host) return; id = id || ''; await hostCmd('spot', { id }); st.spot = id; upd(); }
+
+    /* ---------- background blur ---------- */
+    let FX = null;
+    async function setFx(on) {
+      const cam = st.local && st.local.getVideoTracks()[0];
+      if (!on) { fxStop(); upd(); return true; }
+      if (!cam || st.fx || st.fxBusy) return !!st.fx; if (!cam.enabled || cam.readyState !== 'live') return false;
+      /* 1) the platform's own blur (Chrome / Edge on Windows, Mac and ChromeOS when the camera offers it) */
+      try { const caps = cam.getCapabilities ? cam.getCapabilities() : {}; if (caps && Array.isArray(caps.backgroundBlur) && caps.backgroundBlur.includes(true)) { await cam.applyConstraints({ advanced: [{ backgroundBlur: true }] }); st.fx = 'native'; upd(); return true; } } catch (e) { /* not offered */ }
+      /* 2) on the page */
+      st.fxBusy = true; upd();
+      try {
+        const seg = await segLoad();
+        const vid = document.createElement('video'); vid.muted = true; vid.playsInline = true; vid.setAttribute('playsinline', ''); vid.srcObject = new MediaStream([cam]); await vid.play();
+        const w = vid.videoWidth || 640, h = vid.videoHeight || 360;
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d');
+        const sm = document.createElement('canvas'); sm.width = Math.max(24, Math.round(w / 16)); sm.height = Math.max(14, Math.round(h / 16)); const sx = sm.getContext('2d');
+        const md = document.createElement('canvas'); md.width = Math.max(48, Math.round(w / 6)); md.height = Math.max(27, Math.round(h / 6)); const mx = md.getContext('2d');
+        seg.onResults(r => {
+          if (!FX || !FX.run) return;
+          mx.drawImage(r.image, 0, 0, md.width, md.height); sx.drawImage(md, 0, 0, sm.width, sm.height);
+          cx.save(); cx.clearRect(0, 0, w, h); cx.drawImage(r.segmentationMask, 0, 0, w, h);
+          cx.globalCompositeOperation = 'source-in'; cx.drawImage(r.image, 0, 0, w, h);
+          cx.globalCompositeOperation = 'destination-over'; cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high'; cx.drawImage(sm, 0, 0, w, h);
+          cx.restore(); FX.frames++;
+        });
+        const out = cv.captureStream(24).getVideoTracks()[0];
+        FX = { run: true, frames: 0, out, vid, t: 0 };
+        const loop = async () => { if (!FX || !FX.run) return; if (cam.enabled && vid.readyState >= 2) { try { await seg.send({ image: vid }); } catch (e) { /* skip a frame */ } } if (FX && FX.run) FX.t = setTimeout(loop, 40); };
+        loop();
+        /* nobody gets the new picture before it really works (no WebGL / camera off → a blank picture): wait for the first blurred frame */
+        const t0 = Date.now(); while (FX && FX.run && !FX.frames && Date.now() - t0 < 8000) await new Promise(z => setTimeout(z, 100));
+        if (!FX || !FX.frames) { fxStop(); return false; }
+        out.enabled = cam.enabled; st.fxTrack = out; st.fxStream = new MediaStream([out]); st.fx = 'page'; replaceVideo(); track();
+        return true;
+      } catch (e) { console.warn('blur', e); fxStop(); return false; } finally { st.fxBusy = false; upd(); }
+    }
+    function fxStop() {
+      const cam = st.local && st.local.getVideoTracks()[0];
+      if (st.fx === 'native' && cam) { try { cam.applyConstraints({ advanced: [{ backgroundBlur: false }] }).catch(() => {}); } catch (e) { /* gone */ } }
+      if (FX) { FX.run = false; clearTimeout(FX.t); try { FX.out.stop(); } catch (e) { /* stopped */ } FX.vid.srcObject = null; FX = null; }
+      const had = !!st.fxTrack; st.fxTrack = null; st.fxStream = null; st.fx = ''; if (had && st.joined) replaceVideo();
+    }
     /* host */
     async function admit(id) { const w = st.waiting.find(x => x.id === id); if (!w || !w.eph) return false; const r = await fn('admit', { id, thumb: await thumb(w.eph) }); if (!r.sig) return false; await send('admit', { to: id, sig: r.sig }); return true; }
     function deny(id) { send('deny', { to: id }); }
@@ -46191,7 +46453,8 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     async function record(on) { if (!o.host) return false; const r = await fn('status', { rec: !!on }); if (!r.ok) return false; hostCmd('rec', { on: !!on }); setRec(!!on); return true; }
     async function end() { if (!o.host) return; await hostCmd('end'); await fn('status', { status: 'ended' }).catch(() => {}); st.ended = true; await leave(); }
 
-    return { st, o, join, leave, setMic, setCam, share, hand, chat, admit, deny, muteAll: () => hostCmd('muteall'), kick: id => hostCmd('kick', { to: id }), record, end, fn };
+    return { st, o, join, leave, setMic, setCam, share, hand, chat, admit, deny, muteAll: () => hostCmd('muteall'), kick: id => hostCmd('kick', { to: id }), record, end, fn,
+      upload, react, spot, setFx, boardOpen, boardClose, ink: { stroke: inkStroke, undo: inkUndo, clear: inkClear, owner: ownerOf }, _fx: () => FX };
   }
 
   /* =====================================================================
@@ -46215,7 +46478,21 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     link: G('<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>'),
     send: G('<path d="M4 12l16-7-6 16-3-6.5z"/>'), check: G('<path d="M5 12.5l4.5 4.5L19 7.5"/>'), x: G('<path d="M6 6l12 12M18 6L6 18"/>'),
     wa: G('<path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z"/><path d="M9 9.5c.3 2.2 2.3 4.2 4.5 4.5l1-1.2 2 .9c-.3 1.3-1.4 2-2.7 1.8A7 7 0 0 1 8 9.7c-.1-1.3.6-2.4 1.8-2.7l.9 2z"/>'),
-    meet: G('<rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/>')
+    meet: G('<rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/>'),
+    /* v7.66 */
+    smile: G('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 14c.8 1.4 2 2.1 3.5 2.1s2.7-.7 3.5-2.1"/><circle cx="9" cy="10" r=".9" fill="currentColor"/><circle cx="15" cy="10" r=".9" fill="currentColor"/>'),
+    pen: G('<path d="M4 20l1-4.5L16 4.5a2.1 2.1 0 0 1 3 3L8 18.5z"/><path d="M14.5 6l3 3"/>'),
+    hl: G('<path d="M9 14l-3 3v3h6l2-2"/><path d="M8.5 13.5l7-9 4 4-9 7z"/>'),
+    arrow: G('<path d="M5 19L19 5M10 5h9v9"/>'),
+    undo: G('<path d="M9 7L4.5 11.5 9 16"/><path d="M5 11.5h9.5a5 5 0 0 1 0 10H11"/>'),
+    trash: G('<path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13.5h9l1-13.5"/>'),
+    shot: G('<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.5-2.2h5.6L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.4"/>'),
+    blur: G('<circle cx="12" cy="9" r="3.2"/><path d="M6.5 20c.7-3.4 2.9-5.2 5.5-5.2s4.8 1.8 5.5 5.2"/><path d="M3 4.5h.01M3 9h.01M3 13.5h.01M3 18h.01M21 4.5h.01M21 9h.01M21 13.5h.01M21 18h.01" stroke-width="2.6"/>'),
+    board: G('<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20l2.5-4M16 20l-2.5-4M7 12.5l3-3 2.5 2 4-4.5"/>'),
+    idea: G('<path d="M9 17.5h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2v1.5h5V16c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>'),
+    pin: G('<path d="M9 4h6l-1 5 3.5 3.5h-11L10 9z"/><path d="M12 12.5V20"/>'),
+    star: G('<path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"/>'),
+    clip: G('<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/>')
   };
   const CSS = `
     html.nfmeet-open:not(.nfmeet-min),html.nfmeet-open:not(.nfmeet-min) body{overflow:hidden}
@@ -46233,126 +46510,256 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     .mt-stage.grid.n1{grid-template-columns:1fr}.mt-stage.grid.n2{grid-template-columns:1fr 1fr}.mt-stage.grid.n3,.mt-stage.grid.n4{grid-template-columns:1fr 1fr}.mt-stage.grid.n5,.mt-stage.grid.n6,.mt-stage.grid.n7,.mt-stage.grid.n8,.mt-stage.grid.n9{grid-template-columns:repeat(3,1fr)}
     @media (max-width:640px){.mt-stage.grid.n2{grid-template-columns:1fr}.mt-stage.grid.n2 .mt-tile{aspect-ratio:4/3}.mt-stage.grid.n3,.mt-stage.grid.n4,.mt-stage.grid.n5,.mt-stage.grid.n6{grid-template-columns:1fr 1fr}.mt-stage.grid .mt-tile{aspect-ratio:3/4}}
     .mt-stage.spk{display:flex;flex-direction:column}.mt-big{flex:1;min-height:0;display:flex}.mt-big .mt-tile{flex:1;aspect-ratio:auto}.mt-strip{display:flex;gap:8px;overflow-x:auto;flex:none}.mt-strip .mt-tile{width:140px;flex:none}
-    .mt-tile{position:relative;aspect-ratio:16/10;border-radius:16px;overflow:hidden;background:#22262c;display:grid;place-items:center;border:2px solid transparent;transition:border-color .15s}.mt-tile.talk{border-color:#34c759}
-    .mt-tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}.mt-tile.mirror video{transform:scaleX(-1)}
+    .mt-tile{position:relative;aspect-ratio:16/10;border-radius:16px;overflow:hidden;background:#22262c;display:grid;place-items:center;border:2px solid transparent;transition:border-color .15s}.mt-tile.talk{border-color:#34c759}.mt-tile.spot{border-color:#ffcc00}
+    .mt-tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}.mt-tile.mirror video{transform:scaleX(-1)}.mt-tile.scr video{object-fit:contain}
     .mt-av{width:64px;height:64px;border-radius:50%;background:#3a4049;display:grid;place-items:center;font-size:24px;font-weight:600}
-    .mt-ov{position:absolute;inset:0;pointer-events:none}
-    .mt-name{position:absolute;bottom:8px;inset-inline-start:8px;display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.55);font-size:12.5px;max-width:calc(100% - 16px)}.mt-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mt-name i{font-style:normal;opacity:.7;font-size:11px;flex:none}
+    .mt-ov{position:absolute;inset:0;pointer-events:none;z-index:2}
+    .mt-ink{position:absolute;pointer-events:none;touch-action:auto;z-index:1}.mt-ink.bd{background:#fff;border-radius:6px;box-shadow:0 2px 14px rgba(0,0,0,.35)}.mt-ink.on{pointer-events:auto;touch-action:none;cursor:crosshair}
+    .mt-board{background:#2b3038}
+    .mt-name{position:absolute;bottom:8px;inset-inline-start:8px;display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.55);font-size:12.5px;max-width:calc(100% - 16px)}.mt-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mt-name i{font-style:normal;opacity:.7;font-size:11px;flex:none}.mt-name svg{width:13px;height:13px;color:#ffcc00;flex:none}
     .mt-muted,.mt-hand{position:absolute;top:8px;inset-inline-end:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);display:grid;place-items:center}.mt-hand{inset-inline-end:42px;background:#ffcc00;color:#1c1c1e}.mt-muted svg,.mt-hand svg{width:16px;height:16px}
     .mt-net{position:absolute;top:8px;inset-inline-start:8px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,149,0,.85)}
+    .mt-tb{position:absolute;top:8px;inset-inline-start:8px;display:flex;gap:6px;pointer-events:none}.mt-tb button{pointer-events:auto;height:30px;min-width:30px;border-radius:999px;border:0;background:rgba(0,0,0,.6);color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 9px;font:inherit;font-size:12.5px;cursor:pointer}.mt-tb button svg{width:16px;height:16px}
+    .mt-tb .mt-pinb{opacity:0;transition:opacity .15s;padding:0}.mt-tile:hover .mt-pinb,.mt-tile.big .mt-pinb,.mt-pinb.on{opacity:1}.mt-pinb.on{background:#0a84ff}.mt-tb .mt-drb{background:#0a84ff}
+    @media (hover:none){.mt-tb .mt-pinb{opacity:.85}}
+    .mt-strip .mt-tb .mt-drb span,.mt-stage.grid.n5 .mt-drb span,.mt-stage.grid.n6 .mt-drb span{display:none}
+    .mt-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:3}.mt-fx span{position:absolute;bottom:14px;inset-inline-start:calc(18% + var(--dx,0px));font-size:34px;line-height:1;animation:mtUp 3.4s ease-out forwards;filter:drop-shadow(0 2px 6px rgba(0,0,0,.4))}
+    @keyframes mtUp{0%{transform:translateY(10px) scale(.6);opacity:0}12%{transform:translateY(0) scale(1.1);opacity:1}80%{opacity:1}100%{transform:translateY(-150px) scale(1);opacity:0}}
+    .mt-flash{animation:mtFlash .45s ease-out}@keyframes mtFlash{0%{box-shadow:inset 0 0 0 999px rgba(255,255,255,.75)}100%{box-shadow:inset 0 0 0 999px rgba(255,255,255,0)}}
     .mt-stage.wait,.mt-stage.alone{display:flex;align-items:center;justify-content:center}.mt-alone{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%}.mt-slot{width:min(560px,92vw)}.mt-slot .mt-tile{width:100%}.mt-note{opacity:.8;text-align:center;margin:0;font-size:15px;line-height:1.6;padding:0 12px}
+    .mt-draw{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:4px;padding:5px;border-radius:14px;background:rgba(24,27,32,.94);box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:calc(100% - 16px);flex-wrap:wrap;justify-content:center}
+    .mt-sw{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:var(--c);cursor:pointer;padding:0;flex:none}.mt-sw.on{border-color:#fff;box-shadow:0 0 0 2px #0a84ff}
+    .mt-tl{width:34px;height:34px;border-radius:10px;border:0;background:transparent;color:#fff;display:grid;place-items:center;cursor:pointer;padding:0;flex:none}.mt-tl svg{width:19px;height:19px}.mt-tl.on{background:rgba(10,132,255,.45)}.mt-tl:hover{background:rgba(255,255,255,.1)}
+    .mt-sep{width:1px;height:22px;background:rgba(255,255,255,.15);margin:0 3px;flex:none}
+    .mt-rx{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:4px;padding:6px;border-radius:999px;background:rgba(24,27,32,.96);box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:calc(100% - 16px);flex-wrap:wrap;justify-content:center}
+    .mt-re{width:44px;height:44px;border-radius:50%;border:0;background:transparent;font-size:26px;cursor:pointer;padding:0;line-height:1}.mt-re:hover{background:rgba(255,255,255,.1)}
+    .mt-rh{display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 14px;border-radius:999px;border:0;background:rgba(255,255,255,.1);color:#fff;font:inherit;font-size:13px;cursor:pointer}.mt-rh svg{width:19px;height:19px}.mt-rh.on{background:#ffcc00;color:#1c1c1e}
     .mt-side{width:320px;flex:none;background:#181b20;border-inline-start:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;padding:10px;gap:8px;overflow:auto}
-    @media (max-width:760px){.mt-side{position:absolute;inset:auto 0 0 0;width:auto;max-height:66%;border-radius:18px 18px 0 0;z-index:3;border:0;box-shadow:0 -10px 30px rgba(0,0,0,.5)}}
+    @media (max-width:760px){.mt-side{position:absolute;inset:auto 0 0 0;width:auto;max-height:66%;border-radius:18px 18px 0 0;z-index:7;border:0;box-shadow:0 -10px 30px rgba(0,0,0,.5)}}
     .mt-sh{display:flex;align-items:center;justify-content:space-between;gap:8px}.mt-chat{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;min-height:140px}
-    .mt-msg{display:flex;flex-direction:column;padding:6px 10px;border-radius:12px;background:rgba(255,255,255,.07);max-width:90%;align-self:flex-start;word-break:break-word}.mt-msg.me{align-self:flex-end;background:rgba(10,132,255,.35)}.mt-msg small{opacity:.65;font-size:11px}
+    .mt-msg{display:flex;flex-direction:column;gap:3px;padding:6px 10px;border-radius:12px;background:rgba(255,255,255,.07);max-width:90%;align-self:flex-start;word-break:break-word}.mt-msg.me{align-self:flex-end;background:rgba(10,132,255,.35)}.mt-msg small{opacity:.65;font-size:11px}
+    .mt-img{display:block;border-radius:10px;overflow:hidden;max-width:220px}.mt-img img{display:block;width:100%;height:auto;max-height:240px;object-fit:cover}
+    .mt-file{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.25);color:#fff;text-decoration:none;min-width:0}.mt-file svg{width:18px;height:18px;flex:none}.mt-file span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mt-file i{font-style:normal;opacity:.65;font-size:11px;flex:none}
     .mt-empty{opacity:.6;font-size:13px;margin:8px 0}
-    .mt-cin{display:flex;gap:6px}.mt-cin input{flex:1;min-width:0;height:42px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;padding:0 12px;font:inherit;font-size:16px}
-    .mt-wl{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:rgba(255,204,0,.12)}.mt-wl small{opacity:.8}.mt-wr,.mt-pr{display:flex;align-items:center;gap:6px;min-height:34px}.mt-wr span,.mt-pr span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mt-wr i,.mt-pr i{font-style:normal;opacity:.6;font-size:11px}.mt-pr svg{width:16px;height:16px;opacity:.8;flex:none}
+    .mt-cin{display:flex;gap:6px;align-items:center}.mt-cin input[name=t]{flex:1;min-width:0;height:42px;border-radius:12px;border:0;background:rgba(255,255,255,.1);color:#fff;padding:0 12px;font:inherit;font-size:16px}
+    .mt-att{position:relative;overflow:hidden}.mt-att input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}.mt-att.busy{opacity:.5;pointer-events:none}
+    .mt-wl{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:rgba(255,204,0,.12)}.mt-wl small{opacity:.8}.mt-wr,.mt-pr{display:flex;align-items:center;gap:6px;min-height:34px;flex-wrap:wrap}.mt-wr span,.mt-pr span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mt-wr i,.mt-pr i{font-style:normal;opacity:.6;font-size:11px}.mt-pr svg{width:16px;height:16px;opacity:.8;flex:none}
     .mt-pl{display:flex;flex-direction:column;gap:4px}
-    .mt-sb{border:0;border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;background:rgba(255,255,255,.12);color:#fff;flex:none}.mt-sb.p{background:#0a84ff}.mt-sb.d{background:#ff3b30}
-    .mt-mi{display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:0;border-radius:12px;background:rgba(255,255,255,.06);color:#fff;font:inherit;cursor:pointer;text-align:start}.mt-mi.on{background:rgba(255,59,48,.3)}.mt-mi svg{width:20px;height:20px;flex:none}.mt-mi.mt-red{background:rgba(255,59,48,.18)}
-    .mt-tiny{font-size:12px;opacity:.65;margin:0;line-height:1.6}
+    .mt-sb{border:0;border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;background:rgba(255,255,255,.12);color:#fff;flex:none}.mt-sb.p{background:#0a84ff}.mt-sb.d{background:#ff3b30}.mt-sb.y{background:#ffcc00;color:#1c1c1e}
+    .mt-mi{display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:0;border-radius:12px;background:rgba(255,255,255,.06);color:#fff;font:inherit;cursor:pointer;text-align:start}.mt-mi.on{background:rgba(255,59,48,.3)}.mt-mi.act{background:rgba(10,132,255,.35)}.mt-mi svg{width:20px;height:20px;flex:none}.mt-mi.mt-red{background:rgba(255,59,48,.18)}.mt-mi[disabled]{opacity:.6}
+    .mt-tiny{font-size:12px;opacity:.65;margin:0;line-height:1.6}.mt-hsec{margin-top:6px;font-weight:600;opacity:.8}
     .mt-red{color:#ff6961}
     .mt-bar{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 10px calc(10px + env(safe-area-inset-bottom,0px));flex-wrap:wrap}
-    .mt-b{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:60px;padding:7px 6px;border:0;border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:11px;cursor:pointer}.mt-b svg{width:22px;height:22px}.mt-b.on{background:rgba(10,132,255,.4)}.mt-b.off{background:#ff3b30}.mt-b.mt-red{background:#ff3b30;color:#fff}
+    .mt-b{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:60px;padding:7px 6px;border:0;border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:11px;cursor:pointer}.mt-b svg{width:22px;height:22px}.mt-b.on{background:rgba(10,132,255,.4)}.mt-b.off{background:#ff3b30}.mt-b.mt-red{background:#ff3b30;color:#fff}.mt-b.hd{background:#ffcc00;color:#1c1c1e}
     .mt-bw{position:relative;display:inline-flex}.mt-n{position:absolute;top:-4px;inset-inline-end:-4px;min-width:18px;height:18px;border-radius:9px;background:#0a84ff;font-style:normal;font-size:11px;display:grid;place-items:center;padding:0 4px;pointer-events:none}.mt-n.warn{background:#ff9500}
     @media (max-width:520px){.mt-b span{display:none}.mt-b{min-width:44px;width:44px;height:44px;padding:0;justify-content:center;border-radius:50%}.mt-bar{gap:8px}}
+    @media (max-width:420px){.mt-b{min-width:40px;width:40px;height:40px}.mt-b svg{width:20px;height:20px}.mt-bar{gap:5px;padding-inline:6px}.mt-sw{width:24px;height:24px}.mt-tl{width:32px;height:32px}}
     .mt-pill{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border-radius:999px;background:#0f1114;color:#fff;box-shadow:0 10px 30px -8px rgba(0,0,0,.6);max-width:min(92vw,420px)}.mt-pill b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}.mt-pill small{opacity:.65;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px}.mt-recd{width:9px;height:9px;border-radius:50%;background:#ff3b30;flex:none}
   `;
   const escH = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* English fallbacks for labels a page did not pass yet (every page passes its own words) */
+  const TX0 = { draw: 'Draw', drawDone: 'Done', undo: 'Undo', clearAll: 'Clear all', shot: 'Screenshot', shotSaved: 'Screenshot saved', shotDl: 'Screenshot downloaded', noShare: 'Nothing is shared on screen', react: 'React', handDown: 'Lower hand', pin: 'Pin', unpin: 'Unpin', spot: 'Spotlight', unspot: 'Remove spotlight', blur: 'Blur background', blurOff: 'Stop blur', blurBusy: 'Loading blur…', blurFail: "Background blur doesn't work on this device", noCam: 'Turn the camera on first', board: 'Whiteboard', boardOpen: 'Open a whiteboard for everyone', boardClose: 'Close the whiteboard', idea: "Project's idea board", attach: 'Send a picture or file', fileBig: 'The file is bigger than 4 MB', uploading: 'Sending…', upFail: "Couldn't send the file", pen: 'Pen', hl: 'Highlighter', arrow: 'Arrow', more: 'More', hand: 'Raise hand' };
+  /* one stroke list on a 2D context of w × h pixels (the same drawing on screen and in the screenshot) */
+  const DARK_TXT = ['#ffcc00', '#ffffff', '#34c759'];
+  function inkDraw(cx, list, w, h, me, labels) {
+    const now = Date.now();
+    for (const s of list) {
+      const p = s.p; if (!p || p.length < 2) continue; const X = i => p[i] / 10000 * w, Y = i => p[i + 1] / 10000 * h;
+      cx.save(); cx.lineCap = 'round'; cx.lineJoin = 'round'; cx.strokeStyle = s.c;
+      if (s.t === 'hl') { cx.globalAlpha = 0.35; cx.lineWidth = Math.max(8, w * 0.02); } else cx.lineWidth = Math.max(2, w * 0.0036);
+      cx.beginPath(); cx.moveTo(X(0), Y(0));
+      if (s.t === 'arrow') {
+        const n = p.length - 2; const x0 = X(0), y0 = Y(0), x1 = X(n), y1 = Y(n); cx.lineTo(x1, y1);
+        if (Math.hypot(x1 - x0, y1 - y0) > 2) { const a = Math.atan2(y1 - y0, x1 - x0), L = Math.max(10, cx.lineWidth * 4.5); cx.moveTo(x1, y1); cx.lineTo(x1 - L * Math.cos(a - 0.45), y1 - L * Math.sin(a - 0.45)); cx.moveTo(x1, y1); cx.lineTo(x1 - L * Math.cos(a + 0.45), y1 - L * Math.sin(a + 0.45)); }
+      } else { let moved = false; for (let i = 2; i < p.length; i += 2) { cx.lineTo(X(i), Y(i)); if (p[i] !== p[0] || p[i + 1] !== p[1]) moved = true; } if (!moved) cx.lineTo(X(0) + 0.5, Y(0)); }
+      cx.stroke(); cx.restore();
+    }
+    if (!labels) return;
+    /* the name of whoever is drawing, next to his line, while he draws (and 2.5 s after) */
+    for (const s of list) {
+      if (s.by === me || !s.n || (s.done && now - (s.at || 0) > 2500)) continue; const n = s.p.length - 2; const x = s.p[n] / 10000 * w, y = s.p[n + 1] / 10000 * h;
+      const fs = Math.max(11, Math.min(16, w * 0.014)); cx.save(); cx.font = `600 ${fs}px system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif`; cx.direction = 'ltr'; cx.textAlign = 'left'; cx.textBaseline = 'middle';
+      const tw = cx.measureText(s.n).width, pad = fs * 0.55, bh = fs * 1.7; let bx = x + 10, by = y - bh - 6; if (bx + tw + pad * 2 > w) bx = Math.max(0, x - tw - pad * 2 - 10); if (by < 0) by = Math.min(h - bh, y + 10);
+      cx.fillStyle = s.c; cx.beginPath(); if (cx.roundRect) cx.roundRect(bx, by, tw + pad * 2, bh, bh / 2); else cx.rect(bx, by, tw + pad * 2, bh); cx.fill();
+      cx.fillStyle = DARK_TXT.includes(s.c) ? '#111' : '#fff'; cx.fillText(s.n, bx + pad, by + bh / 2); cx.restore();
+    }
+  }
   function ui(core, opts) {
-    const T = opts.T; const st = core.st; const esc = opts.esc || escH; const host = !!core.o.host;
+    const T = opts.T; const st = core.st; const esc = opts.esc || escH; const host = !!core.o.host; const tx = k => T[k] || TX0[k] || k;
     if (!document.getElementById('nfmeet-css')) { const s = document.createElement('style'); s.id = 'nfmeet-css'; s.textContent = CSS; document.head.appendChild(s); }
     const old = document.getElementById('nfmeet'); if (old) old.remove();
     const el = document.createElement('div'); el.id = 'nfmeet'; el.className = 'nfmeet'; el.setAttribute('role', 'dialog');
-    const U = { min: false, panel: '', layout: 'grid', t0: Date.now(), unread: 0, tiles: new Map(), auds: new Map(), seen: new Map(), mode: '', closed: false, warned: false };
+    const U = { min: false, panel: '', layout: 'grid', layoutManual: false, lastF: '', t0: Date.now(), unread: 0, tiles: new Map(), auds: new Map(), seen: new Map(), mode: '', closed: false, warned: false,
+      pin: '', draw: '', tool: 'pen', color: '', live: null, rx: false, rxSeen: new Set(), upl: false };
+    const meId = () => (st.me && st.me.id) || core.o.me.id || 'me';
+    { let hsh = 0; String(core.o.me.id || '').split('').forEach(c => { hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; }); U.color = INK_C[hsh % 4]; }
     el.innerHTML = `<div class="mt-top"><span class="mt-dot"></span><b class="mt-title"></b><span class="mt-time" dir="ltr">00:00</span><span class="mt-rec" hidden>${IC.rec}<span>${esc(T.rec)}</span></span><span class="mt-grow"></span><span class="mt-mode"></span><button type="button" class="mt-ib" data-mt="layout" title="${esc(T.layout)}" aria-label="${esc(T.layout)}"></button>${opts.canMin ? `<button type="button" class="mt-ib" data-mt="min" title="${esc(T.shrink)}" aria-label="${esc(T.shrink)}">${IC.min}</button>` : ''}</div>
-      <div class="mt-main"><div class="mt-stage"></div><aside class="mt-side" hidden></aside></div><div class="mt-bar"></div><div class="mt-pill" hidden></div><div class="mt-aud" aria-hidden="true"></div>`;
+      <div class="mt-main"><div class="mt-stage"></div><div class="mt-draw" hidden></div><div class="mt-rx" hidden></div><aside class="mt-side" hidden></aside></div><div class="mt-bar"></div><div class="mt-pill" hidden></div><div class="mt-aud" aria-hidden="true"></div>`;
     document.body.appendChild(el); document.documentElement.classList.add('nfmeet-open');
     const $ = s => el.querySelector(s);
     const set = (node, html) => { if (node && node._h !== html) { node.innerHTML = html; node._h = html; return true; } return false; };
     const clock = () => { const s = Math.floor((Date.now() - U.t0) / 1000); return (s >= 3600 ? Math.floor(s / 3600) + ':' : '') + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
-    const timer = setInterval(() => { el.querySelectorAll('.mt-time,.mt-clk').forEach(t => { t.textContent = clock(); }); }, 1000);
+    const timer = setInterval(() => { el.querySelectorAll('.mt-time,.mt-clk').forEach(t => { t.textContent = clock(); }); if (!U.min) inkAll(); }, 1000);
     const ini = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase();
-    const meId = () => (st.me && st.me.id) || 'me';
+    const phone = () => /iPhone|iPad|Android/i.test(navigator.userAgent);
+    /* what can be drawn on: the whiteboard, my shared screen, everybody else's shared screen */
+    const drawables = () => (st.board ? ['board'] : []).concat(st.screen ? [meId()] : [], [...st.peers.values()].filter(p => p.screen).map(p => p.id));
+    const exists = id => id === 'board' ? !!st.board : id === meId() || st.peers.has(id);
     function tileEl(id) {
       let t = U.tiles.get(id); if (t) return t;
-      t = document.createElement('div'); t.className = 'mt-tile'; t.dataset.pid = id; t.innerHTML = '<video autoplay playsinline muted></video><span class="mt-av"></span><div class="mt-ov"></div>';
-      t.firstChild.muted = true; U.tiles.set(id, t); return t;
+      t = document.createElement('div'); t.className = 'mt-tile'; t.dataset.pid = id; t.innerHTML = '<video autoplay playsinline muted></video><span class="mt-av"></span><canvas class="mt-ink" hidden></canvas><div class="mt-ov"></div><div class="mt-fx"></div>';
+      const v = t.querySelector('video'); v.muted = true; v.addEventListener('resize', () => paint()); v.addEventListener('loadedmetadata', () => paint()); U.tiles.set(id, t); return t;
+    }
+    function boardEl() {
+      let t = U.tiles.get('board'); if (t) return t;
+      t = document.createElement('div'); t.className = 'mt-tile mt-board'; t.dataset.pid = 'board'; t.innerHTML = '<canvas class="mt-ink bd"></canvas><div class="mt-ov"></div><div class="mt-fx"></div>'; U.tiles.set('board', t); return t;
+    }
+    /* the picture inside a tile (screens are shown whole — «contain» — so the drawing sits on the same spot for everybody) */
+    function crect(t, sid) {
+      const W = t.clientWidth, H = t.clientHeight; if (!W || !H) return null; let ar = 16 / 9;
+      if (sid !== 'board') { const v = t.querySelector('video'); if (v && v.videoWidth && v.videoHeight) ar = v.videoWidth / v.videoHeight; }
+      let w = W, h = W / ar; if (h > H) { h = H; w = H * ar; } return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+    }
+    function inkTile(t, sid, force) {
+      const cv = t.querySelector('.mt-ink'); if (!cv) return; if (!sid) { if (!cv.hidden) cv.hidden = true; cv.classList.remove('on'); return; }
+      const r = crect(t, sid); if (!r) return; cv.hidden = false; cv.classList.toggle('on', U.draw === sid);
+      const dpr = Math.min(2, window.devicePixelRatio || 1); const W = Math.max(1, Math.round(r.w * dpr)), H = Math.max(1, Math.round(r.h * dpr));
+      const list = st.ink[sid] || []; const live = U.live && U.live.sid === sid ? U.live.s : null; const now = Date.now(); const mid = meId();
+      let len = 0, dn = 0, lab = false; for (const x of list) { len += x.p.length; if (x.done) dn++; if (x.by !== mid && (!x.done || now - (x.at || 0) < 2500)) lab = true; }
+      const sig = `${Math.round(r.x)},${Math.round(r.y)},${W},${H}|${list.length},${len},${dn},${list.length ? list[list.length - 1].id : ''}|${live ? live.p.length + live.c + live.t : '-'}|${lab ? Math.floor(now / 500) : 0}`;
+      if (!force && cv._sig === sig) return; cv._sig = sig;
+      cv.style.left = r.x + 'px'; cv.style.top = r.y + 'px'; cv.style.width = r.w + 'px'; cv.style.height = r.h + 'px'; if (cv.width !== W) cv.width = W; if (cv.height !== H) cv.height = H;
+      const cx = cv.getContext('2d'); cx.clearRect(0, 0, W, H); inkDraw(cx, live ? list.concat([Object.assign({ by: mid, done: false }, live)]) : list, W, H, mid, true);
+    }
+    function inkAll() { U.tiles.forEach((t, id) => { if (!t.isConnected) return; const sid = id === 'board' ? 'board' : (id === meId() ? (st.screen ? id : '') : ((st.peers.get(id) || {}).screen ? id : '')); inkTile(t, sid); }); }
+    function tileTools(id, drawable) {
+      const pinned = U.pin === id;
+      return `<div class="mt-tb"><button type="button" class="mt-pinb ${pinned ? 'on' : ''}" data-mt="pin" data-k="${esc(id)}" title="${esc(pinned ? tx('unpin') : tx('pin'))}" aria-label="${esc(pinned ? tx('unpin') : tx('pin'))}">${IC.pin}</button>${drawable && U.draw !== id && st.admitted ? `<button type="button" class="mt-drb" data-mt="drawon" data-k="${esc(id)}" title="${esc(tx('draw'))}">${IC.pen}<span>${esc(tx('draw'))}</span></button>` : ''}</div>`;
     }
     function fillTile(t, p, me) {
-      const v = t.firstChild; const s = me ? (st.screen || st.local) : p.stream;
+      const v = t.querySelector('video'); const s = me ? (st.screen || st.fxStream || st.local) : p.stream; const id = me ? meId() : p.id;
       if (s && v.srcObject !== s) { v.srcObject = s; v.play().catch(() => {}); }
+      const scr = me ? !!st.screen : !!p.screen;
       const vid = !!s && s.getVideoTracks().some(x => x.readyState === 'live') && (me ? (st.cam || !!st.screen) : (p.cam || p.screen));
-      v.hidden = !vid; t.classList.toggle('me', !!me); t.classList.toggle('mirror', !!me && !st.screen); t.classList.toggle('talk', !!st.speaking && st.speaking === (me ? meId() : p.id));
-      const av = t.children[1]; av.hidden = vid; const nm = me ? (core.o.me.name || T.you) : p.name; const i2 = ini(nm); if (av.textContent !== i2) av.textContent = i2;
+      v.hidden = !vid; t.classList.toggle('me', !!me); t.classList.toggle('mirror', !!me && !st.screen); t.classList.toggle('scr', scr); t.classList.toggle('talk', !!st.speaking && st.speaking === id); t.classList.toggle('spot', st.spot === id);
+      const av = t.querySelector('.mt-av'); av.hidden = vid; const nm = me ? (core.o.me.name || T.you) : p.name; const i2 = ini(nm); if (av.textContent !== i2) av.textContent = i2;
       const muted = me ? !st.mic : !p.mic, hd = me ? st.hand : p.hand;
-      set(t.children[2], `<span class="mt-name"><span>${esc(me ? T.you : p.name)}</span>${(me ? core.o.me.guest : p.guest) ? `<i>${esc(T.guest)}</i>` : ''}${(me ? host : p.host) ? `<i>${esc(T.host)}</i>` : ''}</span>${muted ? `<span class="mt-muted">${IC.micoff}</span>` : ''}${hd ? `<span class="mt-hand">${IC.hand}</span>` : ''}${!me && p.net && p.net !== 'connected' && st.mode === 'mesh' ? `<span class="mt-net">${esc(p.net === 'failed' ? T.connLost : T.connecting)}</span>` : ''}`);
+      set(t.querySelector('.mt-ov'), `<span class="mt-name">${st.spot === id ? IC.star : ''}<span>${esc(me ? T.you : p.name)}</span>${(me ? core.o.me.guest : p.guest) ? `<i>${esc(T.guest)}</i>` : ''}${(me ? host : p.host) ? `<i>${esc(T.host)}</i>` : ''}</span>${muted ? `<span class="mt-muted">${IC.micoff}</span>` : ''}${hd ? `<span class="mt-hand">${IC.hand}</span>` : ''}${!me && p.net && p.net !== 'connected' && st.mode === 'mesh' ? `<span class="mt-net">${esc(p.net === 'failed' ? T.connLost : T.connecting)}</span>` : (st.admitted ? tileTools(id, scr) : '')}`);
+      inkTile(t, scr ? id : '');
+    }
+    function fillBoard(t) {
+      const by = st.board.by === meId() ? T.you : ((st.peers.get(st.board.by) || {}).name || '');
+      set(t.querySelector('.mt-ov'), `<span class="mt-name"><span>${esc(tx('board'))}${by ? ' · ' + esc(by) : ''}</span></span>${tileTools('board', true)}`); inkTile(t, 'board');
     }
     function place(box, tiles) { tiles.forEach((t, i) => { if (box.children[i] !== t) box.insertBefore(t, box.children[i] || null); }); while (box.children.length > tiles.length) box.lastChild.remove(); }
+    /* the big tile: what I draw on › what I pinned › the host's spotlight › the whiteboard › a shared screen */
+    function focusId(ps) {
+      if (U.draw && exists(U.draw)) return U.draw;
+      if (U.pin && exists(U.pin)) return U.pin; if (U.pin) U.pin = '';
+      if (st.spot && exists(st.spot)) return st.spot;
+      if (st.board) return 'board';
+      const sh = ps.find(p => p.screen); return sh ? sh.id : '';
+    }
     function paintStage() {
       const stage = $('.mt-stage'); const ps = [...st.peers.values()].sort((a, b) => (a.at || 0) - (b.at || 0)); const mid = meId();
-      U.tiles.forEach((t, id) => { if (id !== mid && !st.peers.has(id)) { const v = t.firstChild; if (v) v.srcObject = null; t.remove(); U.tiles.delete(id); } });
-      const meT = tileEl(mid); fillTile(meT, null, true); ps.forEach(p => fillTile(tileEl(p.id), p, false));
+      U.tiles.forEach((t, id) => { if (id === mid) return; if (id === 'board' ? !st.board : !st.peers.has(id)) { const v = t.querySelector('video'); if (v) v.srcObject = null; t.remove(); U.tiles.delete(id); } });
+      const meT = tileEl(mid); fillTile(meT, null, true); ps.forEach(p => fillTile(tileEl(p.id), p, false)); const bT = st.board ? boardEl() : null;
+      const fid = focusId(ps); if (fid !== U.lastF) { if (fid) U.layoutManual = false; U.lastF = fid; }
+      const lay = U.layoutManual ? U.layout : (fid ? 'speaker' : 'grid'); U.eff = lay;
       let mode, big = null;
-      if (!st.admitted) mode = 'wait'; else if (!ps.length) mode = 'alone'; else if (U.layout === 'speaker') { mode = 'spk'; big = st.peers.get(st.speaking) || ps.find(p => p.screen) || ps[0]; } else mode = 'grid';
+      if (!st.admitted) mode = 'wait'; else if (!ps.length && !bT) mode = 'alone';
+      else if (lay === 'speaker') { mode = 'spk'; big = fid ? (fid === 'board' ? bT : tileEl(fid)) : tileEl((st.peers.get(st.speaking) || ps.find(p => p.screen) || ps[0] || { id: mid }).id); } else mode = 'grid';
       if (U.mode !== mode) { U.mode = mode; stage.textContent = ''; stage.className = 'mt-stage ' + mode; if (mode === 'wait' || mode === 'alone') stage.innerHTML = '<div class="mt-alone"><div class="mt-slot"></div><p class="mt-note"></p></div>'; else if (mode === 'spk') stage.innerHTML = '<div class="mt-big"></div><div class="mt-strip"></div>'; }
-      if (mode === 'wait' || mode === 'alone') { place(stage.querySelector('.mt-slot'), [meT]); const n = stage.querySelector('.mt-note'); const tx = mode === 'wait' ? T.waitAdmit : (st.hostHere ? T.alone : T.waitHost); if (n.textContent !== tx) n.textContent = tx; }
-      else if (mode === 'spk') { place(stage.querySelector('.mt-big'), [tileEl(big.id)]); place(stage.querySelector('.mt-strip'), ps.filter(p => p !== big).map(p => tileEl(p.id)).concat([meT])); }
-      else { stage.className = 'mt-stage grid n' + Math.min(ps.length + 1, 9); place(stage, ps.map(p => tileEl(p.id)).concat([meT])); }
+      const all = (bT ? [bT] : []).concat(ps.map(p => tileEl(p.id)), [meT]);
+      if (mode === 'wait' || mode === 'alone') { place(stage.querySelector('.mt-slot'), [meT]); const n = stage.querySelector('.mt-note'); const tx2 = mode === 'wait' ? T.waitAdmit : (st.hostHere ? T.alone : T.waitHost); if (n.textContent !== tx2) n.textContent = tx2; }
+      else if (mode === 'spk') { place(stage.querySelector('.mt-big'), [big]); place(stage.querySelector('.mt-strip'), all.filter(t => t !== big)); }
+      else { stage.className = 'mt-stage grid n' + Math.min(all.length, 9); place(stage, all); }
+      if (bT) fillBoard(bT);
+      U.tiles.forEach(t => t.classList.toggle('big', !!t.parentNode && t.parentNode.classList.contains('mt-big')));
       /* a player started while its tile was off screen (waiting room) can stay paused — start every visible one again */
-      U.tiles.forEach(t => { const v = t.firstChild; if (v && v.srcObject && v.paused && t.isConnected && !v.hidden) v.play().catch(() => {}); });
+      U.tiles.forEach(t => { const v = t.querySelector('video'); if (v && v.srcObject && v.paused && t.isConnected && !v.hidden) v.play().catch(() => {}); });
       /* sound: one hidden player per person, kept for the whole meeting */
       const box = $('.mt-aud');
       ps.forEach(p => { let a = U.auds.get(p.id); if (!a) { a = document.createElement('audio'); a.autoplay = true; a.setAttribute('playsinline', ''); box.appendChild(a); U.auds.set(p.id, a); } const n = p.stream.getAudioTracks().length; if (a._n !== n) { a._n = n; a.srcObject = p.stream; a.play().catch(() => {}); } });
       U.auds.forEach((a, id) => { if (!st.peers.has(id)) { a.srcObject = null; a.remove(); U.auds.delete(id); } });
       U.auds.forEach(a => { if (a.paused && a.srcObject && a.srcObject.getAudioTracks().length) a.play().catch(() => {}); });
+      /* quick reactions float up over the sender's tile */
+      const now = Date.now();
+      st.reacts.forEach(r => {
+        const k = r.from + '|' + r.at; if (U.rxSeen.has(k) || now - r.at > 4000) return; U.rxSeen.add(k); const t = U.tiles.get(r.from); if (!t || !t.isConnected) return;
+        const sp = document.createElement('span'); sp.textContent = r.e; sp.style.setProperty('--dx', Math.round(Math.random() * 60 - 30) + 'px'); t.querySelector('.mt-fx').appendChild(sp); setTimeout(() => sp.remove(), 3500);
+      });
+      if (U.rxSeen.size > 300) U.rxSeen = new Set([...U.rxSeen].slice(-100));
     }
+    const fsize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+    const fileH = f => !f ? '' : /^image\/(jpeg|png|webp|gif)$/.test(f.mime) ? `<a class="mt-img" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy"></a>` : `<a class="mt-file" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${IC.clip}<span>${esc(f.name)}</span><i dir="ltr">${esc(fsize(f.size))}</i></a>`;
     function paintSide() {
       const side = $('.mt-side'); side.hidden = !U.panel; if (!U.panel) { side._k = ''; side._h = ''; return; }
       const head = t => `<div class="mt-sh"><b>${esc(t)}</b><button type="button" class="mt-ib" data-mt="panel" aria-label="${esc(T.close || 'x')}">${IC.x}</button></div>`;
       if (U.panel === 'chat') {
-        if (side._k !== 'chat') { side._k = 'chat'; side._h = ''; side.innerHTML = head(T.chat) + `<div class="mt-chat"></div><form class="mt-cin"><input name="t" autocomplete="off" maxlength="1000" enterkeyhint="send" placeholder="${esc(T.typeMsg)}"><button type="submit" class="mt-ib" aria-label="${esc(T.send || T.chat)}">${IC.send}</button></form>`; }
-        const c = side.querySelector('.mt-chat'); if (c._n !== st.chat.length) { c._n = st.chat.length; c.innerHTML = st.chat.map(m => `<div class="mt-msg ${m.me ? 'me' : ''}"><small>${esc(m.me ? T.you : m.name)}</small><span>${esc(m.text)}</span></div>`).join('') || `<p class="mt-empty">${esc(T.noMsgs)}</p>`; c.scrollTop = c.scrollHeight; }
+        if (side._k !== 'chat') { side._k = 'chat'; side._h = ''; side.innerHTML = head(T.chat) + `<div class="mt-chat"></div><form class="mt-cin"><label class="mt-ib mt-att" title="${esc(tx('attach'))}" aria-label="${esc(tx('attach'))}">${IC.clip}<input type="file" name="f"></label><input name="t" autocomplete="off" maxlength="1000" enterkeyhint="send" placeholder="${esc(T.typeMsg)}"><button type="submit" class="mt-ib" aria-label="${esc(T.send || T.chat)}">${IC.send}</button></form>`; }
+        const c = side.querySelector('.mt-chat'); const ck = st.chat.length + '|' + U.upl;
+        if (c._n !== ck) { c._n = ck; c.innerHTML = (st.chat.map(m => `<div class="mt-msg ${m.me ? 'me' : ''}"><small>${esc(m.me ? T.you : m.name)}</small>${m.text ? `<span>${esc(m.text)}</span>` : ''}${fileH(m.f)}</div>`).join('') || (U.upl ? '' : `<p class="mt-empty">${esc(T.noMsgs)}</p>`)) + (U.upl ? `<p class="mt-empty">${esc(tx('uploading'))}</p>` : ''); c.scrollTop = c.scrollHeight; }
+        const at = side.querySelector('.mt-att'); if (at) at.classList.toggle('busy', U.upl);
         U.unread = 0; return;
       }
-      side._k = U.panel; const ps = [...st.peers.values()]; let h = '';
+      side._k = U.panel; const ps = [...st.peers.values()]; let h = ''; const mid = meId();
+      const spotB = id => host ? `<button type="button" class="mt-sb ${st.spot === id ? 'y' : ''}" data-mt="spot" data-k="${esc(id)}" title="${esc(st.spot === id ? tx('unspot') : tx('spot'))}">${esc(st.spot === id ? tx('unspot') : tx('spot'))}</button>` : '';
       if (U.panel === 'people') {
         h = head(T.people + ' (' + (ps.length + 1) + ')')
           + (host && st.waiting.length ? `<div class="mt-wl"><small>${esc(T.waitingJoin)}</small>${st.waiting.map(w => `<div class="mt-wr"><span>${esc(w.name || T.guest)}</span>${w.guest ? `<i>${esc(T.guest)}</i>` : ''}<button type="button" class="mt-sb p" data-mt="admit" data-k="${esc(w.id)}">${esc(T.letIn)}</button><button type="button" class="mt-sb" data-mt="deny" data-k="${esc(w.id)}">${esc(T.refuse)}</button></div>`).join('')}</div>` : '')
-          + `<div class="mt-pl"><div class="mt-pr"><span>${esc(core.o.me.name || '')} (${esc(T.you)})</span>${host ? `<i>${esc(T.host)}</i>` : ''}</div>${ps.map(p => `<div class="mt-pr"><span>${esc(p.name)}</span>${p.guest ? `<i>${esc(T.guest)}</i>` : ''}${p.host ? `<i>${esc(T.host)}</i>` : ''}${p.hand ? IC.hand : ''}${p.mic ? '' : IC.micoff}${host && !p.host ? `<button type="button" class="mt-sb" data-mt="kick" data-k="${esc(p.id)}">${esc(T.remove)}</button>` : ''}</div>`).join('')}</div>`;
-      } else if (U.panel === 'more' && host) {
-        h = head(T.hostMenu) + `<button type="button" class="mt-mi ${st.rec ? 'on' : ''}" data-mt="rec">${IC.rec}<span>${esc(st.rec ? T.recStop : T.recStart)}</span></button><p class="mt-tiny">${esc(T.recNote)}${st.recBusy ? ' · ' + esc(T.sending(st.recBusy)) : ''}</p>
+          + `<div class="mt-pl"><div class="mt-pr">${st.spot === mid ? IC.star : ''}<span>${esc(core.o.me.name || '')} (${esc(T.you)})</span>${host ? `<i>${esc(T.host)}</i>` : ''}${st.admitted ? spotB(mid) : ''}</div>${ps.map(p => `<div class="mt-pr">${st.spot === p.id ? IC.star : ''}<span>${esc(p.name)}</span>${p.guest ? `<i>${esc(T.guest)}</i>` : ''}${p.host ? `<i>${esc(T.host)}</i>` : ''}${p.hand ? IC.hand : ''}${p.mic ? '' : IC.micoff}${spotB(p.id)}${host && !p.host ? `<button type="button" class="mt-sb" data-mt="kick" data-k="${esc(p.id)}">${esc(T.remove)}</button>` : ''}</div>`).join('')}</div>`;
+      } else if (U.panel === 'more' && st.admitted) {
+        const canCloseB = st.board && (st.board.by === mid || host);
+        h = head(tx('more'))
+          + `<button type="button" class="mt-mi ${st.fx ? 'act' : ''}" data-mt="blur" ${st.fxBusy ? 'disabled' : ''}>${IC.blur}<span>${esc(st.fxBusy ? tx('blurBusy') : st.fx ? tx('blurOff') : tx('blur'))}</span></button>`
+          + (!st.board ? `<button type="button" class="mt-mi" data-mt="boardopen">${IC.board}<span>${esc(tx('boardOpen'))}</span></button>` : canCloseB ? `<button type="button" class="mt-mi act" data-mt="boardclose">${IC.board}<span>${esc(tx('boardClose'))}</span></button>` : '')
+          + (drawables().length ? `<button type="button" class="mt-mi" data-mt="shot">${IC.shot}<span>${esc(tx('shot'))}</span></button>` : '')
+          + (opts.onIdea ? `<button type="button" class="mt-mi" data-mt="idea">${IC.idea}<span>${esc(tx('idea'))}</span></button>` : '')
+          + (host ? `<p class="mt-tiny mt-hsec">${esc(T.hostMenu)}</p><button type="button" class="mt-mi ${st.rec ? 'on' : ''}" data-mt="rec">${IC.rec}<span>${esc(st.rec ? T.recStop : T.recStart)}</span></button><p class="mt-tiny">${esc(T.recNote)}${st.recBusy ? ' · ' + esc(T.sending(st.recBusy)) : ''}</p>
           <button type="button" class="mt-mi" data-mt="muteall">${IC.micoff}<span>${esc(T.muteAll)}</span></button>
           ${opts.onCopy ? `<button type="button" class="mt-mi" data-mt="copy">${IC.link}<span>${esc(T.copyLink)}</span></button>` : ''}${opts.onWa ? `<button type="button" class="mt-mi" data-mt="wa">${IC.wa}<span>${esc(T.waLink)}</span></button>` : ''}
-          <button type="button" class="mt-mi mt-red" data-mt="end">${IC.leave}<span>${esc(T.endAll)}</span></button>`;
+          <button type="button" class="mt-mi mt-red" data-mt="end">${IC.leave}<span>${esc(T.endAll)}</span></button>` : '');
       } else if (U.panel === 'leave' && host) {
         h = head(T.leave) + `<button type="button" class="mt-mi" data-mt="leaveonly">${IC.leave}<span>${esc(T.leaveOnly)}</span></button><button type="button" class="mt-mi mt-red" data-mt="end">${IC.x}<span>${esc(T.endAll)}</span></button>`;
       } else { U.panel = ''; side.hidden = true; return; }
       set(side, h);
     }
+    function paintTools() {
+      const bar = $('.mt-draw'); if (U.draw && !drawables().includes(U.draw)) { U.draw = ''; U.live = null; }
+      bar.hidden = !U.draw; if (U.draw) {
+        const own = core.ink.owner(U.draw) === meId() || host;
+        set(bar, INK_C.map(c => `<button type="button" class="mt-sw ${U.color === c ? 'on' : ''}" data-mt="color" data-k="${c}" style="--c:${c}" aria-label="${c}"></button>`).join('') + '<i class="mt-sep"></i>'
+          + INK_T.map(k => `<button type="button" class="mt-tl ${U.tool === k ? 'on' : ''}" data-mt="tool" data-k="${k}" title="${esc(tx(k))}" aria-label="${esc(tx(k))}">${IC[k]}</button>`).join('') + '<i class="mt-sep"></i>'
+          + `<button type="button" class="mt-tl" data-mt="undo" title="${esc(tx('undo'))}" aria-label="${esc(tx('undo'))}">${IC.undo}</button>${own ? `<button type="button" class="mt-tl" data-mt="clear" title="${esc(tx('clearAll'))}" aria-label="${esc(tx('clearAll'))}">${IC.trash}</button>` : ''}<button type="button" class="mt-tl" data-mt="shot" title="${esc(tx('shot'))}" aria-label="${esc(tx('shot'))}">${IC.shot}</button><button type="button" class="mt-sb p" data-mt="drawoff">${esc(tx('drawDone'))}</button>`);
+      }
+      const rx = $('.mt-rx'); if (!st.admitted) U.rx = false; rx.hidden = !U.rx;
+      if (U.rx) set(rx, `<button type="button" class="mt-rh ${st.hand ? 'on' : ''}" data-mt="hand">${IC.hand}<span>${esc(st.hand ? tx('handDown') : tx('hand'))}</span></button>` + REACTS.map(e => `<button type="button" class="mt-re" data-mt="emo" data-k="${e}" aria-label="${e}">${e}</button>`).join(''));
+    }
     function paint() {
       if (U.closed) return;
       el.classList.toggle('min', U.min); document.documentElement.classList.toggle('nfmeet-min', U.min);
       const title = (opts.title && opts.title()) || ''; const tt = $('.mt-title'); if (tt.textContent !== title) tt.textContent = title;
-      $('.mt-rec').hidden = !st.rec; $('.mt-mode').textContent = st.mode === 'sfu' ? 'Cloudflare' : ''; set($('[data-mt="layout"]'), U.layout === 'grid' ? IC.speaker : IC.grid);
+      $('.mt-rec').hidden = !st.rec; $('.mt-mode').textContent = st.mode === 'sfu' ? 'Cloudflare' : '';
       [...st.peers.values()].forEach(p => { if (!U.seen.has(p.id)) U.seen.set(p.id, { id: p.id, name: p.name, guest: !!p.guest, wid: p.wid || '', at: Date.now() }); });
       if (st.err === 'media' && !U.warned) { U.warned = true; opts.toast && opts.toast(T.noMedia, 'err'); }
       const pill = $('.mt-pill'); pill.hidden = !U.min;
       if (U.min) { const sp = st.peers.get(st.speaking); if (set(pill, `<span class="mt-dot"></span><b>${esc(title)}</b><span class="mt-clk" dir="ltr"></span>${sp ? `<small>${esc(sp.name)}</small>` : ''}${st.rec ? '<span class="mt-recd"></span>' : ''}<button type="button" class="mt-ib" data-mt="max" aria-label="${esc(T.expand)}">${IC.max}</button><button type="button" class="mt-ib mt-red" data-mt="leave" aria-label="${esc(T.leave)}">${IC.leave}</button>`)) pill.querySelector('.mt-clk').textContent = clock(); return; }
-      paintStage(); paintSide();
-      const shareOk = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !/iPhone|iPad|Android/i.test(navigator.userAgent) && st.admitted;
+      paintTools(); paintStage(); paintSide(); set($('[data-mt="layout"]'), U.eff === 'speaker' ? IC.grid : IC.speaker);
+      const shareOk = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !phone() && st.admitted;
       const b = (k, ic, t, on, cls) => `<button type="button" class="mt-b ${on ? 'on' : ''} ${cls || ''}" data-mt="${k}" title="${esc(t)}" aria-label="${esc(t)}">${ic}<span>${esc(t)}</span></button>`;
-      const wn = host ? st.waiting.length : 0;
+      const wn = host ? st.waiting.length : 0; const dr = drawables();
       set($('.mt-bar'), b('mic', st.mic ? IC.mic : IC.micoff, st.mic ? T.mic : T.muted, false, st.mic ? '' : 'off') + b('cam', st.cam ? IC.cam : IC.camoff, T.camera, false, st.cam ? '' : 'off')
-        + (shareOk ? b('share', IC.screen, T.share, !!st.screen) : '') + (st.admitted ? b('hand', IC.hand, T.hand, st.hand) : '')
+        + (shareOk ? b('share', IC.screen, T.share, !!st.screen) : '') + (st.admitted && dr.length ? b('draw', IC.pen, tx('draw'), !!U.draw) : '')
+        + (st.admitted ? b('react', st.hand ? IC.hand : IC.smile, st.hand ? T.hand : tx('react'), U.rx, st.hand ? 'hd' : '') : '')
         + (st.admitted ? `<span class="mt-bw">${b('chat', IC.chat, T.chat, U.panel === 'chat')}${U.unread ? `<i class="mt-n">${U.unread}</i>` : ''}</span><span class="mt-bw">${b('people', IC.people, T.people, U.panel === 'people')}${wn ? `<i class="mt-n warn">${wn}</i>` : ''}</span>` : '')
-        + (host ? (opts.onCopy && !/iPhone|Android/i.test(navigator.userAgent) ? b('copy', IC.link, T.invite || T.link, false) : '') + b('more', IC.more, T.more, U.panel === 'more') : (opts.onCopy && st.admitted ? b('copy', IC.link, T.link, false) : ''))   /* v7.64: the host sees «Invite» (copy the guest link) on the bar, not only under «More» */
+        + (host ? (opts.onCopy && !/iPhone|Android/i.test(navigator.userAgent) ? b('copy', IC.link, T.invite || T.link, false) : '') : (opts.onCopy && st.admitted ? b('copy', IC.link, T.link, false) : ''))   /* v7.64: the host sees «Invite» (copy the guest link) on the bar, not only under «More» */
+        + (st.admitted ? b('more', IC.more, tx('more'), U.panel === 'more') : '')   /* v7.66: «More» for everybody (blur, whiteboard, screenshot); the host's items under it */
         + b('leave', IC.leave, T.leave, false, 'mt-red'));
     }
     function close() {
-      if (U.closed) return; U.closed = true; clearInterval(timer);
-      U.tiles.forEach(t => { const v = t.firstChild; if (v) v.srcObject = null; }); U.auds.forEach(a => { a.srcObject = null; });
+      if (U.closed) return; U.closed = true; clearInterval(timer); document.removeEventListener('keydown', onKey); window.removeEventListener('resize', onRz);
+      U.tiles.forEach(t => { const v = t.querySelector('video'); if (v) v.srcObject = null; }); U.auds.forEach(a => { a.srcObject = null; });
       el.remove(); document.documentElement.classList.remove('nfmeet-open', 'nfmeet-min');
     }
     function chat() { if (U.panel !== 'chat') U.unread++; paint(); }
@@ -46363,14 +46770,91 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       paint();
     }
     const ask = (m, ok) => (opts.confirm ? opts.confirm(m, ok) : Promise.resolve(window.confirm(m)));
+    const toast = (m, k) => { if (opts.toast) opts.toast(m, k); };
+    /* ---------- screenshot: the shared screen (or the whiteboard) with the drawing, full size ---------- */
+    async function shot(sid) {
+      const t = sid && U.tiles.get(sid); if (!t) { toast(tx('noShare'), 'err'); return; }
+      let w0 = 1600, h0 = 900, src = null;
+      if (sid !== 'board') { src = t.querySelector('video'); if (!src || !src.videoWidth) { toast(tx('noShare'), 'err'); return; } w0 = src.videoWidth; h0 = src.videoHeight; }
+      const k = Math.min(1, 2560 / Math.max(w0, h0)); const cw = Math.round(w0 * k), chh = Math.round(h0 * k);
+      const cv = document.createElement('canvas'); cv.width = cw; cv.height = chh; const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cw, chh);
+      if (src) cx.drawImage(src, 0, 0, cw, chh); inkDraw(cx, st.ink[sid] || [], cw, chh, meId(), false);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/png')); if (!blob) { toast(tx('noShare'), 'err'); return; }
+      t.classList.remove('mt-flash'); void t.offsetWidth; t.classList.add('mt-flash');
+      const d = new Date(); const p2 = n => String(n).padStart(2, '0'); const name = `meeting-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.png`;
+      try { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); } catch (e) { /* download blocked */ }
+      let saved = false; if (opts.onShot) { try { saved = !!(await opts.onShot(blob, name)); } catch (e) { saved = false; } }
+      toast(saved ? tx('shotSaved') : tx('shotDl'));
+    }
+    const shotSid = () => { const dr = drawables(); return U.draw || (dr.includes(U.lastF) ? U.lastF : dr[0]) || ''; };
+    /* ---------- chat: a picture (made smaller) or a file ---------- */
+    async function shrink(file) {
+      if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type || '') || (file.size < 700 * 1024 && /jpeg|png|webp/i.test(file.type))) return file;
+      try {
+        const bm = await createImageBitmap(file); const k = Math.min(1, 2048 / Math.max(bm.width, bm.height)); const cv = document.createElement('canvas'); cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
+        const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bm, 0, 0, cv.width, cv.height);
+        const bl = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85)); if (!bl) return file; return new File([bl], String(file.name || 'photo').replace(/\.[A-Za-z0-9]+$/, '') + '.jpg', { type: 'image/jpeg' });
+      } catch (e) { return file; }
+    }
+    async function attach(file, input) {
+      if (!file || U.upl) return; U.upl = true; paint();
+      try {
+        const f2 = await shrink(file); if (f2.size > 4 * 1024 * 1024) { toast(tx('fileBig'), 'err'); return; }
+        const f = await core.upload(f2); const txt = input ? input.value : ''; core.chat(txt, f); if (input) input.value = '';
+      } catch (e) { toast(e && e.code === 'big' ? tx('fileBig') : tx('upFail'), 'err'); }
+      finally { U.upl = false; paint(); }
+    }
+    /* ---------- drawing with the mouse, a finger or the Apple Pencil ---------- */
+    const ptOf = (cv, e) => { const r = cv.getBoundingClientRect(); const c = v => Math.max(0, Math.min(10000, Math.round(v))); return [c((e.clientX - r.left) / Math.max(1, r.width) * 10000), c((e.clientY - r.top) / Math.max(1, r.height) * 10000)]; };
+    el.addEventListener('pointerdown', e => {
+      const cv = e.target && e.target.closest && e.target.closest('.mt-ink.on'); if (!cv || !U.draw || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      const t = cv.closest('.mt-tile'); if (!t || (t.dataset.pid !== U.draw)) return; e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* old browser */ }
+      U.live = { sid: U.draw, s: { id: rid(10), t: U.tool, c: U.color, p: ptOf(cv, e) }, cv, t, pid: e.pointerId, last: 0 }; inkTile(t, U.draw, true);
+    });
+    el.addEventListener('pointermove', e => {
+      const L = U.live; if (!L || e.pointerId !== L.pid) return; e.preventDefault();
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e]; const p = L.s.p;
+      for (const ce of (evs.length ? evs : [e])) { const [x, y] = ptOf(L.cv, ce); if (L.s.t === 'arrow') { p.length = 2; p.push(x, y); continue; } const n = p.length; if (Math.abs(p[n - 2] - x) + Math.abs(p[n - 1] - y) < 12) continue; p.push(x, y); }
+      if (p.length >= 2990) { core.ink.stroke(L.sid, L.s, true); L.s = { id: rid(10), t: L.s.t, c: L.s.c, p: p.slice(-2) }; L.last = 0; }
+      inkTile(L.t, L.sid, true); const now = Date.now(); if (now - L.last > (L.s.p.length > 1200 ? 300 : 120)) { L.last = now; core.ink.stroke(L.sid, L.s, false); }
+    });
+    const penUp = e => { const L = U.live; if (!L || e.pointerId !== L.pid) return; U.live = null; const p = L.s.p; if (p.length === 2) p.push(p[0], p[1]); if (!(L.s.t === 'arrow' && p[0] === p[2] && p[1] === p[3])) core.ink.stroke(L.sid, L.s, true); inkTile(L.t, L.sid, true); };
+    el.addEventListener('pointerup', penUp); el.addEventListener('pointercancel', penUp);
+    const onKey = e => { if (!U.draw || U.closed) return; if (e.key === 'Escape') { U.draw = ''; paint(); } else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); core.ink.undo(U.draw); } };
+    document.addEventListener('keydown', onKey);
+    let rzT = 0; const onRz = () => { clearTimeout(rzT); rzT = setTimeout(() => paint(), 120); }; window.addEventListener('resize', onRz);
     el.addEventListener('click', async e => {
+      if (U.rx && !e.target.closest('.mt-rx,[data-mt="react"]')) { U.rx = false; paint(); }
       const bt = e.target.closest('[data-mt]'); if (!bt || !el.contains(bt)) return; e.preventDefault(); const k = bt.dataset.mt, a = bt.dataset.k || '';
       if (k === 'min') { U.min = true; return paint(); } if (k === 'max') { U.min = false; return paint(); }
-      if (k === 'layout') { U.layout = U.layout === 'grid' ? 'speaker' : 'grid'; return paint(); }
+      if (k === 'layout') { U.layout = U.eff === 'speaker' ? 'grid' : 'speaker'; U.layoutManual = true; return paint(); }
       if (k === 'mic') return core.setMic(!st.mic); if (k === 'cam') return core.setCam(!st.cam);
       if (k === 'share') { const ok = await core.share(!st.screen); if (!ok && opts.toast) opts.toast(T.shareFail, 'err'); return; }
-      if (k === 'hand') return core.hand(!st.hand);
-      if (k === 'chat' || k === 'people' || k === 'more') { U.panel = U.panel === k ? '' : k; paint(); if (U.panel === 'chat' && !/iPhone|iPad|Android/i.test(navigator.userAgent)) { const i = el.querySelector('.mt-cin input'); if (i) i.focus(); } return; }
+      if (k === 'hand') { core.hand(!st.hand); U.rx = false; return paint(); }
+      if (k === 'react') { U.rx = !U.rx; return paint(); }
+      if (k === 'emo') { core.react(a); U.rx = false; return paint(); }
+      if (k === 'pin') { U.pin = U.pin === a ? '' : a; U.layoutManual = false; return paint(); }
+      if (k === 'spot') { await core.spot(st.spot === a ? '' : a); return paint(); }
+      if (k === 'drawon' || k === 'draw') {
+        if (k === 'draw' && U.draw) { U.draw = ''; return paint(); }
+        const dr = drawables(); const sid = k === 'drawon' ? a : (dr.includes(U.lastF) ? U.lastF : dr[0]); if (!sid || !dr.includes(sid)) return;
+        U.draw = sid; U.layoutManual = false; if (window.innerWidth <= 760) U.panel = ''; return paint();
+      }
+      if (k === 'drawoff') { U.draw = ''; return paint(); }
+      if (k === 'color') { if (INK_C.includes(a)) U.color = a; return paint(); }
+      if (k === 'tool') { if (INK_T.includes(a)) U.tool = a; return paint(); }
+      if (k === 'undo') { if (U.draw) core.ink.undo(U.draw); return; }
+      if (k === 'clear') { if (U.draw && await ask(T.clearQ || tx('clearAll') + '?', tx('clearAll'))) core.ink.clear(U.draw); return; }
+      if (k === 'shot') { U.panel = U.panel === 'more' ? '' : U.panel; paint(); return shot(shotSid()); }
+      if (k === 'boardopen') { if (core.boardOpen()) { U.panel = ''; U.draw = 'board'; } return paint(); }
+      if (k === 'boardclose') { core.boardClose(); if (U.draw === 'board') U.draw = ''; return paint(); }
+      if (k === 'blur') {
+        if (st.fx) { await core.setFx(false); return paint(); }
+        if (!st.cam) { toast(tx('noCam'), 'err'); return; }
+        const ok = await core.setFx(true); if (!ok) toast(tx('blurFail') + (/iPhone|iPad/i.test(navigator.userAgent) && T.blurIos ? ' — ' + T.blurIos : ''), 'err'); return paint();
+      }
+      if (k === 'idea') { if (opts.onIdea) { U.panel = ''; opts.onIdea(); } return; }
+      if (k === 'chat' || k === 'people' || k === 'more') { U.panel = U.panel === k ? '' : k; paint(); if (U.panel === 'chat' && !phone()) { const i = el.querySelector('.mt-cin input[name=t]'); if (i) i.focus(); } return; }
       if (k === 'panel') { U.panel = ''; return paint(); }
       if (k === 'admit') { bt.disabled = true; const ok = await core.admit(a); if (!ok && opts.toast) opts.toast(T.admitFail, 'err'); bt.disabled = false; return; }
       if (k === 'deny') return core.deny(a);
@@ -46382,10 +46866,11 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
       if (k === 'leaveonly') { await core.leave(); close(); opts.onLeave && opts.onLeave(); return; }
       if (k === 'leave') { if (host && st.admitted) { U.min = false; U.panel = 'leave'; return paint(); } await core.leave(); close(); opts.onLeave && opts.onLeave(); }
     });
-    el.addEventListener('submit', e => { const f = e.target.closest('.mt-cin'); if (!f) return; e.preventDefault(); const i = f.querySelector('input'); if (i.value.trim()) { core.chat(i.value); i.value = ''; } });
-    return { el, U, paint, chat, event, close, clock };
+    el.addEventListener('change', e => { const i = e.target; if (!i || !i.matches || !i.matches('.mt-att input[type=file]')) return; const f = i.files && i.files[0]; i.value = ''; attach(f, el.querySelector('.mt-cin input[name=t]')); });
+    el.addEventListener('submit', e => { const f = e.target.closest('.mt-cin'); if (!f) return; e.preventDefault(); const i = f.querySelector('input[name=t]'); if (i.value.trim()) { core.chat(i.value); i.value = ''; } });
+    return { el, U, paint, chat, event, close, clock, shot };
   }
-  window.NFMeetCore = { create, ui, eph, passOk, call, rid, wav, thumb, FN, IC, esc: escH };
+  window.NFMeetCore = { create, ui, eph, passOk, call, rid, wav, thumb, FN, IC, esc: escH, REACTS, INK_C, _seg: segLoad };
 })();
 /* MEET-CORE-END */
 /* =====================================================================
@@ -46460,8 +46945,18 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
         <div class="small ink2 mtinv">${esc(L('المعزومين:', 'Invited:'))} <span class="notr">${esc(inv.join('، ') || '—')}</span></div></div>
       ${showSum ? summaryHTML(m) : (m.status === 'ended' && host && m.rec ? `<div class="card"><h3>${esc(L('الملخص', 'Summary'))}</h3><p class="small ink2">${esc(L('الاجتماع اتسجّل — اعمل الملخص: النقط والقرارات والمهام.', 'The meeting was recorded — make the summary: points, decisions and tasks.'))}</p><button type="button" class="btn p" data-action="mtSum" data-arg="${esc(m.id)}">${esc(L('اعمل الملخص', 'Make the summary'))}</button></div>` : '')}
       ${host && m.status === 'ended' && m.rec ? `<div class="card"><div class="cardhead"><h3>${esc(L('الكلام مكتوب', 'The transcript'))}</h3><div class="grow"></div><button type="button" class="btn sm" data-action="mtLines" data-arg="${esc(m.id)}">${esc(L('اعرضه', 'Show it'))}</button></div><div id="mtlines"></div></div>` : ''}
-      ${(m.chat || []).length && (host || attended(m)) ? `<div class="card"><h3>${esc(L('شات الاجتماع', 'Meeting chat'))}</h3>${(m.chat || []).map(c => `<div class="mtcl"><b class="notr">${esc(c.name || '')}</b> <span class="notr">${esc(c.text || '')}</span></div>`).join('')}</div>` : ''}
+      ${host || attended(m) ? mediaHTML(m) : ''}
+      ${(m.chat || []).length && (host || attended(m)) ? `<div class="card"><h3>${esc(L('شات الاجتماع', 'Meeting chat'))}</h3>${(m.chat || []).map((c, i) => `<div class="mtcl"><b class="notr">${esc(c.name || '')}</b> <span class="notr">${esc(c.text || '')}</span>${c.f && c.f.path ? ` <button type="button" class="btn xs ghost mtfl" data-action="mtFile" data-arg="${esc(m.id + ':' + i)}">${IC.clip}<span class="notr">${esc(c.f.name || L('ملف', 'File'))}</span></button>` : ''}</div>`).join('')}</div>` : ''}
       ${host ? `<div class="mtfoot"><button type="button" class="btn ghost d" data-action="mtDel" data-arg="${esc(m.id)}">${esc(L('امسح الاجتماع', 'Delete the meeting'))}</button></div>` : ''}</div>`;
+  }
+  /* v7.66: «Screenshots and files» — screenshots taken in the meeting (saved as files) + pictures / files sent in its chat */
+  function mediaHTML(m) {
+    const shots = list('files').filter(f => f && f.meetingId === m.id && !f.deleted).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const att = (m.chat || []).map((c, i) => ({ c, i })).filter(x => x.c.f && x.c.f.path);
+    if (!shots.length && !att.length) return '';
+    return `<div class="card"><h3>${esc(L('لقطات وملفات الاجتماع', 'Meeting screenshots and files'))}</h3>
+      ${shots.length ? `<div class="mtshots">${shots.map(f => `<button type="button" class="mtshot" data-action="fileOpen" data-arg="${esc(f.id)}" title="${esc(f.name || '')}">${f.thumb ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">` : `<span>${IC.shot || ''}</span>`}</button>`).join('')}</div>` : ''}
+      ${att.length ? `<div class="mtatt">${att.map(x => `<button type="button" class="btn sm ghost mtfl" data-action="mtFile" data-arg="${esc(m.id + ':' + x.i)}">${IC.clip}<span class="notr">${esc(x.c.f.name || '')}</span><small class="notr">${esc(x.c.name || '')}</small></button>`).join('')}</div>` : ''}</div>`;
   }
   function summaryHTML(m) {
     const s = m.summary || {}; const host = mine(m) || isAdmin(); const made = new Set((m.tasksMade || []).map(t => t.i));
@@ -46577,7 +47072,15 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     ended: L('صاحب الاجتماع قفله', 'The host ended the meeting'), kicked: L('اتشلت من الاجتماع', 'You were removed from the meeting'), mutedByHost: L('صاحب الاجتماع كتم الكل — افتح المايك لما تحب تتكلم', 'The host muted everybody — unmute when you want to talk'),
     recOn: L('الاجتماع بيتسجّل دلوقتي', 'The meeting is being recorded now'), recOff: L('التسجيل وقف', 'Recording stopped'), nokey: L('التسجيل شغال بس مفتاح تحويل الصوت لكلام مش متضبط', 'Recording is on but the speech-to-text key is not set'),
     denied: L('صاحب الاجتماع مسمحش بدخولك', 'The host did not let you in'), noMedia: L('مفيش إذن للمايك أو الكاميرا — افتحه من إعدادات المتصفح', 'No access to the mic or camera — allow it in the browser settings'), admitted: L('دخلت الاجتماع', 'You are in the meeting'),
-    endQ: L('تقفل الاجتماع للكل؟', 'End the meeting for everybody?'), endOk: L('اقفله', 'End it')
+    endQ: L('تقفل الاجتماع للكل؟', 'End the meeting for everybody?'), endOk: L('اقفله', 'End it'),
+    /* v7.66 — drawing, screenshot, reactions, pin / spotlight, blur, whiteboard, files in the chat */
+    draw: L('ارسم', 'Draw'), drawDone: L('خلصت', 'Done'), undo: L('ارجع خطوة', 'Undo'), clearAll: L('امسح الرسم كله', 'Clear all'), clearQ: L('تمسح الرسم كله من عند الكل؟', 'Clear the whole drawing for everybody?'),
+    pen: L('قلم', 'Pen'), hl: L('هايلايتر', 'Highlighter'), arrow: L('سهم', 'Arrow'),
+    shot: L('سكرين شوت', 'Screenshot'), shotSaved: L('السكرين شوت نزل عندك واتحفظ في صفحة الاجتماع ✓', 'Screenshot downloaded and saved on the meeting page ✓'), shotDl: L('السكرين شوت نزل عندك ✓', 'Screenshot downloaded ✓'), noShare: L('مفيش شاشة معروضة ولا سبورة', 'Nothing is shared and no whiteboard is open'),
+    react: L('ردود', 'React'), handDown: L('نزّل إيدك', 'Lower hand'), pin: L('ثبّت عندي', 'Pin for me'), unpin: L('شيل التثبيت', 'Unpin'), spot: L('ثبّت للكل', 'Spotlight'), unspot: L('شيل التثبيت للكل', 'Remove spotlight'),
+    blur: L('غبّش الخلفية', 'Blur background'), blurOff: L('وقّف التغبيش', 'Stop blur'), blurBusy: L('بيجهّز التغبيش…', 'Getting the blur ready…'), blurFail: L('التغبيش مش شغال على الجهاز ده', 'Background blur does not work on this device'), blurIos: L('على الآيفون جرّب Portrait من مركز التحكم ← Video Effects', 'On the iPhone try Portrait from Control Center → Video Effects'), noCam: L('افتح الكاميرا الأول', 'Turn the camera on first'),
+    board: L('سبورة', 'Whiteboard'), boardOpen: L('افتح سبورة للكل', 'Open a whiteboard for everybody'), boardClose: L('اقفل السبورة', 'Close the whiteboard'), idea: L('لوحة أفكار المشروع', "The project's idea board"),
+    attach: L('ابعت صورة أو ملف', 'Send a picture or a file'), fileBig: L('الملف أكبر من 4 ميجا', 'The file is bigger than 4 MB'), uploading: L('بيبعت…', 'Sending…'), upFail: L('مقدرتش أبعت الملف', 'Could not send the file')
   });
   async function join(id) {
     const m = byId(COL, id); if (!m || !hosted()) return;
@@ -46592,7 +47095,8 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     M.core = NFMeetCore.create({ sb: S.sb, room: m.room, me: { id: r.id, name: (S.session && S.session.name) || '', wid: (S.session && S.session.workerId) || '' }, eph, sig: r.sig, host: !!r.host, hostId: r.hostId, pubKey: r.pubKey, token, sfu: !!r.sfu, video: m.video !== false, rec: !!r.rec,
       onUpdate: () => U && U.paint(), onChat: () => U && U.chat(), onEvent: k => U && U.event(k) });
     U = M.ui = NFMeetCore.ui(M.core, { T: TX(), esc, toast, confirm: confirmDlg, canMin: true, title: () => (byId(COL, m.id) || m).title || '',
-      onCopy: () => ACTIONS.mtCopy(m.id), onWa: () => ACTIONS.mtWa(m.id), onLeave: done, onGone: done, onEnd: finish, onRec: on => { if (on) Store.update(COL, m.id, { rec: true }).catch(() => {}); } });
+      onCopy: () => ACTIONS.mtCopy(m.id), onWa: () => ACTIONS.mtWa(m.id), onLeave: done, onGone: done, onEnd: finish, onRec: on => { if (on) Store.update(COL, m.id, { rec: true }).catch(() => {}); },
+      onShot: (blob, name) => saveShot(m, blob, name), onIdea: SYS === 'stu' && m.link && m.link.kind === 'project' && m.link.id && typeof ACTIONS.stuOpenBoard === 'function' ? () => { U.U.min = true; U.paint(); ACTIONS.stuOpenBoard(m.link.id + ':ideas'); } : null });
     U.paint();
     try {
       if (M.core.st.host && m.status !== 'live') { await call('status', { room: m.room, status: 'live' }); await Store.update(COL, m.id, { status: 'live', startedAt: m.startedAt || nowISO() }); const inv = m.invitees || []; if (inv.length && typeof pushSend === 'function') pushSend(inv, L(`بدأ: ${m.title}`, `Started: ${m.title}`).slice(0, 100), L('الاجتماع بدأ — ادخل دلوقتي', 'The meeting started — join now'), `/#/meetings/${m.id}`, 'meet-' + m.id); }
@@ -46600,12 +47104,31 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     } catch (e) { console.warn('meet join', e); toast(L('مقدرتش أوصل للاجتماع', 'Could not reach the meeting'), 'err'); const c = M.core; U.close(); done(); if (c) c.leave().catch(() => {}); }
   }
   ACTIONS.mtJoin = id => join(id);
+  /* v7.66: a screenshot (shared screen / whiteboard + the drawing) → the meeting page, and the linked project / work order's files */
+  if (typeof FILE_KINDS !== 'undefined' && !FILE_KINDS.meetshot) FILE_KINDS.meetshot = [L('لقطة من اجتماع', 'Meeting screenshot'), 'star'];
+  async function saveShot(m, blob, name) {
+    if (typeof uploadOneBase !== 'function' || !hosted()) return false;
+    try {
+      const d = new Date(); const nm = `${L('لقطة اجتماع', 'Meeting shot')} — ${String(m.title || '').slice(0, 60)} — ${d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: '2-digit', minute: '2-digit' })}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+      const lk = m.link || {}; const file = new File([blob], nm || name, { type: 'image/png' });
+      const doc = await uploadOneBase(file, { kind: 'meetshot', orderId: lk.kind === 'order' ? lk.id : null, note: L(`من اجتماع «${m.title}»`, `From the meeting «${m.title}»`) });
+      const extra = { meetingId: m.id }; if (lk.kind === 'project') extra.projectId = lk.id; if (lk.kind === 'cproject' || lk.kind === 'client') { extra.ownerKind = lk.kind; extra.ownerId = lk.id; }
+      await Store.update('files', doc.id, extra); return true;
+    } catch (e) { console.warn('meet shot', e); return false; }
+  }
+  /* a picture / file sent in the meeting chat: a fresh signed link each time (participants and whoever can read the meeting) */
+  ACTIONS.mtFile = async arg => {
+    const i = String(arg).lastIndexOf(':'); const m = byId(COL, String(arg).slice(0, i)); const c = m && (m.chat || [])[+String(arg).slice(i + 1)]; if (!c || !c.f || !c.f.path) return;
+    const w = window.open('', '_blank'); const r = await call('fileurl', { room: m.room, path: c.f.path, name: c.f.name, download: !/^image\//.test(c.f.mime || '') }).catch(() => ({}));
+    if (!r.url) { if (w) w.close(); toast(L('مقدرتش أفتح الملف', 'Could not open the file'), 'err'); return; }
+    if (w) { try { w.opener = null; } catch (e) { /* ignore */ } w.location.href = r.url; } else location.href = r.url;
+  };
   function done() { M.core = null; M.ui = null; M.m = null; rerender(); }
   async function finish() {
     if (!M.core) return; const m = byId(COL, M.m.id) || M.m; const st = M.core.st; const seen = M.ui.U.seen;
     const att = [...seen.values()].map(p => ({ name: p.name, guest: !!p.guest, wid: p.guest ? '' : (p.wid || (people().find(w => w.name === p.name) || {}).id || ''), at: new Date(p.at).toISOString() }));
     att.unshift({ name: (S.session && S.session.name) || '', wid: (S.session && S.session.workerId) || '', uid: S.sbUser.id, host: true });
-    const chat = st.chat.slice(-300).map(c => ({ name: c.me ? (S.session && S.session.name) || '' : c.name, text: c.text, at: new Date(c.at).toISOString() }));
+    const chat = st.chat.slice(-300).map(c => Object.assign({ name: c.me ? (S.session && S.session.name) || '' : c.name, text: c.text, at: new Date(c.at).toISOString() }, c.f ? { f: { name: c.f.name, size: c.f.size, mime: c.f.mime, path: c.f.path } } : {}));
     const rec = st.rec || !!m.rec || st.recSent > 0; const mins = Math.round((Date.now() - M.ui.U.t0) / 60000);
     await M.core.end().catch(() => {}); M.ui.close();
     try { await Store.update(COL, m.id, { status: 'ended', endedAt: nowISO(), attended: att, chat, rec, minutes: mins }); } catch (e) { console.warn(e); }
@@ -46659,6 +47182,8 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     .mttask select,.mttask input[type=date]{height:32px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:inherit;padding:0 6px}.mtok{color:var(--good,#34c759)}.mtok svg{width:18px;height:18px}
     .mtlines{display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto}.mtline{display:flex;gap:8px;align-items:baseline}.mtt{font-size:11px;color:var(--ink-2);flex:none}.mtline b{flex:none}.mtcl{padding:4px 0}
     .mtfoot{display:flex;justify-content:flex-end}
+    .mtshots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px}.mtshot{border:1px solid var(--line);border-radius:12px;overflow:hidden;padding:0;background:var(--bg,#f2f2f7);aspect-ratio:16/10;cursor:pointer}.mtshot img{width:100%;height:100%;object-fit:cover;display:block}.mtshot span{display:grid;place-items:center;height:100%;opacity:.5}
+    .mtatt{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.mtfl{display:inline-flex;align-items:center;gap:6px;max-width:100%}.mtfl svg{width:15px;height:15px;flex:none}.mtfl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}.mtfl small{color:var(--ink-2)}
     .mtwhen{display:flex;gap:4px;margin-bottom:6px}.mtppl{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:6px;margin-top:6px}
     .mtp{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;cursor:pointer}.mtp:hover{background:var(--line)}.mtp small{color:var(--ink-2);margin-inline-start:auto;font-size:11.5px}.mtchk{display:flex;flex-direction:row;align-items:center;gap:8px}
     /* v7.64: the form gives every input width:100% — the ticks took the whole row and squeezed the names; «With camera» stood on its own line */
@@ -47665,7 +48190,7 @@ function oxFlow(k) {
   const can = v => (typeof canSee !== 'function' || canSee(v));
   const GO = {
     pb: { page: () => (can('money') ? 'money' : homeView()), run: id => { if (!byId('money', id)) return toast(T('الدفعة دي مش متاحة ليك', 'This batch is not available to you'), 'err'); if (ACTIONS.pbOpen) ACTIONS.pbOpen(id); else hl(id); } },
-    ab: { page: () => (can('advpay') ? 'advpay' : homeView()), run: id => { const b = byId('advbatch', id); if (!b) return toast(T('الدفعة دي مش متاحة ليك', 'This batch is not available to you'), 'err'); if (isAdmin() && b.status === 'sent' && ACTIONS.abApprove) ACTIONS.abApprove(id); else hl(id); } },
+    ab: { page: () => (can('advpay') ? 'advpay' : homeView()), run: id => { const b = byId('advbatch', id); if (!b) return toast(T('الدفعة دي مش متاحة ليك', 'This batch is not available to you'), 'err'); if (isAdmin() && b.status === 'sent' && ACTIONS.abApprove) ACTIONS.abApprove(id); else { if (window.nfApShow) nfApShow(id); setTimeout(() => hl(id), 60); } } },   /* v7.66: the advances page has categories — open the one that holds this batch */
     fuel: { page: () => (can('fleet') ? 'fleet' : homeView()), run: id => { if (!byId('fuelfills', id)) return toast(T('التموين ده مش متاح ليك', 'This refuel is not available to you'), 'err'); if (ACTIONS.fuelView) ACTIONS.fuelView(id); } },
   };
   let _go = null;
@@ -49230,7 +49755,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
   /* a finished studio project → its portfolio entry (its final shots), opened for review before publishing */
   ACTIONS.pfFromProject = async pid => {
     if (!canEdit()) return; const p = byId('projects', pid); if (!p) return; const ex = all().find(e => e.projectId === pid); if (ex) { location.hash = '#/portfolio/' + ex.id; return; }
-    const fs = list('files').filter(f => f.projectId === pid && !f.deleted && (String(f.mime || '').startsWith('image/') || f.store === 'thumb') && (f.thumb || f.store === 'sb')).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true }));
+    const fs = list('files').filter(f => f.projectId === pid && !f.deleted && f.kind !== 'meetshot' && (String(f.mime || '').startsWith('image/') || f.store === 'thumb') && (f.thumb || f.store === 'sb')).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true }));
     const fin = fs.filter(f => f.rev === 'Final' || f.kind === 'render'); const use = fin.length ? fin : fs;
     const id = 'pf_' + uid(); await Store.save('portfolio', { id, title: p.name || '', client: (typeof nfDevName === 'function' ? nfDevName(p) : '') || p.client || '', year: String(new Date().getFullYear()), location: p.location || '', type: 'ext', shots: use.map(f => f.id), coverId: use[0] ? use[0].id : null, projectId: pid, published: false, source: 'project', createdAt: nowISO(), updatedAt: nowISO(), by: myW() || (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '' });
     toast(L('اتعمل كمسودة — راجع البيانات واللقطات ودوس «انشر»', 'Made as a draft — check the details and shots, then press «Publish»')); location.hash = '#/portfolio/' + id;
@@ -49272,5 +49797,1454 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
 .pfshots{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.pfs{display:flex;flex-direction:column;gap:6px}.pfsimg{border:0;padding:0;border-radius:14px;overflow:hidden;cursor:zoom-in;background:#0b0d10;aspect-ratio:16/10}.pfsimg img{width:100%;height:100%;object-fit:cover;display:block}.pfsa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pfcov{font-size:11px;color:var(--good-ink,#16a34a)}
 .pfed{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;max-height:50vh;overflow:auto}
 @media (max-width:600px){.pfgrid{grid-template-columns:1fr 1fr;gap:10px}.pfct b{font-size:13px}.pfhero{aspect-ratio:4/3;min-height:220px}.pfshots{grid-template-columns:1fr 1fr}.pfht{inset-inline:14px;bottom:14px}}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.66 — comments on a purchase request / purchase order / new-item request (Mahmoud, 13 Oct, forwarding Bahaa on WhatsApp:
+   «I want to add a comment on the purchase request» — «I want this too»).
+   · a «Comments» card on the purchase page: whoever can open the purchase writes a comment (and a picture); his name and the time;
+   · a notice (push, opens that purchase) to: the one who asked for it / made it, purchasing, whoever's turn it is now in the approval
+     chain, and everybody who already commented — never the writer; no money in the notice text;
+   · factory and construction (where the purchases page exists). Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_POCOM__) return; window.__NF_POCOM__ = 1;
+  if (typeof vPurchaseDetail !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const T = (a, b) => (en() ? b : a);
+  const MONEY = /(\d[\d.,\s]*\s*(جنيه|ج\.?م|EGP|LE|USD|\$|دولار|ريال|SAR|€))|((EGP|USD|SAR|\$|€)\s*\d[\d.,]*)|\d{3,}/gi;
+  const me = () => S.session || {};
+  const myIds = () => [me().id, me().workerId ? 'w:' + me().workerId : null].filter(Boolean).map(String);
+  const can = p => !!p && !!S.session && (typeof canSee !== 'function' || canSee('purchases'));
+  const when = iso => { if (!iso) return ''; const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); try { return same ? d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleString(en() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
+  const ini = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('');
+  function cardHTML(p) {
+    const cs = (p.comments || []).filter(c => c && !c.deleted);
+    return `<div class="card pocom" id="pocom"><div class="cardhead"><h3>${icon('chat')}${esc(T('تعليقات', 'Comments'))}</h3>${cs.length ? `<span class="badge">${cs.length}</span>` : ''}</div>
+      ${cs.length ? `<div class="pocl">${cs.map(c => `<div class="pocm ${myIds().includes(String(c.by)) ? 'me' : ''}"><span class="pocav">${esc(ini(c.byName))}</span><div class="pocb"><div class="poch"><b class="notr">${esc(c.byName || '')}</b><span class="muted tiny">${esc(when(c.at))}</span></div>${c.text ? `<div class="poct notr">${esc(c.text).replace(/\n/g, '<br>')}</div>` : ''}${c.photo && c.photo.thumb ? `<img class="pocimg" src="${esc(c.photo.thumb)}" alt="" data-action="fileOpen" data-arg="${esc(c.photo.fileId || '')}">` : ''}</div></div>`).join('')}</div>` : `<p class="muted small" style="margin:2px 0 8px">${esc(T('مفيش تعليقات لسه — اكتب سؤال أو ملاحظة على الطلب، وكل اللي بيتابعوه هيوصلهم.', 'No comments yet — write a question or a note on this request; everybody following it gets it.'))}</p>`}
+      ${writable() ? `<form class="pocf" data-pocom="${esc(p.id)}"><textarea name="t" rows="2" maxlength="1500" placeholder="${esc(T('اكتب تعليق…', 'Write a comment…'))}"></textarea><div class="row" style="gap:6px;align-items:center"><button type="submit" class="btn sm p">${icon('send')}<span>${esc(T('ابعت', 'Send'))}</span></button><label class="btn sm ghost" title="${esc(T('صورة', 'Picture'))}">${icon('camera')}<span>${esc(T('صورة', 'Picture'))}</span><input type="file" accept="image/*" name="f" hidden></label><span class="pocfn muted tiny"></span></div></form>` : ''}</div>`;
+  }
+  vPurchaseDetail = (base => function (id) {
+    const h = base.apply(this, arguments);
+    try { const p = byId('purchases', id); if (!can(p)) return h; const card = cardHTML(p); const i = h.lastIndexOf('</div>'); return i > 0 ? h.slice(0, i) + card + h.slice(i) : h + card; } catch (e) { console.warn('po comments', e); return h; }
+  })(vPurchaseDetail);
+  /* who hears about a new comment */
+  function audience(p) {
+    const ids = new Set();
+    [p.requestedBy, p.createdBy].filter(Boolean).forEach(x => ids.add(String(x)));
+    (p.comments || []).forEach(c => c && c.by && ids.add(String(c.by)));
+    ids.add('role:purch');
+    try { list('requests').filter(r => r && r.purchaseId === p.id && r.status === 'pending' && Array.isArray(r.chain)).forEach(r => { const rl = r.chain[r.step || 0]; if (rl) ids.add('role:' + rl); }); } catch (e) { /* ignore */ }
+    myIds().forEach(x => ids.delete(x));
+    return [...ids];
+  }
+  async function post(id, text, file) {
+    const p0 = byId('purchases', id); if (!can(p0) || !writable()) return false; text = String(text || '').trim().slice(0, 1500); if (!text && !file) return false;
+    let photo = null;
+    if (file) { try { const doc = await uploadOneBase(file, { kind: 'render', orderId: p0.orderId || null, note: T(`تعليق على ${p0.number || ''}`, `Comment on ${p0.number || ''}`) }); photo = { fileId: doc.id, thumb: doc.thumb || null }; } catch (e) { toast(T('مقدرتش أرفع الصورة', 'Could not upload the picture'), 'err'); if (!text) return false; } }
+    const c = { id: uid(), at: nowISO(), by: me().id || '', byName: me().name || '', text, photo };
+    const p = byId('purchases', id) || p0; const comments = (p.comments || []).concat([c]).slice(-300);
+    await Store.update('purchases', id, { comments, lastCommentAt: c.at });
+    try {
+      const to = audience(Object.assign({}, p, { comments })); const what = p.number || '';
+      const body = (text || T('📷 صورة', '📷 a picture')).replace(MONEY, '…').slice(0, 140);
+      if (to.length && typeof pushSend === 'function') pushSend(to, T(`${c.byName} علّق على ${what}`, `${c.byName} commented on ${what}`).slice(0, 100), body, `/#/purchases/${id}/com`, 'pocom-' + id);
+    } catch (e) { /* ignore */ }
+    return true;
+  }
+  window.nfPoComment = post;
+  document.addEventListener('submit', async e => {
+    const f = e.target.closest && e.target.closest('form[data-pocom]'); if (!f) return; e.preventDefault();
+    const t = f.querySelector('textarea'); const fi = f.querySelector('input[type=file]'); const btn = f.querySelector('button[type=submit]'); if (btn.disabled) return;
+    btn.disabled = true;
+    try { const ok = await post(f.dataset.pocom, t.value, fi.files && fi.files[0]); if (ok) { t.value = ''; fi.value = ''; render(false); setTimeout(() => { const l = document.querySelector('#pocom .pocl'); if (l) l.lastElementChild && l.lastElementChild.scrollIntoView({ block: 'nearest' }); }, 60); } }
+    finally { btn.disabled = false; }
+  });
+  document.addEventListener('change', e => { const i = e.target.closest && e.target.closest('form[data-pocom] input[type=file]'); if (!i) return; const n = i.closest('form').querySelector('.pocfn'); if (n) n.textContent = i.files && i.files[0] ? i.files[0].name : ''; });
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .pocom .cardhead h3{display:flex;align-items:center;gap:6px}.pocom .cardhead h3 svg{width:18px;height:18px}
+    .pocl{display:flex;flex-direction:column;gap:10px;margin:4px 0 10px;max-height:460px;overflow:auto}
+    .pocm{display:flex;gap:8px;align-items:flex-start}.pocav{flex:none;width:30px;height:30px;border-radius:50%;background:var(--surface-2,#eef0f3);display:grid;place-items:center;font-size:12px;font-weight:700}
+    .pocb{flex:1;min-width:0;padding:8px 10px;border-radius:12px;background:var(--surface-2,#f4f5f7)}.pocm.me .pocb{background:var(--accent-soft,rgba(10,132,255,.1))}
+    .poch{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.poct{margin-top:2px;white-space:normal;word-break:break-word;font-size:14px}
+    .pocimg{display:block;margin-top:6px;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);object-fit:cover;cursor:zoom-in}
+    @media (max-width:760px){#pocom{margin-bottom:64px}}
+    .pocf{display:grid;gap:6px}.pocf textarea{width:100%;min-height:56px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:inherit;padding:8px 10px;font:inherit;font-size:16px;resize:vertical}
+    .pocf .btn{display:inline-flex;align-items:center;gap:5px}.pocf .btn svg{width:16px;height:16px}
+  </style>`);
+})();
+/* =====================================================================
+   v7.66 — supply papers (Mahmoud, 13 Oct; brief claude/supply-docs-brief.md):
+   1) the request for quotation sheet: a professional sheet with the full specification and NO prices; pick one or more
+      suppliers and each gets the picture of the sheet + a short message with his name on WhatsApp;
+   2) the purchase order sheet: the sheet with the agreed price per line, sent as a picture to the supplier (or his WhatsApp
+      group) so he prepares and sends his invoice; when the invoice is in, a three-way match — PO ↔ what was really received ↔
+      the invoice (quantities and prices): all equal → «matches ✓»; a difference → the line in red, the owner approves it or
+      returns it to the supplier; a transfer with an unapproved difference asks first;
+   3) the delivery note to the client company: the project's brand on top (lōf / elmen / Ninety Aluminum / Ninety
+      Fabrication), the project and its code, the contract lines with their pictures — pick what goes now («8 of 16 benches»,
+      the warehouse is suggested, never more than what is left), the receiver signs on the paper (photo) or on the phone, then it
+      goes to the company on WhatsApp / e-mail; the project shows «delivered 8 of 16».
+   Everything goes out from the WhatsApp of whoever sends it (purchasing / accounts — Mahmoud: «from the purchasing or the accounts
+   officer's number, each by what he sends»). No permission changes: the same people who handle purchases / deliveries today.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUPPLYDOCS__) return; window.__NF_SUPPLYDOCS__ = 1;
+  if (typeof isStuSys === 'function' && isStuSys()) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const T = (a, b) => (en() ? b : a);
+  const B2 = (ar, enx) => `${ar}<small class="sdx">${enx}</small>`;   /* the sheets are bilingual on paper */
+  const MONEY = /(\d[\d.,\s]*\s*(جنيه|ج\.?م|EGP|LE|USD|\$|دولار|ريال|SAR|€))|((EGP|USD|SAR|\$|€)\s*\d[\d.,]*)/gi;
+  const nm = () => (S.session && S.session.name) || '';
+  const isMobile = () => /iPhone|iPad|Android/i.test(navigator.userAgent);
+  const canShareFiles = () => { try { return !!(navigator.canShare && navigator.share && navigator.canShare({ files: [new File([new Blob(['x'], { type: 'image/png' })], 'x.png', { type: 'image/png' })] })); } catch (e) { return false; } };
+  const dmy = iso => { if (!iso) return '—'; const d = String(iso).slice(0, 10).split('-'); return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : iso; };
+  const num2 = v => (typeof fmtNum === 'function' ? fmtNum(v) : String(v));
+  const money2 = v => (typeof fmtMoney === 'function' ? fmtMoney(v) : String(v));
+  /* the company kit for sheets that are not a brand's (purchasing is the company) */
+  try { if (typeof BRAND_KIT_DEFAULT === 'object' && !BRAND_KIT_DEFAULT.nf) BRAND_KIT_DEFAULT.nf = { name: 'Ninety Fabrication', tagline: 'FABRICATION', ink: '#111111', bg: '#f1f1f1', accent: '#111111', accent2: '#8c877d', font: 'var(--font)', svg: null, icon: null, legal: { company: 'Ninety Fabrication', taxId: '', crn: '', address: 'Fifth Settlement, New Cairo, Egypt', phone: '', email: 'info@oekoplanlandscaping.com' } }; } catch (e) { /* ignore */ }
+  const kitId = b => (typeof BRAND_KIT_DEFAULT === 'object' && b && BRAND_KIT_DEFAULT[b]) ? b : 'nf';
+
+  /* ---------------- the sheet shell + picture + sending ---------------- */
+  function sheet(b, title, right, inner) {
+    const id = kitId(b); const k = typeof brandKit === 'function' ? brandKit(id) : { name: 'Ninety', legal: {} }; const Lg = k.legal || {};
+    const logo = typeof brandLogoHTML === 'function' ? brandLogoHTML(id, 44) : '';
+    return `<div class="sdoc" dir="rtl" lang="ar" style="--sd-ink:${k.ink || '#111'};--sd-bg:${k.bg || '#f1f1f1'};--sd-ac:${k.accent || '#111'}">
+      <div class="sdh"><div class="sdl">${logo}</div><div class="sdt"><div class="sdtt">${title}</div><div class="sdco">${esc(Lg.company || k.name || '')}</div></div><div class="sdr">${right}</div></div>
+      ${inner}
+      <div class="sdf"><span>${esc(Lg.company || k.name || '')}${Lg.address ? ' · ' + esc(Lg.address) : ''}</span><span dir="ltr">${esc([Lg.phone, Lg.email].filter(Boolean).join(' · '))}</span></div></div>`;
+  }
+  const kv = rows => `<div class="sdkv">${rows.filter(r => r && r[1]).map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+  async function toPng(html) {
+    await vendorLoad('snap'); const ms = window.modernScreenshot;
+    const host = document.createElement('div'); host.className = 'sdhost'; host.innerHTML = html; document.body.appendChild(host);
+    try {
+      await Promise.all([...host.querySelectorAll('img')].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; setTimeout(r, 4000); })));
+      const el = host.firstElementChild; const c = await ms.domToCanvas(el, { scale: 2, backgroundColor: '#ffffff', timeout: 6000, font: false });
+      return await new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('png'))), 'image/png'));
+    } finally { host.remove(); }
+  }
+  function download(blob, name) { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+  /* from the sender's own WhatsApp: the phone's share sheet with the picture, or (computer) the picture downloads + the chat opens */
+  async function sendPic(blob, name, phone, text, mode) {
+    if (isMobile() && canShareFiles() && mode !== 'email') {
+      try { await navigator.share({ files: [new File([blob], name, { type: 'image/png' })], text }); return 'share'; } catch (e) { if (e && e.name === 'AbortError') return ''; }
+    }
+    download(blob, name);
+    if (mode === 'email') { location.href = `mailto:${encodeURIComponent(phone || '')}?subject=${encodeURIComponent(name.replace(/\.png$/, ''))}&body=${encodeURIComponent(text)}`; return 'email'; }
+    window.open(phone && typeof waLink === 'function' ? waLink(phone, text) : `https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    return 'wa';
+  }
+  function preview(title, html, extra) {
+    openModal({ title, wide: true, cls: 'sdprevm', footer: `<button type="button" class="btn p" data-action="sdPrint">${icon('print')}${esc(T('طباعة', 'Print'))}</button><button type="button" class="btn" data-action="sdSave">${icon('download')}${esc(T('صورة', 'Picture'))}</button>${extra || ''}<button type="button" class="btn ghost" data-action="closemodal">${esc(T('إغلاق', 'Close'))}</button>`, body: `<div class="sdprev">${html}</div>` });
+    window.__sdCur = { html, title };
+  }
+  ACTIONS.sdPrint = () => { const c = window.__sdCur; if (c && typeof printHTML === 'function') printHTML(c.html); };
+  ACTIONS.sdSave = async () => { const c = window.__sdCur; if (!c) return; try { toast(T('بيجهّز الصورة…', 'Preparing the picture…')); download(await toPng(c.html), String(c.title).replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80) + '.png'); } catch (e) { toast(T('مقدرتش أعمل الصورة', 'Could not make the picture'), 'err'); } };
+
+  /* ======================= 1) request for quotation ======================= */
+  const rfqLines = p => (p.kind === 'rfq' ? (p.rfqItems || []).map(it => ({ name: it.name, spec: it.desc || it.spec || '', qty: it.qty, unit: it.unit, photo: it.photo || it.thumb || '' }))
+    : (p.items && p.items.length ? p.items : p.needItems || []).map(it => ({ name: it.name || (typeof matName === 'function' && it.materialId ? matName(it.materialId) : ''), spec: it.spec || it.desc || it.note || '', qty: it.qty, unit: it.unit, photo: it.photo || '' }))).filter(x => x.name);
+  const canRfq = p => !!p && writable() && (isAdmin() || ['purch', 'manager'].includes(role()) || (typeof canDo === 'function' && canDo('purchases'))) && (p.kind === 'rfq' ? !['cancelled', 'coded'].includes(p.status) : ['draft', 'approval', 'offers', 'rfq'].includes(p.status || 'draft'));
+  function rfqSheet(p, sup, due) {
+    const L = rfqLines(p); const no = p.number || '';
+    const right = kv([[T('رقم الطلب', 'No.'), `<span dir="ltr">${esc(no)}</span>`], [T('التاريخ', 'Date'), dmy(todayISO())], [T('ابعت السعر قبل', 'Reply by'), dmy(due)]]);
+    return sheet('nf', B2('طلب عرض سعر', 'Request for Quotation'), right, `
+      <div class="sdto">${B2('السادة', 'To')} <b>${esc(sup ? sup.name : T('الموردين المحترمين', 'Our suppliers'))}</b></div>
+      <p class="sdp">برجاء التكرم بإرسال أفضل عرض سعر للأصناف التالية بالمواصفات المذكورة، موضّح فيه سعر الوحدة، مدة التوريد، شروط الدفع، صلاحية العرض، وهل السعر شامل الضريبة.<br><span class="sdx2">Kindly send your best offer for the items below as specified — unit price, delivery time, payment terms, validity, and whether VAT is included.</span></p>
+      <table class="sdtab"><thead><tr><th style="width:26px">#</th><th>${B2('الصنف', 'Item')}</th><th>${B2('المواصفات', 'Specification')}</th><th style="width:60px">${B2('الكمية', 'Qty')}</th><th style="width:60px">${B2('الوحدة', 'Unit')}</th></tr></thead>
+      <tbody>${L.map((it, i) => `<tr><td>${i + 1}</td><td><b>${esc(it.name)}</b>${it.photo ? `<img class="sdph" src="${esc(it.photo)}" alt="">` : ''}</td><td>${esc(it.spec || '—')}</td><td class="n">${num2(it.qty)}</td><td>${esc(it.unit || '')}</td></tr>`).join('')}</tbody></table>
+      <div class="sdnote">${B2('للتواصل', 'Contact')}: <b>${esc(nm())}</b> — ${T('إدارة المشتريات', 'Purchasing')}</div>`);
+  }
+  const rfqMsg = (p, s, due) => `${T('السلام عليكم', 'Hello')} ${s ? s.contact || s.name : ''}\n${T(`مرفق طلب عرض سعر رقم ${p.number || ''} من Ninety Fabrication.`, `Attached is request for quotation ${p.number || ''} from Ninety Fabrication.`)}\n${T(`برجاء إرسال العرض قبل ${dmy(due)}.`, `Please send your offer before ${dmy(due)}.`)}\n${nm()}`;
+  function rfqCard(p) {
+    if (!rfqLines(p).length) return '';
+    const sent = p.rfqSent || [];
+    return `<div class="card sdcard" id="sdrfq"><div class="cardhead"><h3>${icon('send')}${esc(T('طلب عرض السعر للموردين', 'Request for quotation to suppliers'))}</h3>${sent.length ? `<span class="badge good">${esc(T(`اتبعت لـ ${sent.length}`, `Sent to ${sent.length}`))}</span>` : ''}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-action="sdRfqView" data-arg="${esc(p.id)}">${icon('eye')}${esc(T('شكل الطلب', 'View the sheet'))}</button>${canRfq(p) ? `<button type="button" class="btn sm p" data-action="sdRfqSend" data-arg="${esc(p.id)}">${icon('wa')}${esc(T('ابعت للموردين', 'Send to suppliers'))}</button>` : ''}</div>
+      ${sent.length ? `<div class="sdsent">${sent.map(x => `<span class="apchip good">${icon('check')}<span class="notr">${esc(x.name || '')}</span><small>${esc(dmy(x.at))}</small></span>`).join('')}</div>` : ''}</div>`;
+  }
+  ACTIONS.sdRfqView = id => { const p = byId('purchases', id); if (!p) return; preview(`${T('طلب عرض سعر', 'Request for quotation')} ${p.number || ''}`, rfqSheet(p, null, p.rfqDue || addDays(todayISO(), 3))); };
+  ACTIONS.sdRfqSend = id => {
+    const p = byId('purchases', id); if (!canRfq(p)) return;
+    const cats = new Set(((p.rfqItems || []).map(it => it.cat)).concat([p.cat]).filter(Boolean).map(String));
+    const sups = sortBy(list('suppliers').filter(s => s && s.phone && !s.archived), s => (cats.has(String(s.category || '')) ? '0' : '1') + (s.name || ''));
+    const sentIds = new Set((p.rfqSent || []).map(x => x.supplierId));
+    openModal({ title: `${T('ابعت طلب عرض السعر', 'Send the request for quotation')} ${p.number || ''}`, wide: true, submitLabel: T('كمّل', 'Continue'), body: `<div class="form">
+        ${field(T('ابعت السعر قبل', 'Reply by'), `<input type="date" name="due" value="${esc(p.rfqDue || addDays(todayISO(), 3))}">`)}
+        <div class="field full"><label>${esc(T('الموردين', 'Suppliers'))}</label><input type="search" id="sdq" placeholder="${esc(T('ابحث…', 'Search…'))}" autocomplete="off"><div class="sdsups" id="sdsups">${sups.map(s => `<label class="sdsup" data-n="${esc(String(s.name || '').toLowerCase())}"><input type="checkbox" name="sup" value="${esc(s.id)}"><span class="notr">${esc(s.name)}</span><small>${esc(s.category || '')}${sentIds.has(s.id) ? ' · ' + esc(T('اتبعتله', 'sent')) : ''}</small></label>`).join('') || `<p class="muted small">${esc(T('مفيش موردين بأرقام متسجّلة', 'No suppliers with phone numbers'))}</p>`}</div></div>
+        <p class="tiny muted full">${esc(T('الطلب بيتبعت من الواتساب بتاعك — لكل مورد صورة الطلب باسمه ورسالة قصيرة. على الموبايل الواتساب بيفتح والصورة جاهزة، تدوس «إرسال» وبعدين اللي بعده.', 'It goes from your own WhatsApp — each supplier gets the sheet with his name and a short message. On the phone WhatsApp opens with the picture ready; press «Send», then the next one.'))}</p></div>`,
+      onOpen: f => { f.addEventListener('input', e => { if (e.target.id !== 'sdq') return; const q = e.target.value.trim().toLowerCase(); f.querySelectorAll('.sdsup').forEach(x => { x.hidden = !!q && !x.dataset.n.includes(q); }); }); },
+      onSubmit: async f => {
+        const d = formData(f); const ids = [...f.querySelectorAll('[name=sup]:checked')].map(x => x.value); if (!ids.length) { toast(T('اختار مورد واحد على الأقل', 'Pick at least one supplier'), 'err'); return false; }
+        await Store.update('purchases', p.id, { rfqDue: d.due || null }, { silent: true });
+        setTimeout(() => queue(p.id, ids, d.due), 50); return true;
+      } });
+  };
+  /* one by one (each WhatsApp send needs its own tap) */
+  function queue(id, ids, due) {
+    const p = byId('purchases', id); const sups = ids.map(x => byId('suppliers', x)).filter(Boolean);
+    const row = s => { const done = (byId('purchases', id).rfqSent || []).some(x => x.supplierId === s.id && x.at >= (window.__sdQAt || '')); return `<div class="sdqrow"><span class="notr">${esc(s.name)}</span><span class="ltr muted small">${esc(s.phone || '')}</span><div class="grow"></div>${done ? `<span class="badge good">${icon('check')}${esc(T('اتبعت', 'Sent'))}</span>` : `<button type="button" class="btn sm p" data-action="sdRfqOne" data-arg="${esc(id + '|' + s.id + '|' + (due || ''))}">${icon('wa')}${esc(T('ابعت', 'Send'))}</button>`}</div>`; };
+    window.__sdQAt = nowISO(); window.__sdQ = { id, ids, due, row };
+    openModal({ title: `${T('ابعت', 'Send')} ${p.number || ''}`, body: `<div class="sdq" id="sdq">${sups.map(row).join('')}</div>`, footer: `<button type="button" class="btn" data-action="closemodal">${esc(T('خلصت', 'Done'))}</button>` });
+  }
+  ACTIONS.sdRfqOne = async arg => {
+    const [id, sid, due] = String(arg).split('|'); const p = byId('purchases', id); const s = byId('suppliers', sid); if (!p || !s) return;
+    try {
+      const blob = await toPng(rfqSheet(p, s, due)); const how = await sendPic(blob, `RFQ ${p.number || ''} — ${s.name}.png`.replace(/[\\/:*?"<>|]+/g, ' '), s.phone, rfqMsg(p, s, due));
+      if (!how) return;
+      const cur = byId('purchases', id) || p; const sent = (cur.rfqSent || []).filter(x => x.supplierId !== s.id).concat([{ supplierId: s.id, name: s.name, at: nowISO(), by: S.session?.id || '', byName: nm(), via: how }]);
+      await Store.update('purchases', id, { rfqSent: sent }, { silent: true });
+      const q = window.__sdQ; const box = document.getElementById('sdq'); if (q && box) box.innerHTML = q.ids.map(x => byId('suppliers', x)).filter(Boolean).map(q.row).join('');
+    } catch (e) { console.warn('rfq send', e); toast(T('مقدرتش أجهّز الصورة', 'Could not prepare the picture'), 'err'); }
+  };
+
+  /* ======================= 2) purchase order + three-way match ======================= */
+  const showPrices = () => typeof seesCost !== 'function' || seesCost();   /* prices follow the price rules (purchasing sees them with the owner's grant) */
+  const poSheetOk = p => !!p && p.kind !== 'rfq' && (p.items || []).length && !['draft', 'approval', 'rejected', 'cancelled'].includes(p.status) && (showPrices() || isAdmin() || ['purch', 'manager'].includes(role()) || (typeof canDo === 'function' && canDo('purchases')));
+  function poSheet(p) {
+    const s = typeof supplierOf === 'function' ? supplierOf(p) : null; const o = p.orderId ? byId('orders', p.orderId) : null;
+    const lines = p.items || []; const sub = typeof poTotal === 'function' ? poTotal(p) : lines.reduce((a, it) => a + (+it.qty || 0) * (+it.cost || 0), 0); const P = showPrices();
+    const disc = +p.discount || 0; const total = sub - disc;
+    const appr = (p.poSteps || []).filter(x => x.status === 'approved').map(x => x.byName).filter(Boolean); const last = appr[appr.length - 1] || '';
+    const right = kv([[T('رقم أمر الشراء', 'PO No.'), `<span dir="ltr">${esc(p.number || '')}</span>`], [T('التاريخ', 'Date'), dmy(p.orderedAt || p.date || todayISO())], [T('التسليم', 'Delivery'), dmy(p.expected)]]);
+    return sheet('nf', B2('أمر شراء', 'Purchase Order'), right, `
+      <div class="sdcols"><div>${kv([[B2('المورد', 'Supplier'), esc(s ? s.name : p.supplier || '')], [B2('التليفون', 'Phone'), s && s.phone ? `<span dir="ltr">${esc(s.phone)}</span>` : ''], [B2('الرقم الضريبي', 'Tax ID'), s && s.taxId ? `<span dir="ltr">${esc(s.taxId)}</span>` : '']])}</div>
+      <div>${kv([[B2('مكان التسليم', 'Deliver to'), esc(p.deliverTo || T('مصنع Ninety Fabrication', 'Ninety Fabrication factory'))], [B2('المشروع', 'Project'), o ? `<span dir="ltr">${esc(o.code || '')}</span> ${esc(o.title || '')}` : '']])}</div></div>
+      <table class="sdtab"><thead><tr><th style="width:26px">#</th><th>${B2('الصنف', 'Item')}</th><th style="width:60px">${B2('الكمية', 'Qty')}</th><th style="width:56px">${B2('الوحدة', 'Unit')}</th>${P ? `<th style="width:86px">${B2('سعر الوحدة', 'Unit price')}</th><th style="width:96px">${B2('الإجمالي', 'Amount')}</th>` : ''}</tr></thead>
+      <tbody>${lines.map((it, i) => `<tr><td>${i + 1}</td><td><b>${esc(it.name || '')}</b>${it.spec ? `<div class="sdsm">${esc(it.spec)}</div>` : ''}</td><td class="n">${num2(it.qty)}</td><td>${esc(it.unit || '')}</td>${P ? `<td class="n">${money2(it.cost)}</td><td class="n">${money2((+it.qty || 0) * (+it.cost || 0))}</td>` : ''}</tr>`).join('')}</tbody>
+      ${P ? `<tfoot>${disc ? `<tr><td colspan="5">${B2('الإجمالي قبل الخصم', 'Subtotal')}</td><td class="n">${money2(sub)}</td></tr><tr><td colspan="5">${B2('خصم', 'Discount')}</td><td class="n">- ${money2(disc)}</td></tr>` : ''}<tr class="sdtot"><td colspan="5">${B2('الإجمالي', 'Total')} (${esc(typeof CUR === 'function' ? CUR() : 'EGP')})</td><td class="n">${money2(total)}</td></tr></tfoot>` : ''}</table>
+      ${p.terms || (s && s.terms) ? `<div class="sdnote">${B2('الشروط', 'Terms')}: ${esc(p.terms || s.terms)}</div>` : ''}
+      <div class="sdwarn">${B2('برجاء كتابة رقم أمر الشراء ده على الفاتورة وإذن التسليم.', 'Please quote this PO number on your invoice and delivery note.')}</div>
+      <div class="sdsigns"><div><span>${B2('المشتريات', 'Purchasing')}</span><b>${esc(p.createdByName || nm())}</b></div><div><span>${B2('اعتمد', 'Approved by')}</span><b>${esc(last)}</b></div></div>`);
+  }
+  const poMsg = (p, s) => `${T('السلام عليكم', 'Hello')} ${s ? s.contact || s.name : ''}\n${T(`مرفق أمر الشراء رقم ${p.number || ''} من Ninety Fabrication — برجاء التجهيز وإرسال الفاتورة بنفس الرقم.`, `Attached is purchase order ${p.number || ''} from Ninety Fabrication — please prepare it and send your invoice with this number.`)}\n${nm()}`;
+  function poCard(p) {
+    const s = typeof supplierOf === 'function' ? supplierOf(p) : null; const sent = p.poSent;
+    return `<div class="card sdcard" id="sdpo"><div class="cardhead"><h3>${icon('send')}${esc(T('أمر الشراء للمورد', 'Purchase order to the supplier'))}</h3>${sent ? `<span class="badge good">${esc(T(`اتبعت ${dmy(sent.at)}`, `Sent ${dmy(sent.at)}`))}</span>` : ''}</div>
+      ${showPrices() ? '' : `<div class="tiny muted" style="margin-bottom:6px">${esc(T('أمر الشراء هيطلع بالكميات من غير أسعار — الأسعار بتظهر للي معاه صلاحية الأسعار.', 'The PO goes out with quantities only — prices show for whoever has the price permission.'))}</div>`}
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn sm" data-action="sdPoView" data-arg="${esc(p.id)}">${icon('eye')}${esc(T('شكل أمر الشراء', 'View the PO'))}</button>${writable() ? `<button type="button" class="btn sm p" data-action="sdPoSend" data-arg="${esc(p.id)}">${icon('wa')}${esc(s && s.waGroupLink ? T('ابعته لجروب المورد', 'Send to the supplier group') : T('ابعته للمورد', 'Send to the supplier'))}</button>` : ''}</div>
+      ${!s || !s.phone ? `<div class="tiny muted" style="margin-top:6px">${esc(T('المورد مالوش رقم متسجّل — الصورة هتنزل وتبعتها إنت.', 'The supplier has no phone number — the picture downloads and you send it.'))}</div>` : ''}</div>`;
+  }
+  ACTIONS.sdPoView = id => { const p = byId('purchases', id); if (!poSheetOk(p)) return; preview(`${T('أمر شراء', 'Purchase order')} ${p.number || ''}`, poSheet(p)); };
+  ACTIONS.sdPoSend = async id => {
+    const p = byId('purchases', id); if (!poSheetOk(p) || !writable()) return; const s = typeof supplierOf === 'function' ? supplierOf(p) : null;
+    try {
+      toast(T('بيجهّز أمر الشراء…', 'Preparing the purchase order…')); const blob = await toPng(poSheet(p)); const name = `PO ${p.number || ''}${s ? ' — ' + s.name : ''}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+      let how = '';
+      if (s && s.waGroupLink && !isMobile()) { download(blob, name); window.open(s.waGroupLink, '_blank', 'noopener'); how = 'group'; }
+      else how = await sendPic(blob, name, s && s.phone, poMsg(p, s));
+      if (how) { await Store.update('purchases', id, { poSent: { at: nowISO(), by: S.session?.id || '', byName: nm(), via: how } }, { silent: true }); toast(T('اتبعت ✓', 'Sent ✓')); }
+    } catch (e) { console.warn('po send', e); toast(T('مقدرتش أجهّز الصورة', 'Could not prepare the picture'), 'err'); }
+  };
+  /* three-way match */
+  const recQty = (p, it) => (p.receivedItems || []).filter(r => (it.materialId && r.materialId === it.materialId) || (!it.materialId && r.name === it.name)).reduce((a, r) => a + (+r.qty || 0), 0);
+  const hasInvoice = p => !!(p.invoice || (typeof poInvoices === 'function' && poInvoices(p).length));
+  const matchOk = p => !!p && p.kind !== 'rfq' && (p.items || []).length && hasInvoice(p) && (typeof seesCost !== 'function' || seesCost()) && !['cancelled', 'draft', 'approval'].includes(p.status);
+  const eq = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 0.005;
+  function matchCard(p) {
+    const m = p.match; const lines = p.items || [];
+    const st = !m ? ['', T('لسه ماتعملتش', 'Not done yet')] : m.status === 'ok' ? ['good', T('مطابقة ✓', 'Matches ✓')] : m.decision && m.decision.status === 'approved' ? ['acc', T('فيه فرق — المالك وافق', 'Difference — approved by the owner')] : m.decision && m.decision.status === 'returned' ? ['crit', T('رجعت للمورد', 'Returned to the supplier')] : ['crit', T('فيه فرق — مستني المالك', 'Difference — waiting for the owner')];
+    const rows = (m ? m.lines : lines.map(it => ({ name: it.name, ordered: +it.qty || 0, received: recQty(p, it), invQty: recQty(p, it) || +it.qty || 0, poPrice: +it.cost || 0, invPrice: +it.cost || 0 })));
+    const edit = !m || (m.status !== 'ok' && !(m.decision && m.decision.status === 'approved'));
+    return `<div class="card sdcard" id="sdmatch"><div class="cardhead"><h3>${icon('check')}${esc(T('مطابقة الفاتورة', 'Invoice match'))}</h3><span class="badge ${st[0]}">${esc(st[1])}</span></div>
+      <p class="tiny muted" style="margin:0 0 8px">${esc(T('أمر الشراء ↔ اللي اتستلم فعلًا ↔ الفاتورة (الكميات والأسعار).', 'Purchase order ↔ what was really received ↔ the invoice (quantities and prices).'))}</p>
+      <form class="sdmf" data-sdmatch="${esc(p.id)}"><div class="tablewrap"><table class="sdmt"><thead><tr><th>${esc(T('الصنف', 'Item'))}</th><th class="n">${esc(T('المطلوب', 'Ordered'))}</th><th class="n">${esc(T('اتستلم', 'Received'))}</th><th class="n">${esc(T('في الفاتورة', 'Invoiced'))}</th><th class="n">${esc(T('سعر الأمر', 'PO price'))}</th><th class="n">${esc(T('سعر الفاتورة', 'Invoice price'))}</th><th></th></tr></thead>
+      <tbody>${rows.map((r, i) => { const bad = m && (!eq(r.invQty, r.received) || !eq(r.invPrice, r.poPrice)); return `<tr class="${bad ? 'sdbad' : ''}"><td>${esc(r.name || '')}</td><td class="n">${num2(r.ordered)}</td><td class="n">${num2(r.received)}</td><td class="n">${edit ? `<input name="q${i}" type="number" step="any" value="${esc(r.invQty)}">` : num2(r.invQty)}</td><td class="n">${money2(r.poPrice)}</td><td class="n">${edit ? `<input name="p${i}" type="number" step="any" value="${esc(r.invPrice)}">` : money2(r.invPrice)}</td><td>${m ? (bad ? '✗' : '✓') : ''}</td></tr>`; }).join('')}</tbody></table></div>
+      ${edit && writable() ? `<div class="row" style="gap:6px;margin-top:8px"><button type="submit" class="btn sm p">${esc(T('سجّل المطابقة', 'Save the match'))}</button></div>` : ''}</form>
+      ${m && m.status === 'diff' && !m.decision && isAdmin() && writable() ? `<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><button type="button" class="btn sm p" data-action="sdMatchDecide" data-arg="${esc(p.id)}|approved">${esc(T('وافق على الفرق', 'Approve the difference'))}</button><button type="button" class="btn sm" data-action="sdMatchDecide" data-arg="${esc(p.id)}|returned">${esc(T('رجّعها للمورد', 'Return it to the supplier'))}</button></div>` : ''}
+      ${m && m.decision ? `<div class="tiny muted" style="margin-top:6px">${esc(m.decision.byName || '')} · ${esc(dmy(m.decision.at))}${m.decision.note ? ' — ' + esc(m.decision.note) : ''}</div>` : m ? `<div class="tiny muted" style="margin-top:6px">${esc(m.byName || '')} · ${esc(dmy(m.at))}</div>` : ''}</div>`;
+  }
+  document.addEventListener('submit', async e => {
+    const f = e.target.closest && e.target.closest('form[data-sdmatch]'); if (!f) return; e.preventDefault(); if (!writable()) return;
+    const p = byId('purchases', f.dataset.sdmatch); if (!matchOk(p)) return;
+    const lines = (p.items || []).map((it, i) => ({ name: it.name || '', materialId: it.materialId || null, ordered: +it.qty || 0, received: recQty(p, it), invQty: num((f.querySelector(`[name=q${i}]`) || {}).value), poPrice: +it.cost || 0, invPrice: num((f.querySelector(`[name=p${i}]`) || {}).value) }));
+    const ok = lines.every(l => eq(l.invQty, l.received) && eq(l.invPrice, l.poPrice));
+    const match = { status: ok ? 'ok' : 'diff', lines, at: nowISO(), by: S.session?.id || '', byName: nm(), invNo: (p.invoice && p.invoice.note) || '' };
+    await Store.update('purchases', p.id, { match });
+    if (!ok) {
+      const bad = lines.filter(l => !(eq(l.invQty, l.received) && eq(l.invPrice, l.poPrice))).map(l => l.name).join('، ');
+      try { await Store.save('tasks', { id: `pomatch_${p.id}`, title: `فاتورة ${p.number || ''} فيها فرق عن أمر الشراء / الاستلام — راجعها`, desc: `${p.supplier || ''}\nالبنود: ${bad}`.replace(MONEY, '…'), link: `/#/purchases/${p.id}`, toRole: 'admin', assigneeId: null, priority: 'high', status: 'open', kind: 'update', source: 'pomatch', createdBy: S.session?.id || null, createdByName: nm(), createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (er) { /* ignore */ }
+      if (!isAdmin() && typeof pushSend === 'function') pushSend(['role:admin'], `فاتورة ${p.number || ''} فيها فرق — راجعها`.slice(0, 100), `${p.supplier || ''} · ${bad}`.replace(MONEY, '…').slice(0, 140), `/#/purchases/${p.id}`, 'pomatch-' + p.id);
+      toast(T('فيه فرق — راح للمالك يراجعه', 'There is a difference — sent to the owner'), 'err');
+    } else toast(T('الفاتورة مطابقة ✓', 'The invoice matches ✓'));
+  });
+  ACTIONS.sdMatchDecide = arg => {
+    const [id, how] = String(arg).split('|'); const p = byId('purchases', id); if (!p || !p.match || !isAdmin()) return;
+    const go2 = async note => { await Store.update('purchases', id, { match: Object.assign({}, p.match, { decision: { status: how, note: note || '', at: nowISO(), by: S.session?.id || '', byName: nm() } }) }); try { const t = byId('tasks', `pomatch_${id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ }
+      if (how === 'returned') { try { await Store.save('tasks', { id: `pomret_${id}_${Date.now().toString(36)}`, title: `المالك رجّع فاتورة ${p.number || ''} للمورد`, desc: String(note || '').replace(MONEY, '…'), link: `/#/purchases/${id}`, toRole: 'purch', assigneeId: null, priority: 'high', status: 'open', kind: 'task', source: 'pomatch', createdBy: S.session?.id || null, createdByName: nm(), createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } }
+      toast(how === 'approved' ? T('اتوافق على الفرق', 'Difference approved') : T('رجعت للمشتريات تكلّم المورد', 'Back to purchasing to talk to the supplier')); };
+    if (how === 'approved') return go2('');
+    openModal({ title: T('ترجّع الفاتورة للمورد', 'Return the invoice to the supplier'), submitLabel: T('رجّعها', 'Return it'), body: `<div class="form">${field(T('السبب (يروح للمشتريات)', 'Reason (goes to purchasing)'), '<textarea name="note" rows="3" required></textarea>', 'full')}</div>`, onSubmit: async f => { const d = formData(f); if (!String(d.note || '').trim()) return false; await go2(d.note); } });
+  };
+  if (typeof ACTIONS.poTransfer === 'function') ACTIONS.poTransfer = (base => async function (id) {
+    const p = byId('purchases', id); const m = p && p.match;
+    if (m && m.status === 'diff' && !(m.decision && m.decision.status === 'approved')) { if (!(await confirmDlg(T(`فاتورة ${p.number || ''} فيها فرق عن أمر الشراء / الاستلام لسه ماتوافقش عليه — تحوّل برضه؟`, `Invoice ${p.number || ''} differs from the PO / receipt and the difference is not approved — transfer anyway?`), T('حوّل برضه', 'Transfer anyway')))) return; }
+    return base.apply(this, arguments);
+  })(ACTIONS.poTransfer);
+
+  if (typeof vPurchaseDetail === 'function') vPurchaseDetail = (base => function (id) {
+    const h = base.apply(this, arguments);
+    try {
+      const p = byId('purchases', id); if (!p) return h; let add = '';
+      if ((p.kind === 'rfq' || ['draft', 'approval', 'offers', 'rfq'].includes(p.status || 'draft')) && rfqLines(p).length && (isAdmin() || ['purch', 'manager'].includes(role()) || (typeof canDo === 'function' && canDo('purchases')))) add += rfqCard(p);
+      if (poSheetOk(p)) add += poCard(p);
+      if (matchOk(p)) add += matchCard(p);
+      if (!add) return h; const c = h.indexOf('<div class="card pocom"'); if (c > 0) return h.slice(0, c) + add + h.slice(c);
+      const i = h.lastIndexOf('</div>'); return i > 0 ? h.slice(0, i) + add + h.slice(i) : h + add;
+    } catch (e) { console.warn('supply docs', e); return h; }
+  })(vPurchaseDetail);
+
+  /* ======================= 3) delivery note to the client company ======================= */
+  const fgOk = () => typeof fgStock === 'function' && typeof fgCanDeliver === 'function';
+  const canDn = () => fgOk() && fgCanDeliver();
+  /* the contract lines: the order's products, else the accepted quotation's lines */
+  function contract(o) {
+    const items = typeof orderItems === 'function' ? orderItems(o) : [];
+    if (items.length) return items.map((it, i) => ({ k: 'p:' + it.productId, productId: it.productId, name: typeof fgName === 'function' ? fgName(it.productId, '') : '', qty: +it.qty || 0, unit: (byId('products', it.productId) || {}).unit || T('قطعة', 'pc'), thumb: typeof fgThumb === 'function' ? fgThumb(it.productId) : '' }));
+    const q = (o.quotationId && byId('quotations', o.quotationId)) || null;
+    return ((o.contractLines && o.contractLines.length ? o.contractLines : (q && q.items) || [])).filter(x => x && (x.desc || x.name) && +x.qty).map((x, i) => ({ k: 'd:' + (x.desc || x.name), productId: null, name: String(x.desc || x.name).split('\n')[0].slice(0, 160), qty: +x.qty || 0, unit: x.unit || '', thumb: x.thumb || '' }));
+  }
+  const dnsOf = oid => (typeof fgDns === 'function' ? fgDns() : []).filter(d => d.orderId === oid && d.status !== 'cancelled');
+  const lineKey = it => it.productId ? 'p:' + it.productId : 'd:' + (it.desc || it.variant || '');
+  const deliveredOf = (oid, k, exceptId) => dnsOf(oid).filter(d => d.id !== exceptId).reduce((a, d) => a + (d.items || []).filter(it => lineKey(it) === k).reduce((s2, it) => s2 + (+it.qty || 0), 0), 0);
+  function stockFor(oid, productId) {
+    const st = fgStock(); let n = 0; const keys = [];
+    Object.values(st).filter(r => r.productId === productId).forEach(r => { const res = Math.max(0, (r.byOrder[oid] || 0) - (r.pendingOrder[oid] || 0)); const free = Math.max(0, r.available); const can = r2(res + free); if (can > 0) { keys.push({ key: r.key, variant: r.variant, res, free, can }); n += can; } });
+    keys.sort((a, b) => b.res - a.res); return { n: r2(n), keys };
+  }
+  ACTIONS.sdDnNew = orderId => {
+    const o = byId('orders', orderId); if (!o || !canDn()) return; const L = contract(o); const c = byId('clients', o.clientId) || {};
+    if (!L.length) { toast(T('أمر التشغيل ده مالوش بنود متسجّلة — ضيف المنتجات للأمر أو اربطه بعرض السعر', 'This order has no lines — add its products or link its quotation'), 'err'); return; }
+    const rows = L.map((l, i) => { const before = deliveredOf(o.id, l.k); const left = Math.max(0, r2(l.qty - before)); const stk = l.productId ? stockFor(o.id, l.productId).n : null; const sug = l.productId ? Math.min(left, stk) : left;
+      return `<div class="sddl ${left ? '' : 'done'}"><input type="checkbox" name="on${i}" ${sug > 0 ? 'checked' : ''} ${left ? '' : 'disabled'}>${l.thumb ? `<img src="${esc(l.thumb)}" alt="">` : `<span class="sdnoimg">${icon('inventory')}</span>`}<div class="sddb"><b class="notr">${esc(l.name)}</b><small>${esc(T(`متعاقد ${num2(l.qty)} · اتورّد ${num2(before)} · باقي ${num2(left)}`, `contract ${num2(l.qty)} · delivered ${num2(before)} · left ${num2(left)}`))}${stk != null ? ` · ${esc(T(`في المخزن ${num2(stk)}`, `in stock ${num2(stk)}`))}` : ''}</small></div><input name="q${i}" type="number" min="0" step="1" max="${left}" value="${sug > 0 ? sug : ''}" ${left ? '' : 'disabled'} aria-label="${esc(T('العدد', 'Qty'))}"></div>`; }).join('');
+    openModal({ title: `${T('إذن توريد', 'Delivery note')} — ${o.code || ''}`, wide: true, submitLabel: T('اعمل الإذن', 'Create the note'), body: `<div class="form">
+      ${field(T('الشركة', 'Company'), inp('clientName', c.name || clientName(o.clientId) || '', 'required'))}${field(T('العنوان / الموقع', 'Address / site'), inp('address', o.siteAddress || c.address || (o.site && o.site.label) || '', ''))}
+      ${field(T('رقم العقد / أمر التوريد عندهم (اختياري)', 'Their contract / PO no. (optional)'), inp('clientRef', o.clientRef || '', 'class="ltr"'))}${field(T('تاريخ التوريد', 'Delivery date'), `<input type="date" name="date" value="${todayISO()}">`)}
+      <div class="field full"><label>${esc(T('البنود اللي هتتورّد دلوقتي', 'What goes now'))}</label><div class="sddls">${rows}</div><div class="tiny muted" style="margin-top:4px">${esc(T('السيستم بيقترح الموجود في المخزن، ومش هيسمح بأكتر من الباقي في العقد.', 'The warehouse is suggested; never more than what is left in the contract.'))}</div></div>
+      ${field(T('ملاحظة', 'Note'), inp('note', ''), 'full')}</div>`,
+      onSubmit: async f => {
+        const d = formData(f); const items = []; const st = fgStock();
+        for (let i = 0; i < L.length; i++) {
+          const l = L[i]; if (!(f.querySelector(`[name=on${i}]`) || {}).checked) continue; const q = Math.round(num((f.querySelector(`[name=q${i}]`) || {}).value)); if (!(q > 0)) continue;
+          const left = Math.max(0, r2(l.qty - deliveredOf(o.id, l.k))); if (q > left) { toast(T(`${l.name}: الباقي في العقد ${num2(left)} بس`, `${l.name}: only ${num2(left)} left in the contract`), 'err'); return false; }
+          if (l.productId) {
+            const s0 = stockFor(o.id, l.productId); if (q > s0.n) { toast(T(`${l.name}: في المخزن ${num2(s0.n)} بس — سجّل استلامه من الإنتاج الأول`, `${l.name}: only ${num2(s0.n)} in stock — receive it from production first`), 'err'); return false; }
+            let need = q; for (const k of s0.keys) { if (need <= 0) break; const take = Math.min(need, k.can); items.push({ productId: l.productId, variant: k.variant || '', qty: take, key: k.key, line: l.k, of: l.qty }); need -= take; }
+          } else items.push({ productId: null, variant: l.name, desc: l.name, unit: l.unit, qty: q, key: 'd|' + l.name, line: l.k, of: l.qty });
+        }
+        if (!items.length) { toast(T('اختار بند واحد على الأقل بعدده', 'Pick at least one line with its quantity'), 'err'); return false; }
+        if (!(d.clientName || '').trim()) { toast(T('اكتب اسم الشركة', 'Type the company name'), 'err'); return false; }
+        const dn = { id: uid(), type: 'dn', sd: true, number: typeof nextDnNo === 'function' ? nextDnNo() : 'DN-' + Date.now(), orderId: o.id, clientId: o.clientId || null, clientName: d.clientName.trim(), address: d.address || '', clientRef: (d.clientRef || '').trim(), date: d.date || todayISO(), brandId: o.brandId || null, items, note: d.note || '', status: 'draft', createdAt: nowISO(), createdBy: S.session?.id || null, byName: nm() };
+        await Store.save('fgs', dn, { silent: true });
+        if (d.clientRef && d.clientRef !== o.clientRef) { try { await Store.update('orders', o.id, { clientRef: d.clientRef.trim() }, { silent: true }); } catch (e) { /* ignore */ } }
+        try { await notifyRole('fleet', `إذن توريد ${dn.number} — محتاج مشوار`, `${dn.clientName}${dn.address ? ' · ' + dn.address : ''}\n${items.map(it => `${it.desc || (typeof fgName === 'function' ? fgName(it.productId, it.variant) : '')} × ${it.qty}`).join('، ')}`, { id: `dn_${dn.id}`, priority: 'high', fields: { link: `/#/fg/${dn.id}` } }); } catch (e) { /* ignore */ }
+        toast(T(`اتعمل ${dn.number}`, `${dn.number} created`)); go('fg/' + dn.id);
+      } });
+  };
+  /* the existing «delivery note» button on an order opens the contract version */
+  if (typeof ACTIONS.dnNew === 'function') ACTIONS.dnNew = (base => arg => (arg && byId('orders', arg) ? ACTIONS.sdDnNew(arg) : base(arg)))(ACTIONS.dnNew);
+  /* a line that is not a catalogue product never moves the finished-goods stock */
+  if (typeof dnDeliver === 'function') { const base = dnDeliver; dnDeliver = async function (dn, proof) { if (dn && (dn.items || []).some(it => !it.productId)) return base.call(this, Object.assign({}, dn, { items: dn.items.filter(it => it.productId) }), proof); return base.apply(this, arguments); }; window.dnDeliver = dnDeliver; }
+  function dnLines(dn) {
+    const o = dn.orderId ? byId('orders', dn.orderId) : null; const map = new Map();
+    (dn.items || []).forEach(it => { const k = it.line || lineKey(it); const x = map.get(k) || { k, name: it.desc || (typeof fgName === 'function' ? fgName(it.productId, '') : ''), variants: [], qty: 0, of: +it.of || 0, unit: it.unit || (it.productId ? ((byId('products', it.productId) || {}).unit || T('قطعة', 'pc')) : ''), thumb: it.productId && typeof fgThumb === 'function' ? fgThumb(it.productId) : '' }; x.qty += +it.qty || 0; if (it.productId && it.variant) x.variants.push(it.variant); map.set(k, x); });
+    return [...map.values()].map(x => { const before = o ? deliveredOf(o.id, x.k, dn.id) : 0; const all = (dnsOf(dn.orderId).filter(d => d.createdAt <= dn.createdAt && d.id !== dn.id)); const prev = all.reduce((a, d) => a + (d.items || []).filter(it => (it.line || lineKey(it)) === x.k).reduce((s2, it) => s2 + (+it.qty || 0), 0), 0); return Object.assign(x, { prev, after: prev + x.qty, left: Math.max(0, (x.of || 0) - prev - x.qty), before }); });
+  }
+  function dnSheet(dn) {
+    const o = dn.orderId ? byId('orders', dn.orderId) : null; const L = dnLines(dn); const sg = dn.sign;
+    const right = kv([[T('رقم الإذن', 'No.'), `<span dir="ltr">${esc(dn.number || '')}</span>`], [T('التاريخ', 'Date'), dmy(dn.date || dn.createdAt)], [T('كود المشروع', 'Project code'), o ? `<span dir="ltr">${esc(o.code || '')}</span>` : '']]);
+    return sheet(dn.brandId || (o && o.brandId), B2('إذن توريد', 'Delivery Note'), right, `
+      <div class="sdcols"><div>${kv([[B2('السادة', 'To'), esc(dn.clientName || '')], [B2('العنوان', 'Address'), esc(dn.address || '')]])}</div><div>${kv([[B2('المشروع', 'Project'), esc((o && o.title) || '')], [B2('رقم العقد / أمر التوريد', 'Contract / PO ref.'), dn.clientRef ? `<span dir="ltr">${esc(dn.clientRef)}</span>` : '']])}</div></div>
+      <table class="sdtab"><thead><tr><th style="width:26px">#</th><th style="width:64px"></th><th>${B2('الصنف', 'Item')}</th><th style="width:70px">${B2('الكمية دي', 'This delivery')}</th><th style="width:70px">${B2('المتعاقد', 'Contract')}</th><th style="width:70px">${B2('المورّد لحد دلوقتي', 'Delivered to date')}</th><th style="width:60px">${B2('الباقي', 'Remaining')}</th></tr></thead>
+      <tbody>${L.map((x, i) => `<tr><td>${i + 1}</td><td>${x.thumb ? `<img class="sdph2" src="${esc(x.thumb)}" alt="">` : ''}</td><td><b>${esc(x.name)}</b>${x.variants.length ? `<div class="sdsm">${esc(x.variants.join('، '))}</div>` : ''}</td><td class="n sdbig">${num2(x.qty)} ${esc(x.unit || '')}</td><td class="n">${x.of ? num2(x.of) : '—'}</td><td class="n">${num2(x.after)}</td><td class="n">${x.of ? num2(x.left) : '—'}</td></tr>`).join('')}</tbody></table>
+      ${dn.note ? `<div class="sdnote">${B2('ملاحظات', 'Notes')}: ${esc(dn.note)}</div>` : ''}
+      <p class="sdp">نقر نحن الموقعين أدناه باستلام الأصناف الموضّحة بعاليه بحالة جيدة ومطابقة.<br><span class="sdx2">We, the undersigned, confirm receiving the items above in good condition.</span></p>
+      <div class="sdsigns"><div><span>${B2('سلّمه', 'Delivered by')}</span><b>${esc((dn.proof && dn.proof.byName) || dn.byName || '')}</b><i></i></div>
+      <div><span>${B2('استلمه', 'Received by')}</span><b>${sg ? esc(sg.name) + (sg.title ? ' — ' + esc(sg.title) : '') : '&nbsp;'}</b>${sg && sg.img ? `<img class="sdsig" src="${esc(sg.img)}" alt="">` : '<i></i>'}<small>${B2('الاسم · الوظيفة · التوقيع · الختم · التاريخ', 'Name · title · signature · stamp · date')}${sg ? ` — ${dmy(sg.at)}` : ''}</small></div></div>`);
+  }
+  const dnMsg = dn => { const o = dn.orderId ? byId('orders', dn.orderId) : null; const signed = !!(dn.sign || dn.signedCopy); const proj = o ? T(` — مشروع ${o.title || ''} (${o.code || ''})`, ` — project ${o.title || ''} (${o.code || ''})`) : ''; const att = signed ? T('مرفق نسخة موقّعة.', 'A signed copy is attached.') : T('مرفق الإذن.', 'The note is attached.'); return `${T('السلام عليكم', 'Hello')}\n${T(`تم توريد الأصناف بإذن التوريد رقم ${dn.number || ''}`, `The items in delivery note ${dn.number || ''} have been delivered`)}${proj}. ${att}\n${nm()}`; };
+  function dnPage(dn) {
+    const o = dn.orderId ? byId('orders', dn.orderId) : null; const st = (typeof DN_ST === 'object' && DN_ST[dn.status]) || [dn.status, '']; const t = dn.tripId ? byId('trips', dn.tripId) : null; const L = dnLines(dn); const can = canDn();
+    const acts = [`<button class="btn sm" data-action="sdDnView" data-arg="${esc(dn.id)}">${icon('eye')}${esc(T('شكل الإذن', 'View the note'))}</button>`];
+    if (dn.status === 'draft' && typeof canFleet === 'function' && canFleet()) acts.push(`<button class="btn sm p" data-action="tripNew" data-arg="dn:${esc(dn.id)}">${icon('map')}${esc(T('مشوار تسليم', 'Delivery trip'))}</button>`);
+    if (['draft', 'out', 'delivered'].includes(dn.status) && can && writable() && !dn.sign) acts.push(`<button class="btn sm p" data-action="sdDnSign" data-arg="${esc(dn.id)}">${icon('pen') || icon('edit')}${esc(T('توقيع المستلم', 'Receiver signs'))}</button><label class="btn sm">${icon('camera')}${esc(T('صورة النسخة الموقّعة', 'Photo of the signed copy'))}<input type="file" accept="image/*" capture="environment" hidden data-sddncopy="${esc(dn.id)}"></label>`);
+    if (can && writable()) acts.push(`<button class="btn sm ${dn.status === 'delivered' ? 'p' : ''}" data-action="sdDnSend" data-arg="${esc(dn.id)}|wa">${icon('wa')}${esc(T('ابعته للشركة واتساب', 'Send to the company — WhatsApp'))}</button><button class="btn sm" data-action="sdDnSend" data-arg="${esc(dn.id)}|email">${icon('mail') || ''}${esc(T('إيميل', 'E-mail'))}</button>`);
+    if (['draft', 'out'].includes(dn.status) && can) acts.push(`<button class="btn sm ghost" data-action="dnCancel" data-arg="${esc(dn.id)}">${esc(T('إلغاء', 'Cancel'))}</button>`);
+    return `<div class="toolbar"><a class="btn sm" href="#/fg">${icon('back')}${esc(T('المنتجات الجاهزة', 'Finished goods'))}</a>${o ? `<a class="btn sm ghost" href="#/orders/${esc(o.id)}">${esc(o.code || '')}</a>` : ''}</div>
+      <div class="card"><div class="cardhead"><h3><span class="code">${esc(dn.number || '')}</span> — ${esc(T('إذن توريد', 'Delivery note'))}</h3><div class="grow"></div>${typeof badge === 'function' && typeof DN_ST === 'object' ? badge(DN_ST, dn.status) : esc(st[0])}</div>
+        <div class="grid g3" style="gap:10px;font-size:13px;margin-bottom:10px"><div><div class="tiny muted">${esc(T('الشركة', 'Company'))}</div><b class="notr">${esc(dn.clientName || '')}</b></div><div><div class="tiny muted">${esc(T('المشروع', 'Project'))}</div>${o ? `${esc(o.code || '')} — <span class="notr">${esc(o.title || '')}</span>` : '—'}</div><div><div class="tiny muted">${esc(T('اتعمل', 'Made'))}</div>${esc(dmy(dn.createdAt))} · <span class="notr">${esc(dn.byName || '')}</span></div></div>
+        <div class="sdlines">${L.map(x => `<div class="sdln">${x.thumb ? `<img src="${esc(x.thumb)}" alt="">` : `<span class="sdnoimg">${icon('inventory')}</span>`}<div><b class="notr">${esc(x.name)}</b><small>${esc(T(`المرة دي ${num2(x.qty)} · كده ${num2(x.after)} من ${num2(x.of || x.after)}`, `this time ${num2(x.qty)} · now ${num2(x.after)} of ${num2(x.of || x.after)}`))}</small></div><span class="sdq2">${num2(x.qty)}</span></div>`).join('')}</div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${acts.join('')}</div>
+        ${dn.sign ? `<div class="sdsigned">${icon('check')}<span>${esc(T('استلمه', 'Received by'))} <b class="notr">${esc(dn.sign.name)}</b>${dn.sign.title ? ' — ' + esc(dn.sign.title) : ''} · ${esc(dmy(dn.sign.at))}</span>${dn.sign.img ? `<img src="${esc(dn.sign.img)}" alt="">` : ''}</div>` : ''}
+        ${dn.signedCopy && dn.signedCopy.thumb ? `<div class="sdsigned">${icon('camera')}<span>${esc(T('النسخة الموقّعة', 'Signed copy'))}</span><img src="${esc(dn.signedCopy.thumb)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')"></div>` : ''}
+        ${(dn.sentTo || []).length ? `<div class="tiny muted" style="margin-top:6px">${esc(T('اتبعت للشركة', 'Sent to the company'))}: ${(dn.sentTo || []).map(x => `${esc(x.via === 'email' ? T('إيميل', 'e-mail') : T('واتساب', 'WhatsApp'))} ${esc(dmy(x.at))} (${esc(x.byName || '')})`).join(' · ')}</div>` : ''}</div>
+      ${t ? `<div class="card"><div class="cardhead"><h3>${esc(T('المشوار', 'The trip'))}</h3></div>${typeof tripItem === 'function' ? tripItem(t, { compact: true }) : `<a href="#/fleet/${esc(t.id)}">${esc(t.number || '')}</a>`}</div>` : ''}`;
+  }
+  if (EXTRA_VIEWS && typeof EXTRA_VIEWS.fg === 'function') EXTRA_VIEWS.fg = (base => r => { if (r && r.id) { const dn = byId('fgs', r.id); if (dn && dn.type === 'dn' && dn.sd) return dnPage(dn); } return base(r); })(EXTRA_VIEWS.fg);
+  ACTIONS.sdDnView = id => { const dn = byId('fgs', id); if (!dn) return; preview(`${T('إذن توريد', 'Delivery note')} ${dn.number || ''}`, dnSheet(dn)); };
+  /* the receiver signs on the phone screen */
+  ACTIONS.sdDnSign = id => {
+    const dn = byId('fgs', id); if (!dn || !canDn()) return;
+    openModal({ title: `${T('توقيع المستلم', 'Receiver signs')} — ${dn.number || ''}`, submitLabel: T('تم الاستلام', 'Received'), body: `<div class="form">${field(T('اسم المستلم', 'Receiver name'), inp('name', '', 'required'))}${field(T('الوظيفة', 'Title'), inp('title', ''))}
+      <div class="field full"><label>${esc(T('التوقيع', 'Signature'))}</label><canvas class="sdpad" width="600" height="220"></canvas><div class="row" style="gap:6px;margin-top:4px"><button type="button" class="btn xs" data-sdpad="clear">${esc(T('امسح', 'Clear'))}</button><span class="tiny muted">${esc(T('خلّي المستلم يمضي بصباعه في المربع.', 'Let the receiver sign with a finger in the box.'))}</span></div></div></div>`,
+      onOpen: f => {
+        const cv = f.querySelector('.sdpad'); const cx = cv.getContext('2d'); cx.lineWidth = 3.2; cx.lineCap = 'round'; cx.lineJoin = 'round'; cx.strokeStyle = '#111'; let on = false, n = 0;
+        const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+        cv.addEventListener('pointerdown', e => { e.preventDefault(); on = true; try { cv.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ } const [x, y] = pt(e); cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x + 0.1, y); cx.stroke(); n++; });
+        cv.addEventListener('pointermove', e => { if (!on) return; e.preventDefault(); const [x, y] = pt(e); cx.lineTo(x, y); cx.stroke(); n++; });
+        const up = () => { on = false; }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+        f.addEventListener('click', e => { if (e.target.closest('[data-sdpad="clear"]')) { e.preventDefault(); cx.clearRect(0, 0, cv.width, cv.height); n = 0; } });
+        f._sdpad = () => (n > 3 ? cv.toDataURL('image/png') : '');
+      },
+      onSubmit: async f => {
+        const d = formData(f); const img = f._sdpad ? f._sdpad() : ''; if (!(d.name || '').trim()) { toast(T('اكتب اسم المستلم', 'Type the receiver name'), 'err'); return false; } if (!img) { toast(T('محتاجين توقيع المستلم', 'The receiver must sign'), 'err'); return false; }
+        const sign = { name: d.name.trim(), title: (d.title || '').trim(), img, at: nowISO(), byName: nm() };
+        await Store.update('fgs', dn.id, { sign }, { silent: true });
+        if (dn.status !== 'delivered') { try { await dnDeliver(byId('fgs', dn.id) || dn, { thumb: img, note: T(`استلم: ${sign.name}${sign.title ? ' — ' + sign.title : ''}`, `Received by ${sign.name}${sign.title ? ' — ' + sign.title : ''}`), byName: nm(), at: sign.at }); } catch (e) { console.warn(e); } }
+        toast(T('اتسلّم ✓ — ابعت الإذن للشركة', 'Delivered ✓ — send the note to the company'));
+      } });
+  };
+  document.addEventListener('change', async e => {
+    const i = e.target.closest && e.target.closest('input[data-sddncopy]'); if (!i || !i.files || !i.files[0]) return; const dn = byId('fgs', i.dataset.sddncopy); if (!dn) return;
+    try {
+      const doc = await uploadOneBase(i.files[0], { kind: 'render', orderId: dn.orderId || null, note: `${T('نسخة موقّعة', 'Signed copy')} ${dn.number || ''}` });
+      await Store.update('fgs', dn.id, { signedCopy: { fileId: doc.id, thumb: doc.thumb || null, at: nowISO(), byName: nm() } }, { silent: true });
+      if (dn.status !== 'delivered') await dnDeliver(byId('fgs', dn.id) || dn, { thumb: doc.thumb || null, note: T('نسخة موقّعة', 'Signed copy'), byName: nm(), at: nowISO(), fileIds: [doc.id] });
+      toast(T('اتحفظت النسخة الموقّعة ✓', 'Signed copy saved ✓')); render(false);
+    } catch (er) { toast(T('مقدرتش أرفع الصورة', 'Could not upload the picture'), 'err'); } finally { i.value = ''; }
+  });
+  ACTIONS.sdDnSend = async arg => {
+    const [id, via] = String(arg).split('|'); const dn = byId('fgs', id); if (!dn || !canDn()) return; const c = dn.clientId ? byId('clients', dn.clientId) || {} : {};
+    try {
+      toast(T('بيجهّز الإذن…', 'Preparing the note…')); const blob = await toPng(dnSheet(dn)); const name = `${T('إذن توريد', 'Delivery note')} ${dn.number || ''} — ${dn.clientName || ''}.png`.replace(/[\\/:*?"<>|]+/g, ' ');
+      const how = await sendPic(blob, name, via === 'email' ? c.email : c.phone, dnMsg(dn), via === 'email' ? 'email' : 'wa'); if (!how) return;
+      await Store.update('fgs', id, { sentTo: (dn.sentTo || []).concat([{ via: via === 'email' ? 'email' : 'wa', at: nowISO(), by: S.session?.id || '', byName: nm() }]) }, { silent: true }); render(false);
+    } catch (e) { console.warn('dn send', e); toast(T('مقدرتش أجهّز الصورة', 'Could not prepare the picture'), 'err'); }
+  };
+  /* the project page: «delivered 8 of 16» per contract line + its delivery notes */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      if (!fgOk() || S.route.view !== 'orders' || !S.route.id || !(isAdmin() || canDn() || ['hr', 'acc', 'vice'].includes(role()))) return;
+      const v = document.getElementById('view'); if (!v || v.querySelector('#sdsupply')) return; const o = byId('orders', S.route.id); if (!o) return;
+      const L = contract(o); const dns = sortBy(dnsOf(o.id), d => d.createdAt || '', true); if (!L.length && !dns.length) return;
+      const html = `<div class="card" id="sdsupply"><div class="cardhead"><h3>${icon('inventory')}${esc(T('التوريد', 'Deliveries'))}</h3><div class="grow"></div>${canDn() && writable() && L.length ? `<button class="btn sm p" data-action="sdDnNew" data-arg="${esc(o.id)}">${icon('plus')}${esc(T('إذن توريد جديد', 'New delivery note'))}</button>` : ''}</div>
+        ${L.length ? `<div class="sdprog">${L.map(l => { const dl = deliveredOf(o.id, l.k); const pc = l.qty ? Math.min(100, Math.round(dl / l.qty * 100)) : 0; return `<div class="sdpr"><span class="notr">${esc(l.name)}</span><b>${esc(T(`اتورّد ${num2(dl)} من ${num2(l.qty)}`, `${num2(dl)} of ${num2(l.qty)} delivered`))}</b><i><em style="width:${pc}%"></em></i></div>`; }).join('')}</div>` : ''}
+        ${dns.length ? `<div class="aplines" style="margin-top:8px">${dns.map(d => `<a class="apline" href="#/fg/${esc(d.id)}"><b class="ltr">${esc(d.number || '')}</b><span>${esc(dmy(d.date || d.createdAt))}</span><span class="grow"></span>${typeof badge === 'function' && typeof DN_ST === 'object' ? badge(DN_ST, d.status) : ''}</a>`).join('')}</div>` : ''}</div>`;
+      const old = v.querySelector('#fgordercard'); if (old) old.insertAdjacentHTML('afterend', html); else { const first = v.querySelector('.card'); if (first) first.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('beforeend', html); }
+    } catch (e) { /* ignore */ }
+  });
+  window.nfSupply = { rfqSheet, poSheet, dnSheet, toPng, contract, deliveredOf };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .sdhost{position:fixed;left:-12000px;top:0;width:794px;background:#fff;z-index:-1;pointer-events:none}
+    .sdoc{width:794px;box-sizing:border-box;padding:28px 34px;background:#fff;color:#141414;font:13px/1.55 'IBM Plex Sans Arabic','Segoe UI',Tahoma,system-ui,sans-serif;direction:rtl}
+    .sdprev{overflow:auto;max-height:70vh;background:#e9e9ee;padding:12px;border-radius:12px}.sdprev .sdoc{margin:0 auto;box-shadow:0 6px 24px rgba(0,0,0,.18);transform-origin:top right}
+    @media (max-width:860px){.sdprev .sdoc{zoom:.45}}
+    .sdoc .sdh{display:flex;align-items:center;gap:16px;padding:14px 18px;background:var(--sd-bg);color:var(--sd-ink);border-radius:12px;margin-bottom:16px}
+    .sdoc .sdl .lg{height:44px;display:inline-flex}.sdoc .sdl svg,.sdoc .sdl img{height:44px;width:auto;display:block}
+    .sdoc .sdt{flex:1;min-width:0}.sdoc .sdtt{font-size:22px;font-weight:800;color:var(--sd-ac)}.sdoc .sdco{font-size:11.5px;opacity:.75}
+    .sdoc .sdx{display:block;font-size:10px;font-weight:500;opacity:.65;letter-spacing:.2px;direction:ltr;unicode-bidi:plaintext;text-align:right}.sdoc .sdtab th.n .sdx,.sdoc .sdtab td.n .sdx{text-align:left}.sdoc .sdtt .sdx{font-size:12px;opacity:.7}
+    .sdoc .sdx2{font-size:11px;opacity:.65;direction:ltr;display:block;text-align:left}
+    .sdoc .sdkv{display:grid;gap:4px}.sdoc .sdkv>div{display:flex;gap:8px;align-items:baseline;justify-content:space-between}.sdoc .sdkv span{font-size:11px;opacity:.7}.sdoc .sdkv b{font-size:12.5px;text-align:left}
+    .sdoc .sdr{min-width:190px}.sdoc .sdcols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:14px;padding:10px 14px;border:1px solid #e3e3e8;border-radius:10px}
+    .sdoc .sdto{font-size:14px;margin-bottom:6px}.sdoc .sdto .sdx{display:inline;margin-inline-start:6px}.sdoc .sdp{margin:8px 0 12px;font-size:12.5px}
+    .sdoc .sdtab{width:100%;border-collapse:collapse;margin:8px 0}.sdoc .sdtab th{background:#f3f3f5;color:#141414;font-size:11.5px;text-align:right;padding:7px 8px;border-bottom:2px solid var(--sd-ac);vertical-align:bottom}
+    .sdoc .sdtab td{padding:7px 8px;border-bottom:1px solid #e6e6ea;vertical-align:top;font-size:12.5px}.sdoc .sdtab td.n,.sdoc .sdtab th.n{text-align:left;direction:ltr;white-space:nowrap}
+    .sdoc .sdtab tfoot td{font-weight:700;background:#fafafa}.sdoc .sdtab .sdtot td{background:#f1f1f3;font-size:14px}
+    .sdoc .sdph{display:block;margin-top:4px;width:72px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e3e3e8}.sdoc .sdph2{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e3e3e8;display:block}
+    .sdoc .sdsm{font-size:11px;opacity:.7}.sdoc .sdbig{font-size:15px;font-weight:800}
+    .sdoc .sdnote{margin:10px 0;padding:8px 12px;background:#f7f7f9;border-radius:8px;font-size:12px}.sdoc .sdnote .sdx{display:inline;margin-inline-start:4px}
+    .sdoc .sdwarn{margin:10px 0;padding:8px 12px;border:1px dashed var(--sd-ac);border-radius:8px;font-size:12px;font-weight:600}
+    .sdoc .sdsigns{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}.sdoc .sdsigns>div{border:1px solid #e3e3e8;border-radius:10px;padding:10px 12px;min-height:96px;display:flex;flex-direction:column;gap:4px}
+    .sdoc .sdsigns span{font-size:11px;opacity:.7}.sdoc .sdsigns i{flex:1;border-bottom:1px solid #bbb;min-height:34px}.sdoc .sdsigns small{font-size:10px;opacity:.6}.sdoc .sdsig{height:60px;width:auto;max-width:100%;object-fit:contain;align-self:flex-start}
+    .sdoc .sdf{margin-top:18px;padding-top:8px;border-top:2px solid var(--sd-ac);font-size:10.5px;opacity:.7;display:flex;justify-content:space-between;gap:10px}
+    .sdcard .cardhead h3{display:flex;align-items:center;gap:6px}.sdcard .cardhead h3 svg{width:18px;height:18px}.sdsent{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.sdsent small{opacity:.7;margin-inline-start:4px}
+    .sdsups{display:flex;flex-direction:column;gap:2px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:6px;margin-top:6px}
+    .sdsup{display:flex!important;flex-direction:row!important;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;cursor:pointer}.sdsup:hover{background:var(--line)}.sdsup input{width:18px!important;height:18px!important;flex:none!important;margin:0}.sdsup span{flex:1;min-width:0}.sdsup small{color:var(--ink-2);font-size:11.5px}
+    .sdq{display:grid;gap:6px}.sdqrow{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:12px}
+    .sdmt input{width:84px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:inherit;padding:0 6px;text-align:left;direction:ltr}.sdmt tr.sdbad td{background:var(--crit-soft,#fde8e8);color:var(--crit-ink,#a1121a)}
+    .sddls{display:grid;gap:6px}.sddl{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:12px}.sddl.done{opacity:.55}.sddl>input[type=checkbox]{width:20px!important;height:20px!important;flex:none!important;margin:0}
+    .sddl img,.sdnoimg{width:46px;height:46px;border-radius:8px;object-fit:cover;flex:none;border:1px solid var(--line);display:grid;place-items:center;background:var(--surface-2)}.sdnoimg svg{width:20px;height:20px;opacity:.5}
+    .sddb{flex:1;min-width:0;display:flex;flex-direction:column}.sddb b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sddb small{color:var(--ink-2);font-size:11.5px}.sddl>input[type=number]{width:72px!important;flex:none!important;height:38px;text-align:center}
+    .sdlines{display:grid;gap:6px}.sdln{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line)}.sdln img{width:46px;height:46px;border-radius:8px;object-fit:cover;border:1px solid var(--line)}.sdln>div{flex:1;min-width:0;display:flex;flex-direction:column}.sdln small{color:var(--ink-2)}.sdq2{font-size:18px;font-weight:800}
+    .sdsigned{display:flex;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;border-radius:12px;background:var(--good-soft,#e3f6e8);color:var(--good-ink,#1b6b34);flex-wrap:wrap}.sdsigned svg{width:18px;height:18px}.sdsigned img{height:48px;width:auto;background:#fff;border-radius:6px;border:1px solid var(--line);cursor:zoom-in}
+    .sdpad{width:100%;height:180px;border:1px dashed var(--line);border-radius:12px;background:#fff;touch-action:none;display:block}
+    .sdprog{display:grid;gap:8px}.sdpr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center}.sdpr span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sdpr b{font-size:13px}.sdpr i{grid-column:1/-1;height:6px;border-radius:999px;background:var(--line);overflow:hidden}.sdpr em{display:block;height:100%;background:var(--good,#34c759)}
+  </style>`);
+})();
+/* =====================================================================
+   v7.66 — technical office reviews (brief «Technical Office via ChatGPT / Codex», 13 Oct; factory only).
+   The technical office works from ChatGPT / Codex (Edge function tech-mcp) or from the app; everything it makes is a DRAFT that the
+   owner reviews here.
+   · statuses on a product (p.tstate): draft → under_review → approved (catalogue / factory) or returned (owner's note) → draft again;
+     a product with no tstate is an approved one (everything that existed before);
+   · an approved product is locked for the technical office: «Edit» / «Upload drawings» open (or make) its draft version
+     (a separate product doc: draftOf = the approved id, ver = next); approving merges the version into the approved product, keeps
+     the old one in p.versions (fields + its files) and moves the new files onto it; the version doc stays as «merged» (mergedInto);
+   · drafts never show in the catalogue / orders / quotes (list('products')) — only here and on their own page;
+   · «Technical office reviews» page (owner): Under review · Returned · Recently approved · Activity; a review shows what changed vs
+     the approved version (fields + new files), Approve / Return with a note; the engineer gets a notice either way;
+     the engineer sees the same page for her own work (drafts / under review / returned / approved) with «Send for review»;
+   · every product page: versions (view / restore — owner) and the activity log (who, what, when, version);
+   · the engineer's own purchase requests: their status without any number (rpc nf_tech_purchases, after the server change).
+   Arabic and English; phone and computer.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TECHOFF__) return; window.__NF_TECHOFF__ = 1;
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof vProductDetail !== 'function' || typeof NAV === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const MONEY = /(\d[\d.,\s]*\s*(جنيه|ج\.?م|EGP|LE|USD|\$|دولار|ريال|SAR|€))|((EGP|USD|SAR|\$|€)\s*\d[\d.,]*)|\d{4,}/gi;
+  const WIP = ['draft', 'under_review', 'returned', 'merged'];
+  const isWip = p => !!p && WIP.includes(p.tstate || '');
+  const stateOf = p => (p && p.tstate && p.tstate !== 'approved' ? p.tstate : 'approved');
+  const isTech = () => role() === 'tech';
+  const me = () => S.session || {};
+  const myId = () => String(me().id || '');
+  const raw = () => Array.from((S.data.products && S.data.products.values()) || []);
+  const TR = { raw: 0, exclude: null, tab: null, who: '' };
+  const FIELDS = [['code', 'الكود', 'Code'], ['name', 'الاسم', 'Name'], ['nameEn', 'الاسم بالإنجليزي', 'English name'], ['dims', 'المقاسات', 'Dimensions'], ['unit', 'الوحدة', 'Unit'], ['finish', 'التشطيب', 'Finish'], ['rev', 'الإصدار', 'Revision'], ['desc', 'المواصفات', 'Specification'], ['materials', 'الخامات', 'Materials'], ['notes', 'ملاحظات التصنيع', 'Manufacturing notes']];
+  const MERGE_KEYS = FIELDS.map(f => f[0]).concat(['spec']);
+  const ST = { draft: ['مسودة', 'Draft', 'warn'], under_review: ['مستني المراجعة', 'Under review', 'info'], returned: ['راجع بملاحظات', 'Returned', 'crit'], approved: ['معتمد', 'Approved', 'good'], merged: ['اتدمجت', 'Merged', ''] };
+  const badge = s => { const x = ST[s] || [s, s, '']; return `<span class="badge ${x[2]} trb">${esc(L(x[0], x[1]))}</span>`; };
+  const WHAT = { created: ['عمل المنتج', 'created the product'], version: ['فتح نسخة جديدة', 'opened a new version'], edited: ['عدّل', 'edited'], file: ['رفع ملف', 'uploaded a file'], submitted: ['بعت للمراجعة', 'sent for review'], approved: ['اعتمد', 'approved'], returned: ['رجّع بملاحظات', 'returned with notes'], restored: ['استرجع نسخة', 'restored a version'] };
+  const whatTxt = w => { const x = WHAT[w] || [w, w]; return L(x[0], x[1]); };
+  const when = iso => { if (!iso) return ''; try { const d = new Date(iso); const same = iso.slice(0, 10) === todayISO(); return same ? d.toLocaleTimeString(en() ? 'en-GB' : 'ar-EG', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleString(en() ? 'en-GB' : 'ar-EG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso.slice(0, 16).replace('T', ' '); } };
+  const entry = (what, note, ver) => ({ at: nowISO(), by: myId(), byName: me().name || '', what, ver: ver || 1, note: String(note || '').slice(0, 300), via: 'app' });
+  const withLog = (p, what, note) => (p.tlog || []).concat([entry(what, note, +p.ver || 1)]).slice(-300);
+  const push = (to, title, body, url, tag) => { try { if (to && to.length && typeof pushSend === 'function') pushSend(to, String(title).replace(MONEY, '…').slice(0, 100), String(body || '').replace(MONEY, '…').slice(0, 160), url, tag); } catch (e) { /* the page still shows it */ } };
+  const mainOf = d => (d && d.draftOf ? byId('products', d.draftOf) : null);
+  const openDraftOf = p => raw().find(x => x.draftOf === p.id && ['draft', 'returned', 'under_review'].includes(x.tstate || ''));
+  const canRev = () => !!S.session && (isAdmin() || isTech()) && !(S.viewOrig || S.demoOrig);
+
+  /* ---------- drafts never reach the catalogue / orders / quotes ---------- */
+  if (typeof listScope === 'function') listScope = (base => function (col, arr) {
+    const a = base.apply(this, arguments); if (col !== 'products') return a;
+    if (TR.raw) return a.filter(p => p.id !== TR.exclude && p.tstate !== 'merged');
+    return a.filter(p => !isWip(p));
+  })(listScope);
+  if (typeof nextProductCode === 'function') nextProductCode = (base => function () { TR.raw++; try { return base.apply(this, arguments); } finally { TR.raw--; } })(nextProductCode);
+  const withRaw = async (exclude, fn) => { TR.raw++; const ex = TR.exclude; TR.exclude = exclude || null; try { return await fn(); } finally { TR.raw--; TR.exclude = ex; } };
+
+  /* ---------- the draft version of an approved product (made once, then reused) ---------- */
+  async function draftFor(p) {
+    if (isWip(p)) return p; const open = openDraftOf(p); if (open) return open;
+    const d = {}; ['brandId', 'code', 'name', 'nameEn', 'desc', 'materials', 'notes', 'dims', 'unit', 'finish', 'rev', 'spec', 'projectOrderId', 'kind', 'collection', 'parentId', 'coverFileId'].forEach(k => { if (p[k] !== undefined) d[k] = p[k]; });
+    const ver = (+p.ver || 1) + 1;
+    Object.assign(d, { id: uid(), draftOf: p.id, tstate: 'draft', status: 'active', ver, createdAt: nowISO(), createdBy: myId(), createdByName: me().name || '', tlog: [entry('version', `v${ver} — ${p.code || ''}`, ver)] });
+    await Store.save('products', d); return byId('products', d.id) || d;
+  }
+  async function techTarget(id) {
+    const p = byId('products', id); if (!p) return null;
+    if (p.tstate === 'under_review') { toast(L('المنتج ده عند المالك للمراجعة — استنى رده.', 'This product is with the owner for review — wait for the answer.'), 'warn'); return null; }
+    if (p.tstate === 'merged') { const m = byId('products', p.mergedInto); return m ? techTarget(m.id) : null; }
+    if (isWip(p)) return p;
+    const open = openDraftOf(p); if (open && open.tstate === 'under_review') { toast(L(`النسخة الجديدة من ${p.code || ''} عند المالك للمراجعة.`, `The new version of ${p.code || ''} is with the owner for review.`), 'warn'); return null; }
+    const d = await draftFor(p); if (!open) toast(L(`المنتج المعتمد مقفول — اتفتحت نسخة جديدة v${d.ver} وهتتعدّل فيها.`, `The approved product is locked — a new version v${d.ver} was opened for your changes.`)); return d;
+  }
+
+  /* ---------- the technical office in the app: new = draft, edit / upload on an approved product = its draft ---------- */
+  const baseNew = ACTIONS.productNew, baseEdit = ACTIONS.productEdit, baseUp = ACTIONS.fileUpload;
+  /* the code suggestion also in English (the old one looks for the Arabic title) */
+  const suggestCode = () => setTimeout(() => { const f = document.getElementById('mform'); if (!f || f.dataset.codeSug || typeof productCodeSuggest !== 'function' || !f.querySelector('#f-code')) return; f.dataset.codeSug = '1'; productCodeSuggest(f, false); }, 40);
+  ACTIONS.productNew = arg => {
+    if (!isTech()) { const r = baseNew(arg); suggestCode(); return r; } if (!canFiles()) return;
+    const p = { brandId: arg || (S.settings.brands[0] || {}).id, tstate: 'draft', ver: 1, createdBy: myId(), createdByName: me().name || '' }; p.tlog = [entry('created', '', 1)];
+    openModal({ title: L('منتج جديد (مسودة)', 'New product (draft)'), wide: true, body: productForm(p), onSubmit: f => saveProduct(f, p) }); suggestCode();
+  };
+  ACTIONS.productEdit = async id => {
+    if (!isTech()) return baseEdit(id); const p = byId('products', id); if (!p || !canFiles()) return;
+    const d = await techTarget(id); if (!d) return; if (d.id !== id) { go('products/' + d.id); await new Promise(r => setTimeout(r, 120)); }
+    openModal({ title: L(`تعديل ${d.code || d.name} (v${d.ver || 1})`, `Edit ${d.code || d.name} (v${d.ver || 1})`), wide: true, body: productForm(d), onSubmit: f => saveProduct(f, d) });
+  };
+  ACTIONS.fileUpload = async arg => {
+    const m = /^product:(.+)$/.exec(String(arg || '')); if (!m || !isTech()) return baseUp(arg);
+    const d = await techTarget(m[1]); if (!d) return; if (d.id !== m[1]) { go('products/' + d.id); await new Promise(r => setTimeout(r, 120)); }
+    return baseUp('product:' + d.id);
+  };
+  saveProduct = (base => async function (f, p) {
+    const wip = isWip(p) || (isTech() && !p.id);
+    if (!wip) return base.apply(this, arguments);
+    const p2 = Object.assign({}, p); if (p2.id) { p2.tstate = p2.tstate === 'returned' ? 'draft' : p2.tstate; p2.tlog = withLog(p2, 'edited'); }
+    return withRaw(p2.draftOf, () => base.call(this, f, p2));
+  })(saveProduct);
+
+  /* ---------- send for review / approve / return ---------- */
+  ACTIONS.trSubmit = id => {
+    const d = byId('products', id); if (!d || !['draft', 'returned'].includes(d.tstate || '') || !writable()) return;
+    openModal({ title: L(`ابعت ${d.code || ''} للمراجعة`, `Send ${d.code || ''} for review`), body: `<div class="form">${field(L('ملاحظة للمالك (اختياري)', 'A note for the owner (optional)'), `<textarea name="note" maxlength="600" placeholder="${esc(L('مثال: غيّرت مقاس الرجل وزوّدت رسمة التجميع', 'e.g. changed the leg size and added the assembly drawing'))}"></textarea>`, 'full')}</div>`,
+      onSubmit: async f => {
+        const note = String(formData(f).note || '').trim().slice(0, 600); const cur = byId('products', id) || d;
+        await Store.update('products', id, { tstate: 'under_review', submittedAt: nowISO(), submittedBy: myId(), submittedByName: me().name || '', submitNote: note, reviewNote: '', tlog: withLog(cur, 'submitted', note) });
+        push(['role:admin'], `📐 ${me().name || ''}: ${cur.code || ''} مستني مراجعتك`, `${cur.name || ''}${cur.draftOf ? ` — نسخة ${cur.ver || 2}` : ' — منتج جديد'}`, `/#/techrev/${id}`, 'techrev-' + id);
+        toast(L('اتبعت للمالك يراجعه', 'Sent to the owner for review'));
+      } });
+  };
+  function pick(o) { const x = {}; MERGE_KEYS.forEach(k => { if (o[k] !== undefined) x[k] = o[k]; }); return x; }
+  ACTIONS.trApprove = async id => {
+    const d = byId('products', id); if (!d || d.tstate !== 'under_review' || !isAdmin() || !writable()) return;
+    const m = mainOf(d);
+    if (!(await confirmDlg(m ? L(`اعتماد النسخة v${d.ver || 2} من ${m.code || ''}؟ هتحل محل المعتمدة، والقديمة تفضل في «النسخ».`, `Approve version v${d.ver || 2} of ${m.code || ''}? It replaces the approved one; the old one stays under «Versions».`) : L(`اعتماد ${d.code || ''} ونزوله الكتالوج والمصنع؟`, `Approve ${d.code || ''} into the catalogue and the factory?`), L('اعتماد', 'Approve'), false))) return;
+    const at = nowISO(); let mainId = d.id;
+    if (m) {
+      mainId = m.id; const ver = +d.ver || (+m.ver || 1) + 1;
+      const snap = { ver: +m.ver || 1, at, by: myId(), byName: me().name || '', fields: pick(m), fileIds: filesOf('product', m.id).map(f => f.id) };
+      const upd = Object.assign({}, m, pick(d), { ver, versions: (m.versions || []).concat([snap]).slice(-40), tstate: 'approved', approvedAt: at, approvedBy: myId(), approvedByName: me().name || '', reviewNote: '' });
+      upd.tlog = (m.tlog || []).concat(d.tlog || [], [entry('approved', `v${ver}`, ver)]).slice(-300);
+      await Store.save('products', upd);
+      for (const f of filesOf('product', d.id)) await Store.update('files', f.id, { productId: m.id, ver }, { silent: true });
+      await Store.update('products', d.id, { tstate: 'merged', mergedInto: m.id, mergedAt: at }, { silent: true });
+    } else {
+      await Store.update('products', d.id, { tstate: 'approved', approvedAt: at, approvedBy: myId(), approvedByName: me().name || '', reviewNote: '', tlog: withLog(d, 'approved') });
+    }
+    const to = [d.submittedBy || d.createdBy].filter(Boolean);
+    push(to, L(`✅ ${d.code || ''} اتعتمد`, `✅ ${d.code || ''} approved`), `${d.name || ''}${m ? ` — v${d.ver || 2}` : ''}`, `/#/products/${mainId}`, 'techrev-' + d.id);
+    toast(L('اتعتمد', 'Approved')); go('techrev');
+  };
+  ACTIONS.trReturn = id => {
+    const d = byId('products', id); if (!d || d.tstate !== 'under_review' || !isAdmin() || !writable()) return;
+    openModal({ title: L(`رجّع ${d.code || ''} بملاحظات`, `Return ${d.code || ''} with notes`), body: `<div class="form">${field(L('الملاحظات', 'Notes'), `<textarea name="note" required maxlength="1000" placeholder="${esc(L('اكتب المطلوب تعديله…', 'Write what needs to change…'))}"></textarea>`, 'full')}</div>`,
+      onSubmit: async f => {
+        const note = String(formData(f).note || '').trim().slice(0, 1000); if (!note) { toast(L('اكتب الملاحظات', 'Write the notes'), 'err'); return false; }
+        const cur = byId('products', id) || d;
+        await Store.update('products', id, { tstate: 'returned', reviewNote: note, returnedAt: nowISO(), returnedBy: myId(), tlog: withLog(cur, 'returned', note) });
+        push([cur.submittedBy || cur.createdBy].filter(Boolean), L(`↩️ ${cur.code || ''} راجع بملاحظات`, `↩️ ${cur.code || ''} returned with notes`), note, `/#/products/${id}`, 'techrev-' + id);
+        toast(L('اترجعت للمكتب الفني', 'Returned to the technical office')); go('techrev');
+      } });
+  };
+  ACTIONS.trRestore = async arg => {
+    const [pid, i] = String(arg).split(':'); const m = byId('products', pid); const v = m && (m.versions || [])[+i]; if (!v || !isAdmin() || !writable()) return;
+    if (!(await confirmDlg(L(`ترجع المواصفات لنسخة v${v.ver}؟ الحالية هتتحفظ في «النسخ».`, `Restore the specification of v${v.ver}? The current one is kept under «Versions».`), L('استرجاع', 'Restore'), false))) return;
+    const ver = (+m.ver || 1) + 1; const snap = { ver: +m.ver || 1, at: nowISO(), by: myId(), byName: me().name || '', fields: pick(m), fileIds: filesOf('product', m.id).map(f => f.id) };
+    const upd = Object.assign({}, m, v.fields || {}, { ver, versions: (m.versions || []).concat([snap]).slice(-40) }); upd.tlog = withLog(Object.assign({}, m, { ver }), 'restored', `v${v.ver} → v${ver}`);
+    await Store.save('products', upd); toast(L(`اتسترجعت v${v.ver} (دلوقتي v${ver})`, `v${v.ver} restored (now v${ver})`));
+  };
+  ACTIONS.trVersion = arg => {
+    const [pid, i] = String(arg).split(':'); const m = byId('products', pid); const v = m && (m.versions || [])[+i]; if (!v) return;
+    const fs = (v.fileIds || []).map(id => byId('files', id)).filter(Boolean);
+    openModal({ title: `${m.code || ''} — v${v.ver}`, body: `<div class="muted small">${esc(when(v.at))}${v.byName ? ' · ' + esc(v.byName) : ''}</div>${FIELDS.filter(f => (v.fields || {})[f[0]]).map(f => `<div class="trf"><div class="tiny muted">${esc(L(f[1], f[2]))}</div><div class="small notr" style="white-space:pre-wrap">${esc(v.fields[f[0]])}</div></div>`).join('')}${fs.length ? `<div class="sep"></div><div class="tiny muted">${esc(L('ملفات النسخة', 'Files of this version'))}</div>${fileGallery(fs, '', {})}` : ''}${isAdmin() ? `<div class="row" style="margin-top:12px"><button class="btn sm" data-action="trRestore" data-arg="${esc(pid)}:${esc(i)}">${icon('refresh')}${esc(L('استرجاع النسخة دي', 'Restore this version'))}</button></div>` : ''}` });
+  };
+
+  /* ---------- what changed vs the approved version ---------- */
+  function diffHTML(d) {
+    const m = mainOf(d); const rows = [];
+    FIELDS.forEach(([k, a, b]) => { const nv = String(d[k] ?? ''), ov = m ? String(m[k] ?? '') : ''; if (m ? nv !== ov : nv) rows.push(`<div class="trd"><div class="tiny muted">${esc(L(a, b))}</div>${m ? `<div class="trold notr">${ov ? esc(ov) : '—'}</div>` : ''}<div class="trnew notr">${nv ? esc(nv) : '—'}</div></div>`); });
+    const nf = filesOf('product', d.id);
+    return `<div class="card"><div class="cardhead"><h3>${esc(m ? L(`اللي اتغيّر عن v${m.ver || 1} المعتمدة`, `What changed vs approved v${m.ver || 1}`) : L('منتج جديد — كل البيانات', 'New product — all the data'))}</h3></div>
+      ${rows.length ? `<div class="trdl">${rows.join('')}</div>` : `<p class="muted small">${esc(L('مفيش تغيير في البيانات المكتوبة.', 'No change in the written data.'))}</p>`}
+      <div class="sep"></div><div class="tiny muted" style="margin-bottom:6px">${esc(L(`ملفات جديدة (${nf.length})`, `New files (${nf.length})`))}</div>${nf.length ? fileGallery(nf, '', {}) : `<p class="muted small">${esc(L('مفيش ملفات جديدة.', 'No new files.'))}</p>`}</div>`;
+  }
+  function statusCard(d) {
+    const m = mainOf(d); const s = stateOf(d); const mine = String(d.createdBy || '') === myId();
+    const acts = [];
+    if (['draft', 'returned'].includes(s) && (isAdmin() || isTech()) && writable()) acts.push(`<button class="btn sm p" data-action="trSubmit" data-arg="${esc(d.id)}">${icon('send')}<span>${esc(L('ابعت للمراجعة', 'Send for review'))}</span></button>`);
+    if (s === 'under_review' && isAdmin() && writable()) acts.push(`<button class="btn sm p" data-action="trApprove" data-arg="${esc(d.id)}">${icon('check')}<span>${esc(L('اعتماد', 'Approve'))}</span></button><button class="btn sm" data-action="trReturn" data-arg="${esc(d.id)}">${icon('back')}<span>${esc(L('رجّع بملاحظات', 'Return with notes'))}</span></button>`);
+    return `<div class="card trstat"><div class="cardhead">${badge(s)}<b class="notr">${esc(d.code || '')}</b><span class="muted small">v${esc(d.ver || 1)}</span><div class="grow"></div><a class="btn sm ghost" href="#/techrev">${esc(L('مراجعات المكتب الفني', 'Technical office reviews'))}</a></div>
+      <div class="small">${m ? L(`نسخة جديدة من <a href="#/products/${esc(m.id)}">${esc(m.code || m.name || '')}</a> المعتمدة (v${esc(m.ver || 1)}) — بتتعدّل هنا، والمعتمدة زي ما هي لحد ما المالك يعتمد.`, `A new version of approved <a href="#/products/${esc(m.id)}">${esc(m.code || m.name || '')}</a> (v${esc(m.ver || 1)}) — changes happen here; the approved one stays as it is until the owner approves.`) : esc(L('منتج جديد — مش ظاهر في الكتالوج ولا للمصنع لحد ما المالك يعتمده.', 'A new product — not in the catalogue or the factory until the owner approves it.'))}</div>
+      ${d.createdByName && !mine ? `<div class="muted tiny">${esc(L('عمله', 'Made by'))}: <span class="notr">${esc(d.createdByName)}</span></div>` : ''}
+      ${s === 'returned' && d.reviewNote ? `<div class="trnote"><b>${esc(L('ملاحظات المالك', 'Owner notes'))}:</b> <span class="notr">${esc(d.reviewNote)}</span></div>` : ''}
+      ${s === 'under_review' && d.submitNote ? `<div class="trnote"><b>${esc(L('ملاحظة المكتب الفني', 'Technical office note'))}:</b> <span class="notr">${esc(d.submitNote)}</span></div>` : ''}
+      ${acts.length ? `<div class="row" style="gap:6px;margin-top:10px">${acts.join('')}</div>` : ''}</div>`;
+  }
+  function logHTML(p, title) {
+    const fs = filesOf('product', p.id).filter(f => f.via !== 'chatgpt' && f.createdAt).map(f => ({ at: f.createdAt, byName: f.byName || '', what: 'file', note: f.name, ver: f.ver || null }));
+    const xs = (p.tlog || []).concat(fs).sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 40);
+    if (!xs.length) return '';
+    return `<div class="card"><div class="cardhead"><h3>${esc(title || L('سجل الحركة', 'Activity log'))}</h3><span class="muted small">${xs.length}</span></div><div class="trlog">${xs.map(x => `<div class="trli"><span class="trdot ${esc(x.what)}"></span><div><b class="notr">${esc(x.byName || '')}</b> ${esc(whatTxt(x.what))}${x.ver ? ` <span class="muted tiny">v${esc(x.ver)}</span>` : ''}${x.note ? ` — <span class="notr">${esc(String(x.note).slice(0, 160))}</span>` : ''}${x.via === 'chatgpt' ? ' <span class="badge trgpt">ChatGPT</span>' : ''}<div class="muted tiny">${esc(when(x.at))}</div></div></div>`).join('')}</div></div>`;
+  }
+  function versionsHTML(p) {
+    const vs = p.versions || []; if (!vs.length) return '';
+    return `<div class="card"><div class="cardhead"><h3>${esc(L('النسخ', 'Versions'))}</h3><span class="muted small">${esc(L(`الحالية v${p.ver || 1}`, `current v${p.ver || 1}`))}</span></div><div class="list">${vs.map((v, i) => ({ v, i })).reverse().map(({ v, i }) => `<a class="item" data-action="trVersion" data-arg="${esc(p.id)}:${i}"><div class="main"><div class="title">v${esc(v.ver)}</div><div class="sub muted tiny">${esc(when(v.at))}${v.byName ? ' · ' + esc(v.byName) : ''} · ${esc(L(`${(v.fileIds || []).length} ملف`, `${(v.fileIds || []).length} files`))}</div></div></a>`).join('')}</div></div>`;
+  }
+  vProductDetail = (base => function (id) {
+    const h = base.apply(this, arguments); const p = byId('products', id); if (!p || !canRev()) return h;
+    try {
+      if (p.tstate === 'merged') { const m = byId('products', p.mergedInto); return `<div class="banner" style="margin-bottom:12px">${esc(L('النسخة دي اتعتمدت واتدمجت في المنتج.', 'This version was approved and merged into the product.'))} ${m ? `<a href="#/products/${esc(m.id)}">${esc(m.code || m.name)}</a>` : ''}</div>` + h; }
+      if (isWip(p)) return statusCard(p) + (p.draftOf ? diffHTML(p) : '') + h + logHTML(p);
+      const open = openDraftOf(p);
+      const ban = open ? `<a class="banner warn trban" href="#/products/${esc(open.id)}">${icon('edit')}<span>${esc(L(`فيه نسخة جديدة v${open.ver || 2} (${L(ST[open.tstate][0], ST[open.tstate][1])}) — افتحها`, `There is a new version v${open.ver || 2} (${ST[open.tstate][1]}) — open it`))}</span></a>` : '';
+      return ban + h + versionsHTML(p) + logHTML(p);
+    } catch (e) { console.warn('tech office', e); return h; }
+  })(vProductDetail);
+  if (typeof vProducts === 'function') vProducts = (base => function () {
+    const h = base.apply(this, arguments); if (!canRev()) return h;
+    const xs = raw().filter(p => isWip(p) && p.tstate !== 'merged' && (isAdmin() || String(p.createdBy || '') === myId()));
+    const ur = xs.filter(p => p.tstate === 'under_review').length, rt = xs.filter(p => p.tstate === 'returned').length, dr = xs.filter(p => p.tstate === 'draft').length;
+    if (!xs.length) return h;
+    const txt = isAdmin() ? L(`${ur} منتج مستني مراجعتك من المكتب الفني${rt ? ` · ${rt} راجع بملاحظات` : ''}`, `${ur} products waiting for your review from the technical office${rt ? ` · ${rt} returned` : ''}`) : L(`شغلك: ${dr} مسودة · ${ur} مستني المراجعة · ${rt} راجع بملاحظات`, `Your work: ${dr} drafts · ${ur} under review · ${rt} returned`);
+    return `<a class="banner ${ur && isAdmin() || rt && !isAdmin() ? 'warn' : ''} trban" href="#/techrev">${icon('check')}<span>${esc(txt)}</span></a>` + h;
+  })(vProducts);
+
+  /* ---------- the page: «Technical office reviews» ---------- */
+  const TABS = () => (isAdmin() ? [['under_review', 'مستني المراجعة', 'Under review'], ['returned', 'راجع بملاحظات', 'Returned'], ['approved', 'اتعتمد قريب', 'Recently approved'], ['activity', 'الحركة', 'Activity']] : [['draft', 'مسوداتي', 'My drafts'], ['under_review', 'مستني المراجعة', 'Under review'], ['returned', 'راجع بملاحظات', 'Returned'], ['approved', 'اتعتمد', 'Approved'], ['activity', 'الحركة', 'Activity']]);
+  function itemsFor(tab) {
+    const mine = p => isAdmin() || String(p.createdBy || '') === myId() || String(p.submittedBy || '') === myId();
+    const all = raw().filter(mine);
+    if (tab === 'approved') { const since = new Date(Date.now() - 30 * 864e5).toISOString(); const xs = []; all.forEach(p => { if (p.tstate === 'merged' && (p.mergedAt || '') >= since) xs.push(Object.assign({}, p, { _at: p.mergedAt })); else if (p.tstate === 'approved' && p.approvedAt && p.approvedAt >= since && !p.draftOf) xs.push(Object.assign({}, p, { _at: p.approvedAt })); }); return xs.sort((a, b) => String(b._at).localeCompare(String(a._at))); }
+    return all.filter(p => p.tstate === tab).sort((a, b) => String(b.submittedAt || b.returnedAt || b.createdAt || '').localeCompare(String(a.submittedAt || a.returnedAt || a.createdAt || '')));
+  }
+  function rowHTML(p) {
+    const m = mainOf(p); const cov = typeof productCover === 'function' ? (() => { try { return productCover(p) || (m ? productCover(m) : null); } catch (e) { return null; } })() : null;
+    const sub = [m ? L(`نسخة v${p.ver || 2} من ${m.code || ''}`, `v${p.ver || 2} of ${m.code || ''}`) : L('منتج جديد', 'New product'), p.submittedByName || p.createdByName || '', when(p._at || p.submittedAt || p.returnedAt || p.createdAt)].filter(Boolean).join(' · ');
+    const link = p.tstate === 'merged' ? `#/products/${p.mergedInto}` : p.tstate === 'under_review' && isAdmin() ? `#/techrev/${p.id}` : `#/products/${p.id}`;
+    return `<a class="trrow" href="${esc(link)}">${cov ? `<img src="${esc(cov)}" alt="" loading="lazy">` : `<span class="trico">${icon('cube')}</span>`}<div class="trt"><b class="notr">${esc(p.code || '')} — ${esc(p.name || '')}</b><span class="muted tiny notr">${esc(sub)}</span>${p.tstate === 'returned' && p.reviewNote ? `<span class="trnote1 notr">${esc(p.reviewNote)}</span>` : ''}${p.tstate === 'under_review' && p.submitNote ? `<span class="muted tiny notr">${esc(p.submitNote)}</span>` : ''}</div>${badge(p.tstate === 'merged' ? 'approved' : stateOf(p))}</a>`;
+  }
+  function activityHTML() {
+    const since = new Date(Date.now() - 7 * 864e5).toISOString(); const evs = [];
+    raw().forEach(p => (p.tlog || []).forEach(x => { if ((x.at || '') >= since && (isAdmin() || String(x.by || '') === myId())) evs.push(Object.assign({ code: p.code, pid: p.tstate === 'merged' ? p.mergedInto : p.id }, x)); }));
+    const seen = new Set(); const uniq = evs.filter(x => { const k = [x.at, x.by, x.what, x.note].join('|'); if (seen.has(k)) return false; seen.add(k); return true; });
+    const people = [...new Set(uniq.map(x => x.byName).filter(Boolean))];
+    const xs = uniq.filter(x => !TR.who || x.byName === TR.who).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 200);
+    const byDay = {}; xs.forEach(x => { const d = String(x.at).slice(0, 10); (byDay[d] ||= []).push(x); });
+    const dayName = d => (d === todayISO() ? L('النهارده', 'Today') : typeof fmtDate === 'function' ? fmtDate(d) : d);
+    return `${people.length > 1 ? `<div class="trtabs">${[''].concat(people).map(n => `<button class="${TR.who === n ? 'on' : ''}" data-action="trWho" data-arg="${esc(n)}">${n ? `<span class="notr">${esc(n)}</span>` : esc(L('الكل', 'Everyone'))}</button>`).join('')}</div>` : ''}
+      ${xs.length ? Object.keys(byDay).map(d => `<div class="card"><div class="cardhead"><h3>${esc(dayName(d))}</h3><span class="muted small">${byDay[d].length}</span></div><div class="trlog">${byDay[d].map(x => `<a class="trli" href="#/products/${esc(x.pid || '')}"><span class="trdot ${esc(x.what)}"></span><div><b class="notr">${esc(x.byName || '')}</b> ${esc(whatTxt(x.what))} <b class="notr">${esc(x.code || '')}</b>${x.ver ? ` <span class="muted tiny">v${esc(x.ver)}</span>` : ''}${x.note ? ` — <span class="notr">${esc(String(x.note).slice(0, 120))}</span>` : ''}${x.via === 'chatgpt' ? ' <span class="badge trgpt">ChatGPT</span>' : ''}<div class="muted tiny">${esc(when(x.at))}</div></div></a>`).join('')}</div></div>`).join('') : `<div class="empty"><b>${esc(L('مفيش حركة الأسبوع ده', 'No activity this week'))}</b></div>`}`;
+  }
+  function pageHTML() {
+    const tabs = TABS(); if (!TR.tab || !tabs.some(t => t[0] === TR.tab)) TR.tab = tabs[0][0];
+    const cnt = t => (t === 'activity' ? '' : String(itemsFor(t).length));
+    const head = `<div class="trtabs">${tabs.map(([k, a, b]) => `<button class="${TR.tab === k ? 'on' : ''}" data-action="trTab" data-arg="${k}">${esc(L(a, b))}${cnt(k) && cnt(k) !== '0' ? ` <span class="trn">${cnt(k)}</span>` : ''}</button>`).join('')}</div>`;
+    if (TR.tab === 'activity') return head + activityHTML();
+    const xs = itemsFor(TR.tab);
+    const empty = { under_review: L('مفيش حاجة مستنية مراجعتك.', 'Nothing is waiting for your review.'), returned: L('مفيش حاجة راجعة بملاحظات.', 'Nothing returned.'), approved: L('مفيش حاجة اتعتمدت آخر 30 يوم.', 'Nothing approved in the last 30 days.'), draft: L('مفيش مسودات — اعمل منتج جديد من «المنتجات والرسومات» أو من ChatGPT.', 'No drafts — make a new product from «Products & drawings» or from ChatGPT.') }[TR.tab];
+    return head + (xs.length ? `<div class="trlist">${xs.map(rowHTML).join('')}</div>` : `<div class="empty"><b>${esc(empty || '')}</b></div>`) + (isTech() ? purchCard() : '');
+  }
+  function reviewHTML(id) {
+    const d = byId('products', id); if (!d) return `<div class="empty"><b>${esc(L('المنتج مش موجود', 'Product not found'))}</b></div>`;
+    if (!isWip(d)) { setTimeout(() => go('products/' + id), 0); return ''; }
+    return statusCard(d) + diffHTML(d) + logHTML(d) + `<div class="row" style="margin-top:4px"><a class="btn ghost" href="#/products/${esc(d.id)}">${icon('cube')}<span>${esc(L('صفحة المنتج كاملة', 'The full product page'))}</span></a></div>`;
+  }
+  ACTIONS.trTab = t => { TR.tab = t; render(false); };
+  ACTIONS.trWho = n => { TR.who = n || ''; render(false); };
+
+  /* the engineer's own purchase requests, without numbers (server rpc after the PIN change; nothing shows before it) */
+  const PQ = { at: 0, rows: null, busy: false };
+  function purchCard() {
+    if (!(typeof sbOn === 'function' && sbOn()) || !S.sb) return '';
+    if (!PQ.busy && Date.now() - PQ.at > 60000) { PQ.busy = true; S.sb.rpc('nf_tech_purchases').then(r => { PQ.rows = r && !r.error && Array.isArray(r.data) ? r.data : null; }).catch(() => { PQ.rows = null; }).finally(() => { PQ.busy = false; PQ.at = Date.now(); if (S.route && S.route.view === 'techrev') render(false); }); }
+    if (!PQ.rows || !PQ.rows.length) return '';
+    const SL = { rfq: ['طلب عرض سعر', 'Quote request'], draft: ['مسودة', 'Draft'], approval: ['في الموافقات', 'In approval'], approved: ['اتوافق عليه', 'Approved'], ordered: ['اتطلب من المورد', 'Ordered'], received: ['اتستلم', 'Received'], partial: ['استلام جزئي', 'Partly received'], rejected: ['اترفض', 'Rejected'], cancelled: ['اتلغى', 'Cancelled'] };
+    return `<div class="card" style="margin-top:14px"><div class="cardhead"><h3>${esc(L('طلبات الشراء بتاعتي', 'My purchase requests'))}</h3><span class="muted small">${PQ.rows.length}</span></div><div class="list">${PQ.rows.slice(0, 30).map(r => `<div class="item"><div class="main"><div class="title notr">${esc(r.number || '')} ${esc((r.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join('، '))}</div><div class="sub muted tiny">${esc(L((SL[r.status] || [r.status])[0] || '', (SL[r.status] || [r.status, r.status])[1] || ''))}${r.supplier ? ' · <span class="notr">' + esc(r.supplier) + '</span>' : ''}</div></div></div>`).join('')}</div></div>`;
+  }
+
+  VIEW_TITLES.techrev = 'مراجعات المكتب الفني';
+  EXTRA_VIEWS.techrev = r => (r.id ? reviewHTML(r.id) : pageHTML());
+  EXTRA_TITLES.techrev = r => (r.id ? { title: L('مراجعة منتج', 'Product review'), actions: `<a class="btn ghost" href="#/techrev">${icon('back')}<span>${esc(L('المراجعات', 'Reviews'))}</span></a>` } : { title: L('مراجعات المكتب الفني', 'Technical office reviews'), sub: isAdmin() ? L('اللي المكتب الفني عمله أو عدّله — من التطبيق أو ChatGPT — مستني اعتمادك', 'What the technical office made or changed — in the app or in ChatGPT — waiting for your approval') : L('مسوداتك، اللي عند المالك، واللي رجع بملاحظات', 'Your drafts, what is with the owner, and what came back with notes') });
+  if (Array.isArray(ROLE_VIEWS.tech) && !ROLE_VIEWS.tech.includes('techrev')) ROLE_VIEWS.tech.push('techrev');
+  canSee = (base => function (v) { if (v === 'techrev') return canRev(); return base.apply(this, arguments); })(canSee);
+  (() => {
+    if (NAV.some(n => n.id === 'techrev')) return; let i = NAV.findIndex(n => n.id === 'products'); if (i >= 0 && NAV[i + 1] && NAV[i + 1].id === 'concept') i++; /* «Concept» stays right after products & drawings */
+    const e = { id: 'techrev', label: 'مراجعات المكتب الفني', short: 'المراجعات', icon: 'check', countCls: 'warn', count: () => { if (!canRev()) return 0; const xs = raw(); return isAdmin() ? xs.filter(p => p.tstate === 'under_review').length : xs.filter(p => p.tstate === 'returned' && String(p.createdBy || '') === myId()).length; } };
+    if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e);
+  })();
+  window.nfTechOffice = { draftFor, isWip, stateOf, raw };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .trtabs{display:flex!important;flex-wrap:nowrap!important;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 0 12px;padding:2px 0 4px}.trtabs::-webkit-scrollbar{display:none}
+    .trtabs button{flex:none!important;width:auto!important;display:inline-flex!important;flex-direction:row!important;align-items:center;gap:6px;height:36px;min-height:0!important;padding:0 14px!important;border:1px solid var(--line)!important;background:var(--surface)!important;color:var(--ink)!important;border-radius:999px!important;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}
+    .trtabs button.on{background:var(--ink,#111)!important;color:var(--surface,#fff)!important;border-color:transparent!important}.trn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00);font-size:11.5px;font-weight:700}
+    .trlist{display:flex;flex-direction:column;gap:8px}.trrow{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:inherit;text-decoration:none}
+    .trrow img,.trico{width:52px;height:52px;border-radius:10px;object-fit:cover;flex:none;background:var(--surface-2,#f2f2f5);display:grid;place-items:center}.trico svg{width:22px;height:22px;opacity:.6}
+    .trt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.trt b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trnote1{font-size:12.5px;color:var(--crit-ink,#b42318)}
+    .trb{flex:none}.trstat .cardhead{gap:8px;flex-wrap:wrap}.trnote{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--surface-2,#f4f5f7);font-size:13.5px}
+    .trdl{display:flex;flex-direction:column;gap:10px}.trd{display:grid;gap:3px}.trold{font-size:13px;text-decoration:line-through;opacity:.6;white-space:pre-wrap;word-break:break-word}.trnew{font-size:13.5px;white-space:pre-wrap;word-break:break-word;background:var(--good-bg,rgba(31,157,85,.08));border-radius:8px;padding:4px 8px}
+    .trlog{display:flex;flex-direction:column;gap:9px}.trli{display:flex;gap:9px;align-items:flex-start;color:inherit;text-decoration:none;font-size:13.5px}.trdot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:6px;background:var(--ink-3,#aaa)}
+    .trdot.approved{background:#1f9d55}.trdot.returned{background:#c62828}.trdot.submitted{background:#0a84ff}.trdot.file{background:#8e5cf7}.trdot.created,.trdot.version{background:#b26a00}
+    .trgpt{font-size:10.5px;padding:0 6px}.trban{display:flex;gap:8px;align-items:center;margin-bottom:12px;text-decoration:none}.trf{margin-top:10px}
+  </style>`);
+})();
+/* =====================================================================
+   v7.66 — «everything in its category», wave 2 (Mahmoud, 13 Oct: «no more boxes stacked under each other — everything
+   organised in its own category»; the automatic list of pages with many boxes went out, then the go-ahead on it).
+   The pages from that list get a row of categories on top; one category shows at a time and the page opens on the one that
+   matters first. Every box (whichever part draws it, even late ones) goes to its category by its heading; a box nobody knows
+   stays in the first category, so nothing disappears. Nothing about who sees what changes — boxes only move between tabs.
+   Pages (the three systems where they exist):
+     dashboard · paint pricing · product page · org chart · purchase page · accounts dashboard · supplier page ·
+     employee page · punch locations · operating expenses.
+   A detail page remembers its category in the link (#/purchases/<id>/<tab>), so a notice can open the right one
+   (comments on a purchase → its «Comments»). Phone and computer, Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PTABS__) return; window.__NF_PTABS__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const safe = f => { try { return f(); } catch (e) { return 0; } };
+  const myReqs = () => safe(() => list('requests').filter(r => r && r.status === 'pending' && (typeof requestVisible !== 'function' || requestVisible(r))).length);
+  const myTasks = () => safe(() => (typeof tasksForMe === 'function' ? tasksForMe().length : 0));
+  /* k = key · ar / en = label · rx = which headings belong to it (Arabic source, and English for boxes that draw English themselves) */
+  const PAGES = {
+    dashboard: { pinSel: '#omf, .omf', tabs: [
+      { k: 'need', ar: 'محتاج منك', en: 'Needs you', rx: /(?:بانتظار ردك|بانتظار اعتمادك|مهامي|أوامر متأخرة|مستني|فلوس مستنياك|waiting for (?:you|your)|my tasks|late orders)/i },
+      { k: 'prod', ar: 'الشغل', en: 'Work', rx: /(?:حمل الأقسام|المراحل الجارية|الأوامر المفتوحة|آخر تحديثات|خامات تحت|المشاريع الجارية|CRM|المساعد الذكي|department load|running stages|open orders|latest updates|below minimum|running projects|assistant)/i },
+      { k: 'fleet', ar: 'النقل', en: 'Transport', rx: /(?:مشاوير|الأسطول|العربيات|trips|fleet|vehicles)/i },
+      { k: 'people', ar: 'الناس والأداء', en: 'People & KPIs', rx: /(?:حضور|مؤشرات الأداء|متأخرات رؤساء|السهر|attendance|KPI|performance|heads.? late|overtime)/i }],
+      count: { need: () => myReqs() + myTasks() } },
+    finish: { tabs: [
+      { k: 'cost', ar: 'التكلفة', en: 'Cost', rx: /(?:تكلفة المتر|cost per)/i },
+      { k: 'sys', ar: 'الأنظمة', en: 'Systems', rx: null, one: true },
+      { k: 'gloss', ar: 'درجات اللمعة', en: 'Gloss levels', rx: /(?:اللمعة|gloss)/i },
+      { k: 'prices', ar: 'أسعار الخامات', en: 'Material prices', rx: /(?:أسعار الخامات|المصنعية|material prices|labou?r)/i }], rest: 'sys' },
+    products: { detail: true, pin: /(?:^|\s)(?:اللي اتغيّر|منتج جديد — كل البيانات|what changed|new product — all)/i, pinName: 'products', tabs: [
+      { k: 'draw', ar: 'الرسومات', en: 'Drawings', rx: /(?:الرسومات|المعاينة|كيف تجهّز|مواصفات التصميم|drawings|3D|how to prepare|design spec)/i },
+      { k: 'make', ar: 'التصنيع', en: 'Production', rx: /(?:مسار المنتج|أجزاء المنتج|خط الإنتاج|قطع الفاميلي|product route|product parts|production line|family pieces)/i },
+      { k: 'orders', ar: 'الأوامر والطلبات', en: 'Orders & requests', rx: /(?:أوامر التشغيل|طلبات التعديل|الاستفسارات|work orders|change requests|inquiries)/i },
+      { k: 'log', ar: 'النسخ والسجل', en: 'Versions & log', rx: /(?:سجل الحركة|النسخ|activity|versions)/i }] },
+    org: { tabs: [
+      { k: 'chart', ar: 'الهيكل', en: 'Structure', rx: /(?:الهيكل|هيكل|البراندات ومسؤولو|structure|org chart|brands and)/i },
+      { k: 'chains', ar: 'سلاسل الاعتماد', en: 'Approval chains', rx: /(?:سلاسل الاعتماد|approval chains)/i },
+      { k: 'jobs', ar: 'دليل الوظائف', en: 'Job guide', rx: /(?:دليل الوظائف|job guide|jobs)/i },
+      { k: 'mgr', ar: 'المدير المباشر', en: 'Direct managers', rx: /(?:المدير المباشر|direct manager)/i }] },
+    purchases: { detail: true, pin: /^\s*(?:PO|RFQ|NI|PR|NR)-\d/i, tabs: [
+      { k: 'req', ar: 'الطلب', en: 'Request', rx: /(?:المرفوض|البنود|الخامة|الكمية|rejected|items|quantity)/i },
+      { k: 'appr', ar: 'الاعتماد', en: 'Approval', rx: /(?:الاعتماد|approval)/i },
+      { k: 'sup', ar: 'المورد والعروض', en: 'Supplier & quotes', rx: /(?:المورد والمستندات|عروض أسعار|طلب عرض (?:ال)?سعر|أمر الشراء للمورد|مطابقة|supplier and|supplier &|quotes|quotation|purchase order to|match)/i },
+      { k: 'recv', ar: 'الاستلام', en: 'Receiving', rx: /(?:النقل والاستلام|الاستلام|receiving|delivery)/i },
+      { k: 'com', ar: 'التعليقات', en: 'Comments', rx: /(?:تعليقات|comments)/i }],
+      count: { com: r => safe(() => ((byId('purchases', r.id) || {}).comments || []).filter(c => c && !c.deleted).length), appr: r => safe(() => list('requests').filter(q => q && q.purchaseId === r.id && q.status === 'pending').length) }, warn: ['appr'],
+      prefer: r => (safe(() => list('requests').some(q => q && q.purchaseId === r.id && q.status === 'pending')) ? 'appr' : null) }, /* an approval is waiting → open on «Approval» */
+    accounts: { tabs: [
+      { k: 'cheq', ar: 'التعاقد والشيكات', en: 'Contracts & cheques', rx: /(?:التعاقد والشيكات|الشيكات|contracts? and cheques|cheques)/i },
+      { k: 'due', ar: 'المستحقات', en: 'Receivables & payables', rx: /(?:مستحقات|receivable|payable|owed)/i },
+      { k: 'pl', ar: 'المصروفات والأرباح', en: 'Expenses & profit', rx: /(?:مصروفات|أرباح|expenses|profit)/i }] },
+    suppliers: { detail: true, pinName: 'suppliers', tabs: [
+      { k: 'info', ar: 'البيانات', en: 'Details', rx: /(?:اللوكيشن|مخازن وفروع|جروب واتساب|مستندات المورد|location|warehouses|whatsapp|documents)/i },
+      { k: 'pay', ar: 'التحويل', en: 'Payments', rx: /(?:أرقام تحويل|محفظة المورد|transfer numbers|wallet)/i },
+      { k: 'buy', ar: 'الطلبات والجودة', en: 'Orders & quality', rx: /(?:طلبات الشراء|جودة التوريد|purchase requests|supply quality)/i }] },
+    workers: { detail: true, pinName: 'workers', tabs: [
+      { k: 'att', ar: 'الحضور', en: 'Attendance', rx: /(?:إعداد البصمة|الحضور|التاريخ|اليوم|punch setup|attendance|date)/i },
+      { k: 'money', ar: 'السلف والتحويل', en: 'Advances & transfers', rx: /(?:رقم التحويلات|السلف|سعر الساعة|transfer number|advances|hourly)/i },
+      { k: 'role', ar: 'الدور', en: 'Role', rx: /(?:شرح البرنامج|guide for|role guide)/i }] },
+    sites: { tabs: [
+      { k: 'base', ar: 'المصنع والمكتب', en: 'Factory & office', rx: /(?:المصنع \(|المكتب \(|الموقع الثابت|الإدارة\)|factory \(|office \(|fixed site)/i },
+      { k: 'ext', ar: 'مواقع خارجية', en: 'External sites', rx: /(?:مواقع العمل الخارجية|external work)/i },
+      { k: 'proj', ar: 'مواقع المشاريع', en: 'Project sites', rx: /(?:مواقع المشاريع|project sites)/i }] },
+    opex: { tabs: [
+      { k: 'month', ar: 'الشهر ده', en: 'This month', rx: /(?:البنود الثابتة|مصاريف تانية|fixed items|other expenses)/i },
+      { k: 'year', ar: 'آخر 12 شهر', en: 'Last 12 months', rx: /(?:آخر 12 شهر|حسب البند|last 12 months|by item)/i },
+      { k: 'house', ar: 'السكن', en: 'Housing', rx: /(?:السكن|housing)/i }] },
+  };
+  const BOX = '.card';
+  const srcText = el => { if (!el) return ''; let s = ''; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null); let n; while ((n = w.nextNode())) s += (typeof I18N !== 'undefined' && I18N.base && I18N.base.get(n)) || n.nodeValue || ''; return s.replace(/\s+/g, ' ').trim(); };
+  const headOf = c => srcText(c.querySelector('.cardhead h3, .cardhead h2, h3, h2') || (c.classList.contains('tight') ? c.querySelector('th') : null));
+  const ST = () => (S.ui.ptab ||= {});
+  const keyOf = r => (r.id ? r.view + '/' + r.id : r.view);
+  const curTab = (cfg, r) => { const keys = cfg.tabs.map(t => t.k); if (cfg.detail && r.sub && keys.includes(r.sub)) return r.sub; const p = cfg.prefer ? safe(() => cfg.prefer(r)) : null; return ST()[keyOf(r)] || (p && keys.includes(p) ? p : null) || ST()[r.view] || cfg.tabs[0].k; };
+  let busy = false, obs = null, obsOn = null;
+  function cardsOf(v) { return [...v.querySelectorAll(BOX)].filter(c => !c.parentElement.closest(BOX) && !c.closest('.modal, .overlay, #nfmeet, .ptab-bar') && !c.classList.contains('ptab-empty')); }
+  function pinned(cfg, r, c, i, first) {
+    if (c.dataset.ptab === 'pin') return true;
+    if (cfg.pinFirst && c === first) return true;
+    if (cfg.pinSel && c.matches(cfg.pinSel)) return true;
+    const h = headOf(c);
+    if (cfg.pin && cfg.pin.test(h)) return true;
+    if (c.classList.contains('trstat')) return true;
+    if (cfg.pinName) { const rec = safe(() => byId(cfg.pinName, r.id)); const nm = rec && String(rec.name || '').trim(); if (nm && h && h.indexOf(nm) === 0) return true; }
+    return false;
+  }
+  function apply() {
+    const r = S.route || {}; const v = document.getElementById('view'); if (!v) return;
+    const cfg = PAGES[r.view];
+    const off = () => { v.classList.remove('ptab-on'); v.querySelectorAll('.ptab-bar, .ptab-sub, .ptab-empty').forEach(e => e.remove()); v.querySelectorAll('.ptab-off').forEach(e => e.classList.remove('ptab-off')); };
+    if (!cfg || (cfg.detail ? !r.id : !!r.id)) { off(); return; }
+    busy = true;
+    try {
+      const cards = cardsOf(v); if (!cards.length) { off(); return; }
+      const first = cards[0]; const groups = {}; const order = cfg.tabs.map(t => t.k);
+      cards.forEach((c, i) => {
+        if (pinned(cfg, r, c, i, first)) { c.dataset.ptab = 'pin'; return; }
+        const h = headOf(c); let k = cfg.rest || order[0];
+        for (const t of cfg.tabs) if (t.rx && t.rx.test(h)) { k = t.k; break; }
+        c.dataset.ptab = k; (groups[k] ||= []).push(c);
+      });
+      const have = order.filter(k => (groups[k] || []).length);
+      if (have.length < 2) { off(); cards.forEach(c => c.classList.remove('ptab-off')); return; }
+      let on = curTab(cfg, r); if (!have.includes(on)) on = have[0];
+      /* one box at a time inside a tab (paint systems) */
+      const tdef = cfg.tabs.find(t => t.k === on); const many = tdef && tdef.one && groups[on].length > 1;
+      const subKey = keyOf(r) + ':' + on; let subOn = ST()[subKey] || 0; if (!many || subOn >= groups[on].length) subOn = 0;
+      cards.forEach(c => { const k = c.dataset.ptab; const show = k === 'pin' || (k === on && (!many || groups[on].indexOf(c) === subOn)); c.classList.toggle('ptab-off', !show); });
+      v.classList.add('ptab-on');
+      /* the bar */
+      const cnt = k => { const f = cfg.count && cfg.count[k]; return f ? (+f(r) || 0) : 0; };
+      const bar = `<div class="ptab-bar no-print" role="tablist" aria-label="${esc(L('الأقسام', 'Sections'))}">${have.map(k => { const t = cfg.tabs.find(x => x.k === k); const n = cnt(k); return `<button type="button" role="tab" class="${k === on ? 'on' : ''}" aria-selected="${k === on}" data-ptab="${k}"><span class="notr">${esc(L(t.ar, t.en))}</span>${n ? `<b class="${(cfg.warn || ['need']).includes(k) ? 'warn' : ''}">${n}</b>` : ''}</button>`; }).join('')}</div>`;
+      const sub = many ? `<div class="ptab-sub no-print" role="tablist">${groups[on].map((c, i) => `<button type="button" class="${i === subOn ? 'on' : ''}" data-ptabsub="${i}"><span class="notr">${esc(c.querySelector('.cardhead h3, .cardhead h2, h3') ? c.querySelector('.cardhead h3, .cardhead h2, h3').textContent.replace(/\s+/g, ' ').trim().slice(0, 40) : String(i + 1))}</span></button>`).join('')}</div>` : '';
+      /* where: above the grid that holds the boxes (full width), else right before the first box of a category */
+      const firstT = cards.find(c => c.dataset.ptab !== 'pin');
+      let anchor = firstT; const grid = firstT && firstT.parentElement && firstT.parentElement.closest('#view .gmain, #view .grid, #view [class*="g2"], #view [class*="g3"]');
+      if (grid && grid !== v) { anchor = grid; while (anchor.parentElement && anchor.parentElement !== v && anchor.parentElement.closest('#view .gmain, #view .grid')) anchor = anchor.parentElement.closest('#view .gmain, #view .grid'); }
+      const oldSub = v.querySelector('.ptab-sub'); if (oldSub) oldSub.remove();
+      const old = v.querySelector('.ptab-bar');
+      if (old && old.nextElementSibling === anchor) { if (old.outerHTML !== bar) old.outerHTML = bar; }
+      else { if (old) old.remove(); anchor.insertAdjacentHTML('beforebegin', bar); }
+      const b2 = v.querySelector('.ptab-bar'); if (sub && b2) b2.insertAdjacentHTML('afterend', sub);
+      try { if (typeof i18nApply === 'function' && en()) i18nApply(b2); } catch (e) { /* ignore */ }
+      try { const a = b2 && b2.querySelector('button.on'); if (a && b2.scrollWidth > b2.clientWidth + 2) { const br = b2.getBoundingClientRect(), ar = a.getBoundingClientRect(); if (ar.left < br.left || ar.right > br.right) b2.scrollLeft += (ar.left + ar.width / 2) - (br.left + br.width / 2); } } catch (e) { /* ignore */ }
+    } finally { busy = false; }
+    if (obs && obsOn !== v) { obs.disconnect(); obs = null; }
+    if (!obs && typeof MutationObserver === 'function') { obsOn = v; obs = new MutationObserver(muts => { if (busy || apply._t) return; if (!muts.some(m => [...m.addedNodes].some(n => n.nodeType === 1 && (n.matches && (n.matches(BOX) || n.querySelector && n.querySelector(BOX)))))) return; apply._t = requestAnimationFrame(() => { apply._t = 0; apply(); }); }); obs.observe(v, { childList: true, subtree: true }); }
+  }
+  RENDER_HOOKS.push(apply);
+  function pick(k) {
+    const r = S.route || {}; const cfg = PAGES[r.view]; if (!cfg) return;
+    ST()[keyOf(r)] = k; ST()[r.view] = k;
+    if (cfg.detail && r.id) { r.sub = k; try { history.replaceState(null, '', `#/${r.view}/${r.id}/${k}`); } catch (e) { /* ignore */ } }
+    apply(); const b = document.querySelector('#view .ptab-bar'); if (b && b.getBoundingClientRect().top < 0) b.scrollIntoView({ block: 'start' });
+  }
+  document.addEventListener('click', e => {
+    const t = e.target.closest && e.target.closest('#view .ptab-bar [data-ptab], #view .ptab-sub [data-ptabsub]'); if (!t) return; e.preventDefault();
+    if (t.dataset.ptab) return pick(t.dataset.ptab);
+    const r = S.route || {}; const v = document.querySelector('#view .ptab-bar button.on'); if (!v) return; ST()[keyOf(r) + ':' + v.dataset.ptab] = +t.dataset.ptabsub; apply();
+  });
+  window.nfPageTabs = { PAGES, apply, pick };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    #view .ptab-off{display:none!important}
+    .ptab-bar,.ptab-sub{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 0 12px;padding:2px 0 4px;grid-column:1/-1}
+    .ptab-bar::-webkit-scrollbar,.ptab-sub::-webkit-scrollbar{display:none}
+    .ptab-bar button,.ptab-sub button{flex:none!important;width:auto!important;display:inline-flex!important;flex-direction:row!important;align-items:center;gap:6px;height:36px;min-height:0!important;padding:0 14px!important;border-radius:999px!important;border:1px solid var(--line)!important;background:var(--surface)!important;color:var(--ink)!important;white-space:nowrap;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+    .ptab-bar button.on{background:var(--ink,#111)!important;color:var(--surface,#fff)!important;border-color:transparent!important}
+    .ptab-sub button{height:30px;font-size:12.5px;font-weight:500;padding:0 11px!important}.ptab-sub button.on{border-color:var(--ink,#111)!important}
+    .ptab-bar b{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--surface-2,#eef0f3);color:var(--ink,#111);font-size:11.5px;font-weight:700}
+    .ptab-bar button.on b{background:rgba(255,255,255,.22);color:inherit}.ptab-bar b.warn{background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00)}
+  </style>`);
+})();
+/* =====================================================================
+   v7.66 — Ökoplan Landscaping note 9: reach an office computer from the phone or another computer (like AnyDesk, inside Ninety).
+   Started 12 Oct. Server: server/sql/v766-rdesk.sql (rd_devices / rd_grants / rd_sessions / rd_signals + RPCs) and Edge «rdesk».
+   Windows side: the Ökoplan Landscaping desktop app v4.30 (desktop/rd/agent.js) — must be on and open on that computer.
+   · page «Remote computers» (menu): the computers this person may use (online now / last seen), «Connect»;
+   · the remote-access managers (the owner + admin_config rd_admins — Mohamed Sabek after the PIN step) manage each computer:
+     the way in (the person at the computer allows — default — or «without asking»), who may use it (always / today / until a date),
+     rename, remove; and the log (who, which computer, when, how long, who ended it); nothing is recorded (no picture, no sound);
+   · «Link this computer» when the page is opened inside the desktop app (managers);
+   · the viewer (full screen): the live screen (direct WebRTC; LAN / internet / TURN), the mouse and the keyboard, the phone gestures
+     (one finger = the mouse, tap = click, two-finger tap = right click, hold = drag, two fingers = scroll, pinch = zoom, keyboard button),
+     switch between screens, copy / paste text both ways, speed ↔ sharp-text, the delay (ms) and fps in the corner, «End».
+   Studio only; Arabic and English; iPhone, Android, computer.
+   ===================================================================== */
+if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
+  if (window.__NF_RDESK__) return; window.__NF_RDESK__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const sb = () => window.__rdSb || S.sb;
+  const live = () => !!window.__rdSb || (typeof sbOn === 'function' && sbOn());
+  if (typeof ICONS === 'object' && !ICONS.monitor) ICONS.monitor = '<rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>';
+  if (typeof ICONS === 'object' && !ICONS.keyboard) ICONS.keyboard = '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7 14h10"/>';
+  if (typeof ICONS === 'object' && !ICONS.expand) ICONS.expand = '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>';
+  if (typeof ICONS === 'object' && !ICONS.mouse) ICONS.mouse = '<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/>';
+  const ONLINE_S = 70;
+  const RD = { adm: null, devs: [], grants: [], sess: [], asked: false, loading: false, at: 0, desk: undefined, tab: 'devs', timer: null, err: '' };
+  const isMgr = () => (typeof isAdmin === 'function' && isAdmin()) || RD.adm === true;
+  const online = d => !!(d && d.seen_at && (Date.now() - new Date(d.seen_at).getTime()) / 1000 < ONLINE_S);
+  const myName = () => String((S.session && S.session.name) || 'Ninety').slice(0, 80);
+  const touchDev = () => (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) || 'ontouchstart' in window;
+  const fmtWhen = t => { if (!t) return '—'; try { return new Date(t).toLocaleString(en() ? 'en-GB' : 'ar-EG-u-nu-latn', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return String(t).slice(0, 16); } };
+  const fmtDay = t => { try { return new Date(t).toLocaleDateString(en() ? 'en-GB' : 'ar-EG-u-nu-latn', { day: 'numeric', month: 'long' }); } catch (e) { return String(t).slice(0, 10); } };
+  const fmtDur = (a, b) => { if (!a) return '—'; const s = Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); if (!h && !m) return L(`${s} ث`, `${s} s`); return h ? L(`${h} س ${m} د`, `${h} h ${m} min`) : L(`${m} د`, `${m} min`); };
+  const ago = t => { if (!t) return L('لسه ما اتفتحش', 'Never online yet'); const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); if (s < 3600) return L(`آخر ظهور من ${Math.max(1, Math.round(s / 60))} د`, `Last seen ${Math.max(1, Math.round(s / 60))} min ago`); if (s < 86400) return L(`آخر ظهور من ${Math.round(s / 3600)} س`, `Last seen ${Math.round(s / 3600)} h ago`); return L('آخر ظهور ', 'Last seen ') + fmtDay(t); };
+  const modeL = m => (m === 'unattended' ? L('من غير استئذان', 'Without asking') : L('الشخص اللي عليه يوافق', 'The person at it allows'));
+  const untilL = g => (!g.until ? L('دايمًا', 'Always') : L('لحد ', 'Until ') + fmtWhen(g.until));
+  const STATUS = { ringing: ['بيرن', 'Ringing'], active: ['شغال دلوقتي', 'Live now'], denied: ['اترفض', 'Refused'], missed: ['محدش رد', 'No answer'], ended: ['انتهى', 'Ended'] };
+  const BY = { device: ['الشخص اللي على الجهاز', 'The person at the computer'], viewer: ['اللي دخل', 'The viewer'], admin: ['مدير', 'A manager'], timeout: ['مفيش رد', 'No answer'], reconnect: ['اتصال جديد', 'A new connection'] };
+  const lbl = (m, k) => (m[k] ? L(m[k][0], m[k][1]) : k || '');
+
+  /* ---------- data ---------- */
+  async function load(force) {
+    if (!live() || !S.session || RD.loading) return; if (!force && RD.asked && Date.now() - RD.at < 10e3) return;
+    RD.asked = true; RD.loading = true;
+    try {
+      const c = sb(); if (!c || !c.rpc || !c.from) return;
+      const [a, d] = await Promise.all([Promise.resolve(c.rpc('rd_admin')).catch(() => ({})), Promise.resolve(c.from('rd_devices').select('id,name,mode,screens,info,seen_at,active,created_by_name,created_at').eq('active', true).order('name')).catch(() => ({}))]);
+      RD.adm = !!(a && a.data === true); RD.devs = (d && Array.isArray(d.data)) ? d.data : []; RD.err = d && d.error ? String(d.error.message || '') : '';
+      const g = await Promise.resolve(c.from('rd_grants').select('*').is('revoked_at', null).order('created_at', { ascending: false })).catch(() => ({}));
+      RD.grants = (g && Array.isArray(g.data)) ? g.data.filter(x => !x.until || new Date(x.until) > new Date()) : [];
+      if (isMgr()) { const s = await Promise.resolve(c.from('rd_sessions').select('*').order('created_at', { ascending: false }).limit(120)).catch(() => ({})); RD.sess = (s && Array.isArray(s.data)) ? s.data : []; }
+      RD.at = Date.now();
+    } catch (e) { RD.err = String(e && e.message || e); } finally { RD.loading = false; }
+    if (visible() !== RD.vis) { RD.vis = visible(); rerender(); }
+    if (RD.desk === undefined) deskStatus(); else if (S.route && S.route.view === 'rdesk') rerender();
+  }
+  async function deskStatus() {
+    const d = window.ninetyDesktop && window.ninetyDesktop.rd; if (!d || !d.status) { RD.desk = null; return; }
+    try { RD.desk = await d.status(); } catch (e) { RD.desk = null; } if (S.route && S.route.view === 'rdesk') rerender();
+  }
+  const visible = () => isMgr() || RD.devs.length > 0;
+  canSee = (base => function (v) { if (v === 'rdesk') { if (S.session && !RD.asked) load(); return !!S.session && visible(); } return base.apply(this, arguments); })(canSee);
+
+  /* ---------- the page ---------- */
+  const tabs = () => { if (!isMgr()) return ''; const n = RD.sess.filter(s => s.status === 'active').length; return `<div class="rdtabs">${[['devs', L('الأجهزة', 'Computers')], ['log', L('السجل', 'Log')]].map(([k, t]) => `<button type="button" class="${RD.tab === k ? 'rdon' : ''}" data-action="rdTab" data-arg="${k}">${esc(t)}${k === 'log' && n ? ` <span class="rdn">${n}</span>` : ''}</button>`).join('')}</div>`; };
+  function devCard(d) {
+    const on = online(d); const here = RD.desk && RD.desk.linked && RD.desk.id === d.id; const scr = Array.isArray(d.screens) ? d.screens.length : 0;
+    const g = !isMgr() ? RD.grants.find(x => x.device_id === d.id) : null; const busy = RD.sess.find(s => s.device_id === d.id && s.status === 'active');
+    return `<div class="rdcard${on ? ' rdon' : ''}" data-rdev="${esc(d.id)}"><div class="rdic">${icon('monitor')}<i class="rddot${on ? ' rdon' : ''}"></i></div>
+      <div class="rdt"><b class="notr" dir="auto">${esc(d.name)}</b><small>${esc(on ? L('متاح دلوقتي', 'Online now') : ago(d.seen_at))}${scr > 1 ? ' · ' + esc(L(`${scr} شاشات`, `${scr} screens`)) : ''}${here ? ' · ' + esc(L('ده الكمبيوتر ده', 'This computer')) : ''}</small>
+      <span class="rdchips"><i>${esc(modeL(d.mode))}</i>${g ? `<i>${esc(untilL(g))}</i>` : ''}${busy ? `<i class="warn notr" dir="auto">${esc(L('متصل: ', 'Connected: ') + (busy.viewer_name || ''))}</i>` : ''}</span></div>
+      <div class="rda">${here ? '' : `<button type="button" class="btn sm${on ? ' primary' : ''}" data-action="rdConnect" data-arg="${esc(d.id)}" ${on ? '' : 'disabled'}>${icon('play')}<span>${esc(L('اتصل', 'Connect'))}</span></button>`}${isMgr() ? `<a class="btn sm ghost" href="#/rdesk/${esc(d.id)}">${icon('settings')}<span>${esc(L('إدارة', 'Manage'))}</span></a>` : ''}</div></div>`;
+  }
+  function linkCard() {
+    const d = RD.desk;
+    if (d && d.linked) { const dev = RD.devs.find(x => x.id === d.id); return `<div class="card rdlink"><div class="rdlh">${icon('monitor')}<div><b>${esc(L('الكمبيوتر ده مربوط', 'This computer is linked'))}</b><small class="notr" dir="auto">${esc((dev && dev.name) || d.name || '')}</small></div></div><p class="small muted">${esc(L('متاح من بعيد طول ما برنامج Ökoplan Landscaping شغال عليه (حتى لو مقفول في الشريط جنب الساعة).', 'Reachable remotely while the Ökoplan Landscaping app runs on it (even when closed to the tray by the clock).'))}</p>${isMgr() ? `<button type="button" class="btn sm ghost" data-action="rdUnlinkHere">${esc(L('فك ربط الكمبيوتر ده', 'Unlink this computer'))}</button>` : ''}</div>`; }
+    if (!isMgr()) return '';
+    if (d && d.platform && d.platform !== 'win32') return '';
+    if (d) return `<div class="card rdlink"><div class="rdlh">${icon('monitor')}<div><b>${esc(L('اربط الكمبيوتر ده', 'Link this computer'))}</b><small>${esc(L('عشان تقدر تدخل عليه من الموبايل أو من أي كمبيوتر', 'So you can reach it from the phone or any computer'))}</small></div></div><button type="button" class="btn sm primary" data-action="rdLink">${icon('plus')}<span>${esc(L('اربط الكمبيوتر ده', 'Link this computer'))}</span></button></div>`;
+    return `<div class="card rdlink soft"><div class="rdlh">${icon('info')}<div><b>${esc(L('إزاي تضيف كمبيوتر', 'How to add a computer'))}</b><small>${esc(L('على الكمبيوتر نفسه: افتح برنامج Ökoplan Landscaping للويندوز (4.30 أو أحدث) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Landscaping Windows app (4.30 or newer) → this page → «Link this computer».'))}</small></div></div></div>`;
+  }
+  function logRows(rows) {
+    if (!rows.length) return `<div class="empty"><b>${esc(L('مفيش اتصالات لسه', 'No connections yet'))}</b></div>`;
+    const dn = id => (RD.devs.find(d => d.id === id) || {}).name || '—';
+    return `<div class="rdlog">${rows.map(s => `<div class="rdlr"><div class="rdt"><b class="notr" dir="auto">${esc(s.viewer_name || '—')} → ${esc(dn(s.device_id))}</b><small>${esc(fmtWhen(s.created_at))} · ${esc(s.started_at ? fmtDur(s.started_at, s.ended_at) : '—')}${s.ended_by ? ' · ' + esc(L('أنهاه: ', 'Ended by: ') + lbl(BY, s.ended_by)) : ''}</small></div><span class="rdst ${esc(s.status)}">${esc(lbl(STATUS, s.status))}</span>${s.status === 'active' || s.status === 'ringing' ? `<button type="button" class="btn xs ghost" data-action="rdEndAdm" data-arg="${esc(s.id)}">${esc(L('إنهاء', 'End'))}</button>` : ''}</div>`).join('')}</div>`;
+  }
+  function pageList() {
+    if (RD.tab === 'log' && isMgr()) return `<div class="rdpage">${tabs()}<p class="small muted">${esc(L('مين دخل على أنهي جهاز، إمتى، وقد إيه. مفيش تسجيل صورة ولا صوت.', 'Who reached which computer, when and for how long. No picture or sound is recorded.'))}</p>${logRows(RD.sess)}</div>`;
+    const devs = RD.devs.slice().sort((a, b) => (online(b) - online(a)) || String(a.name).localeCompare(String(b.name)));
+    return `<div class="rdpage">${tabs()}${linkCard()}
+      ${devs.length ? `<div class="rdgrid">${devs.map(devCard).join('')}</div>` : `<div class="empty"><b>${esc(RD.loading && !RD.at ? L('بيحمّل…', 'Loading…') : L('مفيش أجهزة لسه', 'No computers yet'))}</b>${esc(isMgr() ? L('اربط أول كمبيوتر من برنامج الويندوز.', 'Link the first computer from the Windows app.') : L('لما مدير يديك صلاحية على جهاز هيظهر هنا.', 'When a manager gives you access to a computer it shows here.'))}</div>`}
+      <p class="small muted rdnote">${esc(L('الجهاز لازم يكون شغال وبرنامج Ökoplan Landscaping مفتوح عليه. شاشة دخول الويندوز ورسايل «تشغيل كمسؤول» مش بتتحكم فيها من بعيد.', 'The computer must be on with the Ökoplan Landscaping app open. The Windows sign-in screen and «Run as administrator» prompts cannot be controlled remotely.'))}</p></div>`;
+  }
+  function pageDev(d) {
+    const gs = RD.grants.filter(g => g.device_id === d.id); const ss = RD.sess.filter(s => s.device_id === d.id).slice(0, 30); const on = online(d);
+    const scr = Array.isArray(d.screens) ? d.screens : []; const info = d.info || {};
+    return `<div class="rdpage">
+      <div class="card rdhead"><div class="rdic big">${icon('monitor')}<i class="rddot${on ? ' rdon' : ''}"></i></div><div class="rdt"><b class="notr" dir="auto">${esc(d.name)}</b><small>${esc(on ? L('متاح دلوقتي', 'Online now') : ago(d.seen_at))}${scr.length ? ' · ' + esc(scr.map(s => `${s.w}×${s.h}`).join(' + ')) : ''}${info.app ? ' · v' + esc(info.app) : ''}</small></div>
+        <div class="rda"><button type="button" class="btn sm${on ? ' primary' : ''}" data-action="rdConnect" data-arg="${esc(d.id)}" ${on ? '' : 'disabled'}>${icon('play')}<span>${esc(L('اتصل', 'Connect'))}</span></button><button type="button" class="btn sm ghost" data-action="rdRename" data-arg="${esc(d.id)}">${icon('edit')}<span>${esc(L('الاسم', 'Name'))}</span></button></div></div>
+      <div class="card"><h3>${esc(L('طريقة الدخول', 'How people get in'))}</h3><div class="rdmodes">
+        ${['ask', 'unattended'].map(m => `<label class="rdmode${d.mode === m ? ' rdon' : ''}"><input type="radio" name="rdmode" value="${m}" data-rdmode="${esc(d.id)}" ${d.mode === m ? 'checked' : ''}><span><b>${esc(modeL(m))}</b><small>${esc(m === 'ask' ? L('يظهر على الجهاز «فلان عايز يدخل» — اسمح / ارفض (30 ثانية).', 'The computer shows «X wants to connect» — Allow / Deny (30 s).') : L('يدخل على طول — مناسب لجهاز ريندر أو جهاز محدش قاعد عليه.', 'Connects at once — for a render machine or a computer nobody sits at.'))}</small></span></label>`).join('')}
+      </div><p class="small muted">${esc(L('في الحالتين: على الجهاز شريط ثابت «فلان متصل بالجهاز ده» وزرار «إنهاء».', 'Either way the computer shows a bar «X is connected to this computer» with «End».'))}</p></div>
+      <div class="card"><div class="rdch"><h3>${esc(L('مين يقدر يدخل', 'Who can connect'))}</h3><button type="button" class="btn sm" data-action="rdGrant" data-arg="${esc(d.id)}">${icon('plus')}<span>${esc(L('إضافة شخص', 'Add a person'))}</span></button></div>
+        <p class="small muted">${esc(L('مديرين الوصول عن بُعد يقدروا يدخلوا دايمًا.', 'Remote-access managers can always connect.'))}</p>
+        ${gs.length ? `<div class="rdlog">${gs.map(g => `<div class="rdlr"><div class="rdt"><b class="notr" dir="auto">${esc(g.person_name || g.person_id)}</b><small>${esc(untilL(g))}${g.granted_by_name ? ' · ' + esc(L('من ', 'by ') + g.granted_by_name) : ''}</small></div><button type="button" class="btn xs ghost" data-action="rdRevoke" data-arg="${esc(String(g.id))}">${esc(L('إلغاء', 'Remove'))}</button></div>`).join('')}</div>` : `<p class="small">${esc(L('محدش غير المديرين.', 'Nobody but the managers.'))}</p>`}</div>
+      <div class="card"><h3>${esc(L('آخر الاتصالات', 'Recent connections'))}</h3>${logRows(ss)}</div>
+      <div class="card"><button type="button" class="btn sm ghost danger" data-action="rdRemove" data-arg="${esc(d.id)}">${icon('trash')}<span>${esc(L('شيل الجهاز ده', 'Remove this computer'))}</span></button></div></div>`;
+  }
+  if (typeof EXTRA_VIEWS !== 'undefined') EXTRA_VIEWS.rdesk = r => { load(); if (r && r.id && isMgr()) { const d = RD.devs.find(x => x.id === r.id); if (d) return pageDev(d); } return pageList(); };
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.rdesk = r => (r && r.id && RD.devs.some(x => x.id === r.id) ? { title: L('إدارة الجهاز', 'Manage computer'), actions: `<a class="btn ghost" href="#/rdesk">${icon('back')}<span>${esc(L('الأجهزة', 'Computers'))}</span></a>` } : { title: L('الأجهزة عن بُعد', 'Remote computers'), sub: L('ادخل على كمبيوتر المكتب من الموبايل أو من أي كمبيوتر', 'Reach an office computer from the phone or any computer') });
+  VIEW_TITLES.rdesk = 'الأجهزة عن بُعد';
+  Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('rdesk')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['rdesk']); });
+  if (!NAV.some(n => n.id === 'rdesk')) { const at = NAV.findIndex(n => n.id === 'meetings'); NAV.splice(at >= 0 ? at + 1 : NAV.length, 0, { id: 'rdesk', label: 'الأجهزة عن بُعد', short: 'عن بُعد', icon: 'monitor', countCls: 'warn', count: () => (isMgr() ? RD.sess.filter(s => s.status === 'active').length : 0) }); }
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    const on = S.route && S.route.view === 'rdesk';
+    if (on && !RD.timer) RD.timer = setInterval(() => { if (!(S.route && S.route.view === 'rdesk')) { clearInterval(RD.timer); RD.timer = null; return; } const before = JSON.stringify([RD.devs, RD.sess, RD.grants]); RD.at = 0; load(true).then(() => { if (JSON.stringify([RD.devs, RD.sess, RD.grants]) !== before) rerender(); }); }, 15e3);
+  });
+  document.addEventListener('change', ev => { const r = ev.target.closest && ev.target.closest('[data-rdmode]'); if (r) setMode(r.getAttribute('data-rdmode'), r.value); });
+
+  /* ---------- management (managers; the server checks too) ---------- */
+  ACTIONS.rdTab = k => { RD.tab = k === 'log' ? 'log' : 'devs'; if (RD.tab === 'log') load(true); rerender(); };
+  async function setMode(id, mode) {
+    if (!isMgr() || !['ask', 'unattended'].includes(mode)) return; const d = RD.devs.find(x => x.id === id); if (!d || d.mode === mode) return;
+    if (mode === 'unattended' && !(await confirmDlg(L(`«${d.name}»: أي حد ليه صلاحية يدخل على طول من غير ما حد على الجهاز يوافق. متأكد؟`, `«${d.name}»: anyone with access connects at once without anyone at the computer allowing it. Sure?`), L('أيوه', 'Yes'), false))) { rerender(); return; }
+    const r = await sb().from('rd_devices').update({ mode }).eq('id', id).select('id,mode'); if (r.error || !r.data || !r.data.length) { toast(L('ما اتحفظش', 'Not saved') + (r.error ? ': ' + r.error.message : ''), 'err'); rerender(); return; }
+    d.mode = mode; toast(L('اتحفظ', 'Saved')); rerender();
+  }
+  ACTIONS.rdRename = id => { const d = RD.devs.find(x => x.id === id); if (!d || !isMgr()) return; openModal({ title: L('اسم الجهاز', 'Computer name'), submitLabel: L('احفظ', 'Save'), body: `<div class="field"><label>${esc(L('الاسم', 'Name'))}</label><input name="name" maxlength="60" value="${esc(d.name)}" dir="auto"></div>`, onSubmit: async f => { const name = f.querySelector('[name=name]').value.trim(); if (!name) return false; const r = await sb().from('rd_devices').update({ name }).eq('id', id).select('id'); if (r.error) { toast(r.error.message, 'err'); return false; } d.name = name; rerender(); return true; } }); };
+  ACTIONS.rdGrant = id => {
+    const d = RD.devs.find(x => x.id === id); if (!d || !isMgr()) return;
+    const have = new Set(RD.grants.filter(g => g.device_id === id).map(g => g.person_id));
+    const ws = sortBy(list('workers').filter(w => w && w.id && !['inactive', 'suspended', 'left'].includes(w.status) && !have.has('w:' + w.id)), w => w.name || '');
+    const today = new Date().toISOString().slice(0, 10);
+    openModal({ title: L('مين يدخل على ', 'Access to ') + d.name, submitLabel: L('إضافة', 'Add'), body: `
+      <div class="field"><label>${esc(L('الشخص', 'Person'))}</label><select name="who"><option value="">—</option>${ws.map(w => `<option value="${esc(w.id)}">${esc(w.name || w.id)}</option>`).join('')}</select></div>
+      <div class="field"><label>${esc(L('لحد إمتى', 'For how long'))}</label><div class="rdmodes">${[['always', L('دايمًا', 'Always')], ['today', L('النهارده بس', 'Today only')], ['date', L('لحد تاريخ', 'Until a date')]].map(([v, t], i) => `<label class="rdmode sm"><input type="radio" name="dur" value="${v}" ${i === 0 ? 'checked' : ''}><span><b>${esc(t)}</b></span></label>`).join('')}</div><input type="date" name="until" min="${today}" value="${today}" class="ltr"></div>`,
+      onSubmit: async f => {
+        const wid = f.querySelector('[name=who]').value; if (!wid) { toast(L('اختار الشخص', 'Pick the person'), 'err'); return false; }
+        const dur = (f.querySelector('[name=dur]:checked') || {}).value || 'always'; let until = null;
+        if (dur === 'today') { const t = new Date(); t.setHours(23, 59, 59, 0); until = t.toISOString(); }
+        if (dur === 'date') { const v = f.querySelector('[name=until]').value; if (!v) { toast(L('اختار التاريخ', 'Pick the date'), 'err'); return false; } until = new Date(v + 'T23:59:59').toISOString(); }
+        const w = byId('workers', wid) || {};
+        const r = await sb().from('rd_grants').insert({ device_id: id, person_id: 'w:' + wid, person_name: w.name || wid, until, granted_by_name: myName() }).select('*');
+        if (r.error) { toast(L('ما اتحفظش: ', 'Not saved: ') + r.error.message, 'err'); return false; }
+        if (r.data && r.data[0]) RD.grants.unshift(r.data[0]);
+        try { if (typeof pushSend === 'function') pushSend(['w:' + wid], L('اتصال عن بُعد', 'Remote access'), L(`تقدر تدخل على «${d.name}» من صفحة الأجهزة عن بُعد`, `You can now connect to «${d.name}» from Remote computers`), '/#/rdesk', 'rdesk'); } catch (e) { /* no push */ }
+        toast(L('اتضاف', 'Added')); rerender(); return true;
+      } });
+  };
+  ACTIONS.rdRevoke = async gid => { if (!isMgr()) return; const g = RD.grants.find(x => String(x.id) === String(gid)); if (!g) return; if (!(await confirmDlg(L(`تلغي دخول ${g.person_name || ''}؟`, `Remove ${g.person_name || ''}'s access?`), L('إلغاء الدخول', 'Remove')))) return; const r = await sb().from('rd_grants').update({ revoked_at: new Date().toISOString() }).eq('id', g.id).select('id'); if (r.error) { toast(r.error.message, 'err'); return; } RD.grants = RD.grants.filter(x => x !== g); toast(L('اتلغى', 'Removed')); rerender(); };
+  ACTIONS.rdEndAdm = async sid => { if (!isMgr()) return; const r = await sb().rpc('rd_end', { p_session: sid }); if (r.error) { toast(r.error.message, 'err'); return; } await load(true); rerender(); };
+  async function fn(body) { const r = await sb().functions.invoke('rdesk', { body }); if (r.error) { let m = r.error.message || String(r.error); try { const j = r.error.context && (await r.error.context.json()); if (j && j.error) m = j.error; } catch (e) { /* plain */ } throw new Error(m); } if (r.data && r.data.error) throw new Error(r.data.error); return r.data; }
+  ACTIONS.rdRemove = async id => { const d = RD.devs.find(x => x.id === id); if (!d || !isMgr()) return; if (!(await confirmDlg(L(`تشيل «${d.name}»؟ مش هيبقى حد يقدر يدخل عليه لحد ما يتربط تاني.`, `Remove «${d.name}»? Nobody can connect to it until it is linked again.`), L('شيل', 'Remove')))) return; try { await fn({ action: 'unregister', id }); RD.devs = RD.devs.filter(x => x.id !== id); toast(L('اتشال', 'Removed')); location.hash = '#/rdesk'; } catch (e) { toast(e.message, 'err'); } };
+  ACTIONS.rdLink = () => {
+    const dk = window.ninetyDesktop && window.ninetyDesktop.rd; if (!dk || !isMgr()) return;
+    openModal({ title: L('اربط الكمبيوتر ده', 'Link this computer'), submitLabel: L('اربط', 'Link'), body: `<div class="field"><label>${esc(L('اسم الجهاز (يظهر في القايمة)', 'Computer name (shown in the list)'))}</label><input name="name" maxlength="60" dir="auto" value="${esc((RD.desk && RD.desk.hostname) || '')}"></div><p class="small muted">${esc(L('بعد الربط: الجهاز يبقى متاح من بعيد طول ما البرنامج شغال، والبرنامج يفتح مع الويندوز. أول ما حد يدخل يظهر شريط على الشاشة بإسمه وزرار «إنهاء».', 'After linking: the computer is reachable while the app runs, and the app starts with Windows. When someone connects a bar shows their name with «End».'))}</p>`,
+      onSubmit: async f => {
+        const name = f.querySelector('[name=name]').value.trim(); if (!name) { toast(L('اكتب اسم الجهاز', 'Write the computer name'), 'err'); return false; }
+        try { const c = await fn({ action: 'register', name, by: myName() }); const ok = await dk.save(c); if (!ok) throw new Error(L('البرنامج ما حفظش الدخول', 'The app did not keep the sign-in')); } catch (e) { toast(L('ما اتربطش: ', 'Not linked: ') + e.message, 'err'); return false; }
+        toast(L('الكمبيوتر اتربط — بقى متاح من بعيد', 'Linked — this computer is now reachable')); RD.at = 0; await deskStatus(); await load(true); rerender(); return true;
+      } });
+  };
+  ACTIONS.rdUnlinkHere = async () => {
+    const dk = window.ninetyDesktop && window.ninetyDesktop.rd; if (!dk || !RD.desk || !RD.desk.linked) return;
+    if (!(await confirmDlg(L('تفك ربط الكمبيوتر ده؟ مش هيبقى متاح من بعيد.', 'Unlink this computer? It will not be reachable remotely.'), L('فك الربط', 'Unlink')))) return;
+    const id = RD.desk.id; try { if (isMgr() && id) await fn({ action: 'unregister', id }); } catch (e) { /* removed already */ }
+    await dk.forget(); await deskStatus(); await load(true); rerender();
+  };
+
+  /* =====================================================================
+     the viewer
+     ===================================================================== */
+  const V = { open: false };
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const $v = sel => V.el && V.el.querySelector(sel);
+  function vMsg(text, kind, actions) {
+    const m = $v('.rdmsg'); if (!m) return;
+    if (!text) { m.hidden = true; m.innerHTML = ''; return; }
+    m.hidden = false; m.className = 'rdmsg ' + (kind || ''); m.innerHTML = `<div><p>${esc(text)}</p>${actions || ''}</div>`;
+  }
+  const btnClose = () => `<button type="button" class="rdb" data-rd="close">${esc(L('اقفل', 'Close'))}</button>`;
+  const btnAgain = () => `<button type="button" class="rdb pri" data-rd="again">${esc(L('اتصل تاني', 'Connect again'))}</button>`;
+  function overlay(d) {
+    const el = document.createElement('div'); el.className = 'rdv' + (touchDev() ? ' touch' : ''); el.id = 'rdv'; el.setAttribute('dir', en() ? 'ltr' : 'rtl');
+    el.innerHTML = `<div class="rdtop"><button type="button" class="rdb end" data-rd="end">${icon('x')}<span>${esc(L('إنهاء', 'End'))}</span></button><b class="rdname notr" dir="auto">${esc(d.name)}</b><span class="rdstat" dir="ltr"></span><div class="rdtools">
+        <span class="rdscr"></span>
+        <span class="rdseg" role="group">${[['speed', L('سرعة', 'Speed')], ['auto', L('متوازن', 'Balanced')], ['text', L('وضوح النص', 'Sharp text')]].map(([k, t]) => `<button type="button" data-rd="q" data-k="${k}" class="${k === 'auto' ? 'rdon' : ''}">${esc(t)}</button>`).join('')}</span>
+        <span class="rdkeys"><button type="button" class="rdb" data-rd="keys">${icon('keyboard')}<span>${esc(L('مفاتيح', 'Keys'))}</span></button><span class="rdmenu" hidden>${[['win', 'Win'], ['alttab', 'Alt+Tab'], ['taskmgr', L('مدير المهام', 'Task Manager')], ['desk', L('سطح المكتب (Win+D)', 'Desktop (Win+D)')], ['esc', 'Esc']].map(([k, t]) => `<button type="button" data-rd="combo" data-k="${k}">${esc(t)}</button>`).join('')}</span></span>
+        <button type="button" class="rdb" data-rd="paste">${icon('copy')}<span>${esc(L('الصق على الجهاز', 'Paste to computer'))}</span></button>
+        <button type="button" class="rdb" data-rd="full">${icon('expand')}<span>${esc(L('ملء الشاشة', 'Full screen'))}</span></button></div></div>
+      <div class="rdstage"><div class="rdwrap"><video playsinline autoplay muted></video></div><div class="rdcur" hidden></div><div class="rdclip" hidden></div><div class="rdmsg" hidden></div>
+        <div class="rdpaste" hidden><textarea dir="auto" placeholder="${esc(L('الصق أو اكتب النص هنا', 'Paste or type the text here'))}"></textarea><div><button type="button" class="rdb pri" data-rd="pastego">${esc(L('ابعته للجهاز', 'Send to the computer'))}</button><button type="button" class="rdb" data-rd="pastex">${esc(L('إلغاء', 'Cancel'))}</button></div></div></div>
+      <div class="rdbot"><button type="button" class="rdb" data-rd="kb">${icon('keyboard')}<span>${esc(L('كيبورد', 'Keyboard'))}</span></button><button type="button" class="rdb" data-rd="pad">${icon('mouse')}<span class="rdpadl"></span></button>${[['Escape', 'Esc'], ['Tab', 'Tab'], ['ControlLeft', 'Ctrl', 1], ['AltLeft', 'Alt', 1], ['MetaLeft', 'Win', 1], ['ArrowLeft', '←'], ['ArrowUp', '↑'], ['ArrowDown', '↓'], ['ArrowRight', '→'], ['Delete', 'Del'], ['Backspace', '⌫'], ['Enter', '⏎']].map(([c, t, m]) => `<button type="button" class="rdk${m ? ' mod' : ''}" data-rd="${m ? 'mod' : 'key'}" data-k="${c}">${esc(t)}</button>`).join('')}</div>
+      <textarea class="rdkb" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="keyboard"></textarea>`;
+    document.body.appendChild(el); return el;
+  }
+  ACTIONS.rdConnect = async id => {
+    const d = RD.devs.find(x => x.id === id); if (!d || V.open) return;
+    Object.assign(V, { open: true, dev: d, sid: null, pc: null, ch: {}, lastSig: 0, pendingIce: [], iceBuf: [], iceT: null, screens: [], cur: 0, mode: 'auto', connected: false, gotOffer: false, z: 1, tx: 0, ty: 0, cx: 0.5, cy: 0.5, keys: new Set(), sticky: {}, pad: touchDev(), clipFromPc: '', wv: 0, wh: 0, mvP: false, wP: false, ended: false, chans: [], timers: [], hiAt: 0, iceServers: null, vSkip: 0 });
+    V.el = overlay(d); wire(); padLabel(); document.documentElement.classList.add('rdopen');
+    vMsg(L('بيكلّم الجهاز…', 'Calling the computer…'), 'wait', btnClose());
+    V.iceP = fn({ action: 'ice' }).then(r => r.iceServers, () => [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }]);
+    let r; try { r = await sb().rpc('rd_start', { p_device: id, p_name: myName() }); } catch (e) { r = { error: e }; }
+    if (!V.open) return;
+    const j = r && r.data; const err = (r && r.error && (r.error.message || 'error')) || (j && j.error);
+    if (err) {
+      const M = { forbidden: L('مش مسموحلك تدخل على الجهاز ده.', 'You do not have access to this computer.'), no_device: L('الجهاز ده اتشال.', 'This computer was removed.'), offline: L('الجهاز مش متاح دلوقتي — لازم يكون شغال وبرنامج Ninety مفتوح عليه.', 'The computer is not available — it must be on with the Ninety app open.'), busy: L(`الجهاز مشغول — ${(j && j.by) || ''} متصل بيه دلوقتي.`, `The computer is busy — ${(j && j.by) || ''} is connected now.`) };
+      vMsg(M[err] || L('مقدرش يبدأ: ', 'Could not start: ') + err, 'err', btnClose()); return;
+    }
+    V.sid = j.id; V.status = j.status;
+    try { const ss = await sb().auth.getSession(); V.tok = ss && ss.data && ss.data.session ? ss.data.session.access_token : null; } catch (e) { V.tok = null; }
+    watchSession(); listenSignals();
+    if (j.status === 'ringing') vMsg(L(`بيرن على «${d.name}»… مستني الشخص اللي عليه يوافق`, `Ringing «${d.name}»… waiting for the person at it to allow`), 'wait', `<button type="button" class="rdb" data-rd="end">${esc(L('إلغاء', 'Cancel'))}</button>`);
+    else vMsg(L('بيتوصل…', 'Connecting…'), 'wait', `<button type="button" class="rdb" data-rd="end">${esc(L('إلغاء', 'Cancel'))}</button>`);
+    try { if (navigator.wakeLock) V.wake = await navigator.wakeLock.request('screen'); } catch (e) { V.wake = null; }
+  };
+  /* the session row: realtime + poll */
+  function watchSession() {
+    const sid = V.sid; const c = sb();
+    try { if (c.channel) V.chans.push(c.channel('rd-ses-' + sid).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rd_sessions', filter: 'id=eq.' + sid }, p => p.new && onSes(p.new)).subscribe()); } catch (e) { /* poll */ }
+    const tick = async () => { if (!V.open || V.sid !== sid || V.ended) return; try { const { data } = await c.from('rd_sessions').select('*').eq('id', sid).maybeSingle(); if (data) onSes(data); } catch (e) { /* next */ } };
+    V.timers.push(setInterval(tick, 1500)); tick();
+  }
+  function onSes(row) {
+    if (!V.open || row.id !== V.sid || V.ended) return; const prev = V.status; V.status = row.status;
+    if (row.status === 'active' && prev === 'ringing' && !V.connected) vMsg(L('وافق — بيتوصل…', 'Allowed — connecting…'), 'wait', `<button type="button" class="rdb" data-rd="end">${esc(L('إلغاء', 'Cancel'))}</button>`);
+    if (row.status === 'active' && !V.gotOffer && !V.hiAt) V.hiAt = Date.now();
+    if (['denied', 'missed', 'ended'].includes(row.status)) {
+      const t = row.status === 'denied' ? L('الشخص اللي على الجهاز رفض.', 'The person at the computer refused.') : row.status === 'missed' ? L('محدش رد على الجهاز.', 'Nobody answered at the computer.')
+        : row.ended_by === 'device' ? L('الشخص اللي على الجهاز أنهى الاتصال.', 'The person at the computer ended the connection.') : row.ended_by === 'admin' ? L('مدير أنهى الاتصال.', 'A manager ended the connection.') : row.ended_by === 'reconnect' ? L('اتفتح اتصال تاني بنفس الحساب.', 'Another connection was opened with the same account.') : L('الاتصال انتهى.', 'The connection ended.');
+      finish(t);
+    }
+  }
+  /* the computer's set-up messages */
+  function listenSignals() {
+    const sid = V.sid; const c = sb();
+    try { if (c.channel) V.chans.push(c.channel('rd-vsig-' + sid).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rd_signals', filter: 'session_id=eq.' + sid }, p => p.new && queueSig([p.new])).subscribe()); } catch (e) { /* poll */ }
+    const pull = async () => {
+      if (!V.open || V.sid !== sid || V.ended) return;
+      if (V.connected && (V.vSkip = (V.vSkip + 1) % 5)) return;
+      try { const { data } = await c.from('rd_signals').select('id,kind,payload,from_device').eq('session_id', sid).eq('from_device', true).gt('id', V.lastSig).order('id', { ascending: true }).limit(50); if (data && data.length) queueSig(data); } catch (e) { /* next */ }
+      if (V.status === 'active' && !V.gotOffer && V.hiAt && Date.now() - V.hiAt > 6000) { V.hiAt = Date.now(); sig('hi', {}); }
+    };
+    V.timers.push(setInterval(pull, 900)); pull();
+  }
+  const sig = (kind, payload) => V.sid && sb().rpc('rd_signal', { p_session: V.sid, p_kind: kind, p_payload: payload });
+  let chain = Promise.resolve();
+  function queueSig(rows) { chain = chain.then(() => onSigs(rows)).catch(e => console.warn('rd signal', e)); }
+  async function onSigs(rows) {
+    for (const s of rows.slice().sort((a, b) => a.id - b.id)) {
+      if (!s.from_device || s.id <= V.lastSig || !V.open || V.ended) continue; V.lastSig = s.id; const p = s.payload || {};
+      if (s.kind === 'offer' && p.sdp) {
+        V.gotOffer = true; const pc = await ensurePc(); if (!pc) return;
+        await pc.setRemoteDescription({ type: 'offer', sdp: p.sdp });
+        for (const c of V.pendingIce.splice(0)) await pc.addIceCandidate(c).catch(() => null);
+        const a = await pc.createAnswer(); await pc.setLocalDescription(a); await sig('answer', { type: 'answer', sdp: pc.localDescription.sdp });
+      } else if (s.kind === 'ice' && Array.isArray(p.c)) {
+        for (const c of p.c) { if (V.pc && V.pc.remoteDescription) await V.pc.addIceCandidate(c).catch(() => null); else V.pendingIce.push(c); }
+      } else if (s.kind === 'bye') finish(L('الاتصال انتهى.', 'The connection ended.'));
+    }
+  }
+  async function ensurePc() {
+    if (V.pc) return V.pc; const servers = await V.iceP; if (!V.open) return null;
+    const pc = new RTCPeerConnection({ iceServers: servers || [], bundlePolicy: 'max-bundle' }); V.pc = pc;
+    pc.ontrack = e => { const vid = $v('video'); const st = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]); vid.srcObject = st; vid.play().catch(() => null); try { if ('playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0; if ('jitterBufferTarget' in e.receiver) e.receiver.jitterBufferTarget = 0; } catch (x) { /* older engine */ } };
+    pc.ondatachannel = e => { const ch = e.channel; V.ch[ch.label] = ch; if (ch.label === 'ctl') { ch.onmessage = m => onCtl(m.data); ch.onopen = () => { send({ t: 'ping', ts: Date.now() }); }; } };
+    pc.onicecandidate = e => { if (e.candidate) { V.iceBuf.push(e.candidate.toJSON()); if (!V.iceT) V.iceT = setTimeout(flushIce, 120); } else flushIce(); };
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState; if (pc !== V.pc) return;
+      if (s === 'connected') { V.connected = true; vMsg(''); startStats(); }
+      if (s === 'disconnected' || s === 'failed') vMsg(L('الاتصال ضعيف — بيحاول يرجع…', 'Weak connection — trying to get back…'), 'wait', `<button type="button" class="rdb" data-rd="end">${esc(L('إنهاء', 'End'))}</button>`);
+    };
+    const vid = $v('video'); vid.addEventListener('loadedmetadata', () => { if (V.connected) vMsg(''); placeCursor(); });
+    return pc;
+  }
+  function flushIce() { clearTimeout(V.iceT); V.iceT = null; if (!V.iceBuf.length) return; sig('ice', { c: V.iceBuf.splice(0, 40) }); if (V.iceBuf.length) V.iceT = setTimeout(flushIce, 60); }
+  function send(o, fast) { const ch = (fast && V.ch.in && V.ch.in.readyState === 'open') ? V.ch.in : V.ch.ctl; if (ch && ch.readyState === 'open') try { ch.send(JSON.stringify(o)); return true; } catch (e) { /* closing */ } return false; }
+  function onCtl(raw) {
+    let m; try { m = JSON.parse(raw); } catch (e) { return; }
+    if (m.t === 'hello' || m.t === 'scr') { V.screens = Array.isArray(m.screens) ? m.screens : V.screens; V.cur = +m.cur || 0; drawScreens(); }
+    else if (m.t === 'q') { V.mode = m.m; $v('.rdseg').querySelectorAll('button').forEach(b => b.classList.toggle('rdon', b.dataset.k === V.mode)); }
+    else if (m.t === 'clip' && typeof m.s === 'string') gotClip(m.s);
+    else if (m.t === 'pong') V.app = Date.now() - (+m.ts || Date.now());
+    else if (m.t === 'bye') finish(m.why === 'device' ? L('الشخص اللي على الجهاز أنهى الاتصال.', 'The person at the computer ended the connection.') : L('الاتصال انتهى.', 'The connection ended.'));
+  }
+  function drawScreens() {
+    const box = $v('.rdscr'); if (!box) return;
+    box.innerHTML = V.screens.length > 1 ? V.screens.map((s, i) => `<button type="button" class="rdb${i === V.cur ? ' rdon' : ''}" data-rd="scr" data-k="${i}">${icon('monitor')}<span>${esc(L('شاشة ', 'Screen ') + (i + 1))}</span></button>`).join('') : '';
+  }
+  /* the delay and fps in the corner */
+  function startStats() {
+    if (V.statT) return;
+    V.statT = setInterval(async () => {
+      if (!V.pc) return; let rtt = null, fps = null, path = '', pair = null; const rep = await V.pc.getStats().catch(() => null); if (!rep) return;
+      rep.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = rep.get(s.selectedCandidatePairId); });
+      if (!pair) rep.forEach(s => { if (s.type === 'candidate-pair' && s.state === 'succeeded' && (s.nominated || s.selected)) pair = pair || s; });
+      if (pair) { if (pair.currentRoundTripTime != null) rtt = Math.round(pair.currentRoundTripTime * 1000); const lc = rep.get(pair.localCandidateId), rc = rep.get(pair.remoteCandidateId); path = (lc && lc.candidateType === 'relay') || (rc && rc.candidateType === 'relay') ? 'TURN' : (lc && rc && lc.candidateType === 'host' && rc.candidateType === 'host') ? 'LAN' : 'P2P'; }
+      rep.forEach(s => { if (s.type === 'inbound-rtp' && (s.kind === 'video' || s.mediaType === 'video') && s.framesPerSecond != null) fps = Math.round(s.framesPerSecond); });
+      V.stats = { rtt, fps, path }; const el = $v('.rdstat'); if (el) el.textContent = `${rtt != null ? rtt + ' ms' : '— ms'} · ${fps != null ? fps : '—'} fps${path ? ' · ' + path : ''}`;
+    }, 1000);
+  }
+  /* clipboard */
+  async function gotClip(s) {
+    V.clipFromPc = s; let ok = false;
+    try { if (document.hasFocus() && navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(s); ok = true; } } catch (e) { ok = false; }
+    const box = $v('.rdclip'); if (!box) return;
+    box.hidden = false; box.innerHTML = ok ? `<span>${icon('check')}${esc(L('النص اللي اتنسخ على الجهاز اتنسخ عندك', 'The text copied on the computer is on your clipboard'))}</span>` : `<button type="button" class="rdb pri" data-rd="clipcopy">${icon('copy')}<span>${esc(L('نص اتنسخ على الجهاز — اضغط عشان تنسخه عندك', 'Text copied on the computer — tap to copy it here'))}</span></button>`;
+    clearTimeout(V.clipT); V.clipT = setTimeout(() => { box.hidden = true; }, ok ? 2500 : 12000);
+  }
+  async function pasteToPc() {
+    let s = null; try { if (navigator.clipboard && navigator.clipboard.readText) s = await navigator.clipboard.readText(); } catch (e) { s = null; }
+    if (typeof s === 'string' && s) { send({ t: 'clip', s }); send({ t: 'combo', k: ['ControlLeft', 'KeyV'] }); toast(L('اتلصق على الجهاز', 'Pasted on the computer')); return; }
+    const p = $v('.rdpaste'); p.hidden = false; const ta = p.querySelector('textarea'); ta.value = ''; setTimeout(() => ta.focus(), 30);
+  }
+
+  /* ---------- the end ---------- */
+  function finish(text) {
+    if (V.ended) return; V.ended = true; cleanup();
+    if (!V.open) return; const again = V.dev && online(V.dev);
+    vMsg(text, 'end', (again ? btnAgain() : '') + btnClose());
+  }
+  function cleanup() {
+    V.timers.forEach(t => clearInterval(t)); V.timers = []; clearInterval(V.statT); V.statT = null; clearTimeout(V.iceT);
+    try { V.chans.forEach(ch => sb().removeChannel(ch)); } catch (e) { /* gone */ } V.chans = [];
+    try { Object.values(V.ch).forEach(c => c.close()); } catch (e) { /* closed */ } V.ch = {};
+    try { if (V.pc) V.pc.close(); } catch (e) { /* closed */ } V.pc = null; V.connected = false;
+    try { if (V.wake) V.wake.release(); } catch (e) { /* none */ } V.wake = null;
+    try { navigator.keyboard && navigator.keyboard.unlock && navigator.keyboard.unlock(); } catch (e) { /* none */ }
+    const vid = $v('video'); if (vid) vid.srcObject = null;
+  }
+  async function endByMe() {
+    const sid = V.sid;
+    if (sid && !V.ended) { V.ended = true; send({ t: 'rel' }); try { await sb().rpc('rd_end', { p_session: sid }); } catch (e) { /* the computer closes leftovers */ } send({ t: 'bye' }); await new Promise(r => setTimeout(r, 60)); }
+    cleanup(); close();
+  }
+  function close() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => null);
+    if (V.el) V.el.remove(); V.el = null; V.open = false; V.sid = null; document.documentElement.classList.remove('rdopen');
+    RD.at = 0; load(true);
+  }
+  /* the tab closes: end it on the server (keepalive) and tell the computer */
+  window.addEventListener('pagehide', () => {
+    if (!V.open || !V.sid || V.ended) return; send({ t: 'rel' });
+    try { const c = sb(); if (V.tok && c.supabaseUrl) fetch(String(c.supabaseUrl).replace(/\/$/, '') + '/rest/v1/rpc/rd_end', { method: 'POST', keepalive: true, headers: { apikey: c.supabaseKey, Authorization: 'Bearer ' + V.tok, 'content-type': 'application/json' }, body: JSON.stringify({ p_session: V.sid }) }); } catch (e) { /* the computer closes leftovers */ }
+    send({ t: 'bye' });
+  });
+
+  /* ---------- input: the picture rectangle and the pointer ---------- */
+  function content() { const vid = $v('video'); const r = vid.getBoundingClientRect(); const vw = vid.videoWidth || 16, vh = vid.videoHeight || 9; const s = Math.min(r.width / vw, r.height / vh); const w = vw * s, h = vh * s; return { x: r.left + (r.width - w) / 2, y: r.top + (r.height - h) / 2, w, h }; }
+  function norm(cx, cy) { const c = content(); return { x: clamp01((cx - c.x) / c.w), y: clamp01((cy - c.y) / c.h) }; }
+  const N = v => Math.round(clamp01(v) * 65535);
+  function sendMove() { if (V.mvP) return; V.mvP = true; requestAnimationFrame(() => { V.mvP = false; send({ t: 'm', x: N(V.cx), y: N(V.cy) }, true); }); }
+  function sendWheel() { if (V.wP) return; V.wP = true; requestAnimationFrame(() => { V.wP = false; const v = Math.round(V.wv), h = Math.round(V.wh); V.wv -= v; V.wh -= h; if (v || h) send({ t: 'w', v, h, x: N(V.cx), y: N(V.cy) }); }); }
+  const btnOf = b => (b === 2 ? 1 : b === 1 ? 2 : 0);
+  function placeCursor() {
+    const cur = $v('.rdcur'); if (!cur) return; cur.hidden = !(V.pad && touchDev()); if (cur.hidden) return;
+    const c = content(), st = $v('.rdstage').getBoundingClientRect(); cur.style.transform = `translate(${c.x - st.left + V.cx * c.w}px, ${c.y - st.top + V.cy * c.h}px)`;
+  }
+  function applyZoom() {
+    const st = $v('.rdstage'); const W = st.clientWidth, Hh = st.clientHeight; V.z = Math.max(1, Math.min(4, V.z));
+    V.tx = Math.min(0, Math.max(W - V.z * W, V.tx)); V.ty = Math.min(0, Math.max(Hh - V.z * Hh, V.ty)); if (V.z === 1) { V.tx = 0; V.ty = 0; }
+    $v('.rdwrap').style.transform = `translate(${V.tx}px, ${V.ty}px) scale(${V.z})`; placeCursor();
+  }
+  function follow() { /* keep the cursor in view while zoomed (mouse mode) */
+    if (V.z <= 1) return; const c = content(), st = $v('.rdstage').getBoundingClientRect(); const px = c.x + V.cx * c.w, py = c.y + V.cy * c.h; const m = 40; let dx = 0, dy = 0;
+    if (px < st.left + m) dx = st.left + m - px; else if (px > st.right - m) dx = st.right - m - px; if (py < st.top + m) dy = st.top + m - py; else if (py > st.bottom - m) dy = st.bottom - m - py;
+    if (dx || dy) { V.tx += dx; V.ty += dy; applyZoom(); }
+  }
+  function padLabel() { const l = $v('.rdpadl'); if (l) l.textContent = V.pad ? L('ماوس', 'Mouse') : L('لمس مباشر', 'Direct touch'); placeCursor(); }
+
+  /* touch: one finger = the mouse · tap = click · two-finger tap = right click · hold = drag · two fingers = scroll · pinch = zoom */
+  const T = { pts: new Map(), mode: null };
+  function touchDown(e) {
+    T.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (T.pts.size === 1) {
+      Object.assign(T, { mode: 'one', t0: Date.now(), sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, drag: false, lp: false });
+      clearTimeout(T.lpT); T.lpT = setTimeout(longPress, 450);
+    } else if (T.pts.size === 2) {
+      clearTimeout(T.lpT); if (T.drag) { send({ t: 'b', b: 0, d: 0, x: N(V.cx), y: N(V.cy) }); T.drag = false; }
+      const [a, b] = [...T.pts.values()]; T.mode = 'two'; T.two = { d0: Math.hypot(a.x - b.x, a.y - b.y), c0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, lc: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, t0: Date.now(), kind: null, z0: V.z, tx0: V.tx, ty0: V.ty };
+    } else T.mode = 'none';
+  }
+  function longPress() {
+    if (T.mode !== 'one' || T.moved) return; T.lp = true; try { navigator.vibrate && navigator.vibrate(15); } catch (e) { /* none */ }
+    if (V.pad) { T.drag = true; send({ t: 'b', b: 0, d: 1, x: N(V.cx), y: N(V.cy) }); }
+    else { const p = norm(T.sx, T.sy); V.cx = p.x; V.cy = p.y; send({ t: 'c', b: 1, x: N(V.cx), y: N(V.cy) }); }
+  }
+  function touchMove(e) {
+    if (!T.pts.has(e.pointerId)) return; T.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (T.mode === 'one') {
+      const dx = e.clientX - T.lx, dy = e.clientY - T.ly; T.lx = e.clientX; T.ly = e.clientY;
+      if (!T.moved && Math.hypot(e.clientX - T.sx, e.clientY - T.sy) > 8) { T.moved = true; clearTimeout(T.lpT); if (!V.pad && !T.lp) { const p = norm(T.sx, T.sy); V.cx = p.x; V.cy = p.y; T.drag = true; send({ t: 'b', b: 0, d: 1, x: N(V.cx), y: N(V.cy) }); } }
+      if (!T.moved) return;
+      if (V.pad) { const c = content(); const k = 1.3; V.cx = clamp01(V.cx + dx / c.w * k); V.cy = clamp01(V.cy + dy / c.h * k); placeCursor(); follow(); }
+      else { const p = norm(e.clientX, e.clientY); V.cx = p.x; V.cy = p.y; }
+      sendMove();
+    } else if (T.mode === 'two' && T.pts.size >= 2) {
+      const [a, b] = [...T.pts.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y), c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; const w = T.two;
+      if (!w.kind) { if (Math.abs(d - w.d0) > 14) w.kind = 'pinch'; else if (Math.hypot(c.x - w.c0.x, c.y - w.c0.y) > 10) w.kind = 'scroll'; }
+      if (w.kind === 'pinch') { const st = $v('.rdstage').getBoundingClientRect(); const c0 = { x: w.c0.x - st.left, y: w.c0.y - st.top }, cn = { x: c.x - st.left, y: c.y - st.top }; const p = { x: (c0.x - w.tx0) / w.z0, y: (c0.y - w.ty0) / w.z0 }; V.z = Math.max(1, Math.min(4, w.z0 * d / Math.max(1, w.d0))); V.tx = cn.x - V.z * p.x; V.ty = cn.y - V.z * p.y; applyZoom(); }
+      else if (w.kind === 'scroll') { V.wv += (c.y - w.lc.y) * 4; V.wh -= (c.x - w.lc.x) * 4; sendWheel(); }
+      w.lc = c;
+    }
+  }
+  function touchUp(e) {
+    if (!T.pts.has(e.pointerId)) return; const n = T.pts.size; T.pts.delete(e.pointerId);
+    if (T.mode === 'one' && n === 1) {
+      clearTimeout(T.lpT);
+      if (T.drag) { send({ t: 'b', b: 0, d: 0, x: N(V.cx), y: N(V.cy) }); T.drag = false; }
+      else if (!T.moved && !T.lp && Date.now() - T.t0 < 450) { if (!V.pad) { const p = norm(T.sx, T.sy); V.cx = p.x; V.cy = p.y; } send({ t: 'c', b: 0, x: N(V.cx), y: N(V.cy) }); }
+      T.mode = null;
+    } else if (T.mode === 'two' && n === 2) {
+      if (!T.two.kind && Date.now() - T.two.t0 < 350) { if (!V.pad) { const p = norm(T.two.c0.x, T.two.c0.y); V.cx = p.x; V.cy = p.y; } send({ t: 'c', b: 1, x: N(V.cx), y: N(V.cy) }); }
+      T.mode = 'none';
+    }
+    if (!T.pts.size) T.mode = null;
+  }
+
+  /* keyboard (computer): characters go as text (any layout / language), the rest as keys; ⌘ on a Mac works as Ctrl */
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const codeOf = e => { let c = e.code || ''; if (isMac && (c === 'MetaLeft' || c === 'MetaRight')) c = 'ControlLeft'; return c; };
+  function keyDown(e) {
+    if (!V.open || !V.connected) return; const t = e.target && e.target.nodeType === 1 ? e.target : null;
+    if (t && (t.closest('.rdpaste') || t.tagName === 'INPUT' || t.classList.contains('rdkb'))) return;
+    e.preventDefault(); e.stopPropagation();
+    const ctrl = e.ctrlKey || (isMac && e.metaKey);
+    if (ctrl && e.code === 'KeyV' && !e.altKey) { if (!V.keys.has('vpaste')) { V.keys.add('vpaste'); (async () => { let s = null; try { s = await navigator.clipboard.readText(); } catch (x) { s = null; } if (typeof s === 'string' && s) send({ t: 'clip', s }); send({ t: 'k', c: 'KeyV', d: 1 }); send({ t: 'k', c: 'KeyV', d: 0 }); })(); } return; }
+    const printable = e.key && [...e.key].length === 1 && !e.isComposing;
+    if (printable && (!ctrl && !e.altKey && !e.metaKey || (e.ctrlKey && e.altKey && !isMac))) { send({ t: 'u', s: e.key }); return; }
+    const c = codeOf(e); if (!c || e.repeat && /^(Control|Shift|Alt|Meta)/.test(c)) return;
+    if (isMac && e.metaKey && !/^(Control|Shift|Alt|Meta)/.test(e.code || '')) { send({ t: 'k', c, d: 1 }); send({ t: 'k', c, d: 0 }); return; } /* macOS sends no key-up while ⌘ is held */
+    V.keys.add(c); send({ t: 'k', c, d: 1 });
+  }
+  function keyUp(e) {
+    if (!V.open || !V.connected) return; const t = e.target && e.target.nodeType === 1 ? e.target : null; if (t && (t.closest('.rdpaste') || t.tagName === 'INPUT' || t.classList.contains('rdkb'))) return;
+    e.preventDefault(); e.stopPropagation(); if (e.code === 'KeyV') { V.keys.delete('vpaste'); if (!V.keys.has('KeyV')) return; }
+    const c = codeOf(e); if (V.keys.has(c)) { V.keys.delete(c); send({ t: 'k', c, d: 0 }); }
+  }
+  /* the phone keyboard: a hidden text box; sticky Ctrl / Alt / Win from the bottom bar */
+  const CHAR_CODE = ch => { const u = ch.toUpperCase(); if (/^[A-Z]$/.test(u)) return 'Key' + u; if (/^[0-9]$/.test(ch)) return 'Digit' + ch; return null; };
+  function stickyKeys() { return Object.keys(V.sticky).filter(k => V.sticky[k]); }
+  function clearSticky() { V.sticky = {}; V.el && V.el.querySelectorAll('.rdk.mod').forEach(b => b.classList.remove('rdon')); }
+  function typeText(s) {
+    const mods = stickyKeys();
+    if (mods.length) { for (const ch of s) { const c = CHAR_CODE(ch); if (c) send({ t: 'combo', k: mods.concat([c]) }); else send({ t: 'u', s: ch }); } clearSticky(); return; }
+    send({ t: 'u', s });
+  }
+  function pressKey(code) { const mods = stickyKeys(); send({ t: 'combo', k: mods.concat([code]) }); clearSticky(); }
+  function kbInput(e) {
+    const ta = e.target; const v = ta.value;
+    if (v.length < 1) pressKey('Backspace'); else if (v.length > 1) { const s = v.slice(1); typeText(s); }
+    ta.value = ' '; try { ta.setSelectionRange(1, 1); } catch (x) { /* fine */ }
+  }
+  const COMBOS = { win: ['MetaLeft'], alttab: ['AltLeft', 'Tab'], taskmgr: ['ControlLeft', 'ShiftLeft', 'Escape'], desk: ['MetaLeft', 'KeyD'], esc: ['Escape'] };
+
+  function wire() {
+    const el = V.el, stage = el.querySelector('.rdstage');
+    el.addEventListener('click', async ev => {
+      const b = ev.target.closest('[data-rd]'); if (!b) return; const k = b.dataset.k; const a = b.dataset.rd;
+      if (a !== 'kb') try { b.blur(); } catch (e) { /* fine */ }
+      if (a === 'end') return endByMe();
+      if (a === 'close') { cleanup(); return close(); }
+      if (a === 'again') { const id = V.dev && V.dev.id; cleanup(); close(); setTimeout(() => ACTIONS.rdConnect(id), 50); return; }
+      if (a === 'q') return send({ t: 'q', m: k });
+      if (a === 'scr') return send({ t: 'scr', i: +k });
+      if (a === 'keys') { const m = el.querySelector('.rdmenu'); m.hidden = !m.hidden; return; }
+      if (a === 'combo') { el.querySelector('.rdmenu').hidden = true; return send({ t: 'combo', k: COMBOS[k] || [] }); }
+      if (a === 'paste') return pasteToPc();
+      if (a === 'pastego') { const ta = el.querySelector('.rdpaste textarea'); const s = ta.value; el.querySelector('.rdpaste').hidden = true; if (s) { send({ t: 'clip', s }); send({ t: 'combo', k: ['ControlLeft', 'KeyV'] }); } return; }
+      if (a === 'pastex') { el.querySelector('.rdpaste').hidden = true; return; }
+      if (a === 'clipcopy') { try { await navigator.clipboard.writeText(V.clipFromPc); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(L('مقدرش ينسخ', 'Could not copy'), 'err'); } el.querySelector('.rdclip').hidden = true; return; }
+      if (a === 'full') { try { if (document.fullscreenElement) await document.exitFullscreen(); else { await el.requestFullscreen(); try { if (navigator.keyboard && navigator.keyboard.lock) await navigator.keyboard.lock(); } catch (e) { /* not supported */ } } } catch (e) { /* not on this phone */ } return; }
+      if (a === 'kb') { const ta = el.querySelector('.rdkb'); ta.value = ' '; ta.focus(); try { ta.setSelectionRange(1, 1); } catch (e) { /* fine */ } return; }
+      if (a === 'pad') { V.pad = !V.pad; padLabel(); return; }
+      if (a === 'mod') { V.sticky[k] = !V.sticky[k]; b.classList.toggle('rdon', !!V.sticky[k]); return; }
+      if (a === 'key') return pressKey(k);
+    });
+    stage.addEventListener('pointerdown', e => {
+      if (e.target.closest('.rdmsg,.rdpaste,.rdclip')) return; e.preventDefault(); try { stage.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
+      if (!V.connected) return;
+      if (e.pointerType === 'touch') return touchDown(e);
+      const p = norm(e.clientX, e.clientY); V.cx = p.x; V.cy = p.y; send({ t: 'b', b: btnOf(e.button), d: 1, x: N(p.x), y: N(p.y) });
+    });
+    stage.addEventListener('pointermove', e => {
+      if (!V.connected) return; if (e.pointerType === 'touch') return touchMove(e);
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : []; const last = evs.length ? evs[evs.length - 1] : e; const p = norm(last.clientX, last.clientY); V.cx = p.x; V.cy = p.y; sendMove();
+    });
+    const up = e => { if (!V.connected) return; if (e.pointerType === 'touch') return touchUp(e); const p = norm(e.clientX, e.clientY); send({ t: 'b', b: btnOf(e.button), d: 0, x: N(p.x), y: N(p.y) }); };
+    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', e => { if (e.pointerType === 'touch') { T.pts.clear(); if (T.drag) send({ t: 'b', b: 0, d: 0 }); T.drag = false; T.mode = null; } });
+    stage.addEventListener('contextmenu', e => e.preventDefault());
+    stage.addEventListener('wheel', e => { e.preventDefault(); if (!V.connected) return; if (e.ctrlKey && touchDev()) return; const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 400 : 1.2; V.wv -= e.deltaY * k; V.wh += e.deltaX * k; const p = norm(e.clientX, e.clientY); V.cx = p.x; V.cy = p.y; sendWheel(); }, { passive: false });
+    const ta = el.querySelector('.rdkb'); ta.addEventListener('input', kbInput);
+    ta.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pressKey('Enter'); } else if (e.key === 'Backspace' && ta.value.length <= 1) { e.preventDefault(); pressKey('Backspace'); } else if (/^(Arrow|Escape|Tab|Delete|Home|End|PageUp|PageDown)/.test(e.key)) { e.preventDefault(); pressKey(e.code || e.key); } });
+    window.addEventListener('resize', () => { if (V.open) applyZoom(); });
+  }
+  window.addEventListener('keydown', keyDown, true); window.addEventListener('keyup', keyUp, true);
+  window.addEventListener('blur', () => { if (V.open && V.connected && V.keys.size) { send({ t: 'rel' }); V.keys.clear(); } });
+  window.nfRdesk = { RD, V, load, online };
+
+  const css = document.createElement('style'); css.textContent = `
+.rdpage{display:flex;flex-direction:column;gap:12px}
+.rdtabs{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto}.rdtabs button{flex:none;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}.rdtabs button.rdon{background:var(--ink,#111);color:var(--surface,#fff);border-color:transparent}
+.rdn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00);font-size:11.5px;font-weight:700}
+.rdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}.rdcard{flex-wrap:wrap}.rdcard .rdt{flex:1 1 160px}.rdcard .rda{flex:1 0 100%;justify-content:flex-end}
+.rdcard,.rdhead{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.rdcard.rdon{border-color:color-mix(in srgb,var(--good,#1a7f37) 35%,var(--line))}
+.rdic{position:relative;width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:var(--surface-2,#f2f2f5);flex:none}.rdic svg{width:24px;height:24px;opacity:.75}.rdic.big{width:56px;height:56px}
+.rddot{position:absolute;bottom:-2px;inset-inline-end:-2px;width:13px;height:13px;border-radius:50%;background:#9aa1a9;border:2px solid var(--surface,#fff)}.rddot.rdon{background:#1fa463}
+.rdt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.rdt b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rdt small{color:var(--muted);font-size:12.5px}
+.rdchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}.rdchips i{font-style:normal;font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}.rdchips i.warn{color:var(--warn-ink,#8a5a00);border-color:var(--warn-ink,#8a5a00)}
+.rda{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.rdlink{display:flex;flex-direction:column;gap:8px}.rdlink.soft{background:transparent!important;border:1px dashed var(--line-2,var(--line))!important;box-shadow:none!important}.rdlh{display:flex;gap:10px;align-items:center}.rdlh>svg{width:26px;height:26px;opacity:.7;flex:none}.rdlh div{display:flex;flex-direction:column}.rdlh small{color:var(--muted)}.rdlink .btn{align-self:flex-start}
+.rdmodes{display:flex;flex-direction:column;gap:8px;margin:6px 0}.rdmode{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}.rdmode.rdon{border-color:var(--ink,#111)}.rdmode span{display:flex;flex-direction:column;gap:2px}.rdmode small{color:var(--muted)}.rdmode.sm{padding:8px 10px}.rdmode input{margin-top:3px}
+.rdch{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap}.rdch h3{margin:0}
+.rdlog{display:flex;flex-direction:column;gap:6px}.rdlr{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.rdst{font-size:12px;border-radius:999px;padding:2px 9px;background:var(--surface-2,#f2f2f5);white-space:nowrap}.rdst.active{background:#e3f6ea;color:#11643a}.rdst.ringing{background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00)}.rdst.denied,.rdst.missed{background:#fdecec;color:#a4262c}
+.rdnote{margin:0}
+html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
+.rdv{position:fixed;inset:0;z-index:2147483000;background:#0b0d10;color:#eef1f4;display:flex;flex-direction:column;font-size:13px;-webkit-user-select:none;user-select:none}
+.rdtop{display:flex;align-items:center;gap:8px;padding:6px 8px;padding-top:max(6px,env(safe-area-inset-top));background:#15181c;border-bottom:1px solid #262b31;flex-wrap:wrap}
+.rdname{font-weight:600;max-width:30vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rdstat{font:12px ui-monospace,Menlo,Consolas,monospace;color:#9fb0c0;white-space:nowrap}
+.rdtools{display:flex;align-items:center;gap:6px;margin-inline-start:auto;overflow-x:auto;scrollbar-width:none;max-width:100%}.rdtools::-webkit-scrollbar{display:none}
+.rdb{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;border:1px solid #303740;background:#1d2126;color:#eef1f4;font:inherit;cursor:pointer;white-space:nowrap;flex:none}.rdb svg{width:16px;height:16px}.rdb.rdon{background:#eef1f4;color:#111}.rdb.pri{background:#2f6fed;border-color:#2f6fed}.rdb.end{background:#b3261e;border-color:#b3261e}
+.rdseg{display:inline-flex;border:1px solid #303740;border-radius:8px;overflow:hidden;flex:none}.rdseg button{height:30px;padding:0 10px;border:0;background:#1d2126;color:#cfd6dd;font:inherit;cursor:pointer;white-space:nowrap}.rdseg button.rdon{background:#eef1f4;color:#111}
+.rdscr{display:inline-flex;gap:4px}
+.rdkeys{position:relative}.rdmenu{position:fixed;top:48px;inset-inline-end:8px;display:flex;flex-direction:column;background:#1d2126;border:1px solid #303740;border-radius:10px;padding:4px;z-index:3;min-width:180px}.rdmenu[hidden]{display:none}.rdmenu button{height:34px;border:0;background:none;color:#eef1f4;text-align:start;padding:0 10px;border-radius:6px;font:inherit;cursor:pointer}.rdmenu button:hover{background:#2a3037}
+.rdstage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none;cursor:default}
+.rdwrap{position:absolute;inset:0;transform-origin:0 0;will-change:transform}.rdwrap video{width:100%;height:100%;object-fit:contain;display:block;background:#000;pointer-events:none}
+.rdcur{position:absolute;left:0;top:0;width:18px;height:18px;margin:-2px 0 0 -2px;pointer-events:none;z-index:2;background:no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 2l16 9-7 2-3 7z' fill='white' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E")}
+.rdmsg{position:absolute;inset:0;display:grid;place-items:center;background:rgba(11,13,16,.72);z-index:4;padding:20px}.rdmsg>div{max-width:420px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}.rdmsg p{margin:0;font-size:16px;line-height:1.6}.rdmsg>div>div,.rdmsg>div{gap:10px}.rdmsg.wait p::before{content:"";display:block;width:26px;height:26px;margin:0 auto 12px;border-radius:50%;border:3px solid #3b4450;border-top-color:#eef1f4;animation:rdspin 1s linear infinite}@keyframes rdspin{to{transform:rotate(360deg)}}.rdmsg .rdb{height:38px;padding:0 16px}
+.rdclip{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:3;background:#1d2126;border:1px solid #303740;border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:6px;max-width:92%}.rdclip span{display:inline-flex;gap:6px;align-items:center}.rdclip svg{width:16px;height:16px}
+.rdpaste{position:absolute;inset-inline:12px;top:12px;z-index:5;background:#15181c;border:1px solid #303740;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}.rdpaste textarea{min-height:90px;background:#0b0d10;color:#eef1f4;border:1px solid #303740;border-radius:8px;padding:8px;font:inherit;-webkit-user-select:text;user-select:text}.rdpaste div{display:flex;gap:8px}
+.rdbot{display:none;gap:6px;padding:6px 8px;padding-bottom:max(6px,env(safe-area-inset-bottom));background:#15181c;border-top:1px solid #262b31;overflow-x:auto;scrollbar-width:none}.rdbot::-webkit-scrollbar{display:none}.rdv.touch .rdbot{display:flex}
+.rdk{flex:none;min-width:40px;height:34px;padding:0 10px;border-radius:8px;border:1px solid #303740;background:#1d2126;color:#eef1f4;font:inherit;cursor:pointer}.rdk.rdon{background:#eef1f4;color:#111}
+.rdkb{position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px}
+@media (max-width:700px){.rdgrid{grid-template-columns:1fr}.rdcard .rda{justify-content:stretch}.rdcard .rda .btn{flex:1;justify-content:center}.rdtools{margin-inline-start:0;width:100%}.rdname{max-width:40vw}.rdtools .rdb span{display:none}.rdtools .rdb{padding:0 8px}}`;
   document.head.appendChild(css);
 })();

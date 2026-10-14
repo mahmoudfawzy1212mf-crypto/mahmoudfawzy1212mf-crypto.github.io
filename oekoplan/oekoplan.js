@@ -59,6 +59,9 @@ html.apple[data-theme="light"] .side .avatar{background:linear-gradient(135deg,#
 html.apple[data-theme="dark"] .side,html.apple[data-theme="dark"] .nhome .nside,html.apple:not([data-theme="light"]) .side{background:#0a1b28!important;border-color:#1b3a4f!important}
 html.apple[data-theme="dark"] .side .nav a.on{background:linear-gradient(135deg,#3ca13c,#38a599)!important;color:#fff!important}
 html[data-theme="dark"] .side .userchip{background:rgba(255,255,255,.06)}
+html body .nfd-main,html.apple.apple .nfd-main,html body .fab,html.apple.apple .fab,html body .nq-fab,html.apple.apple .nq-fab{background:linear-gradient(135deg,#70b62e,#38a599 60%,#50b1e7)!important;color:#fff!important;box-shadow:0 10px 26px -8px rgba(56,165,153,.6)!important;border:0!important}
+.nfd-main:hover,.fab:hover,.nq-fab:hover{filter:brightness(1.06)}
+html body .nfd-main svg,html body .nfd-main{color:#fff!important}
 html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
 html[data-theme="dark"] .tb-logo img,html[data-theme="dark"] .brand img{filter:none}
 /* ---- the side bar's top block: logo · person · language/look · view-as/password/sign-out/guide — one width (the menu's), one rhythm ---- */
