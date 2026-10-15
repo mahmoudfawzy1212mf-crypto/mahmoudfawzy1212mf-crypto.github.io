@@ -457,11 +457,23 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
       ['برنامج صيانة وسنة ضمان العيوب', 'Maintenance program and defects-liability year'],
       ['توثيق المشروع بالتصوير للمعرض', 'Project documentation (photography) for the gallery']] },
   ];
-  window.OEKO_PIPELINE = PIPELINE;
+  window.OEKO_PIPELINE = PIPELINE; window.OEKO_PIPELINE_DEFAULT = JSON.parse(JSON.stringify(PIPELINE));
   const STAGES = PIPELINE.map(st => ({ id: st.id, name: st.name, ar: st.ar, pct: st.pct }));
   if (typeof DEFAULT_SETTINGS === 'object') DEFAULT_SETTINGS.pmStages = STAGES;
-  if (typeof PM_STAGES !== 'undefined' && Array.isArray(PM_STAGES)) { PM_STAGES.length = 0; STAGES.forEach(s => PM_STAGES.push(s)); }
-  if (typeof STU_STAGES !== 'undefined' && Array.isArray(STU_STAGES)) { STU_STAGES.length = 0; STAGES.forEach(s => STU_STAGES.push(s)); }
+  const syncStages = () => {
+    STAGES.length = 0; PIPELINE.forEach(st => STAGES.push({ id: st.id, name: st.name, ar: st.ar, pct: st.pct }));
+    if (typeof PM_STAGES !== 'undefined' && Array.isArray(PM_STAGES)) { PM_STAGES.length = 0; STAGES.forEach(s => PM_STAGES.push(s)); }
+    if (typeof STU_STAGES !== 'undefined' && Array.isArray(STU_STAGES)) { STU_STAGES.length = 0; STAGES.forEach(s => STU_STAGES.push(s)); }
+    if (Array.isArray(window.OS_STATUSES)) { const list = PIPELINE.map(st => ({ id: st.id, en: st.name, ar: st.ar })).concat([{ id: 'closed', en: 'Closed', ar: 'اتقفل' }]); OS_STATUSES.length = 0; list.forEach(x => OS_STATUSES.push(x)); }
+  };
+  syncStages();
+  /* the office may edit the pipeline (settings.okPipeline — the editor page): the arrays are replaced in place so every module sees it */
+  let pipeSig = '';
+  window.okApplyPipeline = custom => {
+    const src = Array.isArray(custom) && custom.length ? custom : window.OEKO_PIPELINE_DEFAULT; const sig = JSON.stringify(src); if (sig === pipeSig) return false; pipeSig = sig;
+    PIPELINE.length = 0; JSON.parse(sig).forEach(st => PIPELINE.push(st)); syncStages(); return true;
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { try { if (window.okApplyPipeline(S.settings && S.settings.okPipeline)) setTimeout(() => rerender(), 0); } catch (e) { /* */ } });
 
   /* ---------------------------------------------------------------- login screen (light, the Ökoplan lockup + signature) */
   const cfgL = () => Object.assign({}, OEKO_DEFAULTS.stuLogin, (S.settings && S.settings.stuLogin) || {});
@@ -1323,8 +1335,10 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'الفرص والعروض': 'Enquiries & proposals', 'الفرص': 'Enquiries' });
 
   /* ==================================================================== B) THE PROJECT PIPELINE CARD */
-  const SETUP = [['كود المشروع وهيكل الملفات بتسمية ISO 19650 (المشروع-المرحلة-النوع-الرقم-النسخة)', 'Project code and folder structure, ISO 19650 naming (project-stage-type-number-revision)'], ['Project Owner والفريق واللقب لكل واحد', 'Project Owner, team and role of each'], ['خطة المراحل والمواعيد (D-2 داخلي · D-1 أقصى · موعد العميل ثابت)', 'Stage plan and dates (internal D-2 · maximum D-1 · fixed client deadline)'], ['Scope matrix: المخرجات المتعاقد عليها لكل مرحلة', 'Scope matrix: contracted deliverables per stage'], ['Kick-off داخلي (الفريق)', 'Internal kick-off (team)'], ['Kick-off مع العميل (جهات الاتصال · طريقة التسليم · دورة المراجعة)', 'Client kick-off (contacts · submission channel · review cycle)'], ['استلام الداتا: المساحي · التربة · المخططات المعمارية · البنية التحتية', 'Data received: survey · soil · architectural drawings · infrastructure']];
-  const CLOSE = [['Practical Completion / محضر استلام ابتدائي', 'Practical completion certificate'], ['As-built drawings مستلمة ومراجعة', 'As-built drawings received and checked'], ['دليل التشغيل والصيانة: الري · النباتات · الصيانة الموسمية', 'O&M manual: irrigation · planting · seasonal maintenance'], ['بداية فترة الضمان (Defects Liability Period)', 'Defects liability period started'], ['إقفال ملاحظات الضمان / الاستلام النهائي', 'Defects closed / final handover'], ['Lessons learned مع الفريق', 'Lessons learned with the team'], ['أرشفة الملفات وإقفال المشروع', 'Files archived and project closed'], ['إضافة المشروع لمعرض المشاريع', 'Added to the projects gallery']];
+  const SETUP0 = [['كود المشروع وهيكل الملفات بتسمية ISO 19650 (المشروع-المرحلة-النوع-الرقم-النسخة)', 'Project code and folder structure, ISO 19650 naming (project-stage-type-number-revision)'], ['Project Owner والفريق واللقب لكل واحد', 'Project Owner, team and role of each'], ['خطة المراحل والمواعيد (D-2 داخلي · D-1 أقصى · موعد العميل ثابت)', 'Stage plan and dates (internal D-2 · maximum D-1 · fixed client deadline)'], ['Scope matrix: المخرجات المتعاقد عليها لكل مرحلة', 'Scope matrix: contracted deliverables per stage'], ['Kick-off داخلي (الفريق)', 'Internal kick-off (team)'], ['Kick-off مع العميل (جهات الاتصال · طريقة التسليم · دورة المراجعة)', 'Client kick-off (contacts · submission channel · review cycle)'], ['استلام الداتا: المساحي · التربة · المخططات المعمارية · البنية التحتية', 'Data received: survey · soil · architectural drawings · infrastructure']];
+  const CLOSE0 = [['Practical Completion / محضر استلام ابتدائي', 'Practical completion certificate'], ['As-built drawings مستلمة ومراجعة', 'As-built drawings received and checked'], ['دليل التشغيل والصيانة: الري · النباتات · الصيانة الموسمية', 'O&M manual: irrigation · planting · seasonal maintenance'], ['بداية فترة الضمان (Defects Liability Period)', 'Defects liability period started'], ['إقفال ملاحظات الضمان / الاستلام النهائي', 'Defects closed / final handover'], ['Lessons learned مع الفريق', 'Lessons learned with the team'], ['أرشفة الملفات وإقفال المشروع', 'Files archived and project closed'], ['إضافة المشروع لمعرض المشاريع', 'Added to the projects gallery']];
+  const SETUPI = () => (S.settings && Array.isArray(S.settings.okSetupItems) && S.settings.okSetupItems.length ? S.settings.okSetupItems : SETUP0);
+  const CLOSEI = () => (S.settings && Array.isArray(S.settings.okCloseItems) && S.settings.okCloseItems.length ? S.settings.okCloseItems : CLOSE0);
   const SUBK = { sub: ['اتسلّم للعميل', 'Submitted to client', 'b'], cmt: ['تعليقات العميل وصلت', 'Client comments received', 'y'], res: ['رد المكتب على التعليقات', 'Response sheet sent', 'b'], app: ['اعتماد العميل', 'Client approval', 'g'], rej: ['مرفوض — إعادة تقديم', 'Rejected — resubmit', 'r'] };
   const SITE = { visits: ['زيارات الموقع', 'Site visits'], subm: ['Shop drawings & Material submittals', 'Shop drawings & material submittals'], rfis: ['RFIs', 'RFIs'], instr: ['تعليمات الموقع', 'Site instructions'], vars: ['التعديلات (Variations)', 'Variations'], snags: ['ملاحظات التسليم (Snag list)', 'Snag list'] };
   const SUBST = { sub: ['مقدَّم', 'Submitted', 'b'], appr: ['معتمد', 'Approved', 'g'], noted: ['معتمد بملاحظات', 'Approved as noted', 'g'], rev: ['يُعاد تقديمه', 'Revise & resubmit', 'y'], rej: ['مرفوض', 'Rejected', 'r'] };
@@ -1336,7 +1350,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   const ck = (p, key, items, idxs, can) => items.map((it, i) => `<label class="okck ${idxs.includes(i) ? 'done' : ''}"><input type="checkbox" data-okck="${p.id}:${key}:${i}" ${idxs.includes(i) ? 'checked' : ''} ${can ? '' : 'disabled'}><span>${esc(L(it[0], it[1]))}</span></label>`).join('');
   const pill = (k, map) => { const m = map[k]; return m ? `<span class="okpill ${m[2]}">${esc(L(m[0], m[1]))}</span>` : ''; };
   const addBtn = (p, kind, can) => (can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:${kind}">${icon('plus')}<span>${esc(L('إضافة', 'Add'))}</span></button>` : '');
-  const tabSetup = (p, can) => { const d = p.okSetup || []; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${SETUP.length}</b>${p.okNtp ? `<span class="okpill b">NTP · ${d10(p.okNtp)}</span>` : ''}${p.okKick && p.okKick.internal ? `<span class="okpill">${esc(L('Kick-off داخلي', 'Internal kick-off'))} · ${d10(p.okKick.internal)}</span>` : ''}${p.okKick && p.okKick.client ? `<span class="okpill">${esc(L('Kick-off العميل', 'Client kick-off'))} · ${d10(p.okKick.client)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:kick">${icon('calendar')}<span>${esc(L('التواريخ', 'Dates'))}</span></button>` : ''}</div>${ck(p, 'okSetup', SETUP, d, can)}`; };
+  const tabSetup = (p, can) => { const d = p.okSetup || []; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${SETUPI().length}</b>${p.okNtp ? `<span class="okpill b">NTP · ${d10(p.okNtp)}</span>` : ''}${p.okKick && p.okKick.internal ? `<span class="okpill">${esc(L('Kick-off داخلي', 'Internal kick-off'))} · ${d10(p.okKick.internal)}</span>` : ''}${p.okKick && p.okKick.client ? `<span class="okpill">${esc(L('Kick-off العميل', 'Client kick-off'))} · ${d10(p.okKick.client)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:kick">${icon('calendar')}<span>${esc(L('التواريخ', 'Dates'))}</span></button>` : ''}</div>${ck(p, 'okSetup', SETUPI(), d, can)}`; };
   const tabClient = (p, can) => { const S2 = p.okSub || {}; const cur = stageIdx(p); return `<div class="okgrid">${PIPE.map((s, i) => { const ev = (S2[s.id] && S2[s.id].events) || []; const last = ev[ev.length - 1]; return `<div class="okst2 ${i === cur ? 'cur' : ''}"><b>${esc(L(s.ar, s.name))}</b>${last ? `${pill(last.k, SUBK)}<small>${d10(last.at)}${last.rev ? ' · Rev ' + esc(last.rev) : ''}${last.note ? ' · ' + esc(last.note) : ''}</small>` : `<small>${esc(L('لسه ماتقدّمش', 'Not submitted yet'))}</small>`}${ev.length > 1 ? `<details><summary class="tiny muted">${esc(L('كل الحركات', 'All events'))} · ${ev.length}</summary>${ev.slice().reverse().map(x => `<div class="tiny" style="padding:3px 0">${d10(x.at)} · ${esc(L(SUBK[x.k][0], SUBK[x.k][1]))}${x.rev ? ' · Rev ' + esc(x.rev) : ''}${x.note ? ' — ' + esc(x.note) : ''}</div>`).join('')}</details>` : ''}${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:sub:${s.id}">${icon('plus')}<span>${esc(L('حركة', 'Record'))}</span></button>` : ''}</div>`; }).join('')}</div>`; };
   const siteRow = (kind, x, p, can) => {
     const st = kind === 'subm' ? pill(x.status, SUBST) : kind === 'visits' ? '' : pill(x.status || 'open', OPEN);
@@ -1348,11 +1362,11 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     if (p.okSiteOn === false) return `<div class="okempty">${esc(L('الإشراف على الموقع مقفول للمشروع ده.', 'Site supervision is switched off for this project.'))} ${canEdit(p) ? `<button type="button" class="btn sm ghost" data-oksite="${p.id}:1">${esc(L('فعّله', 'Switch on'))}</button>` : ''}</div>`;
     const d = p.okSite || {}; return `<div class="row" style="justify-content:flex-end">${canEdit(p) ? `<button type="button" class="btn sm ghost" data-oksite="${p.id}:0">${esc(L('اقفل الإشراف للمشروع ده', 'Switch site supervision off'))}</button>` : ''}</div>` + Object.keys(SITE).map(k => { const xs = (d[k] || []).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))); const open = k === 'visits' ? xs.length : k === 'subm' ? xs.filter(x => ['sub', 'rev'].includes(x.status)).length : xs.filter(x => (x.status || 'open') === 'open').length; return `<div class="oksec"><h4>${esc(L(SITE[k][0], SITE[k][1]))}<span class="n">${xs.length}</span>${k !== 'visits' && open ? `<span class="okpill y">${open} ${esc(L('مفتوح', 'open'))}</span>` : ''}<div class="grow"></div>${addBtn(p, k, team)}</h4>${xs.length ? `<details ${open || k === 'visits' ? 'open' : ''}><summary class="tiny muted">${esc(L('القائمة', 'List'))}</summary>${xs.slice(0, 50).map(x => siteRow(k, x, p, team)).join('')}</details>` : `<div class="okempty">—</div>`}</div>`; }).join('');
   };
-  const tabClose = (p, can) => { const d = p.okClose || []; const dlp = p.okDlp || {}; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${CLOSE.length}</b>${dlp.start ? `<span class="okpill">DLP · ${d10(dlp.start)} → ${d10(dlp.end)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:dlp">${icon('calendar')}<span>${esc(L('فترة الضمان', 'Defects period'))}</span></button><button type="button" class="btn sm ghost" data-okadd="${p.id}:lessons">${icon('edit')}<span>Lessons learned</span></button>` : ''}<a class="btn sm ghost" href="#/portfolio">${esc(L('معرض المشاريع', 'Projects gallery'))}</a></div>${ck(p, 'okClose', CLOSE, d, can)}${p.okLessons ? `<div class="oksec"><h4>Lessons learned</h4><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(p.okLessons)}</p></div>` : ''}`; };
+  const tabClose = (p, can) => { const d = p.okClose || []; const dlp = p.okDlp || {}; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${CLOSEI().length}</b>${dlp.start ? `<span class="okpill">DLP · ${d10(dlp.start)} → ${d10(dlp.end)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:dlp">${icon('calendar')}<span>${esc(L('فترة الضمان', 'Defects period'))}</span></button><button type="button" class="btn sm ghost" data-okadd="${p.id}:lessons">${icon('edit')}<span>Lessons learned</span></button>` : ''}<a class="btn sm ghost" href="#/portfolio">${esc(L('معرض المشاريع', 'Projects gallery'))}</a></div>${ck(p, 'okClose', CLOSEI(), d, can)}${p.okLessons ? `<div class="oksec"><h4>Lessons learned</h4><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(p.okLessons)}</p></div>` : ''}`; };
   const tabLogs = (p, team) => { const d = p.okLogs || {}; return Object.keys(LOGS).map(k => { const xs = (d[k] || []).slice().reverse(); return `<div class="oksec"><h4>${esc(L(LOGS[k][0], LOGS[k][1]))}<span class="n">${xs.length}</span><div class="grow"></div>${addBtn(p, k, team)}</h4>${xs.length ? xs.map(x => `<div class="okrow"><span>${esc(x.text)}</span><div class="grow"></div>${k === 'risks' ? pill(x.status || 'open', OPEN) + (team ? `<button type="button" class="btn sm ghost" data-okcyc="${p.id}:${k}:${x.id}">${icon('edit')}</button>` : '') : ''}<span class="muted">${d10(x.at)} · ${esc(x.by || '')}</span></div>`).join('') : `<div class="okempty">—</div>`}</div>`; }).join(''); };
   const flowHTML = p => {
     const can = canEdit(p), team = onTeam(p);
-    const cnt = { setup: `${(p.okSetup || []).length}/${SETUP.length}`, client: String(Object.values(p.okSub || {}).filter(x => (x.events || []).some(e => e.k === 'app')).length) + '/' + PIPE.length, site: p.okSiteOn === false ? 'off' : String(Object.values(p.okSite || {}).reduce((n, a) => n + (a || []).length, 0)), close: `${(p.okClose || []).length}/${CLOSE.length}`, logs: String(Object.values(p.okLogs || {}).reduce((n, a) => n + (a || []).length, 0)) };
+    const cnt = { setup: `${(p.okSetup || []).length}/${SETUPI().length}`, client: String(Object.values(p.okSub || {}).filter(x => (x.events || []).some(e => e.k === 'app')).length) + '/' + PIPE.length, site: p.okSiteOn === false ? 'off' : String(Object.values(p.okSite || {}).reduce((n, a) => n + (a || []).length, 0)), close: `${(p.okClose || []).length}/${CLOSEI().length}`, logs: String(Object.values(p.okLogs || {}).reduce((n, a) => n + (a || []).length, 0)) };
     const body = tab === 'setup' ? tabSetup(p, can) : tab === 'client' ? tabClient(p, can) : tab === 'site' ? tabSite(p, can, team) : tab === 'close' ? tabClose(p, can) : tabLogs(p, team);
     return `<div class="okflow" data-pid="${p.id}"><div class="okfh"><b>${esc(L('بايب لاين المشروع', 'Project pipeline'))}</b><small class="muted">RIBA 2020 · ISO 9001 · ISO 19650 · FIDIC</small>${p.okEnq ? `<span class="okpill b">${esc(L('من الفرص', 'From enquiries'))}</span>` : ''}</div>
       <div class="oktabs">${TABS.map(t => `<button type="button" data-oktab="${t}" class="${tab === t ? 'on' : ''}">${esc(L(TABL[t][0], TABL[t][1]))}<i>${cnt[t]}</i></button>`).join('')}</div><div class="okfb">${body}</div></div>`;
@@ -1412,5 +1426,103 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     const cur = new Set(p[key] || []); if (el.checked) cur.add(+idx); else cur.delete(+idx);
     await up(pid, { [key]: Array.from(cur).sort((a, b) => a - b) });
   });
-  window.okFlow = { ESTAGES, SETUP, CLOSE, SITE, LOGS };
+  window.okFlow = { ESTAGES, SETUP0, CLOSE0, SITE, LOGS };
+})();
+
+/* =====================================================================
+   Ökoplan — Pipeline editor (Mahmoud, 15 Oct): the office changes its own pipeline — add / remove / rename / reorder stages and
+   their steps, the setup checklist and the close-out checklist — from one page (#/okpipeedit), no code. For the owner and the
+   managers (Dr. Tarek, Mahmoud, Rawan) until the way of working settles. Saved in settings (okPipeline · okSetupItems · okCloseItems);
+   every project reads the live version. A stage that still has projects in it cannot be deleted. «Reset» brings the Ökoplan default back.
+   ===================================================================== */
+(() => {
+  if (window.__OK_PIPEEDIT__) return; window.__OK_PIPEEDIT__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const canEd = () => !!S.session && (isAdmin() || role() === 'manager');
+  const DEF = () => window.OEKO_PIPELINE_DEFAULT || [];
+  const cur = () => JSON.parse(JSON.stringify((S.settings && Array.isArray(S.settings.okPipeline) && S.settings.okPipeline.length) ? S.settings.okPipeline : DEF()));
+  const F = window.okFlow || {};
+  const curSetup = () => JSON.parse(JSON.stringify((S.settings && Array.isArray(S.settings.okSetupItems) && S.settings.okSetupItems.length) ? S.settings.okSetupItems : (F.SETUP0 || [])));
+  const curClose = () => JSON.parse(JSON.stringify((S.settings && Array.isArray(S.settings.okCloseItems) && S.settings.okCloseItems.length) ? S.settings.okCloseItems : (F.CLOSE0 || [])));
+  let draft = null, dSetup = null, dClose = null, dirty = false;
+  const load = () => { draft = cur(); dSetup = curSetup(); dClose = curClose(); dirty = false; };
+  const inUse = id => list('projects').filter(p => p.status !== 'archived' && (p.osStatus || p.stage) === id).length;
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.okpe .okpes{border:1px solid var(--line);border-radius:14px;background:var(--surface);margin-bottom:12px;overflow:hidden}
+.okpe .okpeh{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.okpe .okpeh .num{width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--surface);display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.okpe .okpeh input{height:32px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;min-width:0}
+.okpe .okpeh .nm{flex:2 1 220px;font-weight:600}.okpe .okpeh .ar{flex:2 1 200px}.okpe .okpeh .sm{flex:0 1 110px}.okpe .okpeh .gt{flex:1 1 170px}
+.okpe .okpeb{padding:6px 12px 10px}
+.okpe .okper{display:flex;align-items:center;gap:6px;padding:4px 0}.okpe .okper input{flex:1;height:30px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;min-width:0}
+.okpe .okper .ix{width:22px;color:var(--muted);font-size:11.5px;text-align:center;flex:none}
+.okpe .okib{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);display:grid;place-items:center;cursor:pointer;font-size:13px;flex:none;line-height:1}.okpe .okib:hover{color:var(--ink);border-color:var(--ink)}.okpe .okib.del:hover{color:#b91c1c;border-color:#b91c1c}
+.okpe .okadd{margin-top:6px}
+.okpe .okpebar{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 -12px -12px;border-radius:0 0 var(--radius) var(--radius)}
+.okpe .okhint{font-size:12.5px;color:var(--muted);margin:0 0 10px}
+.okpe .okused{font-size:11.5px;color:var(--muted)}
+@media (max-width:700px){.okpe .okpeh .sm{flex-basis:46%}.okpe .okpeh .gt{flex-basis:100%}}
+</style>`);
+  const stepRow = (si, i, it) => `<div class="okper" data-step="${si}:${i}"><span class="ix">${i + 1}</span><input data-f="ar" value="${esc(it[0] || '')}" placeholder="${esc(L('الخطوة بالعربي', 'Step in Arabic'))}" dir="rtl"><input data-f="en" value="${esc(it[1] || '')}" placeholder="Step in English" dir="ltr"><button type="button" class="okib" data-pe="sup:${si}:${i}" title="↑">↑</button><button type="button" class="okib" data-pe="sdown:${si}:${i}" title="↓">↓</button><button type="button" class="okib del" data-pe="sdel:${si}:${i}" title="${esc(L('حذف', 'Delete'))}">✕</button></div>`;
+  const stageCard = (st, si) => { const used = inUse(st.id); return `<div class="okpes" data-stage="${si}"><div class="okpeh"><span class="num">${si + 1}</span>
+      <input class="nm" data-f="name" value="${esc(st.name || '')}" placeholder="Stage name (English)" dir="ltr"><input class="ar" data-f="ar" value="${esc(st.ar || '')}" placeholder="${esc(L('اسم المرحلة بالعربي', 'Stage name in Arabic'))}" dir="rtl">
+      <input class="sm" data-f="riba" value="${esc(st.riba || '')}" placeholder="RIBA 2" dir="ltr"><input class="sm" data-f="pct" type="number" min="0" max="100" value="${esc(st.pct ?? 0)}" title="${esc(L('وزن المرحلة % (للتقدم)', 'Stage weight % (progress)'))}">
+      <input class="gt" data-f="gate_ar" value="${esc((st.gate || [])[0] || '')}" placeholder="${esc(L('بوابة الاعتماد (عربي)', 'Approval gate (Arabic)'))}" dir="rtl"><input class="gt" data-f="gate_en" value="${esc((st.gate || [])[1] || '')}" placeholder="Approval gate (English)" dir="ltr">
+      <span class="okused">${used ? esc(L(`${used} مشروع في المرحلة دي`, `${used} project(s) in this stage`)) : ''}</span>
+      <span class="grow"></span><button type="button" class="okib" data-pe="up:${si}" title="↑">↑</button><button type="button" class="okib" data-pe="down:${si}" title="↓">↓</button><button type="button" class="okib del" data-pe="del:${si}" title="${esc(L('حذف المرحلة', 'Delete stage'))}" ${used ? 'disabled' : ''}>✕</button></div>
+      <div class="okpeb">${(st.items || []).map((it, i) => stepRow(si, i, it)).join('')}<button type="button" class="btn sm ghost okadd" data-pe="sadd:${si}">${icon('plus')}<span>${esc(L('خطوة', 'Step'))}</span></button></div></div>`; };
+  const listCard = (key, title, items) => `<div class="okpes" data-list="${key}"><div class="okpeh"><b>${esc(title)}</b><span class="grow"></span><span class="okused">${items.length}</span></div><div class="okpeb">${items.map((it, i) => `<div class="okper" data-li="${key}:${i}"><span class="ix">${i + 1}</span><input data-f="ar" value="${esc(it[0] || '')}" dir="rtl"><input data-f="en" value="${esc(it[1] || '')}" dir="ltr"><button type="button" class="okib" data-pe="lup:${key}:${i}">↑</button><button type="button" class="okib" data-pe="ldown:${key}:${i}">↓</button><button type="button" class="okib del" data-pe="ldel:${key}:${i}">✕</button></div>`).join('')}<button type="button" class="btn sm ghost okadd" data-pe="ladd:${key}">${icon('plus')}<span>${esc(L('بند', 'Item'))}</span></button></div></div>`;
+  const page = () => {
+    if (!canEd()) return `<div class="banner warn">${esc(L('الصفحة دي للمالك والمديرين', 'This page is for the owner and the managers'))}</div>`;
+    if (!draft) load(); else if (document.querySelector('.okpe')) pull(); /* a re-render must not lose what is being typed */
+    const custom = !!(S.settings && Array.isArray(S.settings.okPipeline) && S.settings.okPipeline.length);
+    return `<div class="card okpe"><p class="okhint">${esc(L('عدّل المراحل وخطواتها زي ما المكتب شغّال فعلًا. التغيير بيظهر في كل المشاريع فورًا بعد الحفظ. المرحلة اللي فيها مشاريع ما تتمسحش — انقل مشاريعها الأول.', 'Edit the stages and their steps the way the office really works. Changes show on every project right after saving. A stage with projects in it cannot be deleted — move its projects first.'))} ${custom ? `<span class="okpill" style="border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11.5px">${esc(L('نسخة المكتب', 'Office version'))}</span>` : `<span class="okpill" style="border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11.5px">${esc(L('الافتراضي (RIBA)', 'Default (RIBA)'))}</span>`}</p>
+      <h3 style="margin:0 0 8px;font-size:14px">${esc(L('مراحل المشروع وخطوات كل مرحلة', 'Project stages and their steps'))}</h3>
+      ${draft.map(stageCard).join('')}<button type="button" class="btn ghost" data-pe="add">${icon('plus')}<span>${esc(L('مرحلة جديدة', 'New stage'))}</span></button>
+      <h3 style="margin:18px 0 8px;font-size:14px">${esc(L('قوائم بايب لاين المشروع', 'Project pipeline checklists'))}</h3>
+      ${listCard('setup', L('التجهيز (Setup)', 'Setup'), dSetup)}${listCard('close', L('الإقفال (Close-out)', 'Close-out'), dClose)}
+      <div class="okpebar"><button type="button" class="btn p" data-pe="save">${icon('check')}<span>${esc(L('حفظ', 'Save'))}</span></button><button type="button" class="btn ghost" data-pe="reload">${esc(L('تراجع عن التعديلات', 'Discard changes'))}</button><span class="grow"></span><button type="button" class="btn ghost" data-pe="reset">${esc(L('رجّع الافتراضي (RIBA)', 'Reset to default (RIBA)'))}</button></div></div>`;
+  };
+  /* read what is typed back into the draft before any move / add / delete / save */
+  const pull = () => {
+    const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('.okpes[data-stage]').forEach(card => { const si = +card.dataset.stage; const st = draft[si]; if (!st) return; const g = f => { const i = card.querySelector(`.okpeh [data-f="${f}"]`); return i ? i.value.trim() : ''; }; st.name = g('name'); st.ar = g('ar'); st.riba = g('riba'); st.pct = +g('pct') || 0; st.gate = [g('gate_ar'), g('gate_en')]; st.items = Array.from(card.querySelectorAll('.okper[data-step]')).map(r => [r.querySelector('[data-f=ar]').value.trim(), r.querySelector('[data-f=en]').value.trim()]); });
+    const rd = key => Array.from(v.querySelectorAll(`.okpes[data-list="${key}"] .okper`)).map(r => [r.querySelector('[data-f=ar]').value.trim(), r.querySelector('[data-f=en]').value.trim()]);
+    if (v.querySelector('.okpes[data-list="setup"]')) dSetup = rd('setup'); if (v.querySelector('.okpes[data-list="close"]')) dClose = rd('close');
+  };
+  const mv = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; const t = arr[i]; arr[i] = arr[j]; arr[j] = t; };
+  document.addEventListener('click', async ev => {
+    const b = ev.target.closest && ev.target.closest('[data-pe]'); if (!b || !canEd() || !(S.route && S.route.view === 'okpipeedit')) return;
+    const [op, a, c] = b.dataset.pe.split(':'); pull(); dirty = true;
+    if (op === 'add') draft.push({ id: 'st_' + uid().slice(-6), name: 'New stage', ar: 'مرحلة جديدة', pct: 0, riba: '', gate: ['', ''], items: [] });
+    if (op === 'del') { const st = draft[+a]; if (st && !inUse(st.id) && (await confirmDlg(L(`تمسح مرحلة «${st.ar || st.name}» وخطواتها؟`, `Delete the «${st.name || st.ar}» stage and its steps?`), L('امسح', 'Delete')))) draft.splice(+a, 1); }
+    if (op === 'up') mv(draft, +a, -1); if (op === 'down') mv(draft, +a, 1);
+    if (op === 'sadd') draft[+a].items.push(['', '']); if (op === 'sdel') draft[+a].items.splice(+c, 1); if (op === 'sup') mv(draft[+a].items, +c, -1); if (op === 'sdown') mv(draft[+a].items, +c, 1);
+    const LST = a === 'setup' ? dSetup : dClose;
+    if (op === 'ladd') LST.push(['', '']); if (op === 'ldel') LST.splice(+c, 1); if (op === 'lup') mv(LST, +c, -1); if (op === 'ldown') mv(LST, +c, 1);
+    if (op === 'reload') { load(); toast(L('اترجعت للنسخة المحفوظة', 'Back to the saved version')); }
+    if (op === 'reset') { if (!(await confirmDlg(L('ترجّع بايب لاين أوكوبلان الافتراضي (RIBA) وتشيل تعديلات المكتب؟ المشاريع مش هتتأثر — المراحل نفس الأكواد.', 'Reset to the default Ökoplan pipeline (RIBA) and drop the office edits? Projects are not affected — same stage ids.'), L('رجّع الافتراضي', 'Reset')))) { rerender(); return; } const s = Object.assign({}, S.settings); delete s.okPipeline; delete s.okSetupItems; delete s.okCloseItems; await Store.saveSettings(s); load(); toast(L('رجع الافتراضي', 'Default restored')); }
+    if (op === 'save') {
+      const clean = draft.map(st => Object.assign({}, st, { name: st.name || st.ar || 'Stage', ar: st.ar || st.name || 'مرحلة', items: (st.items || []).filter(it => it[0] || it[1]).map(it => [it[0] || it[1], it[1] || it[0]]) })).filter(st => st.name);
+      if (!clean.length) { toast(L('لازم مرحلة واحدة على الأقل', 'At least one stage is needed'), 'err'); return; }
+      const ids = new Set(); for (const st of clean) { if (ids.has(st.id)) { toast(L('مرحلتين بنفس الكود', 'Two stages share an id'), 'err'); return; } ids.add(st.id); }
+      const setup = dSetup.filter(it => it[0] || it[1]).map(it => [it[0] || it[1], it[1] || it[0]]), close = dClose.filter(it => it[0] || it[1]).map(it => [it[0] || it[1], it[1] || it[0]]);
+      await Store.saveSettings(Object.assign({}, S.settings, { okPipeline: clean, okSetupItems: setup, okCloseItems: close, okPipelineAt: nowISO(), okPipelineBy: (S.session && S.session.name) || '' }));
+      try { window.okApplyPipeline(clean); } catch (e) { /* */ } load(); toast(L('اتحفظ — كل المشاريع بتقرا النسخة الجديدة', 'Saved — every project now reads the new version')); return;
+    }
+    rerender();
+  });
+  const hook = () => {
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.okpipeedit) return;
+    EXTRA_VIEWS.okpipeedit = () => page();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.okpipeedit = () => ({ title: L('تعديل البايب لاين', 'Pipeline editor'), sub: L('مراحل المكتب وخطواتها — تتعدّل من هنا من غير كود', 'The office stages and steps — edited here, no code'), actions: `<a class="btn ghost" href="#/projects">${icon('back')}<span>${esc(L('المشاريع', 'Projects'))}</span></a>` });
+    if (typeof VIEW_TITLES === 'object') VIEW_TITLES.okpipeedit = 'تعديل البايب لاين';
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'okpipeedit')) { const at = NAV.findIndex(n => n.id === 'settings'); NAV.splice(at >= 0 ? at : NAV.length, 0, { id: 'okpipeedit', label: 'تعديل البايب لاين', short: 'البايب لاين', icon: 'settings' }); }
+    if (typeof ROLE_VIEWS === 'object') ['admin', 'manager'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('okpipeedit')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['okpipeedit']); });
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'okpipeedit') return canEd(); return base.apply(this, arguments); })(canSee);
+  };
+  hook(); document.addEventListener('nf:ready', hook);
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (!(S.route && S.route.view === 'okpipeedit')) { draft = null; } });
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'تعديل البايب لاين': 'Pipeline editor', 'البايب لاين': 'Pipeline' });
 })();
