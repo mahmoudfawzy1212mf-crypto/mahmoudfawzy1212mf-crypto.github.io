@@ -9157,7 +9157,7 @@ EXTRA_SETTINGS.datasafe = { label: 'أمان البيانات', render: () => {
 document.head.insertAdjacentHTML('beforeend', `<style>
 .ocwrap{overflow:auto;padding:10px 4px 16px;direction:rtl;max-height:72vh}
 .oc{display:inline-flex;flex-direction:row;align-items:flex-start;gap:0}
-.on{display:flex;flex-direction:row;align-items:flex-start;position:relative}
+.oc .on{display:flex;flex-direction:row;align-items:flex-start;position:relative}   /* v7.76: scoped — a bare .on turned every selected tab into a column */
 .ob{position:relative;min-width:170px;max-width:210px;border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--surface);box-shadow:var(--shadow);font-size:12.5px;cursor:pointer;flex:0 0 auto}
 .ob:hover{border-color:var(--accent)}
 .ob.owner{background:var(--ink);color:var(--surface);border-color:var(--ink)}
@@ -9636,7 +9636,7 @@ function openCropper(src, onDone, o = {}) {
 (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
 .ocwrap{overflow:auto;padding:14px 8px 18px;direction:rtl;max-height:78vh;scrollbar-width:thin}
 .oc{display:flex;flex-direction:row;justify-content:flex-start;align-items:flex-start;width:max-content;margin:0 auto;zoom:var(--oczoom,1)}
-.on{display:flex;flex-direction:column;align-items:center;position:relative;padding:0 6px}
+.oc .on{display:flex;flex-direction:column;align-items:center;position:relative;padding:0 6px}   /* v7.76: scoped to the org tree (it leaked into every .on tab: the count fell under the label) */
 .ob{min-width:168px;max-width:200px;text-align:center}
 .ob .av{margin:0 0 4px;display:inline-grid}
 .ob .nm{display:block}
@@ -23821,6 +23821,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
 @keyframes apspin{to{transform:rotate(360deg)}}
 .wlbig{font-size:20px;font-weight:800;letter-spacing:1px;direction:ltr;display:inline-block}
 .apcard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:grid;gap:8px}
+.apcombine{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:0 0 10px;background:var(--surface-2,var(--surface))}.apcombine .num{font-size:16px}@media (max-width:520px){.apcombine .btn{width:100%;justify-content:center}}
 .apcard .t{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.approof,.apthumb{width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;display:block}.apthumb{width:40px;height:40px;border-radius:8px}
 .apgrid{display:grid;gap:10px}
 .aptabs .apn,.apsec h4 .apn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--warn-soft,#fff3d6);color:var(--warn-ink,#8a5a00);font-size:11.5px;font-weight:700}
@@ -23926,7 +23927,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (!a || !(+a.amount)) return; const w = byId('workers', a.workerId) || {}; const id = 'ap_' + a.id; const wl = walletOf(a.workerId);
     await Store.save('advpay', { id, advanceId: a.id, workerId: a.workerId, workerName: w.name || '', waPhone: w.phone || w.workPhone || '', amount: +a.amount, status: 'await', walletShown: wLabel(wl), createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' }, { silent: true });
     try { await Store.update('advances', a.id, { payStatus: 'topay', advPayId: id }, { silent: true }); } catch (e) { /* ignore */ }
-    try { await addToOpenBatch(id); } catch (e) { console.warn('batch', e); }
+    try { await addToOpenBatch(id); } catch (e) { console.warn('batch', e); try { toast(L('السلفة اتسجلت — ودخولها الدفعة هيتم لوحده أول ما المالك أو مدير الحسابات يفتح الأبليكيشن', 'The advance is saved — it joins its batch as soon as the owner or the HR manager opens the app'), 'err'); } catch (e2) { /* ignore */ } }
     if (!wl) { try { await Store.save('tasks', { id: `apw_${a.id}`, title: 'سجّل رقم التحويلات علشان سلفتك تتحول', desc: 'من «بوابتي» ← رقم التحويلات', assigneeId: a.workerId, toRole: null, priority: 'high', status: 'open', kind: 'update', source: 'wallet', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } }
   })(acctAdvanceOut);
   window.nfAdvPending = a => a && ['topay', 'review'].includes(a.payStatus);
@@ -23936,7 +23937,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   ['hr', 'acc', 'purch'].forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('advpay')) ROLE_VIEWS[r].push('advpay'); });
   canSee = (base => function (v) { if (v === 'advpay') return canAdvPay(); return base.apply(this, arguments); })(canSee);
   const TABS = [['batches', 'الدفعات'], ['topay', 'مستني تحويل'], ['review', 'مراجعة'], ['paid', 'اتحولت'], ['wallets', 'أرقام الموظفين']];
-  function msgFor(p) { return `أهلاً ${p.workerName || ''}،\nاتحولتلك سلفة ${fmtMoney(p.paidAmount || p.amount)} ${CUR()} على ${p.walletShown || 'محفظتك'}.\nرقم العملية: ${p.ref || '—'}${p.proofUrl ? `\nصورة التحويل: ${p.proofUrl}` : ''}\n— Ninety Fabrication`; }
+  function msgFor(p) { if (p && p.weekly) return `أهلاً ${p.workerName || ''}،\nاتحوّلك قبض الأسبوع ${fmtMoney(p.paidAmount || p.amount)} ${CUR()} على ${p.walletShown || 'محفظتك'}.\nرقم العملية: ${p.ref || '—'}${p.proofUrl ? `\nصورة التحويل: ${p.proofUrl}` : ''}\n— Ninety Fabrication`; return `أهلاً ${p.workerName || ''}،\nاتحولتلك سلفة ${fmtMoney(p.paidAmount || p.amount)} ${CUR()} على ${p.walletShown || 'محفظتك'}.\nرقم العملية: ${p.ref || '—'}${p.proofUrl ? `\nصورة التحويل: ${p.proofUrl}` : ''}\n— Ninety Fabrication`; }
   function cardHTML(p) {
     const wl = walletOf(p.workerId); const show = wl ? wLabel(wl) : ''; const num = wShow(wl); const cp = wCopy(wl);
     const st = { await: ['مستنية تمويل الدفعة', ''], topay: ['مستني تحويل', 'warn'], review: ['مراجعة', 'serious'], paid: ['اتحولت', 'good'], cancelled: ['ملغية', ''] }[p.status] || [p.status, ''];
@@ -23946,11 +23947,11 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (p.status === 'paid') { if (p.waPhone && typeof waLink === 'function') acts.push(`<a class="btn sm p" target="_blank" rel="noopener" href="${esc(waLink(p.waPhone, msgFor(p)))}">${icon('wa')}ابعت للموظف واتساب</a>`); if (navigator.share) acts.push(`<button class="btn sm" data-action="apShare" data-arg="${esc(p.id)}">مشاركة الصورة</button>`); }
     const rdg = window.nfTrf && nfTrf.reading(p) ? `<span class="nftrdg"><i class="apspin" aria-hidden="true"></i>${esc(L('الصورة بتتراجع…', 'The picture is being checked…'))}</span>` : '';
     if (rdg) { acts.length = 0; }
-    return `<div class="apcard"><div class="t"><b>${esc(p.workerName || '')}</b><span class="badge ${st[1]}">${st[0]}</span>${rdg}<div class="grow"></div><b>${fmtMoney(p.amount)} ${CUR()}</b></div>
+    return `<div class="apcard"><div class="t"><b>${esc(p.workerName || '')}</b>${p.weekly ? `<span class="badge acc">${esc(L('قبض أسبوعي', 'Weekly pay'))}</span>` : ''}<span class="badge ${st[1]}">${st[0]}</span>${rdg}<div class="grow"></div><b>${fmtMoney(p.amount)} ${CUR()}</b></div>
       ${p.status !== 'paid' ? (wl ? `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="muted small">${esc((WT[wl.type] || [''])[0])}</span><span class="wlbig">${esc(wFull(wl))}</span>${cp ? `<button class="btn xs" data-action="apCopy" data-arg="${esc(cp)}">نسخ الرقم</button>` : ''}${wl.type === 'card' ? `<b>${esc(wl.holder || '')}</b><button class="btn xs" data-action="apCopy" data-arg="${esc(wl.holder || '')}">نسخ الاسم</button>` : ''}</div>` : '') : `<div class="small">على <b class="ltr">${esc(p.walletShown || show)}</b> · رقم العملية <b class="ltr">${esc(p.ref || '')}</b> · ${fmtDate((p.paidAt || '').slice(0, 10))}${p.manual ? ' · <span class="badge warn">اتعتمد يدوي</span>' : ''} · ${esc(p.paidByName || '')}</div>`}
       ${p.status === 'review' ? `<div class="banner warn small" style="margin:0">${(p.issues || []).map(esc).join('<br>')}</div>` : ''}
       ${p.proofPath ? `<div><img class="approof" src="${esc(p.proofUrl || '')}" alt="" data-action="apProof" data-arg="${esc(p.id)}" onerror="this.style.display='none'"></div>` : ''}
-      <div class="tiny muted">اتوافق عليها ${fmtDate((p.createdAt || '').slice(0, 10))}${p.createdByName ? ' · ' + esc(p.createdByName) : ''}</div>
+      <div class="tiny muted">${p.weekly ? esc(L(`قبض أسبوع الخميس ${fmtDate(p.weekOf || '')}`, `Weekly pay — Thursday ${fmtDate(p.weekOf || '')}`)) + ((p.ded || []).length ? ' · ' + esc(L('بعد قسط المديونية', 'after the debt instalment')) : '') : `اتوافق عليها ${fmtDate((p.createdAt || '').slice(0, 10))}${p.createdByName ? ' · ' + esc(p.createdByName) : ''}`}</div>
       ${acts.length ? `<div class="row" style="gap:6px;flex-wrap:wrap">${acts.join('')}</div>` : ''}</div>`;
   }
   function walletsHTML() {
@@ -23966,6 +23967,15 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
      employees' wallet numbers, remind) · on the way (one line per batch) · closed (one line per batch, by month, tap = details) · the
      employees' numbers. The payer sees only his part (to transfer / review / transferred); HR / accounts as before.
      A display change only — nobody sees anything new. */
+  /* v7.77 (Mahmoud 15 Oct, on two batches waiting side by side: «why can't I combine the advances — they are all advances»): with two
+     or more batches waiting for his transfer, one bar on top sends them all in ONE transfer to the payer (the same «one transfer»
+     as in «money waiting for you»: one screenshot, read by the server, every batch funded at once). */
+  function combineBar(bs) {
+    const ok = bs.filter(b => b && b.status === 'sent' && !locked(b)); if (ok.length < 2 || !isAdmin() || !writable() || typeof window.nfMoneyGo !== 'function') return '';
+    const tot = Math.round(ok.reduce((a, b) => a + (+b.total || 0), 0) * 100) / 100; const n = ok.reduce((a, b) => a + (b.items || []).length, 0);
+    return `<div class="apcombine"><div><b>${esc(L(`اجمع الـ${ok.length} دفعات في تحويلة واحدة`, `Combine the ${ok.length} batches into one transfer`))}</b><div class="tiny muted">${esc(L(`${n} سلفة — صورة تحويل واحدة للمحوِّل بالمجموع`, `${n} advances — one transfer screenshot to the payer for the total`))}</div></div><div class="grow"></div><b class="num">${fmtMoney(tot)} ${CUR()}</b><button type="button" class="btn p sm" data-action="abCombine">${icon('money')}${esc(L('حوّلهم مرة واحدة', 'Transfer them at once'))}</button></div>`;
+  }
+  ACTIONS.abCombine = () => { if (!isAdmin() || typeof window.nfMoneyGo !== 'function') return; const bs = list('advbatch').filter(b => b && b.status === 'sent' && !locked(b)); if (bs.length < 1) return; window.nfMoneyGo(bs.map(b => ({ sel: 'own', k: 'adv', raw: b.id, id: 'adv:' + b.id }))); };
   const OWNER_TABS = [['you', 'عليك'], ['held', 'عند المحوّل'], ['queued', 'في الطريق'], ['closed', 'اتقفلت'], ['wallets', 'أرقام الموظفين']];
   const PAYER_TABS = [['topay', 'عليك تحوّل'], ['review', 'مراجعة'], ['paid', 'اتحولت']];
   const bDone = b => { const it = (b.items || []).map(i => byId('advpay', i)).filter(Boolean); return it.length > 0 && it.every(p => p.status === 'paid' || p.status === 'cancelled'); };
@@ -24007,7 +24017,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const o = ownerSets();
     if (tab === 'you') {
       if (!o.you.b.length && !o.you.p.length) return `<div class="apclear">${icon('check')}<b>مفيش حاجة عليك ✓</b><span class="muted small">أي دفعة سلف مستنية تحويلك أو تحويل محتاج موافقتك هيظهر هنا.</span></div>`;
-      return (o.you.b.length ? `<div class="apsec"><h4>دفعات مستنية تحويلك <span class="apn">${o.you.b.length}</span></h4><div class="apgrid">${o.you.b.map(batchCard).join('')}</div></div>` : '')
+      return (o.you.b.length ? `<div class="apsec"><h4>دفعات مستنية تحويلك <span class="apn">${o.you.b.length}</span></h4>${combineBar(o.you.b)}<div class="apgrid">${o.you.b.map(batchCard).join('')}</div></div>` : '')
         + (o.you.p.length ? `<div class="apsec"><h4>تحويلات محتاجة موافقتك <span class="apn">${o.you.p.length}</span></h4><div class="apgrid">${o.you.p.map(cardHTML).join('')}</div></div>` : '');
     }
     if (tab === 'held') return o.held.length ? `<div class="apgrid">${o.held.map(heldCard).join('')}</div>` : `<div class="apclear"><b>مفيش دفعات عند المحوّل دلوقتي</b><span class="muted small">لما تحوّل دفعة لبهاء (أو أحمد) هتتابع هنا مين اتحوّل له.</span></div>`;
@@ -24064,7 +24074,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   async function apVerifyDone(id, r, late, quiet) {
     const p = byId('advpay', id); if (!p) return;
       if (r && r.status === 'paid') {
-        try { await Store.save('tasks', { id: `apd_${p.advanceId}`, title: 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
+        try { await Store.save('tasks', { id: `apd_${p.advanceId || p.id}`, title: p.weekly ? 'اتحوّل قبض الأسبوع على محفظتك ✓' : 'اتحولت سلفتك على محفظتك ✓', desc: `رقم العملية: ${r.ref}`, assigneeId: p.workerId, toRole: null, priority: 'normal', status: 'open', kind: 'update', source: 'advpay', createdBy: S.session?.id || null, createdByName: S.session?.name || '', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         try { const t = byId('tasks', `apt_${p.advanceId}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e2) { /* ignore */ }
         try { const bb = p.batchId ? byId('advbatch', p.batchId) : null; if (bb && bb.status === 'funded') { const left = (bb.items || []).filter(i => i !== p.id).map(i => byId('advpay', i)).filter(x => x && x.status !== 'paid' && x.status !== 'cancelled'); if (!left.length) { pushTo(['role:admin'], `${S.session?.name || ''} خلّص توزيع دفعة سلف ${bb.code}`.trim(), `${(bb.items || []).length} سلفة اتحوّلت وكل واحدة بصورتها`, bb.id); try { const t = byId('tasks', `abf_${bb.id}`); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e3) { /* ignore */ } } } } catch (e2) { /* ignore */ }
         if (late) { if (!quiet) toast(L(`تحويل سلفة ${p.workerName || ''} مطابق ✓ — اتقفلت «اتحولت»`, `The advance transfer for ${p.workerName || ''} matches ✓ — closed «transferred»`)); return; }
@@ -35886,7 +35896,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       ${r.lat != null ? `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><a class="btn xs p" href="${navLink(r)}" target="_blank" rel="noopener">${icon('map')}${L('روح للعربية', 'Navigate')}</a></div>` : ''}
       ${r.task ? `<div class="small" style="margin-top:6px">${L('التاسك', 'Task')}: <a href="#/tasks/${esc(r.task.id)}">${esc(r.task.title || '')}</a></div>` : ''}
       ${r.trip ? `<div class="small" style="margin-top:4px"><a class="btn xs" href="#/fleet/${esc(r.trip.id)}">${icon('map')}${L('افتح المشوار', 'Open the trip')} ${esc(r.trip.number || '')}</a></div>` : ''}
-      ${rt && rt.length > 1 ? `<div class="fm-replay"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted">${L('إعادة تشغيل اليوم', 'Replay today')}</span><input type="range" min="0" max="${rt.length - 1}" value="${rp ? rp.i : rt.length - 1}" data-fm-replay="${esc(r.id)}" style="flex:1"><button type="button" class="btn xs ${rp && rp.on ? 'p' : ''}" data-action="fmPlay" data-arg="${esc(r.id)}">${rp && rp.on ? L('إيقاف', 'Pause') : L('تشغيل', 'Play')}</button></div>${rpPt ? `<div class="tiny muted">${esc(String(rpPt.at || '').replace('T', ' ').slice(0, 16))}${rpPt.speed != null ? ` · ${fmtNum(Math.round(rpPt.speed))} ${L('كم/س', 'km/h')}` : ''}</div>` : ''}</div>` : (r.v.gpsId && hosted() ? `<div class="tiny muted" style="margin-top:6px">${rt ? L('مفيش مسار مسجّل النهارده', 'No route recorded today') : L('جارٍ تحميل مسار النهارده…', 'Loading today\'s route…')}</div>` : '')}
+      ${rt && rt.length > 1 ? `<div class="fm-replay"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted">${L('إعادة تشغيل اليوم', 'Replay today')}</span><input type="range" min="0" max="${rt.length - 1}" value="${rp ? rp.i : rt.length - 1}" data-fm-replay="${esc(r.id)}" style="flex:1"><button type="button" class="btn xs ${rp && rp.on ? 'p' : ''}" data-action="fmPlay" data-arg="${esc(r.id)}">${rp && rp.on ? L('إيقاف', 'Pause') : L('تشغيل', 'Play')}</button></div>${rpPt ? `<div class="tiny muted">${esc(String(rpPt.at || '').replace('T', ' ').slice(0, 16))}${rpPt.speed != null ? ` · ${fmtNum(Math.round(rpPt.speed))} ${L('كم/س', 'km/h')}` : ''}</div>` : ''}${window.nfTrackPath ? window.nfTrackPath.note(rt) : ''}</div>` : (r.v.gpsId && hosted() ? `<div class="tiny muted" style="margin-top:6px">${rt ? L('مفيش مسار مسجّل النهارده', 'No route recorded today') : L('جارٍ تحميل مسار النهارده…', 'Loading today\'s route…')}</div>` : '')}
     </div>`;
   }
   EXTRA_VIEWS.fleetmap = () => vFleetMap();
@@ -35927,7 +35937,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     if (FM.routeFor === id && FM.route && Date.now() - FM.routeAt < 60000) return;
     FM.routeFor = id; FM.route = null; FM.routeAt = Date.now();
     const d = new Date(); d.setHours(0, 0, 0, 0);
-    try { const r = await gpsCall('playback', { imei: v.gpsId, from: d.toISOString(), to: new Date().toISOString() }); if (FM.routeFor !== id) return; FM.route = (r.track || []).filter(p => p.lat != null && p.lng != null); }
+    try { const r = await gpsCall('playback', { imei: v.gpsId, from: d.toISOString(), to: new Date().toISOString() }); if (FM.routeFor !== id) return; FM.route = (r.track || []).filter(p => p.lat != null && p.lng != null); if (window.nfTrackPath) window.nfTrackPath.fill(FM.route, () => { if (FM.routeFor === id) { render(false); drawRoute(); } }); }
     catch (e) { FM.route = []; }
     render(false); drawRoute();
   }
@@ -35984,7 +35994,7 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: big || !!opt.zoom, gestureHandling: big ? 'greedy' : 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
     /* v6.93 (Mahmoud: the big factory emoji hid the vehicles parked there): a small dot with a tiny tag, under everything */
     if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 5, fillColor: '#1b7f4b', fillOpacity: .9, strokeColor: '#fff', strokeWeight: 1.5, labelOrigin: g.Point ? new g.Point(0, 3) : undefined }, label: { text: L('المصنع', 'Factory'), fontSize: '10px', fontWeight: '700', className: 'fm-lbl' }, zIndex: 0 });
-    const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;
+    const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;   /* line: the route overlays (v7.77: several — real fixes, road fills, dashed gaps) */
     /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
     const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
     /* v7.02 (Mahmoud, 9 Oct: «عايز مكان كل عربية الحقيقي») — every icon sits exactly on its vehicle; nothing is moved. The tag is the
@@ -36023,8 +36033,8 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     };
     const drawRouteOn = () => {
       const rt = FM.sel && FM.routeFor === FM.sel ? FM.route : null;
-      if (line) { line.setMap(null); line = null; }
-      if (rt && rt.length > 1) line = new g.Polyline({ map, path: rt.map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4, zIndex: 2 });
+      if (line) { (Array.isArray(line) ? line : [line]).forEach(x => x && x.setMap && x.setMap(null)); line = null; }
+      if (rt && rt.length > 1) line = window.nfTrackPath ? window.nfTrackPath.draw(g, map, rt, { color: '#2a78d6' }) : [new g.Polyline({ map, path: rt.map(p => ({ lat: +p.lat, lng: +p.lng })), strokeColor: '#2a78d6', strokeOpacity: 0.85, strokeWeight: 4, zIndex: 2 })];
       const rp = FM.replay && FM.sel && FM.replay.id === FM.sel ? FM.replay : null; const pt = rp && rt ? rt[Math.min(rt.length - 1, rp.i)] : null;
       if (ghost && !pt) { ghost.setMap(null); ghost = null; }
       if (pt) { const pos = { lat: +pt.lat, lng: +pt.lng }; if (!ghost) ghost = new g.Marker({ map, position: pos, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#2a78d6', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 9 }); else if (ghost.setPosition) ghost.setPosition(pos); }
@@ -36563,6 +36573,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
       const trips = (rp.trips || []).map(t => Object.assign({}, t, { start: shift(t.start, off), end: shift(t.end, off) }));
       let km = rp.summary && rp.summary.km != null ? rp.summary.km : (typeof trackKm === 'function' ? Math.round(trackKm(track) * 10) / 10 : null);
       H.data = { track, stops, trips, summary: Object.assign({ km, maxKmh: null, movingMin: null }, rp.summary || {}, { movingMin: trips.reduce((a, t) => a + (t.min || 0), 0) }) }; H.replay = Math.max(0, track.length - 1);
+      if (window.nfTrackPath) window.nfTrackPath.fill(track, () => { if (key === H.key) { render(false); setTimeout(ensureHMap, 30); } });
     } catch (e) { if (key !== H.key) return; H.err = (typeof gpsErrAr === 'function' ? gpsErrAr(e.message || e) : (e.message || String(e))); }
     H.loading = false; render(false); setTimeout(ensureHMap, 30);
   }
@@ -36580,7 +36591,7 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
       ${H.off ? `<div class="tiny muted" style="margin-top:6px">⏱ ${L(`ساعة الجهاز متقدمة ${H.off} ساعة — الأوقات هنا متصحّحة لتوقيت القاهرة (ابعت GMT,E,0# للجهاز عشان تتظبط نهائي)`, `The tracker clock is ${H.off} h ahead — times here are corrected to Cairo time (send GMT,E,0# to the tracker to fix it for good)`)}</div>` : ''}</div>
       <div class="fm-tiles" style="grid-template-columns:repeat(4,1fr)"><div class="fm-tile"><b>${s && s.km != null ? fmtNum(s.km) : '—'}</b><span>${L('كم', 'km')}</span></div><div class="fm-tile"><b>${s && s.maxKmh != null ? fmtNum(Math.round(s.maxKmh)) : '—'}</b><span>${L('أقصى سرعة', 'max km/h')}</span></div><div class="fm-tile"><b>${s ? dur(s.movingMin) : '—'}</b><span>${L('وقت الحركة', 'moving time')}</span></div><div class="fm-tile"><b>${d ? d.stops.length : '—'}</b><span>${L('وقفات', 'stops')}</span></div></div>
       <div class="fm-body"><div class="fm-mapbox"><div id="fh-map" class="fm-map"><div class="muted small" style="padding:14px">${H.loading ? L('جارٍ تحميل المسار…', 'Loading the route…') : H.err ? esc(H.err) : d && !d.track.length ? L('مفيش حركة مسجّلة في اليوم ده', 'No movement recorded on this day') : L('جارٍ تحميل الخريطة…', 'Loading the map…')}</div></div>
-          ${d && d.track.length > 1 ? `<div class="fm-replay card" style="margin-top:8px;padding:8px 12px"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted" style="min-width:150px">${pt ? `${hhmm(pt.at)}${pt.speed != null ? ` · ${fmtNum(Math.round(pt.speed))} ${L('كم/س', 'km/h')}` : ''}` : ''}</span><input type="range" min="0" max="${d.track.length - 1}" value="${H.replay}" data-fh="replay" style="flex:1"></div></div>` : ''}</div>
+          ${d && d.track.length > 1 ? `<div class="fm-replay card" style="margin-top:8px;padding:8px 12px"><div class="row" style="align-items:center;gap:8px"><span class="tiny muted" style="min-width:150px">${pt ? `${hhmm(pt.at)}${pt.speed != null ? ` · ${fmtNum(Math.round(pt.speed))} ${L('كم/س', 'km/h')}` : ''}` : ''}</span><input type="range" min="0" max="${d.track.length - 1}" value="${H.replay}" data-fh="replay" style="flex:1"></div>${window.nfTrackPath ? window.nfTrackPath.note(d.track) : ''}</div>` : ''}</div>
         <aside class="fm-rail"><div class="fm-list">
           ${H.err ? `<div class="banner warn">${icon('alert')}<span>${esc(H.err)}</span></div>` : ''}
           ${d && d.stops.length ? `<div class="tiny muted" style="font-weight:700;padding:4px">${L('الوقفات', 'Stops')}</div>${d.stops.map(st => `<div class="fm-card" data-action="fhStop" data-arg="${st.n}"><span class="fm-dot" style="background:#d98a00;color:#fff;width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${st.n}</span><div class="main"><div class="title">${hhmm(st.start)}${st.end ? ' – ' + hhmm(st.end) : ''} <span class="muted">· ${dur(st.min)}</span></div><div class="meta"><span>${esc(st.address || `${(+st.lat).toFixed(4)}, ${(+st.lng).toFixed(4)}`)}</span></div></div></div>`).join('')}` : ''}
@@ -36616,11 +36627,11 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   }
   function drawH() {
     const m = H.map; const d = H.data; if (!m || !d || !document.getElementById('fh-map')) return; const g = window.google.maps;
-    const sig = H.vid + '|' + H.date + '|' + d.track.length;
+    const tp = window.nfTrackPath; const sig = H.vid + '|' + H.date + '|' + d.track.length + '|' + (tp ? tp.stats(d.track).filled : 0);
     if (m.sig !== sig) {
       m.items.forEach(x => x.setMap(null)); m.items = []; m.sig = sig;
       const path = d.track.map(p => ({ lat: +p.lat, lng: +p.lng })); const bounds = new g.LatLngBounds(); path.forEach(p => bounds.extend(p));
-      if (path.length > 1) m.items.push(new g.Polyline({ map: m.map, path, strokeColor: '#2a78d6', strokeOpacity: .9, strokeWeight: 4, zIndex: 2 }));
+      if (path.length > 1) { if (window.nfTrackPath) m.items.push(...window.nfTrackPath.draw(g, m.map, d.track, { color: '#2a78d6' })); else m.items.push(new g.Polyline({ map: m.map, path, strokeColor: '#2a78d6', strokeOpacity: .9, strokeWeight: 4, zIndex: 2 })); }
       if (path.length) { m.items.push(new g.Marker({ map: m.map, position: path[0], label: { text: L('بداية', 'Start'), fontSize: '11px', fontWeight: '700' }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#1b7f4b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 4 })); m.items.push(new g.Marker({ map: m.map, position: path[path.length - 1], label: { text: L('نهاية', 'End'), fontSize: '11px', fontWeight: '700' }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 7, fillColor: '#d93025', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 4 })); }
       d.stops.forEach(st => { const mk = new g.Marker({ map: m.map, position: { lat: +st.lat, lng: +st.lng }, label: { text: String(st.n), color: '#fff', fontSize: '11px', fontWeight: '800' }, title: `${hhmm(st.start)} · ${dur(st.min)}`, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 11, fillColor: '#d98a00', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }, zIndex: 5 }); m.items.push(mk); });
       const hz = homeZone(); if (hz) m.items.push(new g.Marker({ map: m.map, position: { lat: hz.lat, lng: hz.lng }, icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 5, fillColor: '#1b7f4b', fillOpacity: .9, strokeColor: '#fff', strokeWeight: 1.5, labelOrigin: g.Point ? new g.Point(0, 3) : undefined }, label: { text: L('المصنع', 'Factory'), fontSize: '10px', fontWeight: '700', className: 'fm-lbl' }, zIndex: 0 }));
@@ -45360,8 +45371,8 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
    · One picture viewer for the whole system (replaces the old lightbox that showed one picture and closed on any tap):
      the picture fits the screen exactly (phone portrait / landscape, computer) on a dark background, with its name /
      note under it; pinch, double-tap or the mouse wheel zoom (and you move around while zoomed); with more than one
-     picture you swipe (or use the arrow keys) between them, see «2 of 3» and small pictures at the bottom; it closes only
-     with ✕, a swipe down (phone), Esc or the phone's back button; download and share.
+     picture you swipe (or use the arrow keys) between them, see «2 of 3» and small pictures at the bottom; it closes with ✕,
+     a swipe down (phone), Esc, the phone's back button — and (v7.76) a tap anywhere on the dark area; download and share.
    · nfGridHTML(): attachments laid out like WhatsApp before they are opened — 1 big · 2 side by side · 3 = one big and two
      small · 4 = 2×2 · more = four with «+N».
    · lightbox(src, caption) everywhere now opens this viewer; when the tapped picture sits in a group of pictures, the
@@ -45417,6 +45428,14 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
     el.querySelector('.nfv-pv').addEventListener('click', () => go(-1, true));
     el.querySelector('.nfv-nx').addEventListener('click', () => go(1, true));
     el.querySelector('.nfv-strip').addEventListener('click', e => { const b = e.target.closest('[data-vi]'); if (b) { V.i = +b.dataset.vi; show(); } });
+    /* v7.76 (Mahmoud 15 Oct: «I open a picture — I want to tap anywhere on the black screen and it closes, in the whole system»): a tap on
+       the dark area around the picture (the stage, the empty top bar, the empty strip) closes it; taps on the picture keep zoom / double-tap,
+       the buttons and the small pictures keep their job. Closed on «click», so the tap never lands on the page underneath. */
+    el.addEventListener('click', e => {
+      if (e.target.closest('button, a, input')) return;
+      if (e.target.closest('.nfv-stage')) { if (V.bgTap && Date.now() - V.bgTap < 700) { V.bgTap = 0; e.preventDefault(); e.stopPropagation(); close(); } return; }
+      e.preventDefault(); e.stopPropagation(); close();
+    });
     const st = el.querySelector('.nfv-stage');
     st.addEventListener('pointerdown', down); st.addEventListener('pointermove', move); st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
     st.addEventListener('wheel', wheel, { passive: false });
@@ -45476,11 +45495,13 @@ html body .otn-dash>span:first-of-type{overflow-wrap:anywhere}
       else if (dy > 0) { img.style.transform = `translateY(${dy}px) scale(${Math.max(.85, 1 - dy / 1200)})`; V.el.style.setProperty('--nfv-bg', String(Math.max(.35, 1 - dy / 500))); }
     }
   }
+  const onImg = (x, y) => { const r = V.el.querySelector('.nfv-img').getBoundingClientRect(); return r.width > 0 && x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2; };
   function up(e) {
     const g = V.g; V.ptrs.delete(e.pointerId);
     if (g && g.k === 'pinch') { if (V.ptrs.size < 2) { V.g = null; if (V.s <= 1.02) reset(); } return; }
     V.g = null; if (!g) return;
     const dx = e.clientX - g.x0, dy = e.clientY - g.y0; const img = V.el.querySelector('.nfv-img');
+    if (!g.moved && V.s <= 1.01 && !onImg(e.clientX, e.clientY)) { V.lastTap = 0; V.bgTap = Date.now(); return; }   /* v7.76: a tap on the dark area — closed by the click that follows (no tap reaches the page under it) */
     if (!g.moved) { const now = Date.now(); const near = V.lastXY && Math.hypot(e.clientX - V.lastXY.x, e.clientY - V.lastXY.y) < 30; if (now - V.lastTap < 300 && near) { V.lastTap = 0; if (V.s > 1.01) { reset(); } else { zoomAt(2.5, e.clientX, e.clientY, true); } } else { V.lastTap = now; V.lastXY = { x: e.clientX, y: e.clientY }; } return; }
     if (g.k === 'swipe') {
       V.el.style.removeProperty('--nfv-bg');
@@ -50828,7 +50849,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) (() => {
       { k: 'prod', ar: 'الشغل', en: 'Work', rx: /(?:حمل الأقسام|المراحل الجارية|الأوامر المفتوحة|آخر تحديثات|خامات تحت|المشاريع الجارية|CRM|المساعد الذكي|department load|running stages|open orders|latest updates|below minimum|running projects|assistant)/i },
       { k: 'fleet', ar: 'النقل', en: 'Transport', rx: /(?:مشاوير|الأسطول|العربيات|trips|fleet|vehicles)/i },
       { k: 'people', ar: 'الناس والأداء', en: 'People & KPIs', rx: /(?:حضور|مؤشرات الأداء|متأخرات رؤساء|السهر|attendance|KPI|performance|heads.? late|overtime)/i }],
-      count: { need: () => myReqs() + myTasks() } },
+      count: { need: () => myReqs() + myTasks(), people: () => safe(() => (window.nfAttWeekNew ? window.nfAttWeekNew() : 0)) } },   /* v7.76: «1» on People & KPIs while last week's attendance report is new */
     finish: { tabs: [
       { k: 'cost', ar: 'التكلفة', en: 'Cost', rx: /(?:تكلفة المتر|cost per)/i },
       { k: 'sys', ar: 'الأنظمة', en: 'Systems', rx: null, one: true },
@@ -53273,7 +53294,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   const weekOf = off => { const s = addD(satOf(todayISO()), -7 * off); return { from: s, to: addD(s, 6) }; };   /* off 1 = last week (Sat → Fri) */
   const days = w => { const out = []; for (let d = w.from; d <= w.to; d = addD(d, 1)) out.push(d); return out; };
   const inRange = (iso, w) => { const d = String(iso || '').slice(0, 10); return d >= w.from && d <= w.to; };
-  const staffOf = w => list('workers').filter(x => x && x.id && !['admin', 'kiosk'].includes(x.role) && (x.status !== 'inactive' || (x.leftAt && x.leftAt >= w.from)) && (!x.joined || x.joined <= w.to));
+  const staffOf = w => list('workers').filter(x => x && x.id && !x.noPunch && !['admin', 'kiosk'].includes(x.role) && (x.status !== 'inactive' || (x.leftAt && x.leftAt >= w.from)) && (!x.joined || x.joined <= w.to));
   const deptLabel = id => { try { return deptName(id) || L('بدون قسم', 'No department'); } catch (e) { return id || L('بدون قسم', 'No department'); } };
   /* one pass over the attendance docs: { date: { workerId: row } } for every date in [a, b] */
   function rowsIn(a, b) { const out = {}; const months = new Set([a.slice(0, 7), b.slice(0, 7)]); list('attendance').forEach(doc => { if (!doc || !months.has(doc.month)) return; Object.entries(doc.rows || {}).forEach(([d, rows]) => { if (d < a || d > b || !rows) return; const o = out[d] || (out[d] = {}); Object.assign(o, rows); }); }); return out; }
@@ -53324,7 +53345,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     const topLine = (lab, arr, fmt) => arr.length ? `<div class="awk-top"><span>${esc(lab)}</span>${arr.map(x => `<b>${esc(short(x.w.name))}</b> <small>${esc(fmt(x))}</small>`).join('، ')}</div>` : '';
     const edits = Object.entries(s.edits).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span>${esc(short(k))}</span> ${fmtNum(v)}`).join('، ');
     const wait = Object.entries(s.waiting).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span>${esc(k)}</span> ${fmtNum(v)}`).join('، ');
-    return `<div class="card awk" id="awk" data-ptab="pin"><div class="cardhead"><h3>${icon('clock')}${esc(L('الحضور — الأسبوع اللي فات', 'Attendance — last week'))}</h3><span class="muted small">${esc(fmtD(s.w.from))} – ${esc(fmtD(s.w.to))}</span><div class="grow"></div>${o.modal ? '' : `<button type="button" class="btn xs ghost" data-action="attWeekSeen">${esc(L('شفته', 'Seen'))}</button>`}</div>
+    return `<div class="card awk" id="awk"><div class="cardhead"><h3>${icon('clock')}${esc(L('الحضور — الأسبوع اللي فات', 'Attendance — last week'))}</h3><span class="muted small">${esc(fmtD(s.w.from))} – ${esc(fmtD(s.w.to))}</span><div class="grow"></div>${o.modal ? '' : `<button type="button" class="btn xs ghost" data-action="attWeekSeen">${esc(L('شفته', 'Seen'))}</button>`}</div>
       <div class="awk-s">${tile(r0 == null ? '—' : r0 + '%', L('الحضور', 'Attendance'), arrow(r0, r1), '#/attendance')}${tile(fmtNum(s.tot.late), L('تأخير', 'Late'), arrow(s.tot.late, p.tot.late, false), '#/attendance')}${tile(fmtNum(s.tot.absent), L('غياب (يوم)', 'Absent (days)'), arrow(s.tot.absent, p.tot.absent, false), '#/attendance')}${tile(fmtNum(s.tot.nights), L('ليالي سهر', 'Overtime nights'), `<small>${esc(H(s.tot.ot))}</small>`, '#/otnight')}</div>
       ${rows ? `<div class="tablewrap"><table class="tbl awk-tb"><thead><tr><th>${esc(L('القسم', 'Department'))}</th><th class="n">${esc(L('الحضور', 'Attendance'))}</th><th class="n">${esc(L('تأخير', 'Late'))}</th><th class="n">${esc(L('غياب', 'Absent'))}</th><th class="n">${esc(L('سهر', 'Overtime'))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="muted small">${esc(L('مفيش حضور متسجّل الأسبوع ده', 'No attendance recorded that week'))}</div>`}
       ${topLine(L('أكتر تأخير:', 'Most late:'), s.top('late'), x => `${fmtNum(x.late)}×`)}${topLine(L('أكتر غياب:', 'Most absent:'), s.top('absent'), x => `${fmtNum(x.absent)} ${L('يوم', 'd')}`)}${topLine(L('أكتر سهر:', 'Most overtime:'), s.top('ot'), x => H(x.ot))}
@@ -53339,18 +53360,23 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   const seen = () => { try { return localStorage.getItem(seenKey()) === weekOf(1).from; } catch (e) { return false; } };
   let _memo = null;
   ACTIONS.attWeekSeen = () => { try { localStorage.setItem(seenKey(), weekOf(1).from); } catch (e) { /* ignore */ } const c = document.getElementById('awk'); if (c) c.remove(); };
+  window.nfAttWeekNew = () => { try { return S.session && isAdmin() && !seen() ? 1 : 0; } catch (e) { return 0; } };
   ACTIONS.attWeekOpen = () => openModal({ title: L('الحضور — الأسبوع اللي فات', 'Attendance — last week'), wide: true, footer: null, body: cardHTML({ modal: true }) });
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
     try {
+      /* the Saturday notice (Edge remind v12) opens the report itself: #/attweek → the dashboard + the report window */
+      if (/^#\/attweek/.test(location.hash || '') && S.session) { setTimeout(() => { try { history.replaceState(null, '', '#/dashboard'); parseRoute(); render(true); if (isAdmin()) setTimeout(() => ACTIONS.attWeekOpen(), 120); } catch (e) { /* ignore */ } }, 0); return; }
       const r = S.route || {}; const v = document.getElementById('view'); if (!v || !S.session || !isAdmin()) return;
       if (r.view === 'attendance' && !r.id) { if (!v.querySelector('[data-action="attWeekOpen"]')) v.insertAdjacentHTML('afterbegin', `<div class="awk-open"><button type="button" class="btn sm" data-action="attWeekOpen">${icon('clock')}${esc(L('تقرير الأسبوع اللي فات', "Last week's report"))}</button></div>`); return; }
-      if (!((r.view === 'dashboard' || r.view === 'home') && !r.id)) return;
+      /* v7.76 (Mahmoud 15 Oct: «I open it to look at the money — why is last week's report there? put it in its own place, not under the money»):
+         the card lives in the dashboard's «People & KPIs» tab (no longer pinned on top, not on the home screen); that tab shows 1 while it is new */
+      if (!(r.view === 'dashboard' && !r.id)) return;
       const old = v.querySelector('#awk'); if (seen()) { if (old) old.remove(); return; }
       /* the numbers are counted at most once a minute; the same card stays the same element */
       const k = weekOf(1).from + '|' + (en() ? 'en' : 'ar'); if (!_memo || _memo.k !== k || Date.now() - _memo.at > 60000) _memo = { k, at: Date.now(), html: cardHTML() };
       if (old && old.__h === _memo.html) return; if (old) old.remove();
       const after = v.querySelector('#omf'); if (after) after.insertAdjacentHTML('afterend', _memo.html); else v.insertAdjacentHTML('afterbegin', _memo.html);
-      const nw = v.querySelector('#awk'); if (nw) nw.__h = _memo.html;
+      const nw = v.querySelector('#awk'); if (nw) { nw.__h = _memo.html; const on = v.querySelector('.ptab-bar button.on'); if (on) { nw.dataset.ptab = 'people'; nw.classList.toggle('ptab-off', on.dataset.ptab !== 'people'); } }   /* its tab at once (the page tabs would only catch it on their next pass) */
     } catch (e) { console.warn('attweek', e); }
   });
 
@@ -53369,4 +53395,519 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 .awk-open{display:flex;justify-content:flex-end;margin-bottom:8px}
 @media (max-width:420px){.awk-s{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>`);
+})();
+/* =====================================================================
+   v7.76 — a deleted / cancelled purchase takes its tasks to the archive (Mahmoud, 15 Oct, on «Transfer … to the supplier —
+   RFQ-26-009»: «I cancelled this order — it should leave the tasks and sit in the archive»).
+   · Deleting a purchase (or cancelling it) closes every open task that belongs to it — the transfer to the supplier, the price
+     offers, the approvals, the receiving, the tax invoice … — as «done» with the note «the purchase order was deleted», so they
+     leave the open lists and stay in «Done».
+   · The owner's app also sweeps (at most every few minutes) for tasks left behind by a purchase deleted from another device.
+   A task belongs to a purchase by its purchaseId, or by the id the purchase flow gives it (trf_<po>, po_appr_<po>, rfq_<po> …).
+   ===================================================================== */
+(function () {
+  if (window.__NF_POORPHANS__) return; window.__NF_POORPHANS__ = 1;
+  const RX = /^(?:trf|po_(?:appr|pickup|hr|step|return|recv_store|recv_head|recv_wait|ok|trf_acc|rej_mgr|rej|mis|wait|retask|received|offer|no|disp|loc)|podue|rfq|rfqt|rfqp|rfqok|taxinv)_(.+)$/;
+  const pidOf = t => { if (!t) return ''; if (t.purchaseId) return String(t.purchaseId); const m = RX.exec(String(t.id || '')); return m ? m[1] : ''; };
+  const NOTE = 'أمر الشراء اتحذف — اتنقلت للأرشيف';
+  async function closeFor(pids) {
+    const set = new Set(pids.map(String)); if (!set.size) return 0; let n = 0; const now = nowISO();
+    for (const t of list('tasks')) {
+      if (!t || !['open', 'doing'].includes(t.status) || !set.has(pidOf(t))) continue;
+      try { await Store.update('tasks', t.id, { status: 'done', doneAt: now, doneByName: 'السيستم', autoClosed: true, doneNote: NOTE, updatedAt: now }, { silent: true }); n++; } catch (e) { /* a task this user may not write — the owner's sweep closes it */ }
+    }
+    /* v7.77: its pickup trip, if it has not started, is cancelled (and a running trip no longer points to it as «next») */
+    for (const tr of list('trips')) {
+      if (!tr || !set.has(String(tr.purchaseId || '')) || !['requested', 'approved'].includes(tr.status) || tr.startedAt) continue;
+      try {
+        await Store.update('trips', tr.id, { status: 'cancelled', cancelledAt: now, cancelledByName: 'السيستم', cancelNote: NOTE }, { silent: true }); n++;
+        list('trips').filter(x => x && x.nextUp === tr.id).forEach(x => { Store.update('trips', x.id, { nextUp: null }, { silent: true }).catch(() => { }); });
+        const dt = byId('tasks', `trip_${tr.id}`); if (dt && ['open', 'doing'].includes(dt.status)) await Store.update('tasks', dt.id, { status: 'done', doneAt: now, doneByName: 'السيستم', autoClosed: true, doneNote: NOTE }, { silent: true });
+      } catch (e) { /* ignore */ }
+    }
+    return n;
+  }
+  window.nfPoTasksClose = closeFor;
+  if (typeof ACTIONS.poDelete === 'function') ACTIONS.poDelete = (base => async function (id) {
+    const r = await base.apply(this, arguments);
+    try { if (!byId('purchases', id)) { const n = await closeFor([id]); if (n) render(false); } } catch (e) { /* ignore */ }
+    return r;
+  })(ACTIONS.poDelete);
+  let _at = 0;
+  function sweep(force) {
+    try {
+      if (!S.session || !isAdmin() || !writable() || !S.loaded || !S.loaded.purchases || !S.loaded.tasks) return;
+      const ps = list('purchases'); if (!ps.length) return;   /* never judge before the purchases are there */
+      if (!force && Date.now() - _at < 5 * 60000) return; _at = Date.now();
+      const live = new Map(ps.map(p => [String(p.id), p]));
+      const gone = new Set();
+      list('tasks').forEach(t => { if (!t || !['open', 'doing'].includes(t.status)) return; const pid = pidOf(t); if (!pid) return; const p = live.get(pid); if (!p || p.status === 'cancelled') gone.add(pid); });
+      list('trips').forEach(tr => { if (!tr || !tr.purchaseId || !['requested', 'approved'].includes(tr.status) || tr.startedAt) return; const p = live.get(String(tr.purchaseId)); if (!p || p.status === 'cancelled') gone.add(String(tr.purchaseId)); });
+      if (gone.size) return closeFor([...gone]).then(n => { if (n) render(false); return n; }).catch(() => 0);
+    } catch (e) { /* ignore */ }
+  }
+  window.nfPoSweep = () => sweep(true);
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { sweep(false); });
+})();
+/* =====================================================================
+   v7.77 — «the purchase sends its own trip» (Mahmoud 15 Oct — brief claude/po-dispatch-brief.md; go-ahead: «start — right away»).
+   · A purchase request carries «the right vehicle»: any vehicle, or one of the fleet's vehicle types (need / RFQ / PO forms;
+     purchasing can change it on the purchase page).
+   · The moment a supplier is paid (or a PO goes «deferred») the purchase flow opens its «pickup» task for transport. From now on
+     the system builds the trip itself and picks the vehicle:
+       1. the vehicles of the wanted type that are working;
+       2. a FREE one (no trip running or waiting) → the nearest to the supplier by its tracker (a vehicle with no fresh position
+          counts as parked at the factory);
+       3. none free → the BUSY one nearest to the supplier: the trip is added «after» the one it is on (the v7.74 «add a trip
+          after it»), so the driver goes on to the supplier instead of back to the factory;
+       4. none at all, or the supplier has no location → the pickup task stays with the fleet manager (as before), and
+          purchasing gets «save the supplier's location».
+     The driver gets the trip at once (a push + his trip task); the fleet manager gets a task with the transfer picture, the
+     vehicle chosen and why. The fleet manager / factory manager / owner can «change the vehicle» on the trip page.
+   · Distances are straight-line (approximate). No money amounts in texts — the transfer picture sits in the fleet task only.
+   · Deleting / cancelling the purchase cancels the trip if it has not started (99zzZzZZzzr-po-orphans.js).
+   Factory only. Phone and computer, Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_PODISP__) return; window.__NF_PODISP__ = 1;
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const okLL = p => !!p && p.lat != null && p.lat !== '' && p.lng != null && p.lng !== '' && isFinite(+p.lat) && isFinite(+p.lng);
+  const km = (a, b) => { const R = 6371, r = x => x * Math.PI / 180; const dLa = r(b.lat - a.lat), dLo = r(b.lng - a.lng); const s = Math.sin(dLa / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); };
+  const r1 = v => Math.round(v * 10) / 10;
+  const G = () => window.nfGpsTest || { on: () => typeof gpsOn === 'function' && gpsOn(), call: (a, p) => gpsCall(a, p) };
+  const canDisp = () => typeof canFleet === 'function' && canFleet();
+  const working = v => v && v.id && !['inactive', 'sold', 'maint', 'maintenance', 'broken'].includes(v.status) && !v.maint;
+  const vehTypes = () => [...new Set(list('vehicles').filter(working).map(v => String(v.type || '').trim()).filter(Boolean))];
+  const tripIdOf = pid => 'tpo_' + pid;
+  const RUN = t => !!t && t.status === 'started';
+  const WAIT = t => !!t && t.status === 'approved' && !t.startedAt;
+  const nameOf = id => (typeof assigneeName === 'function' ? assigneeName(id) : '') || '';
+
+  /* ---------- 1) «the right vehicle» on the purchase forms ---------- */
+  const vtField = cur => `<div class="field"><label>${esc(L('العربية المناسبة', 'The right vehicle'))}</label><select name="vehType" class="po-vt">${[['', L('أي عربية', 'Any vehicle')]].concat(vehTypes().map(t => [t, t])).concat(cur && !vehTypes().includes(cur) ? [[cur, cur]] : []).map(([v, l]) => `<option value="${esc(v)}" ${String(cur || '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
+  const addField = html => (p) => { const h = html; const i = h.lastIndexOf('</div>'); const f = vtField((p && p.vehType) || ''); return i > 0 ? h.slice(0, i) + f + h.slice(i) : h + f; };
+  ['needForm', 'rfqForm', 'poForm'].forEach(fn => { try { const base = window[fn]; if (typeof base !== 'function') return; window[fn] = function (p) { const h = base.apply(this, arguments); if (/name="vehType"/.test(h)) return h; return addField(h)(p); }; } catch (e) { /* ignore */ } });
+  ['saveNeed', 'saveRfq', 'savePoBase', 'savePo'].forEach(fn => { try { const base = window[fn]; if (typeof base !== 'function') return; window[fn] = function (f, p) { const el = f && f.querySelector && f.querySelector('[name=vehType]'); const args = Array.from(arguments); if (el) args[1] = Object.assign({}, p || {}, { vehType: el.value || '' }); return base.apply(this, args); }; } catch (e) { /* ignore */ } });
+  /* purchasing / the managers change it on the purchase page */
+  const canVt = p => writable() && p && !['received', 'cancelled'].includes(p.status) && (isAdmin() || canDo('purchases') || ['manager', 'purch', 'fleet'].includes(role()));
+  ACTIONS.poVehType = id => {
+    const p = byId('purchases', id); if (!canVt(p)) return;
+    openModal({ title: L(`العربية المناسبة — ${p.number}`, `The right vehicle — ${p.number}`), submitLabel: L('حفظ', 'Save'), body: `<div class="form">${vtField(p.vehType || '')}</div>`,
+      onSubmit: async f => { const v = (f.querySelector('[name=vehType]') || {}).value || ''; await Store.update('purchases', p.id, { vehType: v }); toast(L('اتحفظ', 'Saved')); return true; } });
+  };
+  if (typeof poReceiptCard === 'function') poReceiptCard = (base => function (p) {
+    let h = base.apply(this, arguments); if (!h || !p) return h;
+    const line = `<div class="small po-vtl" style="margin:-4px 0 10px">${esc(L('العربية المناسبة', 'The right vehicle'))}: <b>${esc(p.vehType || L('أي عربية', 'Any vehicle'))}</b>${canVt(p) ? ` <button type="button" class="btn xs ghost" data-action="poVehType" data-arg="${esc(p.id)}">${icon('edit')}${esc(L('تعديل', 'Edit'))}</button>` : ''}</div>`;
+    const i = h.indexOf('<div class="small"'); return i > 0 ? h.slice(0, i) + line + h.slice(i) : h;
+  })(poReceiptCard);
+
+  /* ---------- 2) the vehicles right now ---------- */
+  async function positions() {
+    const out = {}; const imeis = list('vehicles').map(v => String(v.gpsId || '').trim()).filter(Boolean);
+    try { if (typeof gpsState !== 'undefined' && gpsState && gpsState.positions) Object.assign(out, gpsState.positions); } catch (e) { /* none */ }
+    if (imeis.length && G().on()) { try { const r = await G().call('track', { imeis: imeis.join(',') }); (r.positions || []).forEach(p => { if (p && p.imei) out[String(p.imei)] = p; }); } catch (e) { /* keep the cached ones */ } }
+    return out;
+  }
+  const lastDriver = v => { const ts = list('trips').filter(t => t && t.vehicleId === v.id && t.driverId).sort((a, b) => String(b.startedAt || b.createdAt || '').localeCompare(String(a.startedAt || a.createdAt || ''))); return ts[0] ? ts[0].driverId : null; };
+  async function fleetNow(dest, type, skipTrip) {
+    const pos = await positions(); const geo = (S.settings && S.settings.geo) || {}; const home = okLL(geo) ? { lat: +geo.lat, lng: +geo.lng } : null;
+    const trips = list('trips').filter(t => t && t.id !== skipTrip);
+    const onRoad = new Set(trips.filter(t => RUN(t) || WAIT(t)).map(t => t.driverId).filter(Boolean));
+    return list('vehicles').filter(working).map(v => {
+      const run = trips.find(t => RUN(t) && t.vehicleId === v.id) || null;
+      const wait = trips.find(t => WAIT(t) && t.vehicleId === v.id && (!t.date || t.date <= todayISO())) || null;
+      const g = v.gpsId ? pos[String(v.gpsId)] : null; const fresh = g && g.lat != null && (!g.at || Date.now() - Date.parse(g.at) < 30 * 60000);
+      let at = fresh ? { lat: +g.lat, lng: +g.lng } : null; let where = fresh ? 'tracker' : '';
+      if (!at && run && okLL(run.toLoc)) { at = { lat: +run.toLoc.lat, lng: +run.toLoc.lng }; where = 'dest'; }
+      if (!at && !run && home) { at = home; where = 'factory'; }
+      /* a free vehicle takes its own driver (or the last one who drove it) — unless that driver is out with another vehicle */
+      const own = [v.driverId, lastDriver(v)].filter(Boolean).find(x => !onRoad.has(x)) || null;
+      const driverId = (run && run.driverId) || (wait && wait.driverId) || own;
+      return { v, run, wait, free: !run && !wait, at, where, d: at && dest ? km(at, dest) : null, driverId, typeOk: !type || String(v.type || '').trim() === type };
+    });
+  }
+  function pick(rows) {
+    const ok = rows.filter(x => x.typeOk && x.d != null);
+    const free = ok.filter(x => x.free).sort((a, b) => a.d - b.d);
+    if (free.length) return Object.assign({ how: 'free' }, free[0]);
+    const busy = ok.filter(x => x.run && !x.run.nextUp && !x.run.chainedTo && !x.wait).sort((a, b) => a.d - b.d);
+    if (busy.length) return Object.assign({ how: 'after' }, busy[0]);
+    return null;
+  }
+  const reasonOf = c => c.how === 'free'
+    ? L(`فاضية وعلى بعد ${fmtNum(r1(c.d))} كم من المورد${c.where === 'factory' ? ' (في المصنع)' : ''}`, `free and ${fmtNum(r1(c.d))} km from the supplier${c.where === 'factory' ? ' (at the factory)' : ''}`)
+    : L(`مفيش عربية فاضية — دي الأقرب (${fmtNum(r1(c.d))} كم) وهتروح بعد ما تخلّص ${c.run.number}`, `no free vehicle — the nearest (${fmtNum(r1(c.d))} km), it goes after ${c.run.number}`);
+  window.nfFleetNow = fleetNow;
+
+  /* ---------- 3) build the trip ---------- */
+  const busyP = new Set();
+  async function dispatch(pid, opt) {
+    if (busyP.has(pid)) return null; busyP.add(pid);
+    try {
+      const p = byId('purchases', pid); const tk = byId('tasks', `po_pickup_${pid}`);
+      if (!p || ['cancelled', 'received'].includes(p.status) || (p.pickup && p.pickup.tripId && byId('trips', p.pickup.tripId))) { if (tk && tk.autoDisp === 'pending') await Store.update('tasks', tk.id, { autoDisp: 'skip' }, { silent: true }).catch(() => { }); return null; }
+      if (byId('trips', tripIdOf(pid))) return byId('trips', tripIdOf(pid));
+      const s = typeof supplierOf === 'function' ? supplierOf(p) : null; const dest = s && okLL(s) ? { lat: +s.lat, lng: +s.lng } : null;
+      const manual = async why => {
+        if (tk) await Store.update('tasks', tk.id, { autoDisp: 'manual', autoDispNote: why }, { silent: true }).catch(() => { });
+        if (!dest) { try { await notifyRole('purch', L(`سجّل لوكيشن المورد ${p.supplier || ''}`, `Save the location of supplier ${p.supplier || ''}`), L(`عشان السيستم يطلّع مشوار ${p.number} لوحده بأقرب عربية — من صفحة المورد.`, `So the system can send trip ${p.number} by itself with the nearest vehicle — on the supplier page.`), { id: `po_loc_${pid}`, priority: 'high', fields: { purchaseId: pid } }); } catch (e) { /* ignore */ } }
+        return null;
+      };
+      if (!dest) return manual(L('المورد مالوش لوكيشن', 'The supplier has no location'));
+      const rows = await fleetNow(dest, String(p.vehType || '').trim());
+      const c = (opt && opt.force) || pick(rows);
+      if (!c) return manual(L('مفيش عربية مناسبة دلوقتي', 'No suitable vehicle right now'));
+      const D = window.nfDT; const now = nowISO(); const geo = (S.settings && S.settings.geo) || {};
+      const items = (p.items || p.needItems || p.rfqItems || []).map(it => `${it.name || (byId('materials', it.materialId) || {}).name || ''} × ${fmtNum(it.qty)} ${it.unit || ''}`.trim()).filter(Boolean).join('، ');
+      const reason = reasonOf(c);
+      const trip = { id: tripIdOf(pid), number: D && D.uniqueTripNo ? D.uniqueTripNo() : (typeof nextTripNo === 'function' ? nextTripNo() : 'TR-' + now.slice(2, 4) + '-' + uid().slice(0, 4)), kind: 'materials',
+        purpose: L(`استلام توريد ${p.number} من ${p.supplier || ''}`, `Collect ${p.number} from ${p.supplier || ''}`), from: c.how === 'after' ? ((c.run.toLoc && c.run.toLoc.name) || c.run.to || '') : L('المصنع', 'Factory'), to: `${s.name}${s.location ? ' — ' + s.location : ''}`,
+        fromLoc: c.how === 'after' ? (c.run.toLoc || null) : (okLL(geo) ? { key: 'factory', name: L('المصنع', 'Factory'), lat: +geo.lat, lng: +geo.lng } : null),
+        toLoc: { key: `sup:${s.id}`, name: s.name, lat: +s.lat, lng: +s.lng, area: s.location || '' },
+        date: todayISO(), time: D && D.hhmm ? D.hhmm(now) : now.slice(11, 16), vehicleId: c.v.id, driverId: c.driverId || null, purchaseId: pid, orderId: p.orderId || null,
+        notes: `${items}${typeof mapsLink === 'function' ? '\n' + mapsLink(s.lat, s.lng) : ''}`, status: 'requested', pipe2: true,
+        autoDisp: { at: now, how: c.how, km: r1(c.d), reason, by: (S.session && S.session.name) || '' },
+        createdAt: now, createdBy: (S.session && S.session.id) || null, createdByName: L('السيستم', 'System') };
+      if (c.how === 'after') { trip.after = c.run.id; trip.addedAfter = true; }
+      await Store.save('trips', trip, { silent: true });
+      if (typeof tripApproved === 'function') await tripApproved(trip, true); else await Store.update('trips', trip.id, { status: 'approved', approvedAt: now, approvedByName: L('السيستم', 'System') });
+      if (c.how === 'after') await Store.update('trips', c.run.id, { nextUp: trip.id, nextUpByName: L('السيستم (توريد مورد)', 'System (supplier pickup)'), nextUpAt: now });
+      /* the fleet manager: what is coming, the transfer picture, the vehicle and why */
+      const tr = p.transfer || (Array.isArray(p.payments) && p.payments.length ? p.payments[p.payments.length - 1] : null);
+      const photos = tr ? ((tr.fileIds && tr.fileIds.length ? tr.fileIds : [null]).map((fid, i) => ({ id: uid(), fileId: fid || null, thumb: i === 0 ? (tr.thumb || null) : null, at: tr.at || now, byName: tr.byName || '' })).filter(x => x.fileId || x.thumb)) : [];
+      const fresh = byId('trips', trip.id) || trip;
+      await Store.save('tasks', { id: `po_disp_${pid}`, title: L(`جاي توريد من ${p.supplier || 'المورد'} — ${p.number}`, `Supply coming from ${p.supplier || 'the supplier'} — ${p.number}`),
+        desc: `${items}\n${L('المشوار', 'Trip')} ${fresh.number}: ${vehicleName(c.v.id)}${c.driverId ? ' · ' + nameOf(c.driverId) : ' · ' + L('من غير سواق — حدّد سواق', 'no driver — pick one')}\n${L('ليه العربية دي', 'Why this vehicle')}: ${reason}\n${tr ? L('صورة التحويل للمورد في المهمة.', 'The supplier transfer picture is in this task.') : L('أمر آجل — من غير تحويل.', 'Deferred order — no transfer.')}\n${L('عايز عربية تانية؟ افتح المشوار ← «غيّر العربية».', 'Want another vehicle? Open the trip → «Change the vehicle».')}`,
+        toRole: 'fleet', assigneeId: null, kind: 'update', source: 'podisp', priority: 'high', status: 'open', purchaseId: pid, tripId: trip.id, link: `/#/fleet/${trip.id}`, photos, dueDate: todayISO(),
+        createdBy: null, createdByName: L('السيستم', 'System'), createdAt: now, updatedAt: now }, { silent: true });
+      if (tk) await Store.update('tasks', tk.id, { autoDisp: 'done', tripId: trip.id }, { silent: true }).catch(() => { });
+      /* the driver, at once */
+      try { if (c.driverId && typeof pushSend === 'function') pushSend(['w:' + c.driverId], c.how === 'after' ? L(`المشوار الجاي: ${s.name}`, `Next trip: ${s.name}`) : L(`مشوار جديد مستنيك — ${s.name}`, `A new trip for you — ${s.name}`), c.how === 'after' ? L(`بعد ما تخلّص ${c.run.number} ماترجعش المصنع — روح ${s.name} واستلم ${p.number}.`, `When you finish ${c.run.number} don't go back to the factory — go to ${s.name} and collect ${p.number}.`) : L(`استلام ${p.number} من ${s.name} — افتح المشوار وابدأ.`, `Collect ${p.number} from ${s.name} — open the trip and start.`), '/#/fleet/' + trip.id, 'nf-trip-' + trip.id); } catch (e) { /* ignore */ }
+      return byId('trips', trip.id) || trip;
+    } catch (e) { console.warn('podisp', e); return null; } finally { busyP.delete(pid); }
+  }
+  window.nfPoDispatch = dispatch;
+
+  /* the purchase flow opens «po_pickup_<po>» (4 places) → it is marked for the automatic trip and dispatched */
+  if (typeof Store !== 'undefined' && typeof Store.save === 'function') Store.save = (base => async function (col, doc) {
+    let mark = null;
+    if (col === 'tasks' && doc && /^po_pickup_/.test(String(doc.id || '')) && (doc.status || 'open') === 'open' && !byId('tasks', doc.id)) { doc = Object.assign({}, doc, { autoDisp: 'pending' }); arguments[1] = doc; mark = String(doc.id).slice(10); }
+    const r = await base.apply(this, arguments);
+    if (mark && canDisp()) setTimeout(() => { dispatch(mark).then(() => { try { render(false); } catch (e) { /* ignore */ } }); }, 400);
+    return r;
+  })(Store.save);
+  /* a pickup marked by a device that may not build trips (the payer paying from his custody) → the fleet manager's / owner's app builds it */
+  let _sw = 0;
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      if (!S.session || !canDisp() || !S.loaded || !S.loaded.tasks || !S.loaded.trips || !S.loaded.purchases) return;
+      if (Date.now() - _sw < 30000) return; _sw = Date.now();
+      list('tasks').filter(t => t && t.autoDisp === 'pending' && t.status === 'open' && /^po_pickup_/.test(String(t.id))).slice(0, 3).forEach(t => dispatch(String(t.id).slice(10)).then(x => { if (x) render(false); }));
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- 4) «change the vehicle» (fleet manager / factory manager / owner) ---------- */
+  const changeable = t => !!t && t.purchaseId && WAIT(t) && canDisp();
+  ACTIONS.poDispChange = async id => {
+    const t = byId('trips', id); if (!changeable(t)) return;
+    const p = byId('purchases', t.purchaseId); const s = p && typeof supplierOf === 'function' ? supplierOf(p) : null; const dest = s && okLL(s) ? { lat: +s.lat, lng: +s.lng } : (okLL(t.toLoc) ? { lat: +t.toLoc.lat, lng: +t.toLoc.lng } : null);
+    toast(L('بشوف العربيات…', 'Checking the vehicles…'));
+    const rows = (await fleetNow(dest, '', t.id)).sort((a, b) => (b.typeOk - a.typeOk) || ((b.free ? 1 : 0) - (a.free ? 1 : 0)) || ((a.d ?? 1e9) - (b.d ?? 1e9)));
+    const drivers = list('workers').filter(w => w && w.role === 'driver' && w.status !== 'inactive');
+    const row = x => { const st = x.free ? L('فاضية', 'free') : x.run ? L(`في مشوار ${x.run.number}`, `on trip ${x.run.number}`) : L(`عليها مشوار مستني ${x.wait.number}`, `has waiting trip ${x.wait.number}`);
+      return `<label class="dtk-i pdc-r"><input type="radio" name="veh" value="${esc(x.v.id)}" ${x.v.id === t.vehicleId ? 'checked' : ''}><span><b>${esc(vehicleName(x.v.id))}</b><small>${esc(x.v.type || '')} · ${esc(st)}${x.d != null ? ' · ' + fmtNum(r1(x.d)) + ' ' + L('كم', 'km') : ''}${x.driverId ? ' · ' + esc(nameOf(x.driverId)) : ''}</small></span></label>`; };
+    openModal({ title: L(`غيّر العربية — ${t.number}`, `Change the vehicle — ${t.number}`), wide: true, submitLabel: L('حفظ', 'Save'),
+      body: `<div class="form"><div class="field full"><label>${esc(L('العربية', 'Vehicle'))}${p && p.vehType ? ` <span class="tiny muted">(${esc(L('المطلوب', 'wanted'))}: ${esc(p.vehType)})</span>` : ''}</label><div class="dtk dtk-col pdc">${rows.map(row).join('')}</div></div>
+        <div class="field full"><label>${esc(L('السواق', 'Driver'))}</label><select name="drv"><option value="">${esc(L('سواق العربية', "The vehicle's driver"))}</option>${drivers.map(w => `<option value="${esc(w.id)}" ${w.id === t.driverId ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const x = rows.find(y => y.v.id === d.veh); if (!x) { toast(L('اختار عربية', 'Pick a vehicle'), 'err'); return false; }
+        const drv = d.drv || x.driverId || null; const now = nowISO(); const oldDrv = t.driverId;
+        if (t.after) { const a = byId('trips', t.after); if (a && a.nextUp === t.id) await Store.update('trips', a.id, { nextUp: null }, { silent: true }); }
+        const patch = { vehicleId: x.v.id, driverId: drv, after: null, addedAfter: false, autoDisp: Object.assign({}, t.autoDisp || {}, { changedAt: now, changedBy: (S.session && S.session.name) || '', reason: L(`اختيار ${(S.session && S.session.name) || ''}`, `Chosen by ${(S.session && S.session.name) || ''}`) }) };
+        if (x.run && !x.run.nextUp && !x.run.chainedTo) { patch.after = x.run.id; patch.addedAfter = true; patch.from = (x.run.toLoc && x.run.toLoc.name) || x.run.to || t.from; patch.fromLoc = x.run.toLoc || t.fromLoc; await Store.update('trips', x.run.id, { nextUp: t.id, nextUpByName: (S.session && S.session.name) || '', nextUpAt: now }); }
+        await Store.update('trips', t.id, patch);
+        try { const tk = byId('tasks', `trip_${t.id}`); if (tk) await Store.update('tasks', tk.id, { assigneeId: drv, updatedAt: now }, { silent: true }); } catch (e) { /* ignore */ }
+        try {
+          if (typeof pushSend === 'function') {
+            if (oldDrv && oldDrv !== drv) pushSend(['w:' + oldDrv], L(`المشوار ${t.number} اتشال منك`, `Trip ${t.number} was moved off you`), L('مدير النقل اختار عربية تانية.', 'The fleet manager picked another vehicle.'), '/#/me', 'nf-trip-' + t.id);
+            if (drv) pushSend(['w:' + drv], L(`مشوار جديد مستنيك — ${(s && s.name) || t.to || ''}`, `A new trip for you — ${(s && s.name) || t.to || ''}`), L(`${t.purpose} — افتح المشوار وابدأ.`, `${t.purpose} — open the trip and start.`), '/#/fleet/' + t.id, 'nf-trip-' + t.id);
+          }
+        } catch (e) { /* ignore */ }
+        toast(L('العربية اتغيّرت', 'Vehicle changed')); return true;
+      } });
+  };
+  if (typeof vTripDetail === 'function') vTripDetail = (base => function (id) {
+    let html = base.apply(this, arguments); const t = byId('trips', id); if (!t || !t.autoDisp) return html;
+    const a = t.autoDisp; const ban = `<div class="banner info pdc-ban" style="margin-bottom:12px">${icon('fleet')}<span>${esc(L('المشوار ده اتعمل لوحده بعد تحويل المورد', 'This trip was made by itself after the supplier was paid'))}${a.reason ? ' — ' + esc(a.reason) : ''}${a.changedBy ? ` · ${esc(L('اتغيّرت العربية بواسطة', 'Vehicle changed by'))} ${esc(a.changedBy)}` : ''}</span>${changeable(t) ? `<button type="button" class="btn xs p" data-action="poDispChange" data-arg="${esc(t.id)}">${esc(L('غيّر العربية', 'Change the vehicle'))}</button>` : ''}</div>`;
+    const i = html.indexOf('<div class="card'); return i < 0 ? ban + html : html.slice(0, i) + ban + html.slice(i);
+  })(vTripDetail);
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.pdc-ban{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pdc-ban span{flex:1;min-width:180px}
+.pdc{max-height:46vh;overflow:auto}.pdc-r small{display:block;color:var(--muted);font-size:11.5px}
+.po-vtl .btn{margin-inline-start:4px}
+</style>`);
+})();
+/* =====================================================================
+   v7.77 — «weekly pay» (Mahmoud 15 Oct — brief claude/weekly-pay-brief.md; go-ahead: «start — Thursday»).
+   · A worker may get a FIXED WEEKLY PAY (worker.weeklyPay = { amount, since }) instead of / besides the monthly payroll.
+     Owner / Saeed (hr) only set it, on the worker form; they alone see it on the worker page.
+   · A DEBT is an advance of kind 'debt' with a weekly instalment (monthly 0, so the monthly payroll never touches it).
+     Each week the net = weekly pay − the instalments (never more than what is left of the debt).
+   · Payday is THURSDAY at 12:00 (Cairo). From Wednesday 16:00 the server (Edge «remind») puts one line per weekly-paid worker
+     — advpay `wk_<worker>_<thursday>`, the net amount, weekly: true — into the advance batch that reaches the owner on Thursday
+     at 12:00 (the v7.63 queued batch). An owner / Saeed session does the same on Thursday if the server has not (same ids,
+     so never twice). The owner funds the batch to the payer as always; the payer transfers and the receipt closes the line.
+     The instalment counts on the debt when the line is PAID (Edge «advpay» v14), and a line that is waiting already holds
+     its instalment, so the next week never deducts it twice.
+   · «No punch required» (worker.noPunch, owner / Saeed): no absence, lateness or «unrecorded» day is ever counted for him;
+     he is left out of the daily attendance sheet and the weekly attendance report.
+   · v7.76 hotfix safety net: an approved advance that is not in any batch (the 12–15 Oct server-guard bug) is put into its
+     batch by the next owner / Saeed session.
+   No money amounts in tasks or notifications. Factory only. Phone and computer, Arabic and English.
+   ===================================================================== */
+(function () {
+  if (window.__NF_WKPAY__) return; window.__NF_WKPAY__ = 1;
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction()) || (typeof STU_ON !== 'undefined' && STU_ON)) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const can = () => !!S.session && (isAdmin() || role() === 'hr');
+  const r2 = v => Math.round((+v || 0) * 100) / 100;
+  const loaded = cols => !S.db || (!!S.loaded && cols.every(c => S.loaded[c]));   /* local / demo mode keeps everything in memory */
+  const TZ = 'Africa/Cairo';
+  function cairo(t) {
+    const p = {}; new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).forEach(x => { p[x.type] = x.value; });
+    return { date: `${p.year}-${p.month}-${p.day}`, min: (+p.hour) * 60 + (+p.minute) };
+  }
+  const addD = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const dow = d => new Date(d + 'T12:00:00Z').getUTCDay();
+  function noon(d) { const S2 = window.nfAdvSched; if (S2 && S2._noon) return S2._noon(d); const [y, m, dd] = d.split('-').map(Number); for (const off of [3, 2]) { const t = Date.UTC(y, m - 1, dd, 12 - off); const c = cairo(t); if (c.date === d && c.min === 720) return new Date(t).toISOString(); } return new Date(Date.UTC(y, m - 1, dd, 10)).toISOString(); }
+  /* the Thursday whose lines are due now: Wednesday from 16:00 → tomorrow; Thursday (all day) → today */
+  function dueThu(now) { const c = cairo(now || Date.now()); const w = dow(c.date); if (w === 3 && c.min >= 16 * 60) return addD(c.date, 1); if (w === 4) return c.date; return ''; }
+  /* the next payday (for labels) */
+  function nextThu(from) { let d = from || cairo(Date.now()).date; for (let i = 0; i < 8; i++) { if (dow(d) === 4) return d; d = addD(d, 1); } return d; }
+  const wp = w => (w && w.weeklyPay && +w.weeklyPay.amount > 0 && w.weeklyPay.on !== false) ? w.weeklyPay : null;
+  const activeW = w => w && w.id && !['inactive', 'suspended'].includes(w.status);
+  const isDebt = a => a && a.kind === 'debt';
+  const lines = wid => list('advpay').filter(p => p && p.weekly && p.workerId === wid);
+  /* instalments held by weekly lines that are not paid yet (they count on the debt only when paid) */
+  function held(advId, skipId) { let n = 0; list('advpay').forEach(p => { if (!p || !p.weekly || p.id === skipId || p.dedApplied || ['paid', 'cancelled'].includes(p.status)) return; (p.ded || []).forEach(d => { if (d && d.advId === advId) n += +d.amt || 0; }); }); return r2(n); }
+  const left = (a, skipId) => Math.max(0, r2((+a.amount || 0) - (+a.paid || 0) - held(a.id, skipId)));
+  const debtsOf = wid => list('advances').filter(a => isDebt(a) && a.workerId === wid && a.status !== 'closed');
+  /* the line of one worker for one Thursday */
+  function build(w, thu) {
+    const gross = r2(wp(w).amount); let room = gross; const ded = [];
+    const id = `wk_${w.id}_${thu}`;
+    debtsOf(w.id).filter(a => +a.weekly > 0 && (!a.date || a.date <= thu)).sort((x, y) => String(x.date || '').localeCompare(String(y.date || ''))).forEach(a => {
+      const amt = r2(Math.min(+a.weekly || 0, left(a, id), room)); if (amt > 0) { ded.push({ advId: a.id, amt }); room = r2(room - amt); }
+    });
+    const net = r2(gross - ded.reduce((s, d) => s + d.amt, 0));
+    const wl = window.nfWallet ? window.nfWallet.of(w.id) : null;
+    return { id, weekly: true, weekOf: thu, workerId: w.id, workerName: w.name || '', deptId: w.deptId || null, waPhone: w.phone || w.workPhone || '', amount: net, gross, ded, status: 'await', walletShown: wl && window.nfWallet ? window.nfWallet.label(wl) : '', createdAt: nowISO(), createdBy: null, createdByName: 'السيستم (القبض الأسبوعي)' };
+  }
+  function nextCode() { const yy = todayISO().slice(2, 4); const pre = `SB-${yy}-`; const n = list('advbatch').reduce((m, b) => { const c = String(b.code || ''); if (!c.startsWith(pre)) return m; const k = parseInt(c.slice(pre.length), 10); return isNaN(k) ? m : Math.max(m, k); }, 0) + 1; return pre + String(n).padStart(3, '0'); }
+  async function toBatch(apId, at) {
+    let b = list('advbatch').find(x => x.status === 'queued' && x.releaseAt === at);
+    if (!b) b = { id: 'sb_' + uid(), code: nextCode(), status: 'queued', releaseAt: at, items: [], total: 0, createdAt: nowISO(), createdBy: S.session?.id || null, createdByName: S.session?.name || '' };
+    const items = Array.from(new Set((b.items || []).concat([apId])));
+    const total = r2(items.map(i => byId('advpay', i)).filter(p => p && p.status !== 'cancelled').reduce((s, p) => s + (+p.amount || 0), 0));
+    await Store.save('advbatch', Object.assign({}, b, { items, total, updatedAt: nowISO() }), { silent: true });
+    const ap = byId('advpay', apId); if (ap) await Store.save('advpay', Object.assign({}, ap, { batchId: b.id, payoutAt: at }), { silent: true });
+    return b.id;
+  }
+  /* create the missing lines of a Thursday (owner / Saeed session — the server normally did it already) */
+  let busy = false;
+  async function run(thu, force) {
+    if (busy || !can() || (typeof writable === 'function' && !writable()) || !loaded(['workers', 'advpay', 'advbatch', 'advances'])) return 0;
+    thu = thu || dueThu(); if (!thu) return 0;
+    if (!force) { const c = cairo(Date.now()); if (c.date === thu && c.min < 10 * 60) return 0; if (c.date !== thu) return 0; }   /* a session steps in only on Thursday from 10:00 */
+    busy = true; let n = 0;
+    try {
+      for (const w of list('workers')) {
+        const p = wp(w); if (!activeW(w) || !p || (p.since && p.since > thu)) continue;
+        const id = `wk_${w.id}_${thu}`; if (byId('advpay', id)) continue;
+        const doc = build(w, thu); if (!(doc.amount > 0)) continue;
+        await Store.save('advpay', doc, { silent: true }); await toBatch(id, noon(thu)); n++;
+      }
+    } catch (e) { console.warn('weekly pay', e); } finally { busy = false; }
+    if (n) render(false);
+    return n;
+  }
+  /* v7.76 safety net: approved advances outside every batch go to their batch */
+  let sweptAt = 0;
+  async function sweep(force) {
+    if (!can() || (typeof writable === 'function' && !writable()) || !loaded(['advpay', 'advbatch']) || typeof window.nfAddToOpenBatch !== 'function') return 0;
+    if (!force && Date.now() - sweptAt < 5 * 60000) return 0; sweptAt = Date.now();
+    const inB = new Set(); list('advbatch').forEach(b => (b.items || []).forEach(i => inB.add(i)));
+    const lost = list('advpay').filter(p => p && p.status === 'await' && !p.weekly && !inB.has(p.id) && Date.now() - Date.parse(p.createdAt || 0) > 2 * 60000);
+    let n = 0; for (const p of lost) { try { await window.nfAddToOpenBatch(p.id); n++; } catch (e) { console.warn('adv rebatch', e); } }
+    return n;
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { if (!can()) return; setTimeout(() => { run().catch(() => 0); sweep().catch(() => 0); }, 1500); });
+  window.nfWeeklyPay = { run, sweep, build, dueThu, nextThu, left, held, debtsOf, _cairo: cairo };
+
+  /* ---------- worker form: weekly pay + no punch (owner / Saeed) ---------- */
+  if (typeof workerForm === 'function') workerForm = (base => function (w) {
+    const html = base.apply(this, arguments); if (!can()) return html; w = w || {}; const p = w.weeklyPay || {};
+    const box = `<div class="field full wkpf" id="wkpayflags" style="border-top:1px dashed var(--line);padding-top:8px"><label>${L('القبض الأسبوعي والبصمة (المالك ومدير الحسابات بس)', 'Weekly pay & punching (owner and HR manager only)')}</label>
+      <label class="check"><input type="checkbox" name="wkp-on" ${wp(w) ? 'checked' : ''}> ${L('بيقبض مبلغ ثابت كل أسبوع — الخميس الساعة 12 مع دفعة السلف', 'Gets a fixed amount every week — Thursday at 12:00 with the advance batch')}</label>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><input class="inp" type="number" min="0" step="any" inputmode="decimal" name="wkp-amount" value="${esc(p.amount != null ? p.amount : '')}" placeholder="${esc(L('المبلغ الأسبوعي', 'Weekly amount'))}" style="max-width:170px"><label class="small muted" style="align-self:center">${L('من أول خميس بعد', 'From the first Thursday on/after')}</label><input class="inp" type="date" name="wkp-since" value="${esc(p.since || '')}" style="max-width:170px"></div>
+      <label class="check" style="margin-top:6px"><input type="checkbox" name="noPunch" ${w.noPunch ? 'checked' : ''}> ${L('معفي من البصمة — مفيش غياب ولا تأخير بيتحسب عليه، ومش بيظهر في كشف الحضور', 'No punch required — no absence or lateness is counted, and he is left out of the attendance sheet')}</label></div>`;
+    const i = html.lastIndexOf('</div>'); return i < 0 ? html + box : html.slice(0, i) + box + html.slice(i);
+  })(workerForm);
+  if (typeof workerFromForm === 'function') workerFromForm = (base => async function (f, w) {
+    const doc = await base.apply(this, arguments); if (!doc) return doc;
+    ['wkp-on', 'wkp-amount', 'wkp-since'].forEach(k => delete doc[k]);
+    if (can() && f.querySelector('#wkpayflags')) {
+      const on = !!f.querySelector('[name="wkp-on"]:checked'); const amt = +arDigits(String(f.querySelector('[name="wkp-amount"]').value || '')) || 0; const since = f.querySelector('[name="wkp-since"]').value || '';
+      if (on && !(amt > 0)) { toast(L('اكتب المبلغ الأسبوعي', 'Enter the weekly amount'), 'err'); return null; }
+      const prev = (w && w.weeklyPay) || null;
+      doc.weeklyPay = on ? Object.assign({}, prev || {}, { amount: r2(amt), since: since || todayISO(), on: true, by: S.session?.name || '', at: nowISO() }) : (prev ? Object.assign({}, prev, { on: false, offAt: nowISO() }) : null);
+      doc.noPunch = !!f.querySelector('[name="noPunch"]:checked') || null;
+    } else if (w) { if (w.weeklyPay !== undefined) doc.weeklyPay = w.weeklyPay; if (w.noPunch !== undefined) doc.noPunch = w.noPunch; }
+    return doc;
+  })(workerFromForm);
+
+  /* ---------- worker page: weekly pay + debts (owner / Saeed) ---------- */
+  const stLbl = p => ({ await: [L('مستني الدفعة', 'Waiting for the batch'), ''], topay: [L('مستني تحويل', 'To transfer'), 'warn'], review: [L('مراجعة', 'Review'), 'serious'], paid: [L('اتحوّل', 'Transferred'), 'good'], cancelled: [L('ملغي', 'Cancelled'), ''] }[p.status] || [p.status, '']);
+  function card(w) {
+    const p = wp(w); const ds = debtsOf(w.id); const ls = lines(w.id).sort((a, b) => String(b.weekOf).localeCompare(String(a.weekOf))).slice(0, 6);
+    if (!p && !ds.length && !ls.length && !w.noPunch) return '';
+    const thu = p ? nextThu(p.since && p.since > todayISO() ? p.since : todayISO()) : '';
+    const debtRows = ds.map(a => `<tr><td class="wkhide">${esc(a.note || L('مديونية', 'Debt'))}</td><td class="n">${fmtMoney(a.amount)}</td><td class="n">${fmtMoney(+a.weekly || 0)}</td><td class="n"><b>${fmtMoney(left(a))}</b></td><td class="n">${writable() ? `<button class="btn xs" data-action="wkDebtEdit" data-arg="${esc(a.id)}">${icon('edit')}</button>` : ''}</td></tr>`).join('');
+    const lineRows = ls.map(x => { const s = stLbl(x); const dd = (x.ded || []).reduce((t, d) => t + (+d.amt || 0), 0); return `<tr><td>${fmtDate(x.weekOf)}</td><td class="n wkhide">${fmtMoney(x.gross || x.amount)}</td><td class="n">${dd ? '− ' + fmtMoney(dd) : '—'}</td><td class="n"><b>${fmtMoney(x.amount)}</b></td><td><span class="badge ${s[1]}">${esc(s[0])}</span></td></tr>`; }).join('');
+    return `<div class="card wkpcard" id="wkpcard"><div class="cardhead"><h3>${icon('money')}${L('القبض الأسبوعي', 'Weekly pay')}</h3>${w.noPunch ? `<span class="badge">${L('معفي من البصمة', 'No punch required')}</span>` : ''}<div class="grow"></div>${writable() ? `<button class="btn xs" data-action="wkDebtNew" data-arg="${esc(w.id)}">${icon('plus')}${L('مديونية', 'Debt')}</button><button class="btn xs" data-action="workerEdit" data-arg="${esc(w.id)}">${icon('edit')}${L('تعديل', 'Edit')}</button>` : ''}</div>
+      ${p ? `<div class="wkpk"><div><b class="num">${fmtMoney(p.amount)}</b><span>${L('كل أسبوع', 'every week')} (${CUR()})</span></div><div><b>${L('الخميس 12 الضهر', 'Thursday 12:00')}</b><span>${L('مع دفعة السلف', 'with the advance batch')}</span></div><div><b>${fmtDate(thu)}</b><span>${L('القبض الجاي', 'next payday')}</span></div></div>` : `<div class="small muted">${L('مالوش قبض أسبوعي.', 'No weekly pay.')}</div>`}
+      ${ds.length ? `<div class="small bold" style="margin:10px 0 4px">${L('المديونية — بتتخصم من القبض الأسبوعي', 'Debt — deducted from the weekly pay')}</div><div class="tablewrap"><table><thead><tr><th class="wkhide">${L('البند', 'Item')}</th><th class="n">${L('المبلغ', 'Amount')}</th><th class="n">${L('القسط الأسبوعي', 'Weekly instalment')}</th><th class="n">${L('الباقي', 'Left')}</th><th></th></tr></thead><tbody>${debtRows}</tbody></table></div>` : ''}
+      ${ls.length ? `<div class="small bold" style="margin:10px 0 4px">${L('آخر الأسابيع', 'Last weeks')}</div><div class="tablewrap"><table><thead><tr><th>${L('الخميس', 'Thursday')}</th><th class="n wkhide">${L('المرتب', 'Pay')}</th><th class="n">${L('القسط', 'Instalment')}</th><th class="n">${L('الصافي', 'Net')}</th><th>${L('الحالة', 'Status')}</th></tr></thead><tbody>${lineRows}</tbody></table></div>` : ''}</div>`;
+  }
+  document.head.insertAdjacentHTML('beforeend', `<style>.wkpcard .wkpk{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.wkpcard .wkpk div{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;min-width:0}.wkpcard .wkpk b{display:block;font-size:16px}.wkpcard .wkpk span{font-size:11px;color:var(--muted)}@media (max-width:520px){.wkpcard .wkpk{grid-template-columns:1fr 1fr}.wkpcard .wkpk div:last-child{grid-column:1/-1}.wkpcard .wkpk b{font-size:14px}.wkpcard table{font-size:12px}.wkpcard th,.wkpcard td{padding:6px 5px;white-space:nowrap}.wkpcard .wkhide{display:none}}</style>`);
+  if (typeof vWorkerDetail === 'function') vWorkerDetail = (base => function (id) {
+    const h = base.apply(this, arguments); const w = byId('workers', id); if (!w || !can()) return h;
+    const c = card(w); if (!c) return h; const i = h.indexOf('<div class="card'); return i > 0 ? h.slice(0, i) + c + h.slice(i) : h + c;
+  })(vWorkerDetail);
+
+  /* ---------- debts: add / edit (owner / Saeed) ---------- */
+  function debtForm(w, a) {
+    a = a || {};
+    openModal({ title: a.id ? L(`تعديل المديونية — ${w.name}`, `Edit debt — ${w.name}`) : L(`مديونية جديدة — ${w.name}`, `New debt — ${w.name}`), submitLabel: L('حفظ', 'Save'),
+      body: `<div class="form">${field(L(`المبلغ (${CUR()})`, `Amount (${CUR()})`), inp('amount', a.amount || '', 'type="number" step="any" min="1" required inputmode="decimal"'))}${field(L('القسط الأسبوعي', 'Weekly instalment'), inp('weekly', a.weekly || '', 'type="number" step="any" min="1" required inputmode="decimal"'))}
+        ${a.id ? field(L('اتسدّد منها', 'Paid so far'), inp('paid', a.paid || 0, 'type="number" step="any" min="0" inputmode="decimal"')) : ''}${field(L('ملاحظة', 'Note'), inp('note', a.note || L('مديونية قديمة', 'Old debt')), 'full')}
+        <div class="tiny muted full">${L('القسط بيتخصم من القبض الأسبوعي كل خميس لحد ما المديونية تخلص — ومش بيتخصم من المرتب الشهري.', 'The instalment is deducted from the weekly pay every Thursday until the debt is cleared — never from the monthly payroll.')}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); const amount = r2(+arDigits(String(d.amount || ''))); const weekly = r2(+arDigits(String(d.weekly || ''))); const paid = a.id ? r2(+arDigits(String(d.paid || 0))) : 0;
+        if (!(amount > 0) || !(weekly > 0)) { toast(L('اكتب المبلغ والقسط', 'Enter the amount and the instalment'), 'err'); return false; }
+        const now = nowISO();
+        const doc = Object.assign({}, a, { id: a.id || 'debt_' + uid(), kind: 'debt', workerId: w.id, workerName: w.name || '', deptId: w.deptId || null, amount, weekly, monthly: 0, installments: 0, paid, payStatus: 'paid', status: paid >= amount - 0.01 ? 'closed' : 'open', date: a.date || todayISO(), note: String(d.note || '').trim(), createdAt: a.createdAt || now, createdByName: a.createdByName || S.session?.name || '', updatedAt: now });
+        await Store.save('advances', doc); toast(L('اتسجّلت', 'Saved')); render(false);
+      } });
+  }
+  ACTIONS.wkDebtNew = wid => { const w = byId('workers', wid); if (!w || !can() || !writable()) return; debtForm(w, null); };
+  ACTIONS.wkDebtEdit = id => { const a = byId('advances', id); const w = a && byId('workers', a.workerId); if (!w || !can() || !writable()) return; debtForm(w, a); };
+
+  /* ---------- no punch: never absent / late, out of the attendance sheet and the weekly report ---------- */
+  if (typeof classifyDay === 'function') classifyDay = (base => function (w, date, row) {
+    const c = base.apply(this, arguments);
+    if (w && w.noPunch && ['unrecorded', 'absent'].includes(c.kind)) return { kind: 'off', label: L('معفي من البصمة', 'No punch required'), noPunch: true };
+    return c;
+  })(classifyDay);
+  let skipNP = 0;
+  const away0 = window.nfAttAway;
+  window.nfAttAway = function (w) { if (skipNP && w && w.noPunch) return true; return typeof away0 === 'function' ? away0.apply(this, arguments) : false; };
+  const scoped = fn => function () { skipNP++; try { return fn.apply(this, arguments); } finally { skipNP--; } };
+  const scopedAsync = fn => async function () { skipNP++; try { return await fn.apply(this, arguments); } finally { skipNP--; } };
+  if (typeof vAttendance === 'function') vAttendance = scoped(vAttendance);
+  ['attAll', 'attAutoAlloc'].forEach(k => { if (typeof ACTIONS[k] === 'function') ACTIONS[k] = scopedAsync(ACTIONS[k]); });
+
+  /* ---------- the advance pages show a weekly line for what it is ---------- */
+  window.nfIsWeeklyLine = p => !!(p && p.weekly);
+})();
+/* =====================================================================
+   v7.77 — exact vehicle paths (Mahmoud 15 Oct, on the Suzuki van crossing the ring-road interchange in a straight line:
+   «be exact about the vehicles' path — this won't do»).
+   Why: the trackers normally send a fix every 5 s, but a GT06 sometimes slips back to one fix every 150 s (after a long park),
+   so the map joined two fixes 3–4 km apart with a straight line across the interchange.
+   Now, wherever two fixes are far apart in time and place (≥ 40 s and ≥ 250 m):
+     · the map asks the server (Edge «traffic» → gapfill) for the road the vehicle most likely took between them (Google Routes,
+       cached per segment, plausibility-checked: road length and implied speed) and draws THAT, a little lighter;
+     · where no road can be trusted, the gap is a DASHED line — never a solid line that looks like the real path;
+     · under the map: «N gaps completed on the road — the tracker was sending every X» so nobody mistakes it for raw data.
+   The server (Edge «remind») also puts a slipping tracker back to one fix every 5 s while it drives (see remind v12).
+   Used by the live fleet map (today's route of the selected vehicle) and the route-history page. Phone and computer, AR / EN.
+   ===================================================================== */
+(function () {
+  if (window.nfTrackPath) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const GAP_S = 40, GAP_M = 250;
+  const hav = (a, b) => { const R = 6371e3, r = Math.PI / 180; const dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
+  const P = p => ({ lat: +p.lat, lng: +p.lng });
+  const tms = p => Date.parse((p && p.at) || '') || 0;
+  const keyOf = (a, b) => [a.lat, a.lng, b.lat, b.lng].map(v => (+v).toFixed(4)).join(',');
+  const cache = new Map();   /* segment key → road points [[lat,lng]…] | null (asked: no trustworthy road) */
+  const pending = new Set();
+  function gaps(tr) {
+    const out = []; if (!Array.isArray(tr)) return out;
+    for (let i = 0; i < tr.length - 1; i++) {
+      const a = tr[i], b = tr[i + 1]; if (!a || !b) continue; const A = P(a), B = P(b); if (!isFinite(A.lat) || !isFinite(B.lat)) continue;
+      const d = hav(A, B); const dt = (tms(b) - tms(a)) / 1000;
+      if (d >= GAP_M && (dt >= GAP_S || !tms(a) || !tms(b))) out.push({ i, key: keyOf(A, B), seg: [A.lat, A.lng, B.lat, B.lng, dt > 0 ? Math.round(dt) : 0], dt, d });
+    }
+    return out;
+  }
+  function stats(tr) {
+    const gs = gaps(tr); const filled = gs.filter(x => Array.isArray(cache.get(x.key))).length;
+    const dts = gs.map(x => x.dt).filter(x => x > 0).sort((a, b) => a - b); const med = dts.length ? dts[Math.floor(dts.length / 2)] : 0;
+    return { gaps: gs.length, filled, open: gs.length - filled, medGap: Math.round(med) };
+  }
+  /* ask the server for the road of the gaps not known yet; onDone() redraws */
+  async function fill(tr, onDone) {
+    const hostedOk = typeof S !== 'undefined' && S.sb && S.sb.functions && typeof S.sb.functions.invoke === 'function';
+    const test = window.nfGapTest;   /* tests: a stub (segs) → [pts | null] */
+    if (!hostedOk && !test) return 0;
+    const need = gaps(tr).filter(x => !cache.has(x.key) && !pending.has(x.key)).slice(-40);
+    if (!need.length) return 0;
+    need.forEach(x => pending.add(x.key)); let got = 0;
+    try {
+      const segs = test ? await test(need.map(x => x.seg)) : (((await S.sb.functions.invoke('traffic', { body: { action: 'gapfill', segs: need.map(x => x.seg) } })) || {}).data || {}).segs;
+      if (Array.isArray(segs)) need.forEach((x, j) => { if (j < segs.length) { const p = segs[j]; cache.set(x.key, Array.isArray(p) && p.length > 1 ? p : null); got++; } });
+    } catch (e) { /* keep the gaps dashed */ }
+    finally { need.forEach(x => pending.delete(x.key)); }
+    if (got && typeof onDone === 'function') { try { onDone(); } catch (e) { /* ignore */ } }
+    return got;
+  }
+  /* the overlays of a track: solid runs of real fixes, lighter road fills, dashed straight lines for gaps with no road */
+  function draw(g, map, tr, o) {
+    o = o || {}; const col = o.color || '#2a78d6'; const z = o.zIndex || 2; const items = [];
+    if (!g || !g.Polyline || !Array.isArray(tr) || tr.length < 2) return items;
+    const solid = path => new g.Polyline({ map, path, strokeColor: col, strokeOpacity: 0.9, strokeWeight: 4, zIndex: z });
+    const road = path => new g.Polyline({ map, path, strokeColor: col, strokeOpacity: 0.55, strokeWeight: 4, zIndex: z });
+    const dashed = path => new g.Polyline({ map, path, strokeColor: col, strokeOpacity: 0, strokeWeight: 3, zIndex: z, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.7, strokeColor: col, strokeWeight: 3, scale: 3 }, offset: '0', repeat: '12px' }] });
+    const gm = new Map(gaps(tr).map(x => [x.i, x]));
+    let run = [];
+    for (let i = 0; i < tr.length; i++) {
+      const p = tr[i]; if (!p || p.lat == null || p.lng == null) continue;
+      run.push(P(p));
+      const gp = gm.get(i); if (!gp || i === tr.length - 1) continue;
+      if (run.length > 1) items.push(solid(run));
+      const f = cache.get(gp.key); const A = P(tr[i]), B = P(tr[i + 1]);
+      if (Array.isArray(f) && f.length > 1) items.push(road([A].concat(f.map(q => ({ lat: +q[0], lng: +q[1] }))).concat([B])));
+      else items.push(dashed([A, B]));
+      run = [];
+    }
+    if (run.length > 1) items.push(solid(run));
+    return items;
+  }
+  /* a one-line note under a map (empty when the track has no gaps) */
+  function note(tr) {
+    const s = stats(tr); if (!s.gaps) return '';
+    const every = s.medGap >= 90 ? L(`كل ${Math.round(s.medGap / 60 * 10) / 10} دقيقة`, `every ${Math.round(s.medGap / 60 * 10) / 10} min`) : L(`كل ${s.medGap} ثانية`, `every ${s.medGap} s`);
+    const parts = [];
+    if (s.filled) parts.push(L(`${s.filled} جزء اتكمّل على الطريق (الخط الفاتح)`, `${s.filled} gap(s) completed along the road (lighter line)`));
+    if (s.open) parts.push(L(`${s.open} جزء من غير بيانات (متقطّع)`, `${s.open} gap(s) without data (dashed)`));
+    return `<div class="tiny muted trkgap-note" style="margin-top:6px">${icon('info')} ${esc(parts.join(' · '))} — ${esc(L(`الجهاز كان بيبعت مكانه ${every} بدل كل 5 ثواني.`, `the tracker was sending its position ${every} instead of every 5 s.`))}</div>`;
+  }
+  window.nfTrackPath = { gaps, fill, draw, stats, note, _cache: cache };
 })();

@@ -1214,13 +1214,6 @@ html[data-theme="dark"] .okpst{background:rgba(5,14,22,.82)}
   const d10 = iso => (iso ? fmtDate(String(iso).slice(0, 10)) : '—');
   const up = async (pid, patch) => { await Store.update('projects', pid, patch); if (typeof rerender === 'function') rerender(); };
   const people = () => list('workers').filter(w => w.status !== 'left' && w.status !== 'inactive').sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  /* who owns projects in the office (from the imported list / the projects) — they come first in every «Owner» pick */
-  const ownerCounts = () => { const c = {}; list('projects').forEach(p => { if (p.status === 'archived') return; Array.from(new Set([p.ownerId, p.leadId].filter(Boolean))).forEach(id => { c[id] = (c[id] || 0) + 1; }); }); return c; };
-  const ownerOpts = (cur, blank) => {
-    const c = ownerCounts(); const all = people(); const owners = all.filter(w => c[w.id]).sort((a, b) => c[b.id] - c[a.id] || String(a.name).localeCompare(String(b.name))); const rest = all.filter(w => !c[w.id]);
-    const o = w => `<option value="${esc(w.id)}" ${w.id === cur ? 'selected' : ''}>${esc(w.name)}${c[w.id] ? ` · ${Math.round(c[w.id])} ${L('مشروع', 'project(s)')}` : ''}</option>`;
-    return `${blank ? '<option value="">—</option>' : ''}<optgroup label="${esc(L('Project Owners في المكتب', 'Project Owners in the office'))}">${owners.map(o).join('')}</optgroup><optgroup label="${esc(L('باقي الفريق', 'Rest of the team'))}">${rest.map(o).join('')}</optgroup>`;
-  };
   const TYPES = { hotel: ['فنادق ومنتجعات', 'Hotels & Resorts'], res: ['سكني', 'Residential'], urban: ['تخطيط عمراني', 'Urban Planning'], com: ['تجاري وترفيهي', 'Commercial & Leisure'], edu: ['تعليمي', 'Education'], gov: ['حكومي', 'Government'], park: ['حدائق عامة', 'Public Parks'] };
 
   document.head.insertAdjacentHTML('beforeend', `<style>
@@ -1278,7 +1271,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   };
   const enqForm = e => `<div class="form">${field(L('اسم المشروع / الطلب', 'Project / enquiry name'), inp('name', e.name || '', 'required'), 'full')}${field(L('المطوّر / العميل', 'Developer / client'), inp('developer', e.developer || ''))}${field(L('الموقع', 'Location'), inp('location', e.location || ''))}
     ${field(L('نوع المشروع', 'Project type'), `<select name="type">${Object.keys(TYPES).map(k => `<option value="${k}" ${e.type === k ? 'selected' : ''}>${esc(L(TYPES[k][0], TYPES[k][1]))}</option>`).join('')}</select>`)}${field(L('المصدر', 'Source'), `<select name="source">${Object.keys(SOURCES).map(k => `<option value="${k}" ${e.source === k ? 'selected' : ''}>${esc(L(SOURCES[k][0], SOURCES[k][1]))}</option>`).join('')}</select>`)}
-    ${field(L('المسؤول عن الفرصة (Project Owner)', 'Owner (Project Owner)'), `<select name="ownerId">${ownerOpts(e.ownerId || '', true)}</select>`)}${field(L('جهة الاتصال', 'Contact person'), inp('contact', e.contact || ''))}
+    ${field(L('المسؤول عن الفرصة', 'Owner'), `<select name="ownerId"><option value="">—</option>${opts(people(), e.ownerId || me(), x => x.name)}</select>`)}${field(L('جهة الاتصال', 'Contact person'), inp('contact', e.contact || ''))}
     ${field(L('الخطوة الجاية', 'Next action'), inp('nextWhat', e.nextWhat || ''))}${field(L('موعدها', 'Due'), inp('next', e.next || '', 'type="date"'))}
     ${field(L('ملاحظات (من غير أرقام مالية)', 'Notes (no money figures)'), `<textarea name="notes" rows="3">${esc(e.notes || '')}</textarea>`, 'full')}</div>`;
   const enqSave = async (f, e) => {
@@ -1319,7 +1312,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     if (op === 'lost') { if (!(await confirmDlg(L(`تقفل «${e.name}» كخسران / ملغي؟`, `Close «${e.name}» as lost / cancelled?`), L('اقفل', 'Close it')))) return; closeModal(); await enqLog(e, L('اتقفل: خسران / ملغي', 'Closed: lost / cancelled'), { stage: 'lost' }); }
     if (op === 'win') {
       closeModal();
-      openModal({ title: L('تحويل لمشروع', 'Make it a project'), body: `<div class="form">${field(L('اسم المشروع', 'Project name'), inp('name', e.name, 'required'), 'full')}${field(L('الكود', 'Code'), inp('code', nextCode(), 'class="ltr"'))}${field(L('Project Owner', 'Project Owner'), `<select name="ownerId">${ownerOpts(e.ownerId || '', false)}</select>`)}${field(L('تاريخ التعاقد / NTP', 'Contract / NTP date'), inp('ntp', todayISO(), 'type="date"'))}${field(L('موعد التسليم للعميل (لو اتحدد)', 'Client deadline (if set)'), inp('dueDate', '', 'type="date"'))}</div>`, submitLabel: L('أنشئ المشروع', 'Create the project'),
+      openModal({ title: L('تحويل لمشروع', 'Make it a project'), body: `<div class="form">${field(L('اسم المشروع', 'Project name'), inp('name', e.name, 'required'), 'full')}${field(L('الكود', 'Code'), inp('code', nextCode(), 'class="ltr"'))}${field(L('Project Owner', 'Project Owner'), `<select name="ownerId">${opts(people(), e.ownerId || me(), x => x.name)}</select>`)}${field(L('تاريخ التعاقد / NTP', 'Contract / NTP date'), inp('ntp', todayISO(), 'type="date"'))}${field(L('موعد التسليم للعميل (لو اتحدد)', 'Client deadline (if set)'), inp('dueDate', '', 'type="date"'))}</div>`, submitLabel: L('أنشئ المشروع', 'Create the project'),
         onSubmit: async f => {
           const d = formData(f); if (!d.name) return false; const pid = uid();
           const p = { id: pid, name: d.name, client: e.developer || '', code: d.code || nextCode(), stage: 'data', osStatus: 'data', flow: 'os', osStatusAt: { data: nowISO() }, ownerId: d.ownerId || e.ownerId || null, leadId: d.ownerId || e.ownerId || null, team: [d.ownerId || e.ownerId].filter(Boolean), dueDate: d.dueDate || null, area: '', desc: [e.location ? L('الموقع: ', 'Location: ') + e.location : '', e.notes || ''].filter(Boolean).join('\n'), okEnq: e.id, okState: 'active', okNtp: d.ntp || null, status: 'active', createdAt: nowISO(), createdBy: S.session && S.session.id };
@@ -1433,9 +1426,6 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     const cur = new Set(p[key] || []); if (el.checked) cur.add(+idx); else cur.delete(+idx);
     await up(pid, { [key]: Array.from(cur).sort((a, b) => a - b) });
   });
-  if (typeof openModal === 'function') openModal = (base => function (o) { const r = base.apply(this, arguments); try {
-    document.querySelectorAll('#mform select[name="ownerId"], #mform select[name="leadId"]').forEach(sel => { if (sel.dataset.okgrp) return; const cur = sel.value; const blank = !!sel.querySelector('option[value=""]'); sel.innerHTML = ownerOpts(cur, blank); sel.dataset.okgrp = '1'; });
-  } catch (e) { /* */ } return r; })(openModal);
   window.okFlow = { ESTAGES, SETUP0, CLOSE0, SITE, LOGS };
   /* English for the consultancy wording that mk-oeko puts into the engine's Arabic strings */
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'اعتماد العميل للكونسبت': 'Client concept approval', 'مطلوب قبل تطوير التصميم (DD)': 'Required before Design Development (DD)', 'مش مطلوب — العميل معتمد اتجاه المكتب': 'Not required — the client approved the office direction', 'مخرجات المشروع': 'Project deliverables', 'ضيف مخرجات': 'Add deliverables', 'مخرجاتي': 'My deliverables', 'مفيش مخرجات عليك دلوقتي': 'No deliverables on you right now', 'كود المخرج': 'Deliverable code', 'موعد التسليم النهائي للمخرج': 'Final due date of the deliverable', 'كلمة عن المخرج (اختياري)': 'A word about the deliverable (optional)', 'لسه مفيش مخرجات': 'No deliverables yet', 'محتاج مخرجات': 'Needs deliverables', 'تعذّر حفظ المخرج': 'Could not save the deliverable', 'المخرج': 'Deliverable', 'المسؤول': 'Responsible', 'اعتماد الكونسبت': 'Concept approval', 'مراجعة اللوحة': 'Drawing review', 'ملاحظة جديدة على اللوحة': 'New comment on the drawing', 'معرض اللوحات': 'Drawings gallery', 'مفيش لوحات لسه': 'No drawings yet', 'لوحات المشاريع · المهام · المخرجات · الوقت': 'Project boards · tasks · deliverables · time', 'اعمل جدول التسليمات': 'Build the deliverables schedule', 'جدول التسليمات': 'Deliverables schedule' });
