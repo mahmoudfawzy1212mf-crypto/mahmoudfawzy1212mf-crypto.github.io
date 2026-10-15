@@ -1175,3 +1175,242 @@ html[data-theme="dark"] .okpst{background:rgba(5,14,22,.82)}
   const run = () => { if (!(typeof I18N !== 'undefined' && I18N.lang === 'en')) return; strip(document.getElementById('view')); strip(document.querySelector('.topbar')); strip(document.querySelector('.modal')); };
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(run); setInterval(run, 1200);
 })();
+
+/* =====================================================================
+   Ökoplan — the consultancy pipeline, end to end (Mahmoud, 15 Oct, «ابدأ»):
+   A) Enquiries (#/enquiries): Lead → Brief review (Go / No-Go) → Proposal → Negotiation → Won (becomes a project) / Lost.
+      Seen by the owner, managers and the people in settings.okEnqViewers (server: nf_enq_vis). No money anywhere.
+   B) On every project, under the stage steps, the «Project pipeline» card:
+      Setup (mobilisation checklist + kick-offs) · Client (submission → comments → response → approval, per stage) ·
+      Site (visits · submittals · RFIs · site instructions · variations · snag list — can be switched off per project) ·
+      Close-out (handover, as-built, O&M, defects period, lessons learned, gallery) · Logs (decisions · changes · risks).
+   C) Stage gate: the Project Owner (or a manager) approves the gate → the project moves to the next stage; logged in okGates.
+   Standards behind it: RIBA Plan of Work 2020 (stages), ISO 9001 (gate reviews / records), ISO 19650 (document naming), FIDIC (site records).
+   ===================================================================== */
+(() => {
+  if (window.__OK_FLOW__) return; window.__OK_FLOW__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const me = () => (typeof stuMe === 'function' ? stuMe() : '');
+  const isMgr = () => isAdmin() || role() === 'manager';
+  const PIPE = window.OEKO_PIPELINE || [];
+  const stageIdx = p => Math.max(0, PIPE.findIndex(s => s.id === (p.osStatus || p.stage)));
+  const canEdit = p => !!p && typeof stuCanEdit === 'function' && stuCanEdit() && (isMgr() || p.ownerId === me() || p.leadId === me());
+  const onTeam = p => !!p && typeof stuCanEdit === 'function' && stuCanEdit() && (canEdit(p) || (p.team || []).includes(me()));
+  const who = id => { const w = id && (byId('workers', id) || byId('staff', id)); return (w && w.name) || (id === me() && S.session && S.session.name) || ''; };
+  const myName = () => (S.session && S.session.name) || '';
+  const d10 = iso => (iso ? fmtDate(String(iso).slice(0, 10)) : '—');
+  const up = async (pid, patch) => { await Store.update('projects', pid, patch); if (typeof rerender === 'function') rerender(); };
+  const people = () => list('workers').filter(w => w.status !== 'left' && w.status !== 'inactive').sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const TYPES = { hotel: ['فنادق ومنتجعات', 'Hotels & Resorts'], res: ['سكني', 'Residential'], urban: ['تخطيط عمراني', 'Urban Planning'], com: ['تجاري وترفيهي', 'Commercial & Leisure'], edu: ['تعليمي', 'Education'], gov: ['حكومي', 'Government'], park: ['حدائق عامة', 'Public Parks'] };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.okflow{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}
+.okflow .okfh{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}.okflow .okfh b{font-size:14px}
+.okflow .oktabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:8px 10px 0}.okflow .oktabs::-webkit-scrollbar{display:none}
+.okflow .oktabs button{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font:600 12.5px var(--font);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.okflow .oktabs button.on{background:var(--ink);color:var(--surface);border-color:transparent}.okflow .oktabs button i{font-style:normal;font-size:11px;opacity:.75}
+.okflow .okfb{padding:12px}
+.okflow .okck{display:flex;gap:10px;align-items:flex-start;padding:7px 2px;border-top:1px solid var(--line);font-size:13.5px;cursor:pointer}.okflow .okck:first-child{border-top:0}.okflow .okck input{margin-top:3px;accent-color:var(--accent)}.okflow .okck.done span{text-decoration:line-through;color:var(--muted)}
+.okflow .okrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap}.okflow .okrow:first-child{border-top:0}.okflow .okrow .muted{color:var(--muted)}.okflow .okrow .grow{flex:1}
+.okflow .okpill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:600;border:1px solid var(--line);background:var(--surface-2)}
+.okflow .okpill.g{background:rgba(34,197,94,.14);border-color:rgba(34,197,94,.4);color:#15803d}.okflow .okpill.y{background:rgba(245,179,1,.14);border-color:rgba(245,179,1,.45);color:#9a6700}.okflow .okpill.r{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.4);color:#b91c1c}.okflow .okpill.b{background:rgba(80,177,231,.14);border-color:rgba(80,177,231,.45);color:#0c6aa0}
+html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] .okflow .okpill.y{color:#fcd34d}html[data-theme="dark"] .okflow .okpill.r{color:#fca5a5}html[data-theme="dark"] .okflow .okpill.b{color:#8ad6f7}
+.okflow .oksec{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:8px 12px}.okflow .oksec h4{margin:0;font-size:13px;display:flex;align-items:center;gap:8px}.okflow .oksec h4 .n{font-weight:700;color:var(--accent)}
+.okflow .okempty{color:var(--muted);font-size:12.5px;padding:6px 0}
+.okflow .okgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.okflow .okst2{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}.okflow .okst2 b{font-size:13px}.okflow .okst2 small{color:var(--muted)}
+.okflow .okst2.cur{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.okgatebtn{margin-inline-start:auto}
+/* enquiries */
+.okenq{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}@media (max-width:1000px){.okenq{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:600px){.okenq{grid-template-columns:1fr}}
+.okenq .okcol{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:10px;min-height:120px}.okenq .okcol h4{margin:0 0 8px;font-size:13px;display:flex;align-items:center;gap:8px}.okenq .okcol h4 .n{color:var(--muted);font-weight:600}
+.okenq .okcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:transform .15s,box-shadow .15s}.okenq .okcard:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}
+.okenq .okcard b{font-size:14px}.okenq .okcard small{color:var(--muted);font-size:12px}.okenq .okcard .late{color:#b91c1c;font-weight:600}
+.okenqsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.okenqsum .okpill{padding:6px 12px;font-size:12.5px;border-radius:999px;border:1px solid var(--line);background:var(--surface);display:inline-flex;gap:6px;align-items:center}.okenqsum .okpill b{color:var(--accent)}
+.okenqdone{margin-top:14px}.okenqdone summary{cursor:pointer;color:var(--muted);font-size:13px}
+.okenqdone .okrow{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap}.okenqdone .okrow .grow{flex:1}
+.okstepbar{display:flex;gap:4px;margin:6px 0 10px}.okstepbar i{flex:1;height:5px;border-radius:999px;background:var(--line)}.okstepbar i.on{background:var(--accent)}
+</style>`);
+
+  /* ==================================================================== A) ENQUIRIES */
+  const COL = 'enquiries';
+  if (typeof COLS !== 'undefined' && !COLS.includes(COL)) COLS.push(COL); S.data[COL] = S.data[COL] || new Map();
+  if (typeof Store === 'object' && Store.subscribeAll) Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; try { S.unsub.push(db.collection(COL).onSnapshot(snap => { S.data[COL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[COL] = true; rerender(); }, e => console.warn('snapshot', COL, e))); } catch (e) { /* local */ } })(Store.subscribeAll);
+  const ESTAGES = [
+    { id: 'lead', ar: 'طلب جديد', en: 'Lead / Enquiry', hint: ['مصدر الطلب · المطوّر · الموقع · نوع المشروع', 'source · developer · location · project type'] },
+    { id: 'brief', ar: 'مراجعة البريف', en: 'Brief review', hint: ['فهم المطلوب · زيارة أولية · قرار Go / No-Go', 'understand the ask · first visit · Go / No-Go'] },
+    { id: 'proposal', ar: 'العرض الفني', en: 'Proposal', hint: ['نطاق الخدمات · الجدول · المخرجات · الفريق', 'scope of services · schedule · deliverables · team'] },
+    { id: 'nego', ar: 'التفاوض والتعاقد', en: 'Negotiation & contract', hint: ['Scope matrix · التعاقد · Notice to Proceed', 'scope matrix · contract · notice to proceed'] },
+  ];
+  const SOURCES = { ref: ['ترشيح', 'Referral'], repeat: ['عميل قائم', 'Repeat client'], tender: ['مناقصة / دعوة', 'Tender / invitation'], web: ['الموقع / السوشيال', 'Website / social'], other: ['أخرى', 'Other'] };
+  const enqVis = () => !!S.session && (isMgr() || ((S.settings && S.settings.okEnqViewers) || []).includes(me()));
+  const enqs = () => list(COL).filter(e => !e.deleted);
+  const nextCode = () => { let n = 0; list('projects').forEach(p => { const m = /^OK-(\d{3,})$/.exec(p.code || ''); if (m) n = Math.max(n, +m[1]); }); return 'OK-' + String(n + 1).padStart(3, '0'); };
+  const late = e => e.next && e.next < todayISO() && !['won', 'lost'].includes(e.stage);
+  const card = e => `<div class="okcard" data-action="okEnqOpen" data-arg="${e.id}"><b>${esc(e.name)}</b><small>${esc([e.developer, e.location].filter(Boolean).join(' · ') || '—')}</small><small>${esc(TYPES[e.type] ? L(TYPES[e.type][0], TYPES[e.type][1]) : '')}${e.ownerId ? ' · ' + esc(who(e.ownerId)) : ''}</small>${e.next ? `<small class="${late(e) ? 'late' : ''}">${esc(L('الخطوة الجاية', 'Next'))}: ${esc(e.nextWhat || '')} · ${d10(e.next)}</small>` : ''}${e.gonogo && e.gonogo.decision ? `<small>${e.gonogo.decision === 'go' ? '✅ Go' : '⛔ No-Go'}</small>` : ''}</div>`;
+  const enqPage = () => {
+    if (!enqVis()) return `<div class="banner warn">${esc(L('الصفحة دي لإدارة المكتب', 'This page is for the office management'))}</div>`;
+    const all = enqs(); const open = all.filter(e => !['won', 'lost'].includes(e.stage)); const done = all.filter(e => ['won', 'lost'].includes(e.stage)).sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    const sum = `<div class="okenqsum">${ESTAGES.map(s => `<span class="okpill"><b>${open.filter(e => e.stage === s.id).length}</b>${esc(L(s.ar, s.en))}</span>`).join('')}<span class="okpill"><b>${done.filter(e => e.stage === 'won').length}</b>${esc(L('اتحوّلت لمشاريع', 'won → projects'))}</span><span class="okpill"><b>${open.filter(late).length}</b>${esc(L('متأخرة', 'overdue'))}</span></div>`;
+    const cols = `<div class="okenq">${ESTAGES.map(s => { const xs = open.filter(e => e.stage === s.id).sort((a, b) => String(a.next || '9').localeCompare(String(b.next || '9'))); return `<div class="okcol"><h4>${esc(L(s.ar, s.en))}<span class="n">${xs.length}</span></h4><div class="tiny muted" style="margin:-4px 0 8px">${esc(L(s.hint[0], s.hint[1]))}</div>${xs.map(card).join('') || `<div class="okempty">—</div>`}</div>`; }).join('')}</div>`;
+    const doneH = done.length ? `<details class="okenqdone"><summary>${esc(L('المحسومة', 'Closed'))} · ${done.length}</summary>${done.map(e => `<div class="okrow"><span class="okpill ${e.stage === 'won' ? 'g' : 'r'}">${e.stage === 'won' ? esc(L('اتحوّل لمشروع', 'Won')) : esc(L('خسران / No-Go', 'Lost / No-Go'))}</span><b>${esc(e.name)}</b><span class="muted">${esc(e.developer || '')}</span><div class="grow"></div>${e.projectId ? `<a class="btn sm ghost" href="#/projects/${esc(e.projectId)}">${esc(L('المشروع', 'Project'))}</a>` : ''}<button type="button" class="btn sm ghost" data-action="okEnqOpen" data-arg="${e.id}">${esc(L('تفاصيل', 'Details'))}</button></div>`).join('')}</details>` : '';
+    return `<div class="card"><div class="cardhead"><h2 style="margin:0">${esc(L('الفرص والعروض', 'Enquiries & proposals'))}</h2><div class="grow"></div><button class="btn p" data-action="okEnqNew">${icon('plus')}<span>${esc(L('طلب جديد', 'New enquiry'))}</span></button></div>${sum}${cols}${doneH}</div>`;
+  };
+  const enqForm = e => `<div class="form">${field(L('اسم المشروع / الطلب', 'Project / enquiry name'), inp('name', e.name || '', 'required'), 'full')}${field(L('المطوّر / العميل', 'Developer / client'), inp('developer', e.developer || ''))}${field(L('الموقع', 'Location'), inp('location', e.location || ''))}
+    ${field(L('نوع المشروع', 'Project type'), `<select name="type">${Object.keys(TYPES).map(k => `<option value="${k}" ${e.type === k ? 'selected' : ''}>${esc(L(TYPES[k][0], TYPES[k][1]))}</option>`).join('')}</select>`)}${field(L('المصدر', 'Source'), `<select name="source">${Object.keys(SOURCES).map(k => `<option value="${k}" ${e.source === k ? 'selected' : ''}>${esc(L(SOURCES[k][0], SOURCES[k][1]))}</option>`).join('')}</select>`)}
+    ${field(L('المسؤول عن الفرصة', 'Owner'), `<select name="ownerId"><option value="">—</option>${opts(people(), e.ownerId || me(), x => x.name)}</select>`)}${field(L('جهة الاتصال', 'Contact person'), inp('contact', e.contact || ''))}
+    ${field(L('الخطوة الجاية', 'Next action'), inp('nextWhat', e.nextWhat || ''))}${field(L('موعدها', 'Due'), inp('next', e.next || '', 'type="date"'))}
+    ${field(L('ملاحظات (من غير أرقام مالية)', 'Notes (no money figures)'), `<textarea name="notes" rows="3">${esc(e.notes || '')}</textarea>`, 'full')}</div>`;
+  const enqSave = async (f, e) => {
+    const d = formData(f); if (!d.name) { toast(L('اكتب اسم الطلب', 'Write the enquiry name'), 'err'); return false; }
+    const doc = Object.assign({}, e, { name: d.name, developer: d.developer, location: d.location, type: d.type, source: d.source, ownerId: d.ownerId || null, contact: d.contact, nextWhat: d.nextWhat, next: d.next || null, notes: typeof nfUnmaskMoney === 'function' ? d.notes : d.notes, updatedAt: nowISO() });
+    if (!doc.id) { doc.id = uid(); doc.stage = 'lead'; doc.createdAt = nowISO(); doc.createdBy = me(); doc.log = [{ at: nowISO(), by: myName(), text: L('اتسجّل الطلب', 'Enquiry logged') }]; }
+    await Store.save(COL, doc); return doc;
+  };
+  ACTIONS.okEnqNew = () => { if (!enqVis()) return; openModal({ title: L('طلب جديد', 'New enquiry'), wide: true, body: enqForm({}), submitLabel: L('تسجيل', 'Log it'), onSubmit: async f => { const r = await enqSave(f, {}); if (!r) return false; toast(L('اتسجّل', 'Logged')); rerender(); return true; } }); };
+  ACTIONS.okEnqEdit = id => { const e = byId(COL, id); if (!e || !enqVis()) return; openModal({ title: L('تعديل الطلب', 'Edit enquiry'), wide: true, body: enqForm(e), onSubmit: async f => { const r = await enqSave(f, e); if (!r) return false; rerender(); return true; } }); };
+  const enqLog = async (e, text, patch) => { const log = (e.log || []).concat([{ at: nowISO(), by: myName(), text }]).slice(-100); await Store.save(COL, Object.assign({}, e, patch || {}, { log, updatedAt: nowISO() })); rerender(); };
+  ACTIONS.okEnqOpen = id => {
+    const e = byId(COL, id); if (!e || !enqVis()) return; const si = ESTAGES.findIndex(s => s.id === e.stage); const closed = ['won', 'lost'].includes(e.stage);
+    const bar = `<div class="okstepbar">${ESTAGES.map((s, i) => `<i class="${i <= si || e.stage === 'won' ? 'on' : ''}" title="${esc(L(s.ar, s.en))}"></i>`).join('')}</div>`;
+    const rows = [[L('المطوّر', 'Developer'), e.developer], [L('الموقع', 'Location'), e.location], [L('النوع', 'Type'), TYPES[e.type] ? L(TYPES[e.type][0], TYPES[e.type][1]) : ''], [L('المصدر', 'Source'), SOURCES[e.source] ? L(SOURCES[e.source][0], SOURCES[e.source][1]) : ''], [L('المسؤول', 'Owner'), who(e.ownerId)], [L('جهة الاتصال', 'Contact'), e.contact], [L('الخطوة الجاية', 'Next action'), e.nextWhat ? `${e.nextWhat} · ${d10(e.next)}` : (e.next ? d10(e.next) : '')]].filter(r => r[1]);
+    const acts = closed ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
+      ${si > 0 ? `<button type="button" class="btn sm ghost" data-okenq="back:${e.id}">← ${esc(L(ESTAGES[si - 1].ar, ESTAGES[si - 1].en))}</button>` : ''}
+      ${e.stage === 'brief' && !(e.gonogo && e.gonogo.decision) ? `<button type="button" class="btn sm p" data-okenq="go:${e.id}">✅ Go</button><button type="button" class="btn sm d" data-okenq="nogo:${e.id}">⛔ No-Go</button>` : ''}
+      ${si < ESTAGES.length - 1 ? `<button type="button" class="btn sm p" data-okenq="next:${e.id}">${esc(L(ESTAGES[si + 1].ar, ESTAGES[si + 1].en))} →</button>` : ''}
+      ${['proposal', 'nego'].includes(e.stage) ? `<button type="button" class="btn sm p" data-okenq="win:${e.id}">${esc(L('اتعاقدنا — حوّله لمشروع', 'Won — make it a project'))}</button>` : ''}
+      <button type="button" class="btn sm ghost" data-okenq="lost:${e.id}">${esc(L('خسران / اتلغى', 'Lost / cancelled'))}</button></div>`;
+    openModal({ title: e.name, wide: true, footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button>${closed ? '' : `<button type="button" class="btn ghost" data-action="okEnqEdit" data-arg="${e.id}">${icon('edit')}<span>${esc(L('تعديل', 'Edit'))}</span></button>`}`,
+      body: `<div>${bar}<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="okpill ${e.stage === 'won' ? 'g' : e.stage === 'lost' ? 'r' : 'b'}" style="display:inline-flex;border-radius:999px;padding:3px 10px;border:1px solid var(--line);font-size:12px;font-weight:600">${esc(e.stage === 'won' ? L('اتحوّل لمشروع', 'Won') : e.stage === 'lost' ? L('خسران / No-Go', 'Lost / No-Go') : L(ESTAGES[si].ar, ESTAGES[si].en))}</span>${e.gonogo && e.gonogo.decision ? `<span class="small muted">${e.gonogo.decision === 'go' ? 'Go' : 'No-Go'} · ${esc(e.gonogo.by || '')} · ${d10(e.gonogo.at)}${e.gonogo.why ? ' · ' + esc(e.gonogo.why) : ''}</span>` : ''}${e.projectId ? `<a class="btn sm ghost" href="#/projects/${esc(e.projectId)}" data-action="closemodal">${esc(L('افتح المشروع', 'Open the project'))}</a>` : ''}</div>
+      <div class="tablewrap"><table><tbody>${rows.map(r => `<tr><th style="width:140px">${esc(r[0])}</th><td>${esc(r[1])}</td></tr>`).join('')}</tbody></table></div>
+      ${e.notes ? `<p class="small" style="white-space:pre-wrap;margin:10px 0 0">${esc(e.notes)}</p>` : ''}${acts}
+      <details style="margin-top:10px"><summary class="small muted">${esc(L('السجل', 'History'))} · ${(e.log || []).length}</summary>${(e.log || []).slice().reverse().map(l => `<div class="small" style="padding:4px 0;border-top:1px solid var(--line)">${esc(d10(l.at))} · ${esc(l.by || '')} — ${esc(l.text)}</div>`).join('')}</details></div>` });
+  };
+  document.addEventListener('click', async ev => {
+    const b = ev.target.closest && ev.target.closest('[data-okenq]'); if (!b) return; const [op, id] = b.dataset.okenq.split(':'); const e = byId(COL, id); if (!e || !enqVis()) return;
+    const si = ESTAGES.findIndex(s => s.id === e.stage);
+    if (op === 'next' && si < ESTAGES.length - 1) { const s = ESTAGES[si + 1]; closeModal(); await enqLog(e, L(`اتنقل لـ«${s.ar}»`, `Moved to «${s.en}»`), { stage: s.id }); }
+    if (op === 'back' && si > 0) { const s = ESTAGES[si - 1]; closeModal(); await enqLog(e, L(`رجع لـ«${s.ar}»`, `Back to «${s.en}»`), { stage: s.id }); }
+    if (op === 'go' || op === 'nogo') {
+      closeModal();
+      openModal({ title: op === 'go' ? 'Go' : 'No-Go', body: `<div class="form"><div class="field full"><label>${esc(L('السبب / الملاحظة', 'Reason / note'))}</label><input name="why" maxlength="200" dir="auto"></div></div>`, submitLabel: L('تأكيد', 'Confirm'),
+        onSubmit: async f => { const why = f.querySelector('[name=why]').value.trim(); const g = { decision: op, by: myName(), at: nowISO(), why }; await enqLog(e, (op === 'go' ? 'Go' : 'No-Go') + (why ? ' — ' + why : ''), op === 'go' ? { gonogo: g, stage: 'proposal' } : { gonogo: g, stage: 'lost', lostWhy: why }); return true; } });
+    }
+    if (op === 'lost') { if (!(await confirmDlg(L(`تقفل «${e.name}» كخسران / ملغي؟`, `Close «${e.name}» as lost / cancelled?`), L('اقفل', 'Close it')))) return; closeModal(); await enqLog(e, L('اتقفل: خسران / ملغي', 'Closed: lost / cancelled'), { stage: 'lost' }); }
+    if (op === 'win') {
+      closeModal();
+      openModal({ title: L('تحويل لمشروع', 'Make it a project'), body: `<div class="form">${field(L('اسم المشروع', 'Project name'), inp('name', e.name, 'required'), 'full')}${field(L('الكود', 'Code'), inp('code', nextCode(), 'class="ltr"'))}${field(L('Project Owner', 'Project Owner'), `<select name="ownerId">${opts(people(), e.ownerId || me(), x => x.name)}</select>`)}${field(L('تاريخ التعاقد / NTP', 'Contract / NTP date'), inp('ntp', todayISO(), 'type="date"'))}${field(L('موعد التسليم للعميل (لو اتحدد)', 'Client deadline (if set)'), inp('dueDate', '', 'type="date"'))}</div>`, submitLabel: L('أنشئ المشروع', 'Create the project'),
+        onSubmit: async f => {
+          const d = formData(f); if (!d.name) return false; const pid = uid();
+          const p = { id: pid, name: d.name, client: e.developer || '', code: d.code || nextCode(), stage: 'data', osStatus: 'data', flow: 'os', osStatusAt: { data: nowISO() }, ownerId: d.ownerId || e.ownerId || null, leadId: d.ownerId || e.ownerId || null, team: [d.ownerId || e.ownerId].filter(Boolean), dueDate: d.dueDate || null, area: '', desc: [e.location ? L('الموقع: ', 'Location: ') + e.location : '', e.notes || ''].filter(Boolean).join('\n'), okEnq: e.id, okState: 'active', okNtp: d.ntp || null, status: 'active', createdAt: nowISO(), createdBy: S.session && S.session.id };
+          await Store.save('projects', p); if (typeof stuEnsureBoards === 'function') { try { await stuEnsureBoards(pid); } catch (x) { /* later */ } }
+          await enqLog(e, L(`اتحوّل لمشروع ${p.code}`, `Became project ${p.code}`), { stage: 'won', projectId: pid, wonAt: nowISO() });
+          toast(L('اتعمل المشروع', 'Project created')); go('projects/' + pid); return true;
+        } });
+    }
+  });
+  const hookEnq = () => {
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.enquiries) return;
+    EXTRA_VIEWS.enquiries = () => enqPage();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.enquiries = () => ({ title: L('الفرص والعروض', 'Enquiries & proposals'), sub: L('من أول طلب العميل لحد التعاقد — وبعدها يبقى مشروع', 'From the first enquiry to the contract — then it becomes a project') });
+    if (typeof VIEW_TITLES === 'object') VIEW_TITLES.enquiries = 'الفرص والعروض';
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'enquiries')) { const at = NAV.findIndex(n => n.id === 'projects'); NAV.splice(at >= 0 ? at : 1, 0, { id: 'enquiries', label: 'الفرص والعروض', short: 'الفرص', icon: 'quote', count: () => (enqVis() ? enqs().filter(late).length : 0), countCls: 'warn' }); }
+    if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('enquiries')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['enquiries']); });
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'enquiries') return enqVis(); return base.apply(this, arguments); })(canSee);
+  };
+  hookEnq(); document.addEventListener('nf:ready', hookEnq);
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'الفرص والعروض': 'Enquiries & proposals', 'الفرص': 'Enquiries' });
+
+  /* ==================================================================== B) THE PROJECT PIPELINE CARD */
+  const SETUP = [['كود المشروع وهيكل الملفات بتسمية ISO 19650 (المشروع-المرحلة-النوع-الرقم-النسخة)', 'Project code and folder structure, ISO 19650 naming (project-stage-type-number-revision)'], ['Project Owner والفريق واللقب لكل واحد', 'Project Owner, team and role of each'], ['خطة المراحل والمواعيد (D-2 داخلي · D-1 أقصى · موعد العميل ثابت)', 'Stage plan and dates (internal D-2 · maximum D-1 · fixed client deadline)'], ['Scope matrix: المخرجات المتعاقد عليها لكل مرحلة', 'Scope matrix: contracted deliverables per stage'], ['Kick-off داخلي (الفريق)', 'Internal kick-off (team)'], ['Kick-off مع العميل (جهات الاتصال · طريقة التسليم · دورة المراجعة)', 'Client kick-off (contacts · submission channel · review cycle)'], ['استلام الداتا: المساحي · التربة · المخططات المعمارية · البنية التحتية', 'Data received: survey · soil · architectural drawings · infrastructure']];
+  const CLOSE = [['Practical Completion / محضر استلام ابتدائي', 'Practical completion certificate'], ['As-built drawings مستلمة ومراجعة', 'As-built drawings received and checked'], ['دليل التشغيل والصيانة: الري · النباتات · الصيانة الموسمية', 'O&M manual: irrigation · planting · seasonal maintenance'], ['بداية فترة الضمان (Defects Liability Period)', 'Defects liability period started'], ['إقفال ملاحظات الضمان / الاستلام النهائي', 'Defects closed / final handover'], ['Lessons learned مع الفريق', 'Lessons learned with the team'], ['أرشفة الملفات وإقفال المشروع', 'Files archived and project closed'], ['إضافة المشروع لمعرض المشاريع', 'Added to the projects gallery']];
+  const SUBK = { sub: ['اتسلّم للعميل', 'Submitted to client', 'b'], cmt: ['تعليقات العميل وصلت', 'Client comments received', 'y'], res: ['رد المكتب على التعليقات', 'Response sheet sent', 'b'], app: ['اعتماد العميل', 'Client approval', 'g'], rej: ['مرفوض — إعادة تقديم', 'Rejected — resubmit', 'r'] };
+  const SITE = { visits: ['زيارات الموقع', 'Site visits'], subm: ['Shop drawings & Material submittals', 'Shop drawings & material submittals'], rfis: ['RFIs', 'RFIs'], instr: ['تعليمات الموقع', 'Site instructions'], vars: ['التعديلات (Variations)', 'Variations'], snags: ['ملاحظات التسليم (Snag list)', 'Snag list'] };
+  const SUBST = { sub: ['مقدَّم', 'Submitted', 'b'], appr: ['معتمد', 'Approved', 'g'], noted: ['معتمد بملاحظات', 'Approved as noted', 'g'], rev: ['يُعاد تقديمه', 'Revise & resubmit', 'y'], rej: ['مرفوض', 'Rejected', 'r'] };
+  const OPEN = { open: ['مفتوح', 'Open', 'y'], closed: ['مقفول', 'Closed', 'g'] };
+  const LOGS = { decisions: ['القرارات', 'Decisions'], changes: ['التعديلات على النطاق (Change control)', 'Change control'], risks: ['المخاطر', 'Risks'] };
+  const TABS = ['setup', 'client', 'site', 'close', 'logs'];
+  const TABL = { setup: ['التجهيز', 'Setup'], client: ['العميل', 'Client'], site: ['الموقع', 'Site'], close: ['الإقفال', 'Close-out'], logs: ['السجلات', 'Logs'] };
+  let tab = 'setup'; try { tab = localStorage.getItem('ok.ftab') || 'setup'; } catch (e) { /* */ }
+  const ck = (p, key, items, idxs, can) => items.map((it, i) => `<label class="okck ${idxs.includes(i) ? 'done' : ''}"><input type="checkbox" data-okck="${p.id}:${key}:${i}" ${idxs.includes(i) ? 'checked' : ''} ${can ? '' : 'disabled'}><span>${esc(L(it[0], it[1]))}</span></label>`).join('');
+  const pill = (k, map) => { const m = map[k]; return m ? `<span class="okpill ${m[2]}">${esc(L(m[0], m[1]))}</span>` : ''; };
+  const addBtn = (p, kind, can) => (can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:${kind}">${icon('plus')}<span>${esc(L('إضافة', 'Add'))}</span></button>` : '');
+  const tabSetup = (p, can) => { const d = p.okSetup || []; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${SETUP.length}</b>${p.okNtp ? `<span class="okpill b">NTP · ${d10(p.okNtp)}</span>` : ''}${p.okKick && p.okKick.internal ? `<span class="okpill">${esc(L('Kick-off داخلي', 'Internal kick-off'))} · ${d10(p.okKick.internal)}</span>` : ''}${p.okKick && p.okKick.client ? `<span class="okpill">${esc(L('Kick-off العميل', 'Client kick-off'))} · ${d10(p.okKick.client)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:kick">${icon('calendar')}<span>${esc(L('التواريخ', 'Dates'))}</span></button>` : ''}</div>${ck(p, 'okSetup', SETUP, d, can)}`; };
+  const tabClient = (p, can) => { const S2 = p.okSub || {}; const cur = stageIdx(p); return `<div class="okgrid">${PIPE.map((s, i) => { const ev = (S2[s.id] && S2[s.id].events) || []; const last = ev[ev.length - 1]; return `<div class="okst2 ${i === cur ? 'cur' : ''}"><b>${esc(L(s.ar, s.name))}</b>${last ? `${pill(last.k, SUBK)}<small>${d10(last.at)}${last.rev ? ' · Rev ' + esc(last.rev) : ''}${last.note ? ' · ' + esc(last.note) : ''}</small>` : `<small>${esc(L('لسه ماتقدّمش', 'Not submitted yet'))}</small>`}${ev.length > 1 ? `<details><summary class="tiny muted">${esc(L('كل الحركات', 'All events'))} · ${ev.length}</summary>${ev.slice().reverse().map(x => `<div class="tiny" style="padding:3px 0">${d10(x.at)} · ${esc(L(SUBK[x.k][0], SUBK[x.k][1]))}${x.rev ? ' · Rev ' + esc(x.rev) : ''}${x.note ? ' — ' + esc(x.note) : ''}</div>`).join('')}</details>` : ''}${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:sub:${s.id}">${icon('plus')}<span>${esc(L('حركة', 'Record'))}</span></button>` : ''}</div>`; }).join('')}</div>`; };
+  const siteRow = (kind, x, p, can) => {
+    const st = kind === 'subm' ? pill(x.status, SUBST) : kind === 'visits' ? '' : pill(x.status || 'open', OPEN);
+    const main = kind === 'visits' ? `<b>${d10(x.at)}</b><span>${esc(x.by || '')}</span><span class="muted">${esc(x.text || '')}</span>` : `<b>${esc(x.no || '')}</b><span>${esc(x.text || '')}</span><span class="muted">${x.rev ? 'Rev ' + esc(x.rev) + ' · ' : ''}${d10(x.at)}${x.by ? ' · ' + esc(x.by) : ''}</span>`;
+    const cyc = can && kind !== 'visits' ? `<button type="button" class="btn sm ghost" data-okcyc="${p.id}:${kind}:${x.id}" title="${esc(L('غيّر الحالة', 'Change status'))}">${icon('edit')}</button>` : '';
+    return `<div class="okrow">${main}<div class="grow"></div>${st}${cyc}</div>`;
+  };
+  const tabSite = (p, can, team) => {
+    if (p.okSiteOn === false) return `<div class="okempty">${esc(L('الإشراف على الموقع مقفول للمشروع ده.', 'Site supervision is switched off for this project.'))} ${canEdit(p) ? `<button type="button" class="btn sm ghost" data-oksite="${p.id}:1">${esc(L('فعّله', 'Switch on'))}</button>` : ''}</div>`;
+    const d = p.okSite || {}; return `<div class="row" style="justify-content:flex-end">${canEdit(p) ? `<button type="button" class="btn sm ghost" data-oksite="${p.id}:0">${esc(L('اقفل الإشراف للمشروع ده', 'Switch site supervision off'))}</button>` : ''}</div>` + Object.keys(SITE).map(k => { const xs = (d[k] || []).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))); const open = k === 'visits' ? xs.length : k === 'subm' ? xs.filter(x => ['sub', 'rev'].includes(x.status)).length : xs.filter(x => (x.status || 'open') === 'open').length; return `<div class="oksec"><h4>${esc(L(SITE[k][0], SITE[k][1]))}<span class="n">${xs.length}</span>${k !== 'visits' && open ? `<span class="okpill y">${open} ${esc(L('مفتوح', 'open'))}</span>` : ''}<div class="grow"></div>${addBtn(p, k, team)}</h4>${xs.length ? `<details ${open || k === 'visits' ? 'open' : ''}><summary class="tiny muted">${esc(L('القائمة', 'List'))}</summary>${xs.slice(0, 50).map(x => siteRow(k, x, p, team)).join('')}</details>` : `<div class="okempty">—</div>`}</div>`; }).join('');
+  };
+  const tabClose = (p, can) => { const d = p.okClose || []; const dlp = p.okDlp || {}; return `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"><b class="small">${d.length}/${CLOSE.length}</b>${dlp.start ? `<span class="okpill">DLP · ${d10(dlp.start)} → ${d10(dlp.end)}</span>` : ''}<div class="grow"></div>${can ? `<button type="button" class="btn sm ghost" data-okadd="${p.id}:dlp">${icon('calendar')}<span>${esc(L('فترة الضمان', 'Defects period'))}</span></button><button type="button" class="btn sm ghost" data-okadd="${p.id}:lessons">${icon('edit')}<span>Lessons learned</span></button>` : ''}<a class="btn sm ghost" href="#/portfolio">${esc(L('معرض المشاريع', 'Projects gallery'))}</a></div>${ck(p, 'okClose', CLOSE, d, can)}${p.okLessons ? `<div class="oksec"><h4>Lessons learned</h4><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(p.okLessons)}</p></div>` : ''}`; };
+  const tabLogs = (p, team) => { const d = p.okLogs || {}; return Object.keys(LOGS).map(k => { const xs = (d[k] || []).slice().reverse(); return `<div class="oksec"><h4>${esc(L(LOGS[k][0], LOGS[k][1]))}<span class="n">${xs.length}</span><div class="grow"></div>${addBtn(p, k, team)}</h4>${xs.length ? xs.map(x => `<div class="okrow"><span>${esc(x.text)}</span><div class="grow"></div>${k === 'risks' ? pill(x.status || 'open', OPEN) + (team ? `<button type="button" class="btn sm ghost" data-okcyc="${p.id}:${k}:${x.id}">${icon('edit')}</button>` : '') : ''}<span class="muted">${d10(x.at)} · ${esc(x.by || '')}</span></div>`).join('') : `<div class="okempty">—</div>`}</div>`; }).join(''); };
+  const flowHTML = p => {
+    const can = canEdit(p), team = onTeam(p);
+    const cnt = { setup: `${(p.okSetup || []).length}/${SETUP.length}`, client: String(Object.values(p.okSub || {}).filter(x => (x.events || []).some(e => e.k === 'app')).length) + '/' + PIPE.length, site: p.okSiteOn === false ? 'off' : String(Object.values(p.okSite || {}).reduce((n, a) => n + (a || []).length, 0)), close: `${(p.okClose || []).length}/${CLOSE.length}`, logs: String(Object.values(p.okLogs || {}).reduce((n, a) => n + (a || []).length, 0)) };
+    const body = tab === 'setup' ? tabSetup(p, can) : tab === 'client' ? tabClient(p, can) : tab === 'site' ? tabSite(p, can, team) : tab === 'close' ? tabClose(p, can) : tabLogs(p, team);
+    return `<div class="okflow" data-pid="${p.id}"><div class="okfh"><b>${esc(L('بايب لاين المشروع', 'Project pipeline'))}</b><small class="muted">RIBA 2020 · ISO 9001 · ISO 19650 · FIDIC</small>${p.okEnq ? `<span class="okpill b">${esc(L('من الفرص', 'From enquiries'))}</span>` : ''}</div>
+      <div class="oktabs">${TABS.map(t => `<button type="button" data-oktab="${t}" class="${tab === t ? 'on' : ''}">${esc(L(TABL[t][0], TABL[t][1]))}<i>${cnt[t]}</i></button>`).join('')}</div><div class="okfb">${body}</div></div>`;
+  };
+  /* ---- C) the stage gate button on the stage-steps card */
+  const gateBtn = p => {
+    const i = stageIdx(p); const st = PIPE[i]; if (!st || i >= PIPE.length - 1) return '';
+    const done = ((p.okSteps || {})[st.id] || []).length, n = st.items.length; const g = (p.okGates || {})[st.id];
+    if (!canEdit(p)) return g ? `<span class="okgatebtn small muted">${esc(L('اعتمد', 'Approved'))} · ${esc(g.by || '')} · ${d10(g.at)}</span>` : '';
+    return `<button type="button" class="btn sm ${done === n ? 'p' : 'ghost'} okgatebtn" data-okgate="${p.id}">${icon('check')}<span>${esc(L('اعتماد البوابة ← ', 'Approve gate → '))}${esc(L(PIPE[i + 1].ar, PIPE[i + 1].name))}</span></button>`;
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (!(S.route && S.route.view === 'projects' && S.route.id)) return; const p = byId('projects', S.route.id); if (!p) return;
+    const pipe = document.querySelector('.okpipe'); if (!pipe) return;
+    const head = pipe.querySelector('.okph'); if (head && !head.querySelector('.okgatebtn')) head.insertAdjacentHTML('beforeend', gateBtn(p));
+    const old = pipe.parentElement.querySelector('.okflow'); const html = flowHTML(p);
+    if (!old) pipe.insertAdjacentHTML('afterend', html); else if (old.dataset.sig !== html.length + ':' + tab + ':' + (p.updatedAt || '')) { old.outerHTML = html; }
+    const el = pipe.parentElement.querySelector('.okflow'); if (el) el.dataset.sig = html.length + ':' + tab + ':' + (p.updatedAt || '');
+  });
+  const field2 = (l, i) => `<div class="field full"><label>${esc(l)}</label>${i}</div>`;
+  document.addEventListener('click', async ev => {
+    const t = ev.target.closest && ev.target.closest('[data-oktab],[data-okadd],[data-okcyc],[data-oksite],[data-okgate]'); if (!t) return;
+    if (t.dataset.oktab) { tab = t.dataset.oktab; try { localStorage.setItem('ok.ftab', tab); } catch (e) { /* */ } const card = t.closest('.okflow'); const p = byId('projects', card && card.dataset.pid); if (p) card.outerHTML = flowHTML(p); return; }
+    if (t.dataset.oksite) { const [pid, on] = t.dataset.oksite.split(':'); const p = byId('projects', pid); if (!p || !canEdit(p)) return; await up(pid, { okSiteOn: on === '1' }); return; }
+    if (t.dataset.okgate) {
+      const p = byId('projects', t.dataset.okgate); if (!p || !canEdit(p)) return; const i = stageIdx(p); const st = PIPE[i], nx = PIPE[i + 1]; if (!nx) return;
+      const done = ((p.okSteps || {})[st.id] || []).length, n = st.items.length;
+      openModal({ title: L(`اعتماد بوابة «${st.ar}»`, `Approve the «${st.name}» gate`), submitLabel: L('اعتمد وانقل المرحلة', 'Approve and move on'),
+        body: `<div class="form"><div class="full small">${done === n ? `✅ ${esc(L('كل خطوات المرحلة متعلّمة', 'All stage steps are ticked'))}` : `⚠️ ${esc(L(`${n - done} خطوة لسه ماتعلمتش — تقدر تعتمد مع كتابة السبب`, `${n - done} step(s) not ticked — you can still approve with a reason`))}`}</div>${field2(L('ملاحظة الاعتماد', 'Approval note'), `<input name="note" maxlength="200" dir="auto" ${done === n ? '' : 'required'}>`)}<div class="full small muted">${esc(L('المرحلة الجاية: ', 'Next stage: '))}<b>${esc(L(nx.ar, nx.name))}</b> · ${esc(L('البوابة: ', 'Gate: '))}${esc(L(nx.gate[0], nx.gate[1]))}</div></div>`,
+        onSubmit: async f => { const note = f.querySelector('[name=note]').value.trim(); if (done !== n && !note) { toast(L('اكتب السبب', 'Write the reason'), 'err'); return false; }
+          const okGates = Object.assign({}, p.okGates || {}, { [st.id]: { by: myName(), byId: me(), at: nowISO(), note, steps: `${done}/${n}` } });
+          await up(p.id, { okGates, stage: nx.id, osStatus: nx.id, osStatusAt: Object.assign({}, p.osStatusAt || {}, { [nx.id]: nowISO() }), stageAt: Object.assign({}, p.stageAt || {}, { [nx.id]: nowISO() }) });
+          toast(L(`اتعتمدت — المشروع في «${nx.ar}»`, `Approved — the project is now in «${nx.name}»`)); return true; } });
+      return;
+    }
+    if (t.dataset.okcyc) {
+      const [pid, kind, id] = t.dataset.okcyc.split(':'); const p = byId('projects', pid); if (!p || !onTeam(p)) return;
+      const isLog = kind in LOGS; const arr = ((isLog ? p.okLogs : p.okSite) || {})[kind] || []; const x = arr.find(y => y.id === id); if (!x) return;
+      const order = kind === 'subm' ? ['sub', 'appr', 'noted', 'rev', 'rej'] : ['open', 'closed']; const cur = x.status || order[0]; x.status = order[(order.indexOf(cur) + 1) % order.length]; x.statusAt = nowISO();
+      await up(pid, isLog ? { okLogs: Object.assign({}, p.okLogs || {}, { [kind]: arr }) } : { okSite: Object.assign({}, p.okSite || {}, { [kind]: arr }) }); return;
+    }
+    if (t.dataset.okadd) {
+      const [pid, kind, sid] = t.dataset.okadd.split(':'); const p = byId('projects', pid); if (!p) return;
+      if (kind === 'kick') { if (!canEdit(p)) return; const k = p.okKick || {}; openModal({ title: L('تواريخ التجهيز', 'Setup dates'), body: `<div class="form">${field(L('تاريخ التعاقد / NTP', 'Contract / NTP'), inp('ntp', p.okNtp || '', 'type="date"'))}${field(L('Kick-off داخلي', 'Internal kick-off'), inp('internal', k.internal || '', 'type="date"'))}${field(L('Kick-off مع العميل', 'Client kick-off'), inp('client', k.client || '', 'type="date"'))}</div>`, onSubmit: async f => { const d = formData(f); await up(pid, { okNtp: d.ntp || null, okKick: { internal: d.internal || null, client: d.client || null } }); return true; } }); return; }
+      if (kind === 'dlp') { if (!canEdit(p)) return; const d0 = p.okDlp || {}; openModal({ title: L('فترة الضمان (Defects Liability Period)', 'Defects liability period'), body: `<div class="form">${field(L('من', 'From'), inp('start', d0.start || '', 'type="date"'))}${field(L('إلى', 'To'), inp('end', d0.end || '', 'type="date"'))}</div>`, onSubmit: async f => { const d = formData(f); await up(pid, { okDlp: { start: d.start || null, end: d.end || null } }); return true; } }); return; }
+      if (kind === 'lessons') { if (!canEdit(p)) return; openModal({ title: 'Lessons learned', body: `<div class="form">${field2(L('إيه اللي نعمله أحسن المرة الجاية؟', 'What do we do better next time?'), `<textarea name="t" rows="6">${esc(p.okLessons || '')}</textarea>`)}</div>`, onSubmit: async f => { await up(pid, { okLessons: f.querySelector('[name=t]').value.trim() }); return true; } }); return; }
+      if (kind === 'sub') { if (!canEdit(p)) return; const st = PIPE.find(s => s.id === sid); openModal({ title: L(`حركة مع العميل — ${st.ar}`, `Client event — ${st.name}`), body: `<div class="form">${field(L('النوع', 'Event'), `<select name="k">${Object.keys(SUBK).map(k => `<option value="${k}">${esc(L(SUBK[k][0], SUBK[k][1]))}</option>`).join('')}</select>`)}${field(L('التاريخ', 'Date'), inp('at', todayISO(), 'type="date"'))}${field(L('النسخة (Rev)', 'Revision'), inp('rev', '', 'class="ltr" maxlength="10"'))}${field2(L('ملاحظة', 'Note'), `<input name="note" maxlength="200" dir="auto">`)}</div>`, onSubmit: async f => { const d = formData(f); const S2 = Object.assign({}, p.okSub || {}); const cur = Object.assign({ events: [] }, S2[sid] || {}); cur.events = (cur.events || []).concat([{ k: d.k, at: d.at, rev: d.rev, note: d.note, by: myName() }]); S2[sid] = cur; await up(pid, { okSub: S2 }); return true; } }); return; }
+      if (kind in SITE) { if (!onTeam(p) || p.okSiteOn === false) return; const d0 = (p.okSite || {})[kind] || []; const no = kind === 'visits' ? '' : `${{ subm: 'SUB', rfis: 'RFI', instr: 'SI', vars: 'VO', snags: 'SN' }[kind]}-${String(d0.length + 1).padStart(3, '0')}`;
+        openModal({ title: L(SITE[kind][0], SITE[kind][1]), body: `<div class="form">${kind === 'visits' ? '' : field(L('الرقم', 'No.'), inp('no', no, 'class="ltr"'))}${field(L('التاريخ', 'Date'), inp('at', todayISO(), 'type="date"'))}${kind === 'subm' ? field(L('النوع', 'Type'), `<select name="t"><option value="shop">Shop drawing</option><option value="mat">Material</option></select>`) + field('Rev', inp('rev', '0', 'class="ltr" maxlength="10"')) : ''}${field2(kind === 'visits' ? L('تقرير الزيارة (ملاحظات · اللي اتعمل · اللي مطلوب)', 'Visit report (observations · done · required)') : L('الموضوع', 'Subject'), `<textarea name="text" rows="${kind === 'visits' ? 5 : 2}" required></textarea>`)}</div>`,
+          onSubmit: async f => { const d = formData(f); if (!d.text) return false; const row = { id: uid(), no: d.no, at: d.at, text: d.text, by: myName(), byId: me(), rev: d.rev, type: d.t, status: kind === 'subm' ? 'sub' : kind === 'visits' ? undefined : 'open' }; await up(pid, { okSite: Object.assign({}, p.okSite || {}, { [kind]: d0.concat([row]) }) }); return true; } }); return; }
+      if (kind in LOGS) { if (!onTeam(p)) return; const d0 = (p.okLogs || {})[kind] || []; openModal({ title: L(LOGS[kind][0], LOGS[kind][1]), body: `<div class="form">${field2(L('النص', 'Text'), `<textarea name="text" rows="3" required></textarea>`)}${field(L('التاريخ', 'Date'), inp('at', todayISO(), 'type="date"'))}</div>`, onSubmit: async f => { const d = formData(f); if (!d.text) return false; await up(pid, { okLogs: Object.assign({}, p.okLogs || {}, { [kind]: d0.concat([{ id: uid(), text: d.text, at: d.at, by: myName(), byId: me(), status: kind === 'risks' ? 'open' : undefined }]) }) }); return true; } }); return; }
+    }
+  });
+  document.addEventListener('change', async ev => {
+    const el = ev.target.closest && ev.target.closest('[data-okck]'); if (!el) return;
+    const [pid, key, idx] = el.dataset.okck.split(':'); const p = byId('projects', pid); if (!p || !canEdit(p)) { el.checked = !el.checked; return; }
+    const cur = new Set(p[key] || []); if (el.checked) cur.add(+idx); else cur.delete(+idx);
+    await up(pid, { [key]: Array.from(cur).sort((a, b) => a - b) });
+  });
+  window.okFlow = { ESTAGES, SETUP, CLOSE, SITE, LOGS };
+})();
