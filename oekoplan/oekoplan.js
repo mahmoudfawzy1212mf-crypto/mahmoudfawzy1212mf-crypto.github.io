@@ -1030,7 +1030,9 @@ html[data-theme="dark"] .okn{background:var(--surface-2)}
 .okstlist label.on{border-color:rgb(var(--okc));box-shadow:0 0 0 1px rgba(var(--okc),.35)}.okstlist label i{width:10px;height:10px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
 .okstlist label small{color:var(--muted);margin-inline-start:auto}
 html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
+.okown{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}.okown svg{width:13px;height:13px}.okown b{color:var(--ink);font-weight:600}
 </style>`);
+  const ownerName = p => { if (!p) return ''; const id = p.ownerId || p.leadId; const w = id && typeof byId === 'function' && (byId('workers', id) || byId('staff', id)); return (w && w.name) || p.leadName || ''; };
   const badge = (st, p, asBtn) => { const s = STATES[st]; const note = p && p.okStateNote ? ` title="${esc(p.okStateNote)}"` : ''; return `<${asBtn ? 'button type="button"' : 'span'} class="okst ok-${st}${asBtn ? ' okbtn' : ''}" style="--okc:${s.c}"${asBtn ? ` data-action="okState" data-arg="${esc(p.id)}"` : ''}${note}><i></i>${esc(L(s.ar, s.en))}${asBtn ? ' ▾' : ''}</${asBtn ? 'button' : 'span'}>`; };
 
   /* ---- personal use count ---- */
@@ -1056,6 +1058,9 @@ html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
       ORDER.forEach(s => a.classList.toggle('ok-' + s, st === s));
       let b = a.querySelector(':scope > .okst'); if (!st) { if (b) b.remove(); return; }
       if (!b || b.dataset.okst !== st + '|' + I18N.lang) { if (b) b.remove(); a.insertAdjacentHTML('afterbegin', badge(st, p, false)); b = a.querySelector(':scope > .okst'); b.dataset.okst = st + '|' + I18N.lang; }
+      /* the project owner (from the 2026 list): the person's record, or the name as written when he is not on the team list */
+      const own = ownerName(p); let o = a.querySelector('.okown');
+      if (own && (!o || o.dataset.n !== own + '|' + I18N.lang)) { if (o) o.remove(); const cl = a.querySelector('.bd .cl'); if (cl) { cl.insertAdjacentHTML('afterend', `<div class="okown" data-n="${esc(own + '|' + I18N.lang)}">${icon('user')}<span>${esc(L('المسؤول', 'Owner'))}</span><b>${esc(own)}</b></div>`); } }
     });
     if (S.route && S.route.view === 'projects' && !S.route.id) {
       const u = merged(), now = Date.now();
