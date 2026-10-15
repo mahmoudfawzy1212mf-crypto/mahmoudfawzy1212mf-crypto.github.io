@@ -12764,6 +12764,85 @@ if (typeof nameEnRegister === 'function') {
 if (typeof myNameEn === 'function') myNameEn = (base => function () { const v = base.apply(this, arguments); if (v) return v; try { return S.session && S.session.name ? nfTranslit(S.session.name) : ''; } catch (e) { return ''; } })(myNameEn);
 Object.assign(window, { nfTranslit, nfTrWord, NF_NAMES, NF_WORDS });
 /* =====================================================================
+   v7.72 — بيانات التحويل البنكي دايمًا بالإنجليزي (محمود 15 أكتوبر: «رقم الحساب واسم المحوَّل له واسم البنك… لو أنا شغال
+   عربي أو إنجليزي يجيبها بالإنجليزي عشان ناخدها كوبي نحطها على سيستم التحويلات بتاع CIB»).
+   - اسم البنك: قايمة البنوك في مصر بالاسم الرسمي بالإنجليزي + أسمائها الشائعة بالعربي (اللي اتكتب قبل كده بالعربي بيطلع إنجليزي).
+   - اسم صاحب الحساب: holderEn (اللي بيتكتب في الفورم بالإنجليزي) — ولو الاسم القديم عربي ومالوش إنجليزي: كتابة تلقائية
+     (nfTranslit) وعلامة «اتكتب تلقائي — راجعه».
+   الملف ده قاموس (مش نصوص واجهة) — متساب من فحص الترجمة (tools/i18n/codeish.py SKIP_FILES).
+   ===================================================================== */
+(function () {
+  if (window.nfPayEn) return;
+  /* [official English name, Arabic name, extra aliases (Arabic / English / short)] */
+  const BANKS = [
+    ['National Bank of Egypt (NBE)', 'البنك الأهلي المصري', ['البنك الاهلي', 'الاهلي', 'الاهلي المصري', 'بنك الاهلي', 'nbe', 'national bank of egypt', 'alahly', 'ahly']],
+    ['Banque Misr', 'بنك مصر', ['banque misr', 'bank misr', 'bm']],
+    ['Commercial International Bank (CIB)', 'البنك التجاري الدولي', ['التجاري الدولي', 'بنك التجاري الدولي', 'سي اي بي', 'cib', 'commercial international bank']],
+    ['Banque du Caire', 'بنك القاهرة', ['banque du caire', 'bank of cairo', 'bdc']],
+    ['QNB Egypt', 'بنك QNB مصر', ['qnb', 'qnb alahli', 'qnb al ahli', 'qnb الاهلي', 'بنك قطر الوطني', 'قطر الوطني', 'قطر الوطني الاهلي', 'كيو ان بي', 'qatar national bank']],
+    ['First Abu Dhabi Bank Misr (FABMISR)', 'بنك أبوظبي الأول مصر', ['بنك ابوظبي الاول', 'بنك ابو ظبي الاول', 'ابوظبي الاول', 'بنك ابوظبي الاول مصر', 'fab', 'fab misr', 'fabmisr', 'first abu dhabi bank', 'first abu dhabi bank misr']],
+    ['Abu Dhabi Islamic Bank – Egypt (ADIB)', 'مصرف أبوظبي الإسلامي – مصر', ['مصرف ابوظبي الاسلامي', 'بنك ابوظبي الاسلامي', 'ابوظبي الاسلامي', 'adib', 'abu dhabi islamic bank']],
+    ['Abu Dhabi Commercial Bank – Egypt (ADCB)', 'بنك أبوظبي التجاري – مصر', ['بنك ابوظبي التجاري', 'ابوظبي التجاري', 'adcb', 'abu dhabi commercial bank']],
+    ['Arab African International Bank (AAIB)', 'البنك العربي الأفريقي الدولي', ['العربي الافريقي', 'البنك العربي الافريقي', 'aaib', 'arab african international bank', 'arab african']],
+    ['HSBC Bank Egypt', 'بنك HSBC مصر', ['hsbc', 'اتش اس بي سي', 'hsbc bank egypt']],
+    ['Bank of Alexandria (AlexBank)', 'بنك الإسكندرية', ['بنك الاسكندريه', 'بنك الاسكندرية', 'الكس بنك', 'alexbank', 'alex bank', 'bank of alexandria']],
+    ['Faisal Islamic Bank of Egypt', 'بنك فيصل الإسلامي المصري', ['بنك فيصل', 'فيصل الاسلامي', 'بنك فيصل الاسلامي', 'faisal', 'faisal islamic bank']],
+    ['Al Baraka Bank Egypt', 'بنك البركة مصر', ['بنك البركه', 'البركه', 'albaraka', 'al baraka']],
+    ['Emirates NBD Egypt', 'بنك الإمارات دبي الوطني – مصر', ['الامارات دبي الوطني', 'بنك الامارات دبي الوطني', 'emirates nbd', 'enbd']],
+    ['Crédit Agricole Egypt', 'بنك كريدي أجريكول مصر', ['كريدي اجريكول', 'بنك كريدي اجريكول', 'credit agricole', 'crédit agricole']],
+    ['Housing and Development Bank (HDB)', 'بنك التعمير والإسكان', ['التعمير والاسكان', 'بنك التعمير والاسكان', 'hdb', 'housing and development bank']],
+    ['Suez Canal Bank', 'بنك قناة السويس', ['قناه السويس', 'بنك قناه السويس', 'suez canal bank']],
+    ['Egyptian Gulf Bank (EG Bank)', 'البنك المصري الخليجي', ['المصري الخليجي', 'eg bank', 'egbank', 'egyptian gulf bank']],
+    ['Arab Bank', 'البنك العربي', ['arab bank']],
+    ['Attijariwafa Bank Egypt', 'التجاري وفا بنك مصر', ['التجاري وفا', 'التجاري وفا بنك', 'attijariwafa', 'attijariwafa bank']],
+    ['Mashreq Bank Egypt', 'بنك المشرق – مصر', ['بنك المشرق', 'المشرق', 'mashreq', 'mashreq bank']],
+    ['Kuwait Finance House – Egypt (KFH)', 'بيت التمويل الكويتي – مصر', ['بيت التمويل الكويتي', 'البنك الاهلي المتحد', 'الاهلي المتحد', 'kfh', 'ahli united bank', 'kuwait finance house']],
+    ['National Bank of Kuwait – Egypt (NBK)', 'بنك الكويت الوطني – مصر', ['بنك الكويت الوطني', 'الكويت الوطني', 'nbk', 'national bank of kuwait']],
+    ['Al Ahli Bank of Kuwait – Egypt (ABK)', 'البنك الأهلي الكويتي – مصر', ['البنك الاهلي الكويتي', 'الاهلي الكويتي', 'abk', 'al ahli bank of kuwait']],
+    ['Société Arabe Internationale de Banque (SAIB)', 'بنك الشركة المصرفية العربية الدولية (saib)', ['الشركه المصرفيه العربيه الدوليه', 'بنك saib', 'saib']],
+    ['Arab International Bank (AIB)', 'المصرف العربي الدولي', ['المصرف العربي الدولي', 'arab international bank']],
+    ['Agricultural Bank of Egypt (ABE)', 'البنك الزراعي المصري', ['البنك الزراعي', 'بنك التنميه والائتمان الزراعي', 'agricultural bank of egypt']],
+    ['Industrial Development Bank (IDB)', 'بنك التنمية الصناعية', ['التنميه الصناعيه', 'بنك التنميه الصناعيه', 'industrial development bank']],
+    ['Export Development Bank of Egypt (EBE)', 'البنك المصري لتنمية الصادرات', ['تنميه الصادرات', 'بنك تنميه الصادرات', 'ebank', 'ebe', 'export development bank']],
+    ['Arab Investment Bank (aiBANK)', 'بنك الاستثمار العربي', ['الاستثمار العربي', 'aibank', 'arab investment bank']],
+    ['MIDBANK', 'ميد بنك', ['ميدبنك', 'midbank', 'mid bank']],
+    ['The United Bank', 'المصرف المتحد', ['المصرف المتحد', 'united bank', 'the united bank']],
+    ['Egyptian Arab Land Bank', 'البنك العقاري المصري العربي', ['العقاري المصري العربي', 'egyptian arab land bank']],
+    ['Bank ABC Egypt', 'بنك ABC مصر', ['المؤسسه العربيه المصرفيه', 'bank abc', 'abc bank']],
+    ['Citibank Egypt', 'سيتي بنك مصر', ['سيتي بنك', 'citibank', 'citi bank']],
+    ['Standard Chartered Egypt', 'ستاندرد تشارترد مصر', ['ستاندرد تشارترد', 'standard chartered']],
+    ['Nasser Social Bank', 'بنك ناصر الاجتماعي', ['بنك ناصر', 'nasser social bank']]
+  ];
+  const AR = /[؀-ۿ]/;
+  const key = s => String(s || '').toLowerCase().replace(/[ً-ْٰـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+    .replace(/[^a-z0-9ء-ي]/g, '');
+  const ALIAS = []; BANKS.forEach(b => [b[0], b[1]].concat(b[2]).forEach(a => { const k = key(a); if (k) ALIAS.push([k, b[0]]); }));
+  ALIAS.sort((a, b) => b[0].length - a[0].length);
+  const EXACT = new Map(ALIAS.map(x => [x[0], x[1]]));
+  /* the official English name of a bank written any way (Arabic, English, short) — '' when unknown and Arabic */
+  function bankOf(s) {
+    const k = key(s); if (!k) return ''; if (EXACT.has(k)) return EXACT.get(k);
+    const hit = ALIAS.find(x => x[0].length >= 5 && k.includes(x[0])); if (hit) return hit[1];
+    return '';
+  }
+  const bank = s => { const v = String(s || '').trim(); return bankOf(v) || (AR.test(v) ? '' : v); };
+  /* «the bank name in English» for showing / copying: known → official name; Latin → as written; unknown Arabic → transliteration */
+  const bankShow = s => { const v = String(s || '').trim(); return bank(v) || (v && typeof nfTranslit === 'function' ? nfTranslit(v) : v); };
+  const bankAuto = s => { const v = String(s || '').trim(); return !!v && !bank(v); };
+  const holder = m => { if (!m) return ''; if (m.holderEn) return String(m.holderEn); const h = String(m.holder || '').trim(); return AR.test(h) && typeof nfTranslit === 'function' ? nfTranslit(h) : h; };
+  const holderAuto = m => !!m && (!!m.holderEnAuto || (!m.holderEn && AR.test(String(m.holder || ''))));
+  const auto = m => !!m && (holderAuto(m) || (m.type === 'bank' && bankAuto(m.bank)));
+  const latinOk = s => /^[A-Za-z][A-Za-z0-9 .,&'()\/+-]{1,}$/.test(String(s || '').trim()) && (String(s).match(/[A-Za-z]/g) || []).length >= 2;
+  const isEn = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  /* <option>s of the bank picker (value = the English name) + «another bank» */
+  function options(cur) {
+    const c = bank(cur); const known = BANKS.some(b => b[0] === c);
+    return `<option value="">${isEn() ? '— choose the bank —' : '— اختار البنك —'}</option>` + BANKS.map(b => `<option value="${b[0].replace(/"/g, '&quot;')}"${b[0] === c ? ' selected' : ''}>${isEn() ? b[0] : `${b[0]} — ${b[1]}`}</option>`).join('')
+      + `<option value="__other"${cur && !known ? ' selected' : ''}>${isEn() ? 'Another bank (type it in English)' : 'بنك تاني (اكتبه بالإنجليزي)'}</option>`;
+  }
+  window.nfPayEn = { BANKS, bank, bankShow, bankAuto, holder, holderAuto, auto, latinOk, options, key };
+})();
+/* =====================================================================
    v6.03 — "everything flips" (Mahmoud's standing rule): texts people type are translated too.
    · English: any Arabic text left after the dictionary (product name, note, task title, item line, message…) is sent in
      batches to Edge "tr" (Claude) and replaced by its English — each text is translated once on the server (cache nf_tr) and kept on the device.
@@ -24154,16 +24233,23 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const payOf = sid => (sid && byId('suppay', sid)) || null;
   const methodsOf = sid => ((payOf(sid) || {}).methods || []).filter(Boolean);
   const cardFmt = c => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
-  const mShow = m => !m ? '' : m.type === 'card' ? cardFmt(m.card) : m.type === 'bank' ? `${m.bank || ''} — ${m.account || ''}` : (m.number || m.ipa || '');
+  /* v7.72 (محمود 15 أكتوبر): اسم البنك واسم صاحب الحساب دايمًا بالإنجليزي — بيتنسخوا في شاشة تحويلات CIB */
+  const PE = () => window.nfPayEn || null;
+  const mBank = m => (PE() ? PE().bankShow(m && m.bank) : (m && m.bank) || '');
+  const mHolder = m => (PE() ? PE().holder(m) : (m && m.holder) || '');
+  const mAuto = m => !!(PE() && PE().auto(m));
+  const holderHTML = m => mHolder(m) ? `<b dir="ltr" class="ltr notr">${esc(mHolder(m))}</b>` : '';
+  const autoNote = (m, sid) => !mAuto(m) ? '' : `<span class="tiny muted">${esc(sid ? L('اتكتب بالإنجليزي تلقائي — راجعه', 'Written in English automatically — check it') : L('اتكتب بالإنجليزي تلقائي — لو مختلف عن البنك صحّحه من صفحة المورد', 'Written in English automatically — if the bank has it differently, fix it on the supplier page'))}</span>${sid && writable() && canSupPay() ? `<button type="button" class="btn xs ghost" data-action="supPayEn" data-arg="${esc(sid)}:${esc(m.id)}">${esc(L('صحّح', 'Fix'))}</button>` : ''}`;
+  const mShow = m => !m ? '' : m.type === 'card' ? cardFmt(m.card) : m.type === 'bank' ? `${mBank(m)} — ${m.account || ''}` : (m.number || m.ipa || '');
   const mCopy = m => !m ? '' : (m.type === 'card' ? m.card : m.type === 'bank' ? m.account : (m.number || m.ipa)) || '';
-  const mLabel = m => !m ? '' : `${(ST[m.type] || [''])[0]} ${mShow(m)}${m.holder ? ' — ' + m.holder : ''}`.trim();
+  const mLabel = m => !m ? '' : `${(ST[m.type] || [''])[0]} ${mShow(m)}${mHolder(m) ? ' — ' + mHolder(m) : ''}`.trim();
   const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9a-zA-Z@._-]/g, '');
   const luhn = n => { let t = 0; for (let i = 0; i < n.length; i++) { let d = +n[n.length - 1 - i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; } return t % 10 === 0; };
   const remaining = p => r2(poPayable(p) - (+p.paid || 0));
   window.nfSupPayOf = payOf;
   (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
 .spm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px dashed var(--line)}.spm:last-child{border-bottom:0}
-.spm .v{font-weight:800;direction:ltr;letter-spacing:.5px}.spm label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.spm .v{font-weight:800;direction:ltr;letter-spacing:.5px}.spm label>.muted,.spm>.muted{white-space:nowrap}.spm label{display:flex;gap:6px;align-items:center;cursor:pointer}
 .sppay{border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:6px;margin-top:8px}
 </style>`);
 
@@ -24172,8 +24258,9 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     return `<div class="form">${intro ? `<div class="full small">${intro}</div>` : ''}
       ${field('النوع', `<select name="stype" id="sp-type">${Object.keys(ST).map(k => `<option value="${k}">${ST[k][0]}</option>`).join('')}</select>`)}
       <div class="field" id="sp-ipmode" style="display:none"><label>إنستاباي بـ</label><select name="ipmode"><option value="num">رقم الموبايل</option><option value="ipa">عنوان إنستاباي (name@instapay)</option></select></div>
-      <div class="field" id="sp-bank" style="display:none"><label>اسم البنك</label><input name="bank" autocomplete="off" placeholder="مثلاً البنك الأهلي"></div>
-      <div class="field full" id="sp-holder" style="display:none"><label id="sp-hl">اسم صاحب الحساب</label><input name="holder" autocomplete="off" spellcheck="false"></div>
+      <div class="field" id="sp-bank" style="display:none"><label>اسم البنك</label><select name="bank" id="sp-banksel">${PE() ? PE().options('') : ''}</select></div>
+      <div class="field" id="sp-bankother" style="display:none"><label>اسم البنك بالإنجليزي</label><input name="bankOther" class="ltr" dir="ltr" autocomplete="off" spellcheck="false" placeholder="Bank name"></div>
+      <div class="field full" id="sp-holder" style="display:none"><label id="sp-hl">اسم صاحب الحساب بالإنجليزي</label><input name="holder" class="ltr" dir="ltr" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="FIRST METALS"><div class="tiny muted" style="margin-top:3px">بالحروف الإنجليزي وزي ما هو مكتوب في البنك بالظبط — بيتنسخ زي ما هو في شاشة التحويل.</div></div>
       <div class="field full"><label id="sp-l1">الرقم</label><input name="w1" id="sp-1" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="01xxxxxxxxx"></div>
       <div class="field full"><label id="sp-l2">اكتب الرقم تاني (بإيدك — اللصق مقفول)</label><input name="w2" id="sp-2" class="ltr" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="نفس الرقم"></div>
       <div class="full tiny muted">بعد التسجيل أي تغيير أو إضافة بيروح لمدير الحسابات أو المالك يوافق عليه — علشان محدش يبدّل رقم مورد.</div></div>`;
@@ -24184,12 +24271,13 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const upd = () => {
       const k = t.value, ipa = mode() === 'ipa', card = k === 'card', bank = k === 'bank';
       $('#sp-ipmode', f).style.display = k === 'ip' ? '' : 'none'; $('#sp-bank', f).style.display = bank ? '' : 'none'; $('#sp-holder', f).style.display = card || bank ? '' : 'none';
-      $('#sp-hl', f).textContent = card ? 'اسم صاحب الكارت (اللي بيتكتب في إنستاباي)' : 'اسم صاحب الحساب';
+      $('#sp-hl', f).textContent = card ? L('اسم صاحب الكارت بالإنجليزي (اللي بيظهر في إنستاباي)', 'Card holder name in English (as InstaPay shows it)') : L('اسم صاحب الحساب بالإنجليزي', 'Account holder name in English');
+      const bo = $('#sp-bankother', f), bs = $('#sp-banksel', f); if (bo) bo.style.display = bank && bs && bs.value === '__other' ? '' : 'none';
       const l = card ? 'رقم كارت فوري' : bank ? 'رقم الحساب أو الـ IBAN' : ipa ? 'عنوان إنستاباي' : 'الرقم';
       $('#sp-l1', f).textContent = l; $('#sp-l2', f).textContent = `اكتب ${l} تاني (بإيدك — اللصق مقفول)`;
       [a, b].forEach(x => { x.inputMode = ipa || bank ? 'text' : 'numeric'; x.placeholder = card ? '16 رقم' : bank ? 'EG00 0000 …' : ipa ? 'name@instapay' : '01xxxxxxxxx'; });
     };
-    t.addEventListener('change', upd); f.addEventListener('change', e => { if (e.target.name === 'ipmode') upd(); });
+    t.addEventListener('change', upd); f.addEventListener('change', e => { if (e.target.name === 'ipmode' || e.target.name === 'bank') upd(); });
     ['paste', 'drop', 'dragover'].forEach(ev => b.addEventListener(ev, e => { e.preventDefault(); if (ev !== 'dragover') toast('اكتبه بإيدك — اللصق مقفول هنا', 'err'); }));
     ['copy', 'cut'].forEach(ev => a.addEventListener(ev, e => e.preventDefault()));
     b.addEventListener('contextmenu', e => e.preventDefault());
@@ -24204,8 +24292,16 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     if (v1 !== v2) { toast('الخانتين مش زي بعض — راجعهم', 'err'); return null; }
     const base = { id: uid(), type, number: null, ipa: null, card: null, bank: null, account: null, holder: null, at: nowISO(), byName: S.session?.name || '' };
     const holder = String(d.holder || '').trim().replace(/\s+/g, ' ');
-    if (type === 'bank') { if (!/^[0-9A-Z]{6,34}$/.test(v1)) { toast('رقم الحساب أو الـ IBAN مش مظبوط', 'err'); return null; } if (String(d.bank || '').trim().length < 2) { toast('اكتب اسم البنك', 'err'); return null; } if (holder.length < 3) { toast('اكتب اسم صاحب الحساب', 'err'); return null; } return Object.assign(base, { account: v1, bank: String(d.bank).trim(), holder }); }
-    if (type === 'card') { if (!/^\d{16,19}$/.test(v1)) { toast('رقم الكارت لازم يبقى 16 رقم', 'err'); return null; } if (holder.length < 3) { toast('اكتب اسم صاحب الكارت', 'err'); return null; } if (!luhn(v1) && !(await confirmDlg(`رقم الكارت ${cardFmt(v1)} شكله مش مظبوط. متأكد منه؟`, 'أيوه متأكد', false))) return null; return Object.assign(base, { card: v1, holder }); }
+    const enOk = v => (PE() ? PE().latinOk(v) : v.length >= 3);
+    if ((type === 'bank' || type === 'card') && holder && !enOk(holder)) { toast(L('اكتب الاسم بالحروف الإنجليزي — زي ما هو في البنك', 'Write the name in English letters — exactly as the bank has it'), 'err'); return null; }
+    if (type === 'bank') {
+      if (!/^[0-9A-Z]{6,34}$/.test(v1)) { toast('رقم الحساب أو الـ IBAN مش مظبوط', 'err'); return null; }
+      const bk = d.bank === '__other' ? String(d.bankOther || '').trim().replace(/\s+/g, ' ') : String(d.bank || '').trim();
+      if (bk.length < 2) { toast('اكتب اسم البنك', 'err'); return null; }
+      if (d.bank === '__other' && !enOk(bk)) { toast(L('اكتب اسم البنك بالحروف الإنجليزي', 'Write the bank name in English letters'), 'err'); return null; }
+      if (holder.length < 3) { toast('اكتب اسم صاحب الحساب', 'err'); return null; }
+      return Object.assign(base, { account: v1, bank: bk, holder, holderEn: holder }); }
+    if (type === 'card') { if (!/^\d{16,19}$/.test(v1)) { toast('رقم الكارت لازم يبقى 16 رقم', 'err'); return null; } if (holder.length < 3) { toast('اكتب اسم صاحب الكارت', 'err'); return null; } if (!luhn(v1) && !(await confirmDlg(`رقم الكارت ${cardFmt(v1)} شكله مش مظبوط. متأكد منه؟`, 'أيوه متأكد', false))) return null; return Object.assign(base, { card: v1, holder, holderEn: holder }); }
     if (ipa) { if (!/^[a-z0-9._-]+@instapay$/.test(v1)) { toast('عنوان إنستاباي لازم يبقى زي name@instapay', 'err'); return null; } return Object.assign(base, { ipa: v1 }); }
     if (!/^01[0125]\d{8}$/.test(v1)) { toast('الرقم لازم يبقى موبايل مصري 11 رقم', 'err'); return null; }
     return Object.assign(base, { number: v1 });
@@ -24245,11 +24341,31 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     toast(ok === '1' ? 'اتوافق' : 'اترفض');
   };
   ACTIONS.spCopy = async v => { try { await navigator.clipboard.writeText(v); toast('اتنسخ'); } catch (e) { toast(v); } };
-  const copyBtns = m => `${mCopy(m) ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(mCopy(m))}">نسخ الرقم</button>` : ''}${m.holder ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(m.holder)}">نسخ الاسم</button>` : ''}`;
+  const copyBtns = m => `${mCopy(m) ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(mCopy(m))}">${esc(L('نسخ الرقم', 'Copy number'))}</button>` : ''}${mHolder(m) ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(mHolder(m))}">${esc(L('نسخ الاسم', 'Copy name'))}</button>` : ''}${m.type === 'bank' && mBank(m) ? `<button type="button" class="btn xs" data-action="spCopy" data-arg="${esc(mBank(m))}">${esc(L('نسخ البنك', 'Copy bank'))}</button>` : ''}`;
+  /* v7.72: fix the English bank / holder name of a registered number (owner / HR directly, otherwise a request like any change) */
+  ACTIONS.supPayEn = arg => {
+    const [sid, mid] = String(arg).split(':'); const s = byId('suppliers', sid); const m = methodsOf(sid).find(x => x.id === mid); if (!s || !m || !canSupPay() || !writable()) return;
+    const cur = payOf(sid); if (cur && cur.pending) { toast('فيه طلب تغيير لسه مستني الموافقة', 'err'); return; }
+    const bank = m.type === 'bank'; const bk = bank && PE() ? PE().bank(m.bank) : '';
+    openModal({ title: `${L('الاسم بالإنجليزي', 'English name')} — ${s.name || ''}`, submitLabel: canApprove() ? L('حفظ', 'Save') : L('ابعت الطلب', 'Send the request'),
+      body: `<div class="form"><div class="full small"><span class="muted">${esc((ST[m.type] || [''])[0])}</span> <b dir="ltr" class="ltr notr">${esc(mCopy(m))}</b></div>
+        ${bank ? `<div class="field"><label>${esc(L('اسم البنك', 'Bank name'))}</label><select name="bank" id="spe-bank">${PE() ? PE().options(bk || m.bank) : ''}</select></div><div class="field" id="spe-other" style="${bk ? 'display:none' : ''}"><label>${esc(L('اسم البنك بالإنجليزي', 'Bank name in English'))}</label><input name="bankOther" class="ltr" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(bk ? '' : (/[\u0600-\u06FF]/.test(m.bank || '') ? mBank(m) : (m.bank || '')))}"></div>` : ''}
+        <div class="field full"><label>${esc(bank ? L('اسم صاحب الحساب بالإنجليزي', 'Account holder name in English') : L('اسم صاحب الكارت بالإنجليزي', 'Card holder name in English'))}</label><input name="holderEn" class="ltr" dir="ltr" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(mHolder(m))}"><div class="tiny muted" style="margin-top:3px">${esc(L('زي ما هو مكتوب في البنك بالظبط.', 'Exactly as the bank has it.'))}${m.holder && m.holder !== mHolder(m) ? ` ${esc(L('اللي كان متسجّل:', 'Registered as:'))} ${esc(m.holder)}` : ''}</div></div>
+        ${canApprove() ? '' : `<div class="full tiny muted">${esc(L('الطلب هيروح لمدير الحسابات يوافق عليه.', 'The request goes to the accounts manager to approve.'))}</div>`}</div>`,
+      onOpen: f => { const sel = $('#spe-bank', f), o = $('#spe-other', f); if (sel && o) sel.addEventListener('change', () => { o.style.display = sel.value === '__other' ? '' : 'none'; }); },
+      onSubmit: async f => {
+        const d = formData(f); const h = String(d.holderEn || '').trim().replace(/\s+/g, ' ');
+        const enOk = v => (PE() ? PE().latinOk(v) : v.length >= 3);
+        if (!enOk(h)) { toast(L('اكتب الاسم بالحروف الإنجليزي — زي ما هو في البنك', 'Write the name in English letters — exactly as the bank has it'), 'err'); return false; }
+        const nm = Object.assign({}, m, { holderEn: h, holderEnAuto: false });
+        if (bank) { const b2 = d.bank === '__other' ? String(d.bankOther || '').trim().replace(/\s+/g, ' ') : String(d.bank || '').trim(); if (!b2 || !enOk(b2)) { toast(L('اكتب اسم البنك بالحروف الإنجليزي', 'Write the bank name in English letters'), 'err'); return false; } nm.bank = b2; }
+        await proposeMethods(s, methodsOf(sid).map(x => (x.id === mid ? nm : x)), `${L('الاسم بالإنجليزي', 'English name')}: ${mLabel(nm)}`);
+      } });
+  };
   function supPayCard(s) {
     const cur = payOf(s.id); const ms = methodsOf(s.id); const pend = cur && cur.pending;
     return `<div class="card" id="suppaycard"><div class="cardhead"><h3>${icon('money')}أرقام تحويل المورد</h3><div class="grow"></div>${writable() && !pend ? `<button class="btn sm" data-action="supPayAdd" data-arg="${esc(s.id)}">${icon('plus')}${!canApprove() && ms.length ? 'طلب إضافة رقم' : 'رقم تحويل'}</button>` : ''}</div>
-      ${ms.length ? ms.map(m => `<div class="spm"><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v">${esc(mShow(m))}</span>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}<div class="grow"></div>${writable() && !pend ? `<button class="btn xs ghost" data-action="supPayDel" data-arg="${esc(s.id)}:${esc(m.id)}">${canApprove() ? 'شيل' : 'طلب شيل'}</button>` : ''}</div>`).join('') : '<div class="small muted">مفيش أرقام تحويل لسه — المالك مش هيعرف يحوّل غير لما تتسجّل.</div>'}
+      ${ms.length ? ms.map(m => `<div class="spm"><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v notr" dir="ltr">${esc(mShow(m))}</span>${holderHTML(m)}${copyBtns(m)}${!pend ? autoNote(m, s.id) : ''}<div class="grow"></div>${writable() && !pend && (m.type === 'bank' || m.type === 'card') && !mAuto(m) ? `<button class="btn xs ghost" data-action="supPayEn" data-arg="${esc(s.id)}:${esc(m.id)}">${esc(L('عدّل الإنجليزي', 'Edit English'))}</button>` : ''}${writable() && !pend ? `<button class="btn xs ghost" data-action="supPayDel" data-arg="${esc(s.id)}:${esc(m.id)}">${canApprove() ? 'شيل' : 'طلب شيل'}</button>` : ''}</div>`).join('') : '<div class="small muted">مفيش أرقام تحويل لسه — المالك مش هيعرف يحوّل غير لما تتسجّل.</div>'}
       ${pend ? `<div class="banner warn small" style="margin-top:8px;display:block"><b>طلب تغيير</b> من ${esc(pend.byName || '')} — ${esc(pend.what || '')}<div style="margin-top:4px">بعد الموافقة: ${(pend.methods || []).map(m => `<span class="ltr">${esc(mLabel(m))}</span>`).join(' · ') || 'مفيش أرقام'}</div>${canApprove() && writable() ? `<div class="row" style="gap:6px;margin-top:6px"><button class="btn xs p" data-action="supPayDecide" data-arg="${esc(s.id)}:1">وافق</button><button class="btn xs" data-action="supPayDecide" data-arg="${esc(s.id)}:0">ارفض</button></div>` : ''}</div>` : ''}</div>`;
   }
   if (EXTRA_VIEWS.suppliers) EXTRA_VIEWS.suppliers = (base => r => { let h = base(r); if (!r || !r.id || !canSupPay()) return h; const s = byId('suppliers', r.id); if (!s) return h; const i = h.indexOf('<div class="card"'); const card = supPayCard(s); return i < 0 ? h + card : h.slice(0, i) + card + h.slice(i); })(EXTRA_VIEWS.suppliers);
@@ -24264,7 +24380,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
       S._spDefer = () => { closeModal(); fin({ mode: 'defer' }); };
       openModal({ title: o.title, submitLabel: 'حوّلت — سجّل التحويل',
         body: `<div class="form">
-          <div class="full"><div class="tiny muted" style="margin-bottom:4px">حوّل على رقم من دول واختار حوّلت على أنهي:</div>${ms.length ? ms.map((m, i) => `<div class="spm"><label><input type="radio" name="mid" value="${esc(m.id)}" ${i === 0 ? 'checked' : ''}><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v">${esc(mShow(m))}</span></label>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}</div>`).join('') : `<div class="banner warn small">المورد مالوش أرقام تحويل مسجّلة — اطلب من المشتريات يسجّلها من صفحة المورد. تقدر تسجّل التحويل برضه.</div><input type="hidden" name="mid" value="">`}</div>
+          <div class="full"><div class="tiny muted" style="margin-bottom:4px">حوّل على رقم من دول واختار حوّلت على أنهي:</div>${ms.length ? ms.map((m, i) => `<div class="spm"><label><input type="radio" name="mid" value="${esc(m.id)}" ${i === 0 ? 'checked' : ''}><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v notr" dir="ltr">${esc(mShow(m))}</span></label>${holderHTML(m)}${copyBtns(m)}${autoNote(m)}</div>`).join('') : `<div class="banner warn small">المورد مالوش أرقام تحويل مسجّلة — اطلب من المشتريات يسجّلها من صفحة المورد. تقدر تسجّل التحويل برضه.</div><input type="hidden" name="mid" value="">`}</div>
           ${o.fixed ? `<div class="field"><label>المبلغ</label><b class="num" style="font-size:18px">${fmtMoney(o.amount)} ${CUR()}</b><input type="hidden" name="amount" value="${o.amount}"></div>` : field(`المبلغ (${CUR()}) — الباقي ${fmtMoney(o.amount)}`, inp('amount', o.amount, 'type="number" step="any" min="0" inputmode="decimal"'))}
           ${o.src ? field('التحويل من', `<select name="src">${typeof srcOptions === 'function' ? srcOptions('personal') : '<option value="personal">حساب محمود الشخصي</option>'}</select>`) : ''}
           <div class="field full"><label>صورة التحويل</label><input type="file" id="sp-file" accept="image/*"></div>
@@ -24378,7 +24494,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   }
   /* v7.55: the line of a PO in «money waiting for you» says where to transfer (type, number, account holder) */
   const MT_EN = { vf: 'Vodafone Cash', et: 'Etisalat Cash', or: 'Orange Cash', we: 'WE Cash', ip: 'InstaPay', card: 'Instant card', bank: 'Bank account' };
-  const mLine = m => `${L((ST[m.type] || [''])[0], MT_EN[m.type] || '')} ${mShow(m)}${m.holder ? ' — ' + m.holder : ''}`.trim();
+  const mLine = m => `${L((ST[m.type] || [''])[0], MT_EN[m.type] || '')} ${mShow(m)}${mHolder(m) ? ' — ' + mHolder(m) : ''}`.trim();
   if (typeof moneyDue === 'function') moneyDue = (base => function () {
     const out = base.apply(this, arguments);
     try { if (canSupPay()) out.forEach(x => { if (!x || x.kind !== 'po') return; const p = byId('purchases', x.id); const s0 = p && supplierOf(p); const ms = s0 ? methodsOf(s0.id) : [];
@@ -24391,7 +24507,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     /* v7.55 (Mahmoud on RFQ-26-009: «where is the number to transfer to?») — the supplier's transfer numbers on the waiting card itself */
     if (p.status === 'transfer' && !p.transfer && canSupPay()) {
       const s = supplierOf(p); const ms = s ? methodsOf(s.id) : [];
-      const add = ms.length ? `<div class="sp-to"><div class="tiny muted" style="margin:8px 0 4px">${esc(L('حوّل على:', 'Transfer to:'))}</div>${ms.map(m => `<div class="spm"><span class="muted small">${esc(L((ST[m.type] || [''])[0], MT_EN[m.type] || ''))}</span><span class="v ltr">${esc(mShow(m))}</span>${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${copyBtns(m)}</div>`).join('')}</div>`
+      const add = ms.length ? `<div class="sp-to"><div class="tiny muted" style="margin:8px 0 4px">${esc(L('حوّل على:', 'Transfer to:'))}</div>${ms.map(m => `<div class="spm"><span class="muted small">${esc(L((ST[m.type] || [''])[0], MT_EN[m.type] || ''))}</span><span class="v ltr notr" dir="ltr">${esc(mShow(m))}</span>${holderHTML(m)}${copyBtns(m)}${autoNote(m, s.id)}</div>`).join('')}</div>`
         : `<div class="banner warn small" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${icon('alert')}<span>${esc(L('المورد مالوش رقم تحويل متسجّل لسه — ضيفه من صفحة المورد.', 'The supplier has no transfer number yet — add it on the supplier page.'))}</span>${s ? `<a class="btn xs" href="#/suppliers/${esc(s.id)}">${esc(L('أرقام تحويل المورد', 'Supplier transfer numbers'))}</a>` : ''}</div>`;
       const i = h.lastIndexOf('</div>'); h = i > 0 ? h.slice(0, i) + add + h.slice(i) : h + add;
     }
@@ -41615,7 +41731,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     } catch (e) { /* ignore */ }
     const items = freeItems(); const gs = groupsOf(items); const grouped = new Set(); gs.forEach(g => g.items.forEach(it => grouped.add(it.key)));
     /* v7.55: the supplier line also says where to transfer (type, number, account holder) */
-    const toOf = sk => { const ms = supMethods(sk); return ms.length ? ' · ' + L('حوّل على', 'Transfer to') + ': ' + ms.map(m => `${ST()[m.type] || ''} ${mNum(m)}${m.holder ? ' — ' + m.holder : ''}`.trim()).join(' / ') : ''; };
+    const toOf = sk => { const ms = supMethods(sk); return ms.length ? ' · ' + L('حوّل على', 'Transfer to') + ': ' + ms.map(m => `${ST()[m.type] || ''} ${mNum(m)}${mHol(m) ? ' — ' + mHol(m) : ''}`.trim()).join(' / ') : ''; };
     gs.forEach(g => { const to = toOf(g.sk); out.push({ kind: 'sup', id: g.sk, label: L(`${g.supplier} — ${g.items.length} أوامر شراء`, `${g.supplier} — ${g.items.length} purchase orders`), sub: g.items.map(it => `${it.no} ${fmtMoney(it.amount)}`).join(' · ') + to, subNo: g.items.map(it => it.no).join('، ') + to, amount: g.total, action: 'supGroupPay', href: 'money' }); });
     const busy = inLive();
     baseDue().filter(x => !busy.has(keyOf(x)) && !grouped.has(keyOf(x))).forEach(x => out.push(x));
@@ -41702,9 +41818,12 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
 
   /* ---------- supplier numbers / payer numbers ---------- */
   const ST = () => ({ vf: L('فودافون كاش', 'Vodafone Cash'), et: L('اتصالات كاش', 'Etisalat Cash'), or: L('أورنج كاش', 'Orange Cash'), we: L('وي كاش', 'WE Pay'), ip: L('إنستاباي', 'InstaPay'), card: L('كارت', 'Card'), bank: L('حساب بنك', 'Bank account') });
-  const mNum = m => !m ? '' : (m.type === 'card' ? String(m.card || '').replace(/(\d{4})(?=\d)/g, '$1 ') : m.type === 'bank' ? `${m.bank || ''} — ${m.account || ''}` : (m.number || m.ipa || ''));
+  /* v7.72: bank name + account holder always in English (copied into CIB's transfer screen) */
+  const mBk = m => (window.nfPayEn ? nfPayEn.bankShow(m && m.bank) : (m && m.bank) || '');
+  const mHol = m => (window.nfPayEn ? nfPayEn.holder(m) : (m && m.holder) || '');
+  const mNum = m => !m ? '' : (m.type === 'card' ? String(m.card || '').replace(/(\d{4})(?=\d)/g, '$1 ') : m.type === 'bank' ? `${mBk(m)} — ${m.account || ''}` : (m.number || m.ipa || ''));
   const mCopy = m => !m ? '' : (m.type === 'card' ? m.card : m.type === 'bank' ? m.account : (m.number || m.ipa)) || '';
-  const mLine = (m, radio, i) => `<div class="spm">${radio ? `<label><input type="radio" name="mid" value="${esc(m.id || '')}" ${i === 0 ? 'checked' : ''}>` : '<span>'}<span class="muted small">${esc(ST()[m.type] || '')}</span><span class="v">${esc(mNum(m))}</span>${radio ? '</label>' : '</span>'}${m.holder ? `<b>${esc(m.holder)}</b>` : ''}${mCopy(m) ? `<button type="button" class="btn xs" data-action="pbCopy" data-arg="${esc(mCopy(m))}">${esc(L('نسخ', 'Copy'))}</button>` : ''}</div>`;
+  const mLine = (m, radio, i) => `<div class="spm">${radio ? `<label><input type="radio" name="mid" value="${esc(m.id || '')}" ${i === 0 ? 'checked' : ''}>` : '<span>'}<span class="muted small">${esc(ST()[m.type] || '')}</span><span class="v notr" dir="ltr">${esc(mNum(m))}</span>${radio ? '</label>' : '</span>'}${mHol(m) ? `<b dir="ltr" class="ltr notr">${esc(mHol(m))}</b>` : ''}${mCopy(m) ? `<button type="button" class="btn xs" data-action="pbCopy" data-arg="${esc(mCopy(m))}">${esc(L('نسخ الرقم', 'Copy number'))}</button>` : ''}${mHol(m) ? `<button type="button" class="btn xs" data-action="pbCopy" data-arg="${esc(mHol(m))}">${esc(L('نسخ الاسم', 'Copy name'))}</button>` : ''}${m.type === 'bank' && mBk(m) ? `<button type="button" class="btn xs" data-action="pbCopy" data-arg="${esc(mBk(m))}">${esc(L('نسخ البنك', 'Copy bank'))}</button>` : ''}${window.nfPayEn && nfPayEn.auto(m) ? `<span class="tiny muted">${esc(L('اتكتب بالإنجليزي تلقائي — لو مختلف عن البنك صحّحه من صفحة المورد', 'Written in English automatically — if the bank has it differently, fix it on the supplier page'))}</span>` : ''}</div>`;
   ACTIONS.pbCopy = async v => { try { await navigator.clipboard.writeText(v); toast(L('اتنسخ', 'Copied')); } catch (e) { toast(v); } };
   const supMethods = sk => { const sid = String(sk).startsWith('n:') ? '' : sk; const sp = (sid && typeof window.nfSupPayOf === 'function' && window.nfSupPayOf(sid)) || null; return ((sp && sp.methods) || []).filter(Boolean); };
   async function shrink(file) { const src = await fileToDataURL(file); return await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1800 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.88)); }; im.onerror = rej; im.src = src; }); }
