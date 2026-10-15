@@ -1127,6 +1127,8 @@ html[data-theme="dark"] .okpst{background:rgba(5,14,22,.82)}
 .spgrid[data-okcols="1"] .spcard .okpst i{width:6px;height:6px}
 #nf-install{background:var(--surface)!important;color:var(--ink)!important;border:1px solid var(--line)}#nf-install .txt span{opacity:.75}
 .okown{flex-wrap:wrap;row-gap:0}
+/* the project-chat bubble sits right above the + button on phones (Mahmoud, 15 Oct) */
+@media (max-width:900px){html body #pcbub.on{bottom:calc(138px + env(safe-area-inset-bottom,0px))!important;inset-inline-end:14px!important}}
 @media (max-width:700px){.spgrid[data-okcols="3"] .spcard .nm,.spgrid[data-okcols="2"] .spcard .nm{font-size:13px}.spgrid[data-okcols="3"] .spcard .bd,.spgrid[data-okcols="2"] .spcard .bd{padding:8px 10px;gap:4px}.spgrid[data-okcols="3"] .spcard .cl,.spgrid[data-okcols="3"] .tiny,.spgrid[data-okcols="3"] .okown{font-size:10.5px}.spgrid[data-okcols="3"] .stg{font-size:10px;padding:2px 6px}.spgrid[data-okcols="3"] .stuavs{display:none}.spgrid[data-okcols="3"] .okpst,.spgrid[data-okcols="2"] .okpst{font-size:10px;padding:3px 8px 3px 7px}}
 </style>`);
   const ICO = { 1: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>', 2: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="7" height="16" rx="1.5"/><rect x="13.5" y="4" width="7" height="16" rx="1.5"/></svg>', 3: '<svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="5" height="16" rx="1.2"/><rect x="9.5" y="4" width="5" height="16" rx="1.2"/><rect x="16.5" y="4" width="5" height="16" rx="1.2"/></svg>', '': '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>' };
