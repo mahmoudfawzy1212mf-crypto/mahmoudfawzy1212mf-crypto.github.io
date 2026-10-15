@@ -51837,6 +51837,9 @@ ${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}
     const e = { id: 'support', label: 'الدعم الفني', icon: 'lifebuoy', countCls: 'warn', count: navCount };
     if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e);
   })();
+  /* v7.70 fix: the entry sits right after «Regulation», so the owner (who has no «My portal») opened the app on Support instead of the
+     dashboard — the home page never lands on Support */
+  if (typeof homeView === 'function') homeView = (base => function () { const v = base.apply(this, arguments); if (v !== 'support') return v; const n = NAV.find(x => x.id && x.id !== 'regulation' && x.id !== 'support' && canSee(x.id)); return n ? n.id : 'dashboard'; })(homeView);
 
   /* ---------- the doors: the assistant panel, «My portal» ---------- */
   function go() { if (!isOwner()) { if (!SUP.chat || SUP.chat.step === 'sent') newChat(); else if (SUP.last) SUP.chat.page = SUP.chat.page || SUP.last; } const p = document.querySelector('#aipanel'); if (p && !p.hidden) { const x = p.querySelector('[data-aiclose]'); if (x) x.click(); } if (location.hash !== '#/support') location.hash = '#/support'; else render(false); }
@@ -52275,4 +52278,149 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 .tridev summary{cursor:pointer;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.tridev summary svg{width:16px;height:16px}.trirow.sm{padding:8px 4px}
 @media (max-width:560px){.trititle{font-size:16px}.trirow .t{white-space:normal}.tricmd .row .btn,.tridec .row .btn{flex:1 1 auto;justify-content:center}}
 </style>`);
+})();
+/* =====================================================================
+   v7.70 — an old copy of the app can't send requests (Mahmoud 15 Oct, «yes»): a phone was still on the build from before noon and
+   showed the old «you have an open advance» lock, which v7.68 had removed.
+   · nfFresh.check() reads this system's BUILD.txt (no cache) and compares it with the build the page was made from (NF_BUILD);
+   · a stale copy updates itself as soon as the person is not in the middle of something (no form open, nothing typed, no call);
+     otherwise a strip says a new version is waiting, with «Update now»;
+   · sending a request (leave / permission / punch / advance, also from the kiosk) asks first — a stale copy does not send: it says
+     why, keeps what was typed, updates, and opens the same request again filled in, so the person only presses Save;
+   · a reload that still lands on the old copy (the CDN can lag a few minutes) is not repeated for 3 minutes — no reload loop;
+   · only on the web app / the phone apps (http/https with NF_PWA); the desktop file build and the tests' local pages are left alone.
+   ===================================================================== */
+(function () {
+  if (window.__NF_FRESH770__) return; window.__NF_FRESH770__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const F = window.nfFresh = { stale: false, latest: '', at: 0, inflight: null };
+  const mine = () => String(window.NF_BUILD || '').trim();
+  const can = () => !!mine() && !!window.NF_PWA && /^https?:$/.test(location.protocol) && !(window.claude && typeof window.claude.use === 'function');
+  const ss = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
+  const BUILD_RE = /^\d{8}-\d{4}-[0-9a-f]{6}(?:-o[0-9a-f]{6})?$/;
+
+  F.check = async function (force) {
+    if (!can()) return false;
+    if (F.inflight) return F.inflight;
+    if (!force && Date.now() - F.at < 60000) return F.stale;
+    F.inflight = (async () => {
+      try {
+        const ctl = typeof AbortController === 'function' ? new AbortController() : null; const tm = ctl ? setTimeout(() => ctl.abort(), 4000) : 0;
+        const r = await fetch('BUILD.txt?t=' + Date.now(), Object.assign({ cache: 'no-store', credentials: 'same-origin' }, ctl ? { signal: ctl.signal } : {}));
+        clearTimeout(tm);
+        if (r.ok) { const v = String(await r.text()).trim(); if (BUILD_RE.test(v)) { F.latest = v; F.stale = v !== mine(); F.at = Date.now(); } }
+      } catch (e) { /* offline or slow: keep the last answer — a request made offline is not held back */ }
+      F.inflight = null;
+      if (F.stale) onStale();
+      return F.stale;
+    })();
+    return F.inflight;
+  };
+
+  /* is the person in the middle of something? then never reload under them */
+  function busy() {
+    try {
+      const mr = document.getElementById('modalroot'); if (mr && mr.children.length) return true;
+      if (document.getElementById('nf-fresh-dlg')) return true;
+      const a = document.activeElement; if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|submit|checkbox|radio)$/i.test(a.type || ''))) && String(a.value || '').trim()) return true;
+      if (document.getElementById('nfc-sheet') || document.fullscreenElement || document.querySelector('iframe[src*="meet"]')) return true;
+      if (typeof NFC === 'function') { const n = NFC(); if (n && typeof n.current === 'function' && n.current()) return true; }
+      const sc = window.nfSupport && window.nfSupport.chat; if (sc && sc.step !== 'sent' && Array.isArray(sc.msgs) && sc.msgs.some(m => m.from === 'me')) return true;
+      if (document.querySelector('.suprecbar, .supvoice.on, .supmic.on')) return true;   /* recording a voice note or the screen for support */
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  function reloadFresh(why) {
+    const k = 'nf.fresh.try'; const prev = JSON.parse(ss.get(k) || 'null');
+    if (prev && prev.v === F.latest && Date.now() - prev.at < 180000) { strip(true); return false; } /* just tried: the CDN is still on the old copy */
+    ss.set(k, JSON.stringify({ v: F.latest, at: Date.now(), why: why || 'auto' }));
+    try { if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) navigator.serviceWorker.getRegistration().then(reg => reg && reg.update()).catch(() => { }); } catch (e) { /* ignore */ }
+    const url = location.pathname + '?fresh=' + Date.now() + location.hash;   /* a new address = the page itself comes fresh, not from any cache */
+    setTimeout(() => { F.go(url); }, 250);
+    return true;
+  }
+  F.go = url => location.replace(url);   /* tests replace this */
+
+  function onStale() {
+    if (!busy()) { reloadFresh('auto'); return; }
+    strip(false);
+  }
+  /* the strip on top: a new version is waiting */
+  function strip(lag) {
+    let el = document.getElementById('nf-fresh-bar');
+    const txt = lag ? L('النسخة الجديدة لسه بتوصل — جرّب كمان دقيقة', 'The new version is still arriving — try again in a minute') : L('في نسخة جديدة من السيستم — هتتحدّث لوحدها أول ما تخلّص اللي بتعمله', 'A new version of the system is ready — it updates itself as soon as you finish what you are doing');
+    if (!el) { el = document.createElement('div'); el.id = 'nf-fresh-bar'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.innerHTML = `<span>${esc(txt)}</span><button type="button" data-fresh="now">${esc(L('حدّث دلوقتي', 'Update now'))}</button>`;
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-fresh]'); if (!b) return; e.preventDefault();
+    const k = b.dataset.fresh;
+    if (k === 'now') { ss.set('nf.fresh.try', null); keepDraft(); reloadFresh('button'); }
+    if (k === 'later') { const d = document.getElementById('nf-fresh-dlg'); if (d) d.remove(); }
+  });
+
+  /* a request from a stale copy: keep what was typed, update, open it again filled in */
+  let lastForm = null;
+  function keepDraft(f) {
+    f = f || lastForm || document.getElementById('mform'); if (!f || !f.querySelector('select[name=type]')) return;
+    try {
+      const vals = {}; f.querySelectorAll('input[name],select[name],textarea[name]').forEach(x => { if (x.type === 'file') return; if (x.type === 'checkbox') vals[x.name] = x.checked; else if (x.type === 'radio') { if (x.checked) vals[x.name] = x.value; } else vals[x.name] = x.value; });
+      ss.set('nf.fresh.req', JSON.stringify({ kiosk: !!f.closest('.kiosk') || !!F.kioskForm, vals, at: Date.now() }));
+    } catch (e) { /* ignore */ }
+  }
+  function blockDlg() {
+    if (document.getElementById('nf-fresh-dlg')) return;
+    const d = document.createElement('div'); d.id = 'nf-fresh-dlg';
+    d.innerHTML = `<div class="nffd-card" role="alertdialog" aria-modal="true"><div class="nffd-ic">↻</div><h3>${esc(L('النسخة اللي على جهازك قديمة', 'The copy on your device is old'))}</h3><p>${esc(L('الطلب ماتبعتش. هنحدّث السيستم في ثواني، وهيفتحلك نفس الطلب باللي كتبته — تدوس «حفظ» بس.', 'The request was not sent. We will update the system in a few seconds and open the same request with what you typed — just press «Save».'))}</p><div class="nffd-b"><button type="button" class="nffd-p" data-fresh="now">${esc(L('حدّث دلوقتي', 'Update now'))}</button><button type="button" data-fresh="later">${esc(L('بعدين', 'Later'))}</button></div></div>`;
+    document.body.appendChild(d);
+  }
+  if (typeof createRequest === 'function') createRequest = (base => async function (f, forKiosk) {
+    lastForm = f; F.kioskForm = !!forKiosk;
+    if (await F.check(true)) { keepDraft(f); blockDlg(); return false; }
+    return base.apply(this, arguments);
+  })(createRequest);
+
+  /* after the update: open the same request again, filled in */
+  function restore() {
+    const raw = ss.get('nf.fresh.req'); if (!raw) return; ss.set('nf.fresh.req', null);
+    let d = null; try { d = JSON.parse(raw); } catch (e) { return; } if (!d || !d.vals || Date.now() - d.at > 15 * 60000) return;
+    if (F.stale || !S.session) return;
+    const act = d.kiosk ? ACTIONS.kioskReq : ACTIONS.reqNew; if (typeof act !== 'function') return;
+    act(d.vals.workerId || '');
+    setTimeout(() => {
+      const f = document.getElementById('mform'); if (!f) return;
+      const t = d.vals.type; const tile = t && f.querySelector(`[data-rqk="${CSS.escape(t)}"]`);
+      if (tile) tile.click(); else { const sel = f.querySelector('select[name=type]'); if (sel && t) { sel.value = t; sel.dispatchEvent(new Event('change', { bubbles: true })); } }
+      setTimeout(() => {
+        Object.entries(d.vals).forEach(([k, v]) => { if (k === 'type' || k === 'workerId') return; f.querySelectorAll(`[name="${CSS.escape(k)}"]`).forEach(x => { if (x.type === 'checkbox') { if (x.checked !== !!v) { x.checked = !!v; x.dispatchEvent(new Event('change', { bubbles: true })); } } else if (x.type === 'radio') x.checked = x.value === v; else { x.value = v; x.dispatchEvent(new Event('input', { bubbles: true })); } }); });
+        if (typeof toast === 'function') toast(L('اتحدّث السيستم ✓ — طلبك رجع زي ما كان، دوس «حفظ»', 'The system is updated ✓ — your request is back as it was, press «Save»'));
+      }, 250);
+    }, 300);
+  }
+
+  /* when to look: shortly after opening, whenever the app comes back to the front, every 10 minutes, and before a request */
+  function boot() {
+    if (!can()) return;
+    if (/[?&]fresh=/.test(location.search)) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }
+    setTimeout(() => { F.check(true).then(st => { if (!st) { ss.set('nf.fresh.try', null); restoreWhenReady(); } }); }, 2500);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') F.check(); });
+    setInterval(() => { if (document.visibilityState !== 'hidden') F.check(true); }, 10 * 60000);
+    /* a strip is waiting: update the moment the person is free (form closed, nothing typed) */
+    setInterval(() => { if (F.stale && document.getElementById('nf-fresh-bar') && !busy()) reloadFresh('idle'); }, 4000);
+  }
+  function restoreWhenReady(n) { n = n || 0; if (typeof S !== 'undefined' && S.session && S.route) restore(); else if (n < 40) setTimeout(() => restoreWhenReady(n + 1), 500); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+
+  const st = document.createElement('style');
+  st.textContent = `#nf-fresh-bar{position:fixed;inset-inline:12px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:2147483000;display:flex;gap:10px;align-items:center;justify-content:space-between;background:#1f2d3d;color:#fff;border-radius:14px;padding:10px 12px;font-size:13.5px;line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:640px;margin-inline:auto}
+#nf-fresh-bar button{flex:none;border:0;border-radius:10px;padding:7px 12px;background:#fff;color:#1f2d3d;font:inherit;font-weight:600;cursor:pointer}
+#nf-fresh-dlg{position:fixed;inset:0;z-index:2147483001;background:rgba(10,16,24,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+#nf-fresh-dlg .nffd-card{background:var(--card,#fff);color:var(--ink,#1d2733);border-radius:20px;padding:20px 18px 16px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+#nf-fresh-dlg .nffd-ic{width:52px;height:52px;margin:0 auto 8px;border-radius:50%;background:#e8f0f8;color:#2f4b69;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
+#nf-fresh-dlg h3{margin:0 0 6px;font-size:17px}#nf-fresh-dlg p{margin:0 0 14px;font-size:14px;line-height:1.7;opacity:.85}
+#nf-fresh-dlg .nffd-b{display:flex;gap:8px;justify-content:center}#nf-fresh-dlg .nffd-b button{border:0;border-radius:12px;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer;background:var(--bg2,#eef1f5);color:inherit}
+#nf-fresh-dlg .nffd-b .nffd-p{background:#4a6a8c;color:#fff}`;
+  (document.head || document.documentElement).appendChild(st);
 })();
