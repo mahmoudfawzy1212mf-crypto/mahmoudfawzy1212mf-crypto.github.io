@@ -184,6 +184,22 @@ open(os.path.join(DST, 'meet.html'), 'w', encoding='utf-8').write(meet)
 rep("L('على الكمبيوتر نفسه: افتح برنامج Ökoplan Landscaping للويندوز (4.30 أو أحدث) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Landscaping Windows app (4.30 or newer) → this page → «Link this computer».')",
     "L('على الكمبيوتر نفسه: افتح برنامج Ökoplan للويندوز (النسخة اللي فيها «الوصول عن بُعد» — جاية قريب) ← الصفحة دي ← «اربط الكمبيوتر ده».', 'On the computer itself: open the Ökoplan Windows app (the version with «Remote access» — coming soon) → this page → «Link this computer».')", 1)
 
+
+# --- a consultancy, not a render studio (Mahmoud, 15 Oct): the Project Owner form, the deliverables wording, the project types
+rep("const OS_TYPES = { archviz: 'ArchViz', interior: 'Interior', film: 'Film', mixed: 'Mixed' };",
+    "const OS_TYPES = { archviz: 'Landscape design', interior: 'Masterplan / Urban', film: 'Site supervision only', mixed: 'Design + supervision' };", 1)
+rep("${field('موافقة العميل على الكاميرات', `<select id=\"f-camReq\" name=\"camReq\">${pairOpts([['req', 'مطلوبة قبل الإنتاج'], ['opt', 'اختيارية (العميل معتمد رؤية المكتب)']], p.camReq || 'req')}</select>`, 'full')}",
+    "${field('اعتماد العميل للكونسبت', `<select id=\"f-camReq\" name=\"camReq\">${pairOpts([['req', 'مطلوب قبل تطوير التصميم (DD)'], ['opt', 'مش مطلوب — العميل معتمد اتجاه المكتب']], p.camReq || 'req')}</select>`, 'full')}", 1)
+rep("مشروع واحد = Owner واحد. الـOwner بيعمل الـMaster Schedule ويوزع الشغل ويراجع أولًا. موعد العميل ثابت — التأخير الداخلي مايحركوش.",
+    "مشروع واحد = Project Owner واحد. الـOwner بيعمل جدول التسليمات، يوزّع الشغل على الفريق، ويراجع المخرجات قبل مدير التصميم. موعد العميل ثابت — التأخير الداخلي مايحركوش.", 1)
+rep("`موعد العميل ${fmtDate(d.clientDeadline)} — اعمل الـMaster Schedule` : 'اعمل الـMaster Schedule'", "`موعد العميل ${fmtDate(d.clientDeadline)} — اعمل جدول التسليمات` : 'اعمل جدول التسليمات'", 1)
+for a, b in [("'لقطات المشروع'", "'مخرجات المشروع'"), ("ضيف لقطات'", "ضيف مخرجات'"), ("'لقطاتي'", "'مخرجاتي'"), ("مفيش لقطات عليك دلوقتي", "مفيش مخرجات عليك دلوقتي"), ("كود اللقطة", "كود المخرج"),
+             ("موعد التسليم النهائي للقطة", "موعد التسليم النهائي للمخرج"), ("كلمة عن اللقطة (اختياري)", "كلمة عن المخرج (اختياري)"), ("لسه مفيش لقطات", "لسه مفيش مخرجات"), ("محتاج لقطات", "محتاج مخرجات"),
+             ("تعذّر حفظ اللقطة", "تعذّر حفظ المخرج"), ("<th>اللقطة</th>", "<th>المخرج</th>"), ("<th>Artist</th>", "<th>المسؤول</th>"), ("اعتماد الكاميرات", "اعتماد الكونسبت"),
+             ("'مراجعة الريندر'", "'مراجعة اللوحة'"), ("ملاحظة جديدة على الريندر", "ملاحظة جديدة على اللوحة"), ("معرض الريندرات", "معرض اللوحات"), ("مفيش ريندرات لسه", "مفيش لوحات لسه"),
+             ("لوحات المشاريع · المهام · الريندرات · الوقت", "لوحات المشاريع · المهام · المخرجات · الوقت")]:
+    rep(a, b, must=False)
+
 # --- the add-on, loaded after the app and after the QR attendance add-on
 rep('<script src="./qrp-v1.js" defer></script>\n</body>',
     '<script src="./qrp-v1.js" defer></script>\n<!-- Ökoplan brand & office layer (loaded after the app) - keep these lines on rebuilds -->\n<script src="./oekoplan.js" defer></script>\n<script src="./oeko-home.js" defer></script>\n</body>', 1)
@@ -205,7 +221,7 @@ open(os.path.join(DST, 'BUILD.txt'), 'w', encoding='utf-8').write(BUILD + '\n')
 # --- en.json: the pack is aligned BY POSITION with the Arabic strings extracted from index.html (i18nBuildDict); our text
 #     replacements change some Arabic keys, so the pack is rebuilt for the derived page with node (the page's own extractor + checksum),
 #     carrying the English over with the same name replacements. Add-on strings (oekoplan.js) carry their own English at runtime.
-EN_REPL = [('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office'), ('art director', 'design manager'), ('Art director', 'Design manager'), ('Art Director', 'Design Manager'), ('Studio work', 'Projects Gallery'), ('studio work', 'projects gallery'), ('Office work', 'Projects Gallery'), ("From the office's work", 'From the projects gallery'), ("From the studio's work", 'From the projects gallery')]
+EN_REPL = [('Project shots', 'Project deliverables'), ('project shots', 'project deliverables'), ('Add shots', 'Add deliverables'), ('My shots', 'My deliverables'), ('No shots', 'No deliverables'), ('no shots', 'no deliverables'), ('Shot code', 'Deliverable code'), ('the shot', 'the deliverable'), ('Needs shots', 'Needs deliverables'), ('Camera approval', 'Concept approval'), ('camera approval', 'concept approval'), ('Client camera approval', 'Client concept approval'), ('Required before production', 'Required before Design Development (DD)'), ('Render review', 'Drawing review'), ('Renders gallery', 'Drawings gallery'), ('No renders yet', 'No drawings yet'), ('Master Schedule', 'Deliverables schedule'), ('Ninety Degree Studio', NAME), ('Ninety Studioz', NAME), ('ninetystudioz.com', DOMAIN), ('A story in every frame', 'Designing landscapes that live'), ('the studio', 'the office'), ('The studio', 'The office'), ('art director', 'design manager'), ('Art director', 'Design manager'), ('Art Director', 'Design Manager'), ('Studio work', 'Projects Gallery'), ('studio work', 'projects gallery'), ('Office work', 'Projects Gallery'), ("From the office's work", 'From the projects gallery'), ("From the studio's work", 'From the projects gallery')]
 import subprocess, tempfile
 js = r"""
 const fs = require('fs'); const [,, srcHtml, dstHtml, packPath, outPath, replJson] = process.argv;

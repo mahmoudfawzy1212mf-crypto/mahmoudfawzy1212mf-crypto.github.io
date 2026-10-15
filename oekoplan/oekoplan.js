@@ -391,7 +391,7 @@ html[data-theme="dark"] .okcard .slalt button{color:#6fcbbf}
   }
   if (typeof VIEW_TITLES === 'object') Object.assign(VIEW_TITLES, { workers: 'فريق المكتب', sites: 'مواقع البصمة' });
   /* not in Ökoplan: the NFC door (remote computers: server side ready — rd_* + Edge rdesk) */
-  const HIDDEN = ['door'];
+  const HIDDEN = ['door', 'stuorg']; /* stuorg = the render studio's job-levels framework (ArchViz artists) — Ökoplan has its own titles and the org chart */
   if (typeof canSee === 'function') canSee = (base => view => (/^ninety/.test(String(view || '')) || HIDDEN.includes(view) ? false : base(view)))(canSee);
   if (Array.isArray(NAV)) for (let i = NAV.length - 1; i >= 0; i--) if (HIDDEN.includes(NAV[i].id)) NAV.splice(i, 1);
   if (typeof NINETY_COS === 'object') Object.keys(NINETY_COS).forEach(k => { NINETY_COS[k].url = ''; });
@@ -1427,6 +1427,8 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     await up(pid, { [key]: Array.from(cur).sort((a, b) => a - b) });
   });
   window.okFlow = { ESTAGES, SETUP0, CLOSE0, SITE, LOGS };
+  /* English for the consultancy wording that mk-oeko puts into the engine's Arabic strings */
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'اعتماد العميل للكونسبت': 'Client concept approval', 'مطلوب قبل تطوير التصميم (DD)': 'Required before Design Development (DD)', 'مش مطلوب — العميل معتمد اتجاه المكتب': 'Not required — the client approved the office direction', 'مخرجات المشروع': 'Project deliverables', 'ضيف مخرجات': 'Add deliverables', 'مخرجاتي': 'My deliverables', 'مفيش مخرجات عليك دلوقتي': 'No deliverables on you right now', 'كود المخرج': 'Deliverable code', 'موعد التسليم النهائي للمخرج': 'Final due date of the deliverable', 'كلمة عن المخرج (اختياري)': 'A word about the deliverable (optional)', 'لسه مفيش مخرجات': 'No deliverables yet', 'محتاج مخرجات': 'Needs deliverables', 'تعذّر حفظ المخرج': 'Could not save the deliverable', 'المخرج': 'Deliverable', 'المسؤول': 'Responsible', 'اعتماد الكونسبت': 'Concept approval', 'مراجعة اللوحة': 'Drawing review', 'ملاحظة جديدة على اللوحة': 'New comment on the drawing', 'معرض اللوحات': 'Drawings gallery', 'مفيش لوحات لسه': 'No drawings yet', 'لوحات المشاريع · المهام · المخرجات · الوقت': 'Project boards · tasks · deliverables · time', 'اعمل جدول التسليمات': 'Build the deliverables schedule', 'جدول التسليمات': 'Deliverables schedule' });
 })();
 
 /* =====================================================================
