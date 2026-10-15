@@ -1024,6 +1024,7 @@ html[data-theme="dark"] .okn{background:var(--surface-2)}
   const stateOf = p => { if (!p || p.status === 'archived') return null; if (p.okState && STATES[p.okState]) return p.okState; if (p.osStatus === 'delivered' || p.osStatus === 'closed' || p.stage === 'delivered') return 'done'; if (p.blocked) return 'hold'; return 'active'; };
   const me = () => (typeof stuMe === 'function' ? stuMe() : '');
   const canSet = p => !!p && typeof stuCanEdit === 'function' && stuCanEdit() && ((typeof stuManager === 'function' && stuManager()) || p.leadId === me() || p.ownerId === me());
+  window.okPState = { stateOf, STATES };
   document.head.insertAdjacentHTML('beforeend', `<style>
 .spcard.ok-active{border-color:rgba(34,197,94,.55)!important;box-shadow:0 0 0 1px rgba(34,197,94,.22),0 0 22px rgba(34,197,94,.30)}
 .spcard.ok-hold{border-color:rgba(245,179,1,.6)!important;box-shadow:0 0 0 1px rgba(245,179,1,.22),0 0 22px rgba(245,179,1,.30)}
@@ -1527,4 +1528,253 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   hook(); document.addEventListener('nf:ready', hook);
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (!(S.route && S.route.view === 'okpipeedit')) { draft = null; } });
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'تعديل البايب لاين': 'Pipeline editor', 'البايب لاين': 'Pipeline' });
+})();
+
+/* =====================================================================
+   Ökoplan — Smart layer (Mahmoud, 15 Oct «ابدأ في كله»): the system watches the office instead of people remembering.
+   1 alerts (stalled projects · overdue gates · client waiting · enquiry follow-up)  2 weekly digest (server, Sunday)  3 workload per
+   Project Owner + least-loaded suggestion  4 delay-risk prediction per project (🟠/🔴 before it is late)  5 issued deliverables →
+   client-submission events automatically  6 assistant (🤖) over the office data  7 smart gate checklist  8 deliverables schedule +
+   kick-off from a won enquiry  9 client file (all projects · response time · rejections)  10 site visits from the phone (photo + GPS).
+   Page: #/oksmart (everyone — each sees his own projects, managers see all). Server side: Edge Function `oeko-smart` (pg_cron).
+   ===================================================================== */
+(() => {
+  if (window.__OK_SMART__) return; window.__OK_SMART__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const me = () => (typeof stuMe === 'function' ? stuMe() : '');
+  const isMgr = () => isAdmin() || role() === 'manager';
+  const PIPE = () => window.OEKO_PIPELINE || [];
+  const who = id => { const w = id && (byId('workers', id) || byId('staff', id)); return (w && w.name) || ''; };
+  const myName = () => (S.session && S.session.name) || '';
+  const d10 = iso => (iso ? fmtDate(String(iso).slice(0, 10)) : '—');
+  const T = () => todayISO();
+  const days = (a, b) => Math.round((new Date(String(b).slice(0, 10) + 'T00:00:00') - new Date(String(a).slice(0, 10) + 'T00:00:00')) / 864e5);
+  const ago = iso => (iso ? days(iso, T()) : 9999);
+  const stateOf = p => (window.okPState && window.okPState.stateOf ? window.okPState.stateOf(p) : (p.status === 'archived' ? null : p.okState || 'active'));
+  const live = () => list('projects').filter(p => p.status !== 'archived' && stateOf(p) === 'active');
+  const mine = p => isMgr() || p.ownerId === me() || p.leadId === me() || (p.team || []).includes(me());
+  const stageIdx = p => Math.max(0, PIPE().findIndex(s => s.id === (p.osStatus || p.stage)));
+  const stageAt = (p, id) => { const v = ((p.stageAt || {})[id]) || ((p.osStatusAt || {})[id]) || null; return v ? String(v).slice(0, 10) : null; };
+  const curStart = p => { const st = PIPE()[stageIdx(p)]; const v = (st && stageAt(p, st.id)) || p.okNtp || null; return v ? String(v).slice(0, 10) : null; };   /* imported projects with no stage date are not judged until their first gate */
+  const lastTouch = p => { const xs = [p.updatedAt, p.stageAt && Object.values(p.stageAt).sort().pop(), p.osStatusAt && Object.values(p.osStatusAt).sort().pop(), p.okStateAt]; (Object.values(p.okSub || {})).forEach(s => (s.events || []).forEach(e => xs.push(e.at))); Object.values(p.okSite || {}).forEach(a => (a || []).forEach(x => xs.push(x.at))); list('shots').filter(s => s.projectId === p.id).forEach(s => xs.push(s.updatedAt)); return xs.filter(Boolean).map(x => String(x).slice(0, 10)).sort().pop() || (p.createdAt || '').slice(0, 10) || T(); };
+  const DEF_DAYS = { data: 14, concept: 21, schem: 21, dd: 30, tender: 30, super: 120, delivered: 30 };
+
+  /* ---- 4) expected duration of the current stage: office history (median) → planned split (NTP→client deadline by %) → defaults */
+  const history = () => { const h = {}; list('projects').forEach(p => { const P = PIPE(); P.forEach((s, i) => { const a = stageAt(p, s.id), b = P[i + 1] && stageAt(p, P[i + 1].id); if (a && b && days(a, b) > 0) (h[s.id] = h[s.id] || []).push(days(a, b)); }); }); return h; };
+  let histCache = null, histAt = 0; const hist = () => { if (!histCache || Date.now() - histAt > 30000) { histCache = history(); histAt = Date.now(); } return histCache; };
+  const median = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+  const expectDays = (p, st) => {
+    const h = (hist()[st.id] || []); if (h.length >= 3) return { d: median(h), src: 'office' };
+    const start = p.okNtp || (p.createdAt || '').slice(0, 10); const end = p.dueDate || p.clientDeadline;
+    if (start && end && days(start, end) > 0) { const tot = PIPE().filter(s => s.id !== 'super' && s.id !== 'delivered').reduce((n, s) => n + (s.pct || 0), 0) || 100; return { d: Math.max(5, Math.round(days(start, end) * (st.pct || 10) / tot)), src: 'plan' }; }
+    return { d: DEF_DAYS[st.id] || 21, src: 'default' };
+  };
+  const risk = p => {
+    if (stateOf(p) !== 'active') return null; const i = stageIdx(p); const st = PIPE()[i]; if (!st || i >= PIPE().length - 1 || !curStart(p)) return null;
+    const ex = expectDays(p, st); const used = ago(curStart(p)); const r = used / Math.max(1, ex.d); const eta = addDays(curStart(p), ex.d);
+    const lvl = r >= 1 ? 'red' : r >= 0.8 ? 'amber' : 'ok';
+    return { lvl, used, expect: ex.d, src: ex.src, eta, pct: Math.min(100, Math.round(r * 100)), stage: st };
+  };
+
+  /* ---- 1) alerts */
+  const alerts = () => {
+    const out = []; const Pn = PIPE();
+    live().filter(mine).forEach(p => {
+      const idle = ago(lastTouch(p));
+      if (idle >= 20) out.push({ sev: 'crit', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش أي حركة من ${idle} يوم`, `${p.name} — no activity for ${idle} days`), href: '#/projects/' + p.id });
+      else if (idle >= 10) out.push({ sev: 'warn', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش حركة من ${idle} يوم`, `${p.name} — quiet for ${idle} days`), href: '#/projects/' + p.id });
+      const rk = risk(p); if (rk && rk.lvl === 'red') out.push({ sev: 'crit', kind: 'gate', pid: p.id, text: L(`${p.name} — مرحلة «${rk.stage.ar}» عدّت المتوقع (${rk.used}/${rk.expect} يوم) والبوابة لسه ماتعتمدتش`, `${p.name} — «${rk.stage.name}» passed its expected ${rk.expect} days (${rk.used} so far) and the gate is not approved`), href: '#/projects/' + p.id });
+      else if (rk && rk.lvl === 'amber') out.push({ sev: 'info', kind: 'risk', pid: p.id, text: L(`${p.name} — «${rk.stage.ar}» قرّبت تتأخر (${rk.pct}% من الوقت المتوقع)`, `${p.name} — «${rk.stage.name}» is close to slipping (${rk.pct}% of the expected time)`), href: '#/projects/' + p.id });
+      Object.keys(p.okSub || {}).forEach(sid => { const ev = (p.okSub[sid].events || []); const last = ev[ev.length - 1]; if (last && last.k === 'sub') { const w = ago(last.at); const st = Pn.find(s => s.id === sid) || { ar: sid, name: sid }; if (w >= 7) out.push({ sev: w >= 14 ? 'crit' : 'warn', kind: 'client', pid: p.id, text: L(`${p.name} — تسليم «${st.ar}» مستني رد العميل من ${w} يوم`, `${p.name} — «${st.name}» submission is waiting for the client for ${w} days`), href: '#/projects/' + p.id, remind: true }); } });
+      (p.okSite && p.okSite.rfis || []).filter(x => (x.status || 'open') === 'open' && ago(x.at) >= 7).forEach(x => out.push({ sev: 'warn', kind: 'rfi', pid: p.id, text: L(`${p.name} — RFI ${x.no || ''} مفتوح من ${ago(x.at)} يوم`, `${p.name} — RFI ${x.no || ''} open for ${ago(x.at)} days`), href: '#/projects/' + p.id }));
+    });
+    if (isMgr() || ((S.settings && S.settings.okEnqViewers) || []).includes(me())) list('enquiries').filter(e => !e.deleted && !['won', 'lost'].includes(e.stage)).forEach(e => {
+      if (e.next && e.next < T()) out.push({ sev: 'warn', kind: 'enq', eid: e.id, text: L(`فرصة «${e.name}» — الخطوة الجاية فاتت من ${ago(e.next)} يوم`, `Enquiry «${e.name}» — next action overdue by ${ago(e.next)} days`), href: '#/enquiries' });
+      else if (ago(e.updatedAt || e.createdAt) >= 5) out.push({ sev: 'info', kind: 'enq', eid: e.id, text: L(`فرصة «${e.name}» — من غير متابعة من ${ago(e.updatedAt || e.createdAt)} يوم`, `Enquiry «${e.name}» — no follow-up for ${ago(e.updatedAt || e.createdAt)} days`), href: '#/enquiries' });
+    });
+    const W = { crit: 0, warn: 1, info: 2 }; return out.sort((a, b) => W[a.sev] - W[b.sev]);
+  };
+  const KIND = { stalled: ['واقف', 'Stalled'], gate: ['بوابة متأخرة', 'Gate overdue'], risk: ['خطر تأخير', 'Delay risk'], client: ['مستني العميل', 'Waiting for client'], rfi: ['RFI', 'RFI'], enq: ['فرصة', 'Enquiry'] };
+
+  /* ---- 3) workload per Project Owner */
+  const workload = () => {
+    const ps = list('projects').filter(p => p.status !== 'archived'); const rows = {};
+    ps.forEach(p => { const id = p.ownerId || p.leadId; if (!id) return; const r = rows[id] = rows[id] || { id, name: who(id), active: 0, hold: 0, done: 0, stages: {}, risk: 0, idle: 0 }; const st = stateOf(p); if (st === 'active') { r.active++; const s = PIPE()[stageIdx(p)]; if (s) r.stages[s.id] = (r.stages[s.id] || 0) + 1; const rk = risk(p); if (rk && rk.lvl !== 'ok') r.risk++; if (ago(lastTouch(p)) >= 10) r.idle++; } else if (st === 'done') r.done++; else r.hold++; });
+    return Object.values(rows).sort((a, b) => b.active - a.active || a.name.localeCompare(b.name));
+  };
+  const suggestOwner = () => { const w = workload(); const ppl = list('workers').filter(x => x.status !== 'left' && x.status !== 'inactive'); const owners = w.filter(r => ppl.some(x => x.id === r.id)); if (!owners.length) return null; return owners.slice().sort((a, b) => (a.active + a.risk) - (b.active + b.risk) || a.active - b.active)[0]; };
+
+  /* ---- 9) client file */
+  const clients = () => {
+    const m = {}; list('projects').filter(p => p.status !== 'archived').forEach(p => { const k = String(p.client || (p.clientId && typeof clientName === 'function' ? clientName(p.clientId) : '') || L('بدون عميل', 'No client')).trim(); const c = m[k] = m[k] || { name: k, projects: [], resp: [], rej: 0, appr: 0, subs: 0 }; c.projects.push(p); Object.values(p.okSub || {}).forEach(s => { const ev = (s.events || []); ev.forEach((e, i) => { if (e.k === 'sub') { c.subs++; const nx = ev.slice(i + 1).find(x => x.k !== 'sub'); if (nx) c.resp.push(Math.max(0, days(e.at, nx.at))); } if (e.k === 'rej') c.rej++; if (e.k === 'app') c.appr++; }); }); });
+    return Object.values(m).map(c => Object.assign(c, { active: c.projects.filter(p => stateOf(p) === 'active').length, avg: c.resp.length ? Math.round(c.resp.reduce((a, b) => a + b, 0) / c.resp.length) : null })).sort((a, b) => b.active - a.active || b.projects.length - a.projects.length);
+  };
+
+  /* ---- 8) deliverables template per stage (landscape consultancy) */
+  const TEMPLATE = {
+    data: [['SA', 'تقرير تحليل الموقع', 'Site analysis report'], ['EX', 'مخطط الوضع الراهن والمساحي', 'Existing conditions & survey plan']],
+    concept: [['CM', 'ماستر بلان الكونسبت', 'Concept masterplan'], ['CP', 'عرض الكونسبت (المود والصور المرجعية)', 'Concept presentation (mood & references)'], ['PP', 'باليتة النباتات المبدئية', 'Preliminary planting palette']],
+    schem: [['SM', 'ماستر بلان تمهيدي', 'Schematic masterplan'], ['SZ', 'مخطط الهارد والسوفت سكيب', 'Hardscape / softscape zoning plan'], ['SS', 'قطاعات واسكتشات رئيسية', 'Key sections & sketches']],
+    dd: [['DL', 'مخططات DD: التنسيق والمناسيب', 'DD plans: layout & grading'], ['DP', 'مخططات DD: الزراعة', 'DD plans: planting'], ['DI', 'مخططات DD: الري', 'DD plans: irrigation'], ['DE', 'مخططات DD: الإضاءة', 'DD plans: lighting'], ['DS', 'ملخص المواصفات + مقايسة مبدئية', 'Outline specifications + preliminary BOQ']],
+    tender: [['IFC', 'مجموعة الرسومات التنفيذية (IFC)', 'IFC drawing set'], ['SP', 'المواصفات الفنية', 'Technical specifications'], ['BQ', 'المقايسة (BOQ)', 'Bill of quantities'], ['TD', 'مستندات الطرح', 'Tender documents']],
+    super: [['SV', 'تقارير زيارات الموقع', 'Site visit reports'], ['SB', 'مراجعة الـSubmittals والشوب دروينج', 'Submittal & shop-drawing reviews'], ['SN', 'قايمة الملاحظات (Snag list)', 'Snag list']],
+    delivered: [['OM', 'دليل التشغيل والصيانة', 'O&M manual'], ['HC', 'شهادة التسليم', 'Handover certificate'], ['AB', 'مراجعة As-built', 'As-built review']],
+  };
+  async function buildSchedule(p, scope) {
+    if (!p || list('shots').some(s => s.projectId === p.id && !s.deleted)) return 0;
+    const P = PIPE().filter(s => scope === 'full' || !['super'].includes(s.id)); const start = p.okNtp || T(); const end = p.dueDate || p.clientDeadline || null;
+    const tot = P.reduce((n, s) => n + (s.pct || 0), 0) || 100; let acc = 0; let n = 0;
+    for (const st of P) { acc += (st.pct || 0); const due = end && days(start, end) > 0 ? addDays(start, Math.round(days(start, end) * acc / tot)) : null; for (const t of (TEMPLATE[st.id] || [])) { n++; await Store.save('shots', { id: uid(), projectId: p.id, code: `${p.code || 'OK'}-${t[0]}`, name: en() ? t[2] : t[1], kind: 'still', assigneeId: p.ownerId || p.leadId || null, gate: 'comp', state: 'work', okStage: st.id, due, gateDue: {}, log: [], createdAt: nowISO(), createdBy: me(), auto: true }); } }
+    if (!(p.okSetup || []).length) await Store.update('projects', p.id, { okSetup: [], okScope: scope, okScheduleAt: nowISO() }); else await Store.update('projects', p.id, { okScope: scope, okScheduleAt: nowISO() });
+    return n;
+  }
+  /* the «make it a project» form (enquiries) gets the scope + schedule switch; the owner picker gets the least-loaded hint */
+  if (typeof openModal === 'function') openModal = (base => function (o) { const r = base.apply(this, arguments); try {
+    const f = document.getElementById('mform'); if (!f) return r;
+    if (f.querySelector('[name=ntp]') && f.querySelector('[name=code]') && !f.querySelector('[name=okScope]')) {
+      const sel = f.querySelector('select[name=ownerId]'); const sug = suggestOwner();
+      f.querySelector('.form').insertAdjacentHTML('beforeend', `${field(L('نطاق الخدمة', 'Service scope'), `<select name="okScope"><option value="design">${esc(L('تصميم فقط', 'Design only'))}</option><option value="full">${esc(L('تصميم + إشراف على التنفيذ', 'Design + site supervision'))}</option></select>`)}<label class="field full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="okSched" checked><span>${esc(L('اعمل جدول التسليمات وقايمة التجهيز تلقائيًا', 'Generate the deliverables schedule and setup checklist automatically'))}</span></label>${sug && sel ? `<div class="full small muted">💡 ${esc(L(`الأقل حمل دلوقتي: ${sug.name} (${sug.active} مشروع نشط)`, `Least loaded right now: ${sug.name} (${sug.active} active)`))} <button type="button" class="btn xs ghost" data-oksug="${esc(sug.id)}">${esc(L('اختاره', 'Pick'))}</button></div>` : ''}`);
+    }
+  } catch (e) { /* */ } return r; })(openModal);
+  document.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-oksug]'); if (!b) return; const sel = document.querySelector('#mform select[name=ownerId]'); if (sel) { sel.value = b.dataset.oksug; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
+  /* when the project is created from the enquiry, build its schedule (5 + 8 share the Store.save hook) */
+  if (typeof Store === 'object' && Store.save) Store.save = (base => async function (col, doc) {
+    let prev = null; try { prev = col === 'shots' || col === 'projects' ? byId(col, doc && doc.id) : null; } catch (e) { /* */ }
+    const r = await base.apply(this, arguments);
+    try {
+      if (col === 'projects' && doc && doc.okEnq && !prev) { const f = document.getElementById('mform'); const sc = f && f.querySelector('[name=okScope]'); const on = f && f.querySelector('[name=okSched]'); if (!f || (on && on.checked)) { const n = await buildSchedule(doc, sc ? sc.value : 'design'); if (n) toast(L(`اتعمل جدول التسليمات: ${n} مخرج`, `Deliverables schedule created: ${n} items`)); } }
+      if (col === 'shots' && doc && doc.state === 'done' && (!prev || prev.state !== 'done')) {   /* 5) an issued deliverable = a client submission event */
+        const p = byId('projects', doc.projectId); if (p) { const sid = doc.okStage || (PIPE()[stageIdx(p)] || {}).id; if (sid) { const S2 = Object.assign({}, p.okSub || {}); const cur = Object.assign({ events: [] }, S2[sid] || {}); if (!(cur.events || []).some(e => e.code === doc.code)) { cur.events = (cur.events || []).concat([{ k: 'sub', at: T(), rev: doc.rev || '', note: L(`صدر ${doc.code}${doc.name ? ' — ' + doc.name : ''}`, `${doc.code} issued${doc.name ? ' — ' + doc.name : ''}`), by: myName(), code: doc.code, auto: true }]); S2[sid] = cur; await Store.update('projects', p.id, { okSub: S2 }); } } }
+      }
+    } catch (e) { console.warn('oksmart', e); }
+    return r;
+  })(Store.save);
+
+  /* ---- 7) smart gate: what is really missing before the Project Owner approves */
+  const gateChecks = p => {
+    const st = PIPE()[stageIdx(p)]; if (!st) return [];
+    const steps = ((p.okSteps || {})[st.id] || []).length, n = st.items.length;
+    const sh = list('shots').filter(s => s.projectId === p.id && !s.deleted && !s.movedTo && (s.okStage ? s.okStage === st.id : true)); const shDone = sh.filter(s => s.state === 'done').length;
+    const ev = ((p.okSub || {})[st.id] || {}).events || []; const sub = ev.some(e => e.k === 'sub'), app = ev.some(e => e.k === 'app'), rejLast = ev.length && ev[ev.length - 1].k === 'rej';
+    const rfis = ((p.okSite || {}).rfis || []).filter(x => (x.status || 'open') === 'open').length; const risks = ((p.okLogs || {}).risks || []).filter(x => (x.status || 'open') === 'open').length;
+    const setup = (p.okSetup || []).length, setupN = (window.okFlow && (S.settings && Array.isArray(S.settings.okSetupItems) && S.settings.okSetupItems.length ? S.settings.okSetupItems : window.okFlow.SETUP0) || []).length;
+    const out = [
+      { ok: steps === n, text: L(`خطوات المرحلة: ${steps}/${n}`, `Stage steps: ${steps}/${n}`) },
+      { ok: sh.length ? shDone === sh.length : null, text: sh.length ? L(`المخرجات المعتمدة: ${shDone}/${sh.length}`, `Approved deliverables: ${shDone}/${sh.length}`) : L('مفيش مخرجات مسجّلة للمرحلة دي', 'No deliverables recorded for this stage') },
+      { ok: st.id === 'data' ? null : app, text: st.id === 'data' ? L('مرحلة داخلية — مش محتاجة اعتماد عميل', 'Internal stage — no client approval needed') : app ? L('اعتماد العميل مسجّل ✓', 'Client approval recorded ✓') : sub ? L(rejLast ? 'آخر رد من العميل: مرفوض — إعادة تقديم' : 'اتسلّم للعميل ولسه مفيش اعتماد مسجّل', rejLast ? 'Last client response: rejected — resubmit' : 'Submitted to the client, no approval recorded yet') : L('ماتسلّمش للعميل أصلًا', 'Not submitted to the client at all') },
+      { ok: !rfis, text: rfis ? L(`${rfis} RFI مفتوح`, `${rfis} open RFI(s)`) : L('مفيش RFIs مفتوحة', 'No open RFIs') },
+      { ok: !risks, text: risks ? L(`${risks} خطر مفتوح في السجل`, `${risks} open risk(s) in the log`) : L('مفيش مخاطر مفتوحة', 'No open risks') },
+    ];
+    if (st.id === 'data' || st.id === 'concept') out.unshift({ ok: setupN ? setup === setupN : null, text: L(`قايمة التجهيز: ${setup}/${setupN}`, `Setup checklist: ${setup}/${setupN}`) });
+    return out;
+  };
+  document.addEventListener('click', async ev => {
+    const t = ev.target.closest && ev.target.closest('[data-okgate]'); if (!t) return; ev.stopImmediatePropagation(); ev.preventDefault();
+    const p = byId('projects', t.dataset.okgate); if (!p) return; const can = (typeof stuCanEdit === 'function' && stuCanEdit()) && (isMgr() || p.ownerId === me() || p.leadId === me()); if (!can) return;
+    const i = stageIdx(p); const st = PIPE()[i], nx = PIPE()[i + 1]; if (!nx) return; const cks = gateChecks(p); const bad = cks.filter(c => c.ok === false).length;
+    openModal({ title: L(`اعتماد بوابة «${st.ar}»`, `Approve the «${st.name}» gate`), submitLabel: L('اعتمد وانقل المرحلة', 'Approve and move on'),
+      body: `<div class="form"><div class="full oksmck">${cks.map(c => `<div class="okck2 ${c.ok === true ? 'g' : c.ok === false ? 'r' : ''}"><i>${c.ok === true ? '✅' : c.ok === false ? '⚠️' : 'ℹ️'}</i><span>${esc(c.text)}</span></div>`).join('')}</div>${bad ? `<div class="full small" style="color:#b91c1c">${esc(L(`${bad} نقطة ناقصة — تقدر تعتمد مع كتابة السبب (بيتسجّل في البوابة)`, `${bad} item(s) missing — you can still approve with a reason (kept on the gate record)`))}</div>` : `<div class="full small">✅ ${esc(L('كل حاجة تمام — اعتمد', 'Everything is in place — approve'))}</div>`}<div class="field full"><label>${esc(L('ملاحظة الاعتماد', 'Approval note'))}</label><input name="note" maxlength="200" dir="auto" ${bad ? 'required' : ''}></div><div class="full small muted">${esc(L('المرحلة الجاية: ', 'Next stage: '))}<b>${esc(L(nx.ar, nx.name))}</b> · ${esc(L('البوابة: ', 'Gate: '))}${esc(L(nx.gate[0], nx.gate[1]))}</div></div>`,
+      onSubmit: async f => { const note = f.querySelector('[name=note]').value.trim(); if (bad && !note) { toast(L('اكتب السبب', 'Write the reason'), 'err'); return false; }
+        const okGates = Object.assign({}, p.okGates || {}, { [st.id]: { by: myName(), byId: me(), at: nowISO(), note, steps: `${((p.okSteps || {})[st.id] || []).length}/${st.items.length}`, checks: cks.map(c => (c.ok === true ? '✓' : c.ok === false ? '✗' : '·') + ' ' + c.text) } });
+        await Store.update('projects', p.id, { okGates, stage: nx.id, osStatus: nx.id, osStatusAt: Object.assign({}, p.osStatusAt || {}, { [nx.id]: nowISO() }), stageAt: Object.assign({}, p.stageAt || {}, { [nx.id]: nowISO() }) }); rerender();
+        toast(L(`اتعتمدت — المشروع في «${nx.ar}»`, `Approved — the project is now in «${nx.name}»`)); return true; } });
+  }, true);
+
+  /* ---- 10) site visit from the phone: photos + GPS (replaces the plain visit form) */
+  document.addEventListener('click', async ev => {
+    const t = ev.target.closest && ev.target.closest('[data-okadd]'); if (!t || !/:visits$/.test(t.dataset.okadd)) return; ev.stopImmediatePropagation(); ev.preventDefault();
+    const pid = t.dataset.okadd.split(':')[0]; const p = byId('projects', pid); if (!p || p.okSiteOn === false) return; const team = isMgr() || p.ownerId === me() || p.leadId === me() || (p.team || []).includes(me()); if (!team || !(typeof stuCanEdit === 'function' && stuCanEdit())) return;
+    let geo = null; const geoP = typeof getGeoBase === 'function' ? getGeoBase(8000).then(g => { geo = g; const el = document.getElementById('okgeo'); if (el) el.textContent = g ? `📍 ${g.lat}, ${g.lng} (±${g.acc}m)` : L('الموقع مش متاح — كمّل من غيره', 'Location unavailable — continue without it'); }) : Promise.resolve();
+    openModal({ title: L('زيارة موقع', 'Site visit'), submitLabel: L('سجّل الزيارة', 'Log the visit'), body: `<div class="form">${field(L('التاريخ', 'Date'), inp('at', T(), 'type="date"'))}${field(L('نوع الزيارة', 'Visit type'), `<select name="vt"><option value="routine">${esc(L('دورية', 'Routine'))}</option><option value="insp">${esc(L('معاينة / استلام', 'Inspection / handover'))}</option><option value="meet">${esc(L('اجتماع موقع', 'Site meeting'))}</option></select>`)}<div class="field full"><label>${esc(L('تقرير الزيارة (ملاحظات · اللي اتعمل · اللي مطلوب)', 'Visit report (observations · done · required)'))}</label><textarea name="text" rows="5" required></textarea></div><div class="field full"><label>${esc(L('صور من الموقع', 'Site photos'))}</label><input type="file" name="photos" accept="image/*" capture="environment" multiple></div><div class="full small muted" id="okgeo">${esc(L('بنحدد موقعك…', 'Locating you…'))}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (!d.text) return false; await geoP; const files = Array.from((f.querySelector('[name=photos]') || {}).files || []).slice(0, 6); const photos = [];
+        for (const file of files) { try { const small = await shrink(file); const st = await Files.put(small, 'image/jpeg'); photos.push(st); } catch (e) { console.warn('photo', e); } }
+        const d0 = (p.okSite || {}).visits || []; const row = { id: uid(), at: d.at, text: d.text, vt: d.vt, by: myName(), byId: me(), photos, geo, loggedAt: nowISO() };
+        await Store.update('projects', pid, { okSite: Object.assign({}, p.okSite || {}, { visits: d0.concat([row]) }) }); rerender(); toast(L('اتسجّلت الزيارة', 'Visit logged')); return true; } });
+  }, true);
+  async function shrink(file) { try { const bmp = await createImageBitmap(file); const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)); const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return await new Promise(r => c.toBlob(b => r(b || file), 'image/jpeg', 0.82)); } catch (e) { return file; } }
+  /* photos + map link under each visit row (rows are rendered newest-first, same order as the data) */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    const card = document.querySelector('.okflow'); if (!card) return; const p = byId('projects', card.dataset.pid); if (!p) return;
+    const sec = Array.from(card.querySelectorAll('.oksec')).find(s => /Site visits|زيارات الموقع/.test(s.querySelector('h4') ? s.querySelector('h4').textContent : '')); if (!sec) return;
+    const rows = Array.from(sec.querySelectorAll('.okrow')); const xs = ((p.okSite || {}).visits || []).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 50);
+    rows.forEach((r, i) => { const x = xs[i]; if (!x || r.querySelector('.okvx') || (!(x.photos || []).length && !x.geo)) return; const d = document.createElement('div'); d.className = 'okvx'; d.innerHTML = `${x.geo ? `<a class="okpill" target="_blank" rel="noopener" href="https://maps.google.com/?q=${x.geo.lat},${x.geo.lng}">📍 ${esc(L('الموقع على الخريطة', 'On the map'))}</a>` : ''}${(x.photos || []).map((ph, j) => `<a class="okph" data-okph="${esc(p.id)}:${esc(x.id)}:${j}" title="photo"><span>🖼</span></a>`).join('')}`; r.appendChild(d); (x.photos || []).forEach(async (ph, j) => { try { const u = await Files.url(ph); const a = d.querySelector(`[data-okph="${p.id}:${x.id}:${j}"]`); if (u && a) { a.href = u; a.target = '_blank'; a.innerHTML = `<img src="${u}" alt="">`; } } catch (e) { /* */ } }); });
+  });
+
+  /* ---- 6) assistant: a scoped snapshot of the office data + the engine's aiText */
+  const snapshot = () => {
+    const ps = list('projects').filter(p => p.status !== 'archived' && mine(p)).map(p => { const st = PIPE()[stageIdx(p)]; const rk = risk(p); return { code: p.code, name: p.name, client: p.client || '', owner: who(p.ownerId || p.leadId), state: stateOf(p), stage: st ? st.name : (p.osStatus || p.stage), stage_started: curStart(p) || null, expected_days: rk ? rk.expect : null, risk: rk ? rk.lvl : null, last_activity: lastTouch(p), client_deadline: p.dueDate || p.clientDeadline || null, ntp: p.okNtp || null, client_events: Object.fromEntries(Object.entries(p.okSub || {}).map(([k, v]) => [k, (v.events || []).map(e => `${e.at.slice(0, 10)} ${e.k}${e.rev ? ' rev' + e.rev : ''}${e.note ? ' ' + e.note : ''}`)])), open_rfis: ((p.okSite || {}).rfis || []).filter(x => (x.status || 'open') === 'open').length, open_risks: ((p.okLogs || {}).risks || []).filter(x => (x.status || 'open') === 'open').map(x => x.text), deliverables: list('shots').filter(s => s.projectId === p.id && !s.deleted).map(s => `${s.code} ${s.name || ''} [${s.state}${s.due ? ' due ' + s.due : ''}]`) }; });
+    const enq = (isMgr() ? list('enquiries').filter(e => !e.deleted && !['won', 'lost'].includes(e.stage)) : []).map(e => ({ name: e.name, developer: e.developer, stage: e.stage, next: e.nextWhat ? `${e.nextWhat} @ ${e.next}` : e.next, owner: who(e.ownerId) }));
+    return { today: T(), me: myName(), role: role(), pipeline: PIPE().map(s => `${s.id}: ${s.name} (${s.riba})`), projects: ps, enquiries: enq, workload: isMgr() ? workload().map(w => `${w.name}: ${w.active} active, ${w.risk} at risk, ${w.idle} idle`) : undefined, alerts: alerts().slice(0, 40).map(a => `${a.sev}: ${a.text}`) };
+  };
+  const SYS = () => `You are the Ökoplan Landscaping office assistant (a landscape-architecture consultancy in Egypt; pipeline per RIBA 2020 / ISO 9001 / ISO 19650 / FIDIC). Answer in the language the user writes in (Egyptian Arabic or English), briefly and concretely, using ONLY the data below. Never invent projects, dates or people. No money figures ever. When asked to write an email or message to a client, write it in professional English unless asked otherwise, signed by the user. Data (JSON):\n${JSON.stringify(snapshot())}`;
+  const chat = []; let busy = false;
+  const askHTML = () => `<div class="okask"><div class="okmsgs" id="okmsgs">${chat.length ? chat.map(m => `<div class="okm ${m.role}">${m.role === 'assistant' ? md(m.text) : esc(m.text)}</div>`).join('') : `<div class="okm hint">${esc(L('اسأل عن مشاريعك: «إيه اللي مستني اعتماد عميل؟» · «لخّصلي OK-031» · «اكتب إيميل متابعة للعميل بتاع …» · «مين عنده أكتر مشاريع؟»', 'Ask about your projects: “what is waiting for client approval?” · “summarise OK-031” · “write a follow-up email to the client of …” · “who has the most projects?”'))}</div>`}${busy ? `<div class="okm assistant">…</div>` : ''}</div><form class="okaskf" id="okaskf"><input name="q" autocomplete="off" placeholder="${esc(L('اكتب سؤالك…', 'Type your question…'))}" dir="auto" ${busy ? 'disabled' : ''}><button class="btn p" ${busy ? 'disabled' : ''}>${icon('send')}</button>${chat.length ? `<button type="button" class="btn ghost" data-okclear="1" title="${esc(L('ابدأ من جديد', 'Start over'))}">${icon('x')}</button>` : ''}</form>${typeof aiAvailable === 'function' && !aiAvailable() ? `<div class="small muted" style="margin-top:6px">${esc(L('المساعد محتاج مفتاح Anthropic على السيرفر — من الإعدادات.', 'The assistant needs the Anthropic key on the server — see Settings.'))}</div>` : ''}</div>`;
+  const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^- (.*)$/gm, '• $1').replace(/\n/g, '<br>');
+  document.addEventListener('submit', async ev => {
+    const f = ev.target; if (!f || f.id !== 'okaskf') return; ev.preventDefault(); const q = f.q.value.trim(); if (!q || busy) return;
+    chat.push({ role: 'user', text: q }); busy = true; paintAsk();
+    try { const msgs = [{ role: 'user', content: SYS() + '\n\nConversation so far:\n' + chat.slice(0, -1).map(m => `${m.role}: ${m.text}`).join('\n') + '\n\nuser: ' + q }]; const r = await aiText(msgs, {}); chat.push({ role: 'assistant', text: r.text || '' }); }
+    catch (e) { chat.push({ role: 'assistant', text: (typeof aiErr === 'function' ? aiErr(e) : '') || String(e && e.message || e) }); }
+    busy = false; paintAsk();
+  });
+  document.addEventListener('click', ev => { if (ev.target.closest && ev.target.closest('[data-okclear]')) { chat.length = 0; paintAsk(); } });
+  const paintAsk = () => { const el = document.getElementById('okaskbox'); if (el) { el.innerHTML = askHTML(); const m = el.querySelector('#okmsgs'); if (m) m.scrollTop = m.scrollHeight; const i = el.querySelector('input[name=q]'); if (i && !busy) i.focus(); } };
+
+  /* ---- 2) weekly reports written by the server (docs col okreports) */
+  const RCOL = 'okreports';
+  if (typeof COLS !== 'undefined' && !COLS.includes(RCOL)) COLS.push(RCOL); S.data[RCOL] = S.data[RCOL] || new Map();
+  if (typeof Store === 'object' && Store.subscribeAll) Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; try { S.unsub.push(db.collection(RCOL).onSnapshot(snap => { S.data[RCOL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[RCOL] = true; rerender(); }, e => console.warn('snapshot', RCOL, e))); } catch (e) { /* */ } })(Store.subscribeAll);
+  const reportHTML = r => `<details class="okrep" ${r.open ? 'open' : ''}><summary><b>${esc(L('تقرير الأسبوع', 'Weekly report'))} · ${d10(r.at)}</b><span class="small muted">${esc(L(`${r.active} نشط · ${r.hold} متوقف · ${r.moved} اتحرك · ${r.gates} بوابة اتقفلت · ${r.enqNew} فرصة جديدة`, `${r.active} active · ${r.hold} on hold · ${r.moved} moved · ${r.gates} gates closed · ${r.enqNew} new enquiries`))}</span></summary><div class="small" style="white-space:pre-wrap;line-height:1.7">${esc(en() ? (r.textEn || r.text) : (r.text || r.textEn))}</div></details>`;
+
+  /* ---- the page */
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.oksm{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media (max-width:1000px){.oksm{grid-template-columns:1fr}}
+.oksm .card{margin:0}.oksm h3{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}.oksm h3 .n{color:var(--accent);font-weight:700}
+.okal{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:13px;text-decoration:none;color:inherit}.okal:first-child{border-top:0}.okal i{flex:none;width:9px;height:9px;border-radius:999px;margin-top:5px}.okal.crit i{background:#ef4444;box-shadow:0 0 10px rgba(239,68,68,.6)}.okal.warn i{background:#f5b301}.okal.info i{background:#50b1e7}.okal .k{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 7px;white-space:nowrap}.okal .grow{flex:1}
+.okal .btn.xs{padding:2px 8px;font-size:11px}
+.okwl{width:100%;border-collapse:collapse;font-size:13px}.okwl th,.okwl td{padding:6px 6px;border-top:1px solid var(--line);text-align:start;white-space:nowrap}.okwl th{color:var(--muted);font-weight:600;font-size:11.5px}.okwl .bar{display:inline-block;height:8px;border-radius:999px;background:var(--accent);vertical-align:middle}
+.okrk{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}.okrk a{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:12px;padding:10px;text-decoration:none;color:inherit;font-size:12.5px}.okrk a b{font-size:13px}.okrk .m{height:6px;border-radius:999px;background:var(--line);overflow:hidden}.okrk .m i{display:block;height:100%}.okrk.red .m i,.okrk a.red .m i{background:#ef4444}.okrk a.amber .m i{background:#f5b301}.okrk a.ok .m i{background:#22c55e}
+.okcl{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}.okcl div{border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px}.okcl b{font-size:13.5px;display:block;margin-bottom:4px}
+.okask{display:flex;flex-direction:column;gap:8px}.okmsgs{max-height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px}.okm{max-width:92%;border-radius:14px;padding:8px 12px;font-size:13.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--line)}.okm.user{align-self:flex-end;background:var(--ink);color:var(--surface);border-color:transparent}.okm.hint{color:var(--muted);font-size:12.5px}.okaskf{display:flex;gap:6px}.okaskf input{flex:1}
+.okrep{border-top:1px solid var(--line);padding:8px 0}.okrep summary{cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.oksmck .okck2{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line);font-size:13px}.oksmck .okck2:first-child{border-top:0}.oksmck .okck2.r{color:#b91c1c}html[data-theme="dark"] .oksmck .okck2.r{color:#fca5a5}
+.okvx{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:4px}.okvx .okph{width:54px;height:54px;border-radius:10px;overflow:hidden;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;background:var(--surface-2)}.okvx .okph img{width:100%;height:100%;object-fit:cover}.okvx .okpill{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;text-decoration:none;color:inherit;align-self:center}
+.okrdot{position:absolute;top:10px;inset-inline-start:10px;z-index:2;width:12px;height:12px;border-radius:999px;border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,.35)}.okrdot.amber{background:#f5b301}.okrdot.red{background:#ef4444}
+.oksmhead{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.oksmhead .okpill{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;background:var(--surface)}.oksmhead .okpill b{color:var(--accent)}
+</style>`);
+  const page = () => {
+    const al = alerts(); const wl = workload(); const rk = live().filter(mine).map(p => ({ p, r: risk(p) })).filter(x => x.r).sort((a, b) => b.r.pct - a.r.pct); const cl = isMgr() ? clients() : []; const reps = list(RCOL).sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 8);
+    const head = `<div class="oksmhead"><span class="okpill"><b>${al.filter(a => a.sev === 'crit').length}</b>${esc(L('عاجل', 'urgent'))}</span><span class="okpill"><b>${al.filter(a => a.sev === 'warn').length}</b>${esc(L('يحتاج متابعة', 'needs follow-up'))}</span><span class="okpill"><b>${rk.filter(x => x.r.lvl !== 'ok').length}</b>${esc(L('مشروع في خطر تأخير', 'projects at delay risk'))}</span><span class="okpill"><b>${live().filter(mine).length}</b>${esc(L('مشروع نشط', 'active projects'))}</span></div>`;
+    const alH = `<div class="card"><h3>${icon('alert')} ${esc(L('محتاج انتباهك', 'Needs your attention'))}<span class="n">${al.length}</span></h3>${al.length ? al.slice(0, 60).map(a => `<a class="okal ${a.sev}" href="${a.href}"><i></i><span class="k">${esc(L(KIND[a.kind][0], KIND[a.kind][1]))}</span><span class="grow">${esc(a.text)}</span>${a.remind ? `<button type="button" class="btn xs ghost" data-okremind="${a.pid}">${esc(L('ذكّر العميل', 'Remind client'))}</button>` : ''}</a>`).join('') : `<div class="small muted">✅ ${esc(L('مفيش حاجة واقفة — كله ماشي', 'Nothing is stuck — all moving'))}</div>`}</div>`;
+    const rkH = `<div class="card"><h3>⏱ ${esc(L('خطر التأخير (قبل ما يحصل)', 'Delay risk (before it happens)'))}<span class="n">${rk.filter(x => x.r.lvl !== 'ok').length}</span></h3><div class="okrk">${rk.slice(0, 24).map(({ p, r }) => `<a class="${r.lvl}" href="#/projects/${p.id}"><b>${esc(p.code || '')} ${esc(p.name)}</b><span class="small muted">${esc(L(r.stage.ar, r.stage.name))} · ${esc(L(`${r.used} من ${r.expect} يوم`, `${r.used} of ${r.expect} days`))} · ${esc(L(r.src === 'office' ? 'حسب تاريخ المكتب' : r.src === 'plan' ? 'حسب خطة المشروع' : 'تقدير افتراضي', r.src === 'office' ? 'from office history' : r.src === 'plan' ? 'from the project plan' : 'default estimate'))}</span><div class="m"><i style="width:${r.pct}%"></i></div><span class="small">${esc(L('المتوقع تخلص', 'Expected to finish'))} ${d10(r.eta)}${r.lvl === 'red' ? ' · ' + esc(L('متأخرة', 'late')) : r.lvl === 'amber' ? ' · ' + esc(L('قرّبت', 'close')) : ''}</span></a>`).join('') || `<div class="small muted">—</div>`}</div></div>`;
+    const wlH = isMgr() ? `<div class="card"><h3>${icon('users')} ${esc(L('حمل الفريق (Project Owners)', 'Team workload (Project Owners)'))}</h3><div class="tablewrap"><table class="okwl"><thead><tr><th>${esc(L('الاسم', 'Name'))}</th><th>${esc(L('نشط', 'Active'))}</th><th></th><th>${esc(L('في خطر', 'At risk'))}</th><th>${esc(L('ساكن', 'Idle'))}</th><th>${esc(L('متوقف', 'Hold'))}</th><th>${esc(L('اتسلّم', 'Done'))}</th></tr></thead><tbody>${wl.map(w => `<tr><td>${esc(w.name || w.id)}</td><td><b>${w.active}</b></td><td><span class="bar" style="width:${Math.min(120, w.active * 12)}px"></span></td><td>${w.risk || ''}</td><td>${w.idle || ''}</td><td>${w.hold || ''}</td><td>${w.done || ''}</td></tr>`).join('')}</tbody></table></div>${suggestOwner() ? `<div class="small muted" style="margin-top:8px">💡 ${esc(L(`لو جه مشروع جديد: الأقل حمل دلوقتي ${suggestOwner().name}`, `For the next new project: least loaded right now is ${suggestOwner().name}`))}</div>` : ''}</div>` : '';
+    const clH = isMgr() ? `<div class="card"><h3>${icon('clients')} ${esc(L('ملف العملاء', 'Client file'))}<span class="n">${cl.length}</span></h3><div class="okcl">${cl.slice(0, 40).map(c => `<div><b>${esc(c.name)}</b>${esc(L(`${c.projects.length} مشروع · ${c.active} نشط`, `${c.projects.length} projects · ${c.active} active`))}<br>${c.avg != null ? esc(L(`متوسط رد العميل: ${c.avg} يوم`, `Avg. client response: ${c.avg} days`)) : esc(L('لسه مفيش تسليمات مسجّلة', 'No submissions recorded yet'))}${c.rej ? ` · <span style="color:#b91c1c">${esc(L(`${c.rej} رفض`, `${c.rej} rejection(s)`))}</span>` : ''}${c.appr ? ` · ${c.appr} ✓` : ''}<br><span class="small muted">${c.projects.slice(0, 4).map(p => esc(p.code || p.name)).join(' · ')}${c.projects.length > 4 ? ' …' : ''}</span></div>`).join('') || '—'}</div></div>` : '';
+    const repH = `<div class="card"><h3>${icon('report')} ${esc(L('التقرير الأسبوعي (الأحد الصبح)', 'Weekly report (Sunday morning)'))}</h3>${reps.length ? reps.map((r, i) => reportHTML(Object.assign({ open: i === 0 }, r))).join('') : `<div class="small muted">${esc(L('أول تقرير هيتكتب الأحد الجاي ويتبعت لك وللدكتور طارق على الموبايل.', 'The first report is written next Sunday and pushed to you and Dr. Tarek.'))}</div>`}</div>`;
+    const askH = `<div class="card"><h3>🤖 ${esc(L('المساعد', 'Assistant'))}</h3><div id="okaskbox">${askHTML()}</div></div>`;
+    return `${head}<div class="oksm"><div style="display:flex;flex-direction:column;gap:14px">${alH}${rkH}${clH}</div><div style="display:flex;flex-direction:column;gap:14px">${askH}${wlH}${repH}</div></div>`;
+  };
+  /* «remind the client»: a ready email + a logged event */
+  document.addEventListener('click', async ev => {
+    const b = ev.target.closest && ev.target.closest('[data-okremind]'); if (!b) return; ev.preventDefault(); ev.stopPropagation();
+    const p = byId('projects', b.dataset.okremind); if (!p) return; const sid = Object.keys(p.okSub || {}).find(k => { const ev2 = p.okSub[k].events || []; return ev2.length && ev2[ev2.length - 1].k === 'sub'; }); const st = PIPE().find(s => s.id === sid) || {}; const last = sid ? p.okSub[sid].events.slice(-1)[0] : null;
+    const txt = `Subject: ${p.name} — ${st.name || ''} submission (${last ? 'Rev ' + (last.rev || '0') + ', ' : ''}${last ? d10(last.at) : ''}) — kind reminder\n\nDear ${p.client || 'Sir/Madam'},\n\nWe hope this finds you well. We would like to kindly follow up on the ${st.name || ''} submission for ${p.name}, issued on ${last ? d10(last.at) : ''}. We would appreciate receiving your comments or approval so that we can proceed with the next stage without affecting the programme.\n\nPlease let us know if a review meeting would help.\n\nBest regards,\n${myName()}\nÖkoplan Landscaping`;
+    openModal({ title: L('تذكير العميل', 'Client reminder'), submitLabel: L('اتبعت — سجّل التذكير', 'Sent — log the reminder'), body: `<div class="form"><div class="field full"><textarea rows="12" dir="ltr" style="font-family:inherit">${esc(txt)}</textarea></div><div class="full small muted">${esc(L('انسخ النص وابعته من إيميلك، وبعدين اضغط الزر عشان يتسجّل في حركات العميل.', 'Copy the text and send it from your email, then press the button to log it in the client events.'))}</div></div>`,
+      onSubmit: async () => { if (!sid) return true; const S2 = Object.assign({}, p.okSub); const cur = Object.assign({}, S2[sid]); cur.events = (cur.events || []).concat([{ k: 'sub', at: T(), rev: last && last.rev, note: L('تذكير للعميل', 'Reminder sent to client'), by: myName(), reminder: true }]); S2[sid] = cur; await Store.update('projects', p.id, { okSub: S2 }); rerender(); return true; } });
+  });
+  const hook = () => {
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.oksmart) return;
+    EXTRA_VIEWS.oksmart = () => page();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.oksmart = () => ({ title: L('لوحة الذكاء', 'Smart desk'), sub: L('السيستم بيراقب المشاريع بدالك: اللي واقف · اللي هيتأخر · اللي مستني العميل · حمل الفريق · المساعد', 'The system watches the projects for you: stalled · about to slip · waiting for the client · team load · assistant') });
+    if (typeof VIEW_TITLES === 'object') VIEW_TITLES.oksmart = 'لوحة الذكاء';
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'oksmart')) { const at = NAV.findIndex(n => n.id === 'projects'); NAV.splice(at >= 0 ? at + 1 : 1, 0, { id: 'oksmart', label: 'لوحة الذكاء', short: 'الذكاء', icon: 'alert', count: () => { try { return S.session ? alerts().filter(a => a.sev !== 'info').length : 0; } catch (e) { return 0; } }, countCls: 'warn' }); }
+    if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('oksmart')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['oksmart']); });
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'oksmart') return !!S.session && !['kiosk', 'viewer'].includes(role()); return base.apply(this, arguments); })(canSee);
+  };
+  hook(); document.addEventListener('nf:ready', hook);
+  /* 4) the risk dot on project cards */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { document.querySelectorAll('.spcard[href^="#/projects/"]').forEach(c => { if (c.querySelector('.okrdot')) return; const id = c.getAttribute('href').slice('#/projects/'.length); const p = id && byId('projects', id); if (!p) return; const r = risk(p); if (!r || r.lvl === 'ok') return; c.insertAdjacentHTML('afterbegin', `<span class="okrdot ${r.lvl}" title="${esc(L(r.lvl === 'red' ? 'متأخر عن المتوقع' : 'قرّب يتأخر', r.lvl === 'red' ? 'Behind the expected pace' : 'Close to slipping'))}"></span>`); }); });
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'لوحة الذكاء': 'Smart desk', 'الذكاء': 'Smart' });
+  window.okSmart = { alerts, risk, workload, clients, snapshot, buildSchedule, gateChecks };
 })();
