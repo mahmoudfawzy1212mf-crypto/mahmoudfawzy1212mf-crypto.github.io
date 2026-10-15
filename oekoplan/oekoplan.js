@@ -1573,25 +1573,28 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   const risk = p => {
     if (stateOf(p) !== 'active') return null; const i = stageIdx(p); const st = PIPE()[i]; if (!st || i >= PIPE().length - 1 || !curStart(p)) return null;
     const ex = expectDays(p, st); const used = ago(curStart(p)); const r = used / Math.max(1, ex.d); const eta = addDays(curStart(p), ex.d);
-    const lvl = r >= 1 ? 'red' : r >= 0.8 ? 'amber' : 'ok';
+    const lvl = r >= 1 ? 'red' : r >= (TH().riskAmber || 80) / 100 ? 'amber' : 'ok';
     return { lvl, used, expect: ex.d, src: ex.src, eta, pct: Math.min(100, Math.round(r * 100)), stage: st };
   };
 
   /* ---- 1) alerts */
+  const TH0 = { idleWarn: 10, idleCrit: 20, clientWarn: 7, clientCrit: 14, rfi: 7, enqIdle: 5, riskAmber: 80 };
+  const TH = () => Object.assign({}, TH0, (S.settings && S.settings.okAlert) || {});
+  window.okAlertTH = TH;
   const alerts = () => {
-    const out = []; const Pn = PIPE();
+    const out = []; const Pn = PIPE(); const th = TH();
     live().filter(mine).forEach(p => {
       const idle = ago(lastTouch(p));
-      if (idle >= 20) out.push({ sev: 'crit', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش أي حركة من ${idle} يوم`, `${p.name} — no activity for ${idle} days`), href: '#/projects/' + p.id });
-      else if (idle >= 10) out.push({ sev: 'warn', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش حركة من ${idle} يوم`, `${p.name} — quiet for ${idle} days`), href: '#/projects/' + p.id });
+      if (idle >= th.idleCrit) out.push({ sev: 'crit', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش أي حركة من ${idle} يوم`, `${p.name} — no activity for ${idle} days`), href: '#/projects/' + p.id });
+      else if (idle >= th.idleWarn) out.push({ sev: 'warn', kind: 'stalled', pid: p.id, text: L(`${p.name} — مفيش حركة من ${idle} يوم`, `${p.name} — quiet for ${idle} days`), href: '#/projects/' + p.id });
       const rk = risk(p); if (rk && rk.lvl === 'red') out.push({ sev: 'crit', kind: 'gate', pid: p.id, text: L(`${p.name} — مرحلة «${rk.stage.ar}» عدّت المتوقع (${rk.used}/${rk.expect} يوم) والبوابة لسه ماتعتمدتش`, `${p.name} — «${rk.stage.name}» passed its expected ${rk.expect} days (${rk.used} so far) and the gate is not approved`), href: '#/projects/' + p.id });
       else if (rk && rk.lvl === 'amber') out.push({ sev: 'info', kind: 'risk', pid: p.id, text: L(`${p.name} — «${rk.stage.ar}» قرّبت تتأخر (${rk.pct}% من الوقت المتوقع)`, `${p.name} — «${rk.stage.name}» is close to slipping (${rk.pct}% of the expected time)`), href: '#/projects/' + p.id });
-      Object.keys(p.okSub || {}).forEach(sid => { const ev = (p.okSub[sid].events || []); const last = ev[ev.length - 1]; if (last && last.k === 'sub') { const w = ago(last.at); const st = Pn.find(s => s.id === sid) || { ar: sid, name: sid }; if (w >= 7) out.push({ sev: w >= 14 ? 'crit' : 'warn', kind: 'client', pid: p.id, text: L(`${p.name} — تسليم «${st.ar}» مستني رد العميل من ${w} يوم`, `${p.name} — «${st.name}» submission is waiting for the client for ${w} days`), href: '#/projects/' + p.id, remind: true }); } });
-      (p.okSite && p.okSite.rfis || []).filter(x => (x.status || 'open') === 'open' && ago(x.at) >= 7).forEach(x => out.push({ sev: 'warn', kind: 'rfi', pid: p.id, text: L(`${p.name} — RFI ${x.no || ''} مفتوح من ${ago(x.at)} يوم`, `${p.name} — RFI ${x.no || ''} open for ${ago(x.at)} days`), href: '#/projects/' + p.id }));
+      Object.keys(p.okSub || {}).forEach(sid => { const ev = (p.okSub[sid].events || []); const last = ev[ev.length - 1]; if (last && last.k === 'sub') { const w = ago(last.at); const st = Pn.find(s => s.id === sid) || { ar: sid, name: sid }; if (w >= th.clientWarn) out.push({ sev: w >= th.clientCrit ? 'crit' : 'warn', kind: 'client', pid: p.id, text: L(`${p.name} — تسليم «${st.ar}» مستني رد العميل من ${w} يوم`, `${p.name} — «${st.name}» submission is waiting for the client for ${w} days`), href: '#/projects/' + p.id, remind: true }); } });
+      (p.okSite && p.okSite.rfis || []).filter(x => (x.status || 'open') === 'open' && ago(x.at) >= th.rfi).forEach(x => out.push({ sev: 'warn', kind: 'rfi', pid: p.id, text: L(`${p.name} — RFI ${x.no || ''} مفتوح من ${ago(x.at)} يوم`, `${p.name} — RFI ${x.no || ''} open for ${ago(x.at)} days`), href: '#/projects/' + p.id }));
     });
     if (isMgr() || ((S.settings && S.settings.okEnqViewers) || []).includes(me())) list('enquiries').filter(e => !e.deleted && !['won', 'lost'].includes(e.stage)).forEach(e => {
       if (e.next && e.next < T()) out.push({ sev: 'warn', kind: 'enq', eid: e.id, text: L(`فرصة «${e.name}» — الخطوة الجاية فاتت من ${ago(e.next)} يوم`, `Enquiry «${e.name}» — next action overdue by ${ago(e.next)} days`), href: '#/enquiries' });
-      else if (ago(e.updatedAt || e.createdAt) >= 5) out.push({ sev: 'info', kind: 'enq', eid: e.id, text: L(`فرصة «${e.name}» — من غير متابعة من ${ago(e.updatedAt || e.createdAt)} يوم`, `Enquiry «${e.name}» — no follow-up for ${ago(e.updatedAt || e.createdAt)} days`), href: '#/enquiries' });
+      else if (ago(e.updatedAt || e.createdAt) >= th.enqIdle) out.push({ sev: 'info', kind: 'enq', eid: e.id, text: L(`فرصة «${e.name}» — من غير متابعة من ${ago(e.updatedAt || e.createdAt)} يوم`, `Enquiry «${e.name}» — no follow-up for ${ago(e.updatedAt || e.createdAt)} days`), href: '#/enquiries' });
     });
     const W = { crit: 0, warn: 1, info: 2 }; return out.sort((a, b) => W[a.sev] - W[b.sev]);
   };
@@ -1760,8 +1763,19 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     const b = ev.target.closest && ev.target.closest('[data-okremind]'); if (!b) return; ev.preventDefault(); ev.stopPropagation();
     const p = byId('projects', b.dataset.okremind); if (!p) return; const sid = Object.keys(p.okSub || {}).find(k => { const ev2 = p.okSub[k].events || []; return ev2.length && ev2[ev2.length - 1].k === 'sub'; }); const st = PIPE().find(s => s.id === sid) || {}; const last = sid ? p.okSub[sid].events.slice(-1)[0] : null;
     const txt = `Subject: ${p.name} — ${st.name || ''} submission (${last ? 'Rev ' + (last.rev || '0') + ', ' : ''}${last ? d10(last.at) : ''}) — kind reminder\n\nDear ${p.client || 'Sir/Madam'},\n\nWe hope this finds you well. We would like to kindly follow up on the ${st.name || ''} submission for ${p.name}, issued on ${last ? d10(last.at) : ''}. We would appreciate receiving your comments or approval so that we can proceed with the next stage without affecting the programme.\n\nPlease let us know if a review meeting would help.\n\nBest regards,\n${myName()}\nÖkoplan Landscaping`;
-    openModal({ title: L('تذكير العميل', 'Client reminder'), submitLabel: L('اتبعت — سجّل التذكير', 'Sent — log the reminder'), body: `<div class="form"><div class="field full"><textarea rows="12" dir="ltr" style="font-family:inherit">${esc(txt)}</textarea></div><div class="full small muted">${esc(L('انسخ النص وابعته من إيميلك، وبعدين اضغط الزر عشان يتسجّل في حركات العميل.', 'Copy the text and send it from your email, then press the button to log it in the client events.'))}</div></div>`,
-      onSubmit: async () => { if (!sid) return true; const S2 = Object.assign({}, p.okSub); const cur = Object.assign({}, S2[sid]); cur.events = (cur.events || []).concat([{ k: 'sub', at: T(), rev: last && last.rev, note: L('تذكير للعميل', 'Reminder sent to client'), by: myName(), reminder: true }]); S2[sid] = cur; await Store.update('projects', p.id, { okSub: S2 }); rerender(); return true; } });
+    const clientRec = p.clientId ? byId('clients', p.clientId) : null; const toDef = p.clientEmail || (clientRec && (clientRec.email || clientRec.contactEmail)) || '';
+    const [subj0, ...bodyLines] = txt.split('\n'); const subj = subj0.replace(/^Subject:\s*/, ''); const body0 = bodyLines.join('\n').replace(/^\n+/, '');
+    openModal({ title: L('تذكير العميل', 'Client reminder'), submitLabel: L('ابعت الإيميل وسجّل', 'Send the email and log it'), extra: `<button type="button" class="btn ghost" data-okremlog="1">${esc(L('اتبعت من برّه — سجّل بس', 'Sent elsewhere — just log it'))}</button>`,
+      body: `<div class="form">${field(L('إلى (إيميل العميل)', 'To (client email)'), inp('to', toDef, 'type="email" required dir="ltr"'))}${field('CC', inp('cc', (S.session && S.session.email) || '', 'dir="ltr"'))}${field(L('الموضوع', 'Subject'), inp('subject', subj, 'dir="ltr"'), 'full')}<div class="field full"><label>${esc(L('النص', 'Body'))}</label><textarea name="body" rows="11" dir="ltr" style="font-family:inherit">${esc(body0)}</textarea></div><div class="full small muted">${esc(L('الإيميل بيتبعت من عنوان المكتب باسم Ökoplan Landscaping والرد بيرجع لك. بعد الإرسال بيتسجّل تلقائيًا في حركات العميل.', 'Sent from the office address as Ökoplan Landscaping, replies come to you. Logged automatically in the client events after sending.'))}</div></div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.to || '')) { toast(L('اكتب إيميل العميل', 'Write the client email'), 'err'); return false; }
+        if (!(typeof sbOn === 'function' && sbOn())) { toast(L('الإرسال محتاج السيرفر', 'Sending needs the server'), 'err'); return false; }
+        let res; try { res = await S.sb.functions.invoke('oeko-mail', { body: { action: 'client', to: d.to, cc: d.cc, subject: d.subject, text: d.body, projectId: p.id, replyTo: (S.session && S.session.email) || '' } }); } catch (e) { toast(String(e && e.message || e), 'err'); return false; }
+        const j = (res && res.data) || {}; if (res.error || j.status !== 'ok') { toast((j.detail || (res.error && res.error.message) || L('الإرسال فشل', 'Sending failed')).slice(0, 160), 'err'); return false; }
+        const S2 = Object.assign({}, p.okSub); if (sid) { const cur = Object.assign({}, S2[sid]); cur.events = (cur.events || []).concat([{ k: 'sub', at: T(), rev: last && last.rev, note: L(`تذكير اتبعت بالإيميل إلى ${d.to}`, `Reminder emailed to ${d.to}`), by: myName(), reminder: true, emailed: true }]); S2[sid] = cur; }
+        await Store.update('projects', p.id, Object.assign({ clientEmail: d.to }, sid ? { okSub: S2 } : {})); rerender(); toast(L('اتبعت واتسجّل', 'Sent and logged')); return true; } });
+    const logOnly = async () => { if (sid) { const S2 = Object.assign({}, p.okSub); const cur = Object.assign({}, S2[sid]); cur.events = (cur.events || []).concat([{ k: 'sub', at: T(), rev: last && last.rev, note: L('تذكير للعميل', 'Reminder sent to client'), by: myName(), reminder: true }]); S2[sid] = cur; await Store.update('projects', p.id, { okSub: S2 }); } closeModal(); rerender(); toast(L('اتسجّل', 'Logged')); };
+    const f = document.getElementById('mform'); if (f) { const b2 = f.querySelector('[data-okremlog]'); if (b2) b2.addEventListener('click', logOnly); }
   });
   const hook = () => {
     if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.oksmart) return;
@@ -1790,12 +1804,13 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
    ===================================================================== */
 (() => {
   if (window.__OK_LEARN__) return; window.__OK_LEARN__ = 1;
+  const twinOn = () => !(S.settings && S.settings.okTwin && S.settings.okTwin.enabled === false);
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const me = () => (typeof stuMe === 'function' ? stuMe() : '');
   const isMgr = () => isAdmin() || role() === 'manager';
-  const on = () => { try { return localStorage.getItem('ok.learn') !== 'off'; } catch (e) { return true; } };
-  const adapt = () => { try { return localStorage.getItem('ok.adapt') !== 'off'; } catch (e) { return true; } };
+  const on = () => { if (!twinOn()) return false; try { return localStorage.getItem('ok.learn') !== 'off'; } catch (e) { return true; } };
+  const adapt = () => { if (!twinOn()) return false; try { return localStorage.getItem('ok.adapt') !== 'off'; } catch (e) { return true; } };
   const live = () => typeof sbOn === 'function' && sbOn() && S.sbUser && S.session;
   const dev = () => (window.innerWidth <= 760 ? 'phone' : 'desktop');
   const LCOL = 'oklearn';
@@ -1867,7 +1882,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     if (typeof VIEW_TITLES === 'object') VIEW_TITLES.oklearn = 'ما تعلّمه السيستم';
     if (Array.isArray(NAV) && !NAV.some(n => n.id === 'oklearn')) { const at = NAV.findIndex(n => n.id === 'oksmart'); NAV.splice(at >= 0 ? at + 1 : 2, 0, { id: 'oklearn', label: 'ما تعلّمه السيستم', short: 'التعلّم', icon: 'star', count: () => { try { const o = office(); return o && isMgr() ? (o.suggestions || []).filter(s => !(o.decisions || {})[s.id]).length : 0; } catch (e) { return 0; } } }); }
     if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('oklearn')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['oklearn']); });
-    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'oklearn') return !!S.session && !['kiosk', 'viewer'].includes(role()); return base.apply(this, arguments); })(canSee);
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'oklearn') return !!S.session && twinOn() && !['kiosk', 'viewer'].includes(role()); return base.apply(this, arguments); })(canSee);
   };
   hook(); document.addEventListener('nf:ready', hook);
   /* ---------------- adaptive touch #1: your shortcuts on the home page ---------------- */
@@ -1896,12 +1911,13 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
    ===================================================================== */
 (() => {
   if (window.__OK_TWIN__) return; window.__OK_TWIN__ = 1;
+  const twinOn = () => !(S.settings && S.settings.okTwin && S.settings.okTwin.enabled === false);
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
   const L = (a, b) => (en() ? b : a);
   const me = () => (typeof stuMe === 'function' ? stuMe() : '');
   const myName = () => (S.session && S.session.name) || '';
   const isMgr = () => isAdmin() || role() === 'manager';
-  const adapt = () => { try { return localStorage.getItem('ok.adapt') !== 'off'; } catch (e) { return true; } };
+  const adapt = () => { if (!twinOn()) return false; try { return localStorage.getItem('ok.adapt') !== 'off'; } catch (e) { return true; } };
   const SM = () => window.okSmart || {};
   const PIPE = () => window.OEKO_PIPELINE || [];
   const T = () => todayISO();
@@ -1921,7 +1937,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     deadline_guard: { ar: 'حارس موعد العميل (قبلها بـ N يوم)', en: 'Client-deadline guard (N days before)', side: 'server', params: ['days'], ar2: 'موعد العميل قرّب (N يوم) والمرحلة لسه مش مقفولة → تنبيه للـ Owner والإدارة.', en2: 'Client deadline within N days and the stage is not closed → alert the owner and management.' },
   };
   const rules = () => (S.settings && Array.isArray(S.settings.okRules) ? S.settings.okRules : []);
-  const active = () => rules().filter(r => r.state === 'on' || r.state === 'try');
+  const active = () => (twinOn() ? rules().filter(r => r.state === 'on' || r.state === 'try') : []);
   const metricNow = kind => { const o = office() || {}; const ops = o.ops || {}; if (kind === 'remind_client') return { k: 'waitShare', v: ops.client ? ops.client.waitShare : null }; if (kind === 'escalate_stale') return { k: 'stale', v: ops.tasks ? ops.tasks.stale : null }; if (kind === 'stage_tasks') return { k: 'medianClose', v: ops.tasks ? ops.tasks.medianClose : null }; return { k: '', v: null }; };
   const saveRules = async next => { if (!(typeof stuCanEdit === 'function' && stuCanEdit()) || !isMgr()) { toast(L('القواعد للإدارة', 'Rules are for management'), 'err'); return false; } try { await Store.saveSettings(Object.assign({}, S.settings, { okRules: next, okRulesAt: nowISO() })); rerender(); return true; } catch (e) { toast(L('ماقدرتش أحفظ القاعدة', 'Could not save the rule'), 'err'); return false; } };
   const addRule = async (kind, params, from, state) => { const r = { id: 'r' + uid(), kind, params: params || {}, state: state || 'try', from: from || null, createdAt: nowISO(), by: myName(), byId: me(), baseline: metricNow(kind), log: [] }; const ok = await saveRules(rules().concat([r])); if (ok) toast(L(state === 'on' ? 'القاعدة شغّالة' : 'القاعدة تحت التجربة شهر', state === 'on' ? 'Rule is on' : 'Rule is on trial for a month')); return ok; };
@@ -2018,8 +2034,17 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     const rs = rules(); const srvLog = (byId('oklearn', 'rulelog') || {}).items || [];
     const impact = r => { const now = metricNow(r.kind); if (!r.baseline || r.baseline.v == null || now.v == null) return ''; const d = now.v - r.baseline.v; const good = r.kind === 'escalate_stale' || r.kind === 'remind_client' ? d < 0 : d < 0; return `<span class="lg">${esc(L('الأثر: ', 'Impact: '))}${esc(now.k)} ${r.baseline.v} → ${now.v} ${d === 0 ? '' : good ? '✅' : '⚠️'}</span>`; };
     const card = r => { const k = KINDS[r.kind] || { ar: r.kind, en: r.kind, ar2: '', en2: '' }; const lg = (r.log || []).slice(-3).reverse().concat(srvLog.filter(x => x.ruleId === r.id).slice(-3)); return `<div class="okrl"><div class="row"><b>${esc(L(k.ar, k.en))}</b><span class="st ${r.state}">${esc({ on: L('شغّالة', 'On'), try: L('تجربة', 'Trial'), off: L('موقوفة', 'Off') }[r.state] || r.state)}</span><div class="grow"></div><button type="button" class="btn xs ghost" data-action="okRuleEdit" data-arg="${esc(r.id)}">${icon('edit')}</button></div><span class="small muted">${esc(L(k.ar2, k.en2))}</span><span class="small">${r.params && r.params.days ? esc(L(`N = ${r.params.days} يوم`, `N = ${r.params.days} days`)) + ' · ' : ''}${r.params && r.params.stage ? esc(L((PIPE().find(s => s.id === r.params.stage) || {}).ar || r.params.stage, (PIPE().find(s => s.id === r.params.stage) || {}).name || r.params.stage)) + ' · ' : ''}${r.params && r.params.titles ? esc(r.params.titles.join(' · ')) + ' · ' : ''}${esc(L(`من ${r.by || ''} · ${d10(r.createdAt)}`, `by ${r.by || ''} · ${d10(r.createdAt)}`))}${r.from ? ' · ' + esc(L('من مقترح', 'from a suggestion')) : ''}${r.runs ? ' · ' + esc(L(`اشتغلت ${r.runs} مرة`, `ran ${r.runs}×`)) : ''}</span>${impact(r)}${lg.length ? `<details><summary class="lg">${esc(L('السجل', 'Log'))}</summary>${lg.map(x => `<div class="lg">${esc(d10(x.at))} · ${esc(x.text)}</div>`).join('')}</details>` : ''}<div class="row">${r.state !== 'on' ? `<button type="button" class="btn xs p" data-action="okRuleState" data-arg="${esc(r.id)}:on">${esc(L('شغّل', 'Turn on'))}</button>` : ''}${r.state !== 'try' ? `<button type="button" class="btn xs ghost" data-action="okRuleState" data-arg="${esc(r.id)}:try">${esc(L('تجربة', 'Trial'))}</button>` : ''}${r.state !== 'off' ? `<button type="button" class="btn xs ghost" data-action="okRuleState" data-arg="${esc(r.id)}:off">${esc(L('أوقف', 'Turn off'))}</button>` : ''}</div></div>`; };
-    return `<div class="card"><div class="cardhead"><h2 style="margin:0">${esc(L('قواعد التشغيل الآلي', 'Automation rules'))}</h2><div class="grow"></div><button class="btn p" data-action="okRuleNew">${icon('plus')}<span>${esc(L('قاعدة جديدة', 'New rule'))}</span></button></div><div class="small muted" style="margin-bottom:6px">${esc(L('القواعد بتتولد من المقترحات اللي بتقبلها في «ما تعلّمه السيستم» أو بتتضاف من هنا. «تجربة» = شهر وبعدها الأثر يتقاس. القواعد اللي على السيرفر بتشتغل كل يوم الصبح؛ اللي في الواجهة بتشتغل لحظيًا.', 'Rules are born from the suggestions you accept in "What the system learned" or added here. "Trial" = a month, then the impact is measured. Server rules run every morning; interface rules run instantly.'))}</div>${rs.length ? rs.map(card).join('') : `<div class="small muted">${esc(L('مفيش قواعد لسه — اقبل مقترح أو اعمل قاعدة.', 'No rules yet — accept a suggestion or add a rule.'))}</div>`}</div>`;
+    const th = window.okAlertTH ? window.okAlertTH() : {}; const tw = (S.settings && S.settings.okTwin) || {}; const viewers = (S.settings && S.settings.okEnqViewers) || [];
+    const thRow = (k, ar, en2) => `<div class="field"><label>${esc(L(ar, en2))}</label><input type="number" name="th_${k}" min="1" max="120" value="${th[k]}"></div>`;
+    const setH = `<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:14px">⚙️ ${esc(L('إعدادات التوأم الرقمي', 'Digital twin settings'))}</h3><form id="oktwinset" class="form">
+      <label class="field full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="enabled" ${tw.enabled === false ? '' : 'checked'}><span><b>${esc(L('المديول شغّال', 'Module on'))}</b> — ${esc(L('التسجيل، التعلّم، القواعد، والواجهة المتكيّفة. لو اتقفل: مفيش تسجيل ولا قواعد بتشتغل، والصفحات بتختفي (الإعدادات دي بس بتفضل).', 'logging, learning, rules and the adaptive interface. Off: nothing is recorded, no rule runs, the pages hide (only these settings remain).'))}</span></label>
+      <div class="full small muted" style="margin-top:6px"><b>${esc(L('عتبات التنبيهات (بالأيام)', 'Alert thresholds (days)'))}</b></div>
+      ${thRow('idleWarn', 'مشروع ساكن — تنبيه', 'Idle project — warning')}${thRow('idleCrit', 'مشروع ساكن — عاجل (+الإدارة)', 'Idle project — urgent (+management)')}${thRow('clientWarn', 'مستني العميل — تنبيه', 'Waiting for client — warning')}${thRow('clientCrit', 'مستني العميل — عاجل (+الإدارة)', 'Waiting for client — urgent (+management)')}${thRow('rfi', 'RFI مفتوح', 'Open RFI')}${thRow('enqIdle', 'فرصة بلا متابعة', 'Enquiry without follow-up')}${thRow('riskAmber', 'خطر التأخير 🟠 عند % من المدة', 'Delay risk 🟠 at % of the expected time')}
+      ${isAdmin() ? `<div class="field full"><label>${esc(L('مين يشوف صفحة الفرص (غير الإدارة)', 'Who sees the Enquiries page (besides management)'))}</label><select name="viewers" multiple size="5">${people().map(w => `<option value="${esc(w.id)}" ${viewers.includes(w.id) ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select><div class="small muted">${esc(L('Ctrl/⌘ لاختيار أكتر من واحد — ده تغيير صلاحيات.', 'Ctrl/⌘ to pick several — this is a permission change.'))}</div></div>` : ''}
+      <div class="full"><button class="btn p" type="submit">${esc(L('احفظ الإعدادات', 'Save settings'))}</button></div></form></div>`;
+    return `<div class="card"><div class="cardhead"><h2 style="margin:0">${esc(L('قواعد التشغيل الآلي', 'Automation rules'))}</h2><div class="grow"></div><button class="btn p" data-action="okRuleNew">${icon('plus')}<span>${esc(L('قاعدة جديدة', 'New rule'))}</span></button></div><div class="small muted" style="margin-bottom:6px">${esc(L('القواعد بتتولد من المقترحات اللي بتقبلها في «ما تعلّمه السيستم» أو بتتضاف من هنا. «تجربة» = شهر وبعدها الأثر يتقاس. القواعد اللي على السيرفر بتشتغل كل يوم الصبح؛ اللي في الواجهة بتشتغل لحظيًا.', 'Rules are born from the suggestions you accept in "What the system learned" or added here. "Trial" = a month, then the impact is measured. Server rules run every morning; interface rules run instantly.'))}</div>${rs.length ? rs.map(card).join('') : `<div class="small muted">${esc(L('مفيش قواعد لسه — اقبل مقترح أو اعمل قاعدة.', 'No rules yet — accept a suggestion or add a rule.'))}</div>`}</div>` + setH;
   };
+  document.addEventListener('submit', async ev => { const f = ev.target; if (!f || f.id !== 'oktwinset') return; ev.preventDefault(); if (!isMgr()) return; const d = formData(f); const okAlert = {}; ['idleWarn', 'idleCrit', 'clientWarn', 'clientCrit', 'rfi', 'enqIdle', 'riskAmber'].forEach(k => { const v = +d['th_' + k]; if (v > 0) okAlert[k] = v; }); const patch = { okAlert, okTwin: Object.assign({}, (S.settings && S.settings.okTwin) || {}, { enabled: !!f.querySelector('[name=enabled]').checked, at: nowISO(), by: myName() }) }; const sel = f.querySelector('[name=viewers]'); if (sel && isAdmin()) patch.okEnqViewers = Array.from(sel.selectedOptions).map(o => o.value); try { await Store.saveSettings(Object.assign({}, S.settings, patch)); toast(L('اتحفظت', 'Saved')); rerender(); } catch (e) { toast(L('ماقدرتش أحفظ', 'Could not save'), 'err'); } });
   const hook = () => {
     if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.okrules) return;
     EXTRA_VIEWS.okrules = () => rulesPage();
@@ -2027,7 +2052,7 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
     if (typeof VIEW_TITLES === 'object') VIEW_TITLES.okrules = 'قواعد التشغيل الآلي';
     if (Array.isArray(NAV) && !NAV.some(n => n.id === 'okrules')) { const at = NAV.findIndex(n => n.id === 'oklearn'); NAV.splice(at >= 0 ? at + 1 : 3, 0, { id: 'okrules', label: 'قواعد التشغيل الآلي', short: 'القواعد', icon: 'play', count: () => rules().filter(r => r.state === 'try').length }); }
     if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('okrules')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['okrules']); });
-    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'okrules') return !!S.session && isMgr(); return base.apply(this, arguments); })(canSee);
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'okrules') return !!S.session && isMgr();   /* the settings card lives here, so it stays visible even when the twin is switched off */ return base.apply(this, arguments); })(canSee);
   };
   hook(); document.addEventListener('nf:ready', hook);
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'قواعد التشغيل الآلي': 'Automation rules', 'القواعد': 'Rules' });
