@@ -2058,3 +2058,174 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'قواعد التشغيل الآلي': 'Automation rules', 'القواعد': 'Rules' });
   window.okTwin = { KINDS, rules, addRule, delayProb, similar, actCard };
 })();
+
+/* =====================================================================
+   Ökoplan — Digital twin · project, task & timeline management (Mahmoud, 15 Oct «ابدأ»):
+   · Project timeline (Gantt) on the project page: planned vs actual per stage, deliverables and tasks on the line, today marker.
+     First plan saved as the BASELINE; later changes are re-plans with a reason (client / internal / scope) — that is what the office
+     learns from. Stage dates editable by the owner / manager.
+   · Re-scheduling with approval: when a stage runs past its plan, the system proposes shifting the following stages and shows the
+     effect on the client deadline (critical path in red when the design end passes it). Nothing moves without a click.
+   · Portfolio timeline (#/oktimeline, management): every active project under each other, months axis, where the crowd is.
+   · «Today's plan» on the home page for every person: his open tasks ranked by priority · due · project risk · dependencies.
+   · Load balancing (management, on the portfolio page): people above capacity + the least-loaded teammate to move work to.
+   · Learning from time: planned vs actual deviation per stage (planning accuracy) — feeds the estimates and the suggestions.
+   Data on the project: okPlan { baseline:{at,by,stages{sid:{start,end}}}, stages{sid:{start,end}}, replans:[{at,by,reason,delta,note}] }.
+   ===================================================================== */
+(() => {
+  if (window.__OK_TIME__) return; window.__OK_TIME__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const me = () => (typeof stuMe === 'function' ? stuMe() : '');
+  const myName = () => (S.session && S.session.name) || '';
+  const isMgr = () => isAdmin() || role() === 'manager';
+  const SM = () => window.okSmart || {};
+  const PIPE = () => window.OEKO_PIPELINE || [];
+  const T = () => todayISO();
+  const d0 = s => (s ? String(s).slice(0, 10) : null);
+  const days = (a, b) => Math.round((new Date(d0(b) + 'T00:00:00') - new Date(d0(a) + 'T00:00:00')) / 864e5);
+  const d10 = iso => (iso ? fmtDate(String(iso).slice(0, 10)) : '—');
+  const who = id => { const w = id && (byId('workers', id) || byId('staff', id)); return (w && w.name) || ''; };
+  const canEdit = p => !!p && typeof stuCanEdit === 'function' && stuCanEdit() && (isMgr() || p.ownerId === me() || p.leadId === me());
+  const stageAt = (p, id) => { const v = ((p.stageAt || {})[id]) || ((p.osStatusAt || {})[id]); return v ? d0(v) : null; };
+  const stageIdx = p => Math.max(0, PIPE().findIndex(s => s.id === (p.osStatus || p.stage)));
+  const DESIGN = s => !['super', 'delivered'].includes(s.id);
+  const stateOf = p => (SM().stateOf ? SM().stateOf(p) : (p.okState || 'active'));
+
+  /* ---------- the plan: baseline → current → actual */
+  const expect = (p, st) => (SM().expectDays ? SM().expectDays(p, st).d : 21);
+  const autoPlan = p => {
+    const P = PIPE(); const end = d0(p.dueDate || p.clientDeadline); const des = P.filter(DESIGN); const tot = des.reduce((n, s) => n + (s.pct || 0), 0) || 100;
+    const ntp = d0(p.okNtp) || stageAt(p, P[0] && P[0].id); const cur = stageIdx(p); const out = {};
+    if (ntp) {   /* a dated project: split NTP → client deadline by the stage weights, supervision after */
+      const span = end && days(ntp, end) > 0 ? days(ntp, end) : null; let c = ntp;
+      P.forEach(s => { const d = DESIGN(s) && span ? Math.max(3, Math.round(span * (s.pct || 10) / tot)) : expect(p, s); const e = addDays(c, d); out[s.id] = { start: c, end: e }; c = e; });
+      if (span) { const last = des[des.length - 1]; if (last && out[last.id]) out[last.id].end = end; }
+      return out;
+    }
+    /* imported / undated: anchor on the CURRENT stage (its date, else today); earlier stages are placed backwards, later ones forward */
+    const anchor = stageAt(p, (P[cur] || {}).id) || T(); let c = anchor;
+    for (let i = cur - 1; i >= 0; i--) { const s = P[i]; const st = stageAt(p, s.id); const d = expect(p, s); const a = st || addDays(c, -d); out[s.id] = { start: a, end: c }; c = a; }
+    c = anchor; const rest = P.slice(cur); const restDes = rest.filter(DESIGN); const restTot = restDes.reduce((n, s) => n + (s.pct || 0), 0) || 100; const span = end && days(anchor, end) > 0 ? days(anchor, end) : null;
+    rest.forEach(s => { const d = DESIGN(s) && span ? Math.max(3, Math.round(span * (s.pct || 10) / restTot)) : expect(p, s); const e = addDays(c, d); out[s.id] = { start: c, end: e }; c = e; });
+    if (span) { const last = restDes[restDes.length - 1]; if (last && out[last.id]) out[last.id].end = end; }
+    return out;
+  };
+  const plan = p => (p.okPlan && p.okPlan.stages && Object.keys(p.okPlan.stages).length ? p.okPlan.stages : autoPlan(p));
+  const hasBaseline = p => !!(p.okPlan && p.okPlan.baseline && p.okPlan.baseline.stages);
+  const actual = p => { const P = PIPE(); const out = {}; const cur = stageIdx(p); P.forEach((s, i) => { const a = stageAt(p, s.id); const b = P[i + 1] ? stageAt(p, P[i + 1].id) : null; if (a) out[s.id] = { start: a, end: b || (i === cur ? T() : null), open: !b && i === cur }; }); return out; };
+  const designEnd = pl => { const des = PIPE().filter(DESIGN); const last = des[des.length - 1]; return last && pl[last.id] ? pl[last.id].end : null; };
+  /* drift: the current stage started later than planned, or is running past its planned end → propose shifting what follows */
+  const drift = p => {
+    const P = PIPE(); const i = stageIdx(p); const st = P[i]; if (!st || stateOf(p) !== 'active') return null; const pl = plan(p); const cur = pl[st.id]; if (!cur) return null;
+    const a = stageAt(p, st.id); let delta = 0, why = '';
+    if (a && days(cur.start, a) > 2) { delta = days(cur.start, a); why = L(`«${st.ar}» بدأت متأخرة ${delta} يوم عن الخطة`, `«${st.name}» started ${delta} days after the plan`); }
+    if (T() > cur.end && i < P.length - 1) { const d2 = days(cur.end, T()); if (d2 > delta) { delta = d2; why = L(`«${st.ar}» عدّت نهايتها المخططة بـ ${d2} يوم ولسه مفتوحة`, `«${st.name}» is ${d2} days past its planned end and still open`); } }
+    if (delta <= 2) return null;
+    const next = {}; P.forEach((s, k) => { const x = pl[s.id]; if (!x) return; next[s.id] = k < i ? x : k === i ? { start: a || x.start, end: addDays(x.end, delta) } : { start: addDays(x.start, delta), end: addDays(x.end, delta) }; });
+    const dl = d0(p.dueDate || p.clientDeadline); const de = designEnd(next); const over = dl && de && days(dl, de) > 0 ? days(dl, de) : 0;
+    return { delta, why, next, over, dl, de };
+  };
+  const critical = p => { const dl = d0(p.dueDate || p.clientDeadline); if (!dl) return null; const de = designEnd(plan(p)); const dr = drift(p); const de2 = dr ? dr.de : de; const over = de2 && days(dl, de2) > 0 ? days(dl, de2) : 0; return over ? { over, de: de2, dl } : null; };
+  /* planning accuracy: planned vs actual per stage across projects with a baseline */
+  const accuracy = () => { const rows = {}; list('projects').forEach(p => { if (!hasBaseline(p)) return; const b = p.okPlan.baseline.stages; const a = actual(p); PIPE().forEach(s => { const x = b[s.id], y = a[s.id]; if (!x || !y || !y.end || y.open) return; const pd = days(x.start, x.end), ad = days(y.start, y.end); if (pd <= 0) return; (rows[s.id] = rows[s.id] || []).push({ dev: Math.round(100 * (ad - pd) / pd), ad, pd, code: p.code }); }); }); return PIPE().map(s => { const r = rows[s.id] || []; const avg = r.length ? Math.round(r.reduce((n, x) => n + x.dev, 0) / r.length) : null; return { id: s.id, name: s.name, ar: s.ar, n: r.length, avgDev: avg, late: r.filter(x => x.dev > 10).length }; }); };
+  const replans = () => list('projects').flatMap(p => (p.okPlan && p.okPlan.replans || []).map(r => Object.assign({ p }, r)));
+
+  /* ---------- Gantt rendering */
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.oktl{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}.oktl .okth{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}.oktl .okth b{font-size:14px}
+.okg{position:relative;padding:8px 12px 10px;overflow-x:auto}.okg .okgm{position:relative;height:18px;font-size:10.5px;color:var(--muted)}.okg .okgm span{position:absolute;top:0;border-inline-start:1px solid var(--line);padding-inline-start:4px;white-space:nowrap}
+.okg .okgr{position:relative;height:34px;display:flex;align-items:center}.okg .okgr .lb{position:sticky;inset-inline-start:0;width:150px;flex:none;font-size:12px;padding-inline-end:8px;background:var(--surface);z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.okg .okgr .tr{position:relative;flex:1;height:100%;border-top:1px dashed var(--line)}
+.okg .bar{position:absolute;height:10px;border-radius:999px;top:6px;background:rgba(80,177,231,.35);border:1px solid rgba(80,177,231,.7)}.okg .bar.act{top:19px;background:rgba(34,197,94,.55);border-color:rgba(34,197,94,.9)}.okg .bar.act.open{background:repeating-linear-gradient(90deg,rgba(34,197,94,.55) 0 6px,rgba(34,197,94,.25) 6px 12px)}.okg .bar.late{background:rgba(239,68,68,.45);border-color:rgba(239,68,68,.9)}.okg .bar.cur{box-shadow:0 0 0 2px var(--accent)}
+.okg .dot{position:absolute;top:12px;width:8px;height:8px;border-radius:999px;background:var(--ink);border:2px solid var(--surface);z-index:1;cursor:pointer}.okg .dot.t{background:#f5b301}.okg .dot.done{background:#22c55e}.okg .today{position:absolute;top:0;bottom:0;border-inline-start:2px solid #ef4444;z-index:1}.okg .dl{position:absolute;top:0;bottom:0;border-inline-start:2px dashed #0c6aa0;z-index:1}
+.okg .lg{display:flex;gap:12px;font-size:11px;color:var(--muted);padding:6px 0 0;flex-wrap:wrap}.okg .lg i{display:inline-block;width:14px;height:8px;border-radius:999px;vertical-align:middle;margin-inline-end:4px}
+.okdrift{margin:0 12px 10px;border:1px solid rgba(245,179,1,.6);background:rgba(245,179,1,.08);border-radius:12px;padding:10px 12px;font-size:13px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}.okdrift.red{border-color:rgba(239,68,68,.6);background:rgba(239,68,68,.08)}
+.okpf .okgr{height:30px}.okpf .okgr .lb{width:210px}.okpf .bar{top:10px;height:10px}.okpf .okgr .lb a{color:inherit;text-decoration:none}
+.okday{margin:0 0 14px;border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}.okday h4{margin:0 0 6px;font-size:13px;display:flex;gap:8px;align-items:center}.okday .it{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--line);font-size:13px;text-decoration:none;color:inherit}.okday .it:first-of-type{border-top:0}.okday .it .pr{width:8px;height:8px;border-radius:999px;flex:none}.okday .it .pr.urgent{background:#ef4444}.okday .it .pr.high{background:#f5b301}.okday .it .pr.normal{background:#50b1e7}.okday .it .m{color:var(--muted);font-size:11.5px;margin-inline-start:auto;white-space:nowrap}
+.okbal{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}.okbal div{border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px}
+</style>`);
+  const monthsAxis = (a, b) => { const out = []; let d = new Date(d0(a) + 'T00:00:00'); d.setDate(1); if (days(a, addDays(a, 0)) === 0 && new Date(d0(a) + 'T00:00:00').getDate() > 12) d.setMonth(d.getMonth() + 1); const end = new Date(d0(b) + 'T00:00:00'); const span = days(a, b) || 1; while (d <= end) { const iso = d.toISOString().slice(0, 10); const x = Math.max(0, 100 * days(a, iso) / span); out.push(`<span style="inset-inline-start:${x}%">${d.toLocaleDateString(en() ? 'en-GB' : 'ar-EG', { month: 'short', year: span > 400 ? '2-digit' : undefined })}</span>`); d.setMonth(d.getMonth() + 1); } return out.join(''); };
+  const gantt = (p, opts) => {
+    const P = PIPE(); const pl = plan(p); const ac = actual(p); const cur = stageIdx(p); const dl = d0(p.dueDate || p.clientDeadline);
+    const dates = []; Object.values(pl).forEach(x => dates.push(x.start, x.end)); Object.values(ac).forEach(x => dates.push(x.start, x.end)); if (dl) dates.push(dl); dates.push(T());
+    const shots = list('shots').filter(s => s.projectId === p.id && !s.deleted && !s.movedTo && s.due); shots.forEach(s => dates.push(s.due));
+    const tasks = list('tasks').filter(t => t.projectId === p.id && ['open', 'doing'].includes(t.status) && t.dueDate); tasks.forEach(t => dates.push(t.dueDate));
+    const a = addDays(dates.filter(Boolean).sort()[0], -7), b = addDays(dates.filter(Boolean).sort().pop(), 14); const span = Math.max(1, days(a, b)); const X = d => Math.min(100, Math.max(0, 100 * days(a, d) / span));
+    const rows = P.map((s, i) => { const x = pl[s.id], y = ac[s.id]; const late = x && y && y.end && days(x.end, y.end) > 2; const sh = shots.filter(z => (z.okStage || s.id) === s.id); const tk = tasks.filter(t => (t.okStage || '') === s.id);
+      return `<div class="okgr"><div class="lb" title="${esc(L(s.ar, s.name))}">${esc(L(s.ar, s.name))}</div><div class="tr">${x ? `<div class="bar ${i === cur ? 'cur' : ''}" style="inset-inline-start:${X(x.start)}%;width:${Math.max(0.5, X(x.end) - X(x.start))}%" title="${esc(L('مخطط', 'Planned'))}: ${d10(x.start)} → ${d10(x.end)}"></div>` : ''}${y ? `<div class="bar act ${y.open ? 'open' : ''} ${late ? 'late' : ''}" style="inset-inline-start:${X(y.start)}%;width:${Math.max(0.5, X(y.end || T()) - X(y.start))}%" title="${esc(L('فعلي', 'Actual'))}: ${d10(y.start)} → ${y.open ? esc(L('مفتوحة', 'open')) : d10(y.end)}"></div>` : ''}${sh.map(z => `<a class="dot ${z.state === 'done' ? 'done' : ''}" style="inset-inline-start:${X(z.due)}%" title="${esc(z.code)} · ${d10(z.due)}" href="#/projects/${p.id}"></a>`).join('')}${tk.map(t => `<a class="dot t" style="inset-inline-start:${X(t.dueDate)}%" title="${esc(t.title)} · ${d10(t.dueDate)}" href="#/tasks/${t.id}"></a>`).join('')}</div></div>`; }).join('');
+    const unst = tasks.filter(t => !t.okStage);
+    return `<div class="okg"><div class="okgm" style="margin-inline-start:150px">${monthsAxis(a, b)}</div><div style="position:relative"><div class="today" style="inset-inline-start:calc(150px + (100% - 150px) * ${X(T()) / 100})" title="${esc(L('النهارده', 'Today'))}"></div>${dl ? `<div class="dl" style="inset-inline-start:calc(150px + (100% - 150px) * ${X(dl) / 100})" title="${esc(L('موعد العميل', 'Client deadline'))} ${d10(dl)}"></div>` : ''}${rows}${unst.length ? `<div class="okgr"><div class="lb muted">${esc(L('تاسكات مفتوحة', 'Open tasks'))}</div><div class="tr">${unst.map(t => `<a class="dot t" style="inset-inline-start:${X(t.dueDate)}%" title="${esc(t.title)} · ${d10(t.dueDate)}" href="#/tasks/${t.id}"></a>`).join('')}</div></div>` : ''}</div><div class="lg"><span><i style="background:rgba(80,177,231,.35);border:1px solid rgba(80,177,231,.7)"></i>${esc(L('مخطط', 'planned'))}</span><span><i style="background:rgba(34,197,94,.55)"></i>${esc(L('فعلي', 'actual'))}</span><span><i style="background:rgba(239,68,68,.45)"></i>${esc(L('اتأخر عن الخطة', 'late vs plan'))}</span><span><i style="background:var(--ink);width:8px"></i>${esc(L('مخرج', 'deliverable'))}</span><span><i style="background:#f5b301;width:8px"></i>${esc(L('تاسك', 'task'))}</span><span><i style="background:#ef4444;width:2px"></i>${esc(L('النهارده', 'today'))}</span>${dl ? `<span><i style="background:#0c6aa0;width:2px"></i>${esc(L('موعد العميل', 'client deadline'))}</span>` : ''}</div></div>`;
+  };
+  const tlCard = p => {
+    const can = canEdit(p); const dr = drift(p); const cr = critical(p); const bl = hasBaseline(p); const rp = (p.okPlan && p.okPlan.replans) || [];
+    const head = `<div class="okth"><b>${esc(L('التايم لاين', 'Timeline'))}</b>${bl ? `<span class="okpill b">${esc(L('خطة أساسية', 'Baseline'))} · ${d10(p.okPlan.baseline.at)}</span>` : `<span class="okpill y">${esc(L('خطة تلقائية — مش محفوظة', 'Auto plan — not saved'))}</span>`}${rp.length ? `<span class="okpill">${rp.length} ${esc(L('إعادة جدولة', 're-plan(s)'))}</span>` : ''}${cr ? `<span class="okpill r">${esc(L(`مسار حرج: نهاية التصميم بعد موعد العميل بـ ${cr.over} يوم`, `Critical path: design ends ${cr.over} days after the client deadline`))}</span>` : ''}<div class="grow"></div>${can ? `${bl ? '' : `<button type="button" class="btn sm p" data-oktl="base:${p.id}">${esc(L('احفظ كخطة أساسية', 'Save as baseline'))}</button>`}<button type="button" class="btn sm ghost" data-oktl="edit:${p.id}">${icon('calendar')}<span>${esc(L('تواريخ المراحل', 'Stage dates'))}</span></button>` : ''}</div>`;
+    const dh = dr ? `<div class="okdrift ${dr.over ? 'red' : ''}"><span>⏱ ${esc(dr.why)}.</span><span>${esc(L(`المقترح: زحزحة المراحل الجاية ${dr.delta} يوم`, `Proposal: shift the following stages by ${dr.delta} days`))}${dr.over ? ' — ' + esc(L(`هيعدّي موعد العميل بـ ${dr.over} يوم`, `this passes the client deadline by ${dr.over} days`)) : dr.dl ? ' — ' + esc(L('لسه جوه موعد العميل', 'still within the client deadline')) : ''}.</span>${can ? `<button type="button" class="btn sm p" data-oktl="shift:${p.id}">${esc(L('اقبل إعادة الجدولة', 'Accept the re-plan'))}</button>` : ''}</div>` : '';
+    const rph = rp.length ? `<details style="margin:0 12px 10px"><summary class="small muted">${esc(L('سجل إعادة الجدولة', 'Re-plan log'))}</summary>${rp.slice().reverse().map(r => `<div class="small" style="padding:3px 0">${d10(r.at)} · ${esc(r.by || '')} · ${esc({ client: L('العميل', 'client'), internal: L('داخلي', 'internal'), scope: L('تغيير نطاق', 'scope change'), other: L('أخرى', 'other') }[r.reason] || r.reason || '')} · ${r.delta > 0 ? '+' : ''}${r.delta} ${esc(L('يوم', 'd'))}${r.note ? ' — ' + esc(r.note) : ''}</div>`).join('')}</details>` : '';
+    return `<div class="oktl" data-pid="${p.id}">${head}${dh}${gantt(p)}${rph}</div>`;
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (!(S.route && S.route.view === 'projects' && S.route.id)) return; const p = byId('projects', S.route.id); if (!p) return;
+    const anchor = document.querySelector('.okflow') || document.querySelector('.okpipe'); if (!anchor) return;
+    const html = tlCard(p); const old = anchor.parentElement.querySelector('.oktl'); const sig = html.length + ':' + (p.updatedAt || '') + ':' + I18N.lang;
+    if (!old) { anchor.insertAdjacentHTML('afterend', html); anchor.parentElement.querySelector('.oktl').dataset.sig = sig; } else if (old.dataset.sig !== sig) { old.outerHTML = html; anchor.parentElement.querySelector('.oktl').dataset.sig = sig; }
+  });
+  const savePlan = async (p, stages, extra) => { await Store.update('projects', p.id, { okPlan: Object.assign({}, p.okPlan || {}, { stages }, extra || {}) }); rerender(); };
+  document.addEventListener('click', async ev => {
+    const b = ev.target.closest && ev.target.closest('[data-oktl]'); if (!b) return; const [op, pid] = b.dataset.oktl.split(':'); const p = byId('projects', pid); if (!p || !canEdit(p)) return;
+    if (op === 'base') { const st = plan(p); await savePlan(p, st, { baseline: { at: nowISO(), by: myName(), stages: JSON.parse(JSON.stringify(st)) } }); toast(L('اتحفظت الخطة الأساسية', 'Baseline saved')); return; }
+    if (op === 'shift') { const dr = drift(p); if (!dr) return; openModal({ title: L('إعادة جدولة', 'Re-plan'), submitLabel: L('اعتمد الجدول الجديد', 'Apply the new schedule'), body: `<div class="form"><div class="full small">${esc(dr.why)} — ${esc(L(`المراحل الجاية هتتزحزح ${dr.delta} يوم.`, `The following stages move by ${dr.delta} days.`))}${dr.over ? `<br><b style="color:#b91c1c">${esc(L(`نهاية التصميم هتبقى ${d10(dr.de)} — بعد موعد العميل ${d10(dr.dl)} بـ ${dr.over} يوم. اتفق مع العميل أو اضغط المراحل.`, `Design would end ${d10(dr.de)} — ${dr.over} days after the client deadline ${d10(dr.dl)}. Agree with the client or compress the stages.`))}</b>` : ''}</div>${field(L('السبب', 'Reason'), `<select name="reason"><option value="client">${esc(L('العميل (رد / اعتماد / بيانات)', 'Client (response / approval / data)'))}</option><option value="internal">${esc(L('داخلي (حمل / موارد)', 'Internal (load / resources)'))}</option><option value="scope">${esc(L('تغيير نطاق', 'Scope change'))}</option><option value="other">${esc(L('أخرى', 'Other'))}</option></select>`)}<div class="field full"><label>${esc(L('ملاحظة', 'Note'))}</label><input name="note" maxlength="160" dir="auto"></div></div>`, onSubmit: async f => { const d = formData(f); if (!hasBaseline(p)) p.okPlan = Object.assign({}, p.okPlan || {}, { baseline: { at: nowISO(), by: myName(), stages: JSON.parse(JSON.stringify(plan(p))) } }); await savePlan(p, dr.next, { baseline: p.okPlan.baseline, replans: ((p.okPlan && p.okPlan.replans) || []).concat([{ at: nowISO(), by: myName(), reason: d.reason, delta: dr.delta, note: d.note, over: dr.over }]).slice(-50) }); toast(L('اتجدولت', 'Re-planned')); return true; } }); return; }
+    if (op === 'edit') { const st = plan(p); openModal({ title: L('تواريخ المراحل (الخطة)', 'Stage dates (plan)'), wide: true, submitLabel: L('حفظ', 'Save'), body: `<div class="form">${PIPE().map(s => `${field(L(s.ar, s.name) + ' — ' + L('من', 'from'), inp('s_' + s.id, (st[s.id] || {}).start || '', 'type="date"'))}${field(L('إلى', 'to'), inp('e_' + s.id, (st[s.id] || {}).end || '', 'type="date"'))}`).join('')}<div class="full small muted">${esc(L('أي تعديل بعد الخطة الأساسية بيتسجّل كإعادة جدولة.', 'Any change after the baseline is recorded as a re-plan.'))}</div>${hasBaseline(p) ? field(L('السبب', 'Reason'), `<select name="reason"><option value="client">${esc(L('العميل', 'Client'))}</option><option value="internal">${esc(L('داخلي', 'Internal'))}</option><option value="scope">${esc(L('تغيير نطاق', 'Scope change'))}</option><option value="other">${esc(L('أخرى', 'Other'))}</option></select>`) : ''}</div>`, onSubmit: async f => { const d = formData(f); const next = {}; PIPE().forEach(s => { const a = d['s_' + s.id], b2 = d['e_' + s.id]; if (a && b2 && b2 >= a) next[s.id] = { start: a, end: b2 }; }); if (!Object.keys(next).length) return false; const was = designEnd(st), now = designEnd(next); const extra = hasBaseline(p) ? { replans: ((p.okPlan && p.okPlan.replans) || []).concat([{ at: nowISO(), by: myName(), reason: d.reason || 'other', delta: was && now ? days(was, now) : 0, note: L('تعديل يدوي للتواريخ', 'Manual date edit') }]).slice(-50) } : { baseline: { at: nowISO(), by: myName(), stages: JSON.parse(JSON.stringify(next)) } }; await savePlan(p, next, extra); return true; } }); }
+  });
+
+  /* ---------- portfolio timeline + load balancing + planning accuracy (management) */
+  const capacity = () => +((S.settings && S.settings.okCapacity) || 8);
+  const loads = () => { const m = {}; list('tasks').filter(t => ['open', 'doing'].includes(t.status) && t.assigneeId && t.kind !== 'update').forEach(t => { const r = m[t.assigneeId] = m[t.assigneeId] || { id: t.assigneeId, name: who(t.assigneeId), n: 0, over: 0, urgent: 0 }; r.n++; if (t.dueDate && t.dueDate < T()) r.over++; if (['urgent', 'high'].includes(t.priority)) r.urgent++; }); return Object.values(m).sort((a, b) => b.n - a.n); };
+  const balance = () => { const ws = list('workers').filter(w => w.status !== 'left' && w.status !== 'inactive'); const ld = loads(); const cap = capacity(); const byId2 = Object.fromEntries(ld.map(x => [x.id, x])); return ld.filter(x => x.n > cap).map(x => { const w = ws.find(y => y.id === x.id); const mates = ws.filter(y => y.id !== x.id && (!w || !w.deptId || y.deptId === w.deptId)).map(y => ({ y, n: (byId2[y.id] || { n: 0 }).n })).sort((a, b) => a.n - b.n); const to = mates[0]; return { from: x, to: to ? { id: to.y.id, name: to.y.name, n: to.n } : null, excess: x.n - cap }; }); };
+  const portfolio = () => {
+    if (!isMgr()) return `<div class="banner warn">${esc(L('الصفحة دي للإدارة', 'This page is for management'))}</div>`;
+    const ps = list('projects').filter(p => p.status !== 'archived' && stateOf(p) === 'active').map(p => ({ p, pl: plan(p), cr: critical(p), dr: drift(p) }));
+    const dates = []; ps.forEach(({ pl, p }) => { Object.values(pl).forEach(x => dates.push(x.start, x.end)); const dl = d0(p.dueDate || p.clientDeadline); if (dl) dates.push(dl); }); dates.push(T());
+    const a = addDays(dates.filter(Boolean).sort()[0] || T(), -7), b = addDays(dates.filter(Boolean).sort().pop() || T(), 30); const span = Math.max(1, days(a, b)); const X = d => Math.min(100, Math.max(0, 100 * days(a, d) / span));
+    const COL = { data: '#94a3b8', concept: '#50b1e7', schem: '#38bdf8', dd: '#6366f1', tender: '#a855f7', super: '#f59e0b', delivered: '#22c55e' };
+    const sorted = ps.sort((x, y) => (y.cr ? 1 : 0) - (x.cr ? 1 : 0) || String(x.p.dueDate || '9').localeCompare(String(y.p.dueDate || '9')));
+    const rows = sorted.map(({ p, pl, cr, dr }) => { const cur = (PIPE()[stageIdx(p)] || {}).id; const dl = d0(p.dueDate || p.clientDeadline); return `<div class="okgr"><div class="lb"><a href="#/projects/${p.id}" title="${esc(p.name)}">${cr ? '🔴 ' : dr ? '🟠 ' : ''}${esc(p.code || '')} ${esc(p.name)}</a></div><div class="tr">${PIPE().map(s => { const x = pl[s.id]; if (!x) return ''; return `<div class="bar ${s.id === cur ? 'cur' : ''}" style="inset-inline-start:${X(x.start)}%;width:${Math.max(0.4, X(x.end) - X(x.start))}%;background:${COL[s.id] || '#999'}55;border-color:${COL[s.id] || '#999'}" title="${esc(L(s.ar, s.name))}: ${d10(x.start)} → ${d10(x.end)}"></div>`; }).join('')}${dl ? `<div class="dl" style="inset-inline-start:${X(dl)}%" title="${esc(L('موعد العميل', 'Client deadline'))} ${d10(dl)}"></div>` : ''}</div></div>`; }).join('');
+    const crowd = (() => { const m = {}; sorted.forEach(({ pl }) => Object.values(pl).forEach(x => { let d = new Date(d0(x.start) + 'T00:00:00'); const e = new Date(d0(x.end) + 'T00:00:00'); while (d <= e) { const k = d.toISOString().slice(0, 7); m[k] = (m[k] || 0) + 1; d.setMonth(d.getMonth() + 1); d.setDate(1); } })); return Object.entries(m).sort().slice(0, 18); })();
+    const acc = accuracy().filter(s => s.n); const bal = balance(); const ld = loads();
+    return `<div class="card okpf"><div class="cardhead"><h2 style="margin:0">${esc(L('تايم لاين المكتب', 'Portfolio timeline'))}</h2><span class="small muted">${ps.length} ${esc(L('مشروع نشط', 'active projects'))} · 🔴 ${esc(L('مسار حرج', 'critical'))} · 🟠 ${esc(L('محتاج إعادة جدولة', 'needs re-plan'))}</span></div><div class="okg"><div class="okgm" style="margin-inline-start:210px">${monthsAxis(a, b)}</div><div style="position:relative"><div class="today" style="inset-inline-start:calc(210px + (100% - 210px) * ${X(T()) / 100})"></div>${rows || `<div class="small muted">—</div>`}</div><div class="lg">${PIPE().map(s => `<span><i style="background:${COL[s.id] || '#999'}55;border:1px solid ${COL[s.id] || '#999'}"></i>${esc(L(s.ar, s.name))}</span>`).join('')}</div></div></div>
+      <div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:14px">📈 ${esc(L('الزحمة بالشهر (مراحل شغّالة في نفس الوقت)', 'Crowding by month (stages running at the same time)'))}</h3><div class="row" style="gap:6px;flex-wrap:wrap">${crowd.map(([k, n]) => `<span class="okpill" style="border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px">${k} · <b>${n}</b></span>`).join('') || '—'}</div></div>
+      <div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:14px">⚖️ ${esc(L('توزيع الحمل (تاسكات مفتوحة)', 'Load balancing (open tasks)'))}<span class="small muted">${esc(L(`الطاقة الافتراضية ${capacity()} تاسك للشخص`, `default capacity ${capacity()} tasks per person`))}</span></h3>${bal.length ? `<div class="okbal">${bal.map(x => `<div><b>${esc(x.from.name)}</b> — ${esc(L(`${x.from.n} تاسك (+${x.excess} فوق الطاقة)${x.from.over ? ` · ${x.from.over} متأخر` : ''}`, `${x.from.n} tasks (+${x.excess} over capacity)${x.from.over ? ` · ${x.from.over} overdue` : ''}`))}<br>${x.to ? esc(L(`اقتراح: انقل ${x.excess} لـ ${x.to.name} (عنده ${x.to.n})`, `Suggestion: move ${x.excess} to ${x.to.name} (has ${x.to.n})`)) : esc(L('مفيش زميل فاضي في نفس القسم', 'No free teammate in the same department'))}</div>`).join('')}</div>` : `<div class="small muted">${esc(L('محدش فوق طاقته دلوقتي', 'Nobody is above capacity right now'))}</div>`}<details style="margin-top:8px"><summary class="small muted">${esc(L('الكل', 'Everyone'))}</summary><div class="small">${ld.map(x => `${esc(x.name)}: ${x.n}${x.over ? ` (${x.over} ${esc(L('متأخر', 'overdue'))})` : ''}`).join(' · ') || '—'}</div></details></div>
+      <div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:14px">🎯 ${esc(L('دقة التخطيط (مخطط ← فعلي)', 'Planning accuracy (planned → actual)'))}</h3>${acc.length ? `<div class="tablewrap"><table class="okwl"><thead><tr><th>${esc(L('المرحلة', 'Stage'))}</th><th>${esc(L('متوسط الانحراف', 'Avg. deviation'))}</th><th>${esc(L('اتأخرت', 'Late'))}</th><th>n</th></tr></thead><tbody>${acc.map(s => `<tr><td>${esc(L(s.ar, s.name))}</td><td style="color:${s.avgDev > 10 ? '#b91c1c' : s.avgDev < -10 ? '#15803d' : 'inherit'}">${s.avgDev > 0 ? '+' : ''}${s.avgDev}%</td><td>${s.late}/${s.n}</td><td>${s.n}</td></tr>`).join('')}</tbody></table></div>` : `<div class="small muted">${esc(L('بتتحسب أول ما مشاريع بخطة أساسية تقفل مراحل.', 'Computed once projects with a baseline close stages.'))}</div>`}${replans().length ? `<div class="small" style="margin-top:8px">${esc(L('أسباب إعادة الجدولة: ', 'Re-plan reasons: '))}${Object.entries(replans().reduce((m, r) => { m[r.reason] = (m[r.reason] || 0) + 1; return m; }, {})).map(([k, n]) => `${esc({ client: L('العميل', 'client'), internal: L('داخلي', 'internal'), scope: L('نطاق', 'scope'), other: L('أخرى', 'other') }[k] || k)} ${n}`).join(' · ')}</div>` : ''}</div>`;
+  };
+
+  /* ---------- today's plan on the home page */
+  const dayPlan = () => {
+    const mine = list('tasks').filter(t => t.assigneeId === me() && ['open', 'doing'].includes(t.status) && t.kind !== 'update'); if (!mine.length) return null;
+    const PW = { urgent: 3, high: 2, normal: 1, low: 0 };
+    const score = t => { let s = PW[t.priority] || 1; if (t.dueDate) { const d = days(T(), t.dueDate); s += d < 0 ? 3 : d <= 2 ? 2 : d <= 7 ? 1 : 0; } const p = t.projectId && byId('projects', t.projectId); if (p && SM().risk) { const r = SM().risk(p); if (r && r.lvl === 'red') s += 2; else if (r && r.lvl === 'amber') s += 1; if (critical(p)) s += 2; } if (t.source === 'rule') s += 1; if (t.status === 'doing') s += 1; return s; };
+    const top = mine.map(t => ({ t, s: score(t) })).sort((a, b) => b.s - a.s || String(a.t.dueDate || '9').localeCompare(String(b.t.dueDate || '9'))).slice(0, 5);
+    const atRisk = new Set(top.map(x => x.t.projectId).filter(id => { const p = id && byId('projects', id); const r = p && SM().risk && SM().risk(p); return (r && r.lvl !== 'ok') || (p && critical(p)); }));
+    return { top, total: mine.length, overdue: mine.filter(t => t.dueDate && t.dueDate < T()).length, atRisk: atRisk.size };
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (!S.session) return; const r = S.route || {}; const home = typeof homeView === 'function' ? homeView() : 'dashboard'; if (r.view !== home || r.id) return;
+    const v = document.getElementById('view'); if (!v || v.querySelector('.okday')) return; const d = dayPlan(); if (!d) return;
+    const html = `<div class="okday"><h4>📋 ${esc(L('خطة النهارده', "Today's plan"))}<span class="small muted">${esc(L(`${d.total} مفتوح${d.overdue ? ` · ${d.overdue} متأخر` : ''}`, `${d.total} open${d.overdue ? ` · ${d.overdue} overdue` : ''}`))}</span></h4>${d.top.map(({ t }) => { const p = t.projectId && byId('projects', t.projectId); return `<a class="it" href="#/tasks/${t.id}"><span class="pr ${t.priority || 'normal'}"></span><span>${esc(t.title)}</span><span class="m">${p ? esc(p.code || p.name) + ' · ' : ''}${t.dueDate ? (t.dueDate < T() ? '⚠️ ' : '') + d10(t.dueDate) : ''}</span></a>`; }).join('')}<div class="small muted" style="margin-top:6px">${esc(d.atRisk ? L(`لو خلّصت دول النهارده ${d.atRisk} مشروع يفضل في وقته.`, `Finish these today and ${d.atRisk} project(s) stay on time.`) : L('مرتّبة حسب الأولوية والموعد وحالة المشروع.', 'Ranked by priority, due date and project state.'))}</div></div>`;
+    const sc = v.querySelector('.oksc'); if (sc) sc.insertAdjacentHTML('afterend', html); else v.insertAdjacentHTML('afterbegin', html);
+  });
+
+  /* ---------- rule tasks & schedule tasks carry their stage onto the timeline */
+  if (typeof Store === 'object' && Store.save) Store.save = (base => async function (col, doc) { try { if (col === 'tasks' && doc && doc.projectId && !doc.okStage && (doc.source === 'rule' || doc.source === 'assistant')) { const p = byId('projects', doc.projectId); if (p) doc.okStage = (PIPE()[stageIdx(p)] || {}).id; } } catch (e) { /* */ } return base.apply(this, arguments); })(Store.save);
+
+  const hook = () => {
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.oktimeline) return;
+    EXTRA_VIEWS.oktimeline = () => portfolio();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.oktimeline = () => ({ title: L('تايم لاين المكتب', 'Portfolio timeline'), sub: L('كل المشاريع على خط زمني واحد: الخطة · الفعلي · المسار الحرج · الحمل', 'All projects on one line: plan · actual · critical path · load') });
+    if (typeof VIEW_TITLES === 'object') VIEW_TITLES.oktimeline = 'تايم لاين المكتب';
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'oktimeline')) { const at = NAV.findIndex(n => n.id === 'oksmart'); NAV.splice(at >= 0 ? at + 1 : 2, 0, { id: 'oktimeline', label: 'تايم لاين المكتب', short: 'التايم لاين', icon: 'calendar', count: () => { try { return isMgr() ? list('projects').filter(p => p.status !== 'archived' && stateOf(p) === 'active' && critical(p)).length : 0; } catch (e) { return 0; } }, countCls: 'warn' }); }
+    if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('oktimeline')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['oktimeline']); });
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'oktimeline') return !!S.session && isMgr(); return base.apply(this, arguments); })(canSee);
+  };
+  hook(); document.addEventListener('nf:ready', hook);
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'تايم لاين المكتب': 'Portfolio timeline', 'التايم لاين': 'Timeline' });
+  window.okTime = { plan, autoPlan, actual, drift, critical, accuracy, dayPlan, balance, loads };
+})();
