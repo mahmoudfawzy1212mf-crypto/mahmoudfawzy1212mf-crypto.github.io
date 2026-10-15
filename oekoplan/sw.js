@@ -1,10 +1,10 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261015-1259-c9bb18-o77065e';
+const BUILD = '20261015-1259-c9bb18-o2db0cf';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
 const CACHE = 'nf-shell-' + (TAG ? TAG + '-' : '') + BUILD;
-const SHELL = ["./app.js?v=20261015-1259-c9bb18-o77065e", "./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./en.json", "./oekoplan.js", "./oeko-home.js", "./qrp-v1.js"];
+const SHELL = ["./app.js?v=20261015-1259-c9bb18-o2db0cf", "./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./en.json", "./oekoplan.js", "./oeko-home.js", "./qrp-v1.js"];
 self.addEventListener('install', e => {
   self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))).catch(() => { })));
