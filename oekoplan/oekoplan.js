@@ -994,3 +994,100 @@ html[data-theme="dark"] .okn{background:var(--surface-2)}
 })();
 
 ;(function(){try{setInterval(function(){try{if(innerWidth<1001)return;var d=document.getElementById('nq-dock'),a=document.querySelector('.topbar .tb-actions');if(d&&a&&d.parentElement!==a)a.insertBefore(d,a.firstChild)}catch(e){}},700)}catch(e){}})();
+
+/* =====================================================================
+   Ökoplan — project state lights + personal order (Mahmoud, 15 Oct):
+   · every project card / page carries a state light: Active = green glow, On hold = amber, Stopped = red, Delivered = quiet grey.
+     The state is set from the project page (managers, the team lead, the project owner); without one it is derived
+     (blocked → on hold, delivered / closed → delivered, else active).
+   · the list is ordered per person: the projects he opens most (and most recently) come first, inside «my projects» and «the rest».
+     Counted on this device (localStorage) and, when his record allows it, kept on his own worker record (okUse) so it follows him.
+   ===================================================================== */
+(() => {
+  if (window.__OK_PSTATE__) return; window.__OK_PSTATE__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const STATES = { active: { ar: 'شغّال', en: 'Active', c: '34,197,94' }, hold: { ar: 'متوقف مؤقتًا', en: 'On hold', c: '245,179,1' }, stopped: { ar: 'واقف', en: 'Stopped', c: '239,68,68' }, done: { ar: 'اتسلّم', en: 'Delivered', c: '148,163,184' } };
+  const ORDER = ['active', 'hold', 'stopped', 'done'];
+  const stateOf = p => { if (!p || p.status === 'archived') return null; if (p.okState && STATES[p.okState]) return p.okState; if (p.osStatus === 'delivered' || p.osStatus === 'closed' || p.stage === 'delivered') return 'done'; if (p.blocked) return 'hold'; return 'active'; };
+  const me = () => (typeof stuMe === 'function' ? stuMe() : '');
+  const canSet = p => !!p && typeof stuCanEdit === 'function' && stuCanEdit() && ((typeof stuManager === 'function' && stuManager()) || p.leadId === me() || p.ownerId === me());
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.spcard.ok-active{border-color:rgba(34,197,94,.55)!important;box-shadow:0 0 0 1px rgba(34,197,94,.22),0 0 22px rgba(34,197,94,.30)}
+.spcard.ok-hold{border-color:rgba(245,179,1,.6)!important;box-shadow:0 0 0 1px rgba(245,179,1,.22),0 0 22px rgba(245,179,1,.30)}
+.spcard.ok-stopped{border-color:rgba(239,68,68,.6)!important;box-shadow:0 0 0 1px rgba(239,68,68,.22),0 0 22px rgba(239,68,68,.32)}
+.spcard.ok-done{opacity:.72;filter:saturate(.7)}
+.spcard.ok-active:hover{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 30px rgba(34,197,94,.42)}
+.spcard.ok-hold:hover{box-shadow:0 0 0 1px rgba(245,179,1,.3),0 0 30px rgba(245,179,1,.42)}
+.spcard.ok-stopped:hover{box-shadow:0 0 0 1px rgba(239,68,68,.3),0 0 30px rgba(239,68,68,.45)}
+.okst{position:absolute;top:10px;inset-inline-end:10px;z-index:2;display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border-radius:999px;font:600 11.5px/1 var(--font);letter-spacing:.02em;background:rgba(8,18,26,.74);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:0;cursor:default;white-space:nowrap}
+.okst i{width:8px;height:8px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
+.okst.ok-active i{animation:okpulse 1.6s ease-out infinite}
+@keyframes okpulse{0%{box-shadow:0 0 0 0 rgba(var(--okc),.75),0 0 8px rgb(var(--okc))}100%{box-shadow:0 0 0 9px rgba(var(--okc),0),0 0 8px rgb(var(--okc))}}
+.okst.okbtn{position:static;cursor:pointer;background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
+.okst.okbtn:hover{border-color:rgb(var(--okc))}
+.okstlist{display:grid;gap:8px}.okstlist label{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
+.okstlist label.on{border-color:rgb(var(--okc));box-shadow:0 0 0 1px rgba(var(--okc),.35)}.okstlist label i{width:10px;height:10px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
+.okstlist label small{color:var(--muted);margin-inline-start:auto}
+html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
+</style>`);
+  const badge = (st, p, asBtn) => { const s = STATES[st]; const note = p && p.okStateNote ? ` title="${esc(p.okStateNote)}"` : ''; return `<${asBtn ? 'button type="button"' : 'span'} class="okst ok-${st}${asBtn ? ' okbtn' : ''}" style="--okc:${s.c}"${asBtn ? ` data-action="okState" data-arg="${esc(p.id)}"` : ''}${note}><i></i>${esc(L(s.ar, s.en))}${asBtn ? ' ▾' : ''}</${asBtn ? 'button' : 'span'}>`; };
+
+  /* ---- personal use count ---- */
+  const KEY = 'ok.puse'; let use = {}; try { use = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { use = {}; }
+  const merged = () => { const r = typeof myRecordRef === 'function' ? myRecordRef() : null; const w = r && r.col === 'workers' ? r.rec : null; const srv = (w && w.okUse) || {}; const out = Object.assign({}, use); Object.keys(srv).forEach(k => { const a = out[k] || { n: 0, at: 0 }, b = srv[k] || {}; out[k] = { n: Math.max(a.n || 0, b.n || 0), at: Math.max(a.at || 0, b.at || 0) }; }); return out; };
+  const score = (u, now) => { if (!u) return 0; const age = now - (u.at || 0); return (u.n || 0) + (age < 7 * 864e5 ? 3 : age < 30 * 864e5 ? 1 : 0); };
+  let lastRoute = '', lastPush = 0, pushT = null;
+  const persist = () => { clearTimeout(pushT); pushT = setTimeout(async () => { try { const r = typeof myRecordRef === 'function' ? myRecordRef() : null; const w = r && r.col === 'workers' ? r.rec : null; if (!w || !S.session || Date.now() - lastPush < 60e3) return; lastPush = Date.now(); const keep = {}; Object.entries(merged()).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 60).forEach(([k, v]) => { keep[k] = v; }); await Store.update('workers', w.id, { okUse: keep }, { silent: true }); } catch (e) { /* the record may be read-only for him — the device copy still works */ } }, 4000); };
+  const track = () => {
+    const r = S.route || {}; const key = r.view === 'projects' && r.id ? r.id : '';
+    if (!key || key === lastRoute) { if (!key) lastRoute = ''; return; } lastRoute = key;
+    const u = use[key] || { n: 0, at: 0 }; u.n = (u.n || 0) + 1; u.at = Date.now(); use[key] = u;
+    try { localStorage.setItem(KEY, JSON.stringify(use)); } catch (e) { /* private mode */ }
+    persist();
+  };
+
+  /* ---- paint: cards, page head, order ---- */
+  const decorate = () => {
+    track();
+    const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('.spcard[href^="#/projects/"]').forEach(a => {
+      const id = a.getAttribute('href').slice('#/projects/'.length); const p = byId('projects', id); const st = stateOf(p);
+      ORDER.forEach(s => a.classList.toggle('ok-' + s, st === s));
+      let b = a.querySelector(':scope > .okst'); if (!st) { if (b) b.remove(); return; }
+      if (!b || b.dataset.okst !== st + '|' + I18N.lang) { if (b) b.remove(); a.insertAdjacentHTML('afterbegin', badge(st, p, false)); b = a.querySelector(':scope > .okst'); b.dataset.okst = st + '|' + I18N.lang; }
+    });
+    if (S.route && S.route.view === 'projects' && !S.route.id) {
+      const u = merged(), now = Date.now();
+      v.querySelectorAll('.spgrid').forEach(g => {
+        const cards = Array.from(g.children); const sc = c => { const h = c.getAttribute('href') || ''; return score(u[h.slice('#/projects/'.length)], now); };
+        const sorted = cards.map((c, i) => ({ c, i, s: sc(c) })).sort((a, b) => b.s - a.s || a.i - b.i).map(x => x.c);
+        if (sorted.some((c, i) => c !== cards[i])) sorted.forEach(c => g.appendChild(c));
+      });
+    }
+    if (S.route && S.route.view === 'projects' && S.route.id) {
+      const p = byId('projects', S.route.id); const head = v.querySelector('.sphead'); const st = stateOf(p); if (!p || !head || !st) return;
+      const row = head.querySelector('.row'); if (!row) return; const stg = row.querySelector('.stg');
+      let b = head.querySelector('.okst'); const sig = st + '|' + I18N.lang + '|' + (canSet(p) ? 1 : 0) + '|' + (p.okStateNote || '');
+      if (b && b.dataset.okst === sig) return; if (b) b.remove();
+      (stg || row.querySelector('h2')).insertAdjacentHTML('afterend', badge(st, p, canSet(p))); b = head.querySelector('.okst'); if (b) { b.classList.add('okbtn'); b.dataset.okst = sig; if (!canSet(p)) b.style.cursor = 'default'; }
+    }
+  };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(decorate);
+
+  /* ---- set the state (managers, team lead, project owner) ---- */
+  ACTIONS.okState = pid => {
+    const p = byId('projects', pid); if (!p || !canSet(p)) return; const cur = stateOf(p);
+    const opts = ['active', 'hold', 'stopped', 'done'].map(s => `<label class="${cur === s ? 'on' : ''}" style="--okc:${STATES[s].c}"><input type="radio" name="st" value="${s}" ${cur === s ? 'checked' : ''} hidden><i></i><b>${esc(L(STATES[s].ar, STATES[s].en))}</b><small>${esc(s === 'active' ? L('الفريق شغّال فيه', 'the team is working on it') : s === 'hold' ? L('مستني حاجة — داتا / قرار / دفعة', 'waiting — data, a decision, a payment') : s === 'stopped' ? L('اتوقف — مش هنكمّل دلوقتي', 'stopped — not continuing for now') : L('اتسلّم للعميل', 'handed over to the client'))}</small></label>`).join('');
+    openModal({ title: L(`حالة مشروع «${p.name}»`, `State of «${p.name}»`), submitLabel: L('حفظ', 'Save'),
+      body: `<div class="form"><div class="field full"><div class="okstlist" id="okstl">${opts}</div></div><div class="field full"><label>${esc(L('ملاحظة (اختياري) — السبب يظهر لما حد يقف على الحالة', 'Note (optional) — shown when someone hovers the state'))}</label><input name="note" maxlength="140" dir="auto" value="${esc(p.okStateNote || '')}"></div></div>`,
+      onOpen: f => { const l = f.querySelector('#okstl'); if (l) l.addEventListener('change', () => { l.querySelectorAll('label').forEach(x => x.classList.toggle('on', x.querySelector('input').checked)); }); },
+      onSubmit: async f => {
+        const st = (f.querySelector('input[name=st]:checked') || {}).value; if (!st) return false; const note = f.querySelector('[name=note]').value.trim();
+        const log = (p.okStateLog || []).slice(-30); log.push({ st, note, at: new Date().toISOString(), by: me() });
+        await Store.save('projects', Object.assign({}, byId('projects', pid) || p, { okState: st, okStateNote: note, okStateAt: new Date().toISOString(), okStateBy: me(), okStateLog: log }));
+        toast(L('اتحفظت حالة المشروع', 'Project state saved')); return true;
+      } });
+  };
+  window.okProjectState = stateOf;
+})();
