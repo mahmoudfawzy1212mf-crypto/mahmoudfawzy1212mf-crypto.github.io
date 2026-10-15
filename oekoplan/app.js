@@ -551,7 +551,7 @@ function openModal(o) {
     ${o.footer === null ? '' : `<div class="mf">${o.footer ?? `<button type="submit" class="btn p">${esc(o.submitLabel || 'حفظ')}</button><button type="button" class="btn" data-action="closemodal">إلغاء</button>${o.extra || ''}`}</div>`}
   </form></div>`;
   const f = $('#mform');
-  f.addEventListener('submit', async ev => { ev.preventDefault(); if (!o.onSubmit) return; const btn = f.querySelector('button[type=submit]'); if (btn) btn.disabled = true; try { const r = await o.onSubmit(f); if (r !== false) closeModal(); } catch (e) { console.error(e); } finally { if (btn) btn.disabled = false; } });
+  f.addEventListener('submit', async ev => { ev.preventDefault(); if (!o.onSubmit) return; const btn = f.querySelector('button[type=submit]'); if (btn) btn.disabled = true; try { const r = await o.onSubmit(f); if (r !== false && _modal === o) closeModal(); /* v7.73: a window opened from inside onSubmit (e.g. «تسجّل برضه؟» after the transfer screenshot) is not closed with the old one */ } catch (e) { console.error(e); } finally { if (btn) btn.disabled = false; } });
   if (o.onOpen) o.onOpen(f);
   const first = f.querySelector('input:not([type=hidden]),select,textarea'); if (first && window.innerWidth > 900) setTimeout(() => first.focus(), 30);
 }
@@ -11164,7 +11164,8 @@ function needCard(p) {
 function transferCard(p) {
   if (p.transfer) return `<div class="card trfcard"><div class="cardhead"><h3>تحويل المالك للمورد</h3><span class="badge good">تم التحويل</span></div><div class="small">${fmtMoney(p.transfer.amount)} ${CUR()} · ${fmtDate((p.transfer.at || '').slice(0, 10))} · ${esc(p.transfer.byName || '')}${p.transfer.note ? ` — ${esc(p.transfer.note)}` : ''}</div>${p.transfer.thumb ? `<img class="trfthumb" src="${p.transfer.thumb}" alt="التحويل" data-action="lightboxSrc" data-arg="${p.id}">` : ''}${(p.transfer.fileIds || []).length ? `<div style="margin-top:6px"><button class="btn xs" data-action="fileOpen" data-arg="${esc(p.transfer.fileIds[0])}:att">${icon('file')}فتح صورة التحويل</button></div>` : ''}</div>`;
   if (p.status !== 'transfer') return '';
-  return `<div class="card trfcard"><div class="cardhead"><h3>بانتظار تحويل المالك</h3><span class="badge warn">${fmtMoney(poPayable(p))} ${CUR()}</span><div class="grow"></div>${isAdmin() ? `<button class="btn sm p" data-action="poTransfer" data-arg="${p.id}">${icon('check')}تم التحويل — أرفق الصورة</button>` : ''}</div><div class="small ink2">معتمد من ${esc(p.approval?.approvedByName || 'الحسابات')} ${fmtDate((p.approval?.approvedAt || '').slice(0, 10))}. المورد: ${esc(p.supplier || '')}${supplierOf(p)?.phone ? ` · ${esc(supplierOf(p).phone)}` : ''}</div></div>`;
+  /* v7.73: data-ptab="pin" → stays on top of the purchase page whatever category is open (Mahmoud 15 Oct asked where to transfer on RFQ-26-011: the page had opened on the Approval category and the transfer box sat under Request) */
+  return `<div class="card trfcard" data-ptab="pin"><div class="cardhead"><h3>بانتظار تحويل المالك</h3><span class="badge warn">${fmtMoney(poPayable(p))} ${CUR()}</span><div class="grow"></div>${isAdmin() ? `<button class="btn sm p" data-action="poTransfer" data-arg="${p.id}">${icon('check')}تم التحويل — أرفق الصورة</button>` : ''}</div><div class="small ink2">معتمد من ${esc(p.approval?.approvedByName || 'الحسابات')} ${fmtDate((p.approval?.approvedAt || '').slice(0, 10))}. المورد: ${esc(p.supplier || '')}${supplierOf(p)?.phone ? ` · ${esc(supplierOf(p).phone)}` : ''}</div></div>`;
 }
 ACTIONS.lightboxSrc = id => { const p = byId('purchases', id); if (p && p.transfer && p.transfer.thumb) lightbox(p.transfer.thumb, `تحويل ${p.number}`); };
 function vPurchaseDetail(id) {
@@ -12176,7 +12177,7 @@ function rfqCard(p) {
   if (p.kind !== 'rfq') return ''; const q = p.rfqQuote; const items = p.rfqItems || [];
   return `<div class="card"><div class="cardhead"><h3>طلب عرض سعر — خامة جديدة من ${esc(deptName(p.deptId))}</h3>${badge(PO_STATUS, p.status)}<div class="grow"></div>${p.status === 'rfq' && canNeed() ? `<button class="btn xs" data-action="rfqEdit" data-arg="${p.id}">${icon('edit')}تعديل</button>` : ''}${p.status === 'rfq' && canPurch() ? `<button class="btn xs p" data-action="rfqQuote" data-arg="${p.id}">${icon('money')}تسجيل عرض المورد</button>` : ''}</div>
     <div class="small">${p.orderId && byId('orders', p.orderId) ? `<a href="#/orders/${p.orderId}"><span class="code">${esc(byId('orders', p.orderId).code)}</span></a> ` : ''}${p.requestedByName ? `طلبه ${esc(p.requestedByName)}` : ''}${p.expected ? ` · مطلوب قبل ${fmtDate(p.expected)}` : ''}</div>
-    <table class="tbl" style="margin-top:8px"><thead><tr><th>الخامة</th><th>الوصف</th><th class="n">الكمية</th>${q ? `<th class="n">سعر ${esc(q.supplierName)}</th><th>صورة</th>` : ''}</tr></thead><tbody>${items.map((x, i) => `<tr><td>${esc(x.name)}</td><td class="small">${esc(x.desc || '')}</td><td class="n">${fmtNum(x.qty)} ${esc(x.unit || '')}</td>${q ? `<td class="n">${fmtMoney((q.items[i] || {}).price || 0)}</td><td>${(q.items[i] || {}).thumb ? `<img class="rfqthumb" src="${q.items[i].thumb}" alt="" data-action="lightboxRfq" data-arg="${p.id}:${i}" style="cursor:zoom-in">` : '—'}</td>` : ''}</tr>`).join('')}</tbody>${q ? `<tfoot><tr><th colspan="3">الإجمالي</th><th class="n">${fmtMoney(q.total)} ${CUR()}</th><th>${q.leadDays ? `توريد ${q.leadDays} يوم` : ''}</th></tr></tfoot>` : ''}</table>
+    ${q ? `<div class="small" style="margin-top:6px">عرض المورد: <b>${esc(q.supplierName)}</b>${q.leadDays ? ` · توريد ${q.leadDays} يوم` : ''}</div>` : ''}<div class="tablewrap" style="margin-top:8px"><table class="tbl rfqtbl"><thead><tr><th>الخامة</th><th>الوصف</th><th class="n">الكمية</th>${q ? `<th class="n">السعر</th>` : ''}</tr></thead><tbody>${items.map((x, i) => `<tr><td>${esc(x.name)}${q && (q.items[i] || {}).thumb ? `<div><img class="rfqthumb" src="${q.items[i].thumb}" alt="" data-action="lightboxRfq" data-arg="${p.id}:${i}" style="cursor:zoom-in"></div>` : ''}</td><td class="small">${esc(x.desc || '').replace(/([*×xX\/])/g, '$1\u200b')}</td><td class="n">${fmtNum(x.qty)} ${esc(x.unit || '')}</td>${q ? `<td class="n">${fmtMoney((q.items[i] || {}).price || 0)}</td>` : ''}</tr>`).join('')}</tbody>${q ? `<tfoot><tr><th colspan="2">الإجمالي</th><th class="n" colspan="2">${fmtMoney(q.total)} ${CUR()}</th></tr></tfoot>` : ''}</table></div>
     ${p.notes ? `<div class="small ink2" style="margin-top:6px">${esc(p.notes)}</div>` : ''}
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${p.rfqTech ? `<span class="badge good">اعتماد فني ${p.rfqTech.mode === 'inspected' ? 'بعد المعاينة' : 'على الصورة'} — ${esc(p.rfqTech.byName || '')}</span>` : ''}${p.rfqPrice ? `<span class="badge ${p.rfqPrice.ok ? 'good' : 'crit'}">${p.rfqPrice.ok ? 'السعر معتمد' : 'السعر مرفوض'} — ${esc(p.rfqPrice.byName || '')}</span>` : ''}${(p.rfqRejected || []).map(x => `<span class="badge crit" title="${esc(x.note || '')}">مرفوض فنيًا: ${esc(x.supplierName || '')}</span>`).join('')}</div>
     ${p.status === 'rfq_price' ? `<div class="banner info" style="margin-top:8px">${icon('info')}<span>اعتماد السعر: مدير المصنع${(q && q.total >= rfqOwnerAbove()) ? ' ثم المالك (فوق ' + fmtMoney(rfqOwnerAbove()) + ')' : ''} — من الطلبات.</span></div>` : ''}
@@ -12193,6 +12194,9 @@ vInventory = (base => () => { let html = base(); try { list('materials').forEach
 /* settings: the owner threshold for new-material prices */
 EXTRA_SETTINGS.rfq = { label: 'خامات جديدة — حد اعتماد المالك', render: () => `<form class="card" id="rfqform"><h3>اعتماد سعر الخامة الجديدة</h3><p class="small ink2">أقل من الحد: مدير المصنع وحده. من الحد فأكثر: مدير المصنع ثم المالك. الحد على إجمالي الطلب.</p><div class="form">${field(`الحد (${CUR()})`, inp('rfqOwnerAbove', rfqOwnerAbove(), 'type="number" min="0" step="any"'))}</div><div class="row" style="margin-top:12px"><button class="btn p" type="submit">${icon('save')}حفظ</button></div></form>` };
 document.addEventListener('submit', async ev => { if (ev.target.id !== 'rfqform') return; ev.preventDefault(); if (!isAdmin()) return; const d = formData(ev.target); await Store.saveSettings(Object.assign({}, S.settings, { policy: Object.assign({}, S.settings.policy || {}, { rfqOwnerAbove: num(d.rfqOwnerAbove) || 5000 }) })); toast('تم الحفظ'); });
+
+/* v7.73: the new-item request table fits a phone (Mahmoud 15 Oct, RFQ-26-011 screenshot: the price column and the total were cut off) */
+(document.head || document.body).insertAdjacentHTML('beforeend', '<style>.rfqtbl th,.rfqtbl td{padding:8px 6px}.rfqtbl .n{white-space:nowrap}.rfqtbl td.small{overflow-wrap:break-word}.rfqtbl .rfqthumb{margin-top:4px}</style>');
 /* =====================================================================
    v4.24 — أوامر تشغيل سرية: الأمر المعلَّم «سري» لا يصل من السيرفر أصلًا إلا للمالك والمدير التجاري ومدير الحسابات
    (سياسة RLS: nf_conf_ok — الأمر نفسه وكل ما يشير إليه بـorderId: مهام/ملفات/توريدات/مشاوير…).
@@ -14815,9 +14819,10 @@ async function acctPurchaseOut(p, amt) {
 }
 (() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => {
   const p = byId('purchases', id); if (!p || !isAdmin() || !moneyOn()) return base(id);
-  const src = await new Promise(res => { let d = false; const fin = v => { if (!d) { d = true; clearInterval(iv); res(v); } }; openModal({ title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, submitLabel: 'التالي: صورة التحويل', body: `<div class="form">${field('التحويل من', `<select name="src">${srcOptions('personal')}</select>`, 'full')}</div>`, onSubmit: f => { fin(formData(f).src || 'personal'); return true; } }); const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300); });
+  const pre = S._poSrcPre || null; /* v7.73: already picked in the transfer window (supplier-pay) → no second window */
+  const src = pre || await new Promise(res => { let d = false; const fin = v => { if (!d) { d = true; clearInterval(iv); res(v); } }; openModal({ title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, submitLabel: 'التالي: صورة التحويل', body: `<div class="form">${field('التحويل من', `<select name="src">${srcOptions('personal')}</select>`, 'full')}</div>`, onSubmit: f => { fin(formData(f).src || 'personal'); return true; } }); const iv = setInterval(() => { if (!document.getElementById('mform')) fin(null); }, 300); });
   if (!src) return; const w = walletOf(src); if (w && walletBalance(w.id).balance + 0.5 < poPayable(p)) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; }
-  await new Promise(r => setTimeout(r, 350)); S._poSrc = src;
+  if (!pre) await new Promise(r => setTimeout(r, 350)); S._poSrc = src;
   try { await base(id); } finally { S._poSrc = null; }
   const p2 = byId('purchases', id); if (p2 && p2.transfer && !p2.transfer.source) await Store.update('purchases', id, { transfer: Object.assign({}, p2.transfer, { source: src, sourceName: acctLabel(src) }) });
   const e = list('expenses').find(x => x.purchaseId === id && x.src === 'purchase' && !x.thumb); if (e && p2 && p2.transfer && p2.transfer.thumb) await Store.update('expenses', e.id, { thumb: p2.transfer.thumb });
@@ -24245,6 +24250,9 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const digits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^0-9a-zA-Z@._-]/g, '');
   const luhn = n => { let t = 0; for (let i = 0; i < n.length; i++) { let d = +n[n.length - 1 - i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; } return t % 10 === 0; };
   const remaining = p => r2(poPayable(p) - (+p.paid || 0));
+  /* v7.73 (Mahmoud 15 Oct: «أنا بحوّل من الحسابات بتاعتي — شخصي ولا LOF ولا Ninety») — «paid from» is in the transfer window itself; the last choice on this device is the default */
+  const lastSrc = () => { try { return localStorage.getItem('nf.poSrc') || 'personal'; } catch (e) { return 'personal'; } };
+  const keepSrc = v => { try { if (v) localStorage.setItem('nf.poSrc', v); } catch (e) { /* ignore */ } };
   window.nfSupPayOf = payOf;
   (document.body || document.head).insertAdjacentHTML('beforeend', `<style>
 .spm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px dashed var(--line)}.spm:last-child{border-bottom:0}
@@ -24381,7 +24389,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
         body: `<div class="form">
           <div class="full"><div class="tiny muted" style="margin-bottom:4px">حوّل على رقم من دول واختار حوّلت على أنهي:</div>${ms.length ? ms.map((m, i) => `<div class="spm"><label><input type="radio" name="mid" value="${esc(m.id)}" ${i === 0 ? 'checked' : ''}><span class="muted small">${esc((ST[m.type] || [''])[0])}</span><span class="v notr" dir="ltr">${esc(mShow(m))}</span></label>${holderHTML(m)}${copyBtns(m)}${autoNote(m)}</div>`).join('') : `<div class="banner warn small">المورد مالوش أرقام تحويل مسجّلة — اطلب من المشتريات يسجّلها من صفحة المورد. تقدر تسجّل التحويل برضه.</div><input type="hidden" name="mid" value="">`}</div>
           ${o.fixed ? `<div class="field"><label>المبلغ</label><b class="num" style="font-size:18px">${fmtMoney(o.amount)} ${CUR()}</b><input type="hidden" name="amount" value="${o.amount}"></div>` : field(`المبلغ (${CUR()}) — الباقي ${fmtMoney(o.amount)}`, inp('amount', o.amount, 'type="number" step="any" min="0" inputmode="decimal"'))}
-          ${o.src ? field('التحويل من', `<select name="src">${typeof srcOptions === 'function' ? srcOptions('personal') : '<option value="personal">حساب محمود الشخصي</option>'}</select>`) : ''}
+          ${o.src ? field('حوّلت من', `<select name="src">${typeof srcOptions === 'function' ? srcOptions(lastSrc()) : '<option value="personal">حساب محمود الشخصي</option>'}</select>`) : ''}
           <div class="field full"><label>صورة التحويل</label><input type="file" id="sp-file" accept="image/*"></div>
           ${field('ملاحظة', inp('note', ''), 'full')}
           <div class="full tiny muted">السيستم بيقرأ الصورة ويتأكد إن المستلم رقم المورد والمبلغ مظبوط ويطلّع رقم العملية.</div></div>`,
@@ -24443,11 +24451,12 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   /* the owner's transfer on an approved PO → our dialog first (methods + copy + screenshot + AI), then the old chain */
   (() => { const base = ACTIONS.poTransfer; if (!base) return; ACTIONS.poTransfer = async id => {
     const p = byId('purchases', id); if (!p || stu() || !isAdmin() || p.status !== 'transfer') return base(id);
-    const r = await transferDialog(p, { title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, amount: poPayable(p), fixed: true, allowDefer: true });
+    const r = await transferDialog(p, { title: `تحويل ${fmtMoney(poPayable(p))} ${CUR()} — ${p.supplier || ''}`, amount: poPayable(p), fixed: true, allowDefer: true, src: typeof srcOptions === 'function' && typeof moneyOn === 'function' && moneyOn() });
     if (!r) return; if (r.mode === 'defer') return poDefer(p);
     if (!(await confirmIssues(r))) return;
+    if (r.src) { keepSrc(r.src); S._poSrcPre = r.src; }
     const orig = proofDialog; proofDialog = async () => ({ note: [r.note, r.ref ? `رقم العملية ${r.ref}` : '', r.methodLabel ? `على ${r.methodLabel}` : ''].filter(Boolean).join(' · '), status: null, fileIds: r.fileIds, thumb: r.thumb, at: nowISO(), by: S.session?.id || null, byName: S.session?.name || '' });
-    try { await base(id); } finally { proofDialog = orig; }
+    try { await base(id); } finally { proofDialog = orig; S._poSrcPre = null; }
     const p2 = byId('purchases', id); if (p2 && p2.transfer) await Store.update('purchases', id, { transfer: Object.assign({}, p2.transfer, trfInfo(r)) });
     const e = list('expenses').find(x => x.purchaseId === id && x.src === 'purchase' && !x.trfRef); if (e && r.ref) { try { await Store.update('expenses', e.id, { trfRef: r.ref }); } catch (e2) { /* ignore */ } }
   }; })();
@@ -24456,7 +24465,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
     const p = byId('purchases', id); if (!p || !isAdmin() || !p.deferred || stu()) return; const left = remaining(p); if (left <= 0.5) { toast('الأمر اتسدّد'); return; }
     const r = await transferDialog(p, { title: `تحويل آجل — ${p.number} · ${p.supplier || ''}`, amount: left, fixed: false, allowDefer: false, src: true });
     if (!r || r.mode !== 'paid') return; if (!(await confirmIssues(r))) return;
-    const src = r.src || 'personal'; if (typeof walletOf === 'function' && typeof walletBalance === 'function') { const w = walletOf(src); if (w && walletBalance(w.id).balance + 0.5 < r.amount) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; } }
+    const src = r.src || 'personal'; keepSrc(src); if (typeof walletOf === 'function' && typeof walletBalance === 'function') { const w = walletOf(src); if (w && walletBalance(w.id).balance + 0.5 < r.amount) { toast(`رصيد عهدة ${w.name} مش كفاية`, 'err'); return; } }
     const me = S.session || {}; const n = list('expenses').filter(e => e.purchaseId === p.id).length + 1; const now = nowISO();
     await Store.save('expenses', { id: `pot_${p.id}_${n}`, date: todayISO(), month: monthOf(todayISO()), amount: r.amount, cat: 'materials', account: src, orderId: null, payee: p.supplier || '', supplierId: p.supplierId || null, ref: p.number, note: `تحويل آجل للمورد — ${p.number}${r.ref ? ' · ' + r.ref : ''}`, src: 'purchase', purchaseId: p.id, thumb: r.thumb || null, trfRef: r.ref || null, byName: me.name || '', createdAt: now });
     const p1 = byId('purchases', id) || p; const pay = Object.assign({ id: uid(), amount: r.amount, at: now, byName: me.name || '', src, srcName: typeof acctLabel === 'function' ? acctLabel(src) : src, thumb: r.thumb || null, fileIds: r.fileIds || [], note: r.note || '' }, trfInfo(r));
@@ -24487,7 +24496,7 @@ start لكل مرحلة: {"mode":"after"} = بعد ما كل اللي قبلها
   const infoLine = x => `${x.trfPending ? `<div class="small"><span class="nftrdg"><i class="apspin" aria-hidden="true"></i>${esc(L('صورة التحويل بتتراجع…', 'The transfer picture is being checked…'))}</span></div>` : ''}${x.methodLabel ? `<div class="small">على <b class="ltr">${esc(x.methodLabel)}</b>${x.ref ? ` · رقم العملية <b class="ltr">${esc(x.ref)}</b>` : ''} ${x.aiOk ? '<span class="badge good">الصورة مطابقة ✓</span>' : (x.aiIssues && x.aiIssues.length ? '<span class="badge warn">اتسجّل رغم الاختلاف</span>' : '')}</div>` : (x.ref ? `<div class="small">رقم العملية <b class="ltr">${esc(x.ref)}</b></div>` : '')}${x.aiIssues && x.aiIssues.length && !x.aiOk ? `<div class="tiny muted">${x.aiIssues.map(esc).join(' · ')}</div>` : ''}`;
   function deferredCard(p) {
     const d = p.deferred; const left = remaining(p); const over = d.due && left > 0.5 && d.due < todayISO();
-    return `<div class="card trfcard"><div class="cardhead"><h3>آجل — التحويل لاحقاً</h3>${left > 0.5 ? `<span class="badge ${over ? 'crit' : 'warn'}">علينا ${fmtMoney(left)} ${CUR()}</span>` : '<span class="badge good">اتسدّد</span>'}<div class="grow"></div>${left > 0.5 && isAdmin() && writable() ? `<button class="btn sm p" data-action="poPayLater" data-arg="${esc(p.id)}">${icon('money')}حوّل دلوقتي</button>` : ''}</div>
+    return `<div class="card trfcard"${left > 0.5 ? ' data-ptab="pin"' : ''}><div class="cardhead"><h3>آجل — التحويل لاحقاً</h3>${left > 0.5 ? `<span class="badge ${over ? 'crit' : 'warn'}">علينا ${fmtMoney(left)} ${CUR()}</span>` : '<span class="badge good">اتسدّد</span>'}<div class="grow"></div>${left > 0.5 && isAdmin() && writable() ? `<button class="btn sm p" data-action="poPayLater" data-arg="${esc(p.id)}">${icon('money')}حوّل دلوقتي</button>` : ''}</div>
       <div class="small">اتسجّل آجل ${fmtDate((d.at || '').slice(0, 10))} · ${esc(d.byName || '')} · المبلغ ${fmtMoney(poPayable(p))}${d.due ? ` · ميعاد الدفع <b style="${over ? 'color:var(--crit-ink)' : ''}">${fmtDate(d.due)}${over ? ' — متأخر' : ''}</b>` : ''}</div>
       ${(d.payments || []).map(x => `<div class="sppay"><div class="small"><b>${fmtMoney(x.amount)} ${CUR()}</b> · ${fmtDate((x.at || '').slice(0, 10))} · ${esc(x.byName || '')} · من ${esc(x.srcName || '')}</div>${infoLine(x)}${x.thumb ? `<img class="trfthumb" src="${esc(x.thumb)}" alt="" onclick="typeof lightbox==='function'&&lightbox(this.src,'')">` : ''}${waBtns(p, x.id, x)}</div>`).join('')}</div>`;
   }
