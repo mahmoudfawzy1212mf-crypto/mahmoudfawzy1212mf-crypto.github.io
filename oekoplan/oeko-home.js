@@ -101,7 +101,7 @@
 /* the office in numbers */
 .okstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .okst{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px 18px;display:flex;flex-direction:column;gap:2px}
-.okst b{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1;background:linear-gradient(135deg,#3ca13c,#38a599 55%,#50b1e7);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-flex;align-items:baseline;gap:2px}.okst b i{font-style:normal;font-size:20px}
+.okst b{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1;background:linear-gradient(135deg,#3ca13c,#38a599 55%,#50b1e7);-webkit-background-clip:text;background-clip:text;color:transparent;display:inline-flex;align-items:baseline;gap:2px}.okst b i{font-style:normal;font-size:22px;font-weight:800;line-height:1;align-self:flex-start;margin-inline-start:3px;-webkit-text-fill-color:#50b1e7;color:#50b1e7;background:none;-webkit-background-clip:border-box;background-clip:border-box}
 .okst span{font-size:12.5px;color:var(--muted)}.okst b .shn{font:inherit;color:inherit;background:inherit;-webkit-background-clip:text;background-clip:text}
 /* about */
 .okabout{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px 20px;display:grid;grid-template-columns:1.1fr 1fr;gap:18px 24px}
