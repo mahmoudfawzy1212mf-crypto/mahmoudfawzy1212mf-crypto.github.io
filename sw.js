@@ -1,10 +1,10 @@
 /* Ninety Fabrication — service worker (app shell cache). Data never lives here: it is on the server. */
-const BUILD = '20261015-0342-99fda9';
+const BUILD = '20261015-0440-19aed7';
 /* v4.17: several Ninety apps share one origin (/ = factory, /studioz/ = office) — each service worker keeps to its own scope and its own cache prefix */
 const SCOPE = new URL(self.registration.scope).pathname;
 const TAG = SCOPE.replace(/^\/|\/$/g, '').replace(/\//g, '-');
 const CACHE = 'nf-shell-' + (TAG ? TAG + '-' : '') + BUILD;
-const SHELL = ["./app.js?v=20261015-0342-99fda9", "./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./en.json", "./laeha.pdf", "./lof-c01.pdf"];
+const SHELL = ["./app.js?v=20261015-0440-19aed7", "./index.html", "./config.js", "./manifest.json", "./vendor/supabase.js", "./vendor/three.bundle.js", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/leaflet.js", "./icons/icon-192.png", "./icons/icon-512.png", "./en.json", "./laeha.pdf", "./lof-c01.pdf"];
 self.addEventListener('install', e => {
   self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))).catch(() => { })));
@@ -112,6 +112,8 @@ self.addEventListener('push', e => {
 });
 self.addEventListener('message', e => { const d = e.data || {}; if (d.nfBadge != null) { (async () => { try { const c = await caches.open('nf-badge'); await c.put('count', new Response(String(d.nfBadge))); if ('setAppBadge' in navigator) { if (d.nfBadge > 0) await navigator.setAppBadge(d.nfBadge); else await navigator.clearAppBadge(); } } catch (x) { /* ignore */ } })(); } });
 self.addEventListener('notificationclick', e => {
+  /* v7.71: the owner's support notice opens the Claude chat itself (claude.ai links only), not the app */
+  try { const u0 = String((e.notification.data && e.notification.data.url) || ''); const m0 = /#\/supgo\/([^?#]+)/.exec(u0); if (m0) { const t0 = decodeURIComponent(m0[1]); if (/^https:\/\/claude\.ai\/[A-Za-z0-9_.\/-]+$/.test(t0)) { e.notification.close(); e.waitUntil(self.clients.openWindow(t0)); return; } } } catch (x) { /* fall through to the app */ }
   e.notification.close(); try { caches.open('nf-badge').then(c => c.put('count', new Response('0'))); if ('clearAppBadge' in navigator) navigator.clearAppBadge(); } catch (x) { /* ignore */ } let url = (e.notification.data && e.notification.data.url) || './'; if (e.notification.data && e.notification.data.call && (e.action === 'accept' || e.action === 'decline')) url = './#/calls/' + e.notification.data.call + '/' + e.action;
   /* v6.86: iOS rejects WindowClient.navigate() asynchronously (the old try/catch never caught it, so a tapped notification just
      brought the app forward without opening its page) — the page itself now sets the hash from the message; navigate is not used */

@@ -51425,7 +51425,7 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
     return OWN.for === id && OWN.ok;
   }
   const isOwner = () => !!S.session && isAdmin() && !(S.viewOrig || S.demoOrig) && ownerOk();
-  const ownerTo = () => (isOeko() ? [] : ['role:admin']); /* Ökoplan: the server notifies the support owner itself */
+  const ownerTo = () => []; /* v7.71: the server tells the owner (instant notice → the Claude chat, server/sql/v771-*.sql) in all 4 systems */
   const canUse = () => !!S.session && role() !== 'kiosk' && !(S.viewOrig || S.demoOrig);
   const sysKey = () => isOeko() ? 'oekoplan' : (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : (typeof isStudioz === 'function' && isStudioz()) ? 'studio' : 'factory';
   const SYS = { factory: ['المصنع', 'Factory'], studio: ['الاستوديو', 'Studio'], construction: ['المقاولات', 'Construction'], oekoplan: ['أوكوبلان', 'Ökoplan'] };
@@ -52422,5 +52422,286 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 #nf-fresh-dlg h3{margin:0 0 6px;font-size:17px}#nf-fresh-dlg p{margin:0 0 14px;font-size:14px;line-height:1.7;opacity:.85}
 #nf-fresh-dlg .nffd-b{display:flex;gap:8px;justify-content:center}#nf-fresh-dlg .nffd-b button{border:0;border-radius:12px;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer;background:var(--bg2,#eef1f5);color:inherit}
 #nf-fresh-dlg .nffd-b .nffd-p{background:#4a6a8c;color:#fff}`;
+  (document.head || document.documentElement).appendChild(st);
+})();
+/* =====================================================================
+   v7.71 — «Support» guide for everyone (Mahmoud 14 Oct: an animation when people open the system — an arrow, «tap here»,
+   a menu opens, «tap to do this» — showing how to use Support; started 15 Oct). Brief: claude/support-onboard-brief.md.
+   · the first time each person opens the system (also new people at their first sign-in): a card «New: Support» → «Show me» / «Later»;
+   · then 10 steps on the real screens: the screen dims, the button is lit with a pulsing ring, a finger walks to it and taps,
+     a bubble says one line with «Next» / «Skip»: «+» → «Assistant» → «Problem in the system?» → page and device are recorded →
+     write → picture · voice · screen video → «Send» → leave / advance / punch questions get an instant answer → it reaches the
+     management with a number → follow it from «My portal»;
+   · it really opens the «+», the assistant and the Support page, but nothing is ever sent (the chat lines are an example, drawn
+     on the screen only, gone when the guide ends — a draft the person had stays as it was);
+   · seen once per person: kept on the server (nf_uprefs «tour_sup») so it does not come back on another device; «How do I use
+     Support?» on the Support page and in the assistant panel plays it again;
+   · not for the owner, not over an open form / a call / a meeting / a recording, not on a stale copy (it waits until the screen
+     is free); all 4 systems, phone / computer / the phone apps, Arabic and English.
+   · #/supgo/<link> (the owner's support notice): opens the Claude chat link (claude.ai only) — the notice itself is sent by the
+     server (server/sql/v771-*.sql), so the app no longer pushes «new problem» to the owner by itself.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUPTOUR771__) return; window.__NF_SUPTOUR771__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const KEY = 'tour_sup'; const VER = 1;
+  const T = window.nfSupTour = { on: false, i: 0, steps: [], seen: null, pulled: '', saved: {}, demo: [], timer: 0, raf: 0, auto: true };
+  const sid = () => (S.session && (S.session.id || S.session.workerId)) || '';
+  const lsKey = () => 'nf.tour.sup.' + sid();
+  const hosted = () => typeof sbOn === 'function' && sbOn() && !!S.sb && !!S.sbUser;
+  const $q = s => document.querySelector(s);
+  const vis = el => { if (!el || !el.isConnected) return false; const r = el.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return false; const cs = getComputedStyle(el); return cs.visibility !== 'hidden' && cs.display !== 'none'; };
+  const firstVis = sel => Array.from(document.querySelectorAll(sel)).find(vis) || null;
+  const wait = (fn, ms) => new Promise(res => { const t0 = Date.now(); (function loop() { let v = null; try { v = fn(); } catch (e) { v = null; } if (v || Date.now() - t0 > (ms || 2500)) return res(v || null); setTimeout(loop, 80); })(); });
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const ownerAcct = () => { try { return typeof isAdmin === 'function' && isAdmin() && !(S.session && S.session.workerId); } catch (e) { return false; } };
+  const eligible = () => !!S.session && typeof role === 'function' && role() !== 'kiosk' && !(S.viewOrig || S.demoOrig) && !ownerAcct() && typeof canSee === 'function' && canSee('support');
+
+  /* ---------- seen: local copy at once, the server copy follows ---------- */
+  const done = v => !!v && ((+v.v || 0) >= VER || (+v.until || 0) > Date.now());   /* seen, or «Later» not over yet */
+  const seenLocal = () => { try { return done(JSON.parse(lsGet(lsKey()) || 'null')); } catch (e) { return false; } };
+  async function seenServer() {
+    if (!hosted()) return false;
+    try { const r = await S.sb.rpc('nf_uprefs_get'); const v = r && !r.error && r.data && r.data[KEY]; if (done(v)) { lsSet(lsKey(), JSON.stringify(v)); return true; } } catch (e) { /* offline */ }
+    return false;
+  }
+  async function markSeen(how) {
+    let v = { v: VER, at: Date.now(), how: how || 'done' };
+    if (how === 'later') {   /* «Later»: back in 2 days; the second «Later» is final */
+      let prev = null; try { prev = JSON.parse(lsGet(lsKey()) || 'null'); } catch (e) { prev = null; }
+      const n = ((prev && +prev.later) || 0) + 1;
+      if (n < 2) v = { v: 0, later: n, until: Date.now() + 2 * 86400000, at: Date.now(), how: 'later' };
+    }
+    lsSet(lsKey(), JSON.stringify(v)); T.seen = true;
+    if (hosted()) { try { await S.sb.rpc('nf_uprefs_set', { p_key: KEY, p_val: v }); } catch (e) { /* the local copy is enough until next time */ } }
+  }
+
+  /* ---------- is the screen free? ---------- */
+  function busy() {
+    try {
+      const mr = document.getElementById('modalroot'); if (mr && mr.children.length) return true;
+      if (document.getElementById('nf-fresh-dlg') || document.getElementById('nf-fresh-bar') || (window.nfFresh && window.nfFresh.stale)) return true;
+      const a = document.activeElement; if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|submit|checkbox|radio)$/i.test(a.type || ''))) && String(a.value || '').trim()) return true;
+      if (document.getElementById('nfc-sheet') || document.fullscreenElement || document.querySelector('iframe[src*="meet"], .suprecbar, #nfsnap, .supvoice.on')) return true;
+      if (typeof NFC === 'function') { const n = NFC(); if (n && typeof n.current === 'function' && n.current()) return true; }
+      if (document.getElementById('nfdial') && document.getElementById('nfdial').classList.contains('open')) return true;
+      const p = document.getElementById('aipanel'); if (p && !p.hidden) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  /* ---------- the overlay ---------- */
+  const HAND = '<svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><path d="M19 6.5c1.9 0 3.4 1.5 3.4 3.4v11.2l1.2-.3c1.8-.4 3.6.6 4.1 2.4l.1.4 1.1-.2c1.8-.3 3.5.8 3.9 2.6l1.1-.1c1.9-.1 3.5 1.3 3.6 3.2v.4l-.6 8.2c-.4 5.2-4.7 9.2-9.9 9.2h-3.4c-3 0-5.8-1.4-7.6-3.8l-7.3-9.6c-1.2-1.6-.9-3.8.7-5 1.5-1.1 3.6-.9 4.8.5l1.4 1.6V9.9c0-1.9 1.5-3.4 3.4-3.4z" fill="#fff" stroke="#1d2733" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+  const BUOY = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"/></svg>';
+  function root() {
+    let r = document.getElementById('nfst'); if (r) return r;
+    r = document.createElement('div'); r.id = 'nfst'; r.setAttribute('role', 'dialog'); r.setAttribute('aria-modal', 'true');
+    r.innerHTML = `<div class="nfst-catch"></div><div class="nfst-hole nfst-none"></div><div class="nfst-rings"></div><div class="nfst-rip"></div><div class="nfst-hand" style="opacity:0">${HAND}</div><div class="nfst-bub" role="status"></div><div class="nfst-intro"></div>`;
+    document.body.appendChild(r);
+    r.addEventListener('click', e => {
+      const b = e.target.closest('[data-st]'); if (b) { e.preventDefault(); e.stopPropagation(); const k = b.dataset.st; if (k === 'next') next(); else if (k === 'skip' || k === 'later') finish(k); else if (k === 'go') next(); return; }
+      if (e.target.classList.contains('nfst-catch') && T.rect) { const x = e.clientX, y = e.clientY, q = T.rect; if (x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h) next(); }
+    });
+    return r;
+  }
+  const rectOf = els => { const rs = els.filter(vis).map(e => e.getBoundingClientRect()); if (!rs.length) return null; const pad = 6; const x1 = Math.min(...rs.map(r => r.left)), y1 = Math.min(...rs.map(r => r.top)), x2 = Math.max(...rs.map(r => r.right)), y2 = Math.max(...rs.map(r => r.bottom)); return { x: x1 - pad, y: y1 - pad, w: x2 - x1 + pad * 2, h: y2 - y1 + pad * 2 }; };
+  function place() {
+    const r = document.getElementById('nfst'); if (!r || !T.on) return; const st = T.steps[T.i]; if (!st || st.intro) return;
+    const els = (T.els || []).filter(vis); const q = rectOf(els); T.rect = q;
+    const hole = r.querySelector('.nfst-hole'), rings = r.querySelector('.nfst-rings'), bub = r.querySelector('.nfst-bub');
+    if (q) { hole.classList.remove('nfst-none'); Object.assign(hole.style, { left: q.x + 'px', top: q.y + 'px', width: q.w + 'px', height: q.h + 'px' }); }
+    else { hole.classList.add('nfst-none'); }
+    rings.innerHTML = els.map(e => { const b = e.getBoundingClientRect(); return `<i style="left:${b.left - 5}px;top:${b.top - 5}px;width:${b.width + 10}px;height:${b.height + 10}px"></i>`; }).join('');
+    const W = window.innerWidth, H = window.innerHeight; const bw = Math.min(300, W - 24); bub.style.width = bw + 'px'; const bh = bub.offsetHeight || 120;
+    let top, left;
+    if (q) { top = q.y + q.h + 14; if (top + bh > H - 10) top = q.y - bh - 14; if (top < 10) top = Math.max(10, Math.min(H - bh - 10, q.y + q.h / 2 - bh / 2)); left = q.x + q.w / 2 - bw / 2; }
+    else { top = H / 2 - bh / 2; left = W / 2 - bw / 2; }
+    left = Math.max(12, Math.min(W - bw - 12, left)); bub.style.top = Math.round(top) + 'px'; bub.style.left = Math.round(left) + 'px';
+  }
+  function loop() { if (!T.on) return; place(); T.raf = requestAnimationFrame(loop); }
+  function tapOn(el) {
+    const r = document.getElementById('nfst'); const hand = r && r.querySelector('.nfst-hand'); if (!hand) return;
+    if (!el || !vis(el)) { hand.style.opacity = 0; return; }
+    const b = el.getBoundingClientRect(); const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+    hand.style.opacity = 1; hand.classList.remove('tap'); hand.style.left = (cx - 12) + 'px'; hand.style.top = (cy - 6) + 'px';
+    clearTimeout(T.timer); T.timer = setTimeout(() => { if (!T.on) return; void hand.offsetWidth; hand.classList.add('tap'); const rp = r.querySelector('.nfst-rip'); rp.style.left = cx + 'px'; rp.style.top = cy + 'px'; rp.classList.remove('go'); void rp.offsetWidth; rp.classList.add('go'); }, 750);
+  }
+
+  /* ---------- the example lines in the Support chat (drawn only; nothing is saved or sent) ---------- */
+  function demoLine(side, who, text, tag) {
+    const box = $q('.supchat .supmsgs'); if (!box) return null;
+    const d = document.createElement('div'); d.className = `supb ${side}${side === 'bot' ? ' isbot' : ''} nfst-demo`;
+    d.innerHTML = `<div class="who"><span class="notr">${esc(who)}</span> · <span class="nfst-eg">${esc(L('مثال', 'Example'))}</span></div><div class="tx notr">${esc(text)}</div>`;
+    box.appendChild(d); T.demo.push(d); if (tag) d.dataset.st = tag;
+    try { d.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
+    return d;
+  }
+  function clearDemo() {
+    T.demo.forEach(d => d.remove()); T.demo = [];
+    const q = document.getElementById('supq'); if (q && T.saved.hasDraft !== undefined) { q.value = T.saved.draft || ''; }
+    clearInterval(T.typeT);
+  }
+  function typeInto(el, text) {
+    clearInterval(T.typeT); if (!el) return; if (T.saved.hasDraft === undefined) { T.saved.hasDraft = true; T.saved.draft = el.value; }
+    el.value = ''; let k = 0; T.typeT = setInterval(() => { if (!T.on) return clearInterval(T.typeT); el.value = text.slice(0, ++k); if (k >= text.length) clearInterval(T.typeT); }, 45);
+  }
+  const closeDial = () => { const d = document.getElementById('nfdial'); if (d && d.classList.contains('open')) { const bg = d.querySelector('[data-nfd="close"]'); if (bg) bg.click(); } };
+  const closeAi = () => { const p = document.getElementById('aipanel'); if (p && !p.hidden) { const x = p.querySelector('[data-aiclose]'); if (x) x.click(); else p.hidden = true; } };
+  async function toHomeish() {
+    if (firstVis('.nfd-main')) return true;
+    const h = typeof homeView === 'function' ? homeView() : 'me'; location.hash = '#/' + (canSee('me') ? 'me' : h);
+    return !!(await wait(() => firstVis('.nfd-main'), 2500));
+  }
+
+  /* ---------- the steps ---------- */
+  function build() {
+    const pc = window.innerWidth > 900;
+    return [
+      { intro: true },
+      { side: ['دوس +', 'Tap +'], t: ['من أي صفحة: دوس على <b>+</b>', 'From any page: tap <b>+</b>'],
+        prep: async () => { closeAi(); closeDial(); await toHomeish(); }, els: () => [firstVis('.nfd-main')], tap: () => firstVis('.nfd-main') },
+      { side: ['المساعد', 'Assistant'], t: ['اختار <b>«المساعد»</b>', 'Choose <b>«Assistant»</b>'],
+        prep: async () => { const d = document.getElementById('nfdial'); if (!d || !d.classList.contains('open')) { const m = firstVis('.nfd-main'); if (m) m.click(); } await wait(() => firstVis('.nfd-items [data-nfd="ai"]'), 2000); },
+        els: () => [firstVis('.nfd-items [data-nfd="ai"]')], tap: () => firstVis('.nfd-items [data-nfd="ai"]') },
+      { side: ['مشكلة في السيستم؟', 'Problem in the system?'], t: ['دوس <b>«مشكلة في السيستم؟»</b>', 'Tap <b>«Problem in the system?»</b>'],
+        prep: async () => { const it = firstVis('.nfd-items [data-nfd="ai"]'); if (it) it.click(); else { closeDial(); const a = document.querySelector('.aifab'); if (a) a.click(); } await wait(() => firstVis('#aipanel [data-supgo]'), 2500); const i = document.getElementById('aiq'); if (i) i.blur(); },
+        els: () => [firstVis('#aipanel [data-supgo]')], tap: () => firstVis('#aipanel [data-supgo]') },
+      { side: ['بيتسجل لوحده', 'Recorded by itself'], t: ['الصفحة اللي كنت فيها والجهاز بيتسجلوا <b>لوحدهم</b> — مش محتاج تشرحهم', 'The page you were on and your device are recorded <b>by themselves</b> — no need to explain them'],
+        prep: async () => { const g = firstVis('#aipanel [data-supgo]'); if (g) g.click(); else location.hash = '#/support'; await wait(() => firstVis('.supctx') && firstVis('#supq'), 3000); closeAi(); window.scrollTo(0, 0); },
+        els: () => [firstVis('.supctx')] },
+      { side: ['اكتب', 'Write'], t: ['اكتب اللي حصل بكلامك العادي', 'Write what happened in your own words'],
+        prep: async () => { const q = firstVis('#supq'); if (q) { try { q.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ } typeInto(q, L('بدوس «حفظ» في المهمة ومفيش حاجة بتحصل', 'I press «Save» on the task and nothing happens')); } },
+        els: () => [firstVis('#supq')] },
+      { side: ['صورة · صوت · فيديو', 'Picture · voice · video'], t: [pc ? 'أو ابعت <b>صورة</b>، أو <b>رسالة صوت</b>، أو <b>سجّل الشاشة</b> وأنت بتشرح — البوت بيكتب ملخص لوحده' : 'أو ابعت <b>صورة</b>، أو <b>رسالة صوت</b>، أو <b>فيديو للشاشة</b> — البوت بيكتب ملخص لوحده', pc ? 'Or send a <b>picture</b>, a <b>voice note</b>, or <b>record the screen</b> while you explain — the bot writes the summary itself' : 'Or send a <b>picture</b>, a <b>voice note</b> or a <b>screen video</b> — the bot writes the summary itself'],
+        els: () => Array.from(document.querySelectorAll('.supchat .supcomp .supatt, .supchat .supcomp [data-supvoice], .supchat .supcomp [data-suprec]')).filter(vis) },
+      { side: ['ابعت', 'Send'], t: ['دوس <b>«ابعت»</b>', 'Tap <b>«Send»</b>'],
+        els: () => [firstVis('.supchat [data-action="supSend"]')], tap: () => firstVis('.supchat [data-action="supSend"]') },
+      { side: ['البوت بيرد على طول', 'Instant answers'], t: ['سؤال عن <b>الإجازة أو السلفة أو البصمة</b>؟ البوت بيرد عليك على طول من بياناتك', 'A question about <b>leave, advances or punches</b>? The bot answers right away from your own data'],
+        prep: async () => { clearDemo(); demoLine('me', L('إنت', 'You'), L('عايز أعرف رصيد إجازاتي كام؟', 'How many leave days do I have left?')); demoLine('bot', L('البوت', 'Bot'), L('رصيد إجازاتك الاعتيادي: باقي لك 12 يوم. الإجازة بتتطلب من «طلب جديد» ← «إجازة».', 'Your annual leave: 12 days left. Leave is asked from «New request» → «Leave».'), 'b1'); },
+        els: () => [document.querySelector('.nfst-demo[data-st="b1"]')] },
+      { side: ['وصلت برقم', 'Sent with a number'], t: ['مشكلة في السيستم؟ <b>بتوصل للإدارة برقم</b>، وهيجيلك إشعار لما يترد عليها أو تتحل', 'A problem in the system? <b>It reaches the management with a number</b>, and you get a notice when it is answered or solved'],
+        prep: async () => { clearDemo(); demoLine('me', L('إنت', 'You'), L('بدوس «حفظ» في المهمة ومفيش حاجة بتحصل', 'I press «Save» on the task and nothing happens')); demoLine('bot', L('البوت', 'Bot'), L('✓ وصلت للدعم الفني — رقمها #A1B2. هيوصلك إشعار لما يترد عليها أو تتحل.', '✓ It reached support — number #A1B2. You will get a notice when it is answered or solved.'), 'b2'); },
+        els: () => [document.querySelector('.nfst-demo[data-st="b2"]')] },
+      { side: ['تتابع من بوابتي', 'Follow it in My portal'], last: true, t: ['تتابع مشاكلك والردود من <b>«بوابتي»</b> أو <b>«الدعم الفني»</b> في القايمة — والشرح ده تقدر تشوفه تاني من هناك', 'Follow your problems and the replies from <b>«My portal»</b> or <b>«Support»</b> in the menu — and you can replay this guide from there'],
+        prep: async () => { clearDemo(); if (typeof render === 'function') render(false); if (canSee('me')) { location.hash = '#/me'; const c = await wait(() => firstVis('.supme'), 2500); if (c) { try { c.scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ } } } },
+        els: () => { const c = firstVis('.supme'); if (c) return [c]; const n = firstVis('.side a[href="#/support"], .sidebar a[href="#/support"], nav a[href="#/support"]'); return n ? [n] : []; } },
+    ];
+  }
+
+  async function show(n) {
+    T.i = n; const st = T.steps[n]; const r = root(); const bub = r.querySelector('.nfst-bub'), intro = r.querySelector('.nfst-intro'), hand = r.querySelector('.nfst-hand');
+    bub.classList.remove('on'); intro.classList.remove('on'); hand.style.opacity = 0; r.querySelector('.nfst-rings').innerHTML = '';
+    if (st.intro) {
+      r.querySelector('.nfst-hole').classList.add('nfst-none'); T.els = []; T.rect = null;
+      intro.innerHTML = `<div class="nfst-card"><div class="nfst-ic">${BUOY}</div><h3>${esc(L('جديد في السيستم: الدعم الفني', 'New in the system: Support'))}</h3><p>${esc(L('لو قابلتك أي مشكلة في السيستم — زرار مش شغال، رقم غلط، صفحة مش فاهمها — ابعتها من هنا وهتوصل للإدارة على طول. هوريك إزاي في نص دقيقة.', 'If anything in the system gets in your way — a button that does nothing, a wrong number, a page you don\'t get — send it from here and it reaches the management right away. Here is how, in half a minute.'))}</p><div class="nfst-btns"><button type="button" class="nfst-p" data-st="go">${esc(L('يلا نشوف', 'Show me'))}</button><button type="button" data-st="later">${esc(L('بعدين', 'Later'))}</button></div></div>`;
+      intro.classList.add('on'); return;
+    }
+    if (st.prep) { try { await st.prep(); } catch (e) { /* the step still shows */ } }
+    if (!T.on || T.i !== n) return;
+    T.els = (st.els ? st.els() : []).filter(Boolean);
+    if (T.els[0]) { try { const b = T.els[0].getBoundingClientRect(); if (b.top < 0 || b.bottom > window.innerHeight) T.els[0].scrollIntoView({ block: 'center' }); } catch (e) { /* ignore */ } }
+    const total = T.steps.length - 1; const dots = Array.from({ length: total }, (_, k) => `<i class="${k + 1 === n ? 'on' : ''}"></i>`).join('');
+    bub.innerHTML = `<span class="nfst-tag">${esc(L('الدعم الفني', 'Support'))} · ${n}/${total}</span><div class="nfst-tx">${L(st.t[0], st.t[1])}</div><div class="nfst-row"><span class="nfst-dots">${dots}</span>${st.last ? '' : `<button type="button" class="nfst-sk" data-st="skip">${esc(L('تخطّي', 'Skip'))}</button>`}<button type="button" class="nfst-nx" data-st="next">${esc(st.last ? L('تمام، فهمت ✓', 'Got it ✓') : L('التالي', 'Next'))}</button></div>`;
+    place(); requestAnimationFrame(() => { place(); bub.classList.add('on'); });
+    tapOn(st.tap ? st.tap() : null);
+  }
+  function next() { if (!T.on) return; const st = T.steps[T.i]; if (st && st.last) return finish('done'); show(T.i + 1); }
+  async function finish(how) {
+    if (!T.on) return; T.on = false; cancelAnimationFrame(T.raf); clearTimeout(T.timer); clearInterval(T.typeT);
+    clearDemo(); closeDial(); closeAi();
+    const r = document.getElementById('nfst'); if (r) r.remove();
+    document.documentElement.classList.remove('nfst-active');
+    if (!T.replay) await markSeen(how);
+    if (S.route && S.route.view === 'support' && typeof render === 'function') render(false);
+    T.replay = false;
+  }
+  T.start = function (replay) {
+    if (T.on) return; T.on = true; T.replay = !!replay; T.saved = {}; T.demo = []; T.steps = build(); T.i = 0;
+    document.documentElement.classList.add('nfst-active'); root(); loop();
+    show(replay ? 1 : 0);
+  };
+  T.finish = finish;
+  ACTIONS.supTour = () => T.start(true);
+
+  /* ---------- when to offer it: once the person is in, the screen is free, and it was never seen ---------- */
+  let checking = false;
+  async function maybeStart() {
+    if (T.on || checking || !T.auto || !eligible()) return;
+    if ((window.NF_TEST_LANG || navigator.webdriver) && !window.NF_TOUR_TEST) return;   /* automated test browsers run without the guide unless a test asks for it */
+    if (T.pulled === sid() && T.seen) return;
+    if (seenLocal()) { T.seen = true; T.pulled = sid(); return; }
+    checking = true;
+    try {
+      if (T.pulled !== sid()) { T.pulled = sid(); if (await seenServer()) { T.seen = true; return; } }
+      T.seen = false;
+      for (let k = 0; k < 40 && !T.on; k++) { if (eligible() && !busy() && S.route && document.visibilityState !== 'hidden') break; await sleep(1500); }
+      if (!T.on && eligible() && !busy() && !seenLocal()) T.start(false);
+    } finally { checking = false; }
+  }
+  RENDER_HOOKS.push(() => { if (!T.on && T.seen !== true) setTimeout(maybeStart, 2500); });
+
+  /* ---------- «How do I use Support?» — on the Support page and in the assistant panel ---------- */
+  RENDER_HOOKS.push(() => {
+    if (!S.session || !S.route || S.route.view !== 'support' || ownerAcct()) return;
+    const v = document.getElementById('view'); if (!v || v.querySelector('.nfst-replay')) return;
+    const card = v.querySelector('.supchat') || v.querySelector('.card'); if (!card) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost sm nfst-replay'; b.dataset.action = 'supTour';
+    b.innerHTML = `${typeof icon === 'function' ? icon('info') : ''}<span>${esc(L('إزاي أستخدم الدعم الفني؟', 'How do I use Support?'))}</span>`;
+    card.parentNode.insertBefore(b, card);
+  });
+  const panelBtn = () => {
+    const p = document.getElementById('aipanel'); if (!p || ownerAcct() || !eligible()) return; const h = p.querySelector('.aih'); if (!h || h.querySelector('.nfst-howto')) return;
+    const g = h.querySelector('[data-supgo]'); if (!g) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn xs nfst-howto'; b.dataset.action = 'supTour'; b.title = L('إزاي أستخدم الدعم الفني؟', 'How do I use Support?'); b.setAttribute('aria-label', b.title); b.textContent = '?';
+    g.insertAdjacentElement('afterend', b);
+  };
+  new MutationObserver(() => { if (document.getElementById('aipanel')) panelBtn(); }).observe(document.body, { childList: true });
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.nfst-howto'); if (!b) return; e.preventDefault(); e.stopPropagation(); closeAi(); T.start(true); }, true);
+
+  /* ---------- #/supgo/<link>: the owner's support notice opens the Claude chat ---------- */
+  function supgo() {
+    const m = /^#\/supgo\/([^?#]*)/.exec(location.hash); if (!m) return;
+    let u = ''; try { u = decodeURIComponent(m[1]); } catch (e) { u = ''; }
+    const back = '#/' + (S.session && typeof homeView === 'function' ? homeView() : 'dashboard');
+    try { history.replaceState(null, '', location.pathname + location.search + back); if (typeof parseRoute === 'function') { parseRoute(); if (typeof render === 'function') render(true); } } catch (e) { /* ignore */ }
+    if (!/^https:\/\/claude\.ai\/[A-Za-z0-9_./-]+$/.test(u)) { if (S.session) location.hash = '#/support'; return; }
+    let w = null; try { w = window.open(u, '_blank', 'noopener'); } catch (e) { w = null; }
+    if (!w) { try { location.href = u; } catch (e) { /* ignore */ } }
+  }
+  T.supgo = supgo;
+  window.addEventListener('hashchange', supgo);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(supgo, 300)); else setTimeout(supgo, 300);
+
+  const st = document.createElement('style');
+  st.textContent = `#nfst{position:fixed;inset:0;z-index:2147483100;pointer-events:none}
+#nfst .nfst-catch{position:absolute;inset:0;pointer-events:auto;background:transparent}
+#nfst .nfst-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 4000px rgba(10,16,24,.62);transition:left .45s cubic-bezier(.4,.1,.2,1),top .45s cubic-bezier(.4,.1,.2,1),width .45s,height .45s;pointer-events:none}
+#nfst .nfst-hole.nfst-none{width:0!important;height:0!important;left:50%!important;top:50%!important}
+#nfst .nfst-rings i{position:fixed;border:3px solid #ffd166;border-radius:16px;pointer-events:none;animation:nfstp 1.4s ease-in-out infinite}
+@keyframes nfstp{0%,100%{box-shadow:0 0 0 0 rgba(255,209,102,.7)}50%{box-shadow:0 0 0 10px rgba(255,209,102,0)}}
+#nfst .nfst-hand{position:fixed;width:44px;height:44px;pointer-events:none;transition:left .7s cubic-bezier(.4,.1,.2,1),top .7s cubic-bezier(.4,.1,.2,1),opacity .3s;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));z-index:3}
+#nfst .nfst-hand.tap svg{animation:nfstt .5s ease}@keyframes nfstt{0%{transform:scale(1)}45%{transform:scale(.78)}100%{transform:scale(1)}}
+#nfst .nfst-rip{position:fixed;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.75);pointer-events:none;transform:translate(-50%,-50%) scale(.2);opacity:0;z-index:2}
+#nfst .nfst-rip.go{animation:nfstr .6s ease-out}@keyframes nfstr{0%{opacity:.9;transform:translate(-50%,-50%) scale(.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(3.2)}}
+#nfst .nfst-bub{position:fixed;z-index:4;pointer-events:auto;background:#fff;color:#1d2733;border-radius:16px;padding:12px 14px 10px;box-shadow:0 10px 30px rgba(0,0,0,.28);font-size:14.5px;line-height:1.6;opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s}
+#nfst .nfst-bub.on{opacity:1;transform:none}#nfst .nfst-bub b{color:#2f4b69}
+#nfst .nfst-tag{display:inline-block;font-size:11.5px;background:#e9f0f7;color:#2f4b69;border-radius:20px;padding:1px 9px;margin-bottom:5px}
+#nfst .nfst-row{display:flex;gap:6px;align-items:center;margin-top:9px}#nfst .nfst-dots{flex:1;min-width:0;overflow:hidden;display:flex;gap:4px}
+#nfst .nfst-dots i{flex:none;width:6px;height:6px;border-radius:50%;background:#cfd8e2}#nfst .nfst-dots i.on{background:#4a6a8c}
+#nfst .nfst-row button{flex:none;white-space:nowrap;border:0;font:inherit;font-size:13.5px;border-radius:10px;padding:7px 13px;cursor:pointer}
+#nfst .nfst-nx{background:#4a6a8c;color:#fff}#nfst .nfst-sk{background:transparent;color:#66768a}
+#nfst .nfst-intro{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(10,16,24,.62);opacity:0;pointer-events:none;transition:opacity .35s}
+#nfst .nfst-intro.on{opacity:1;pointer-events:auto}
+#nfst .nfst-card{background:#fff;color:#1d2733;border-radius:22px;padding:22px 20px 16px;max-width:340px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.35);animation:nfstpop .5s cubic-bezier(.3,1.5,.5,1)}
+@keyframes nfstpop{0%{transform:scale(.7);opacity:0}100%{transform:none;opacity:1}}
+#nfst .nfst-ic{width:62px;height:62px;border-radius:50%;margin:0 auto 10px;background:linear-gradient(135deg,#4a6a8c,#7aa5cf);display:flex;align-items:center;justify-content:center;animation:nfstb 2.2s ease-in-out infinite}
+@keyframes nfstb{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+#nfst .nfst-card h3{margin:0 0 6px;font-size:18px}#nfst .nfst-card p{margin:0 0 14px;font-size:14px;color:#4b5a6b;line-height:1.7}
+#nfst .nfst-btns{display:flex;gap:8px;justify-content:center}#nfst .nfst-btns button{border:0;font:inherit;font-size:14px;border-radius:12px;padding:9px 18px;cursor:pointer;background:#eef1f5;color:#4b5a6b}
+#nfst .nfst-btns .nfst-p{background:#4a6a8c;color:#fff}
+.supb.nfst-demo{outline:2px dashed rgba(74,106,140,.35);outline-offset:2px}.supb .nfst-eg{font-size:11px;background:#fff3cd;color:#7a5a00;border-radius:8px;padding:0 6px}
+.nfst-replay{margin-bottom:10px}.aipanel .aih .nfst-howto{min-width:28px;padding:0 8px;font-weight:700}
+@media (prefers-reduced-motion:reduce){#nfst .nfst-hole,#nfst .nfst-hand{transition:none}#nfst .nfst-rings i,#nfst .nfst-ic,#nfst .nfst-card{animation:none}}`;
   (document.head || document.documentElement).appendChild(st);
 })();
