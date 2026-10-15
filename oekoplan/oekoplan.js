@@ -62,6 +62,8 @@ html[data-theme="dark"] .side .userchip{background:rgba(255,255,255,.06)}
 html body .nfd-main,html.apple.apple .nfd-main,html body .fab,html.apple.apple .fab,html body .nq-fab,html.apple.apple .nq-fab{background:linear-gradient(135deg,#70b62e,#38a599 60%,#50b1e7)!important;color:#fff!important;box-shadow:0 10px 26px -8px rgba(56,165,153,.6)!important;border:0!important}
 .nfd-main:hover,.fab:hover,.nq-fab:hover{filter:brightness(1.06)}
 html body .nfd-main svg,html body .nfd-main{color:#fff!important}
+html body .nfd-main svg{width:30px!important;height:30px!important;stroke:#fff!important;stroke-width:3!important;stroke-linecap:round!important;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+html body .nfd-main svg *{stroke:#fff!important;stroke-width:3!important}
 html.apple[data-theme="dark"] .side .nav a.on svg{color:#fff!important}
 html[data-theme="dark"] .tb-logo img,html[data-theme="dark"] .brand img{filter:none}
 /* ---- the side bar's top block: logo · person · language/look · view-as/password/sign-out/guide — one width (the menu's), one rhythm ---- */
@@ -1020,20 +1022,20 @@ html[data-theme="dark"] .okn{background:var(--surface-2)}
 .spcard.ok-active:hover{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 30px rgba(34,197,94,.42)}
 .spcard.ok-hold:hover{box-shadow:0 0 0 1px rgba(245,179,1,.3),0 0 30px rgba(245,179,1,.42)}
 .spcard.ok-stopped:hover{box-shadow:0 0 0 1px rgba(239,68,68,.3),0 0 30px rgba(239,68,68,.45)}
-.okst{position:absolute;top:10px;inset-inline-end:10px;z-index:2;display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border-radius:999px;font:600 11.5px/1 var(--font);letter-spacing:.02em;background:rgba(8,18,26,.74);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:0;cursor:default;white-space:nowrap}
-.okst i{width:8px;height:8px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
-.okst.ok-active i{animation:okpulse 1.6s ease-out infinite}
+.okpst{position:absolute;top:10px;inset-inline-end:10px;z-index:2;display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border-radius:999px;font:600 11.5px/1 var(--font);letter-spacing:.02em;background:rgba(8,18,26,.74);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:0;cursor:default;white-space:nowrap}
+.okpst i{width:8px;height:8px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
+.okpst.ok-active i{animation:okpulse 1.6s ease-out infinite}
 @keyframes okpulse{0%{box-shadow:0 0 0 0 rgba(var(--okc),.75),0 0 8px rgb(var(--okc))}100%{box-shadow:0 0 0 9px rgba(var(--okc),0),0 0 8px rgb(var(--okc))}}
-.okst.okbtn{position:static;cursor:pointer;background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
-.okst.okbtn:hover{border-color:rgb(var(--okc))}
-.okstlist{display:grid;gap:8px}.okstlist label{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
-.okstlist label.on{border-color:rgb(var(--okc));box-shadow:0 0 0 1px rgba(var(--okc),.35)}.okstlist label i{width:10px;height:10px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
-.okstlist label small{color:var(--muted);margin-inline-start:auto}
-html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
+.okpst.okbtn{position:static;cursor:pointer;background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
+.okpst.okbtn:hover{border-color:rgb(var(--okc))}
+.okpstlist{display:grid;gap:8px}.okpstlist label{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
+.okpstlist label.on{border-color:rgb(var(--okc));box-shadow:0 0 0 1px rgba(var(--okc),.35)}.okpstlist label i{width:10px;height:10px;border-radius:50%;background:rgb(var(--okc));box-shadow:0 0 8px rgb(var(--okc))}
+.okpstlist label small{color:var(--muted);margin-inline-start:auto}
+html[data-theme="dark"] .okpst{background:rgba(5,14,22,.82)}
 .okown{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}.okown svg{width:13px;height:13px}.okown b{color:var(--ink);font-weight:600}
 </style>`);
   const ownerName = p => { if (!p) return ''; const id = p.ownerId || p.leadId; const w = id && typeof byId === 'function' && (byId('workers', id) || byId('staff', id)); return (w && w.name) || p.leadName || ''; };
-  const badge = (st, p, asBtn) => { const s = STATES[st]; const note = p && p.okStateNote ? ` title="${esc(p.okStateNote)}"` : ''; return `<${asBtn ? 'button type="button"' : 'span'} class="okst ok-${st}${asBtn ? ' okbtn' : ''}" style="--okc:${s.c}"${asBtn ? ` data-action="okState" data-arg="${esc(p.id)}"` : ''}${note}><i></i>${esc(L(s.ar, s.en))}${asBtn ? ' ▾' : ''}</${asBtn ? 'button' : 'span'}>`; };
+  const badge = (st, p, asBtn) => { const s = STATES[st]; const note = p && p.okStateNote ? ` title="${esc(p.okStateNote)}"` : ''; return `<${asBtn ? 'button type="button"' : 'span'} class="okpst ok-${st}${asBtn ? ' okbtn' : ''}" style="--okc:${s.c}"${asBtn ? ` data-action="okState" data-arg="${esc(p.id)}"` : ''}${note}><i></i>${esc(L(s.ar, s.en))}${asBtn ? ' ▾' : ''}</${asBtn ? 'button' : 'span'}>`; };
 
   /* ---- personal use count ---- */
   const KEY = 'ok.puse'; let use = {}; try { use = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { use = {}; }
@@ -1056,8 +1058,8 @@ html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
     v.querySelectorAll('.spcard[href^="#/projects/"]').forEach(a => {
       const id = a.getAttribute('href').slice('#/projects/'.length); const p = byId('projects', id); const st = stateOf(p);
       ORDER.forEach(s => a.classList.toggle('ok-' + s, st === s));
-      let b = a.querySelector(':scope > .okst'); if (!st) { if (b) b.remove(); return; }
-      if (!b || b.dataset.okst !== st + '|' + I18N.lang) { if (b) b.remove(); a.insertAdjacentHTML('afterbegin', badge(st, p, false)); b = a.querySelector(':scope > .okst'); b.dataset.okst = st + '|' + I18N.lang; }
+      let b = a.querySelector(':scope > .okpst'); if (!st) { if (b) b.remove(); return; }
+      if (!b || b.dataset.okpst !== st + '|' + I18N.lang) { if (b) b.remove(); a.insertAdjacentHTML('afterbegin', badge(st, p, false)); b = a.querySelector(':scope > .okpst'); b.dataset.okpst = st + '|' + I18N.lang; }
       /* the project owner (from the 2026 list): the person's record, or the name as written when he is not on the team list */
       const own = ownerName(p); let o = a.querySelector('.okown');
       if (own && (!o || o.dataset.n !== own + '|' + I18N.lang)) { if (o) o.remove(); const cl = a.querySelector('.bd .cl'); if (cl) { cl.insertAdjacentHTML('afterend', `<div class="okown" data-n="${esc(own + '|' + I18N.lang)}">${icon('user')}<span>${esc(L('المسؤول', 'Owner'))}</span><b>${esc(own)}</b></div>`); } }
@@ -1073,9 +1075,9 @@ html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
     if (S.route && S.route.view === 'projects' && S.route.id) {
       const p = byId('projects', S.route.id); const head = v.querySelector('.sphead'); const st = stateOf(p); if (!p || !head || !st) return;
       const row = head.querySelector('.row'); if (!row) return; const stg = row.querySelector('.stg');
-      let b = head.querySelector('.okst'); const sig = st + '|' + I18N.lang + '|' + (canSet(p) ? 1 : 0) + '|' + (p.okStateNote || '');
-      if (b && b.dataset.okst === sig) return; if (b) b.remove();
-      (stg || row.querySelector('h2')).insertAdjacentHTML('afterend', badge(st, p, canSet(p))); b = head.querySelector('.okst'); if (b) { b.classList.add('okbtn'); b.dataset.okst = sig; if (!canSet(p)) b.style.cursor = 'default'; }
+      let b = head.querySelector('.okpst'); const sig = st + '|' + I18N.lang + '|' + (canSet(p) ? 1 : 0) + '|' + (p.okStateNote || '');
+      if (b && b.dataset.okpst === sig) return; if (b) b.remove();
+      (stg || row.querySelector('h2')).insertAdjacentHTML('afterend', badge(st, p, canSet(p))); b = head.querySelector('.okpst'); if (b) { b.classList.add('okbtn'); b.dataset.okpst = sig; if (!canSet(p)) b.style.cursor = 'default'; }
     }
   };
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(decorate);
@@ -1095,4 +1097,83 @@ html[data-theme="dark"] .okst{background:rgba(5,14,22,.82)}
       } });
   };
   window.okProjectState = stateOf;
+})();
+
+/* =====================================================================
+   Ökoplan (Mahmoud, 15 Oct): the projects list layout is his to choose — a list (one under the other), two or three side by side.
+   A small switch above the list; the choice is kept on the device (ok.pcols). «Auto» = the engine's own fit.
+   ===================================================================== */
+(() => {
+  if (window.__OK_PCOLS__) return; window.__OK_PCOLS__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const KEY = 'ok.pcols'; let cols = ''; try { cols = localStorage.getItem(KEY) || ''; } catch (e) { cols = ''; }
+  /* no choice yet: on a phone three side by side (Mahmoud), on a computer the engine's own fit */
+  const eff = () => cols || (innerWidth <= 760 ? '3' : '');
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.okcols{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);margin-inline-end:8px}
+.okcols button{border:0;background:transparent;color:var(--muted);width:34px;height:30px;border-radius:999px;display:grid;place-items:center;cursor:pointer;font:600 12px var(--font)}
+.okcols button.on{background:var(--ink);color:var(--surface)}
+.okcols button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+.spgrid[data-okcols="1"]{grid-template-columns:1fr!important;gap:10px}
+.spgrid[data-okcols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.spgrid[data-okcols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+/* the list: a row — cover on the side, text next to it */
+.spgrid[data-okcols="1"] .spcard{flex-direction:row;min-height:0;align-items:stretch}
+.spgrid[data-okcols="1"] .spcard .cov{aspect-ratio:auto;width:112px;min-width:112px;font-size:18px}
+.spgrid[data-okcols="1"] .spcard .cov img{object-fit:contain;padding:8px}
+.spgrid[data-okcols="1"] .spcard .cov.oklogo img,.spgrid[data-okcols="1"] .spcard .cov.okmark img{object-fit:contain}
+.spgrid[data-okcols="1"] .spcard .bd{padding:10px 12px;gap:4px;min-width:0}
+.spgrid[data-okcols="1"] .spcard .nm{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spgrid[data-okcols="1"] .spcard .okpst{top:auto;bottom:8px;inset-inline-end:auto;inset-inline-start:8px;padding:3px 8px 3px 7px;font-size:10.5px;max-width:96px;overflow:hidden;text-overflow:ellipsis}
+.spgrid[data-okcols="1"] .spcard .okpst i{width:6px;height:6px}
+#nf-install{background:var(--surface)!important;color:var(--ink)!important;border:1px solid var(--line)}#nf-install .txt span{opacity:.75}
+.okown{flex-wrap:wrap;row-gap:0}
+@media (max-width:700px){.spgrid[data-okcols="3"] .spcard .nm,.spgrid[data-okcols="2"] .spcard .nm{font-size:13px}.spgrid[data-okcols="3"] .spcard .bd,.spgrid[data-okcols="2"] .spcard .bd{padding:8px 10px;gap:4px}.spgrid[data-okcols="3"] .spcard .cl,.spgrid[data-okcols="3"] .tiny,.spgrid[data-okcols="3"] .okown{font-size:10.5px}.spgrid[data-okcols="3"] .stg{font-size:10px;padding:2px 6px}.spgrid[data-okcols="3"] .stuavs{display:none}.spgrid[data-okcols="3"] .okpst,.spgrid[data-okcols="2"] .okpst{font-size:10px;padding:3px 8px 3px 7px}}
+</style>`);
+  const ICO = { 1: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>', 2: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="7" height="16" rx="1.5"/><rect x="13.5" y="4" width="7" height="16" rx="1.5"/></svg>', 3: '<svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="5" height="16" rx="1.2"/><rect x="9.5" y="4" width="5" height="16" rx="1.2"/><rect x="16.5" y="4" width="5" height="16" rx="1.2"/></svg>', '': '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>' };
+  const TITLE = { 1: ['قائمة — واحد تحت التاني', 'List — one under the other'], 2: ['اتنين جنب بعض', 'Two side by side'], 3: ['تلاتة جنب بعض', 'Three side by side'], '': ['تلقائي', 'Auto'] };
+  const apply = () => {
+    if (!(S.route && S.route.view === 'projects' && !S.route.id)) return;
+    const v = document.getElementById('view'); if (!v) return;
+    const c = eff(); v.querySelectorAll('.spgrid').forEach(g => { if (c) g.dataset.okcols = c; else delete g.dataset.okcols; });
+    const head = v.querySelector('.card > .cardhead'); if (!head) return;
+    let sw = head.querySelector('.okcols');
+    if (!sw) { sw = document.createElement('div'); sw.className = 'okcols'; const grow = head.querySelector('.grow'); (grow || head).insertAdjacentElement(grow ? 'afterend' : 'beforeend', sw); }
+    const want = ['', '1', '2', '3'].map(c => `<button type="button" data-okcols="${c}" class="${eff() === c ? 'on' : ''}" title="${esc(L(TITLE[c][0], TITLE[c][1]))}" aria-label="${esc(L(TITLE[c][0], TITLE[c][1]))}">${ICO[c]}</button>`).join('');
+    if (sw.dataset.sig !== eff() + I18N.lang) { sw.innerHTML = want; sw.dataset.sig = eff() + I18N.lang; }
+  };
+  document.addEventListener('click', ev => {
+    const b = ev.target.closest && ev.target.closest('.okcols button'); if (!b) return;
+    cols = b.dataset.okcols; try { if (cols) localStorage.setItem(KEY, cols); else localStorage.removeItem(KEY); } catch (e) { /* private */ }
+    const sw = b.closest('.okcols'); if (sw) sw.dataset.sig = ''; apply();
+  });
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(apply);
+})();
+
+/* =====================================================================
+   Ökoplan (Mahmoud, 15 Oct): in English, no Arabic on the screen. The engine shows some labels in both languages
+   («Design Development · تطوير التصميم», the stage steps) — in English mode the Arabic half is dropped.
+   People's own text (names, notes) is left as written.
+   ===================================================================== */
+(() => {
+  if (window.__OK_ENONLY__) return; window.__OK_ENONLY__ = 1;
+  const AR = /[؀-ۿ]/;
+  const strip = root => {
+    if (!root) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; let n; while ((n = w.nextNode())) nodes.push(n);
+    nodes.forEach(t => {
+      const s = t.nodeValue; if (!s || !AR.test(s)) return;
+      const el = t.parentElement; if (!el || el.closest('input,textarea,[contenteditable],.notr,.okown,.nm,.sht,h2.notr')) return;
+      /* «English · عربي» (one text node) → English */
+      const m = /^(\s*[^؀-ۿ·]*[A-Za-z0-9)][^؀-ۿ·]*)\s*·\s*[؀-ۿ][^·]*$/.exec(s);
+      if (m) { t.nodeValue = m[1].replace(/\s+$/, ''); return; }
+      /* the stage steps: <b>English</b>عربي → the Arabic tail goes */
+      if (el.classList.contains('spstep') && t.previousSibling && t.previousSibling.nodeName === 'B' && !/[A-Za-z]/.test(s)) { t.nodeValue = ''; return; }
+      /* a chip whose English twin sits right before it (engine stage pills) */
+      if (el.classList.contains('stg') && /[A-Za-z]/.test(el.textContent) && !/[A-Za-z]/.test(s)) t.nodeValue = s.replace(/[؀-ۿ\s·،]+/g, ' ').trim() ? s : '';
+    });
+  };
+  const run = () => { if (!(typeof I18N !== 'undefined' && I18N.lang === 'en')) return; strip(document.getElementById('view')); strip(document.querySelector('.topbar')); strip(document.querySelector('.modal')); };
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(run); setInterval(run, 1200);
 })();

@@ -221,3 +221,24 @@ html[data-theme="dark"] .okmq .lg{border-color:transparent}
   setInterval(okCaption, 1500);
   window.oekoHome = { PROJECTS, OFFICE, seedGallery };
 })();
+
+/* Ökoplan (Mahmoud, 15 Oct): every number on the home opens the thing it counts — the office numbers → About the office,
+   the pulse tiles → projects / operations board / Projects & Tasks / handed-over projects. Tiles that already link are left alone. */
+(() => {
+  if (window.__OK_TILELINKS__) return; window.__OK_TILELINKS__ = 1;
+  const PULSE = ['#/projects', '#/studioos', '#/pm', '#/projects'];
+  const mark = (el, href) => { if (!el || el.dataset.okgo === href) return; el.dataset.okgo = href; el.setAttribute('role', 'link'); el.setAttribute('tabindex', '0'); el.style.cursor = 'pointer'; };
+  const apply = () => {
+    const v = document.getElementById('view'); if (!v) return;
+    v.querySelectorAll('.okstats .okst').forEach(el => mark(el, '#/okabout'));
+    v.querySelectorAll('.shpulse .shp').forEach((el, i) => mark(el, PULSE[i] || '#/projects'));
+    v.querySelectorAll('.oskpis .kpi').forEach(el => { if (!el.closest('a') && !el.dataset.okgo) mark(el, '#/projects'); });
+  };
+  document.addEventListener('click', ev => {
+    const el = ev.target.closest && ev.target.closest('[data-okgo]'); if (!el || ev.target.closest('a,button,input,label')) return;
+    ev.preventDefault(); location.hash = el.dataset.okgo;
+  });
+  document.addEventListener('keydown', ev => { if (ev.key !== 'Enter' || !ev.target.dataset || !ev.target.dataset.okgo) return; location.hash = ev.target.dataset.okgo; });
+  document.head.insertAdjacentHTML('beforeend', '<style>[data-okgo]{transition:transform .15s,box-shadow .15s}[data-okgo]:hover{transform:translateY(-1px);box-shadow:0 6px 18px -10px rgba(0,0,0,.35)}[data-okgo]:active{transform:translateY(0)}</style>');
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(apply); setInterval(apply, 1500);
+})();
