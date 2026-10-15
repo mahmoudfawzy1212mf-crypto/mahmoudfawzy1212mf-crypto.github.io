@@ -1778,3 +1778,105 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'لوحة الذكاء': 'Smart desk', 'الذكاء': 'Smart' });
   window.okSmart = { alerts, risk, workload, clients, snapshot, buildSchedule, gateChecks };
 })();
+
+/* =====================================================================
+   Ökoplan — Digital twin, phase 1 (Mahmoud, 15 Oct): the system remembers how the office works and how each person uses it.
+   · Event log → nf_events (RPC nf_ev_log, batched): page opened + time on it · action tapped · form opened / saved / abandoned ·
+     record saved. Usage data is for easing the interface only — never a performance score; each person can switch it off.
+   · Page #/oklearn «ما تعلّمه السيستم / What the system learned»: operations patterns, interface patterns, suggestions with evidence
+     (accept / reject / try — the decisions feed the next pass), and «my usage» for everyone.
+   · First adaptive touch: «your shortcuts» on the home page from the person's own top pages (switchable).
+   Server: Edge oeko-learn nightly 01:15Z → docs col oklearn (office + p:<person>).
+   ===================================================================== */
+(() => {
+  if (window.__OK_LEARN__) return; window.__OK_LEARN__ = 1;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const me = () => (typeof stuMe === 'function' ? stuMe() : '');
+  const isMgr = () => isAdmin() || role() === 'manager';
+  const on = () => { try { return localStorage.getItem('ok.learn') !== 'off'; } catch (e) { return true; } };
+  const adapt = () => { try { return localStorage.getItem('ok.adapt') !== 'off'; } catch (e) { return true; } };
+  const live = () => typeof sbOn === 'function' && sbOn() && S.sbUser && S.session;
+  const dev = () => (window.innerWidth <= 760 ? 'phone' : 'desktop');
+  const LCOL = 'oklearn';
+  if (typeof COLS !== 'undefined' && !COLS.includes(LCOL)) COLS.push(LCOL); S.data[LCOL] = S.data[LCOL] || new Map();
+  if (typeof Store === 'object' && Store.subscribeAll) Store.subscribeAll = (base => function () { base.call(this); const db = S.db; if (!db) return; try { S.unsub.push(db.collection(LCOL).onSnapshot(snap => { S.data[LCOL] = new Map(snap.docs.map(d => [d.id, d.data()])); S.loaded[LCOL] = true; rerender(); }, e => console.warn('snapshot', LCOL, e))); } catch (e) { /* */ } })(Store.subscribeAll);
+
+  /* ---------------- the logger ---------------- */
+  const Q = []; let flushT = null;
+  const log = (kind, name, extra) => { if (!on() || !live() || !name) return; Q.push(Object.assign({ at: new Date().toISOString(), person: me(), kind, name: String(name).slice(0, 120), device: dev() }, extra || {})); if (Q.length >= 40) flush(); else if (!flushT) flushT = setTimeout(flush, 20000); };
+  async function flush() { clearTimeout(flushT); flushT = null; if (!Q.length || !live()) { Q.length = 0; return; } const rows = Q.splice(0, 200); try { await S.sb.rpc('nf_ev_log', { rows }); } catch (e) { /* best effort */ } }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { navEnd(); flush(); } });
+  window.addEventListener('pagehide', () => { navEnd(); flush(); });
+  /* pages: one event per visit with the time spent */
+  let cur = null;
+  const navEnd = () => { if (!cur) return; const d = Date.now() - cur.at; if (d >= 300) log('nav', cur.view, { ref: cur.id, dur: Math.min(d, 3600000) }); cur = null; };
+  const navStart = () => { const r = S.route || {}; if (!r.view) return; if (cur && cur.view === r.view && cur.id === (r.id || null)) return; navEnd(); cur = { view: r.view, id: r.id || null, at: Date.now() }; };
+  window.addEventListener('hashchange', () => setTimeout(navStart, 0)); document.addEventListener('nf:ready', () => setTimeout(navStart, 500)); setTimeout(navStart, 1500);
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { if (!cur && S.session) navStart(); });
+  /* actions: whatever is tapped */
+  const SKIP = new Set(['closemodal', 'openside', 'closeside', 'navgo', 'go', 'logout']);
+  document.addEventListener('click', ev => { const a = ev.target.closest && ev.target.closest('[data-action],[data-okgate],[data-okadd],[data-okenq],[data-oktab],[data-okremind],[data-oksug]'); if (!a) return; const ds = a.dataset; const name = ds.action ? (SKIP.has(ds.action) ? '' : ds.action) : ds.okgate ? 'okGate' : ds.okadd ? 'okAdd:' + ds.okadd.split(':')[1] : ds.okenq ? 'okEnq:' + ds.okenq.split(':')[0] : ds.oktab ? 'okTab:' + ds.oktab : ds.okremind ? 'okRemind' : ds.oksug ? 'okSug' : ''; if (name) log('act', name, { ref: (S.route && S.route.id) || null, meta: { view: S.route && S.route.view } }); }, true);
+  /* forms: opened → saved or abandoned */
+  if (typeof openModal === 'function') openModal = (base => function (o) { const t0 = Date.now(); const title = o && o.title ? String(o.title).replace(/\s*[—–-]\s*.*$/, '').slice(0, 60) : ''; let done = false; if (o && typeof o.onSubmit === 'function') { const sub = o.onSubmit; o.onSubmit = async function () { const r = await sub.apply(this, arguments); if (r !== false) { done = true; log('modal', title, { dur: Date.now() - t0, meta: { ok: true, view: S.route && S.route.view } }); } return r; }; } const r = base.apply(this, arguments); const root = document.getElementById('modalroot'); if (root && title) { const mo = new MutationObserver(() => { if (!root.querySelector('#mform')) { mo.disconnect(); if (!done) log('modal', title, { dur: Date.now() - t0, meta: { ok: false, view: S.route && S.route.view } }); } }); mo.observe(root, { childList: true }); } return r; })(openModal);
+  /* records */
+  if (typeof Store === 'object') { if (Store.save) Store.save = (base => async function (col, doc) { const r = await base.apply(this, arguments); try { if (!['pushsubs', 'oklearn', 'okreports'].includes(col)) log('save', col, { ref: doc && doc.id, meta: { op: 'save' } }); } catch (e) { /* */ } return r; })(Store.save); if (Store.update) Store.update = (base => async function (col, id, patch, opts) { const r = await base.apply(this, arguments); try { if (!(opts && opts.silent) && !['pushsubs', 'oklearn', 'okreports', 'workers'].includes(col)) log('save', col, { ref: id, meta: { op: 'update', keys: Object.keys(patch || {}).slice(0, 8) } }); } catch (e) { /* */ } return r; })(Store.update); }
+
+  /* ---------------- the page ---------------- */
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.okl{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:1000px){.okl{grid-template-columns:1fr}}.okl .card{margin:0}.okl h3{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}.okl h3 .n{color:var(--accent);font-weight:700}
+.okl table{width:100%;border-collapse:collapse;font-size:12.5px}.okl th,.okl td{padding:5px 6px;border-top:1px solid var(--line);text-align:start}.okl th{color:var(--muted);font-weight:600;font-size:11px}
+.oksg{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px;font-size:13px;display:flex;flex-direction:column;gap:6px}.oksg .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.oksg .ev{font-size:11.5px;color:var(--muted)}.oksg .row{display:flex;gap:6px;flex-wrap:wrap}.oksg.acc{border-color:rgba(34,197,94,.5)}.oksg.rej{opacity:.55}.oksg.try{border-color:rgba(245,179,1,.6)}
+.oklhead{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}.oklhead .okpill{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;background:var(--surface)}.oklhead .okpill b{color:var(--accent)}
+.oksw{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}.oksw input{accent-color:var(--accent)}
+.oksc{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.oksc a{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:12.5px;text-decoration:none;color:inherit;background:var(--surface)}.oksc a:hover{border-color:var(--accent)}.oksc .okwhy{font-size:11px;color:var(--muted);align-self:center;margin-inline-start:auto;cursor:pointer}
+.okbar{display:inline-block;height:7px;border-radius:999px;background:var(--accent);vertical-align:middle;margin-inline-end:6px}
+</style>`);
+  const office = () => byId(LCOL, 'office') || null;
+  const mine = () => byId(LCOL, 'p:' + me()) || null;
+  const vname = v => { const n = Array.isArray(NAV) && NAV.find(x => x.id === v); const t = typeof VIEW_TITLES === 'object' && VIEW_TITLES[v]; const raw = (n && (n.short || n.label)) || t || v; return en() && typeof OEKO_I18N === 'object' && OEKO_I18N[raw] ? OEKO_I18N[raw] : raw; };
+  const sugCard = (s, dec) => `<div class="oksg ${dec ? dec.d : ''}"><span class="k">${esc({ ops: L('التشغيل', 'Operations'), ui: L('الواجهة', 'Interface'), auto: L('أتمتة', 'Automation') }[s.area] || s.area)} · ${esc(s.kind)}</span><span>${esc(en() ? s.en : s.ar)}</span><span class="ev">${esc(L('الدليل: ', 'Evidence: '))}${esc(s.evidence || '')}</span>${dec ? `<span class="ev">${esc({ acc: L('مقبول', 'Accepted'), rej: L('مرفوض', 'Rejected'), try: L('تحت التجربة', 'Trying') }[dec.d])} · ${esc(dec.by || '')} · ${esc(fmtDate(String(dec.at || '').slice(0, 10)))}</span>` : ''}${isMgr() ? `<div class="row"><button type="button" class="btn xs p" data-oksug="acc:${esc(s.id)}">${esc(L('نطبّقه', 'Accept'))}</button><button type="button" class="btn xs ghost" data-oksug="try:${esc(s.id)}">${esc(L('نجرّبه شهر', 'Try a month'))}</button><button type="button" class="btn xs ghost" data-oksug="rej:${esc(s.id)}">${esc(L('لا', 'Reject'))}</button></div>` : ''}</div>`;
+  const page = () => {
+    const o = office(); const p = mine(); const sw = (key, label) => `<label class="oksw"><input type="checkbox" data-oklsw="${key}" ${(key === 'learn' ? on() : adapt()) ? 'checked' : ''}><span>${esc(label)}</span></label>`;
+    const head = `<div class="oklhead">${o ? `<span class="okpill"><b>${(o.ui || {}).events || 0}</b>${esc(L('حدث استخدام آخر 30 يوم', 'usage events, last 30 days'))}</span><span class="okpill"><b>${(o.ui || {}).people || 0}</b>${esc(L('شخص', 'people'))}</span><span class="okpill"><b>${(o.suggestions || []).length}</b>${esc(L('مقترح', 'suggestions'))}</span><span class="okpill small muted">${esc(L('آخر تعلّم', 'Last pass'))} ${esc(fmtDate(String(o.at || '').slice(0, 10)))}</span>` : `<span class="okpill small muted">${esc(L('أول تعلّم بيتم الليلة — السيستم لسه بيجمّع.', 'The first pass runs tonight — the system is still collecting.'))}</span>`}<div class="grow"></div>${sw('learn', L('سجّل استخدامي لتحسين الواجهة', 'Record my usage to improve the interface'))}${sw('adapt', L('خصّص واجهتي', 'Personalise my interface'))}</div>`;
+    const note = `<div class="small muted" style="margin:-6px 0 12px">${esc(L('بيانات الاستخدام بتتجمع عشان نسهّل الشغل والواجهة بس — مش لتقييم حد. كل واحد يقدر يقفلها من هنا.', 'Usage data is collected only to ease the work and the interface — never to evaluate anyone. Anyone can switch it off here.'))}</div>`;
+    const myH = `<div class="card"><h3>👤 ${esc(L('استخدامي أنا', 'My usage'))}</h3>${p ? `<div class="small muted">${esc(L(`${p.events} حدث · ${p.phoneShare}% من الموبايل · أكتر الساعات: ${(p.peakHours || []).map(h => h + ':00').join(' · ')}`, `${p.events} events · ${p.phoneShare}% on the phone · peak hours: ${(p.peakHours || []).map(h => h + ':00').join(' · ')}`))}</div><table><thead><tr><th>${esc(L('الصفحة', 'Page'))}</th><th>${esc(L('مرات', 'Opens'))}</th></tr></thead><tbody>${(p.topViews || []).map(v => `<tr><td>${esc(vname(v.view))}</td><td><span class="okbar" style="width:${Math.min(100, v.n * 3)}px"></span>${v.n}</td></tr>`).join('')}</tbody></table>${(p.abandoned || []).length ? `<div class="small" style="margin-top:8px">${esc(L('فورمات بتسيبها كتير من غير حفظ: ', 'Forms you often leave unsaved: '))}${p.abandoned.map(f => esc(f.form)).join(' · ')}</div>` : ''}` : `<div class="small muted">${esc(L('لسه مفيش بروفايل — بيتبني بعد أول يوم استخدام.', 'No profile yet — it is built after the first day of use.'))}</div>`}</div>`;
+    if (!o) return head + note + `<div class="okl">${myH}</div>`;
+    const dec = o.decisions || {}; const sugs = (o.suggestions || []); const open = sugs.filter(s => !dec[s.id] || dec[s.id].d === 'try'), closed = sugs.filter(s => dec[s.id] && dec[s.id].d !== 'try');
+    const sugH = `<div class="card"><h3>💡 ${esc(L('مقترحات السيستم', 'System suggestions'))}<span class="n">${open.length}</span></h3>${open.length ? open.map(s => sugCard(s, dec[s.id])).join('') : `<div class="small muted">${esc(L('مفيش مقترحات لسه — المقترحات بتظهر لما الأنماط تتكرر كفاية (مش من حالة واحدة).', 'No suggestions yet — they appear once a pattern repeats enough (never from a single case).'))}</div>`}${closed.length ? `<details style="margin-top:8px"><summary class="small muted">${esc(L('المحسومة', 'Decided'))} · ${closed.length}</summary>${closed.map(s => sugCard(s, dec[s.id])).join('')}</details>` : ''}</div>`;
+    const ops = o.ops || {}; const st = (ops.stages || []).filter(s => s.n);
+    const opsH = `<div class="card"><h3>⏱ ${esc(L('أنماط التشغيل', 'Operations patterns'))}</h3>${st.length ? `<table><thead><tr><th>${esc(L('المرحلة', 'Stage'))}</th><th>${esc(L('وسيط الأيام', 'Median days'))}</th><th>${esc(L('أطول', 'Longest'))}</th><th>n</th></tr></thead><tbody>${st.map(s => `<tr><td>${esc(en() ? s.name : s.ar)}</td><td><span class="okbar" style="width:${Math.min(120, s.median * 2)}px"></span>${s.median}</td><td>${s.max}</td><td>${s.n}</td></tr>`).join('')}</tbody></table>` : `<div class="small muted">${esc(L('مدد المراحل بتتعلّم من أول بوابة تتعتمد.', 'Stage durations are learned from the first approved gates.'))}</div>`}
+      <div class="small" style="margin-top:10px">${esc(L('العميل: ', 'Client: '))}${ops.client ? esc(L(`${ops.client.submissions} تسليم · وسيط الرد ${ops.client.medianResponse} يوم · ${ops.client.rejections} رفض${ops.client.waitShare != null ? ` · ${ops.client.waitShare}% من وقت المراحل انتظار` : ''}`, `${ops.client.submissions} submissions · median response ${ops.client.medianResponse} days · ${ops.client.rejections} rejections${ops.client.waitShare != null ? ` · ${ops.client.waitShare}% of stage time is waiting` : ''}`)) : '—'}</div>
+      <div class="small" style="margin-top:6px">${esc(L('التاسكات: ', 'Tasks: '))}${ops.tasks ? esc(L(`${ops.tasks.open} مفتوح · ${ops.tasks.stale} مفتوح من أكتر من أسبوعين · وسيط الإقفال ${ops.tasks.medianClose} يوم`, `${ops.tasks.open} open · ${ops.tasks.stale} open for 2+ weeks · median close ${ops.tasks.medianClose} days`)) : '—'}</div>
+      ${ops.tasks && (ops.tasks.repeated || []).length ? `<div class="small" style="margin-top:6px"><b>${esc(L('تاسكات بتتكرر في كل مشروع (مرشّحة للأتمتة): ', 'Tasks repeated across projects (automation candidates): '))}</b>${ops.tasks.repeated.slice(0, 6).map(r => `${esc(r.title)} (${r.projects})`).join(' · ')}</div>` : ''}
+      ${isMgr() && (ops.byOwner || []).length ? `<details style="margin-top:8px"><summary class="small muted">${esc(L('حسب الـ Project Owner', 'By Project Owner'))}</summary><table><thead><tr><th></th>${st.map(s => `<th>${esc((en() ? s.name : s.ar).slice(0, 14))}</th>`).join('')}</tr></thead><tbody>${ops.byOwner.map(r => `<tr><td>${esc(r.name)}</td>${st.map(s => `<td>${r.stages[s.id] ? r.stages[s.id].median + ' <span class="muted">(' + r.stages[s.id].n + ')</span>' : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></details>` : ''}</div>`;
+    const ui = o.ui || {};
+    const uiH = isMgr() ? `<div class="card"><h3>🧭 ${esc(L('أنماط الواجهة (30 يوم)', 'Interface patterns (30 days)'))}</h3><div class="small muted">${esc(L(`${ui.events || 0} حدث · ${ui.people || 0} شخص · ${ui.phoneShare != null ? ui.phoneShare + '% موبايل' : ''}`, `${ui.events || 0} events · ${ui.people || 0} people · ${ui.phoneShare != null ? ui.phoneShare + '% phone' : ''}`))}</div>${(ui.views || []).length ? `<table><thead><tr><th>${esc(L('الصفحة', 'Page'))}</th><th>${esc(L('مرات', 'Opens'))}</th><th>${esc(L('أشخاص', 'People'))}</th><th>${esc(L('خروج سريع', 'Bounce'))}</th><th>${esc(L('متوسط ث', 'Avg s'))}</th></tr></thead><tbody>${ui.views.slice(0, 20).map(v => `<tr><td>${esc(vname(v.view))}</td><td>${v.n}</td><td>${v.people}</td><td ${v.bounce >= 50 && v.n >= 10 ? 'style="color:#b91c1c"' : ''}>${v.bounce}%</td><td>${v.avgSec}</td></tr>`).join('')}</tbody></table>` : `<div class="small muted">${esc(L('بيتجمع…', 'Collecting…'))}</div>`}${(ui.forms || []).length ? `<details style="margin-top:8px"><summary class="small muted">${esc(L('الفورمات', 'Forms'))}</summary><table><thead><tr><th>${esc(L('الفورم', 'Form'))}</th><th>${esc(L('فتح', 'Opened'))}</th><th>${esc(L('اتحفظ', 'Saved'))}</th><th>${esc(L('اتساب', 'Abandoned'))}</th></tr></thead><tbody>${ui.forms.map(f => `<tr><td>${esc(f.form)}</td><td>${f.open}</td><td>${f.done}</td><td ${f.abandon >= 40 && f.open >= 8 ? 'style="color:#b91c1c"' : ''}>${f.abandon}%</td></tr>`).join('')}</tbody></table></details>` : ''}</div>` : '';
+    return head + note + `<div class="okl"><div style="display:flex;flex-direction:column;gap:14px">${sugH}${opsH}</div><div style="display:flex;flex-direction:column;gap:14px">${myH}${uiH}</div></div>`;
+  };
+  document.addEventListener('change', ev => { const el = ev.target.closest && ev.target.closest('[data-oklsw]'); if (!el) return; try { localStorage.setItem(el.dataset.oklsw === 'learn' ? 'ok.learn' : 'ok.adapt', el.checked ? 'on' : 'off'); } catch (e) { /* */ } if (el.dataset.oklsw === 'learn' && !el.checked) Q.length = 0; rerender(); });
+  document.addEventListener('click', async ev => {
+    const b = ev.target.closest && ev.target.closest('[data-oksug]'); if (!b || !isMgr()) return; const [d, ...rest] = b.dataset.oksug.split(':'); const id = rest.join(':'); const o = office(); if (!o) return;
+    const decisions = Object.assign({}, o.decisions || {}, { [id]: { d, by: (S.session && S.session.name) || '', byId: me(), at: nowISO() } });
+    try { await Store.update(LCOL, 'office', { decisions }); toast(L('اتسجّل القرار — السيستم هيتعلّم منه', 'Decision recorded — the system learns from it')); rerender(); } catch (e) { toast(L('ماقدرتش أحفظ القرار', 'Could not save the decision'), 'err'); }
+  });
+  const hook = () => {
+    if (typeof EXTRA_VIEWS !== 'object' || EXTRA_VIEWS.oklearn) return;
+    EXTRA_VIEWS.oklearn = () => page();
+    if (typeof EXTRA_TITLES === 'object') EXTRA_TITLES.oklearn = () => ({ title: L('ما تعلّمه السيستم', 'What the system learned'), sub: L('التوأم الرقمي للمكتب: أنماط التشغيل · أنماط الاستخدام · مقترحات بأدلة', 'The office digital twin: operations patterns · usage patterns · suggestions with evidence') });
+    if (typeof VIEW_TITLES === 'object') VIEW_TITLES.oklearn = 'ما تعلّمه السيستم';
+    if (Array.isArray(NAV) && !NAV.some(n => n.id === 'oklearn')) { const at = NAV.findIndex(n => n.id === 'oksmart'); NAV.splice(at >= 0 ? at + 1 : 2, 0, { id: 'oklearn', label: 'ما تعلّمه السيستم', short: 'التعلّم', icon: 'star', count: () => { try { const o = office(); return o && isMgr() ? (o.suggestions || []).filter(s => !(o.decisions || {})[s.id]).length : 0; } catch (e) { return 0; } } }); }
+    if (typeof ROLE_VIEWS === 'object') Object.keys(ROLE_VIEWS).forEach(r => { if (Array.isArray(ROLE_VIEWS[r]) && !ROLE_VIEWS[r].includes('oklearn')) ROLE_VIEWS[r] = ROLE_VIEWS[r].concat(['oklearn']); });
+    if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'oklearn') return !!S.session && !['kiosk', 'viewer'].includes(role()); return base.apply(this, arguments); })(canSee);
+  };
+  hook(); document.addEventListener('nf:ready', hook);
+  /* ---------------- adaptive touch #1: your shortcuts on the home page ---------------- */
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    if (!adapt() || !S.session) return; const r = S.route || {}; const home = typeof homeView === 'function' ? homeView() : 'dashboard'; if (r.view !== home || r.id) return;
+    const v = document.getElementById('view'); if (!v || v.querySelector('.oksc')) return; const p = mine(); if (!p) return;
+    const tops = (p.topViews || []).filter(x => x.view !== home && x.view !== 'oklearn' && typeof canSee === 'function' && canSee(x.view)).slice(0, 5); if (tops.length < 2) return;
+    v.insertAdjacentHTML('afterbegin', `<div class="oksc">${tops.map(x => `<a href="#/${esc(x.view)}">${icon('arrow')}<span>${esc(vname(x.view))}</span></a>`).join('')}<span class="okwhy" data-action="go" data-arg="oklearn" title="${esc(L('ليه بشوف ده؟', 'Why am I seeing this?'))}">${esc(L('اختصاراتك — ليه؟', 'Your shortcuts — why?'))}</span></div>`);
+  });
+  if (typeof OEKO_I18N === 'object') Object.assign(OEKO_I18N, { 'ما تعلّمه السيستم': 'What the system learned', 'التعلّم': 'Learning' });
+  window.okLearn = { log, flush, office, mine };
+})();
