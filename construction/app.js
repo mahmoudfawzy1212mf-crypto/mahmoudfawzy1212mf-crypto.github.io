@@ -485,7 +485,7 @@ function renderBase(full) {
       root.innerHTML = shell();
     } else {
       $('#view').innerHTML = viewHTML();
-      const nav = $('#nav'); if (nav) nav.innerHTML = navHTML();
+      const nav = $('#nav'); if (nav) { const h = navHTML(); if (nav.__h !== h) { nav.__h = h; nav.innerHTML = h; } }   /* v7.74: same menu → the links stay the same elements (a tap that started on a link is not lost when the page refreshes) */
       const tb = $('#topbar'); if (tb) tb.innerHTML = topbarInner();
     }
   });
@@ -581,11 +581,14 @@ document.addEventListener('click', async ev => {
   if (act === 'openside') { ev.preventDefault(); $('#side')?.classList.add('open'); $('#sidecover')?.classList.remove('hidden'); return; }
   if (act === 'closeside') { $('#side')?.classList.remove('open'); $('#sidecover')?.classList.add('hidden'); return; }
   if (act === 'navgo') { $('#side')?.classList.remove('open'); $('#sidecover')?.classList.add('hidden'); return; }
+  /* (v7.74 — any page change closes the phone menu: see the hashchange listener below) */
   if (act === 'logout') { lsSet('nf.staff', null); S.session = null; render(true); return; }
   if (act === 'go') { ev.preventDefault(); go(arg); return; }
   if (typeof ACTIONS !== 'undefined' && ACTIONS[act]) { ev.preventDefault(); try { await ACTIONS[act](arg, a, ev); } catch (e) { console.error(e); } }
 });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && _modal) closeModal(); });
+/* v7.74 (Mahmoud 15 Oct: «when I tap something in the menu it should go straight there and the menu should go back to its place — it stays open and I tap an empty spot to hide it»): any page change closes the drawer */
+window.addEventListener('hashchange', () => { const sd = document.getElementById('side'); if (sd && sd.classList.contains('open')) { sd.classList.remove('open'); const cv = document.getElementById('sidecover'); if (cv) cv.classList.add('hidden'); } });
 document.addEventListener('click', ev => { if (ev.target.id === 'overlay' && _modal && !_modal.sticky) closeModal(); });
 /* =====================================================================
    Brand: NINETY logo (wordmark + mark) — transparent PNG, inverted in dark mode
@@ -10006,8 +10009,10 @@ Store.update = async function (col, id, patch, opts = {}) {
       }
       if (!Object.keys(rows || {}).length) delete patch.rows[date];
     }
-    if (pending) { toast('تعديل حضورك الشخصي أُرسل للمالك للاعتماد', 'err'); await notifyOwner(`طلب تصحيح حضور: ${me.name || ''}`, 'بانتظار اعتمادك في الطلبات', { id: `af_${myWid}_${Date.now()}`, reqId: S._lastAttfixReq || null }); if (!Object.keys(patch.rows).length) return S.data[col].get(id); }
-    if (notes.length) notifyOwner(`تعديل حضور بواسطة ${me.name || ''}`, notes.join('\n'), { id: `an_${me.id}_${todayISO()}_${Math.floor(Date.now() / 600000)}` }).catch(() => { });
+    /* v7.74 (Mahmoud 15 Oct: «messages about people's attendance — not to me; a weekly report»): the request stays with the owner (he decided «stays with me, no notice») — it waits in «Requests» and in the weekly report, no notice */
+    if (pending) { toast('تعديل حضورك الشخصي أُرسل للمالك للاعتماد', 'err'); if (!Object.keys(patch.rows).length) return S.data[col].get(id); }
+    /* v7.74: an attendance edit is no longer a notice to the owner — a quiet log (done task, no push) that the weekly report counts */
+    if (notes.length) { const lid = `an_${me.id}_${todayISO()}_${Math.floor(Date.now() / 600000)}`; const prev = byId('tasks', lid); Store.save('tasks', { id: lid, title: `تعديل حضور بواسطة ${me.name || ''}`, desc: (prev && prev.desc ? prev.desc + '\n' : '') + notes.join('\n'), toRole: 'admin', assigneeId: null, kind: 'attlog', source: 'attlog', status: 'done', priority: 'normal', createdBy: me.id || null, createdByName: me.name || '', createdAt: (prev && prev.createdAt) || nowISO(), updatedAt: nowISO(), doneAt: nowISO() }, { silent: true }).catch(() => { }); }
   }
   return _storeUpdateApprovals.call(this, col, id, patch, opts);
 };
@@ -33363,7 +33368,8 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
       const all = rowsOn(d);
       if (all.length) {
         const m = all.filter(x => stageOf(x.r) === 'mgr'), h = all.filter(x => stageOf(x.r) === 'hr'), ok = all.filter(x => x.r.otOk);
-        await upsertNote('admin', `otday_${d}`, `اتسجّل إضافي النهارده — ${fmtDate(d)}`, `${all.length} موظف · ${hrsOf(all)} ساعة: ${names(all)}. ${[m.length ? `عند مدير المصنع ${m.length}` : '', h.length ? `عند مدير الحسابات ${h.length}` : '', ok.length ? `معتمد ${ok.length}` : ''].filter(Boolean).join(' · ')}. للعلم بس — مش محتاج منك حاجة.`);
+        /* v7.74 (Mahmoud 15 Oct: overtime messages not to the owner — a weekly report): the daily «overtime recorded today» note no longer goes to him */
+        await closeNote(`otday_${d}`, 'v7.74: weekly report');
         if (m.length) await upsertNote('manager', `otpend_${d}_m`, `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${m.length} موظف · ${hrsOf(m)} ساعة: ${names(m)}. بعد اعتمادك بيروح لمدير الحسابات.`); else await closeNote(`otpend_${d}_m`, 'اتعتمد');
         if (h.length) await upsertNote('hr', `otpend_${d}_h`, `إضافي مستني اعتمادك — ${fmtDate(d)}`, `${h.length} موظف · ${hrsOf(h)} ساعة: ${names(h)} — اعتمده مدير المصنع.`); else await closeNote(`otpend_${d}_h`, 'اتعتمد');
       }
@@ -33372,11 +33378,13 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
     const old = { mgr: [], hr: [] };
     for (let i = 1; i <= 7; i++) { const day = addDays(d, -i); rowsOn(day).forEach(x => { const st = stageOf(x.r); if (st === 'mgr' || st === 'hr') old[st].push(x); }); }
     for (const st of ['mgr', 'hr']) {
-      const id = `late_ot_${st}_${d}`; const arr = old[st];
-      for (const t of list('tasks')) { if (String(t.id || '').startsWith(`late_ot_${st}_`) && t.id !== id) await closeNote(t.id, 'يوم جديد'); }
-      if (!arr.length) { await closeNote(id, 'اتعتمد'); continue; }
+      /* v7.74: the delay note goes to the factory manager + the accounts manager, not the owner (he sees it in the weekly report) */
+      const id = `late_ot_${st}_${d}`; const ids = [id + '_manager', id + '_hr']; const arr = old[st];
+      await closeNote(id, 'v7.74: to the factory manager + the accounts manager');
+      for (const t of list('tasks')) { if (String(t.id || '').startsWith(`late_ot_${st}_`) && t.id !== id && !ids.includes(t.id)) await closeNote(t.id, 'يوم جديد'); }
+      if (!arr.length) { for (const x of ids) await closeNote(x, 'اتعتمد'); continue; }
       const who = st === 'mgr' ? (list('workers').find(x => x.role === 'manager' && x.status !== 'inactive') || {}).name || 'مدير المصنع' : (list('workers').find(x => x.role === 'hr' && x.status !== 'inactive') || {}).name || 'مدير الحسابات';
-      await upsertNote('admin', id, `${who} ما اعتمدش إضافي ${arr.length} ${arr.length === 1 ? 'موظف' : 'موظفين'} من أكتر من يوم`, `${hrsOf(arr)} ساعة: ${names(arr)}`, { priority: 'high' });
+      for (const [ro, x] of [['manager', ids[0]], ['hr', ids[1]]]) await upsertNote(ro, x, `${who} ما اعتمدش إضافي ${arr.length} ${arr.length === 1 ? 'موظف' : 'موظفين'} من أكتر من يوم`, `${hrsOf(arr)} ساعة: ${names(arr)}`, { priority: 'high' });
     }
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(otNotes, 2500); });
@@ -33542,15 +33550,19 @@ if (typeof STU_ON === 'undefined' || !STU_ON) {
       if (st.role !== 'admin' && st.hours >= H && !lateSteps.includes(st.role)) lateSteps.push(st.role);
       lateSteps.forEach(step => { const who = whoFor(step, r); if (!who) return; const g = groups.get(who.key) || { who, items: [], hours: 0 }; g.items.push(r); g.hours = Math.max(g.hours, st.hours); groups.set(who.key, g); });
     });
-    const today = todayISO(); const open = list('tasks').filter(t => /^late_/.test(String(t.id || '')) && ['open', 'doing'].includes(t.status));
-    for (const t of open) { const m = /^late_(.+)_(\d{4}-\d{2}-\d{2})$/.exec(t.id); if (!m || !groups.has(m[1]) || m[2] !== today) { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: 'اتردّ على الطلبات' }, { silent: true }); } catch (e) { /* ignore */ } } }
+    const today = todayISO(); const open = list('tasks').filter(t => /^late_/.test(String(t.id || '')) && !/^late_ot_/.test(String(t.id || '')) && ['open', 'doing'].includes(t.status));   /* v7.74: late_ot_* are the overtime module's own notes */
+    for (const t of open) { const m = /^late_(.+)_(\d{4}-\d{2}-\d{2})(?:_(?:hr|manager))?$/.exec(t.id); if (!m || !groups.has(m[1]) || m[2] !== today) { try { await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: 'اتردّ على الطلبات' }, { silent: true }); } catch (e) { /* ignore */ } } }
     for (const [key, g] of groups) {
-      const id = `late_${key}_${today}`; const cur = byId('tasks', id); const n = g.items.length;
+      const id0 = `late_${key}_${today}`; const attOnly = g.items.every(r => ATT_TYPES.has(r.type) || r.type === 'attfix'); const ids = attOnly ? [id0 + '_hr', id0 + '_manager'] : [id0];
+      if (attOnly) { const o = byId('tasks', id0); if (o && ['open', 'doing'].includes(o.status)) { try { await Store.update('tasks', id0, { status: 'done', doneAt: nowISO(), doneByName: 'السيستم', autoClosed: true, doneNote: 'v7.74: attendance queues go to the accounts manager + factory manager' }, { silent: true }); } catch (e) { /* ignore */ } } }
+      const id = ids[0]; const cur = byId('tasks', id); const n = g.items.length;
       const title = key === 'hr' && g.items.every(r => ATT_TYPES.has(r.type)) ? `${g.who.name} لم يرد على ${n} ${n === 1 ? 'طلب' : 'طلبات'} تعديل حضور وانصراف` : `${g.who.name} (${g.who.label}) ما خدش أكشن في ${n} ${n === 1 ? 'طلب' : 'طلبات'}`;
       const desc = `من ${g.hours >= 48 ? Math.floor(g.hours / 24) + ' يوم' : g.hours + ' ساعة'} (فترة السماح ${H} ساعة): ${g.items.slice(0, 5).map(short).join('، ')}${n > 5 ? ` و${n - 5} غيرهم` : ''}`;
-      if (cur && ['open', 'doing'].includes(cur.status)) { if (cur.title !== title || cur.desc !== desc) { try { await Store.update('tasks', id, { title, desc, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } continue; }
+      if (cur && ['open', 'doing'].includes(cur.status)) { if (cur.title !== title || cur.desc !== desc) { for (const x of ids) { if (byId('tasks', x)) { try { await Store.update('tasks', x, { title, desc, updatedAt: nowISO() }, { silent: true }); } catch (e) { /* ignore */ } } } } continue; }
       if (cur) continue;
-      try { await notifyRole('admin', title, desc, { id, kind: 'notice', priority: 'high', fields: { link: '/#/requests', lateKey: key } }); } catch (e) { /* ignore */ }
+      /* v7.74 (Mahmoud 15 Oct: attendance messages stay with the heads and the accounts manager): a queue of attendance requests only → the
+         accounts manager + the factory manager, not the owner; any other request type still reaches the owner */
+      try { if (attOnly) { for (const ro of ['hr', 'manager']) await notifyRole(ro, title, desc, { id: id0 + '_' + ro, kind: 'notice', priority: 'high', fields: { link: '/#/requests', lateKey: key } }); } else await notifyRole('admin', title, desc, { id: id0, kind: 'notice', priority: 'high', fields: { link: '/#/requests', lateKey: key } }); } catch (e) { /* ignore */ }
     }
   }
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { setTimeout(lateSweep, 3000); });
@@ -37343,6 +37355,9 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     return true;
   }
 
+  /* v7.74: the «another trip from here» part (99zzZzZZzzp-trip-chain.js) builds its windows from the same pieces */
+  window.nfDT = { pickerHTML, locOf, KINDS, KSHORT, kindFor, syncTo, uniqueTripNo, busyWith, curName, pushStaff: (t, a, b) => pushStaff(t, a, b), hhmm };
+
   /* ---------- pushes to the fleet manager + the factory manager ---------- */
   function pushStaff(t, title, body) { try { if (typeof pushSend === 'function') pushSend(['role:fleet', 'role:manager'], title, body, '/#/fleet/' + t.id, 'nf-trip-' + t.id); } catch (e) { /* ignore */ } }
   function stepPush(t, prevStatus) {
@@ -37449,7 +37464,11 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
   const DOT = { good: '#30a46c', acc: '#2a78d6', warn: '#e5932a', '': '#8a8f98' };
   function todayCard() {
     const ts = todayTrips(); if (!ts.length) return '';
-    const open = ts.filter(t => t.status !== 'done'), back = ts.filter(t => t.status === 'done');
+    /* v7.74 (Mahmoud 15 Oct — «another trip from here»): trips chained on one road trip show as ONE line with the whole way
+       («factory ← supplier ← site ← factory»); a trip that went on to the next one is not counted as «back» */
+    const ids = new Set(ts.map(t => t.id)); const hidden = new Set(ts.filter(t => t.chainedTo && ids.has(t.chainedTo)).map(t => t.id));
+    const chainPath = t => { const seq = [t]; let p = t, n = 0; while (p && p.chainedFrom && n++ < 12) { p = byId('trips', p.chainedFrom); if (p) seq.unshift(p); } if (seq.length < 2) return null; const sh = s => String(s || '').split('—')[0].trim(); const way = [sh(seq[0].from || (seq[0].fromLoc || {}).name) || L('المصنع', 'Factory')].concat(seq.map(x => sh(x.to || (x.toLoc || {}).name))); if (t.status === 'done' && !t.chainedTo) way.push(L('المصنع', 'Factory')); return { n: seq.length, way: way.filter(Boolean) }; };
+    const open = ts.filter(t => t.status !== 'done' && !hidden.has(t.id)), back = ts.filter(t => t.status === 'done' && !t.chainedTo && !hidden.has(t.id));
     const run = ts.filter(t => t.status === 'started').length, wait = ts.filter(t => t.status === 'planned' || t.status === 'approved').length;
     const when = t => { const legs = tripLegs(t); const last = legs[legs.length - 1]; return (last && last.at) || t.endedAt || t.startedAt || t.createdAt || ''; };
     const order = open.concat(back.slice().sort((x, y) => String(when(y)).localeCompare(String(when(x)))));
@@ -37457,7 +37476,8 @@ html body .fmd-l2{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:12px;line-he
     const tile = (n, lab, c) => `<div class="dtc-t"><b style="${c ? `color:${c}` : ''}">${n}</b><span>${esc(lab)}</span></div>`;
     const row = t => {
       const [lab, cls] = stepLine(t); const veh = String(vehicleName(t.vehicleId) || '').split('—')[0].trim(); const drvN = t.driverId ? assigneeName(t.driverId) : '';
-      return `<a class="dtc-r" href="#/fleet/${esc(t.id)}"><span class="dtc-dot" style="background:${DOT[cls] || DOT['']}"></span><b class="dtc-code">${esc(t.number || '')}</b><span class="dtc-who">${esc([drvN, veh].filter(Boolean).join(' · '))}${t.to ? ` <span class="muted">← ${esc(t.to)}</span>` : ''}</span>${t.status !== 'done' ? `<span class="badge ${cls} dtc-b">${esc(lab)}</span>` : ''}<span class="dtc-h">${esc(fmtAtTm(when(t)))}</span></a>`;
+      const ch = chainPath(t);
+      return `<a class="dtc-r" href="#/fleet/${esc(t.id)}"><span class="dtc-dot" style="background:${DOT[cls] || DOT['']}"></span><b class="dtc-code">${esc(t.number || '')}${ch ? `<small class="dtc-n">×${ch.n}</small>` : ''}</b><span class="dtc-who">${esc([drvN, veh].filter(Boolean).join(' · '))}${ch ? ` <span class="muted dtc-way">${esc(ch.way.join(' ← '))}</span>` : t.to ? ` <span class="muted">← ${esc(t.to)}</span>` : ''}</span>${t.status !== 'done' ? `<span class="badge ${cls} dtc-b">${esc(lab)}</span>` : ''}<span class="dtc-h">${esc(fmtAtTm(when(t)))}</span></a>`;
     };
     return `<div class="card dtoday dtc" id="dt-today"><div class="cardhead"><h3>${icon('map')}${esc(L('مشاوير النهارده', "Today's trips"))}</h3><div class="grow"></div><a class="btn xs ghost" href="#/fleet">${esc(L('الحركة', 'Fleet'))}</a></div>
       <div class="dtc-s">${tile(ts.length, L('مشوار', 'trips'))}${tile(run, L('في الطريق', 'on the road'), run ? DOT.acc : '')}${tile(back.length, L('رجعوا', 'back'), back.length ? DOT.good : '')}${tile(wait, L('مستنيين', 'waiting'), wait ? DOT.warn : '')}</div>
@@ -37605,6 +37625,7 @@ select.dtp-sel{position:absolute!important;width:1px!important;height:1px!import
 .dtc-r:first-child{border-top:0}.dtc-r:active{background:var(--surface-2)}
 .dtc-dot{width:9px;height:9px;border-radius:50%;flex:none}
 .dtc-code{flex:none;font-size:12px;font-variant-numeric:tabular-nums;direction:ltr}
+.dtc-n{font-size:10px;font-weight:700;color:var(--accent);margin-inline-start:3px}
 .dtc-who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dtc-b{flex:none;font-size:11px;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dtc-h{flex:none;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -39146,7 +39167,10 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     const svg = g.querySelector('.ngh > svg:first-child'); const label = (g.querySelector('.ngt') || {}).textContent || '';
     const links = [...g.querySelectorAll('.ngi > a')].map(a => a.outerHTML).join('');
     FLY.el.setAttribute('aria-label', label);
-    FLY.el.innerHTML = `<i class="ngfa" aria-hidden="true"></i><div class="ngfin"><div class="ngfh">${svg ? svg.outerHTML : ''}<span>${esc(label)}</span></div><div class="ngfl">${links}</div></div>`;
+    const fh = `<i class="ngfa" aria-hidden="true"></i><div class="ngfin"><div class="ngfh">${svg ? svg.outerHTML : ''}<span>${esc(label)}</span></div><div class="ngfl">${links}</div></div>`;
+    /* v7.74: refill only when the pages / numbers changed — a page refresh (or the English pass) must not swap the links under a finger */
+    const key = FLY.k + '|' + [...g.querySelectorAll('.ngi > a')].map(a => `${a.getAttribute('href')}~${a.className}~${(a.querySelector('.cnt') || {}).textContent || ''}`).join(';');
+    if (FLY.el.__k !== key || !FLY.el.firstChild) { FLY.el.__k = key; FLY.el.innerHTML = fh; }
     g.classList.add('fly'); const b = g.querySelector('.ngh'); if (b) b.setAttribute('aria-expanded', 'true');
     return true;
   }
@@ -40590,7 +40614,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   /* the bell: money first */
   if (typeof notifItems === 'function') notifItems = (base => function () {
     const arr = base.apply(this, arguments);
-    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', n: 1, at: '9999', title: x.label, sub: x.subNo != null ? x.subNo : x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
+    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', mk: x.k, n: 1, at: '9999', title: x.label, sub: x.subNo != null ? x.subNo : x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
   })(notifItems);
   document.head.insertAdjacentHTML('beforeend', `<style>
     .omf{border-color:var(--warn,#e5932a)!important}.omf .cardhead{margin-bottom:6px}
@@ -40762,12 +40786,26 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const K = NK()[g.k]; const x = g.items[0]; const n = g.items.reduce((a, y) => a + (+y.n || 1), 0);
     return `<a href="#" role="button" class="ahn ${g.items.length > 1 ? 'stack' : ''}" data-ahg="${esc(g.k)}" data-ahh="${esc(g.items.length === 1 ? x.href : '')}"><span class="ahn-ic" style="background:${K[1]}">${glyph(K[2], 20)}${n > 1 ? `<i>${n}</i>` : ''}</span><span class="ahn-t"><b>${esc(K[0])}</b><span>${esc(x.title)}</span></span><span class="ahn-tm">${esc(x.at === '9999' ? L('مستني', 'waiting') : ago(x.at))}</span></a>`;
   };
+  /* v7.74 (Mahmoud 15 Oct, on the bell: «the advances messages together, the supplier transfers together — I want it organised»):
+     «money waiting for you» opens in sections — advances · supplier transfers · custody & running costs · … — each with its count,
+     its first lines and «N more» to the money page; the other groups stay one list */
+  const xi = x => `<a class="ahn-xi" href="${esc(x.href)}"><b>${esc(x.title)}</b>${x.sub ? `<span>${esc(x.sub)}</span>` : ''}${x.at === '9999' ? '' : `<small>${esc(ago(x.at))}</small>`}</a>`;
+  const MSEC = () => [['adv', L('السلف', 'Advances'), ['adv']], ['sup', L('تحويلات الموردين', 'Supplier transfers'), ['po', 'sup']], ['fund', L('العُهد والمصاريف', 'Custody & running costs'), ['fund', 'opex']], ['pb', L('دفعات مجمّعة', 'Grouped batches'), ['pb']], ['chq', L('شيكات', 'Cheques'), ['chq']], ['etc', L('تانية', 'Other'), null]];
+  function expHTML(g) {
+    if (g.k !== 'money' || !g.items.some(x => x.mk)) return g.items.slice(0, 12).map(xi).join('');
+    const used = new Set(); const out = [];
+    MSEC().forEach(([k, lab, ks]) => {
+      const its = g.items.filter(x => !used.has(x) && (ks ? ks.includes(x.mk) : true)); if (!its.length) return; its.forEach(x => used.add(x));
+      out.push(`<div class="ahn-sec" data-ahsec="${k}"><span>${esc(lab)}</span><i>${its.length}</i></div>` + its.slice(0, 4).map(xi).join('') + (its.length > 4 ? `<a class="ahn-more" href="#/money">${esc(L(`${its.length - 4} كمان ←`, `${its.length - 4} more →`))}</a>` : ''));
+    });
+    return out.join('');
+  }
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('[data-ahg]'); if (!b) return; e.preventDefault();
     if (b.dataset.ahh) { const p = document.getElementById('bellpop'); if (p) p.remove(); location.hash = b.dataset.ahh; return; }
     const g = noteGroups().find(x => x.k === b.dataset.ahg); if (!g) return;
     const open = b.nextElementSibling && b.nextElementSibling.classList.contains('ahn-x'); if (open) { b.nextElementSibling.remove(); return; }
-    b.insertAdjacentHTML('afterend', `<div class="ahn-x">${g.items.slice(0, 12).map(x => `<a class="ahn-xi" href="${esc(x.href)}"><b>${esc(x.title)}</b>${x.sub ? `<span>${esc(x.sub)}</span>` : ''}<small>${esc(x.at === '9999' ? '' : ago(x.at))}</small></a>`).join('')}</div>`);
+    b.insertAdjacentHTML('afterend', `<div class="ahn-x">${expHTML(g)}</div>`);
   });
   if (typeof ACTIONS.bellOpen === 'function') ACTIONS.bellOpen = (base => function () {
     const old = document.getElementById('bellpop'); if (old) { old.remove(); return; }
@@ -40934,6 +40972,11 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     .ahn-t{flex:1;min-width:0;display:flex;flex-direction:column}.ahn-t b{font-size:14px;font-weight:600;align-self:flex-start;max-width:calc(100% - 72px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ahn-t span{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ahn-tm{position:absolute;top:10px;inset-inline-end:13px;font-size:11.5px;color:var(--muted)}
     .ahn-x{display:flex;flex-direction:column;margin:-4px 8px 4px;border-radius:14px;background:var(--surface-2);overflow:hidden}
+    .bellpop.ahbell>*{flex:none}   /* v7.74: the list scrolls — the cards are never squeezed into each other */
+    .ahn-sec{display:flex;align-items:center;gap:6px;padding:8px 12px 4px;font-size:11.5px;font-weight:700;color:var(--muted);border-top:1px solid var(--line)}.ahn-sec:first-child{border-top:0}
+    .ahn-sec i{font-style:normal;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--surface-3,rgba(127,127,127,.18));display:inline-grid;place-items:center;font-size:11px;color:var(--ink)}
+    .ahn-sec+.ahn-xi{border-top:0}
+    .ahn-more{display:block;padding:7px 12px 9px;font-size:12px;font-weight:600;color:var(--accent);text-decoration:none}
     .ahn-xi{display:flex;flex-direction:column;padding:9px 12px;border-top:1px solid var(--line);color:inherit;text-decoration:none}.ahn-xi:first-child{border-top:0}
     .ahn-xi b{font-size:13px;font-weight:600}.ahn-xi span{font-size:12px;color:var(--muted)}.ahn-xi small{font-size:11px;color:var(--muted)}
     .ahm-n{flex:none;min-width:26px;height:26px;border-radius:13px;background:#ff3b30;color:#fff;font-style:normal;font-weight:700;font-size:13px;display:grid;place-items:center;padding:0 7px}
@@ -52832,4 +52875,473 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 .nfst-replay{margin-bottom:10px}.aipanel .aih .nfst-howto{min-width:28px;padding:0 8px;font-weight:700}
 @media (prefers-reduced-motion:reduce){#nfst .nfst-hole,#nfst .nfst-hand{transition:none}#nfst .nfst-rings i,#nfst .nfst-ic,#nfst .nfst-card{animation:none}}`;
   (document.head || document.documentElement).appendChild(st);
+})();
+/* =====================================================================
+   v7.74 — «another trip from here» (Mahmoud 15 Oct: «when the driver is on a trip where we tell him go back to the factory, we can
+   add another trip so he moves from his place to the next trip» — brief claude/driver-chain-brief.md; who may add it: the driver
+   himself + the fleet manager and the factory manager; go-ahead given). Factory only.
+   · The driver, when he is done at the place (the step that was «head back to the factory»): two buttons — «back to the factory»
+     (as before) and «another trip from here». The current trip closes HERE, marked «didn't go back — went on to TR-…» with the
+     time and the km; the «New trip» window opens with FROM = where he is and TO from the same places list; a trip already waiting
+     for him (assigned by the fleet manager) shows on top to pick in one tap. «New trip» while he is at a place = the same window.
+   · The fleet manager / the factory manager (and the owner): on a running (or not yet started) trip «add a trip after it» —
+     a new destination or a waiting trip. The driver then sees «next trip: … — start it» in place of «back to the factory».
+     Removing it (or cancelling that trip) gives him «back to the factory» again. Pressing «start» on that trip = the same chain.
+   · Every chain step pushes to the fleet manager and the factory manager: «X isn't going back — heading to …».
+   · Today's trips show a chain as one line «factory ← supplier ← site ← factory» (99zzZzZV-driver-trip.js).
+   · The next trip starts where the first one ended; vehicles on a tracker take the km from it (the driver types nothing).
+   · Same fields as the server chain (Edge fleet-alerts v15: chainedTo / chainedFrom), so a chain made by the tracker reads the same.
+   · Goods picked up on the first trip ride along («carry»): when the chain reaches the factory, the purchase order turns «arrived»
+     and the storekeeper / department head / purchasing get their receipt tasks as if the first trip had come back.
+   · Cancelling a chained trip that already started gives the driver his first trip back (open again, «back to the factory»).
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const R = () => (typeof role === 'function' ? role() : '');
+  const W = () => typeof writable === 'function' && writable();
+  const me = () => (typeof myDriverId === 'function' ? myDriverId() : null);
+  const drv = () => R() === 'driver';
+  const fleetOk = () => typeof canFleet === 'function' && canFleet();
+  const DT = () => window.nfDT || null;
+  const later = f => setTimeout(f, 90);
+  const legsOf = t => (t && Array.isArray(t.legs) ? t.legs : []);
+  const hasLeg = (t, k) => legsOf(t).some(l => l && l.key === k);
+  const sh = s => String(s || '').split('—')[0].trim();
+  const toName = t => sh((t && (t.to || (t.toLoc && t.toLoc.name))) || '');
+  const isRunning = t => !!t && t.status === 'started' && !t.gpsAuto;
+  const mineOrFleet = t => !!t && W() && (fleetOk() || (drv() && t.driverId && t.driverId === me()));
+  const PICK = () => (typeof PICK_KINDS !== 'undefined' ? PICK_KINDS : ['materials', 'pickup_ext', 'return']);
+
+  /* ---------- where the chain can start: he is done at the place, the next step is «head back» / «back at the factory» ---------- */
+  function chainPoint(t) {
+    if (!isRunning(t) || t.chainedTo) return null;
+    const nx = typeof tripNextLeg === 'function' ? tripNextLeg(t) : null; if (!nx || !['depart', 'back'].includes(nx.key)) return null;
+    if (!(hasLeg(t, 'arrive') || t.arrivedAt)) return null;
+    return nx;
+  }
+  /* the planned next trip (set by the fleet manager / factory manager) — only while it still waits */
+  const nextUpOf = t => { const n = t && t.nextUp ? byId('trips', t.nextUp) : null; return n && n.status === 'approved' && !n.startedAt ? n : null; };
+  /* trips already waiting for this driver / vehicle (assigned, not started) */
+  const waitingFor = t => sortBy(list('trips').filter(x => x && x.id !== t.id && x.status === 'approved' && !x.startedAt && !x.gpsAuto && !x.chainedFrom
+    && ((t.driverId && x.driverId === t.driverId) || (!x.driverId && t.vehicleId && x.vehicleId === t.vehicleId)) && (!x.date || x.date <= todayISO())), x => `${x.date || ''} ${x.time || ''} ${x.createdAt || ''}`);
+  /* the place the next trip leaves from: the destination of this one (or where he is, if he already headed back) */
+  function fromFor(t) {
+    const ret = hasLeg(t, 'depart') || t.returning; const l = t.toLoc || null;
+    if (!ret && l && l.key && l.key !== 'new' && typeof placeByKey === 'function' && placeByKey(l.key)) { const p = placeByKey(l.key); return { key: p.key, name: p.name, lat: p.lat, lng: p.lng, area: p.area || '' }; }
+    if (!ret && (l || t.to)) return { key: 'new', name: (l && l.name) || t.to || '', lat: l && l.lat != null ? +l.lat : null, lng: l && l.lng != null ? +l.lng : null, newPlace: !!(l && l.newPlace) };
+    return { key: 'new', name: L('مكاني دلوقتي', 'My current location'), lat: null, lng: null, newPlace: true };
+  }
+  /* goods on board: what the earlier trips of the chain picked up and did not bring to the factory yet */
+  function carryOf(t) {
+    const out = Array.isArray(t.carry) ? t.carry.slice() : [];
+    const took = (PICK().includes(t.kind) || t.purchaseId || t.extId) && !t.notTaken && (hasLeg(t, 'received') || hasLeg(t, 'taken'));
+    if (took && !out.includes(t.id)) out.push(t.id);
+    return out;
+  }
+
+  /* ---------- the chain itself ---------- */
+  let _chainPush = null;
+  if (typeof pushSend === 'function') pushSend = (base => async function (to, title, body, url, tag) {
+    const c = _chainPush;
+    if (c && Date.now() < c.until && tag === 'nf-trip-' + c.id && Array.isArray(to) && to.includes('role:fleet')) { _chainPush = null; return base.call(this, to, c.title, c.body, url, tag); }
+    return base.apply(this, arguments);
+  })(pushSend);
+  async function chainTo(t, nx, from) {
+    t = byId('trips', t.id) || t; nx = byId('trips', nx.id) || nx;
+    if (!isRunning(t) || t.chainedTo) { toast(L('المشوار ده اتقفل خلاص', 'This trip is already closed'), 'err'); return false; }
+    toast(L('جارٍ تحديد موقعك…', 'Getting your location…'));
+    let pos = null; try { pos = typeof posNow === 'function' ? await posNow() : null; } catch (e) { pos = null; }
+    const now = nowISO(); const v = t.vehicleId ? byId('vehicles', t.vehicleId) : null;
+    const odo = v && v.gpsId && v.odoSync && typeof vehOdo === 'function' && vehOdo(v) > 0 ? vehOdo(v) : null;
+    const place = Object.assign({}, from || fromFor(t)); if ((place.lat == null || place.lng == null) && pos) { place.lat = pos.lat; place.lng = pos.lng; }
+    /* 1) the next trip leaves from here, with the same vehicle and driver; what is on board rides along */
+    await Store.update('trips', nx.id, { fromLoc: place, from: place.name, chainedFrom: t.id, driverId: nx.driverId || t.driverId || null, vehicleId: nx.vehicleId || t.vehicleId || null, carry: carryOf(t), date: todayISO() });
+    /* 2) the current trip closes HERE — «didn't go back, went on to …» */
+    const track = (t.track || []).concat(pos ? [pos] : []); const trk = typeof trackKm === 'function' ? Math.round(trackKm(track) * 100) / 100 : null;
+    const km = odo != null && t.startKm != null && odo >= +t.startKm ? Math.round((odo - +t.startKm) * 10) / 10 : trk;
+    const note = L(`ماراجعش — كمّل لمشوار ${nx.number || ''}`, `Didn't go back — went on to trip ${nx.number || ''}`);
+    await Store.update('trips', t.id, { legs: legsOf(t).concat([{ key: 'chain', at: now, pos, km: odo, note, to: nx.id }]), status: 'done', endedAt: now, endPos: pos, endKm: odo, km, track, chainedTo: nx.id, nextUp: null, endNote: note });
+    try { const tk = byId('tasks', `trip_${t.id}`); if (tk && tk.status !== 'done') await Store.update('tasks', tk.id, { status: 'done', doneAt: now, doneByName: (S.session && S.session.name) || '', proof: { note, at: now, byName: (S.session && S.session.name) || '' } }, { silent: true }); } catch (e) { /* the driver may not write tasks — the trip itself is closed */ }
+    try { if (drv() && typeof stopTracking === 'function') stopTracking(); } catch (e) { /* ignore */ }
+    /* 3) start the next one (vehicles without a tracker ask the odometer once — it is also the end of the first trip) */
+    const who = t.driverId ? assigneeName(t.driverId) : ((S.session && S.session.name) || '');
+    _chainPush = { id: nx.id, until: Date.now() + 90000, title: L(`${who} ماراجعش — رايح على ${toName(nx)}`, `${who} isn't going back — heading to ${toName(nx)}`), body: L(`${t.number} خلص في ${place.name} · ${nx.number}: ${place.name} ← ${toName(nx)}`, `${t.number} ended at ${place.name} · ${nx.number}: ${place.name} → ${toName(nx)}`) };
+    go('fleet/' + nx.id);
+    try { if (ACTIONS.tripStart) await ACTIONS.tripStart(nx.id); } catch (e) { console.warn('chain start', e); }
+    const n2 = byId('trips', nx.id);
+    if (n2 && n2.status === 'started') {
+      const t2 = byId('trips', t.id);
+      if (t2 && t2.endKm == null && n2.startKm != null) await Store.update('trips', t.id, { endKm: n2.startKm, km: t2.startKm != null && +n2.startKm >= +t2.startKm ? Math.round((+n2.startKm - +t2.startKm) * 10) / 10 : t2.km }, { silent: true });
+      if (_chainPush && _chainPush.id === nx.id) { const c = _chainPush; _chainPush = null; if (DT()) DT().pushStaff(n2, c.title, c.body); }
+      toast(L(`اتقفل ${t.number} هنا — وبدأ ${nx.number}`, `${t.number} closed here — ${nx.number} started`));
+    } else { _chainPush = null; toast(L(`اتقفل ${t.number} هنا — ابدأ ${nx.number} من الزرار`, `${t.number} closed here — start ${nx.number} with the button`)); }
+    rerender(); return true;
+  }
+  window.nfTripChainTo = chainTo;
+
+  /* ---------- the window: «another trip from here» (driver) / «add a trip after it» (fleet manager, factory manager) ---------- */
+  const kindTiles = () => { const d = DT(); return `<div class="dtk" id="f-dtKind">${d.KINDS.map(k => `<label class="dtk-i"><input type="radio" name="dtKind" value="${k}" ${k === 'other' ? 'checked' : ''}><span>${esc(d.KSHORT()[k] || TRIP_KINDS[k] || k)}</span></label>`).join('')}</div>`; };
+  const waitRows = (ws, cur) => !ws.length ? '' : `<div class="field full"><label>${esc(L('مشوار مستنيك', 'A trip waiting for you'))}</label><div class="dtk dtk-col tch-wait">${ws.map(x => `<label class="dtk-i"><input type="radio" name="dtWait" value="${esc(x.id)}" ${x.id === cur ? 'checked' : ''}><span><b>${esc(x.number || '')} — ${esc(toName(x) || x.purpose || '')}</b><small>${esc(x.purpose || TRIP_KINDS[x.kind] || '')}${x.driverId && drv() ? '' : x.driverId ? ` · ${esc(assigneeName(x.driverId))}` : ''}</small></span></label>`).join('')}<label class="dtk-i"><input type="radio" name="dtWait" value="" ${cur ? '' : 'checked'}><span><b>+ ${esc(L('مشوار جديد', 'A new trip'))}</b></span></label></div></div>`;
+  function chainForm(t, o) {
+    const d = DT(); const ws = waitingFor(t); const from = o.from;
+    const fromBox = o.fixedFrom ? `<div class="field full"><label>${esc(L('من', 'From'))}</label><div class="tch-from">${esc(from.name || '—')}</div></div>`
+      : `<div class="field full"><label>${esc(L('من', 'From'))} <span class="tiny muted">${esc(L('— المكان اللي إنت فيه', '— where you are'))}</span></label>${d.pickerHTML('From', from.key)}</div>`;
+    return `<div class="form">
+      ${fromBox}
+      ${waitRows(ws, '')}
+      <div class="full tch-new" id="tch-new">
+        <div class="field full"><label>${esc(L('إلى', 'To'))}</label>${d.pickerHTML('To', '')}</div>
+        <div class="field full"><label>${esc(L('رايح ليه', 'What for'))}</label>${kindTiles()}</div>
+        <div class="full" id="dt-link"></div>
+        ${field(L('الغرض (اختياري)', 'Purpose (optional)'), inp('dtPurpose', '', `placeholder="${esc(L('مثال: استلام ألواح خشب', 'e.g. picking up wood panels'))}"`), 'full')}
+      </div>
+      <div class="banner info full" style="margin:0">${icon('info')}<span>${esc(o.note)}</span></div></div>`;
+  }
+  function wireChain(f, from) {
+    f._kindTouched = false; const d = DT(); if (d) d.syncTo(f);
+    if (from && from.key === 'new') {
+      const nb = f.querySelector('[data-dtpn="From"]'); if (nb) nb.hidden = false;
+      const nm = f.querySelector('[name=dtFromName]'); if (nm) nm.value = from.name || '';
+      if (from.lat != null) { const a = f.querySelector('[name=dtFromLat]'), b = f.querySelector('[name=dtFromLng]'); if (a) a.value = from.lat; if (b) b.value = from.lng; const st = f.querySelector('[data-dtpgeos="From"]'); if (st) st.textContent = L('اللوكيشن متسجّل', 'Location saved'); }
+      const cu = f.querySelector('[data-dtpopen="From"] b'); if (cu) cu.textContent = from.name || '';
+    }
+    const sync = () => { const w = f.querySelector('input[name=dtWait]:checked'); const box = f.querySelector('#tch-new'); if (box) box.hidden = !!(w && w.value); };
+    f.addEventListener('change', e => { if (e.target && e.target.name === 'dtWait') sync(); }); sync();
+  }
+  function newTripDoc(t, d, from, to, extra) {
+    const D = DT(); const kind = D.KINDS.includes(d.dtKind) ? d.dtKind : 'other'; const now = nowISO(); const toP = to.key !== 'new' && typeof placeByKey === 'function' ? placeByKey(to.key) : null;
+    return Object.assign({ id: uid(), number: D.uniqueTripNo(), kind, purpose: String(d.dtPurpose || '').trim() || `${TRIP_KINDS[kind] || ''} — ${to.name}`, from: from.name, to: to.name, fromLoc: from, toLoc: to, date: todayISO(), time: D.hhmm(now), vehicleId: t.vehicleId || null, driverId: t.driverId || null,
+      purchaseId: d.dtPo || null, extId: d.dtExt || null, orderId: d.dtOrder || (toP && toP.orderId) || (d.dtExt ? ((byId('extorders', d.dtExt) || {}).orderId || null) : null),
+      status: 'approved', approvedAt: now, approvedByName: drv() ? L('فتحه السواق', 'Opened by the driver') : ((S.session && S.session.name) || ''), selfOpened: drv(), pipe2: true, createdAt: now, createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '' }, extra || {});
+  }
+  ACTIONS.tripChain = id => {
+    const t = byId('trips', id); if (!t || !mineOrFleet(t) || !DT()) return;
+    if (!chainPoint(t)) { toast(L('سجّل الوصول الأول', 'Log the arrival first'), 'err'); return; }
+    const from = fromFor(t); const nu = nextUpOf(t);
+    openModal({ title: L(`مشوار تاني من هنا — ${t.number}`, `Another trip from here — ${t.number}`), wide: true, cls: 'dtrip', submitLabel: L('اقفل هنا وابدأ', 'Close here and start'),
+      body: chainForm(t, { from, note: L(`${t.number} هيتقفل هنا («ماراجعش») والمشوار الجديد هيبدأ من نفس المكان بنفس العربية. مدير الحركة ومدير المصنع هيوصلهم إشعار.`, `${t.number} closes here («didn't go back») and the new trip starts from the same place with the same vehicle. The fleet manager and the factory manager get a notice.`) }),
+      onOpen: f => { wireChain(f, from); if (nu) { const r = f.querySelector(`input[name=dtWait][value="${nu.id}"]`); if (r) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); } } },
+      onSubmit: async f => {
+        const d = formData(f); const D = DT(); const fr = D.locOf(d, 'From');
+        if (!fr) { toast(L('اختار المكان اللي إنت فيه', 'Pick where you are'), 'err'); return false; }
+        if (d.dtWait) { const nx = byId('trips', d.dtWait); if (!nx || nx.status !== 'approved') { toast(L('المشوار ده مابقاش مستني', 'That trip is no longer waiting'), 'err'); return false; } later(() => chainTo(t, nx, fr)); return true; }
+        const to = D.locOf(d, 'To'); if (!to) { toast(L('اختار المكان اللي رايح له', 'Pick where you are going'), 'err'); return false; }
+        if (fr.key !== 'new' && fr.key === to.key) { toast(L('«من» و«إلى» نفس المكان', '«From» and «To» are the same place'), 'err'); return false; }
+        const nx = newTripDoc(t, d, fr, to); await Store.save('trips', nx, { silent: true }); later(() => chainTo(t, nx, fr)); return true;
+      } });
+  };
+  /* the driver taps «next trip: … — start it» */
+  ACTIONS.tripChainGo = async id => {
+    const t = byId('trips', id); const nx = nextUpOf(t); if (!t || !nx || !mineOrFleet(t)) return;
+    if (!(await confirmDlg(L(`تقفل ${t.number} هنا وتبدأ ${nx.number} (${toName(nx)})؟`, `Close ${t.number} here and start ${nx.number} (${toName(nx)})?`), L('ابدأ المشوار الجاي', 'Start the next trip')))) return;
+    await chainTo(t, nx, fromFor(t));
+  };
+  /* fleet manager / factory manager: «add a trip after it» */
+  ACTIONS.tripAddNext = id => {
+    const t = byId('trips', id); if (!t || !fleetOk() || !DT() || !['approved', 'started'].includes(t.status) || t.chainedTo) return;
+    const from = fromFor(t); from.name = toName(t) || from.name;
+    openModal({ title: L(`مشوار بعد ${t.number}`, `A trip after ${t.number}`), wide: true, cls: 'dtrip', submitLabel: L('ضيفه', 'Add it'),
+      body: chainForm(t, { from, fixedFrom: true, note: L(`${t.driverId ? assigneeName(t.driverId) : 'السواق'} هيشوفه مكان «ارجع المصنع» أول ما يخلّص في ${from.name || 'المكان'}، ويبدأه من هناك بنفس العربية. لو اتلغى يرجع له «ارجع المصنع».`, `${t.driverId ? assigneeName(t.driverId) : 'The driver'} sees it in place of «back to the factory» as soon as he is done at ${from.name || 'the place'}, and starts it from there with the same vehicle. If it is cancelled he gets «back to the factory» again.`) }),
+      onOpen: f => wireChain(f, null),
+      onSubmit: async f => {
+        const d = formData(f); const D = DT(); let nx = null; const old = nextUpOf(t);
+        if (d.dtWait) { nx = byId('trips', d.dtWait); if (!nx || nx.status !== 'approved') { toast(L('المشوار ده مابقاش مستني', 'That trip is no longer waiting'), 'err'); return false; } await Store.update('trips', nx.id, { after: t.id, driverId: nx.driverId || t.driverId || null, vehicleId: t.vehicleId || nx.vehicleId || null, fromLoc: from, from: from.name }); }
+        else { const to = D.locOf(d, 'To'); if (!to) { toast(L('اختار المكان اللي رايح له', 'Pick where he is going'), 'err'); return false; } nx = newTripDoc(t, d, from, to, { after: t.id, addedAfter: true }); await Store.save('trips', nx, { silent: true }); }
+        if (old && old.id !== nx.id && old.addedAfter && old.after === t.id) await Store.update('trips', old.id, { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '' }, { silent: true });
+        await Store.update('trips', t.id, { nextUp: nx.id, nextUpByName: (S.session && S.session.name) || '', nextUpAt: nowISO() });
+        try {
+          if (t.driverId && typeof pushSend === 'function') pushSend(['w:' + t.driverId], L(`المشوار الجاي: ${toName(nx)}`, `Next trip: ${toName(nx)}`), L(`بعد ما تخلّص في ${from.name} ماترجعش المصنع — ابدأ ${nx.number} من صفحة المشوار.`, `When you are done at ${from.name} don't go back to the factory — start ${nx.number} from the trip page.`), '/#/fleet/' + t.id, 'nf-trip-' + t.id);
+          if (DT()) DT().pushStaff(t, L(`${(S.session && S.session.name) || ''} ضاف مشوار بعد ${t.number}`, `${(S.session && S.session.name) || ''} added a trip after ${t.number}`), `${t.driverId ? assigneeName(t.driverId) + ': ' : ''}${from.name} ← ${toName(nx)}`);
+        } catch (e) { /* ignore */ }
+        toast(L('اتضاف المشوار الجاي', 'Next trip added')); rerender(); return true;
+      } });
+  };
+  ACTIONS.tripNextOff = async id => {
+    const t = byId('trips', id); const nx = nextUpOf(t); if (!t || !fleetOk()) return;
+    if (!(await confirmDlg(L(`تشيل المشوار الجاي${nx ? ` (${nx.number})` : ''}؟ السواق هيرجع له «ارجع المصنع».`, `Remove the next trip${nx ? ` (${nx.number})` : ''}? The driver gets «back to the factory» again.`), L('شيله', 'Remove it')))) return;
+    if (nx && nx.after === t.id) await Store.update('trips', nx.id, nx.addedAfter ? { status: 'cancelled', cancelledAt: nowISO(), cancelledByName: (S.session && S.session.name) || '', after: null } : { after: null }, { silent: true });
+    await Store.update('trips', t.id, { nextUp: null });
+    try { if (t.driverId && nx && typeof pushSend === 'function') pushSend(['w:' + t.driverId], L(`اتشال المشوار الجاي ${nx.number}`, `Next trip ${nx.number} removed`), L(`بعد ${t.number} ارجع المصنع.`, `After ${t.number} go back to the factory.`), '/#/fleet/' + t.id, 'nf-trip-' + t.id); } catch (e) { /* ignore */ }
+    toast(L('اتشال', 'Removed')); rerender();
+  };
+
+  /* «start» on a trip that waits for a running one of the same driver = the chain (no two trips on the road at once) */
+  if (ACTIONS.tripStart) ACTIONS.tripStart = (base => async function (id) {
+    const t = byId('trips', id);
+    if (t && t.status === 'approved' && !t.chainedFrom && t.driverId) {
+      const cur = list('trips').find(x => x.id !== t.id && isRunning(x) && x.driverId === t.driverId && !x.chainedTo);
+      if (cur && chainPoint(cur) && mineOrFleet(cur)) {
+        if (!(cur.nextUp === t.id || t.after === cur.id) && !(await confirmDlg(L(`${cur.number} لسه شغّال — تقفله في ${toName(cur) || 'مكانه'} وتبدأ ${t.number} من هناك؟`, `${cur.number} is still running — close it at ${toName(cur) || 'its place'} and start ${t.number} from there?`), L('اقفل وابدأ', 'Close and start')))) return;
+        return chainTo(cur, t, fromFor(cur));
+      }
+    }
+    return base.apply(this, arguments);
+  })(ACTIONS.tripStart);
+  /* «New trip» while he is done at a place = «another trip from here» */
+  if (ACTIONS.drvTripNew) ACTIONS.drvTripNew = (base => function () {
+    const cur = drv() ? list('trips').find(x => isRunning(x) && x.driverId === me()) : null;
+    if (cur && chainPoint(cur)) return ACTIONS.tripChain(cur.id);
+    return base.apply(this, arguments);
+  })(ACTIONS.drvTripNew);
+
+  /* ---------- the steps list: a chained trip ends with «didn't go back — went on to TR-…» (no «back at the factory») ---------- */
+  if (typeof legsWithState === 'function') legsWithState = (base => function (t) {
+    const st = base.apply(this, arguments); if (!t || !t.chainedTo) return st;
+    const legs = legsOf(t); const rec = legs.find(l => l && l.key === 'chain') || legs.slice().reverse().find(l => l && l.key === 'depart') || { key: 'chain', at: t.endedAt, km: t.endKm, pos: t.endPos };
+    const out = st.filter(x => !['depart', 'back'].includes(x.key)).map(x => Object.assign({}, x, { next: false }));
+    let prevKm = null; out.forEach(x => { if (x.rec && x.rec.km != null) prevKm = +x.rec.km; }); if (prevKm == null && t.startKm != null) prevKm = +t.startKm;
+    const n = byId('trips', t.chainedTo);
+    out.push({ key: 'chain', label: L(`ماراجعش — كمّل لمشوار ${(n && n.number) || ''}`, `Didn't go back — went on to trip ${(n && n.number) || ''}`).trim(), done: true, next: false, rec, legKm: rec.km != null && prevKm != null && +rec.km >= prevKm ? Math.round((+rec.km - prevKm) * 100) / 100 : null });
+    return out;
+  })(legsWithState);
+
+  /* ---------- the trip page ---------- */
+  function chainCard(t) {
+    const nx = chainPoint(t); if (!nx || !mineOrFleet(t)) return '';
+    const nu = nextUpOf(t);
+    if (nu) return `<div class="card tchain" data-ptab="pin"><div class="cardhead"><h3>${esc(L('خلّصت هنا؟', 'Done here?'))}</h3></div>
+      <button type="button" class="btn p tch-big" data-action="tripChainGo" data-arg="${esc(t.id)}">${icon('play')}<span>${esc(L('المشوار الجاي', 'Next trip'))}: <b>${esc(toName(nu) || nu.purpose || '')}</b> — ${esc(L('ابدأه', 'start it'))}</span></button>
+      <div class="tiny muted" style="margin-top:6px">${esc(nu.number || '')}${t.nextUpByName ? ` · ${esc(L('حطّه', 'set by'))} ${esc(t.nextUpByName)}` : ''} · ${esc(L('مكان «ارجع المصنع»', 'in place of «back to the factory»'))}</div></div>`;
+    const backLab = nx.key === 'depart' ? L('راجع المصنع', 'Back to the factory') : nx.label;
+    const backAct = nx.key === 'back' ? 'tripEnd' : 'tripLeg';
+    return `<div class="card tchain" data-ptab="pin"><div class="cardhead"><h3>${esc(L('خلّصت هنا؟', 'Done here?'))}</h3></div>
+      <div class="tch-row"><button type="button" class="btn tch-b" data-action="${backAct}" data-arg="${esc(t.id)}">${icon('check')}${esc(backLab)}</button><button type="button" class="btn p tch-b" data-action="tripChain" data-arg="${esc(t.id)}">${icon('plus')}${esc(L('مشوار تاني من هنا', 'Another trip from here'))}</button></div>
+      <div class="tiny muted" style="margin-top:6px">${esc(L('مشوار تاني من هنا: المشوار ده يتقفل في مكانه والجديد يبدأ من نفس المكان.', 'Another trip from here: this trip closes where it is and the new one starts from the same place.'))}</div></div>`;
+  }
+  function nextCard(t) {
+    if (!fleetOk() || drv() || !['approved', 'started'].includes(t.status) || t.chainedTo || t.gpsAuto) return '';
+    const nu = nextUpOf(t);
+    return `<div class="card tnext"><div class="cardhead"><h3>${esc(L('المشوار الجاي', 'Next trip'))}</h3><div class="grow"></div>${nu ? `<button type="button" class="btn sm ghost" data-action="tripNextOff" data-arg="${esc(t.id)}">${esc(L('شيله', 'Remove'))}</button>` : `<button type="button" class="btn sm p" data-action="tripAddNext" data-arg="${esc(t.id)}">${icon('plus')}${esc(L('ضيف مشوار بعده', 'Add a trip after it'))}</button>`}</div>
+      ${nu ? `<a class="tch-nu" href="#/fleet/${esc(nu.id)}"><b>${esc(nu.number || '')}</b><span>${esc(toName(t) || '')} ← ${esc(toName(nu) || '')}</span></a><div class="tiny muted">${esc(L('السواق هيشوفه مكان «ارجع المصنع» ويبدأه من مكانه.', 'The driver sees it in place of «back to the factory» and starts it from where he is.'))}${t.nextUpByName ? ` ${esc(L('حطّه', 'Set by'))} ${esc(t.nextUpByName)}.` : ''}</div>`
+        : `<div class="tiny muted">${esc(L('لو السواق مش هيرجع المصنع بعد المشوار ده — ضيف اللي بعده، وهو يبدأه من مكانه.', "If the driver won't go back to the factory after this trip — add the next one and he starts it from where he is."))}</div>`}</div>`;
+  }
+  function chainBanner(t) {
+    const a = t.chainedFrom ? byId('trips', t.chainedFrom) : null, b = t.chainedTo ? byId('trips', t.chainedTo) : null; if (!a && !b) return '';
+    const parts = [];
+    if (a) parts.push(`${esc(L('جاي من', 'Came from'))} <a href="#/fleet/${esc(a.id)}"><b>${esc(a.number || '')}</b></a> — ${esc(L('بدأ من', 'started at'))} ${esc(sh(t.from || (t.fromLoc || {}).name) || '—')}${t.autoStarted ? ` (${esc(L('من جهاز العربية', 'by the vehicle tracker'))})` : ''}`);
+    if (b) parts.push(`${esc(L('ماراجعش المصنع — كمّل لمشوار', "Didn't go back to the factory — went on to trip"))} <a href="#/fleet/${esc(b.id)}"><b>${esc(b.number || '')}</b></a>${toName(b) ? ` (${esc(toName(b))})` : ''}`);
+    const carry = (t.carry || []).map(id => byId('trips', id)).filter(Boolean);
+    if (carry.length && t.status !== 'done') parts.push(`${esc(L('على العربية من', 'On board from'))} ${carry.map(c => `<a href="#/fleet/${esc(c.id)}">${esc(c.number || '')}</a>`).join('، ')}`);
+    return `<div class="banner info tch-ban" style="margin-bottom:12px">${icon('map')}<span>${parts.join('<br>')}</span></div>`;
+  }
+  if (typeof vTripDetail === 'function') vTripDetail = (base => function (id) {
+    let html = base.apply(this, arguments); const t = byId('trips', id); if (!t) return html;
+    const nu = chainPoint(t) ? nextUpOf(t) : null;
+    if (nu) html = html.replace(new RegExp(`<button class="btn sm p" data-action="(?:tripLeg|tripEnd)" data-arg="${t.id}">[\\s\\S]*?</button>`), '');   /* the planned next trip takes the place of «back to the factory» */
+    const top = chainBanner(t) + chainCard(t); const nc = nextCard(t);
+    const i = html.indexOf('<div class="card'); const ins = top + nc;
+    return ins ? (i < 0 ? ins + html : html.slice(0, i) + ins + html.slice(i)) : html;
+  })(vTripDetail);
+  /* trip rows (driver portal, fleet list): the same choice in one row */
+  if (typeof tripItem === 'function') tripItem = (base => function (t, o) {
+    let html = base.apply(this, arguments); if ((o && o.compact) || !chainPoint(t) || !mineOrFleet(t)) return html;
+    const nu = nextUpOf(t);
+    const btn = nu ? `<button class="btn xs p" data-action="tripChainGo" data-arg="${esc(t.id)}" data-stop="1">${icon('play')}${esc(L('المشوار الجاي', 'Next trip'))}</button>` : `<button class="btn xs" data-action="tripChain" data-arg="${esc(t.id)}" data-stop="1">${icon('plus')}${esc(L('مشوار تاني من هنا', 'Another trip from here'))}</button>`;
+    const rx = new RegExp(`(<button class="btn xs p" data-action="(?:tripLeg|tripEnd)" data-arg="${t.id}" data-stop="1">[\\s\\S]*?</button>)`);
+    if (rx.test(html)) return html.replace(rx, nu ? btn : `$1${btn}`);
+    return html;
+  })(tripItem);
+
+  /* ---------- goods on board reach the factory with the last trip of the chain ---------- */
+  async function carryArrive(t) {
+    t = t && byId('trips', t.id); if (!t || t.carryDone || t.chainedTo || t.status !== 'done' || !(t.carry || []).length) return;
+    await Store.update('trips', t.id, { carryDone: nowISO() }, { silent: true });
+    for (const cid of t.carry) {
+      const c = byId('trips', cid); if (!c) continue;
+      try {
+        if (c.purchaseId) {
+          const p = byId('purchases', c.purchaseId);
+          if (p && !['received', 'cancelled', 'arrived'].includes(p.status)) {
+            await Store.update('purchases', p.id, { status: 'arrived', arrivedAt: nowISO(), arrivedTrip: `${c.number} ← ${t.number}` });
+            const h = typeof poHead === 'function' ? poHead(p) : null; const items = (p.pending || p.items || []).map(it => `${it.name || (byId('materials', it.materialId) || {}).name || ''} × ${fmtNum(it.pendingQty ?? it.qty)}`).join('، ');
+            await Store.save('tasks', { id: `po_recv_head_${p.id}`, title: `استلام توريد ${p.number} — رئيس القسم`, desc: `وصل السائق بالتوريد من ${p.supplier || ''} (اتشال في ${c.number} ووصل مع ${t.number}): ${items}\nافحص البضاعة وسجّل استلامك (صورة + الكميات المقبولة/المرفوضة) من صفحة طلب الشراء. الاستلام يكتمل مع أمين المخزن.`, deptId: p.deptId || null, assigneeId: h ? h.id : null, orderId: p.orderId || null, dueDate: todayISO(), priority: 'urgent', status: 'open', kind: 'task', source: 'system', purchaseId: p.id, createdBy: null, createdByName: 'السيستم', createdAt: nowISO(), updatedAt: nowISO() }, { silent: true });
+            await notifyRole('store', `استلام توريد ${p.number} — أمين المخزن`, `وصل التوريد من ${p.supplier || ''} (مع ${t.number}): ${items}\nسجّل استلامك (صورة + الكميات + الوجهة: المخزن أو أرضية المصنع) من صفحة طلب الشراء.`, { id: `po_recv_store_${p.id}`, priority: 'urgent', kind: 'task', fields: { purchaseId: p.id } });
+          }
+        }
+        if (c.extId && c.kind === 'pickup_ext') {
+          const x = byId('extorders', c.extId);
+          await notifyRole('purch', `وصل الشغل الخارجي — ${(x && x.number) || ''}`, `اتشال في ${c.number} ووصل المصنع مع ${t.number}.\nسجّل الاستلام (فحص + صورة) من صفحة الأمر الخارجي.`, { id: `ext_arrived_${c.extId}`, priority: 'high', fields: { extId: c.extId } });
+          await notifyRole('store', `${t.number}: العربية وصلت بشغل ${(x && x.number) || ''}`, 'استلمه من «التشغيل الخارجي» مع رئيس القسم.', { id: `text_${c.id}`, priority: 'high' });
+        }
+      } catch (e) { console.warn('carry', e); }
+    }
+  }
+  if (ACTIONS.tripEnd) ACTIONS.tripEnd = (base => async function (id) { const r = await base.apply(this, arguments); try { await carryArrive(byId('trips', id)); } catch (e) { /* ignore */ } return r; })(ACTIONS.tripEnd);
+  /* the server chain (tracker) and the server «back at the factory» do not run the app's steps: fill «carry» and deliver it here */
+  let _hookAt = 0;
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (!S.session || !W() || Date.now() - _hookAt < 20000) return; _hookAt = Date.now();
+    try {
+      list('trips').forEach(t => {
+        if (!t) return;
+        if (t.chainedFrom && t.carry === undefined && t.status === 'started' && mineOrFleet(t)) { const p = byId('trips', t.chainedFrom); if (p) Store.update('trips', t.id, { carry: carryOf(p) }, { silent: true }).catch(() => { }); }
+        if (t.status === 'done' && !t.chainedTo && !t.carryDone && (t.carry || []).length && fleetOk()) carryArrive(t).catch(() => { });
+        /* the planned next trip was cancelled / started elsewhere → the pointer goes (the driver sees «back to the factory» again) */
+        if (t.nextUp && t.status === 'started' && !nextUpOf(t) && fleetOk()) { const n = byId('trips', t.nextUp); if (!n || ['cancelled', 'rejected', 'done'].includes(n.status)) Store.update('trips', t.id, { nextUp: null }, { silent: true }).catch(() => { }); }
+      });
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- cancelling a chained trip that already started: the first trip opens again («back to the factory») ---------- */
+  async function unchain(id) {
+    const n = byId('trips', id); if (!n || n.status !== 'cancelled' || !n.chainedFrom) return;
+    const p = byId('trips', n.chainedFrom); if (!p || p.chainedTo !== n.id || p.status !== 'done') return;
+    const legs = legsOf(p).slice(); const last = legs[legs.length - 1]; if (last && (last.key === 'chain' || (last.key === 'depart' && p.autoClosed))) legs.pop();
+    await Store.update('trips', p.id, { status: 'started', legs, chainedTo: null, endedAt: null, endPos: null, endKm: null, endNote: null, autoClosed: false });
+    try { if (p.driverId && typeof pushSend === 'function') pushSend(['w:' + p.driverId], L(`اتلغى ${n.number}`, `${n.number} was cancelled`), L(`كمّل ${p.number} وارجع المصنع.`, `Carry on with ${p.number} and go back to the factory.`), '/#/fleet/' + p.id, 'nf-trip-' + p.id); } catch (e) { /* ignore */ }
+  }
+  ['tripCancel', 'drvTripCancel'].forEach(k => { const base = ACTIONS[k]; if (typeof base !== 'function') return; ACTIONS[k] = async function (id) { const r = await base.apply(this, arguments); try { await unchain(id); } catch (e) { console.warn('unchain', e); } return r; }; });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.tchain .cardhead{margin-bottom:8px}
+.tch-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tch-b{justify-content:center;padding:12px 10px;font-size:14.5px;font-weight:700;border-radius:12px;min-height:48px;white-space:normal;text-align:center}
+.tch-big{display:flex;width:100%;justify-content:center;gap:8px;padding:13px 12px;font-size:15px;font-weight:700;border-radius:12px;white-space:normal;text-align:center}
+.tch-from{padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface-2);font-weight:600}
+.tch-new[hidden]{display:none}
+.tch-nu{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);color:inherit;text-decoration:none;margin-bottom:6px}
+.tch-nu b{font-variant-numeric:tabular-nums;direction:ltr}
+.tch-ban a{font-weight:700}
+@media (max-width:420px){.tch-row{grid-template-columns:1fr}}
+</style>`);
+})();
+/* =====================================================================
+   v7.74 — «weekly attendance report» instead of attendance / overtime messages to the owner (Mahmoud, 15 Oct: «every message about
+   people's attendance, check-out and overtime — don't bring it to me; every week a report I just glance at; this stays with the
+   department heads and the accounts manager» — brief claude/att-weekly-brief.md; «stays with me, no notice» for the accounts
+   manager's own attendance requests; the report on Saturday morning; go-ahead given). Factory only.
+   · no push to the owner for attendance requests (edit / forgotten check-out / punch outside the shift / the accounts manager's own
+     fix) — they still wait in «Requests» when they are his to decide; they leave the bell's «requests waiting for you»;
+   · attendance edits by the accounts manager are a quiet log (78-owner-approvals), the late-reply reminders for attendance queues go
+     to the accounts manager + the factory manager (99zzZzZ-att-approvals); overtime-meal money still reaches him (a transfer);
+   · the card «Attendance — last week» on the dashboard / home (owner): per department attendance %, late, absent, overtime
+     (vs the week before), the top 3 for each, punches outside the shift, attendance edits and who made them, attendance
+     requests still waiting and where. It stays until «Seen»; the attendance page reopens it. One notice on Saturday morning
+     comes from the server (Edge remind v11). No money amounts.
+   ===================================================================== */
+(function () {
+  if ((typeof isStudioz === 'function' && isStudioz()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const ATT = new Set(['attedit', 'outfix', 'punch', 'attfix']);
+  const isAttReq = r => !!r && ATT.has(r.type);
+
+  /* ---------- 1) no attendance push to the owner ---------- */
+  if (typeof pushSend === 'function') pushSend = (base => async function (to, title, body, url, tag) {
+    try {
+      const m = /^req-(.+)$/.exec(String(tag || ''));
+      if (m && Array.isArray(to) && to.includes('role:admin') && isAttReq(byId('requests', m[1]))) { to = to.filter(x => x !== 'role:admin'); if (!to.length) return; }
+    } catch (e) { /* send as asked */ }
+    return base.call(this, to, title, body, url, tag);
+  })(pushSend);
+  /* ---------- 2) the bell: attendance requests are not «waiting for you» notices ---------- */
+  if (typeof notifItems === 'function') notifItems = (base => function () {
+    const arr = base.apply(this, arguments);
+    try { if (!isAdmin()) return arr; return arr.filter(x => { if (!x || x.kind !== 'req') return true; const m = /^#\/requests\/([^/?#]+)/.exec(String(x.href || '')); return !(m && isAttReq(byId('requests', m[1]))); }); } catch (e) { return arr; }
+  })(notifItems);
+
+  /* ---------- 3) the week ---------- */
+  const addD = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const satOf = d => { const x = new Date(d + 'T12:00:00Z'); return addD(d, -((x.getUTCDay() + 1) % 7)); };   /* the Saturday on or before d */
+  const weekOf = off => { const s = addD(satOf(todayISO()), -7 * off); return { from: s, to: addD(s, 6) }; };   /* off 1 = last week (Sat → Fri) */
+  const days = w => { const out = []; for (let d = w.from; d <= w.to; d = addD(d, 1)) out.push(d); return out; };
+  const inRange = (iso, w) => { const d = String(iso || '').slice(0, 10); return d >= w.from && d <= w.to; };
+  const staffOf = w => list('workers').filter(x => x && x.id && !['admin', 'kiosk'].includes(x.role) && (x.status !== 'inactive' || (x.leftAt && x.leftAt >= w.from)) && (!x.joined || x.joined <= w.to));
+  const deptLabel = id => { try { return deptName(id) || L('بدون قسم', 'No department'); } catch (e) { return id || L('بدون قسم', 'No department'); } };
+  /* one pass over the attendance docs: { date: { workerId: row } } for every date in [a, b] */
+  function rowsIn(a, b) { const out = {}; const months = new Set([a.slice(0, 7), b.slice(0, 7)]); list('attendance').forEach(doc => { if (!doc || !months.has(doc.month)) return; Object.entries(doc.rows || {}).forEach(([d, rows]) => { if (d < a || d > b || !rows) return; const o = out[d] || (out[d] = {}); Object.assign(o, rows); }); }); return out; }
+  function stats(w) {
+    const ds = days(w); const all = rowsIn(addD(w.from, -14), w.to); const att = {}; ds.forEach(d => { att[d] = all[d] || {}; });
+    /* only people who use the attendance (a row in the week or the two weeks before) — nobody shows as «absent all week» because he never punches */
+    const uses = new Set(); Object.values(all).forEach(rows => Object.keys(rows).forEach(id => uses.add(id)));
+    const nights = {}; list('tasks').filter(t => t && t.ot && t.ot.date && inRange(t.ot.date, w) && t.status !== 'cancelled' && t.ot.status !== 'rejected' && t.ot.night).forEach(t => (t.ot.workerIds || []).forEach(id => { nights[id] = (nights[id] || 0) + 1; }));
+    const people = staffOf(w).filter(p => uses.has(p.id) || nights[p.id]).map(p => {
+      const s = { w: p, work: 0, pres: 0, absent: 0, leave: 0, late: 0, lateMin: 0, ot: 0, nights: nights[p.id] || 0 };
+      ds.forEach(d => {
+        const row = att[d][p.id]; let c = { kind: 'unrecorded' }; try { c = classifyDay(p, d, row); } catch (e) { /* unknown */ }
+        if (['present', 'half', 'absent', 'leave', 'unrecorded'].includes(c.kind)) s.work++;
+        if (c.kind === 'present') s.pres += 1; else if (c.kind === 'half') s.pres += 0.5; else if (c.kind === 'leave') s.leave++; else if (c.kind === 'absent' || c.kind === 'unrecorded') s.absent++;
+        if (row && (+row.late || 0) > 0 && ['present', 'half'].includes(c.kind)) { let ex = false; try { ex = excused(row).late; } catch (e) { ex = false; } if (!ex) { s.late++; s.lateMin += +row.late || 0; } }
+        if (row) s.ot += c.kind === 'offwork' ? ((+row.hrs || 0) || (+row.ot || 0)) : (+row.ot || 0);
+      });
+      return s;
+    }).filter(s => s.work > 0 || s.ot > 0 || s.nights > 0);
+    const depts = {};
+    people.forEach(s => { const k = s.w.deptId || '-'; const d = depts[k] || (depts[k] = { id: k, name: deptLabel(s.w.deptId), work: 0, pres: 0, leave: 0, absent: 0, late: 0, ot: 0, nights: 0, n: 0 }); d.n++; d.work += s.work; d.pres += s.pres; d.leave += s.leave; d.absent += s.absent; d.late += s.late; d.ot += s.ot; d.nights += s.nights; });
+    const rate = x => { const base = x.work - x.leave; return base > 0 ? Math.round(x.pres / base * 100) : null; };
+    const tot = Object.values(depts).reduce((a, d) => { ['work', 'pres', 'leave', 'absent', 'late', 'ot', 'nights'].forEach(k => { a[k] += d[k]; }); return a; }, { work: 0, pres: 0, leave: 0, absent: 0, late: 0, ot: 0, nights: 0 });
+    const top = (k, n) => people.filter(s => s[k] > 0).sort((a, b) => b[k] - a[k] || String(a.w.name).localeCompare(String(b.w.name), 'ar')).slice(0, n || 3);
+    /* punches outside the shift, attendance edits (the quiet log + the old owner notices), attendance requests still waiting */
+    const punches = list('requests').filter(r => r && r.type === 'punch' && inRange(r.createdAt, w));
+    const edits = {}; let nEdits = 0;
+    list('tasks').filter(t => t && inRange(t.createdAt, w) && (t.kind === 'attlog' || /^an_/.test(String(t.id || '')))).forEach(t => { const who = String(t.createdByName || '—').split(' — ')[0]; const n = Math.max(1, String(t.desc || '').split('\n').filter(Boolean).length); edits[who] = (edits[who] || 0) + n; nEdits += n; });
+    const okEdits = list('requests').filter(r => r && r.type === 'attedit' && r.status === 'approved' && inRange(r.decidedAt || r.updatedAt, w)).length;
+    const waiting = {}; let nWait = 0;
+    list('requests').filter(r => r && r.status === 'pending' && isAttReq(r)).forEach(r => { let lab = ''; try { const st = reqStage(r); lab = st.role === 'admin' ? L('عندك', 'with you') : (typeof CHAIN_LABEL !== 'undefined' && CHAIN_LABEL[st.role]) || st.role; } catch (e) { lab = '—'; } waiting[lab] = (waiting[lab] || 0) + 1; nWait++; });
+    return { w, depts: Object.values(depts).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')), rate, tot, top, punches: { n: punches.length, ok: punches.filter(r => r.status === 'approved').length }, edits, nEdits, okEdits, waiting, nWait };
+  }
+  window.nfAttWeek = stats;
+
+  /* ---------- 4) the card ---------- */
+  const fmtD = d => { try { return fmtDate(d); } catch (e) { return d; } };
+  const H = h => { const v = Math.round(h * 10) / 10; return `${fmtNum(v)} ${L('س', 'h')}`; };
+  /* ▲ / ▼ against the week before — green when it got better (more attendance, less late / absence), red when worse */
+  const arrow = (a, b, upGood) => (a == null || b == null || a === b) ? '' : `<i class="${(a > b) === (upGood !== false) ? 'awk-good' : 'awk-bad'}">${a > b ? '▲' : '▼'}${fmtNum(Math.abs(a - b))}</i>`;
+  const short = n => String(n || '').split(' — ')[0].split(' ').slice(0, 2).join(' ');
+  function cardHTML(opts) {
+    const s = stats(weekOf(1)), p = stats(weekOf(2)); const o = opts || {};
+    const r0 = s.rate(s.tot), r1 = p.rate(p.tot);
+    const tile = (v, lab, extra, href) => `<a class="awk-t" href="${href}"><b>${v}</b><span>${esc(lab)}</span>${extra || ''}</a>`;
+    const prevOf = id => p.depts.find(d => d.id === id);
+    const rows = s.depts.map(d => { const q = prevOf(d.id); const r = s.rate(d); return `<tr><td>${esc(d.name)}</td><td class="n">${r == null ? '—' : r + '%'}${q ? arrow(r, p.rate(q)) : ''}</td><td class="n">${fmtNum(d.late)}</td><td class="n">${fmtNum(d.absent)}</td><td class="n">${H(d.ot)}</td></tr>`; }).join('');
+    const topLine = (lab, arr, fmt) => arr.length ? `<div class="awk-top"><span>${esc(lab)}</span>${arr.map(x => `<b>${esc(short(x.w.name))}</b> <small>${esc(fmt(x))}</small>`).join('، ')}</div>` : '';
+    const edits = Object.entries(s.edits).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span>${esc(short(k))}</span> ${fmtNum(v)}`).join('، ');
+    const wait = Object.entries(s.waiting).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span>${esc(k)}</span> ${fmtNum(v)}`).join('، ');
+    return `<div class="card awk" id="awk" data-ptab="pin"><div class="cardhead"><h3>${icon('clock')}${esc(L('الحضور — الأسبوع اللي فات', 'Attendance — last week'))}</h3><span class="muted small">${esc(fmtD(s.w.from))} – ${esc(fmtD(s.w.to))}</span><div class="grow"></div>${o.modal ? '' : `<button type="button" class="btn xs ghost" data-action="attWeekSeen">${esc(L('شفته', 'Seen'))}</button>`}</div>
+      <div class="awk-s">${tile(r0 == null ? '—' : r0 + '%', L('الحضور', 'Attendance'), arrow(r0, r1), '#/attendance')}${tile(fmtNum(s.tot.late), L('تأخير', 'Late'), arrow(s.tot.late, p.tot.late, false), '#/attendance')}${tile(fmtNum(s.tot.absent), L('غياب (يوم)', 'Absent (days)'), arrow(s.tot.absent, p.tot.absent, false), '#/attendance')}${tile(fmtNum(s.tot.nights), L('ليالي سهر', 'Overtime nights'), `<small>${esc(H(s.tot.ot))}</small>`, '#/otnight')}</div>
+      ${rows ? `<div class="tablewrap"><table class="tbl awk-tb"><thead><tr><th>${esc(L('القسم', 'Department'))}</th><th class="n">${esc(L('الحضور', 'Attendance'))}</th><th class="n">${esc(L('تأخير', 'Late'))}</th><th class="n">${esc(L('غياب', 'Absent'))}</th><th class="n">${esc(L('سهر', 'Overtime'))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="muted small">${esc(L('مفيش حضور متسجّل الأسبوع ده', 'No attendance recorded that week'))}</div>`}
+      ${topLine(L('أكتر تأخير:', 'Most late:'), s.top('late'), x => `${fmtNum(x.late)}×`)}${topLine(L('أكتر غياب:', 'Most absent:'), s.top('absent'), x => `${fmtNum(x.absent)} ${L('يوم', 'd')}`)}${topLine(L('أكتر سهر:', 'Most overtime:'), s.top('ot'), x => H(x.ot))}
+      <div class="awk-f">
+        <a href="#/requests">${esc(L('بصمات برّه الوردية', 'Punches outside the shift'))}: <b>${fmtNum(s.punches.n)}</b>${s.punches.n ? ` <small>(${esc(L('اتعمد', 'approved'))} ${fmtNum(s.punches.ok)})</small>` : ''}</a>
+        <a href="#/attendance">${esc(L('تعديلات الحضور', 'Attendance edits'))}: <b>${fmtNum(s.nEdits)}</b>${edits ? ` <small>(${edits})</small>` : ''}${s.okEdits ? ` · ${esc(L('طلبات تعديل اتقبلت', 'edit requests approved'))} <b>${fmtNum(s.okEdits)}</b>` : ''}</a>
+        <a href="#/requests">${esc(L('طلبات حضور لسه', 'Attendance requests still open'))}: <b>${fmtNum(s.nWait)}</b>${wait ? ` <small>(${wait})</small>` : ''}</a>
+      </div></div>`;
+  }
+  window.nfAttWeekCard = cardHTML;
+  const seenKey = () => 'nf.attweek.seen.' + ((S.session && S.session.id) || 'x');
+  const seen = () => { try { return localStorage.getItem(seenKey()) === weekOf(1).from; } catch (e) { return false; } };
+  let _memo = null;
+  ACTIONS.attWeekSeen = () => { try { localStorage.setItem(seenKey(), weekOf(1).from); } catch (e) { /* ignore */ } const c = document.getElementById('awk'); if (c) c.remove(); };
+  ACTIONS.attWeekOpen = () => openModal({ title: L('الحضور — الأسبوع اللي فات', 'Attendance — last week'), wide: true, footer: null, body: cardHTML({ modal: true }) });
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; const v = document.getElementById('view'); if (!v || !S.session || !isAdmin()) return;
+      if (r.view === 'attendance' && !r.id) { if (!v.querySelector('[data-action="attWeekOpen"]')) v.insertAdjacentHTML('afterbegin', `<div class="awk-open"><button type="button" class="btn sm" data-action="attWeekOpen">${icon('clock')}${esc(L('تقرير الأسبوع اللي فات', "Last week's report"))}</button></div>`); return; }
+      if (!((r.view === 'dashboard' || r.view === 'home') && !r.id)) return;
+      const old = v.querySelector('#awk'); if (seen()) { if (old) old.remove(); return; }
+      /* the numbers are counted at most once a minute; the same card stays the same element */
+      const k = weekOf(1).from + '|' + (en() ? 'en' : 'ar'); if (!_memo || _memo.k !== k || Date.now() - _memo.at > 60000) _memo = { k, at: Date.now(), html: cardHTML() };
+      if (old && old.__h === _memo.html) return; if (old) old.remove();
+      const after = v.querySelector('#omf'); if (after) after.insertAdjacentHTML('afterend', _memo.html); else v.insertAdjacentHTML('afterbegin', _memo.html);
+      const nw = v.querySelector('#awk'); if (nw) nw.__h = _memo.html;
+    } catch (e) { console.warn('attweek', e); }
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.awk .cardhead{margin-bottom:8px;flex-wrap:wrap}
+.awk-s{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:8px}
+.awk-t{display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 4px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);color:inherit;text-decoration:none;min-width:0}
+.awk-t b{font-size:18px;line-height:1.15;font-variant-numeric:tabular-nums}.awk-t span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.awk-t small{font-size:11px;color:var(--muted)}
+.awk i{font-style:normal;font-size:10.5px;font-weight:700;margin-inline-start:3px}.awk-good{color:var(--good,#30a46c)}.awk-bad{color:var(--crit,#c0504d)}
+.awk-t .awk-good,.awk-t .awk-bad{margin:0}
+.awk-tb{table-layout:fixed;width:100%}.awk-tb th,.awk-tb td{padding:6px 4px;font-size:12.5px;overflow-wrap:anywhere}.awk-tb th:first-child,.awk-tb td:first-child{width:36%}.awk-tb .n{white-space:nowrap;text-align:center}
+@media (max-width:420px){.awk-tb th,.awk-tb td{font-size:11.5px;padding:5px 3px}.awk-tb th:first-child,.awk-tb td:first-child{width:34%}}
+.awk-top{font-size:12.5px;margin-top:6px;line-height:1.6}.awk-top span{color:var(--muted);margin-inline-end:4px}.awk-top small{color:var(--muted)}
+.awk-f{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12.5px}
+.awk-f a{color:inherit;text-decoration:none}.awk-f small{color:var(--muted)}
+.awk-open{display:flex;justify-content:flex-end;margin-bottom:8px}
+@media (max-width:420px){.awk-s{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>`);
 })();
