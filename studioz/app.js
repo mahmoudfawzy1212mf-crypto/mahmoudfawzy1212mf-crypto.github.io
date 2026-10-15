@@ -40521,7 +40521,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       if (typeof moneyDue === 'function') moneyDue().forEach(x => {
         if (x.action === 'poPayLater') { const p = byId('purchases', x.id); const due = p && p.deferred && p.deferred.due; if (!due || due > addDays(today, 3)) return; }
         seen.add('fund_' + x.id); seen.add('pbt_' + x.id); seen.add(x.id);
-        out.push({ k: ['fund', 'opex', 'pb', 'sup'].includes(x.kind) ? x.kind : 'po', id: x.kind + ':' + x.id, raw: x.id, kind: x.kind, label: x.label, sub: x.sub || '', subNo: x.subNo, amount: +x.amount || 0, href: x.href ? '#/' + x.href : (['fund', 'opex'].includes(x.kind) ? '#/requests/' + x.id : '#/money') });   /* v7.60: a custody / running-cost line opens the request itself */
+        out.push({ k: ['fund', 'opex', 'pb', 'sup'].includes(x.kind) ? x.kind : 'po', id: x.kind + ':' + x.id, raw: x.id, kind: x.kind, label: x.label, sub: x.sub || '', subNo: x.subNo, amount: +x.amount || 0, act: x.action || '', href: x.href ? '#/' + x.href : (['fund', 'opex'].includes(x.kind) ? '#/requests/' + x.id : '#/money') });   /* v7.60: a custody / running-cost line opens the request itself */
       });
     } catch (e) { /* ignore */ }
     try {
@@ -40532,6 +40532,17 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     return out;
   }
   window.nfOwnerMoney = moneyItems;
+  /* v7.75 (Mahmoud 15 Oct, on the bell: «I tap Mostafa Abdelsamie — it should take me straight to the transfer I have to send»):
+     a money line opens its own transfer window — a PO → its transfer, a supplier's POs → one transfer to him, custody / running
+     cost → its payment, a pay batch → the batch, an advance batch → the one-transfer window; anything else → its page. */
+  window.nfMoneyOpen = id => {
+    try {
+      const x = moneyFor().find(y => y.id === id); if (!x) return false;
+      if (x.act && typeof ACTIONS[x.act] === 'function') { ACTIONS[x.act](x.raw); return true; }
+      if (x.k === 'adv' && x.sel === 'own' && typeof window.nfMoneyGo === 'function') { window.nfMoneyGo([x]); return true; }
+    } catch (e) { /* fall back to the page */ }
+    return false;
+  };
   /* v7.47 (Mahmoud, 12 Oct: «in money waiting for you let me pick one, two or three transfers … for me, Bahaa, Ahmed
      Abdelzaher and Saeed, each by his job»): the card also shows for the approvers (Saeed / Ahmed: what waits to be grouped
      and sent to the owner) and the payer (Bahaa, Ahmed when he pays: advances to transfer and pay-batch items), each with only
@@ -40614,7 +40625,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   /* the bell: money first */
   if (typeof notifItems === 'function') notifItems = (base => function () {
     const arr = base.apply(this, arguments);
-    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', mk: x.k, n: 1, at: '9999', title: x.label, sub: x.subNo != null ? x.subNo : x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
+    try { if (!isAdmin()) return arr; const mi = moneyItems(); if (!mi.length) return arr; const mt = x => { const m = /^#\/tasks\/(.+)$/.exec(String(x.href || '')); return !!m && isMoneyTask(byId('tasks', m[1])); }; return mi.map(x => ({ kind: 'money', mk: x.k, mid: x.id, n: 1, at: '9999', title: x.label, sub: x.subNo != null ? x.subNo : x.sub, href: x.href })).concat(arr.filter(x => !(x.kind === 'notice' && mt(x)))); } catch (e) { return arr; }
   })(notifItems);
   document.head.insertAdjacentHTML('beforeend', `<style>
     .omf{border-color:var(--warn,#e5932a)!important}.omf .cardhead{margin-bottom:6px}
@@ -40784,12 +40795,12 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   }
   const groupCard = (g, i) => {
     const K = NK()[g.k]; const x = g.items[0]; const n = g.items.reduce((a, y) => a + (+y.n || 1), 0);
-    return `<a href="#" role="button" class="ahn ${g.items.length > 1 ? 'stack' : ''}" data-ahg="${esc(g.k)}" data-ahh="${esc(g.items.length === 1 ? x.href : '')}"><span class="ahn-ic" style="background:${K[1]}">${glyph(K[2], 20)}${n > 1 ? `<i>${n}</i>` : ''}</span><span class="ahn-t"><b>${esc(K[0])}</b><span>${esc(x.title)}</span></span><span class="ahn-tm">${esc(x.at === '9999' ? L('مستني', 'waiting') : ago(x.at))}</span></a>`;
+    return `<a href="#" role="button" class="ahn ${g.items.length > 1 ? 'stack' : ''}" data-ahg="${esc(g.k)}" data-ahh="${esc(g.items.length === 1 ? x.href : '')}"${g.items.length === 1 && x.mid ? ` data-bmid="${esc(x.mid)}"` : ''}><span class="ahn-ic" style="background:${K[1]}">${glyph(K[2], 20)}${n > 1 ? `<i>${n}</i>` : ''}</span><span class="ahn-t"><b>${esc(K[0])}</b><span>${esc(x.title)}</span></span><span class="ahn-tm">${esc(x.at === '9999' ? L('مستني', 'waiting') : ago(x.at))}</span></a>`;
   };
   /* v7.74 (Mahmoud 15 Oct, on the bell: «the advances messages together, the supplier transfers together — I want it organised»):
      «money waiting for you» opens in sections — advances · supplier transfers · custody & running costs · … — each with its count,
      its first lines and «N more» to the money page; the other groups stay one list */
-  const xi = x => `<a class="ahn-xi" href="${esc(x.href)}"><b>${esc(x.title)}</b>${x.sub ? `<span>${esc(x.sub)}</span>` : ''}${x.at === '9999' ? '' : `<small>${esc(ago(x.at))}</small>`}</a>`;
+  const xi = x => `<a class="ahn-xi" href="${esc(x.href)}"${x.mid ? ` data-bmid="${esc(x.mid)}"` : ''}><b>${esc(x.title)}</b>${x.sub ? `<span>${esc(x.sub)}</span>` : ''}${x.at === '9999' ? '' : `<small>${esc(ago(x.at))}</small>`}</a>`;
   const MSEC = () => [['adv', L('السلف', 'Advances'), ['adv']], ['sup', L('تحويلات الموردين', 'Supplier transfers'), ['po', 'sup']], ['fund', L('العُهد والمصاريف', 'Custody & running costs'), ['fund', 'opex']], ['pb', L('دفعات مجمّعة', 'Grouped batches'), ['pb']], ['chq', L('شيكات', 'Cheques'), ['chq']], ['etc', L('تانية', 'Other'), null]];
   function expHTML(g) {
     if (g.k !== 'money' || !g.items.some(x => x.mk)) return g.items.slice(0, 12).map(xi).join('');
@@ -40800,9 +40811,23 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     });
     return out.join('');
   }
+  /* v7.75 (Mahmoud 15 Oct: «I tap a line in the bell — it should take me straight there and the list should disappear»): any line
+     closes the bell at once; a money line opens its transfer window right away (nfMoneyOpen), the rest go to their page —
+     even when that page is the one already open. */
+  function bellLeave(href, mid) {
+    const p = document.getElementById('bellpop'); if (p) p.remove();
+    if (mid && typeof window.nfMoneyOpen === 'function' && window.nfMoneyOpen(mid)) return;
+    if (!href || href === '#') return;
+    if (location.hash !== href) location.hash = href; else { try { parseRoute(); render(true); window.scrollTo(0, 0); } catch (e) { /* ignore */ } }
+  }
+  document.addEventListener('click', e => {
+    const a = e.target.closest && e.target.closest('#bellpop a.ahn-xi, #bellpop a.ahn-more'); if (!a) return;
+    e.preventDefault(); bellLeave(a.getAttribute('href') || '', a.dataset.bmid || '');
+  });
+  window.addEventListener('hashchange', () => { const p = document.getElementById('bellpop'); if (p) p.remove(); });
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('[data-ahg]'); if (!b) return; e.preventDefault();
-    if (b.dataset.ahh) { const p = document.getElementById('bellpop'); if (p) p.remove(); location.hash = b.dataset.ahh; return; }
+    if (b.dataset.ahh) { bellLeave(b.dataset.ahh, b.dataset.bmid); return; }
     const g = noteGroups().find(x => x.k === b.dataset.ahg); if (!g) return;
     const open = b.nextElementSibling && b.nextElementSibling.classList.contains('ahn-x'); if (open) { b.nextElementSibling.remove(); return; }
     b.insertAdjacentHTML('afterend', `<div class="ahn-x">${expHTML(g)}</div>`);
