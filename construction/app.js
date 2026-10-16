@@ -41409,7 +41409,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   --shadow:0 1px 2px rgba(30,40,30,.04),0 8px 22px -14px rgba(40,50,35,.20); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.22);
   --wall:radial-gradient(560px 520px at 108% -8%,rgba(172,204,182,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(240,212,172,.95),transparent 68%),linear-gradient(170deg,#d9e8dd 0%,#f3f1ea 48%,#f4e4cb 100%);
   --radius:18px; --radius-sm:12px;
-  --side-bg:#f6f4ee; --side-ink:#22281f; --side-muted:#7b8476; --side-line:rgba(60,75,55,.10); --side-hover:rgba(110,125,110,.11); --side-on:#4f7a64; --side-on-bg:#fffdf8; --nf-side:#f6f4ee;`;
+  --side-bg:#f6f4ee; --side-ink:#22281f; --side-muted:#7b8476; --side-line:rgba(60,75,55,.10); --side-hover:rgba(110,125,110,.11); --side-on:#4f7a64; --side-on-bg:#fffdf8; --nf-side:#f6f4ee;
+  --nf-side-ink:#22281f; --nf-side-muted:#7b8476; --mh-logo:none; --mh-ink:#22281f;`;
   const DARK = `
   --bg:#151b26; --surface:#1f2735; --surface-2:#273042; --surface-3:rgba(150,165,190,.14); --card:rgba(32,40,56,.86);
   --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12);
@@ -41420,7 +41421,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   --glass:#1f2735; --glass-solid:#1f2735; --glass-brd:transparent;
   --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 26px -16px rgba(0,0,0,.6); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
   --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);
-  --side-bg:#18202c; --side-ink:#e9edf3; --side-muted:#94a0b0; --side-line:rgba(255,255,255,.07); --side-hover:rgba(150,165,190,.14); --side-on:#94b3d6; --side-on-bg:#1f2735; --nf-side:#18202c;`;
+  --side-bg:#18202c; --side-ink:#e9edf3; --side-muted:#94a0b0; --side-line:rgba(255,255,255,.07); --side-hover:rgba(150,165,190,.14); --side-on:#94b3d6; --side-on-bg:#1f2735; --nf-side:#18202c;
+  --nf-side-ink:#e9edf3; --nf-side-muted:#94a0b0; --mh-logo:invert(1); --mh-ink:#e9edf3;`;
   const X = 'html.apple:not(.iph)';
   const XL = `
   --bg:#f3f1ea; --surface:#fffdf8; --surface-2:rgba(110,125,110,.09); --surface-3:rgba(110,125,110,.15);
@@ -41541,6 +41543,16 @@ ${I} .rq-t{background:var(--surface)!important;border-color:transparent!importan
 ${I} .pf-pick{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 ${I} .pf-pick.on{border-color:var(--good-ink);color:var(--good-ink);background:var(--good-soft)}
 ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
+/* v7.80 (Mahmoud 16 Oct, screenshot «some text does not show»): on the light Ninety home the header and the side card were still
+   drawn for a dark background — white logo and pale words on the light colour. The logo and the words follow the mode now. */
+${I} .nhome .mhead{border-bottom:.5px solid var(--line)}
+${I} .nhome .mhead img.wordmark,${I} .nhome .nbrand img{filter:var(--mh-logo,invert(1))!important}
+${I} .nhome .mhead .langsw{color:var(--mh-ink,#e5e7eb)!important;border-color:var(--line-2)!important;opacity:1!important}
+${I} .nhome .mhead .langsw *{color:inherit!important}
+${I} .nhome .nbrand{border-bottom-color:var(--line)!important}
+${I} .nhome .co{background:var(--surface)!important}
+${I} .nhome .co .mini span{background:var(--surface-3)!important}
+${I} .nhome .qa button{border-color:var(--line-2)!important;background:var(--surface)!important;color:var(--ink)!important}
 
 /* v7.80 (Mahmoud 16 Oct: «you did not set it to what we chose — option 3 by day, option 2 at night»; he works on Advanced):
    the same two palettes on the Advanced look too — sage & sand by day, calm navy at night, a navy menu instead of black.
