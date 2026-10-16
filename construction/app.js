@@ -53134,7 +53134,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   st.textContent = `#nf-fresh-bar{position:fixed;inset-inline:12px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:2147483000;display:flex;gap:10px;align-items:center;justify-content:space-between;background:#1f2d3d;color:#fff;border-radius:14px;padding:10px 12px;font-size:13.5px;line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:640px;margin-inline:auto}
 #nf-fresh-bar button{flex:none;border:0;border-radius:10px;padding:7px 12px;background:#fff;color:#1f2d3d;font:inherit;font-weight:600;cursor:pointer}
 #nf-fresh-dlg{position:fixed;inset:0;z-index:2147483001;background:rgba(10,16,24,.55);display:flex;align-items:center;justify-content:center;padding:16px}
-#nf-fresh-dlg .nffd-card{background:var(--card,#fff);color:var(--ink,#1d2733);border-radius:20px;padding:20px 18px 16px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+#nf-fresh-dlg .nffd-card{background:var(--surface,var(--card,#fff));color:var(--ink,#1d2733);border-radius:20px;padding:20px 18px 16px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)}
 #nf-fresh-dlg .nffd-ic{width:52px;height:52px;margin:0 auto 8px;border-radius:50%;background:#e8f0f8;color:#2f4b69;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
 #nf-fresh-dlg h3{margin:0 0 6px;font-size:17px}#nf-fresh-dlg p{margin:0 0 14px;font-size:14px;line-height:1.7;opacity:.85}
 #nf-fresh-dlg .nffd-b{display:flex;gap:8px;justify-content:center}#nf-fresh-dlg .nffd-b button{border:0;border-radius:12px;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer;background:var(--bg2,#eef1f5);color:inherit}
@@ -54898,7 +54898,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     .nfl-intro{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin:0 0 8px}.nfl-intro>span:nth-child(2){flex:1 1 220px}.nfl-intro-b{display:flex;gap:6px}
     .nfsc{display:flex;gap:8px;align-items:center;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:2px 0 6px;scrollbar-width:none}.nfsc::-webkit-scrollbar{display:none}
     .nfsc-h{font-size:12px;color:var(--muted,#667);white-space:nowrap;flex:0 0 auto}
-    .nfsc-i{display:inline-flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line,#e3e5ea);background:var(--card,#fff);color:inherit;text-decoration:none;font-size:13px;min-height:36px}
+    .nfsc-i{display:inline-flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line,#e3e5ea);background:var(--surface,var(--card,#fff));color:var(--ink,inherit);text-decoration:none;font-size:13px;min-height:36px}   /* v7.84: «--card» is not set in the night look → the chips came out white with pale text */
     .nfsc-i svg{width:16px;height:16px}.nfsc-w{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--line,#e3e5ea);background:transparent;color:var(--muted,#667);cursor:pointer}
     .nfl-sec{margin:0 0 12px}.nfl-h{margin:0 0 6px;font-size:16px}.nfl-h4{margin:12px 0 6px;font-size:13px;color:var(--muted,#667)}.nfl-sub{margin:0 0 8px}
     .nfl-s .nfl-t,.nfl-t{margin:4px 0 0;line-height:1.6}.nfl-btns{display:flex;gap:6px;flex-wrap:wrap}.nfl-tk{font-weight:600}
@@ -55148,11 +55148,11 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     ((LD.office && LD.office.suggestions) || []).filter(s => s.kind === 'llm').forEach(s => { const b = document.querySelector(`.nfl-s [data-arg="${CSS.escape(s.id)}|apply"]`); const it = b && b.closest('.nfl-s'); const t = it && it.querySelector('.title'); if (t && !t.querySelector('.nfl-ai')) t.insertAdjacentHTML('beforeend', ' <span class="badge acc nfl-ai" title="AI">AI</span>'); });
   });
 
-  /* dashboard: orders that may be late (owner) */
+  /* dashboard: orders that may be late (owner) — v7.84 (Mahmoud 16 Oct: «I don't want this to show first»): at the end of the page, not on top */
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
     const vw = document.getElementById('view'); if (!vw || !isOwner() || viewName() !== 'dashboard' || vw.querySelector('#nfl-risk-card')) return;
     const arr = predict().filter(x => x.p >= 50); if (!arr.length) return;
-    vw.insertAdjacentHTML('afterbegin', `<div class="card nfl-sec" id="nfl-risk-card"><div class="cardhead"><h3>${esc(L('أوامر ممكن تتأخر', 'Orders that may be late'))}</h3><a class="btn sm ghost" href="#/nfsmart">${esc(L('الكل', 'All'))}</a></div>${vPredict(4)}</div>`);
+    vw.insertAdjacentHTML('beforeend', `<div class="card nfl-sec" id="nfl-risk-card"><div class="cardhead"><h3>${esc(L('أوامر ممكن تتأخر', 'Orders that may be late'))}</h3><a class="btn sm ghost" href="#/nfsmart">${esc(L('الكل', 'All'))}</a></div>${vPredict(4)}</div>`);
   });
 
   /* ================= screens that fit the person ================= */
