@@ -79,9 +79,11 @@ self.addEventListener('fetch', e => {
   if (same && url.pathname === '/meet.html') return; // v7.48: the meeting guest page is its own page (never cached as the app)
   if (same && /^\/oauth\//.test(url.pathname)) return; // v7.66: the sign-in / consent page for ChatGPT is its own page (never cached as the app)
   if (same && (req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html'))) {
-    // app page: network first (so updates arrive), cached copy when offline
-    // (cache: 'no-cache' revalidates with the host even when it sends a max-age, e.g. GitHub Pages)
-    e.respondWith(fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)).catch(() => { }); return r; }).catch(() => caches.match('./index.html')));
+    // app page: the cached shell first (instant open), the network when it is missing — and only an HTML answer is ever kept
+    // (v7.75: the shell key is fixed (./index.html); a non-HTML response or one from another path never gets stored under it)
+    const isHtml = r => r && r.ok && /text\/html/i.test(r.headers.get('content-type') || '');
+    const shellUrl = new URL('./index.html', self.registration.scope).href;
+    e.respondWith(caches.open(CACHE).then(c => c.match(shellUrl).then(hit => (hit && /text\/html/i.test(hit.headers.get('content-type') || '')) ? hit : (hit ? c.delete(shellUrl) : Promise.resolve()).then(() => fetch(shellUrl, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { if (isHtml(r)) { const copy = r.clone(); c.put(shellUrl, copy).catch(() => { }); } return r; })))).catch(() => caches.match(shellUrl)));
     return;
   }
   if (same && url.pathname.endsWith('/config.js')) {
