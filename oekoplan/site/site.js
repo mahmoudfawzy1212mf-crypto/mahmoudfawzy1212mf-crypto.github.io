@@ -124,8 +124,10 @@
       <button class="burger" id="burger" aria-label="Menu" aria-expanded="false"><i></i><i></i><i></i></button></div>`;
     document.body.prepend(el);
     $('#burger').addEventListener('click', () => { const o = el.classList.toggle('open'); $('#burger').setAttribute('aria-expanded', o ? 'true' : 'false'); document.body.style.overflow = o ? 'hidden' : ''; });
-    const hero = $('.hero, .pfh'); const onS = () => { el.classList.toggle('solid', window.scrollY > (hero ? Math.min(hero.offsetHeight - 80, window.innerHeight * .6) : 10)); }; onS(); addEventListener('scroll', onS, { passive: true });
-    if (!hero) document.body.classList.add('light-nav');
+  }
+  function navWatch() {
+    const el = $('#nav'); const hero = $('.hero, .pfh'); const onS = () => { el.classList.toggle('solid', window.scrollY > (hero ? Math.min(hero.offsetHeight - 80, window.innerHeight * .6) : 10)); }; onS(); addEventListener('scroll', onS, { passive: true });
+    document.body.classList.toggle('light-nav', !hero);
   }
   const langHref = () => { const u = new URL(location.href); if (ar()) u.searchParams.delete('lang'); else u.searchParams.set('lang', 'ar'); return u.pathname.replace(/^.*\//, '') + u.search + u.hash; };
   function footer() {
@@ -210,7 +212,8 @@
       main.appendChild(band());
     },
     async studio(main) {
-      main.innerHTML = `<section class="hero short"><img src="${SRC}brand/cover-1.jpg" alt=""><div class="wrap"><div><div class="eyebrow">${esc(L('The studio', 'المكتب'))}</div><h1>${esc(L('Nearly thirty years of outdoor life in Egypt.', 'قرابة تلاتين سنة من الحياة في الهواء الطلق في مصر.'))}</h1></div></div></section>
+      const h = PROJECTS.find(x => x.id === 'ok-xanadu') || PROJECTS[2] || FALLBACK[2];
+      main.innerHTML = `<section class="hero short"><img src="${esc(cover(h).full || cover(h).src)}" alt=""><div class="wrap"><div><div class="eyebrow">${esc(L('The studio', 'المكتب'))}</div><h1>${esc(L('Nearly thirty years of outdoor life in Egypt.', 'قرابة تلاتين سنة من الحياة في الهواء الطلق في مصر.'))}</h1></div></div></section>
       <section class="sec"><div class="wrap intro"><p class="lead rv">${esc(L(OFFICE.about[0], OFFICE.about[1]))}</p><div class="txt rv"><div class="vm" style="border:0;padding:0;grid-template-columns:1fr"><div><h3>${esc(L('Vision', 'رؤيتنا'))}</h3><p>${esc(L(OFFICE.vision[0], OFFICE.vision[1]))}</p></div><div><h3>${esc(L('Mission', 'مهمتنا'))}</h3><p>${esc(L(OFFICE.mission[0], OFFICE.mission[1]))}</p></div><div><h3>${esc(L('Values', 'قيمنا'))}</h3><div class="vals">${OFFICE.values.map(v => `<span>${esc(L(v[0], v[1]))}</span>`).join('')}</div></div></div></div></div>
         <div class="wrap" style="margin-top:clamp(40px,6vw,80px)">${numbers()}</div></section>
       <section class="sec alt"><div class="wrap">${sechead(T('leadership'), L('Dr. Tarek Sobhy', 'د. طارق صبحي'))}<div class="split"><div class="ph rv"><img src="${SRC}brand/tarek.jpg" alt="Dr. Tarek Sobhy"></div><div class="txt rv"><p class="lead">${esc(L('Founder and principal. In 2019 he received the first Lifetime Achievement Award given by Landscape Middle East — a recognition of three decades shaping the discipline in Egypt and the region.', 'المؤسس ورئيس المكتب. سنة 2019 استلم أول جايزة إنجاز مدى الحياة بتمنحها Landscape Middle East — تقدير لتلاتين سنة من تشكيل المهنة في مصر والمنطقة.'))}</p><p>${esc(L('He leads every project personally from the first site walk, with a studio of more than ninety landscape architects, engineers and site supervisors behind him.', 'بيقود كل مشروع بنفسه من أول مشية في الأرض، ووراه مكتب فيه أكتر من تسعين مهندس لاند سكيب ومهندس ومشرف موقع.'))}</p><div class="name"><img src="${SRC}brand/sig.png" alt=""><div><b>Dr. Tarek Sobhy</b><small>${esc(L('Founder & Principal', 'المؤسس ورئيس المكتب'))}</small></div></div></div></div></div></section>
@@ -244,9 +247,9 @@
     document.documentElement.lang = ar() ? 'ar' : 'en'; document.documentElement.dir = ar() ? 'rtl' : 'ltr';
     const page = document.body.dataset.page || 'home'; const main = $('#main') || document.body.appendChild(Object.assign(document.createElement('main'), { id: 'main' }));
     nav();
-    if (page === 'home' || page === 'work' || page === 'services') await loadProjects();
+    if (page !== 'contact') await loadProjects();
     await PAGES[page](main);
-    footer(); lazy(); reveal(); if ($('[data-count]')) countUp();
+    navWatch(); footer(); lazy(); reveal(); if ($('[data-count]')) countUp();
     const tt = { home: ['Ökoplan Landscaping — Landscape architecture, Cairo', 'أوكوبلان لتنسيق المواقع — عمارة اللاند سكيب، القاهرة'], work: ['Work — Ökoplan Landscaping', 'المشاريع — أوكوبلان'], services: ['Services — Ökoplan Landscaping', 'الخدمات — أوكوبلان'], studio: ['The studio — Ökoplan Landscaping', 'المكتب — أوكوبلان'], contact: ['Contact — Ökoplan Landscaping', 'تواصل معانا — أوكوبلان'] };
     if (!qs.get('p') && tt[page] && ar()) document.title = tt[page][1];
   }
