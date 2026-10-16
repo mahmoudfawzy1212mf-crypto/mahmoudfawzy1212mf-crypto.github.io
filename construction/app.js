@@ -11830,6 +11830,10 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 .nhome .plan div b{display:block;color:var(--ink);font-size:12.5px}
 .nhome .mhead{display:none}
 @media(max-width:820px){.nhome{grid-template-columns:1fr}.nhome .nmain{order:-1}.nhome .mhead{display:flex;align-items:center;justify-content:space-between;background:var(--nf-side);color:var(--nf-side-ink);margin:-14px -14px 4px;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px}.nhome .mhead img{height:22px;filter:invert(1)!important}.nhome .mhead .av{width:34px;height:34px;border-radius:50%;overflow:hidden;background:var(--nf-fab);display:grid;place-items:center;color:#fff;font-weight:700}.nhome .mhead .av img{width:100%;height:100%;object-fit:cover;filter:none!important}.nhome .nside{padding-top:calc(12px + env(safe-area-inset-top,0px))}.nhome .blk .bd{grid-template-columns:1fr}.nhome .r{grid-template-columns:repeat(2,1fr)}.nhome .nmain{padding:14px 14px 40px}}
+/* v7.78 (Mahmoud 15 Oct, phone screenshots: «when I scroll, the 90 logo, my picture and the systems come again from below»): on a phone the
+   side column sits under the page — its logo, name chip, language switch and company list repeat what the top already shows, so they are
+   hidden there; what stays (look switch, quick actions, alerts) is one rounded card at the end of the page. */
+@media(max-width:820px){.nhome .nside .ndup,.nhome .nside .langrow.nh{display:none!important}.nhome .nside{margin:0 14px calc(96px + env(safe-area-inset-bottom,0px));border-radius:20px;padding:12px 12px 14px!important}.nhome .nside .lookrow.nh{margin-top:2px}}
 .nfback{margin-top:8px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:10px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;text-align:right;width:100%}
 .nfback:hover{color:var(--ink);background:var(--surface-2)}
 .nfshare{font-size:11px}
@@ -11904,9 +11908,9 @@ function ninetyHomeHTML() {
   const f = ninetyFactoryStats(); const sel = S.ui.ninetySel || ''; const day = fmtDate(todayISO());
   const main = sel === 'studio' || sel === 'construction' ? ninetySoonBlock(sel) + ninetyFactoryBlock(f) + ninetySoonBlock(sel === 'studio' ? 'construction' : 'studio') : ninetyFactoryBlock(f) + ninetySoonBlock('studio') + ninetySoonBlock('construction');
   return `<div class="nhome" id="nhome"><aside class="nside">
-    <div class="nbrand">${logoImg(24)}</div>
-    <div class="uchip">${ninetyAvatar()}<div><b>${esc(nfHubNameShown())}</b><small>${esc(ninetyCoName())}</small></div></div>
-    <div class="sec">الشركات</div><div class="cos">${ninetySideCo('factory', f)}${ninetySideCo('studio', f)}${ninetySideCo('construction', f)}</div>
+    <div class="nbrand ndup">${logoImg(24)}</div>
+    <div class="uchip ndup">${ninetyAvatar()}<div><b>${esc(nfHubNameShown())}</b><small>${esc(ninetyCoName())}</small></div></div>
+    <div class="sec ndup">الشركات</div><div class="cos ndup">${ninetySideCo('factory', f)}${ninetySideCo('studio', f)}${ninetySideCo('construction', f)}</div>
     <div class="sec">إجراءات سريعة</div><div class="qa"><button type="button" data-action="ninetyView">${icon('user')}شوف بعين…</button><button type="button" data-action="ninetyBell">${icon('bell')}الإشعارات</button><button type="button" class="crit" data-action="ninetyFreeze">${icon('alert')}تجميد طارئ</button></div>
     <div class="sec">تنبيهات الآن</div><div class="alerts">${ninetyAlerts()}</div>
     <div class="sfoot"><span>${day}</span><span>Ninety · نسخة ${esc((APP.build || '').slice(0, 13) || NINETY_VER)}</span></div>
@@ -33999,7 +34003,8 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
   const L = (a, b) => (en() ? b : a);
   const active = w => w && !['inactive', 'stopped'].includes(w.status);
   const deptsOf = w => [w.deptId].concat(Array.isArray(w.deptIds) ? w.deptIds : []).filter(Boolean);
-  const headsOf = d => list('workers').filter(w => active(w) && w.role === 'head' && deptsOf(w).includes(d));
+  /* v7.78: + whoever leads the department on top of his own role (workers.headDepts — Haitham for «حركة النقل») */
+  const headsOf = d => list('workers').filter(w => active(w) && ((w.role === 'head' && deptsOf(w).includes(d)) || (w.role !== 'head' && Array.isArray(w.headDepts) && w.headDepts.includes(d))));
   const today = () => todayISO();
   /* the two-step overtime approval started on 4 Oct 2026 (v6.46): older unapproved overtime is not counted as the manager's delay */
   const OT_SINCE = '2026-10-04';
@@ -34326,7 +34331,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
 if (typeof STU_ON === 'undefined' || !STU_ON) (function () {
   if (typeof RENDER_HOOKS === 'undefined' || typeof setAtt !== 'function') return;
   const OT_PFX = 'إضافي: ';
-  const isMgr = () => role() === 'manager'; const isHr = () => role() === 'hr'; const isHead = () => role() === 'head';
+  const isMgr = () => role() === 'manager'; const isHr = () => role() === 'hr'; const isHead = () => role() === 'head' || (typeof window.nfHeadDepts === 'function' && window.nfHeadDepts().length > 0);   /* v7.78: + a department led on top of the person's role */
   const needsOk = () => !(S.settings.policy && S.settings.policy.otNeedsApproval === false);
   const otTasks = () => list('tasks').filter(t => t && t.ot && t.ot.date && t.status !== 'cancelled' && t.ot.status !== 'rejected');
   const taskFor = (date, wid) => otTasks().find(t => t.ot.date === date && (t.ot.workerIds || []).includes(wid) && t.ot.status === 'ok') || null;
@@ -40099,6 +40104,11 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
    · report: every night, who stayed, on which project, where, how it was paid, who was deducted; month totals per department
      and per project.
    · no money amounts in tasks or notifications. Factory only. iPhone and Android · Advanced and Classic · Arabic and English.
+   v7.78 (Mahmoud 15 Oct — brief claude/meals-noon-brief.md): every production / installation head is asked at 12:00 (server), reminded
+   at 13:00 and 14:00, the factory manager follows up at 14:30; the head picks ANY running work order (no «open for overtime» needed
+   any more) or presses «no overtime tonight». The meals go to the owner as ONE custody request for the whole day (server, as soon as
+   every department answered or at 15:00) — a registration after it goes as an «addition». The owner transfers to Bahaa from the
+   request (his number in the window); the picture is read and checked against Bahaa's number and the total; then Bahaa is told.
    ===================================================================== */
 (function () {
   if (window.__NF_OTNIGHT__) return; window.__NF_OTNIGHT__ = 1;
@@ -40128,7 +40138,8 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 
   /* ---------- projects open for overtime ---------- */
   const isOtOpen = (o, date) => !!(o && isOpen(o) && o.status !== 'hold' && o.otOpen && o.otOpen.on && (!o.otOpen.until || o.otOpen.until >= (date || todayISO())));
-  const openOrders = date => sortBy(list('orders').filter(o => isOtOpen(o, date)), o => o.code || '');
+  /* v7.78: every running work order (the ones opened for overtime first) */
+  const openOrders = date => sortBy(list('orders').filter(o => o && isOpen(o) && o.status !== 'hold'), o => (isOtOpen(o, date) ? '0' : '1') + (o.code || ''));
   const oName = o => o ? `${o.code || ''} — ${o.title || ''}` : '';
   const oSite = o => (typeof orderSite === 'function' ? orderSite(o) : null);
   window.nfOtOpen = isOtOpen;
@@ -40250,12 +40261,12 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const lockOP = !!t;
     return `<div class="form otn-form">
       ${depts.length > 1 && !t ? field(L('القسم', 'Department'), `<select name="dept" id="otn-dept">${depts.map(id => `<option value="${esc(id)}" ${id === d0 ? 'selected' : ''}>${esc(deptName(id))}</option>`).join('')}</select>`, 'full') : `<input type="hidden" name="dept" value="${esc(d0 || '')}"><div class="full small"><b>${esc(deptName(d0))}</b></div>`}
-      <div class="field full"><label>${esc(L('المشروع (المفتوح للسهر بس)', 'Project (open for overtime only)'))}</label><div class="otn-tiles">${(lockOP ? os.filter(o => o.id === o0).concat(os.some(o => o.id === o0) ? [] : [byId('orders', o0)].filter(Boolean)) : os).map(o => `<label class="otn-t"><input type="radio" name="oid" value="${esc(o.id)}" ${o.id === o0 ? 'checked' : ''}><span><b>${esc(o.code || '')}</b><small>${esc(o.title || '')}</small></span></label>`).join('')}</div></div>
+      <div class="field full"><label>${esc(L('المشروع', 'Project'))}</label><div class="otn-tiles">${(lockOP ? os.filter(o => o.id === o0).concat(os.some(o => o.id === o0) ? [] : [byId('orders', o0)].filter(Boolean)) : os).map(o => `<label class="otn-t"><input type="radio" name="oid" value="${esc(o.id)}" ${o.id === o0 ? 'checked' : ''}><span><b>${esc(o.code || '')}</b><small>${esc(o.title || '')}</small></span></label>`).join('')}</div></div>
       <div class="field full"><label>${esc(L('فين', 'Where'))}</label><div class="otn-tiles two">${['factory', 'site'].map(p => `<label class="otn-t" data-pl="${p}"><input type="radio" name="place" value="${p}" ${p === p0 ? 'checked' : ''} ${lockOP && p !== p0 ? 'disabled' : ''}><span><b>${esc(PLACE()[p])}</b><small class="otn-psub"></small></span></label>`).join('')}</div></div>
       <div class="field full"><div class="row" style="align-items:center;gap:8px"><label style="margin:0">${esc(L('مين هيسهر', 'Who stays'))}</label><div class="grow"></div><button type="button" class="btn xs" data-otnall="1">${esc(L('كل المتأكد منهم', 'All confirmed'))}</button></div><div class="otn-people" id="otn-people"></div></div>
       <label class="check full otn-conf" id="otn-conf" hidden><input type="checkbox" name="otnconf" value="1"> ${esc(L('أنا متأكد إن اللي باللون الأحمر موجودين — تأكيدي هيتسجّل باسمي ويظهر للمالك', 'I am sure the people in red are here — my confirmation is saved with my name and shows to the owner'))}</label>
       ${field(L('الشغل المطلوب', 'The work'), `<textarea name="work" required placeholder="${esc(L('مثال: لحام هيكل 4 كراسي + تجليخ', 'e.g. welding 4 chair frames + grinding'))}">${esc(work0)}</textarea>`, 'full')}
-      <div class="tiny muted full">${esc(L(`بيوصل ${payerName()} والمالك على طول. التعديل لحد الساعة ${editUntil()}.`, `Goes to ${payerName()} and the owner at once. Changes until ${editUntil()}.`))}</div></div>`;
+      <div class="tiny muted full">${esc(L(`بيوصل ${payerName()} على طول، وطلب الوجبات بيروح للمالك مرة واحدة لكل الأقسام. التعديل لحد الساعة ${editUntil()}.`, `Goes to ${payerName()} at once; the meals go to the owner once for all departments. Changes until ${editUntil()}.`))}</div></div>`;
   }
   function wire(f) {
     const paint = () => {
@@ -40272,7 +40283,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   }
   ACTIONS.otnNew = arg => {
     if (!canReg()) return; const date = todayISO();
-    if (!openOrders(date).length) { toast(L('مفيش مشروع مفتوح للسهر النهارده — المالك أو مدير المصنع يفتحه من صفحة أمر التشغيل', 'No project is open for overtime today — the owner or the factory manager opens one from the work order page'), 'err'); return; }
+    if (!openOrders(date).length) { toast(L('مفيش أوامر تشغيل شغّالة', 'No running work orders'), 'err'); return; }
     if (isHead() && nowTm() >= editUntil()) { toast(L(`التسجيل لحد الساعة ${editUntil()} — بعدها مدير المصنع أو المالك`, `Registering is until ${editUntil()} — after that the factory manager or the owner`), 'err'); return; }
     const pre = String(arg || '').split(',').filter(Boolean);
     openModal({ title: L('سهر النهارده', "Tonight's overtime"), wide: true, body: formHTML(null, pre), submitLabel: L('حفظ وإرسال', 'Save and send'), onOpen: f => { f.dataset.pre = pre.join(','); wire(f); }, onSubmit: f => save(f, null) });
@@ -40287,7 +40298,6 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const d = formData(f); const date = t0 ? t0.ot.date : todayISO(); const me = S.session || {};
     if (isHead() && nowTm() >= editUntil()) { toast(L(`التسجيل لحد الساعة ${editUntil()}`, `Registering is until ${editUntil()}`), 'err'); return false; }
     const o = byId('orders', d.oid || ''); if (!o) { toast(L('اختار المشروع', 'Choose the project'), 'err'); return false; }
-    if (!t0 && !isOtOpen(o, date)) { toast(L('المشروع ده مش مفتوح للسهر', 'This project is not open for overtime'), 'err'); return false; }
     const place = d.place === 'site' ? 'site' : 'factory'; if (place === 'site' && !oSite(o)) { toast(L('المشروع ملوش لوكيشن — اختار المصنع', 'The project has no location — choose the factory'), 'err'); return false; }
     const work = String(d.work || '').trim(); if (work.length < 4) { toast(L('اكتب الشغل المطلوب', 'Write the work'), 'err'); return false; }
     const boxes = Array.from(f.querySelectorAll('input[name="otnw"]:checked')); const wids = boxes.map(x => x.value);
@@ -40306,7 +40316,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       createdBy: (ex && ex.createdBy) || me.id || null, createdByName: (ex && ex.createdByName) || me.name || '', createdAt: (ex && ex.createdAt) || now, updatedAt: now });
     await Store.save('tasks', doc);
     try { await afterSave(doc, prev, o); } catch (e) { console.warn('otnight send', e); }
-    toast(wids.length ? L(`اتسجّل سهر ${wids.length} شخص — وصل ${payerName()} والمالك`, `${wids.length} people registered — sent to ${payerName()} and the owner`) : L('اتلغى السهر ده', 'This overtime night was cancelled')); render(false); return true;
+    toast(wids.length ? L(`اتسجّل سهر ${wids.length} شخص — وصل ${payerName()}`, `${wids.length} people registered — sent to ${payerName()}`) : L('اتلغى السهر ده', 'This overtime night was cancelled')); render(false); return true;
   }
   /* to Bahaa (names) + a custody request to the owner (the amount lives in the request only) */
   async function afterSave(t, prev, o) {
@@ -40320,23 +40330,53 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       await Store.save('tasks', Object.assign({}, had || {}, { id: nid, title, desc, assigneeId: pid, deptId: null, orderId: o.id, kind: 'update', source: 'otnight', priority: 'high', status: 'open', link: '/#/otnight', taskRef: wids.length ? null : t.id, createdBy: (had && had.createdBy) || me.id || null, createdByName: (had && had.createdByName) || head, createdAt: (had && had.createdAt) || now, updatedAt: now }), { silent: true });
       if (had && typeof pushSend === 'function') pushSend([pid], title, desc.split('\n')[0], `/#/tasks/${t.id}`, 'otb-' + t.id).catch(() => { });
     }
-    /* custody request: one per entry; while it waits it follows the list, after the owner paid only additions ask again */
+    /* v7.78: no request per entry any more — the server sends ONE request for the whole day (all departments). After it went out,
+       newly added people go as an «addition»; people taken off shrink a request that is still waiting. */
     const wl = payerWallet(); if (!wl) return;
-    const reqs = (n.fundReqIds || []).map(id => byId('requests', id)).filter(Boolean);
-    const paidN = reqs.filter(r => r.status === 'approved').reduce((a, r) => a + (+r.otCount || 0), 0);
-    const pend = reqs.find(r => r.status === 'pending');
-    const want = Math.max(0, wids.length - paidN); const amt = +n.amt || 0;
-    const reason = `وجبات سهر ${fmtDate(t.ot.date)} — ${oName(o)} (${placeShort(n.place)}) — ${deptName(t.deptId)}`;
-    if (pend) {
-      if (!want) { await Store.update('requests', pend.id, { status: 'cancelled', decidedAt: now, otCount: 0 }); try { if (typeof window.nfCloseNotesFor === 'function') await window.nfCloseNotesFor(pend.id); } catch (e) { /* ignore */ } }
-      else if (want !== +pend.otCount) await Store.update('requests', pend.id, { amount: want * amt, otCount: want, reason: `${reason} — ${want} شخص` });
+    const date = t.ot.date; const amt = +n.amt || 0; const live = r => r && r.type === 'fund' && !['cancelled', 'rejected'].includes(r.status);
+    const cnt = r => (r.otTasks && r.otTasks[t.id] ? +r.otTasks[t.id].n || 0 : (r.otTaskId === t.id ? +r.otCount || 0 : 0));
+    const reqs = list('requests').filter(r => live(r) && cnt(r) > 0);
+    const legacy = (n.fundReqIds || []).length && !reqs.length ? wids.length : 0;
+    const counted = reqs.reduce((a, r) => a + cnt(r), 0) + legacy;
+    const sent = list('requests').some(r => live(r) && r.otSummary && r.otDay === date);
+    const want = wids.length - counted;
+    if (want > 0 && sent && added.length) {
+      const r = { id: uid(), type: 'fund', walletId: wl.id, amount: want * amt, cat: 'meals', reason: `إضافة على وجبات سهر ${fmtDate(date)} — ${oName(o)} (${placeShort(n.place)}) — ${deptName(t.deptId)} — ${want} شخص`, otDay: date, otAdd: true, otTasks: { [t.id]: { n: want, amt } }, otCount: want, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `إضافة وجبات سهر — ${want} شخص — ${o.code || ''}` }] };
+      await Store.save('requests', r, { silent: true });
+      if (typeof notifyOwner === 'function') await notifyOwner(`إضافة على وجبات سهر النهارده — عهدة ${wl.name}`, `${o.code || ''} — ${want} شخص (${placeShort(n.place)}) — ${deptName(t.deptId)} — من ${me.name || ''}`, { id: `fund_${r.id}`, reqId: r.id });
+    } else if (want < 0) {
+      const pend = reqs.filter(r => r.status === 'pending' && !r.paidAt && r.otTasks && r.otTasks[t.id]).sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))[0];
+      if (pend) {
+        const ot = Object.assign({}, pend.otTasks); const nn = Math.max(0, cnt(pend) + want); if (nn) ot[t.id] = Object.assign({}, ot[t.id], { n: nn }); else delete ot[t.id];
+        const count = Object.values(ot).reduce((a, x) => a + (+x.n || 0), 0); const amount = Object.values(ot).reduce((a, x) => a + (+x.n || 0) * (+x.amt || 0), 0);
+        if (!count) { await Store.update('requests', pend.id, { status: 'cancelled', decidedAt: now, otTasks: ot, otCount: 0 }); try { if (typeof window.nfCloseNotesFor === 'function') await window.nfCloseNotesFor(pend.id); } catch (e) { /* ignore */ } }
+        else await Store.update('requests', pend.id, { otTasks: ot, otCount: count, amount });
+      }
+    }
+  }
+
+  /* ---------- v7.78: «no overtime tonight» (the head — the factory manager / owner for any department) ---------- */
+  const ADMIN_D = ['tech', 'acct', 'purch', 'store', 'fleet', 'mgmt', 'sales'];
+  const prodDepts = () => (S.settings.departments || []).filter(d => d && d.id && !d.admin && !ADMIN_D.includes(d.id) && list('workers').some(w => w.deptId === d.id && w.status !== 'inactive' && w.status !== 'suspended' && w.role !== 'admin')).map(d => d.id);
+  const noneOf = (date, d) => byId('tasks', `otnone_${date}_${d}`);
+  const deptState = (date, d) => { const es = nights(date).filter(t => t.deptId === d); if (es.length) return { k: 'reg', n: es.reduce((a, t) => a + liveIds(t).length, 0) }; const x = noneOf(date, d); return x && x.status !== 'cancelled' ? { k: 'none', by: x.createdByName || '' } : { k: 'open' }; };
+  ACTIONS.otnNone = async arg => {
+    if (!canReg()) return; const date = todayISO(); const me = S.session || {};
+    if (isHead() && nowTm() >= editUntil()) { toast(L(`التسجيل لحد الساعة ${editUntil()}`, `Registering is until ${editUntil()}`), 'err'); return; }
+    const mine = (isHead() ? myDepts() : prodDepts()).filter(d => prodDepts().includes(d) && deptState(date, d).k === 'open');
+    let ds = arg ? [String(arg)] : mine; if (!ds.length) { toast(L('كل أقسامك ردّت', 'All your departments answered'), 'err'); return; }
+    if (!arg && ds.length > 1) {
+      openModal({ title: L('مفيش سهر النهارده', 'No overtime tonight'), submitLabel: L('تأكيد', 'Confirm'), body: `<div class="form"><div class="field full"><label>${esc(L('الأقسام', 'Departments'))}</label>${ds.map(d => `<label class="chk"><input type="checkbox" name="d" value="${esc(d)}" ${isHead() ? 'checked' : ''}> ${esc(deptName(d))}</label>`).join('')}</div></div>`,
+        onSubmit: async f => { const pick = Array.from(f.querySelectorAll('input[name="d"]:checked')).map(x => x.value); if (!pick.length) { toast(L('اختار قسم', 'Pick a department'), 'err'); return false; } await saveNone(date, pick, me); return true; } });
       return;
     }
-    if (!want || !added.length) return;
-    const r = { id: uid(), type: 'fund', walletId: wl.id, amount: want * amt, cat: 'meals', vehicleId: null, reason: `${reason} — ${want} شخص`, otTaskId: t.id, otCount: want, requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `وجبات سهر — ${want} شخص — ${o.code || ''}` }] };
-    await Store.save('requests', r, { silent: true });
-    await Store.update('tasks', t.id, { ot: Object.assign({}, t.ot, { night: Object.assign({}, n, { fundReqIds: (n.fundReqIds || []).concat([r.id]) }) }) }, { silent: true });
-    if (typeof notifyOwner === 'function') await notifyOwner(`طلب مبلغ لعهدة ${wl.name} — وجبات سهر`, `${o.code || ''} — ${want} شخص (${placeShort(n.place)}) — ${deptName(t.deptId)} — من ${me.name || ''}`, { id: `fund_${r.id}`, reqId: r.id });
+    if (!(await confirmDlg(L(`مفيش سهر النهارده في ${ds.map(deptName).join('، ')}؟`, `No overtime tonight in ${ds.map(deptName).join(', ')}?`), L('أيوه', 'Yes'), false))) return;
+    await saveNone(date, ds, me);
+  };
+  async function saveNone(date, ds, me) {
+    const now = nowISO();
+    for (const d of ds) await Store.save('tasks', { id: `otnone_${date}_${d}`, title: `مفيش سهر النهارده — ${deptName(d)}`, desc: `من ${me.name || ''}`, deptId: d, assigneeId: null, toRole: null, kind: 'update', source: 'otnone', priority: 'normal', status: 'done', dueDate: date, doneAt: now, doneByName: me.name || '', createdBy: me.id || null, createdByName: me.name || '', createdAt: now, updatedAt: now }, { silent: true });
+    toast(L('اتسجّل: مفيش سهر النهارده', 'Saved: no overtime tonight')); render(false);
   }
 
   /* ---------- 5) Bahaa pays: a transfer to each one, or the food for the group ---------- */
@@ -40399,11 +40439,19 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
       </div></div>`;
   }
   function todayHTML(date) {
-    const os = openOrders(date); const es = sortBy(nights(date).filter(visibleNight), t => (t.deptId || '') + (t.orderId || ''));
+    const es = sortBy(nights(date).filter(visibleNight), t => (t.deptId || '') + (t.orderId || ''));
     const total = es.reduce((a, t) => a + liveIds(t).length, 0);
-    const head = `<div class="card otn-top"><div class="cardhead"><h3>${icon('moon')}${esc(L('مفتوح للسهر النهارده', 'Open for overtime today'))}</h3><div class="grow"></div>${canOpenProj() ? `<button type="button" class="btn sm" data-action="otnOpen">${icon('plus')}${esc(L('افتح مشروع', 'Open a project'))}</button>` : ''}</div>
-      ${os.length ? `<div class="otn-chips">${os.map(o => `<a class="otn-chip" href="#/orders/${esc(o.id)}"><b>${esc(o.code || '')}</b> ${esc(o.title || '')}${o.otOpen.until ? ` <small>${esc(L(`لحد ${fmtDate(o.otOpen.until)}`, `until ${fmtDate(o.otOpen.until)}`))}</small>` : ''}</a>`).join('')}</div>` : `<div class="muted small">${esc(L('مفيش مشروع مفتوح للسهر — المالك أو مدير المصنع يفتحه من صفحة أمر التشغيل (مفيش سهر غير على مشروع مفتوح).', 'No project is open for overtime — the owner or the factory manager opens it from the work order page (no overtime except on an open project).'))}</div>`}
-      ${canReg() && os.length ? `<div style="margin-top:10px"><button type="button" class="btn p" data-action="otnNew">${icon('plus')}${esc(L('سجّل سهر النهارده', "Register tonight's overtime"))}</button> <span class="tiny muted">${esc(isHead() ? L(`لحد الساعة ${editUntil()}`, `until ${editUntil()}`) : '')}</span></div>` : ''}</div>`;
+    /* v7.78: every production department and where it stands — registered / no overtime / not yet */
+    const ds = prodDepts().filter(d => !isHead() || myDepts().includes(d));
+    const st = ds.map(d => ({ d, x: deptState(date, d) }));
+    const chip = ({ d, x }) => `<span class="otn-chip otn-st ${x.k}"><b>${esc(deptName(d))}</b> ${esc(x.k === 'reg' ? L(`${x.n} شخص`, `${x.n} people`) : x.k === 'none' ? L('مفيش سهر', 'No overtime') : L('لسه', 'Not yet'))}</span>`;
+    const open = st.filter(y => y.x.k === 'open').length;
+    const sum = list('requests').filter(r => r && r.type === 'fund' && r.otDay === date && !['cancelled', 'rejected'].includes(r.status));
+    const sumLine = (seesMoney() || isMgr()) ? (sum.length ? `<div class="tiny" style="margin-top:8px">${sum.map(r => `<span class="badge ${r.paidAt || r.status === 'approved' ? 'good' : 'warn'}">${esc((r.otSummary ? L('طلب الوجبات', 'Meals request') : L('إضافة', 'Addition')) + ' — ' + L(`${r.otCount || 0} شخص`, `${r.otCount || 0} people`) + ' — ' + (r.paidAt || r.status === 'approved' ? L(`اتحوّل لـ ${payerName()}`, `transferred to ${payerName()}`) : L('مستني المالك', 'waiting for the owner')))}</span>`).join(' ')}</div>` : `<div class="tiny muted" style="margin-top:8px">${esc(L('طلب الوجبات بيروح للمالك مرة واحدة أول ما كل الأقسام ترد، أو الساعة 3 بالكتير.', 'The meals request goes to the owner once, as soon as every department answered, or at 3 pm at the latest.'))}</div>`) : '';
+    const head = `<div class="card otn-top"><div class="cardhead"><h3>${icon('moon')}${esc(L('سهر النهارده', "Tonight's overtime"))}</h3>${open ? `<span class="badge warn">${esc(L(`${open} لسه`, `${open} not yet`))}</span>` : ''}<div class="grow"></div>${canOpenProj() ? `<button type="button" class="btn sm ghost" data-action="otnOpen">${icon('plus')}${esc(L('افتح مشروع للسهر', 'Open a project for overtime'))}</button>` : ''}</div>
+      ${st.length ? `<div class="otn-chips">${st.map(chip).join('')}</div>` : ''}
+      ${canReg() ? `<div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><button type="button" class="btn p" data-action="otnNew">${icon('plus')}${esc(L('سجّل سهر النهارده', "Register tonight's overtime"))}</button>${open ? `<button type="button" class="btn" data-action="otnNone">${esc(L('مفيش سهر النهارده', 'No overtime tonight'))}</button>` : ''} <span class="tiny muted">${esc(isHead() ? L(`قبل الساعة 2 — لحد ${editUntil()} بالكتير`, `before 2 pm — ${editUntil()} at the latest`) : '')}</span></div>` : ''}
+      ${sumLine}</div>`;
     return head + (es.length ? `<div class="small muted" style="margin:6px 2px">${esc(L(`النهارده: ${total} شخص في ${es.length} تسجيل`, `Today: ${total} people in ${es.length} entries`))}</div>` + es.map(entryCard).join('') : `<div class="empty"><b>${esc(L('لسه محدش اتسجّل في سهر النهارده', 'Nobody registered for tonight yet'))}</b></div>`);
   }
   function reportHTML() {
@@ -40437,7 +40485,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const bar = canReport() ? `<div class="tabs" style="margin-bottom:12px"><button type="button" class="${tab === 'today' ? 'on' : ''}" data-otntab="today">${esc(L('النهارده', 'Today'))}</button><button type="button" class="${tab === 'report' ? 'on' : ''}" data-otntab="report">${esc(L('التقرير', 'Report'))}</button></div>` : '';
     return `<div class="otn">${bar}${tab === 'report' ? reportHTML() : todayHTML(todayISO())}</div>`;
   };
-  EXTRA_TITLES.otnight = () => ({ title: L('سهر النهارده', "Tonight's overtime"), sub: L(`السهر على المشاريع المفتوحة بس · الوجبة: اللي يمشي قبل ${mealUntil()} تتخصم منه`, `Overtime on open projects only · meal: whoever leaves before ${mealUntil()} pays for it`) });
+  EXTRA_TITLES.otnight = () => ({ title: L('سهر النهارده', "Tonight's overtime"), sub: L(`رئيس كل قسم يحدد قبل الساعة 2 · الوجبة: اللي يمشي قبل ${mealUntil()} تتخصم منه`, `Every head decides before 2 pm · meal: whoever leaves before ${mealUntil()} pays for it`) });
   document.addEventListener('click', e => {
     const tb = e.target.closest && e.target.closest('[data-otntab]'); if (tb) { S._otnTab = tb.dataset.otntab; render(true); return; }
     const ym = e.target.closest && e.target.closest('[data-otnym]'); if (ym) { S._otnYm = ym.dataset.otnym; render(true); }
@@ -40455,8 +40503,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     try {
       const r = S.route || {}; const v = document.getElementById('view'); if (!v || !canOtn()) return;
       if (r.view === 'dashboard' && !v.querySelector('.otn-dash')) {
-        const os = openOrders(todayISO()); if (!os.length) return; const n = nights(todayISO()).reduce((a, t) => a + liveIds(t).length, 0);
-        v.insertAdjacentHTML('afterbegin', `<a class="otn-dash" href="#/otnight">${icon('moon')}<span><b>${esc(L('مفتوح للسهر النهارده:', 'Open for overtime today:'))}</b> ${os.map(o => esc(oName(o))).join('، ')}</span><span class="otn-dn">${esc(L(`${n} شخص`, `${n} people`))}</span></a>`);
+        /* v7.78: a line only when someone stays tonight */
+        const es = nights(todayISO()); const n = es.reduce((a, t) => a + liveIds(t).length, 0); if (!n) return;
+        const codes = Array.from(new Set(es.map(t => (byId('orders', t.orderId) || {}).code).filter(Boolean)));
+        v.insertAdjacentHTML('afterbegin', `<a class="otn-dash" href="#/otnight">${icon('moon')}<span><b>${esc(L('سهر النهارده:', 'Tonight:'))}</b> ${esc(codes.join('، '))}</span><span class="otn-dn">${esc(L(`${n} شخص`, `${n} people`))}</span></a>`);
       }
       if (r.view === 'attendance') { const tb = v.querySelector('.toolbar'); if (tb && !tb.querySelector('.otn-attb')) tb.insertAdjacentHTML('beforeend', `<a class="btn sm otn-attb" href="#/otnight">${icon('moon')}${esc(L('سهر النهارده', "Tonight's overtime"))}</a>`); }
     } catch (e) { /* ignore */ }
@@ -40467,6 +40517,64 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     if (isHead() && date >= todayISO()) { const wid = String(arg || '').split(':')[1] || ''; if (date === todayISO()) { location.hash = '#/otnight'; setTimeout(() => ACTIONS.otnNew(wid), 120); } else toast(L('السهر بيتسجّل في يومه من «سهر النهارده»', 'Overtime is registered on its day from «Tonight\'s overtime»'), 'err'); return; }
     return base.apply(this, arguments);
   })(ACTIONS.otTaskNew);
+
+  /* ---------- v7.78: the owner transfers the meals to Bahaa — the picture is read (number + total), then Bahaa is told ---------- */
+  const isMealReq = r => !!(r && r.type === 'fund' && r.otDay);
+  let _mr = null;
+  const digits = v => String(v || '').replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[•●xX#]/g, '*').replace(/[^0-9*]/g, '');
+  const payerMethods = () => { const w = byId('wallets', payerId()); return w ? [w, w.alt].filter(m => m && (m.number || m.ipa || m.last4)) : []; };
+  const numOk = (read, want) => { const a = digits(read), b = digits(want); if (!a || !b) return false; if (!a.includes('*')) return a.slice(-10) === b.slice(-10); const x = a.slice(-11), y = b.slice(-11); let vis = 0; for (let i = 1; i <= Math.min(x.length, y.length); i++) { const c = x[x.length - i]; if (c === '*') continue; if (c !== y[y.length - i]) return false; vis++; } return vis >= 4; };
+  const matchPayer = j => { const nums = [j.recipient_number].concat(Array.isArray(j.numbers) ? j.numbers : []).filter(Boolean); const ipas = [j.recipient_ipa].concat(Array.isArray(j.ipas) ? j.ipas : []).filter(Boolean).map(x => String(x).toLowerCase().trim());
+    return payerMethods().some(m => (m.number && nums.some(x => numOk(x, m.number))) || (m.ipa && ipas.includes(String(m.ipa).toLowerCase().trim())) || (m.last4 && digits(j.recipient_card || '').slice(-4) === String(m.last4))); };
+  const PIC_PROMPT = 'This image is an Egyptian money transfer receipt (mobile wallet or InstaPay). Return ONLY JSON: {"success": true|false, "recipient_number": "the RECEIVER mobile number as shown (keep * for masked digits), not the sender", "recipient_ipa": "receiver InstaPay address or null", "recipient_card": "receiver card as shown or null", "numbers": ["every mobile number visible"], "ipas": ["every InstaPay address visible"], "amount": number (EGP, without fees), "reference": "the reference number"}. Western digits; null when not visible.';
+  async function readPic(file) {
+    const src = await fileToDataURL(file);
+    const data = await new Promise((res, rej) => { const im = new Image(); im.onload = () => { const k = Math.min(1, 1600 / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.85)); }; im.onerror = rej; im.src = src; });
+    const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(data); if (!m || !S.sb) throw new Error('img');
+    const r = await S.sb.functions.invoke('ai', { body: { messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } }, { type: 'text', text: PIC_PROMPT }] }], max_tokens: 700 } });
+    const text = (r && r.data && r.data.text) || ''; const mm = text.match(/\{[\s\S]*\}/); if (!mm) throw new Error('unread'); return JSON.parse(mm[0]);
+  }
+  window.nfOtnPicCheck = { matchPayer, numOk };
+  if (ACTIONS.fundPay) ACTIONS.fundPay = (base => async function (id) {
+    const r = byId('requests', id); if (!isMealReq(r)) return base.apply(this, arguments);
+    _mr = { id, amount: +r.amount || 0, state: 'idle' }; try { return await base.apply(this, arguments); } finally { _mr = null; }
+  })(ACTIONS.fundPay);
+  document.addEventListener('change', async e => {
+    const inp = e.target; if (!_mr || !inp || inp.id !== 'md-file' || !inp.files || !inp.files[0]) return; const f = inp.closest('form'); if (!f) return; const file = inp.files[0];
+    const box = () => { let b = f.querySelector('#otn-chk'); if (!b) { (inp.closest('.field') || inp).insertAdjacentHTML('afterend', '<div class="full" id="otn-chk"></div>'); b = f.querySelector('#otn-chk'); } return b; };
+    if (!/^image\//.test(file.type || '')) { _mr.state = 'skip'; box().innerHTML = ''; return; }
+    const my = _mr; my.state = 'reading'; box().innerHTML = `<div class="banner info">${esc(L('بيقرا صورة التحويل…', 'Reading the transfer picture…'))}</div>`;
+    try {
+      const j = await readPic(file); if (_mr !== my) return;
+      const amt = +String(j.amount ?? '').replace(/[^0-9.]/g, ''); const want = +((f.querySelector('[name=amount]') || {}).value || my.amount); const who = j.recipient_number || j.recipient_ipa || L('مش باين', 'not shown'); const issues = [];
+      if (j.success === false) issues.push(L('الصورة بتقول إن التحويل مانجحش', 'The picture says the transfer did not go through'));
+      if (!matchPayer(j)) issues.push(L(`المستلم في الصورة (${who}) مش رقم ${payerName()}`, `The receiver in the picture (${who}) is not the number of ${payerName()}`));
+      if (!(Math.abs(amt - want) < 0.5)) issues.push(L(`المبلغ في الصورة (${isNaN(amt) || !amt ? 'مش باين' : fmtMoney(amt)}) مش هو المجموع (${fmtMoney(want)})`, `The amount in the picture (${isNaN(amt) || !amt ? 'not shown' : fmtMoney(amt)}) is not the total (${fmtMoney(want)})`));
+      my.state = issues.length ? 'bad' : 'ok';
+      box().innerHTML = issues.length ? `<div class="banner warn" style="margin:0">${icon('alert')}<span>${issues.map(esc).join('<br>')}</span></div><label class="check" style="margin-top:6px"><input type="checkbox" id="otn-chk-ok"> ${esc(L('تسجّل برضه', 'Save anyway'))}</label>` : `<div class="banner good" style="margin:0">${icon('check')}<span>${esc(L(`التحويل لـ ${payerName()} بالمجموع ✓`, `Transfer to ${payerName()} with the total ✓`))}</span></div>`;
+    } catch (x) { if (_mr !== my) return; my.state = 'skip'; box().innerHTML = `<div class="banner" style="margin:0">${esc(L('مقدرتش أقرا الصورة — هتتسجّل زي ما هي', 'Could not read the picture — it is saved as it is'))}</div>`; }
+  });
+  document.addEventListener('submit', e => {
+    if (!_mr || !e.target || e.target.id !== 'mform') return; const f = e.target;
+    if (_mr.state === 'reading') { e.preventDefault(); e.stopImmediatePropagation(); toast(L('استنى ثانية — بيقرا الصورة', 'One second — reading the picture'), 'err'); return; }
+    if (_mr.state === 'bad' && !(f.querySelector('#otn-chk-ok') || {}).checked) { e.preventDefault(); e.stopImmediatePropagation(); toast(L('الصورة مش مطابقة — راجعها أو علّم «تسجّل برضه»', 'The picture does not match — check it or tick «Save anyway»'), 'err'); }
+  }, true);
+  /* the money reached Bahaa's custody → he is told to start paying the meals */
+  if (typeof applyRequestEffects === 'function') applyRequestEffects = (base => async function (r) {
+    const out = await base.apply(this, arguments);
+    try {
+      const r1 = r && byId('requests', r.id);
+      if (isMealReq(r1) && (r1.paidAt || r1.payFrom) && !r1.otTold) {
+        const now = nowISO(); await Store.update('requests', r1.id, { otTold: now }, { silent: true }); const pid = payerId();
+        if (pid) {
+          const title = `🌙 اتحوّلت فلوس وجبات سهر ${fmtDate(r1.otDay)} — ابدأ الصرف`; const desc = `${r1.otCount || 0} شخص — افتح «سهر النهارده» وحوّل لكل واحد على رقمه أو اطلب الأكل للمجموعة.`;
+          await Store.save('tasks', { id: `otpaid_${r1.id}`, title, desc, link: '/#/otnight', assigneeId: pid, toRole: null, deptId: null, kind: 'update', source: 'otnight', priority: 'high', status: 'open', createdBy: (S.session && S.session.id) || null, createdByName: (S.session && S.session.name) || '', createdAt: now, updatedAt: now }, { silent: true });
+          if (typeof pushSend === 'function') pushSend([pid], title, desc, '/#/otnight', 'otpaid-' + r1.id).catch(() => { });
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  })(applyRequestEffects);
 
   document.head.insertAdjacentHTML('beforeend', `<style>
     .otn-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.otn-tiles.two{grid-template-columns:1fr 1fr}
@@ -40491,6 +40599,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     .otn-conf{padding:8px 10px;border-radius:10px;background:rgba(229,72,77,.08);font-size:13px}.otn-conf[hidden]{display:none}
     .otn-dash{display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);color:inherit;text-decoration:none;font-size:13.5px}
     .otn-dash>span:first-of-type{flex:1;min-width:0}.otn-dn{flex:none;font-weight:700;color:var(--accent)}
+    .otn-st.reg{border-color:rgba(48,164,108,.5)}.otn-st.none{opacity:.75}.otn-st.open{border-color:rgba(229,147,42,.6)}.otn-st b{direction:inherit}
   </style>`);
 })();
 /* =====================================================================
@@ -48772,7 +48881,8 @@ function oxFlow(k) {
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en'; const T = (a, e) => (en() ? e : a);
   const MIN_PEND = 15;
   const hpd = () => +(S.settings && S.settings.hoursPerDay) || 8;
-  const canDecide = w => !!S.session && (isAdmin() || role() === 'manager' || (role() === 'head' && w && myDepts().includes(w.deptId)));
+  const xh = () => (typeof window.nfHeadDepts === 'function' ? window.nfHeadDepts() : []);   /* v7.78: a department led on top of the person's role */
+  const canDecide = w => !!S.session && (isAdmin() || role() === 'manager' || ((role() === 'head' || xh().includes(w && w.deptId)) && w && myDepts().includes(w.deptId)));
   /* ---------- the rule ---------- */
   function earlyStart(w, date, row) {
     const ss = tmToMin(shiftFor(w).start); let e = null; const a = tmToMin(row.in);
@@ -48801,7 +48911,13 @@ function oxFlow(k) {
     if (r.otManual) { const sw = Math.max(0, Math.min(b, cap) - st - brk) / 60; const mo = +r.ot || 0; return { hrs: r2(Math.min(raw, sw + mo)), hrsRaw: r2(raw), ot: r2(mo), otPend: 0, earlyOff: a < st && st - a >= 5 ? st - a : 0, countFrom: minToTm(st % 1440), countTo: minToTm(Math.min(b, cap + mo * 60) % 1440) }; }
     let ot = +r.ot || 0;
     if (!r.otManual) { ot = Math.max(0, worked - hpd()); if (ot * 60 < (+sh.otAfterMinutes || 0)) ot = 0; if (r.meal && ot > 0) ot = Math.max(0, ot - (+(S.settings.policy && S.settings.policy.mealBreakMinutes) || 30) / 60); }
-    const pend = ok ? 0 : Math.max(0, b - cap);
+    /* v7.78 (Mahmoud 15 Oct: a worker who checked in at 12:28 and out at 17:20 showed «0.33 extra hours»): extra hours are only the time
+       beyond a full day — never the minutes after 17:00 of someone who came late and did not complete his hours */
+    /* v7.78 (Mahmoud 15 Oct: «people punch out 5:15, 5:30 … up to 6 while they collect their things — no overtime before 6 for anyone»):
+       a check-out before the shift end + 60 min (policy.otPendAfterMin) gives no extra hours at all; after it they count from the shift
+       end (his answer: «from 5 if he passed 6») — and still only for the head to approve, then the factory manager. */
+    const after = +((S.settings && S.settings.policy && S.settings.policy.otPendAfterMin) ?? 60);
+    const pend = ok || b < cap + after ? 0 : Math.max(0, Math.min(b - cap, (b - st - brk) - hpd() * 60));
     const early = a < st ? st - a : 0;
     return { hrs: r2(worked), hrsRaw: r2(raw), ot: r2(ot), otPend: !r.otDeptRej && pend >= MIN_PEND ? r2(pend / 60) : 0, earlyOff: early >= 5 ? early : 0, countFrom: minToTm(st % 1440), countTo: minToTm(end % 1440) };
   }
@@ -48870,18 +48986,18 @@ function oxFlow(k) {
   };
   function listHTML(rows) {
     if (!rows.length) return `<div class="empty small">${esc(T('مفيش ساعات زيادة مستنية', 'No extra hours waiting'))}</div>`;
-    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span class="ltr">${esc(fmtTm(r.in || ''))} → ${esc(fmtTm(r.out || ''))}</span><span>${esc(T(`محسوب ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`, `Counted ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
+    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span><bdi>${esc(fmtTm(r.in || ''))}</bdi> ${en() ? '→' : '←'} <bdi>${esc(fmtTm(r.out || ''))}</bdi></span>${+r.late > 0 ? `<span class="badge warn">${esc(T(`متأخر ${r.late} دقيقة`, `${r.late} min late`))}</span>` : ''}<span>${esc(T(`محسوب ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`, `Counted ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
   }
   if (typeof EXTRA_VIEWS !== 'undefined') {
     VIEW_TITLES.otpend = 'ساعات زيادة';
     canSee = (base => function (v) { if (v === 'otpend') return !!S.session && (isAdmin() || ['manager', 'head', 'hr'].includes(role())); return base.apply(this, arguments); })(canSee);
-    EXTRA_VIEWS.otpend = () => `<div class="card"><div class="cardhead"><h3>${icon('moon')}${esc(T('ساعات زيادة مستنية اعتماد', 'Extra hours waiting for approval'))}</h3></div><p class="small muted" style="margin:0 0 8px">${esc(T('اللي بصم انصراف بعد آخر الوردية من غير سهر متوافق عليه: محسوبله ساعات الوردية بس لحد ما رئيس قسمه يعتمد. بعد الاعتماد بتبقى سهر وتكمّل على اعتماد السهر (مدير المصنع ← مدير الحسابات).', 'Someone who punched out after the shift without approved overtime: only the shift hours count until his department head approves. Approved, it becomes overtime and goes on to the overtime approval (factory manager → accounts manager).'))}</p>${listHTML(pending())}</div>`;
+    EXTRA_VIEWS.otpend = () => `<div class="card"><div class="cardhead"><h3>${icon('moon')}${esc(T('ساعات زيادة مستنية اعتماد', 'Extra hours waiting for approval'))}</h3></div><p class="small muted" style="margin:0 0 8px">${esc(T('اللي بصم انصراف بعد الساعة 6 (ساعة بعد آخر الوردية) من غير سهر متوافق عليه وكمّل ساعات يومه: محسوبله ساعات الوردية بس لحد ما رئيس قسمه يعتمد. اللي ينصرف قبلها مالوش ساعات زيادة. بعد الاعتماد بتبقى سهر وتكمّل على اعتماد السهر (مدير المصنع ← مدير الحسابات).', 'Someone who punched out after 6 pm (an hour after the shift) without approved overtime and completed his hours: only the shift hours count until his department head approves. Leaving before that gives no extra hours. Approved, it becomes overtime and goes on to the overtime approval (factory manager → accounts manager).'))}</p>${listHTML(pending())}</div>`;
     if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.otpend = () => ({ title: T('ساعات زيادة', 'Extra hours'), sub: T('اعتماد الساعات اللي بعد الوردية', 'Approve the hours after the shift') });
   }
   /* a card on the attendance page / dashboard for whoever decides */
   if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
     try {
-      const v = S.route && S.route.view; if (!['attendance', 'dashboard'].includes(v) || !S.session || !(isAdmin() || ['manager', 'head'].includes(role()))) return;
+      const v = S.route && S.route.view; if (!['attendance', 'dashboard'].includes(v) || !S.session || !(isAdmin() || ['manager', 'head'].includes(role()) || xh().length)) return;
       const host = document.getElementById('view'); if (!host) return; const old = host.querySelector('#otpcard'); if (old) old.remove();
       const rows = pending(); if (!rows.length) return;
       host.insertAdjacentHTML('afterbegin', `<div class="card" id="otpcard" style="border-color:var(--warn,#e5932a)"><div class="cardhead"><h3>${icon('moon')}${esc(T('ساعات زيادة مستنية اعتمادك', 'Extra hours waiting for you'))}</h3><span class="badge warn">${rows.length}</span><div class="grow"></div><a class="btn xs ghost" href="#/otpend">${esc(T('الكل', 'All'))}</a></div>${listHTML(rows.slice(0, 5))}</div>`);
@@ -53910,4 +54026,185 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     return `<div class="tiny muted trkgap-note" style="margin-top:6px">${icon('info')} ${esc(parts.join(' · '))} — ${esc(L(`الجهاز كان بيبعت مكانه ${every} بدل كل 5 ثواني.`, `the tracker was sending its position ${every} instead of every 5 s.`))}</div>`;
   }
   window.nfTrackPath = { gaps, fill, draw, stats, note, _cache: cache };
+})();
+/* =====================================================================
+   v7.78 (Mahmoud 15 Oct, PIN verified — the head of the transport department is Haitham, his manager Mahmoud El-Behiry): a person can lead a
+   department ON TOP OF his own role — workers.headDepts = [deptId…] (Haitham: fleet manager → head of the transport department).
+   Before: only role «head» counted as a department head, so the transport department showed No team lead and the overtime of the drivers /
+   requests waiting for a head had no owner.
+   After (his own role and pages stay exactly as they were):
+   · he counts as the head of those departments wherever the system looks for one (deptHeads → the head step of requests,
+     extra hours waiting, purchase requests, reminders; the late-work-by-team-lead card carries his name);
+   · he decides requests at the head step and sees them (his departments only); he sees the extra hours page and approves them;
+     he creates overtime tasks for his team from today on (same rule as a head);
+   · he gets the attendance / employees / penalties pages scoped to his departments only (the pages of other people stay closed);
+   · what he leaves late goes up to his direct manager / the factory manager as before (El-Behiry).
+   Direct attendance edits stay HR-only (v7.53). Server: nf_guard_attendance lets him write the attendance of the departments he leads
+   (overtime approvals) — server/sql/v778-extra-head.sql. All systems, Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_XHEAD__) return; window.__NF_XHEAD__ = 1;
+  const SEES_ALL = ['admin', 'hr', 'manager', 'vice'];
+  const active = w => w && !['inactive', 'stopped', 'suspended'].includes(w.status);
+  const hdOf = w => (w && w.role !== 'head' && Array.isArray(w.headDepts) ? w.headDepts.filter(Boolean) : []);
+  const meW = () => (S.session && S.session.workerId ? byId('workers', S.session.workerId) : null);
+  /* the departments the signed-in person leads on top of his role (read live from his worker card) */
+  window.nfHeadDepts = () => { try { if (!S.session || role() === 'head' || SEES_ALL.includes(role()) || role() === 'kiosk') return []; return hdOf(meW()); } catch (e) { return []; } };
+  window.nfXHeadsOf = d => (d ? list('workers').filter(w => active(w) && hdOf(w).includes(d)) : []);
+  const leads = d => !!d && window.nfHeadDepts().includes(d);
+  const deptOfW = wid => { const w = wid ? byId('workers', wid) : null; return w ? w.deptId || '' : ''; };
+  const xhead = () => window.nfHeadDepts().length > 0;
+
+  /* 1) his departments join the departments of his session */
+  if (typeof myDepts === 'function') myDepts = (base => function () { const a = base.apply(this, arguments) || []; const x = window.nfHeadDepts(); return x.length ? Array.from(new Set(a.concat(x))) : a; })(myDepts);
+  /* 2) he is one of the heads of those departments */
+  if (typeof deptHeads === 'function') deptHeads = (base => function (d) {
+    const a = (base.apply(this, arguments) || []).slice(); const ids = new Set(a.map(h => h && h.id));
+    window.nfXHeadsOf(d).forEach(w => { if (!ids.has(w.id)) a.push({ id: w.id, name: w.name, href: `#/workers/${w.id}` }); });
+    return a;
+  })(deptHeads);
+  /* 3) requests of his departments: he sees them and decides the head step */
+  if (typeof canDo === 'function') canDo = (base => function (act, ctx) {
+    if (base.apply(this, arguments)) return true;
+    try { if (!xhead() || !writable() || !['requests.decide', 'requests.create'].includes(act)) return false; const c = ctx || {}; return leads(c.deptId || deptOfW(c.workerId)); } catch (e) { return false; }
+  })(canDo);
+  if (typeof requestVisible === 'function') requestVisible = (base => function (r) {
+    if (base.apply(this, arguments)) return true;
+    try { return !!r && xhead() && (leads(r.deptId) || leads(deptOfW(r.workerId))); } catch (e) { return false; }
+  })(requestVisible);
+  /* 4) people lists (attendance, employees, penalties, reports) = his departments only */
+  if (typeof visibleWorkers === 'function') visibleWorkers = (base => function () {
+    const arr = base.apply(this, arguments);
+    try { if (!xhead()) return arr; const ds = myDepts(); return arr.filter(w => ds.includes(w.deptId)); } catch (e) { return arr; }
+  })(visibleWorkers);
+  /* 5) the pages a head uses for his team */
+  const XVIEWS = ['attendance', 'otpend', 'workers', 'penalties'];
+  if (typeof canSee === 'function') canSee = (base => function (v) {
+    if (base.apply(this, arguments)) return true;
+    try { return XVIEWS.includes(v) && xhead(); } catch (e) { return false; }
+  })(canSee);
+  /* an employee page outside his departments stays closed (same message a head gets) */
+  if (typeof vWorkerDetailBase === 'function') vWorkerDetailBase = (base => function (id) {
+    try { if (xhead()) { const w = byId('workers', id); const me = meW(); if (w && !(me && me.id === w.id) && !myDepts().includes(w.deptId)) return `<div class="empty"><b>${typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'This employee is outside your departments' : 'هذا الموظف خارج أقسامك'}</b></div>`; } } catch (e) { /* ignore */ }
+    return base.apply(this, arguments);
+  })(vWorkerDetailBase);
+})();
+/* =====================================================================
+   v7.78 (Mahmoud 15 Oct, PIN verified — brief claude/leavers-brief.md): an employee who left. All three systems.
+   · «Left» on the employee page (owner and HR): last day + reason → status inactive at once. The server (trigger
+     nf_worker_freeze) bans his login accounts, signs every open session out and detaches his phone notices; with no role he
+     sees no data and punching refuses him.
+   · Archive «Who left» (#/leavers, owner and HR): when each one left, «wiped on …» (two months after the button), his
+     attendance / requests / advances / payroll still open from his page; «Bring back» lifts the freeze, «Postpone a month».
+   · Two months later the server (nf_leavers_daily, every night) wipes his login account and his personal file — the accounts
+     records stay with his name (Mahmoud's answer); still owing an advance → not wiped, a task to HR; a week before → a task to
+     the owner and HR.
+   · Whatever he held (manager of people, head of a department, the advance payer, a custody, a vehicle) is listed when he is
+     marked, and a task asks for someone to take it.
+   Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_LEAVERS__) return; window.__NF_LEAVERS__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || typeof vWorkerDetailBase !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const canLeave = () => !!S.session && (isAdmin() || role() === 'hr');
+  const WIPE_DAYS = 60;
+  const leftOf = w => (w && w.left && typeof w.left === 'object' ? w.left : null);
+  const owes = w => list('advances').filter(a => a && a.workerId === w.id && !['closed', 'cancelled', 'rejected'].includes(a.status)).reduce((s0, a) => s0 + Math.max(0, (+a.amount || 0) - (+a.paid || 0)), 0);
+  /* what he holds and someone has to take */
+  function holds(w) {
+    const out = []; const pol = (S.settings && S.settings.policy) || {};
+    const reps = list('workers').filter(x => x && x.id !== w.id && x.status !== 'inactive' && x.managerId === w.id);
+    if (reps.length) out.push(L(`مدير مباشر لـ ${reps.length}: ${reps.map(x => x.name).join('، ')}`, `Direct manager of ${reps.length}: ${reps.map(x => x.name).join(', ')}`));
+    if (w.role === 'head') [w.deptId].concat(w.accessDepts || []).filter(Boolean).forEach(d => { const hs = typeof deptHeads === 'function' ? deptHeads(d).filter(h => h.id !== w.id) : []; if (!hs.length) out.push(L(`رئيس قسم ${deptName(d)} (مفيش غيره)`, `Head of ${deptName(d)} (the only one)`)); });
+    (Array.isArray(w.headDepts) ? w.headDepts : []).forEach(d => out.push(L(`بيرأس ${deptName(d)}`, `Leads ${deptName(d)}`)));
+    if ([pol.advPayerId, pol.advPayerAltId, pol.otMealPayerId].map(String).includes(String(w.id))) out.push(L('بيحوّل السلف / الوجبات للموظفين', 'Pays the advances / meals to the staff'));
+    ((S.settings && S.settings.money && S.settings.money.wallets) || []).filter(x => x && !x.off && String(x.holder) === String(w.id)).forEach(x => { let b = null; try { b = typeof walletBalance === 'function' ? walletBalance(x.id).balance : null; } catch (e) { b = null; } out.push(L(`عهدة ${x.name || ''}${b ? ` — فيها ${fmtMoney(b)} ${CUR()}` : ''}`, `Custody ${x.name || ''}${b ? ` — holds ${fmtMoney(b)} ${CUR()}` : ''}`)); });
+    list('vehicles').filter(v => v && v.driverId === w.id && !['inactive', 'sold'].includes(v.status)).forEach(v => out.push(L(`سواق ${v.name || v.plate || ''}`, `Driver of ${v.name || v.plate || ''}`)));
+    return out;
+  }
+  ACTIONS.leaveMark = wid => {
+    const w = byId('workers', wid); if (!w || !canLeave() || !writable() || w.status === 'inactive') return;
+    const hs = holds(w); const debt = owes(w); const wipe = addDays(todayISO(), WIPE_DAYS);
+    openModal({ title: L(`${w.name} مشي`, `${w.name} left`), submitLabel: L('مشي — جمّد الحساب', 'Left — freeze the account'), body: `<div class="form">
+      ${field(L('آخر يوم شغل', 'Last working day'), inp('leftAt', todayISO(), `type="date" max="${todayISO()}"`))}
+      ${field(L('السبب (اختياري)', 'Reason (optional)'), inp('reason', ''), 'full')}
+      <div class="banner warn full" style="margin:0">${icon('alert')}<span>${esc(L(`الحساب بيتجمّد على طول: مايقدرش يدخل، إشعاراته بتتشال، والبصمة بترفضه. حسابه وملفه الشخصي بيتمسحوا يوم ${fmtDate(wipe)} — الحضور والمرتبات والسلف بيفضلوا في الحسابات.`, `The account is frozen at once: no login, his notices stop, punching refuses him. His login account and personal file are wiped on ${fmtDate(wipe)} — attendance, payroll and advances stay in the accounts.`))}</span></div>
+      ${hs.length ? `<div class="full"><div class="small"><b>${esc(L('محتاج حد ياخد مكانه في:', 'Someone has to take over:'))}</b></div><ul class="small" style="margin:4px 0 0;padding-inline-start:18px">${hs.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${debt > 0.5 ? `<div class="banner full" style="margin:0">${icon('info')}<span>${esc(L(`لسه عليه سلفة ${fmtMoney(debt)} ${CUR()} — ملفه مش هيتمسح غير لما تخلص.`, `He still owes ${fmtMoney(debt)} ${CUR()} — his file is not wiped until it is cleared.`))}</span></div>` : ''}
+      <label class="check full"><input type="checkbox" name="sure" value="1"> ${esc(L('متأكد إنه مشي', 'I am sure he left'))}</label></div>`,
+      onSubmit: async f => {
+        const d = formData(f); if (!d.sure) { toast(L('علّم «متأكد إنه مشي»', 'Tick «I am sure he left»'), 'err'); return false; }
+        const last = /^\d{4}-\d{2}-\d{2}$/.test(d.leftAt || '') && d.leftAt <= todayISO() ? d.leftAt : todayISO(); const now = nowISO(); const me = S.session || {};
+        await Store.update('workers', w.id, { status: 'inactive', leftAt: last, left: { at: now, by: me.id || null, byName: me.name || '', reason: String(d.reason || '').trim(), purgeAt: wipe, prevStatus: w.status || 'active', prevRole: w.role || null } });
+        if (hs.length) for (const r of ['admin', 'hr']) await Store.save('tasks', { id: `lefthand_${w.id}_${r}`, title: L(`${w.name} مشي — محتاج حد مكانه`, `${w.name} left — someone has to take over`), desc: hs.join('\n'), link: `/#/workers/${w.id}`, toRole: r, assigneeId: null, kind: 'task', source: 'leavers', priority: 'high', status: 'open', createdBy: me.id || null, createdByName: me.name || '', createdAt: now, updatedAt: now }, { silent: true });
+        toast(L('اتجمّد الحساب — اتنقل لـ«اللي مشيوا»', 'Account frozen — moved to «Who left»')); render(false); return true;
+      } });
+  };
+  ACTIONS.leaveBack = async wid => {
+    const w = byId('workers', wid); const l = leftOf(w); if (!w || !canLeave() || !writable() || w.status !== 'inactive' || w.purgedAt) return;
+    if (!(await confirmDlg(L(`ترجّع ${w.name} للشغل؟ الحساب بيتفك ويقدر يدخل تاني.`, `Bring ${w.name} back to work? The account is unfrozen and he can sign in again.`), L('رجّعه', 'Bring back'), false))) return;
+    const now = nowISO(); const me = S.session || {};
+    await Store.update('workers', w.id, { status: l && l.prevStatus && l.prevStatus !== 'inactive' ? l.prevStatus : 'active', leftAt: '', left: null, leftHist: (w.leftHist || []).concat(l ? [Object.assign({}, l, { backAt: now, backByName: me.name || '' })] : []).slice(-10) });
+    toast(L('رجع للشغل — الحساب اتفك', 'Back to work — the account is unfrozen')); render(false);
+  };
+  ACTIONS.leavePostpone = async wid => {
+    const w = byId('workers', wid); const l = leftOf(w); if (!w || !l || !canLeave() || !writable() || w.purgedAt) return;
+    const next = addDays(l.purgeAt && l.purgeAt > todayISO() ? l.purgeAt : todayISO(), 30);
+    await Store.update('workers', w.id, { left: Object.assign({}, l, { purgeAt: next, postponed: (+l.postponed || 0) + 1, postponedByName: (S.session && S.session.name) || '' }) });
+    toast(L(`المسح اتأجّل لـ ${fmtDate(next)}`, `Wiping postponed to ${fmtDate(next)}`)); render(false);
+  };
+  /* someone set «ترك العمل» from the form (old way): give him a wipe date */
+  ACTIONS.leaveSchedule = async wid => {
+    const w = byId('workers', wid); if (!w || !canLeave() || !writable() || w.status !== 'inactive' || leftOf(w) || w.purgedAt) return;
+    const now = nowISO(); const me = S.session || {};
+    await Store.update('workers', w.id, { leftAt: w.leftAt || todayISO(), left: { at: now, by: me.id || null, byName: me.name || '', reason: '', purgeAt: addDays(todayISO(), WIPE_DAYS), prevStatus: 'active', prevRole: w.role || null } });
+    toast(L('اتحدد ميعاد المسح', 'Wipe date set')); render(false);
+  };
+
+  /* ---------- the employee page ---------- */
+  function banner(w) {
+    const l = leftOf(w);
+    if (w.purgedAt) return `<div class="banner lvb">${icon('info')}<span>${esc(L(`مشي يوم ${fmtDate(w.leftAt || '')} — حسابه وملفه الشخصي اتمسحوا يوم ${fmtDate(String(w.purgedAt).slice(0, 10))}. الحضور والمرتبات والسلف فاضلين.`, `Left on ${fmtDate(w.leftAt || '')} — his account and personal file were wiped on ${fmtDate(String(w.purgedAt).slice(0, 10))}. Attendance, payroll and advances stay.`))}</span></div>`;
+    if (w.status !== 'inactive') return '';
+    const acts = canLeave() && writable() ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn sm" data-action="leaveBack" data-arg="${esc(w.id)}">${esc(L('رجّعه', 'Bring back'))}</button>${l ? `<button type="button" class="btn sm ghost" data-action="leavePostpone" data-arg="${esc(w.id)}">${esc(L('أجّل المسح شهر', 'Postpone wiping a month'))}</button>` : `<button type="button" class="btn sm ghost" data-action="leaveSchedule" data-arg="${esc(w.id)}">${esc(L('حدّد ميعاد المسح', 'Set the wipe date'))}</button>`}<a class="btn sm ghost" href="#/leavers">${esc(L('اللي مشيوا', 'Who left'))}</a></div>` : '';
+    return `<div class="banner warn lvb" style="display:block">${icon('lock')}<b>${esc(L('مشي — الحساب متجمّد', 'Left — account frozen'))}</b><div class="small">${esc(L(`آخر يوم ${fmtDate(w.leftAt || '')}${l && l.reason ? ' — ' + l.reason : ''}${l && l.byName ? ' — سجّله ' + l.byName : ''}${l ? ` · هيتمسح يوم ${fmtDate(l.purgeAt)}` : ' · ميعاد المسح مش متحدد'}`, `Last day ${fmtDate(w.leftAt || '')}${l && l.reason ? ' — ' + l.reason : ''}${l && l.byName ? ' — by ' + l.byName : ''}${l ? ` · wiped on ${fmtDate(l.purgeAt)}` : ' · no wipe date yet'}`))}</div>${acts}</div>`;
+  }
+  vWorkerDetailBase = (base => function (id) {
+    let html = base.apply(this, arguments);
+    try {
+      const w = byId('workers', id); if (!w || !canLeave()) return html;
+      const b = banner(w); if (b) { const k = html.indexOf('<div class="stack">'); html = k >= 0 ? html.slice(0, k + 19) + b + html.slice(k + 19) : b + html; }
+      if (w.status !== 'inactive' && writable()) html = html.replace('<div class="row no-print">', `<div class="row no-print"><button class="btn sm lvbtn" data-action="leaveMark" data-arg="${esc(w.id)}">${icon('logout')}${esc(L('مشي', 'Left'))}</button>`);
+    } catch (e) { /* ignore */ }
+    return html;
+  })(vWorkerDetailBase);
+
+  /* ---------- the archive ---------- */
+  const leavers = () => sortBy(list('workers').filter(w => w && w.status === 'inactive'), w => String(w.leftAt || (leftOf(w) || {}).at || ''), true);
+  VIEW_TITLES.leavers = 'اللي مشيوا';
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'leavers') return canLeave(); return base.apply(this, arguments); })(canSee);
+  EXTRA_VIEWS.leavers = () => {
+    if (!canLeave()) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const ws = leavers(); if (!ws.length) return `<div class="empty"><b>${esc(L('مفيش حد مشي', 'Nobody left'))}</b></div>`;
+    const row = w => {
+      const l = leftOf(w); const debt = owes(w); const days = l && l.purgeAt ? daysBetween(todayISO(), l.purgeAt) : null;
+      const state = w.purgedAt ? ['', L(`اتمسح ${fmtDate(String(w.purgedAt).slice(0, 10))}`, `Wiped ${fmtDate(String(w.purgedAt).slice(0, 10))}`)] : !l ? ['warn', L('ميعاد المسح مش متحدد', 'No wipe date')] : debt > 0.5 && days != null && days <= 0 ? ['crit', L('مستني السلفة تخلص', 'Waiting for the advance')] : ['', days != null && days > 0 ? L(`هيتمسح بعد ${days} يوم (${fmtDate(l.purgeAt)})`, `Wiped in ${days} days (${fmtDate(l.purgeAt)})`) : L('هيتمسح الليلة', 'Wiped tonight')];
+      return `<div class="item lv-it"><div class="main"><div class="title"><a href="#/workers/${esc(w.id)}">${esc(w.name || '')}</a> <span class="badge ${state[0]}">${esc(state[1])}</span>${debt > 0.5 ? ` <span class="badge warn">${esc(L('عليه سلفة', 'Owes an advance'))}</span>` : ''}</div>
+        <div class="meta"><span>${esc(deptName(w.deptId))}</span><span>${esc(L(`آخر يوم ${fmtDate(w.leftAt || '')}`, `Last day ${fmtDate(w.leftAt || '')}`))}</span>${l && l.reason ? `<span>${esc(l.reason)}</span>` : ''}${l && l.byName ? `<span>${esc(L(`سجّله ${l.byName}`, `By ${l.byName}`))}</span>` : ''}</div></div>
+        <div class="end" style="display:flex;gap:6px;flex-wrap:wrap">${!w.purgedAt && writable() ? `<button type="button" class="btn sm" data-action="leaveBack" data-arg="${esc(w.id)}">${esc(L('رجّعه', 'Bring back'))}</button>${l ? `<button type="button" class="btn sm ghost" data-action="leavePostpone" data-arg="${esc(w.id)}">${esc(L('أجّل شهر', 'Postpone a month'))}</button>` : `<button type="button" class="btn sm ghost" data-action="leaveSchedule" data-arg="${esc(w.id)}">${esc(L('حدّد ميعاد المسح', 'Set the wipe date'))}</button>`}` : ''}</div></div>`;
+    };
+    return `<div class="card"><p class="small muted" style="margin:0 0 8px">${esc(L('الحساب متجمّد من يوم ما اتعلّم «مشي». بعد شهرين حسابه وملفه الشخصي بيتمسحوا لوحدهم (إلا لو عليه سلفة)، والحضور والمرتبات والسلف بيفضلوا باسمه. قبلها بأسبوع بيوصل تنبيه.', 'The account is frozen from the day he was marked «left». Two months later his login account and personal file are wiped by themselves (unless he owes an advance); attendance, payroll and advances stay under his name. A notice comes a week before.'))}</p><div class="list">${ws.map(row).join('')}</div></div>`;
+  };
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.leavers = () => ({ title: L('اللي مشيوا', 'Who left'), sub: L('حسابات متجمّدة — بتتمسح بعد شهرين', 'Frozen accounts — wiped after two months') });
+  /* the employees list: a link with the count */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; if (r.view !== 'workers' || r.id || !canLeave()) return; const v = document.getElementById('view'); if (!v) return;
+      const n = list('workers').filter(w => w && w.status === 'inactive' && !w.purgedAt).length; const tb = v.querySelector('.toolbar'); if (!tb || tb.querySelector('.lv-link')) return;
+      tb.insertAdjacentHTML('beforeend', `<a class="btn sm lv-link" href="#/leavers">${icon('box')}${esc(L('اللي مشيوا', 'Who left'))}${n ? ` <span class="badge">${n}</span>` : ''}</a>`);
+    } catch (e) { /* ignore */ }
+  });
+  document.head.insertAdjacentHTML('beforeend', '<style>.lvb{margin:0 0 10px}.lvb .small{margin-top:2px}.lv-it .meta span{white-space:nowrap}.lvbtn{color:var(--crit-ink,#c4302b)}</style>');
 })();
