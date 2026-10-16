@@ -41356,6 +41356,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   }
   function pickify(root) {
     if (!root) return;
+    /* v7.85 (Mahmoud 16 Oct, transfer window: «I want to attach a photo — it's not there»): receipts / transfer slips (photo or PDF) had
+       «capture» → the iPhone opened the camera only, with no way to pick the bank-app screenshot. Those now get the phone's own menu
+       (photo library · take photo · files). Camera-only fields (odometer, site photos…) stay as they are. */
+    root.querySelectorAll('input[type=file][capture]').forEach(fi => { const acc = String(fi.accept || '').toLowerCase(); if (/image/.test(acc) && /pdf/.test(acc)) fi.removeAttribute('capture'); });
     root.querySelectorAll('input[type=file]').forEach(fi => {
       if (fi.dataset.a2p || fi.classList.contains('pf-in') || fi.hidden || fi.disabled || fi.closest('label') || fi.closest('.pf-pick')) return;
       let cs; try { cs = getComputedStyle(fi); } catch (e) { return; } if (cs.display === 'none' || cs.visibility === 'hidden') return;
