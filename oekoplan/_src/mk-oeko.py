@@ -51,6 +51,14 @@ rep('<title>Ninety Studioz</title>', f'<title>{NAME}</title>', 1)
 rep('<meta name="description" content="نظام إدارة مكتب Ninety Studioz — الحضور والإجازات واللائحة والمشاريع">',
     f'<meta name="description" content="{NAME} office system — attendance, leave, projects and deliverables">\n<meta property="og:title" content="{NAME}">\n<meta property="og:description" content="{NAME} office system — attendance, leave, projects and deliverables">\n<meta property="og:image" content="https://mahmoudfawzy1212mf-crypto.github.io/oekoplan/icons/icon-512.png">\n<meta property="og:locale" content="en_US">', 1)
 rep('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">', 1)
+
+# ---- Ökoplan menu modules (Mahmoud, 16 Oct): Projects · Intelligence · Design · Communication · Business development · HR · Accounts · Management
+rep("""      add: [{ key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }],
+      into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
+      rename: [],""",
+"""      add: [{ key: 'intel', ar: 'الذكاء', en: 'Intelligence', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],
+      into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos', 'oktimeline', 'portfolio', 'okpipeedit'] }, { near: 'clients', ids: ['enquiries', 'clients', 'quotes'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'okabout', 'rdesk', 'settings'] }],
+      rename: [{ near: 'clients', ar: 'تطوير الأعمال', en: 'Business development' }],""", 1)
 rep('<meta name="apple-mobile-web-app-title" content="Ninety Studioz">', '<meta name="apple-mobile-web-app-title" content="Ökoplan">', 1)  # iOS shows ~11 characters under the icon
 
 # --- logos: the NINETY wordmark / mark become the Ökoplan lockup / square mark (data URIs, like the originals)
