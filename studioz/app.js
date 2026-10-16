@@ -38606,7 +38606,9 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   const weak = () => { try { const m = navigator.deviceMemory, c = navigator.hardwareConcurrency; if (m && m <= 3) return true; if (/Android/.test(ua) && c && c <= 4) return true; } catch (e) { /* ignore */ } return false; };
   const sysLook = () => { const s = (typeof S !== 'undefined' && S.settings && S.settings.ui) || null; return s && s.look ? s.look : (ls(KEY) || 'apple'); };
   const device = () => { const d = ls(DKEY); return d === 'apple' || d === 'classic' ? d : ''; };
-  const want = () => device() || (sysLook() === 'apple' && weak() ? 'classic' : sysLook());
+  /* v7.80 (Mahmoud 16 Oct: «remove Classic / Advanced from me — I work on Advanced always»): the owner is always Advanced, no switch */
+  const ownerLock = () => { try { return typeof S !== 'undefined' && !!S.session && typeof isAdmin === 'function' && isAdmin() && !(typeof isViewing === 'function' && isViewing()); } catch (e) { return false; } };
+  const want = () => (ownerLock() ? 'apple' : (device() || (sysLook() === 'apple' && weak() ? 'classic' : sysLook())));
   function apply() {
     const on = want() !== 'classic'; const h = document.documentElement;
     h.classList.toggle('apple', on); h.classList.toggle('apple-blur', on && blurOK);
@@ -38614,7 +38616,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   }
   apply();
   if (typeof render === 'function') render = (base => function () { try { apply(); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
-  window.nfLook = { want, sysLook, device, weak };
+  window.nfLook = { want, sysLook, device, weak, ownerLock };
 
   /* Settings → «System look» (owner) */
   if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.look = {
@@ -38637,7 +38639,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
     try { localStorage.setItem(DKEY, k); } catch (e) { /* ignore */ }
     apply(); render(true);
   };
-  const mineHTML = () => { const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
+  const mineHTML = () => { if (ownerLock()) return ''; const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
   /* v7.15 — day / night as the same kind of switch, on phones (Mahmoud: «where is night mode here?» — the phone menu button
      never showed, and the switches should match each other) */
   const themeHTML = () => { if (typeof themeCurrent !== 'function' || !ACTIONS.themeToggle) return ''; const dark = themeCurrent() === 'dark'; return `<div class="lookmine thememine" role="group" aria-label="${L('الوضع', 'Mode')}"><button type="button" class="${dark ? '' : 'on'}" data-action="themeSet" data-arg="light">☀︎ ${L('نهاري', 'Light')}</button><button type="button" class="${dark ? 'on' : ''}" data-action="themeSet" data-arg="dark">☾ ${L('ليلي', 'Dark')}</button></div>`; };
@@ -38650,7 +38652,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
     if (lr) lr.insertAdjacentHTML('beforeend', mineHTML() + themeHTML()); else chip.insertAdjacentHTML('afterend', `<div class="lookrow">${mineHTML()}${themeHTML()}</div>`);
   });
   /* the Ninety home has no RENDER_HOOKS — same switch under its name chip */
-  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
+  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !ownerLock() && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
   (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
 .lookrow{display:flex;justify-content:center;margin:6px 10px 2px}
 .lookmine{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:rgba(127,127,127,.18)}
@@ -41419,6 +41421,21 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 26px -16px rgba(0,0,0,.6); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
   --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);
   --side-bg:#18202c; --side-ink:#e9edf3; --side-muted:#94a0b0; --side-line:rgba(255,255,255,.07); --side-hover:rgba(150,165,190,.14); --side-on:#94b3d6; --side-on-bg:#1f2735; --nf-side:#18202c;`;
+  const X = 'html.apple:not(.iph)';
+  const XL = `
+  --bg:#f3f1ea; --surface:#fffdf8; --surface-2:rgba(110,125,110,.09); --surface-3:rgba(110,125,110,.15);
+  --ink:#22281f; --ink-2:#3f4a3c; --muted:#7b8476; --line:rgba(60,75,55,.11); --line-2:rgba(60,75,55,.19);
+  --primary:#3f6a52; --primary-ink:#fff; --accent:#4f7a64; --accent-ink:#fff; --accent-soft:rgba(79,122,100,.13);
+  --glass:rgba(255,253,248,.72); --glass-solid:rgba(255,253,248,.94); --glass-brd:rgba(255,253,248,.85);
+  --side-bg:rgba(24,32,44,.9); --nf-side:rgba(24,32,44,.92);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(172,204,182,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(240,212,172,.95),transparent 68%),linear-gradient(170deg,#d9e8dd 0%,#f3f1ea 48%,#f4e4cb 100%);`;
+  const XD = `
+  --bg:#151b26; --surface:#1f2735; --surface-2:rgba(150,165,190,.14); --surface-3:rgba(150,165,190,.22);
+  --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.13);
+  --primary:#94b3d6; --primary-ink:#141a24; --accent:#94b3d6; --accent-ink:#141a24; --accent-soft:rgba(148,179,214,.16);
+  --glass:rgba(31,39,53,.66); --glass-solid:rgba(31,39,53,.95); --glass-brd:rgba(255,255,255,.06);
+  --side-bg:rgba(20,27,38,.92); --nf-side:rgba(20,27,38,.94);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);`;
   document.head.insertAdjacentHTML('beforeend', `<style id="iphone-look">
 ${I}{${LIGHT}}
 @media (prefers-color-scheme: dark){ ${I}:not([data-theme="light"]){${DARK}} }
@@ -41524,6 +41541,22 @@ ${I} .rq-t{background:var(--surface)!important;border-color:transparent!importan
 ${I} .pf-pick{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 ${I} .pf-pick.on{border-color:var(--good-ink);color:var(--good-ink);background:var(--good-soft)}
 ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
+
+/* v7.80 (Mahmoud 16 Oct: «you did not set it to what we chose — option 3 by day, option 2 at night»; he works on Advanced):
+   the same two palettes on the Advanced look too — sage & sand by day, calm navy at night, a navy menu instead of black.
+   Only colours: the Advanced shapes (glass, pills, the dark menu) stay as they are. */
+${X}{${XL}}
+@media (prefers-color-scheme: dark){ ${X}:not([data-theme="light"]){${XD}} }
+${X}[data-theme="dark"]{${XD}}
+${X}{background:var(--bg)}
+${X} body{background:transparent!important;background-attachment:scroll!important}
+${X} .nhome,${X} .login{background:transparent!important}
+${X} #nf-wall{display:block;position:fixed;top:0;left:0;right:0;bottom:0;z-index:-1;pointer-events:none;background:var(--wall)}
+${X} .side,${X} .nhome .nside{background:var(--side-bg)!important}
+${X} .side .avatar{background:linear-gradient(135deg,#2c3a50,#18202c)}
+html.apple:not(.iph) body:has(.side.open)::before{background:#18202c}
+${X} .tb-logo{background:#18202c}
+@media (prefers-reduced-transparency: reduce){ ${X} .side,${X} .nhome .nside{background:#18202c!important} }
 </style>`);
 })();
 /* =====================================================================
@@ -55098,6 +55131,11 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
      re-plan reasons. Studio: projects to their due date. Construction: projects to their end date.
    · «Today's plan» on the home page: the person's top 5 tasks (priority + date + doing + rules).
    Arabic and English, phone and desktop.
+   v7.80 (Mahmoud 16 Oct: «why is the timeline in AI — it belongs in project management, and every project its timeline with
+   its items»; brief claude/project-timeline-brief.md, Start 16 Oct): the big timeline left the AI module — factory: it is the
+   «Timeline» tab of «Projects manager» for the owner (the others keep the old schedule there); studio / construction: a row
+   inside the Projects module. Each project / order timeline shows under every department its tasks, then purchases and
+   trips, then the order items (each item from the start to the delivery date with its own tasks). Who sees what: unchanged.
    ===================================================================== */
 (function () {
   if (window.__NF_TIMELINE__) return; window.__NF_TIMELINE__ = 1;
@@ -55155,11 +55193,30 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   const planEnd = st => maxD(...Object.values(st).map(x => x && x.end));
   const canPlan = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'manager' || (typeof canDo === 'function' && canDo('orders.edit')));
 
+  /* v7.80: what sits under each line of an order timeline — its tasks, its purchases and trips, its items */
+  const TK_OK = t => t && !t.deleted && !['update', 'notice'].includes(String(t.kind || 'task')) && t.source !== 'morning';
+  const tkS = (t, s0) => D(t.createdAt) || D(t.dueDate) || s0;
+  const tkE = (t, s0) => maxD(tkS(t, s0), t.status === 'done' ? D(t.doneAt || t.updatedAt) : '', D(t.dueDate)) || tkS(t, s0);
+  const tkLate = t => ['open', 'doing'].includes(String(t.status || 'open')) && t.dueDate && D(t.dueDate) < T();
+  const PO_DONE = ['received', 'closed', 'arrived', 'done', 'cancelled'];
+  function under(o) {
+    const s0 = startOf(o); const r = routeOf(o);
+    const tasks = list('tasks').filter(t => TK_OK(t) && t.orderId === o.id).slice(0, 300);
+    const byD = {}; const other = []; tasks.forEach(t => { if (t.deptId && r.includes(t.deptId)) (byD[t.deptId] = byD[t.deptId] || []).push(t); else other.push(t); });
+    const pos = list('purchases').filter(p => p && p.orderId === o.id && p.status !== 'cancelled').map(p => ({ id: p.id, href: `#/purchases/${p.id}`, label: L(`شراء ${p.number || ''}`, `Purchase ${p.number || ''}`), s: D(p.createdAt) || s0, e: PO_DONE.includes(String(p.status)) ? (D(p.receivedAt || p.updatedAt) || D(p.createdAt) || s0) : maxD(D(p.createdAt) || s0, D(p.expectedDate || p.eta), T()), done: PO_DONE.includes(String(p.status)), late: !PO_DONE.includes(String(p.status)) && !!(p.expectedDate || p.eta) && D(p.expectedDate || p.eta) < T() }));
+    const trips = list('trips').filter(x => x && x.orderId === o.id && x.status !== 'cancelled').map(x => { const d0 = D(x.date || x.createdAt) || s0; return { id: x.id, href: `#/fleet/${x.id}`, label: L(`مشوار: ${x.purpose || x.dest || ''}`, `Trip: ${x.purpose || x.dest || ''}`), s: d0, e: d0, done: ['done'].includes(String(x.status)), late: !['done'].includes(String(x.status)) && d0 < T() }; });
+    const items = (Array.isArray(o.items) ? o.items : []).filter(Boolean).slice(0, 40).map((it, i) => { const pr = it.productId ? byId('products', it.productId) : null; const nm = String(it.name || (pr && pr.name) || L(`بند ${i + 1}`, `Item ${i + 1}`)); return { it, i, name: nm + (+it.qty > 1 ? ` × ${+it.qty}` : ''), tasks: it.productId ? tasks.filter(t => t.productId === it.productId) : [] }; });
+    return { s0, tasks, byD, other, pos, trips, items };
+  }
+  const tkCls = t => (t.status === 'done' ? 'done' : tkLate(t) ? 'late' : t.status === 'doing' ? 'doing' : 'open');
   function gantt(o) {
     const r = routeOf(o); if (!r.length) return '';
     const { stages: P, auto } = planOf(o); const B = o.nfPlan && o.nfPlan.baseline && o.nfPlan.baseline.stages; const t = T();
     const pts = []; r.forEach(d => { const p = P[d], a = actOf(o, d); if (p) pts.push(p.start, p.end); if (a.start) pts.push(a.start, a.end); if (B && B[d]) pts.push(B[d].start, B[d].end); });
     pts.push(t); if (o.dueDate) pts.push(D(o.dueDate));
+    const U = under(o); const lo0 = addDays(U.s0, -45);
+    U.tasks.forEach(k => { const a = tkS(k, U.s0), b = tkE(k, U.s0); if (a >= lo0) pts.push(a); if (b >= lo0) pts.push(b); });
+    U.pos.concat(U.trips).forEach(k => { if (k.s >= lo0) pts.push(k.s); if (k.e >= lo0) pts.push(k.e); });
     const lo = addDays(minD(...pts), -1), hi = addDays(maxD(...pts), 1); const tot = Math.max(1, dd(lo, hi) + 1);
     const x = iso => Math.max(0, Math.min(100, dd(lo, iso) / tot * 100)); const w = (a, b) => Math.max(0.8, (dd(a, b) + 1) / tot * 100);
     const rows = r.map(d => {
@@ -55168,8 +55225,23 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
         ${b ? `<i class="nft-b" style="inset-inline-start:${x(b.start)}%;width:${w(b.start, b.end)}%"></i>` : ''}
         ${p ? `<i class="nft-p" style="inset-inline-start:${x(p.start)}%;width:${w(p.start, p.end)}%;--h:${hue(d)}" title="${esc(L('المخطط', 'Planned'))} ${esc(fmtDate(p.start))} → ${esc(fmtDate(p.end))}"></i>` : ''}
         ${a.start ? `<i class="nft-a ${a.done ? 'done' : 'on'} ${late ? 'late' : ''}" style="inset-inline-start:${x(a.start)}%;width:${w(a.start, a.end)}%;--h:${hue(d)}" title="${esc(L('الفعلي', 'Actual'))} ${esc(fmtDate(a.start))} → ${esc(a.done ? fmtDate(a.end) : L('لسه شغّال', 'running'))}"></i>` : ''}
-      </div></div>`;
-    }).join('');
+      </div></div>${subTasks(U.byD[d] || [], d)}`;
+    }).join('') + extraRows();
+    function bar(cls, a, b, hu) { return `<i class="nft-t ${cls}" style="inset-inline-start:${x(a)}%;width:${w(a, b)}%${hu != null ? `;--h:${hu}` : ''}"></i>`; }
+    function subRow(href, label, inner, title) { return `<a class="nft-row nft-sub" href="${esc(href)}" title="${esc(title || label)}"><div class="nft-l">${esc(label)}</div><div class="nft-tr nft-trs">${inner}</div></a>`; }
+    function taskRow(k, hu) { const a = tkS(k, U.s0), b = tkE(k, U.s0); return subRow(`#/tasks/${k.id}`, String(k.title || ''), bar(tkCls(k), a, b, hu), `${k.title || ''}${k.dueDate ? ' — ' + fmtDate(k.dueDate) : ''}`); }
+    function group(label, n, body, open) { return n ? `<details class="nft-det"${open ? ' open' : ''}><summary class="nft-sum"><span class="nft-l">${esc(label)}</span><span class="small muted">${n}</span></summary>${body}</details>` : ''; }
+    function subTasks(ts, d) { return group(L('مهام القسم', 'Department tasks'), ts.length, ts.slice(0, 30).map(k => taskRow(k, hue(d))).join(''), false); }
+    function extraRows() {
+      let h = group(L('مهام تانية', 'Other tasks'), U.other.length, U.other.slice(0, 30).map(k => taskRow(k, null)).join(''), false);
+      const pt = U.pos.concat(U.trips); h += group(L('المشتريات والنقل', 'Purchases and trips'), pt.length, pt.slice(0, 30).map(k => subRow(k.href, k.label, bar(k.done ? 'done' : k.late ? 'late' : 'open', k.s, k.e, null))).join(''), false);
+      const end = D(o.dueDate) || planEnd(P) || t;
+      h += group(L('بنود الأمر', 'Order items'), U.items.length, U.items.map(m => {
+        const dots = m.tasks.slice(0, 12).map(k => { const at = k.status === 'done' ? (D(k.doneAt) || tkE(k, U.s0)) : (D(k.dueDate) || tkS(k, U.s0)); return `<i class="nft-dot ${tkCls(k)}" style="inset-inline-start:${x(at)}%" title="${esc(String(k.title || ''))}"></i>`; }).join('');
+        return `<div class="nft-row nft-sub nft-item"><div class="nft-l" title="${esc(m.name)}">${esc(m.name)}</div><div class="nft-tr nft-trs">${bar('item', U.s0, end, null)}${dots}</div></div>`;
+      }).join('') + (U.items.length ? `<p class="tiny muted nft-note">${esc(L('كل بند من بداية الأمر لميعاد التسليم، والنقط مهامه. البنود بتتحرك مع الأمر في الأقسام.', 'Each item runs from the start of the order to the delivery date; the dots are its tasks. Items move through the departments with the order.'))}</p>` : ''), false);
+      return h;
+    }
     const dr = drift(o); let warn = '';
     if (dr) { const ns = shifted(o, dr); const ne = planEnd(ns); const over = o.dueDate && ne > D(o.dueDate) ? dd(o.dueDate, ne) : 0;
       warn = `<div class="banner warn nft-drift">${icon('alert')}<span>${esc(dr.kind === 'start' ? L(`«${dName(dr.dept)}» بدأ متأخر ${dr.delta} يوم عن الخطة`, `«${dName(dr.dept)}» started ${dr.delta} days late`) : L(`«${dName(dr.dept)}» عدّى نهايته المخططة بـ ${dr.delta} يوم`, `«${dName(dr.dept)}» is ${dr.delta} days past its planned end`))}. ${esc(L(`لو زحزحنا الأقسام اللي بعده، الأمر يخلص ${fmtDate(ne)}`, `Moving the next departments, the order ends ${fmtDate(ne)}`))}${over ? ` — <b>${esc(L(`بعد ميعاد التسليم بـ ${over} يوم`, `${over} days after the delivery date`))}</b>` : ''}.</span>${canPlan() ? `<button type="button" class="btn sm" data-action="nftReplan" data-arg="${esc(o.id)}">${esc(L('اقبل إعادة الجدولة', 'Accept the re-plan'))}</button>` : ''}</div>`; }
@@ -55207,7 +55279,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 
   /* ================= #/nftimeline (owner) ================= */
   VIEW_TITLES.nftimeline = 'التايم لاين';
-  (() => { if (NAV.some(n => n.id === 'nftimeline')) return; const i = NAV.findIndex(n => n.id === 'nflearn'); const e = { id: 'nftimeline', label: 'التايم لاين', icon: 'calendar' }; if (i >= 0) NAV.splice(i, 0, e); else NAV.push(e); })();
+  (() => { if (CO() === 'factory' || NAV.some(n => n.id === 'nftimeline')) return; const near = CO() === 'studio' ? 'projects' : 'cprojects'; const i = NAV.findIndex(n => n.id === near); const e = { id: 'nftimeline', label: 'التايم لاين', icon: 'calendar' }; if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e); })();   /* v7.80: inside the Projects module, not AI */
   if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'nftimeline') return isOwner(); return base.apply(this, arguments); })(canSee);
   if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.nftimeline = () => ({ title: L('التايم لاين', 'Timeline'), sub: L('كل الشغل الشغّال على الشهور، زحمة كل شهر، وحمل كل قسم', 'All running work on the months, how crowded each month is, and the load of each department') });
   const MONTHS = [['يناير', 'Jan'], ['فبراير', 'Feb'], ['مارس', 'Mar'], ['أبريل', 'Apr'], ['مايو', 'May'], ['يونيو', 'Jun'], ['يوليو', 'Jul'], ['أغسطس', 'Aug'], ['سبتمبر', 'Sep'], ['أكتوبر', 'Oct'], ['نوفمبر', 'Nov'], ['ديسمبر', 'Dec']];
@@ -55248,7 +55320,21 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
       + (CO() === 'factory' ? sec(L('حمل الأقسام دلوقتي', 'Department load now'), deps) + sec(L('دقة التخطيط', 'Planning accuracy'), acc) + sec(L('أسباب إعادة الجدولة', 'Re-plan reasons'), why) : '')
       + (CO() === 'studio' && window.nfStuTL ? window.nfStuTL.sections(sec) : '');
   }
-  EXTRA_VIEWS.nftimeline = () => vTimeline();
+  EXTRA_VIEWS.nftimeline = () => {
+    /* v7.80: in the factory the timeline is the «Timeline» tab of «Projects manager» — old links land there */
+    if (CO() === 'factory' && typeof vProjects === 'function') { (S.ui.filter.projects ||= { brand: '', risk: false, tab: 'cards', status: 'open' }).tab = 'gantt'; setTimeout(() => { if (S.route && S.route.view === 'nftimeline') location.hash = '#/projects'; }, 0); }
+    return vTimeline();
+  };
+  const PJ_TABS = on => `<div class="tabs" style="margin-bottom:10px"><button ${on === 'cards' ? 'class="on" ' : ''}data-action="pjTab" data-arg="cards">المشاريع والمراحل</button><button ${on === 'gantt' ? 'class="on" ' : ''}data-action="pjTab" data-arg="gantt">الجدول الزمني</button></div>`;
+  if (typeof vProjects === 'function') vProjects = (base => function () {
+    if (CO() === 'factory' && S.route && !S.route.id && isOwner() && ((S.ui.filter.projects || {}).tab === 'gantt')) return PJ_TABS('gantt') + vTimeline();
+    return base.apply(this, arguments);
+  })(vProjects);
+  if (typeof vProjectDetail === 'function') vProjectDetail = (base => function (o) {
+    const html = base.apply(this, arguments); if (CO() !== 'factory' || !o || o.status === 'cancelled') return html;
+    let g = ''; try { g = gantt(o); } catch (e) { g = ''; } if (!g) return html;
+    const k = '<div class="flow">'; const i = html.indexOf(k); return i < 0 ? html + g : html.slice(0, i) + g + html.slice(i);
+  })(vProjectDetail);
   ACTIONS.nftCap = () => {
     if (!isOwner()) return; const cap = (S.settings && S.settings.nfCapacity) || {}; const ds = ((S.settings && S.settings.departments) || []).filter(d => d && d.id && !d.admin);
     openModal({ title: L('طاقة الأقسام', 'Department capacity'), body: `<div class="form"><p class="small muted full" style="margin:0">${esc(L('كام أمر ممكن يشتغل في القسم في نفس الوقت.', 'How many orders a department can run at the same time.'))}</p>${ds.map(d => `<div class="field"><label>${esc(d.name)}</label><input type="number" min="1" max="50" class="inp" name="c_${esc(d.id)}" value="${esc(String(+cap[d.id] || 3))}"></div>`).join('')}</div>`,
@@ -55288,7 +55374,13 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     .nft-mh{display:grid;grid-template-columns:repeat(6,1fr);margin-inline-start:calc(var(--lw) + 6px);font-size:11px;color:var(--muted,#667)}.nft-mh span{border-inline-start:1px solid var(--line,#e3e5ea);padding-inline-start:3px;white-space:nowrap;overflow:hidden}
     .nft-crowd{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:end;height:110px}.nft-crowd>div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:11px}.nft-crowd b{display:block;width:70%;background:var(--accent,#2a62d8);border-radius:4px 4px 0 0;min-height:2px}.nft-crowd em{font-style:normal;font-weight:600}
     .nft-plan{margin:0 0 12px}.nft-plan .item{text-decoration:none;color:inherit}.nft-reasons{display:flex;flex-wrap:wrap;gap:6px}
-    @media (max-width:640px){.nft-g{--lw:74px}.nft-big{--lw:72px}.nft-l{font-size:11px}}
+    .nft-det{margin:1px 0 3px}.nft-det>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:var(--lw) auto;gap:6px;align-items:center;min-height:20px;font-size:11.5px;color:var(--muted,#667)}.nft-det>summary::-webkit-details-marker{display:none}
+    .nft-det>summary .nft-l::before{content:'▸';display:inline-block;margin-inline-end:4px;transition:transform .15s}[dir=rtl] .nft-det>summary .nft-l::before{content:'◂'}.nft-det[open]>summary .nft-l::before{transform:rotate(90deg)}[dir=rtl] .nft-det[open]>summary .nft-l::before{transform:rotate(-90deg)}
+    .nft-sub{min-height:18px;text-decoration:none;color:inherit}.nft-sub .nft-l{font-size:11px;padding-inline-start:12px;color:var(--ink-2,#445)}.nft-trs{height:10px;background:transparent;border-bottom:1px dashed var(--line,#e3e5ea);border-radius:0}
+    .nft-t{top:1px!important;height:8px!important;border-radius:4px;background:hsla(var(--h,215),45%,55%,.55)}.nft-t.open{background:hsla(var(--h,215),45%,55%,.45)}.nft-t.doing{background:hsl(var(--h,215),55%,50%)}.nft-t.done{background:#7fae8e}.nft-t.late{background:#d64545}.nft-t.item{background:rgba(120,135,160,.22)!important;border:1px solid rgba(120,135,160,.5);box-sizing:border-box}
+    .nft-dot{position:absolute;top:0;width:9px!important;height:9px!important;border-radius:50%;margin-inline-start:-4px;background:#2a62d8;border:1.5px solid var(--surface,#fff)}.nft-dot.done{background:#5c8a6b}.nft-dot.late{background:#d64545}
+    .nft-note{margin:2px 0 4px;padding-inline-start:calc(var(--lw) + 6px)}
+    @media (max-width:640px){.nft-g{--lw:74px}.nft-big{--lw:72px}.nft-l{font-size:11px}.nft-sub .nft-l{font-size:10.5px;padding-inline-start:6px}.nft-note{padding-inline-start:0}}
   </style>`);
 })();
 /* =====================================================================
@@ -55760,7 +55852,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     const sec0 = (tt, inner, sub) => `<div class="card nfl-sec"><h3 class="nfl-h">${esc(tt)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
     if (!VIP()) return OWNER() ? `<div class="banner warn">${icon('info')}<span>${esc(L('التوأم الرقمي مقفول في الاستوديو.', 'The digital twin is off in the studio.'))} <a href="#/nfaiset">${esc(L('شغّله من إعدادات الـAI', 'Turn it on in the AI settings'))}</a></span></div>` : `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
     const th = TH(); const al = alerts(); const sec = (tt, inner, sub, extra) => `<div class="card nfl-sec"${extra || ''}><h3 class="nfl-h">${esc(tt)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
-    const alH = al.length ? `<div class="list">${al.slice(0, 30).map(a => `<div class="item nfst-al ${a.lv}"><div class="main"><div class="title"><span class="badge ${a.lv === 'crit' ? 'crit' : a.lv === 'warn' ? 'warn' : ''}">${esc(a.lv === 'crit' ? L('عاجل', 'Urgent') : a.lv === 'warn' ? L('متابعة', 'Follow up') : L('للعلم', 'FYI'))}</span> <a href="${esc(a.href)}">${esc(a.t)}</a></div></div>${a.client ? `<div class="end"><button type="button" class="btn sm" data-action="nfstRemind" data-arg="${esc(a.p.id)}">${icon('send')}${esc(L('ذكّر العميل', 'Remind the client'))}</button></div>` : ''}</div>`).join('')}</div>` : `<div class="empty small">${esc(L('مفيش حاجة محتاجة انتباهك دلوقتي.', 'Nothing needs you right now.'))}</div>`;
+    const alH = al.length ? `<div class="list">${al.slice(0, 30).map(a => `<div class="item nfst-al ${a.lv}"><div class="main"><div class="title"><span class="badge ${a.lv === 'crit' ? 'crit' : a.lv === 'warn' ? 'warn' : ''}">${esc(a.lv === 'crit' ? L('عاجل', 'Urgent') : a.lv === 'warn' ? L('متابعة', 'Follow up') : L('للعلم', 'FYI'))}</span> <a href="${esc(a.href)}">${esc(a.t)}</a></div></div>${a.client && OWNER() ? `<div class="end"><button type="button" class="btn sm" data-action="nfstRemind" data-arg="${esc(a.p.id)}">${icon('send')}${esc(L('ذكّر العميل', 'Remind the client'))}</button></div>` : ''}</div>`).join('')}</div>` : `<div class="empty small">${esc(L('مفيش حاجة محتاجة انتباهك دلوقتي.', 'Nothing needs you right now.'))}</div>`;
     const rk = list('projects').filter(active).map(p => ({ p, r: risk(p) })).filter(x => x.r.p >= 20).sort((a, b) => b.r.p - a.r.p);
     const rkH = rk.length ? `<div class="list">${rk.slice(0, 15).map(({ p, r }) => `<div class="item"><div class="main"><div class="title"><a href="#/projects/${esc(p.id)}"><b>${esc(p.code || p.name || '')}</b></a> <span class="badge ${r.p >= th.risk ? 'crit' : 'warn'}">${esc(L(`احتمال التأخير ${r.p}%`, `Delay chance ${r.p}%`))}</span></div><div class="meta">${r.why.slice(0, 3).map(w => `<span>${esc(w)}</span>`).join('')}</div></div></div>`).join('')}</div>` : `<div class="empty small">${esc(L('مفيش مشروع في خطر دلوقتي.', 'No project at risk right now.'))}</div>`;
     const tl = teamLoad();
@@ -55800,7 +55892,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 
   /* ---------------- «Remind the client» — a real email from the office address, or log one sent from outside ---------------- */
   ACTIONS.nfstRemind = pid => {
-    const p = byId('projects', pid); if (!p || !VIP()) return; const cw = clientWait(p); const what = cw && cw.why === 'camera' ? 'the camera views' : 'the latest renders';
+    const p = byId('projects', pid); if (!p || !OWNER()) return; const cw = clientWait(p);   /* v7.80 (PIN 16 Oct): the owner only */ const what = cw && cw.why === 'camera' ? 'the camera views' : 'the latest renders';
     const subj = `Follow-up — ${p.name || p.code || ''}`; const txt = `Dear ${p.client || 'client'},\n\nWe hope you are well. We shared ${what} for ${p.name || 'the project'}${cw ? ` ${cw.days} days ago` : ''} and are waiting for your feedback / approval so we can continue on schedule.\n\nKind regards,\nNinety Studioz`;
     openModal({ title: L('ذكّر العميل', 'Remind the client'), submitLabel: L('ابعت الإيميل', 'Send the email'), body: `<div class="form"><div class="field full"><label>${esc(L('إلى', 'To'))}</label><input type="email" name="to" class="inp ltr" value="${esc(p.clientEmail || '')}" required></div><div class="field full"><label>${esc(L('نسخة (اختياري)', 'Cc (optional)'))}</label><input type="email" name="cc" class="inp ltr"></div><div class="field full"><label>${esc(L('الموضوع', 'Subject'))}</label><input name="subject" class="inp ltr" value="${esc(subj)}" required></div><div class="field full"><label>${esc(L('الرسالة', 'Message'))}</label><textarea name="text" class="inp ltr" rows="7">${esc(txt)}</textarea></div><p class="tiny muted full" style="margin:0">${esc(L('بيتبعت من إيميل المكتب، والرد بيرجعلك.', 'Sent from the office address; replies come back to you.'))}</p></div>`,
       extra: `<button type="button" class="btn ghost" data-action="nfstRemindLog" data-arg="${esc(p.id)}">${esc(L('اتبعت من برّه — سجّل بس', 'Sent from outside — just log it'))}</button>`,
@@ -55812,7 +55904,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
       } });
   };
   async function logClient(p, k, note, email) { const cur = byId('projects', p.id) || p; await Store.update('projects', p.id, Object.assign({ clientLog: (Array.isArray(cur.clientLog) ? cur.clientLog : []).concat([{ at: nowISO(), by: me(), k, note: String(note || '').slice(0, 200) }]).slice(-60) }, email ? { clientEmail: email } : {})); }
-  ACTIONS.nfstRemindLog = async pid => { const p = byId('projects', pid); if (!p || !VIP()) return; await logClient(p, 'remind', L('اتبعت من برّه', 'Sent from outside')); if (typeof closeModal === 'function') closeModal(); toast(L('اتسجّل', 'Logged')); rerender(); };
+  ACTIONS.nfstRemindLog = async pid => { const p = byId('projects', pid); if (!p || !OWNER()) return; await logClient(p, 'remind', L('اتبعت من برّه', 'Sent from outside')); if (typeof closeModal === 'function') closeModal(); toast(L('اتسجّل', 'Logged')); rerender(); };
   window.nfStuClientLog = (pid, k, note) => { const p = byId('projects', pid); return p && VIP() ? logClient(p, k, note) : null; };
 
   /* ---------------- the checklist before the next status ---------------- */
@@ -55888,7 +55980,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
 
   /* ================= the menu: one «AI» group, the same order everywhere ================= */
   const smartId = () => (CO() === 'studio' ? 'stusmart' : 'nfsmart');
-  const ORDER = () => [smartId(), 'ai', 'nflearn', 'nfrules', 'nftimeline', 'nfuicheck', 'nfaiset'];
+  const ORDER = () => [smartId(), 'ai', 'nflearn', 'nfrules', 'nfuicheck', 'nfaiset'];   /* v7.80: the timeline moved to project management (part x3) */
   const seesSmart = () => boss();   /* the Smart desk is the owner's, like the studio one — who sees what does not change */
   const push = (id, label, icon0, extra) => { if (!NAV.some(n => n && n.id === id)) NAV.push(Object.assign({ id, label, icon: icon0 }, extra || {})); };
   if (CO() !== 'studio') push('nfsmart', 'لوحة الذكاء', 'sparkle', { countCls: 'warn', count: () => { try { return seesSmart() ? alerts().filter(a => a.lv === 'crit').length : 0; } catch (e) { return 0; } } });
