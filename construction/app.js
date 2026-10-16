@@ -4106,21 +4106,22 @@ ACTIONS.filePrint = async id => {
 
 /* ---------------- pinch / drag / wheel zoom for a transformed element ---------------- */
 function pinchZoom(viewport, content, o = {}) {
-  const st = { s: 1, x: 0, y: 0, min: o.min || 0.5, max: o.max || 8, fitS: 1 }; const ptrs = new Map(); let start = null;
+  const st = { s: 1, x: 0, y: 0, min: o.min || 0.5, max: o.max || 8, fitS: 1, tap: null }; const ptrs = new Map(); let start = null; let tap0 = null;
+  content.style.left = '0'; content.style.right = 'auto';   /* v7.83: the zoom maths counts from the top-left corner — the English mirror turned «left:0» into «right:0» and pushed big pictures off the screen */
   const apply = () => { content.style.transform = `translate(${st.x}px,${st.y}px) scale(${st.s})`; if (o.onChange) o.onChange(st); };
   const fit = () => { if (o.fit) o.fit(st); else { st.s = 1; st.x = 0; st.y = 0; } st.fitS = st.s; st.min = Math.min(o.min || 0.5, st.s * 0.5); };
   const zoomAt = (factor, cx, cy) => { const ns = Math.max(st.min, Math.min(st.max, st.s * factor)); const k = ns / st.s; st.x = cx - (cx - st.x) * k; st.y = cy - (cy - st.y) * k; st.s = ns; apply(); };
   const rect = () => viewport.getBoundingClientRect();
-  viewport.addEventListener('pointerdown', e => { if (e.button !== 0 && e.pointerType === 'mouse') return; viewport.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); start = { s: st.s, x: st.x, y: st.y, ptrs: new Map(ptrs) }; e.preventDefault(); });
+  viewport.addEventListener('pointerdown', e => { if (e.button !== 0 && e.pointerType === 'mouse') return; tap0 = ptrs.size ? null : { x: e.clientX, y: e.clientY, btn: !!(e.target.closest && e.target.closest('button,a,input')), moved: false }; viewport.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (ptrs.size > 1 && tap0) tap0.moved = true; start = { s: st.s, x: st.x, y: st.y, ptrs: new Map(ptrs) }; e.preventDefault(); });
   viewport.addEventListener('pointermove', e => {
-    if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (!start) return; const r = rect();
+    if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (tap0 && !tap0.moved && Math.abs(e.clientX - tap0.x) + Math.abs(e.clientY - tap0.y) > 6) tap0.moved = true; if (!start) return; const r = rect();
     if (ptrs.size >= 2) { const ids = Array.from(ptrs.keys()).slice(0, 2); const a0 = start.ptrs.get(ids[0]), b0 = start.ptrs.get(ids[1]); const a1 = ptrs.get(ids[0]), b1 = ptrs.get(ids[1]); if (!a0 || !b0) { start = { s: st.s, x: st.x, y: st.y, ptrs: new Map(ptrs) }; return; }
       const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y); const k = Math.max(st.min, Math.min(st.max, start.s * d1 / d0)) / start.s;
       const c0 = { x: (a0.x + b0.x) / 2 - r.left, y: (a0.y + b0.y) / 2 - r.top }, c1 = { x: (a1.x + b1.x) / 2 - r.left, y: (a1.y + b1.y) / 2 - r.top };
       st.s = start.s * k; st.x = c1.x - (c0.x - start.x) * k; st.y = c1.y - (c0.y - start.y) * k; apply(); }
     else { const p0 = start.ptrs.get(e.pointerId); if (!p0) return; st.x = start.x + (e.clientX - p0.x); st.y = start.y + (e.clientY - p0.y); apply(); }
   });
-  const up = e => { ptrs.delete(e.pointerId); if (ptrs.size) start = { s: st.s, x: st.x, y: st.y, ptrs: new Map(ptrs) }; else { start = null; if (o.onEnd) o.onEnd(st); } };
+  const up = e => { ptrs.delete(e.pointerId); if (!ptrs.size && tap0) { st.tap = (!tap0.moved && !tap0.btn && e.type === 'pointerup') ? { x: e.clientX, y: e.clientY, at: Date.now() } : null; tap0 = null; } if (ptrs.size) start = { s: st.s, x: st.x, y: st.y, ptrs: new Map(ptrs) }; else { start = null; if (o.onEnd) o.onEnd(st); } };
   viewport.addEventListener('pointerup', up); viewport.addEventListener('pointercancel', up);
   viewport.addEventListener('wheel', e => { e.preventDefault(); const r = rect(); if (e.ctrlKey || o.wheelZoom) { zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); if (o.onEnd) o.onEnd(st); } else { st.y -= e.deltaY; st.x -= e.deltaX; apply(); } }, { passive: false });
   viewport.addEventListener('dblclick', e => { const r = rect(); if (st.s > st.fitS * 1.01) { fit(); apply(); } else zoomAt(2.5, e.clientX - r.left, e.clientY - r.top); if (o.onEnd) o.onEnd(st); });
@@ -4134,14 +4135,26 @@ async function mountImageViewer(body, acts, f) {
   const url = await Files.url(f) || (await openLink(f)); if (!url) throw new Error('no-url');
   body.innerHTML = `<div class="nfv-vp" id="nfv-vp"><div class="nfv-content"><img src="${esc(url)}" alt="${esc(f.name)}" draggable="false"></div></div>`;
   const vp = $('#nfv-vp', body); const img = $('img', vp);
-  const fit = st => { const r = vp.getBoundingClientRect(); const w = img.naturalWidth || 1, h = img.naturalHeight || 1; const s = Math.min((r.width - 16) / w, (r.height - 16) / h, 1); st.s = s; st.x = (r.width - w * s) / 2; st.y = (r.height - h * s) / 2; };
-  const pz = pinchZoom(vp, vp.firstElementChild, { wheelZoom: true, min: 0.1, max: 12, fit }); vp.appendChild(zoomBar(pz));
-  if (!img.complete || !img.naturalWidth) img.addEventListener('load', () => pz.reset(), { once: true }); else pz.reset();
+  /* v7.83 (Mahmoud 16 Oct, screenshot: the photo opened at full size, its corner in the middle of the screen): the fit ran before the
+     picture's size was known (it then counted it as 1×1 at 100%). Now the picture stays hidden until its real size is known, fits then,
+     and fits again whenever the space changes (window resized, bar wrapped, full screen) as long as you have not zoomed or moved it. */
+  const content = vp.firstElementChild; let fitted = null;
+  const fit = st => { const r = vp.getBoundingClientRect(); const w = img.naturalWidth, h = img.naturalHeight; if (!w || !h || r.width < 24 || r.height < 24) { content.style.visibility = 'hidden'; st.s = 1; st.x = 0; st.y = 0; return; } const s = Math.min((r.width - 16) / w, (r.height - 16) / h, 1); st.s = s; st.x = (r.width - w * s) / 2; st.y = (r.height - h * s) / 2; content.style.visibility = ''; fitted = { s, x: st.x, y: st.y }; };
+  const pz = pinchZoom(vp, content, { wheelZoom: true, min: 0.1, max: 12, fit }); vp.appendChild(zoomBar(pz));
+  const untouched = () => !fitted || (Math.abs(pz.st.s - fitted.s) < 1e-6 && Math.abs(pz.st.x - fitted.x) < 0.5 && Math.abs(pz.st.y - fitted.y) < 0.5);
+  const refit = () => { if (untouched()) pz.reset(); };
+  img.addEventListener('load', refit); if (img.decode) img.decode().then(refit).catch(() => { });
+  let tries = 0; const poll = setInterval(() => { if (fitted || ++tries > 40) { clearInterval(poll); return; } refit(); }, 150);
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(refit) : null; if (ro) ro.observe(vp);
+  refit();
+  /* v7.83 (Mahmoud: «a tap anywhere on the empty screen takes me out of the picture — in all of Ninety»): a clean tap on the dark area
+     around the picture closes it (closed on «click», so the tap never lands on the page underneath); taps on the picture and the buttons keep their job */
+  vp.addEventListener('click', e => { const t = pz.st.tap; if (!t || Date.now() - t.at > 700 || (e.target.closest && e.target.closest('button,a,input'))) return; const r = img.getBoundingClientRect(); if (content.style.visibility !== 'hidden' && t.x >= r.left - 2 && t.x <= r.right + 2 && t.y >= r.top - 2 && t.y <= r.bottom + 2) return; pz.st.tap = null; e.preventDefault(); e.stopPropagation(); viewerClose(); });
   acts.innerHTML = fileActs(f);
-  return () => { };
+  return () => { clearInterval(poll); if (ro) ro.disconnect(); };
 }
 /* ---------------- video ---------------- */
-async function mountVideoViewer(body, acts, f) { const url = await openLink(f); if (!url) throw new Error('no-url'); body.innerHTML = `<div class="nfv-center"><video controls playsinline src="${esc(url)}" style="max-width:100%;max-height:100%"></video></div>`; acts.innerHTML = fileActs(f, { print: false }); return () => { }; }
+async function mountVideoViewer(body, acts, f) { const url = await openLink(f); if (!url) throw new Error('no-url'); body.innerHTML = `<div class="nfv-center"><video controls playsinline src="${esc(url)}" style="max-width:100%;max-height:100%"></video></div>`; const c = body.querySelector('.nfv-center'); c.addEventListener('click', e => { if (e.target === c) { e.preventDefault(); e.stopPropagation(); viewerClose(); } }); acts.innerHTML = fileActs(f, { print: false }); return () => { }; }
 /* ---------------- interactive HTML (sandboxed) ---------------- */
 async function mountHtmlViewer(body, acts, f) {
   const b = await Files.blob(f); if (!b) throw new Error('no-file'); const txt = await b.text();
@@ -4176,6 +4189,7 @@ async function mountPdfViewer(body, acts, f) {
   const pz = pinchZoom(vp, pagesEl, { min: 0.4, max: 6, fit: st => { st.s = 1; st.x = 12; st.y = 8; }, onEnd: st => { curZoom = st.s; refresh(); }, onChange: () => { clearTimeout(refreshT); refreshT = setTimeout(refresh, 120); } });
   vp.appendChild(zoomBar(pz));
   refresh(); const ro = new ResizeObserver(() => { pages.forEach(freePage); refresh(); }); ro.observe(vp);
+  vp.addEventListener('click', e => { const t = pz.st.tap; if (!t || Date.now() - t.at > 700 || (e.target.closest && e.target.closest('button,a,input'))) return; const hit = pages.some(p => { const r = p.wrap.getBoundingClientRect(); return t.x >= r.left && t.x <= r.right && t.y >= r.top && t.y <= r.bottom; }); if (hit) return; pz.st.tap = null; e.preventDefault(); e.stopPropagation(); viewerClose(); });   /* v7.83: a tap beside the pages closes */
   return () => { alive = false; ro.disconnect(); try { doc.destroy(); } catch (e) { /* ignore */ } };
 }
 /* =====================================================================
@@ -56790,4 +56804,97 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
   .sup-gg{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 </style>`);
+})();
+/* =====================================================================
+   v7.83 — «Cancel the request» straight from the request window (Mahmoud, 16 Oct, on an approved custody request waiting for his
+   transfer: «I want to be able to cancel this request right away»; brief claude/req-cancel-brief.md, go-ahead the same day).
+   · Owner only. Shown on money requests that are not finished yet: custody (fund), running cost (opex), advance — waiting for an
+     approval, or approved and not transferred yet. Never after the money went out.
+   · Asks for a reason (optional) → the request becomes «cancelled» (who / when / why), a line in its thread, it leaves «Money
+     waiting for you» and any transfer batch, its «Transfer» task closes by itself, and the requester gets «your request was cancelled».
+   · Advance already approved: its payout line is cancelled and the advance is closed (no salary deduction) — only while its batch has
+     not been sent and nothing was paid or deducted.
+   · No change in who sees what or in the approval steps. All three systems · phone and computer · Arabic and English.
+   ===================================================================== */
+(() => {
+  if (window.__NF_REQCANCEL__) return; window.__NF_REQCANCEL__ = 1;
+  if (typeof ACTIONS === 'undefined' || typeof ACTIONS.reqOpen !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const owner = () => { try { return !!S.session && isAdmin() && (typeof writable !== 'function' || writable()); } catch (e) { return false; } };
+  const advOf = r => list('advances').find(a => a && a.reqId === r.id) || null;
+  const apOf = a => a ? ((a.advPayId && byId('advpay', a.advPayId)) || list('advpay').find(p => p && p.advanceId === a.id) || null) : null;
+  /* an approved advance can be undone only while its money has not moved: payout line not paid / not deducted, batch not sent */
+  function advUndoable(r) {
+    const a = advOf(r); if (!a) return false; if (+a.paid > 0 || a.status === 'closed') return false;
+    const ap = apOf(a); if (!ap || ['paid', 'cancelled'].includes(ap.status) || ap.dedApplied || ap.weekly) return false;
+    const b = ap.batchId ? byId('advbatch', ap.batchId) : null; if (b && !['open', 'queued'].includes(b.status)) return false;
+    return true;
+  }
+  function cancellable(r) {
+    if (!r || !owner()) return false;
+    if (!['fund', 'opex', 'advance'].includes(r.type)) return false;
+    if (r.status === 'pending') return !r.paidAt;
+    if (r.status !== 'approved' || r.paidAt) return false;
+    if (r.type === 'fund') return typeof fundToPay === 'function' && fundToPay(r);
+    if (r.type === 'opex') return !list('expenses').some(e => e && e.reqId === r.id);
+    if (r.type === 'advance') return advUndoable(r);
+    return false;
+  }
+  ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); if (!cancellable(r)) return out;
+      const foot = document.querySelector('#modalroot .mf'); if (!foot || foot.querySelector('[data-action="reqOwnerCancel"]')) return out;
+      const old = foot.querySelector('[data-action="reqCancel"]'); if (old) old.remove();   /* the plain «cancel» of a pending request → this one (reason, thread line, notification) */
+      foot.insertAdjacentHTML('afterbegin', `<button type="button" class="btn ghost rqoc" data-action="reqOwnerCancel" data-arg="${esc(r.id)}">${icon('x')}<span>${esc(L('إلغاء الطلب', 'Cancel the request'))}</span></button>`);
+    } catch (e) { console.warn('req cancel', e); }
+    return out;
+  })(ACTIONS.reqOpen);
+  ACTIONS.reqOwnerCancel = id => {
+    const r = byId('requests', id); if (!cancellable(r)) return;
+    const what = `${(typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type}${r.reason ? ' — ' + r.reason : ''}`;
+    openModal({
+      title: L('إلغاء الطلب', 'Cancel the request'),
+      body: `<div class="small" style="margin-bottom:10px">${esc(what)}</div>
+        <div class="tiny muted" style="margin-bottom:10px">${esc(L('الطلب هيتقفل، ويطلع من «فلوس مستنياك»، وصاحبه هيوصله إشعار.', 'The request closes, leaves «Money waiting for you», and its requester gets a notification.'))}</div>
+        <label class="small bold" for="f-rqoc">${esc(L('السبب (اختياري)', 'Reason (optional)'))}</label>
+        <textarea id="f-rqoc" name="why" class="inp" rows="3" style="width:100%;margin-top:6px" placeholder="${esc(L('مثلًا: اتعمل بطريقة تانية', 'e.g. handled another way'))}"></textarea>`,
+      footer: `<button type="button" class="btn" data-action="reqOwnerCancelBack" data-arg="${esc(r.id)}">${esc(L('رجوع', 'Back'))}</button><div class="grow"></div><button type="submit" class="btn d">${esc(L('إلغاء الطلب', 'Cancel the request'))}</button>`,
+      onSubmit: async f => {
+        const why = String((f.querySelector('#f-rqoc') || {}).value || '').trim();
+        const ok = await cancelReq(id, why); if (!ok) return false;
+        if (typeof toast === 'function') toast(L('الطلب اتلغى', 'Request cancelled'));
+        setTimeout(() => { try { ACTIONS.reqOpen(id); } catch (e) { /* ignore */ } }, 60);
+      }
+    });
+    setTimeout(() => { const t = document.getElementById('f-rqoc'); if (t) try { t.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }, 60);
+  };
+  ACTIONS.reqOwnerCancelBack = id => { try { ACTIONS.reqOpen(id); } catch (e) { /* ignore */ } };
+  async function cancelReq(id, why) {
+    const r = byId('requests', id); if (!cancellable(r)) { if (typeof toast === 'function') toast(L('الطلب ده مابقاش ينفع يتلغى', 'This request can no longer be cancelled'), 'err'); return false; }
+    const me = S.session || {}; const at = nowISO();
+    const text = why ? L(`لغى الطلب — السبب: ${why}`, `Cancelled the request — reason: ${why}`) : L('لغى الطلب', 'Cancelled the request');
+    const thread = (r.thread || []).concat([{ id: uid(), at, by: me.id || null, byName: me.name || '', role: typeof role === 'function' ? role() : 'admin', kind: 'decision', text }]);
+    try {
+      if (r.type === 'advance' && r.status === 'approved') {
+        const a = advOf(r); const ap = apOf(a);
+        if (ap) await Store.update('advpay', ap.id, { status: 'cancelled', cancelledAt: at, cancelledBy: me.id || null, cancelNote: why || '' }, { silent: true });
+        if (a) await Store.update('advances', a.id, { status: 'closed', cancelled: true, cancelledAt: at, cancelNote: why || '' }, { silent: true });
+        if (a && byId('expenses', 'adv_' + a.id)) await Store.remove('expenses', 'adv_' + a.id);   /* the cash-out booked at approval never happened */
+      }
+      await Store.update('requests', id, { status: 'cancelled', toPay: false, cancelledAt: at, cancelledBy: me.id || null, cancelledByName: me.name || '', cancelNote: why || '', decidedAt: r.decidedAt || at, thread });
+    } catch (e) { console.warn('req cancel', e); if (typeof toast === 'function') toast(L('ماتحفظش — جرّب تاني', 'Not saved — try again'), 'err'); return false; }
+    try { if (typeof window.nfCloseNotesFor === 'function') await window.nfCloseNotesFor(id); } catch (e) { /* the sweep closes it later */ }
+    try {
+      const to = [r.createdBy, r.requesterId, r.workerId ? 'w:' + r.workerId : null].filter(Boolean).map(String).filter(x => x !== String(me.id || '') && x !== 'w:' + String(me.workerId || ''));
+      const kind = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || '';
+      if (to.length && typeof pushSend === 'function') pushSend(Array.from(new Set(to)), `طلبك اتلغى — ${kind}`.trim(), why ? `السبب: ${why}` : `${me.name || ''} لغى الطلب`.trim(), '/#/requests', 'reqcancel-' + id);
+    } catch (e) { /* push is best effort */ }
+    if (typeof rerender === 'function') rerender();
+    return true;
+  }
+  window.nfReqCancel = { cancellable };
+  const css = document.createElement('style'); css.textContent = '#modalroot .mf .rqoc{color:var(--crit-ink,#b91c1c)}#modalroot .mf .rqoc svg{width:16px;height:16px}';
+  document.head.appendChild(css);
 })();
