@@ -56,7 +56,7 @@ rep('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">', 1)
 rep("""      add: [{ key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }],
       into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
       rename: [],""",
-"""      add: [{ key: 'intel', ar: 'الذكاء', en: 'Intelligence', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],
+"""      add: [{ key: 'intel', ar: 'الذكاء', en: 'AI', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],
       into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos', 'oktimeline', 'portfolio', 'okpipeedit'] }, { near: 'clients', ids: ['enquiries', 'clients', 'quotes'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'okabout', 'rdesk', 'settings'] }],
       rename: [{ near: 'clients', ar: 'تطوير الأعمال', en: 'Business development' }],""", 1)
 rep('<meta name="apple-mobile-web-app-title" content="Ninety Studioz">', '<meta name="apple-mobile-web-app-title" content="Ökoplan">', 1)  # iOS shows ~11 characters under the icon

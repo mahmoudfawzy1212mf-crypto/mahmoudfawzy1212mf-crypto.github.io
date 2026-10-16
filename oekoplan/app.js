@@ -39084,7 +39084,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     },
     studioz: {
       top: ['dashboard', 'door'],
-      add: [{ key: 'intel', ar: 'الذكاء', en: 'Intelligence', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],
+      add: [{ key: 'intel', ar: 'الذكاء', en: 'AI', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],
       into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos', 'oktimeline', 'portfolio', 'okpipeedit'] }, { near: 'clients', ids: ['enquiries', 'clients', 'quotes'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'okabout', 'rdesk', 'settings'] }],
       rename: [{ near: 'clients', ar: 'تطوير الأعمال', en: 'Business development' }],
     },
