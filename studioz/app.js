@@ -2058,12 +2058,26 @@ function requestsList(arr, o = {}) {
 }
 function vRequests() {
   const f = S.ui.filter.requests || (S.ui.filter.requests = { status: 'pending', type: '' });
-  let arr = list('requests').filter(requestVisible); if (f.status !== 'all') arr = arr.filter(r => r.status === f.status); if (f.type) arr = arr.filter(r => r.type === f.type);
+  let arr = list('requests').filter(requestVisible); if (f.status !== 'all') arr = arr.filter(r => r.status === f.status);
+  /* v7.82 (Mahmoud 16 Oct: «employees' advances on their own, project requests on their own, and every kind of request in a category»):
+     category chips with their counts (for the chosen status), and inside a category the kinds it holds */
+  const byCat = {}; arr.forEach(r => { const c = reqCatOf(r.type); (byCat[c] ||= []).push(r); });
+  const cats = REQ_CATS.filter(c => byCat[c[0]] && byCat[c[0]].length);
+  if (f.cat && f.cat !== 'all' && !byCat[f.cat]) f.cat = 'all';
+  if (f.cat && f.cat !== 'all') arr = byCat[f.cat];
+  const kinds = f.cat && f.cat !== 'all' ? [...new Set(arr.map(r => r.type))] : []; if (f.type && f.cat && f.cat !== 'all' && !kinds.includes(f.type)) f.type = '';
+  if (f.type) arr = arr.filter(r => r.type === f.type);
   arr = sortBy(arr, r => r.createdAt || '', true);
-  return `<div class="toolbar"><div class="seg">${[['pending', 'معلقة'], ['approved', 'موافق عليها'], ['rejected', 'مرفوضة'], ['all', 'الكل']].map(s => `<button class="${f.status === s[0] ? 'on' : ''}" data-action="reqFilter" data-arg="status:${s[0]}">${s[1]}</button>`).join('')}</div><select class="sel" id="fl-rtype" data-filter="requests:type"><option value="">كل الأنواع</option>${opts(Object.keys(REQ_TYPES), f.type, k => REQ_TYPES[k])}</select><span class="muted small">${arr.length} طلب</span><div class="grow"></div>${canDo('requests.create') ? `<button class="btn p sm" data-action="reqNew">${icon('plus')}طلب جديد</button>` : ''}</div>
+  const catBar = cats.length > 1 ? `<div class="rqcats">${[['all', 'الكل']].concat(cats).map(c => `<button type="button" class="${(f.cat || 'all') === c[0] ? 'on' : ''}" data-action="reqFilter" data-arg="cat:${c[0]}">${c[1]} <span>${c[0] === 'all' ? Object.values(byCat).reduce((a, x) => a + x.length, 0) : byCat[c[0]].length}</span></button>`).join('')}</div>${kinds.length > 1 ? `<div class="rqkinds">${[['', 'كل الأنواع']].concat(kinds.map(k => [k, REQ_TYPES[k] || k])).map(k => `<button type="button" class="${(f.type || '') === k[0] ? 'on' : ''}" data-action="reqFilter" data-arg="type:${k[0]}">${esc(k[1])}${k[0] ? ` <span>${byCat[f.cat].filter(r => r.type === k[0]).length}</span>` : ''}</button>`).join('')}</div>` : ''}` : '';
+  return `<div class="toolbar"><div class="seg">${[['pending', 'معلقة'], ['approved', 'موافق عليها'], ['rejected', 'مرفوضة'], ['all', 'الكل']].map(s => `<button class="${f.status === s[0] ? 'on' : ''}" data-action="reqFilter" data-arg="status:${s[0]}">${s[1]}</button>`).join('')}</div><select class="sel" id="fl-rtype" data-filter="requests:type"><option value="">كل الأنواع</option>${opts(Object.keys(REQ_TYPES), f.type, k => REQ_TYPES[k])}</select><span class="muted small">${arr.length} طلب</span><div class="grow"></div>${canDo('requests.create') ? `<button class="btn p sm" data-action="reqNew">${icon('plus')}طلب جديد</button>` : ''}</div>${catBar}
   ${f.status === 'pending' || f.status === 'all' ? teamApprovalsSection() : ''}${requestsList(arr) || `<div class="empty"><b>لا توجد طلبات ${f.status === 'pending' ? 'معلقة' : ''}</b>الطلبات تأتي من الكشك (بوابة الموظف) أو تُسجّل هنا نيابة عن الموظف</div>`}`;
 }
-ACTIONS.reqFilter = arg => { const [k, v] = arg.split(':'); (S.ui.filter.requests ||= {})[k] = v; render(false); };
+ACTIONS.reqFilter = arg => { const i = arg.indexOf(':'); const k = arg.slice(0, i), v = arg.slice(i + 1); const f = (S.ui.filter.requests ||= {}); f[k] = v; if (k === 'cat') f.type = ''; render(false); };
+/* v7.82: the request categories (unknown kinds fall in «Other») */
+const REQ_CATS = [['adv', 'سلف الموظفين'], ['proj', 'طلبات المشاريع والمشتريات'], ['money', 'عهد ومصروفات'], ['att', 'الحضور والإجازات'], ['fleet', 'النقل والمعدات'], ['admin', 'الإدارة والصلاحيات'], ['other', 'تانية']];
+const REQ_CAT_OF = { advance: 'adv', abssettle: 'adv', estimate: 'proj', routeplan: 'proj', po: 'proj', need: 'proj', transfer: 'proj', pricecheck: 'proj', rfqtech: 'proj', rfqprice: 'proj', itemconfirm: 'proj', itemtech: 'proj', custody: 'proj', purchase_exception: 'proj', finedit: 'proj', finlock: 'proj', fund: 'money', opex: 'money', leave: 'att', permission: 'att', punch: 'att', outfix: 'att', attfix: 'att', attedit: 'att', siteout: 'att', trip: 'fleet', tripconfirm: 'fleet', equipout: 'fleet', equipret: 'fleet', wagechange: 'admin', regchange: 'admin', password: 'admin', priceopen: 'admin', quoteopen: 'admin', penalty_cancel: 'admin' };
+const reqCatOf = t => REQ_CAT_OF[t] || 'other';
+document.head.insertAdjacentHTML('beforeend', '<style>.rqcats,.rqkinds{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 0 8px;padding:2px 0}.rqcats::-webkit-scrollbar,.rqkinds::-webkit-scrollbar{display:none}.rqcats button,.rqkinds button{flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}.rqkinds button{height:28px;font-size:12px;background:transparent}.rqcats button span,.rqkinds button span{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--surface-2);font-size:11px;font-weight:700;display:inline-grid;place-items:center}.rqcats button.on,.rqkinds button.on{background:var(--ink);color:var(--surface);border-color:transparent}.rqcats button.on span,.rqkinds button.on span{background:rgba(255,255,255,.22);color:inherit}</style>');
 function requestFormBase(wid, forKiosk) {
   const ws = forKiosk ? [byId('workers', wid)] : hrWorkers(role() === 'head' ? '' : '').filter(w => w.status !== 'inactive'); const pol = S.settings.policy || {};
   return `<div class="form">${forKiosk ? `<input type="hidden" name="workerId" value="${esc(wid)}">` : field('الموظف', `<select id="f-workerId" name="workerId" required>${opts(sortBy(ws, w => w.name), wid, w => `${w.name} — ${deptName(w.deptId)}`)}</select>`, 'full')}
@@ -8442,7 +8456,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>
 </style>`);
 const THEME_KEY = () => 'nf.theme.' + (S.session?.id || 'guest');
 function themeCurrent() { const a = document.documentElement.getAttribute('data-theme'); if (a === 'dark' || a === 'light') return a; return (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
-function themeApply(v) { if (v === 'dark' || v === 'light') document.documentElement.setAttribute('data-theme', v); else document.documentElement.removeAttribute('data-theme'); const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', themeCurrent() === 'dark' ? '#0f1216' : '#161b22'); }
+function themeApply(v) { if (v === 'dark' || v === 'light') document.documentElement.setAttribute('data-theme', v); else document.documentElement.removeAttribute('data-theme'); const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', themeCurrent() === 'dark' ? '#08161d' : '#f3f1ea');   /* v7.82: the window title bar follows the mode (light by day, brand navy at night) */ }
 function themeLoad() { let v = null; try { v = localStorage.getItem(THEME_KEY()) || localStorage.getItem('nf.theme.guest'); } catch (e) { /* private mode */ } themeApply(v); }
 ACTIONS.themeToggle = () => { const next = themeCurrent() === 'dark' ? 'light' : 'dark'; themeApply(next); try { localStorage.setItem(THEME_KEY(), next); localStorage.setItem('nf.theme.guest', next); } catch (e) { /* ignore */ } render(false); toast(next === 'dark' ? 'الوضع الليلي' : 'الوضع النهاري'); };
 const themeBtnHTML = () => { const dark = themeCurrent() === 'dark'; return `<button class="themebtn" data-action="themeToggle" title="${dark ? 'الوضع النهاري' : 'الوضع الليلي'}" aria-label="تبديل الوضع الليلي/النهاري">${icon(dark ? 'sun' : 'moon')}</button>`; };
@@ -12199,9 +12213,19 @@ function rfqCard(p) {
 vPurchaseDetail = (base => id => { const p = byId('purchases', id); let html = base(id); if (!p) return html; if (p.supplierConfirmed) html = html.replace('<span class="badge warn">مورد جديد — 3 عروض ويختار مدير المصنع</span>', '<span class="badge good">مورد مؤكَّد على الأصناف ✓ — لا يحتاج 3 عروض</span>').replace(/1 من 3 مطلوبة|0 من 3 مطلوبة/g, 'عرض واحد يكفي'); const extra = rfqCard(p) + linkedCard(p) + purchOptionsCard(p) + priceMatchCard(p); if (!extra) return html; const i = html.indexOf('<div class="card tight">'); return i > 0 ? html.slice(0, i) + extra + html.slice(i) : html + extra; })(vPurchaseDetail);
 vPurchases = (base => () => {
   let html = base(); const f = S.ui.filter.purchases || {}; let rfqs = list('purchases').filter(p => p.kind === 'rfq'); if (role() === 'head') rfqs = rfqs.filter(p => myDepts().includes(p.deptId)); rfqs = sortBy(rfqs, p => p.date || '', true).filter(p => f.status === 'all' || poOpenStatuses.includes(p.status));
-  const card = `<div class="card"><div class="cardhead"><h3>طلبات عروض الأسعار — خامات جديدة</h3><span class="badge">${rfqs.length}</span><div class="grow"></div>${canNeed() ? `<button class="btn sm" data-action="rfqNew">${icon('plus')}طلب عرض سعر</button>` : ''}</div>${rfqs.length ? `<div class="list">${rfqs.map(p => `<a class="item" href="#/purchases/${p.id}"><div class="main"><div class="title"><span class="code">${esc(p.number)}</span> ${esc(deptName(p.deptId))}${p.supplier ? ` · ${esc(p.supplier)}` : ''}</div><div class="meta"><span>${(p.rfqItems || []).slice(0, 3).map(x => esc(x.name)).join('، ')}</span><span>${fmtDate(p.date)}</span></div></div><div class="end">${badge(PO_STATUS, p.status)}</div></a>`).join('')}</div>` : '<div class="muted small">لا توجد طلبات عروض أسعار</div>'}</div>`;
+  /* v7.82 (Mahmoud 16 Oct: «classify — what was ordered and what is a purchase order not approved yet»): tabs with their counts */
+  const RFQ_G = { wait: ['draft', 'rfq', 'rfq_tech', 'rfq_price', 'approval', 'need', 'rejected'], ok: ['approved', 'need_ok', 'transfer'], ord: ['ordered', 'arrived', 'partial'] };
+  const RFQ_T = [['wait', 'لسه ما اتعتمدش'], ['ok', 'اتعتمد — لسه ما اتطلبش'], ['ord', 'اتطلب من المورد'], ['all', 'الكل']];
+  const gOf = p => Object.keys(RFQ_G).find(k => RFQ_G[k].includes(p.status)) || 'all';
+  const rfqAll = rfqs; const gN = k => k === 'all' ? rfqAll.length : rfqAll.filter(p => gOf(p) === k).length;
+  const tabs0 = RFQ_T.filter(([k]) => k === 'all' || gN(k)); const tab = tabs0.some(t => t[0] === S.ui.rfqTab) ? S.ui.rfqTab : (tabs0[0] || ['all'])[0];
+  const allRfqs = rfqs; rfqs = tab === 'all' ? rfqs : rfqs.filter(p => gOf(p) === tab);
+  const tabBar = allRfqs.length && tabs0.length > 1 ? `<div class="rfqtabs">${tabs0.map(([k, l]) => `<button type="button" class="${k === tab ? 'on' : ''}" data-action="rfqTab" data-arg="${k}">${esc(l)} <span>${gN(k)}</span></button>`).join('')}</div>` : '';
+  const card = `<div class="card"><div class="cardhead"><h3>طلبات عروض الأسعار — خامات جديدة</h3><span class="badge">${allRfqs.length}</span><div class="grow"></div>${canNeed() ? `<button class="btn sm" data-action="rfqNew">${icon('plus')}طلب عرض سعر</button>` : ''}</div>${tabBar}${rfqs.length ? `<div class="list">${rfqs.map(p => `<a class="item" href="#/purchases/${p.id}"><div class="main"><div class="title"><span class="code">${esc(p.number)}</span> ${esc(deptName(p.deptId))}${p.supplier ? ` · ${esc(p.supplier)}` : ''}</div><div class="meta"><span>${(p.rfqItems || []).slice(0, 3).map(x => esc(x.name)).join('، ')}</span><span>${fmtDate(p.date)}</span></div></div><div class="end">${badge(PO_STATUS, p.status)}</div></a>`).join('')}</div>` : '<div class="muted small">لا توجد طلبات عروض أسعار</div>'}</div>`;
   const i = html.indexOf('<div class="card'); return i > 0 ? html.slice(0, i) + card + html.slice(i) : card + html;
 })(vPurchases);
+ACTIONS.rfqTab = k => { S.ui.rfqTab = k; render(true); };
+document.head.insertAdjacentHTML('beforeend', '<style>.rfqtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}.rfqtabs button{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}.rfqtabs button span{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--surface-2);font-size:11px;font-weight:700;display:inline-grid;place-items:center}.rfqtabs button.on{background:var(--ink);color:var(--surface);border-color:transparent}.rfqtabs button.on span{background:rgba(255,255,255,.22);color:inherit}</style>');
 /* inventory table: custody badge next to the stock figure */
 vInventory = (base => () => { let html = base(); try { list('materials').forEach(m => { const c = custodyOf(m); const keys = Object.keys(c).filter(k => c[k] > 0); if (!keys.length) return; html = html.replace(`<td class="code ltr">${esc(m.code || '')}</td>`, `<td class="code ltr">${esc(m.code || '')}<div class="custody">عهدة: ${keys.map(k => `${esc(deptName(k))} ${fmtNum(c[k])}`).join(' · ')}</div></td>`); }); } catch (e) { /* ignore */ } return html; })(vInventory);
 /* settings: the owner threshold for new-material prices */
@@ -40762,6 +40786,31 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
      advances · custody · running costs · suppliers · cheques (· other) — one category at a time, opening on the first that has lines. */
   const CATS = () => [['adv', L('سلف', 'Advances')], ['fund', L('عهد', 'Custody')], ['opex', L('تشغيل', 'Running costs')], ['sup', L('موردين', 'Suppliers')], ['chq', L('شيكات', 'Cheques')], ['other', L('تانية', 'Other')], ['all', L('الكل', 'All')]];
   const catOf = x => ({ adv: 'adv', fund: 'fund', opex: 'opex', po: 'sup', sup: 'sup', pb: 'sup', chq: 'chq' })[x.k] || 'other';
+  /* v7.82 (Mahmoud 16 Oct: «make these a table, with a short detail next to each»): the line is split into columns — kind · for whom ·
+     on what · the order · the date · details · status · pay to · amount. The long one-line text is spread over them; nothing is dropped
+     (the full text stays in the details cell's tooltip). On a phone each row is a small card. */
+  const RE_CODE = /\b[A-Z]{2,5}-\d{2}-\d{2,4}\b/; const RE_DATE = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
+  function omfSplit(x) {
+    const lab = String(x.label || ''); const lp = lab.split(' — '); const who0 = lp[0] || '';
+    const who = who0.replace(/^(عهدة|دفعة سلف|سلفة|مصروف تشغيل|تشغيل|شيك|تحويل|سداد)\s*/, '').trim() || who0; const what = lp.slice(1).join(' — ');
+    let status = '', payTo = ''; const rest = [];
+    String(x.sub || '').split(' · ').map(t => t.trim()).filter(Boolean).forEach(seg => {
+      if (!status && /^(موافق عليه|مستني|مستنية|عند |اتودع|مستلَم|اتوافق)/.test(seg)) status = seg;
+      else if (/^حوّل على:/.test(seg)) payTo = seg.replace(/^حوّل على:\s*/, '');
+      else rest.push(seg);
+    });
+    let det = rest.join(' · '); const code = (det.match(RE_CODE) || lab.match(RE_CODE) || [''])[0]; const date = (det.match(RE_DATE) || [''])[0];
+    if (code) det = det.replace(code, ''); if (date) det = det.replace(date, '');
+    det = det.replace(/(\s*—\s*){2,}/g, ' — ').replace(/^\s*[—·]\s*|\s*[—·]\s*$/g, '').trim();
+    return { who: lp.length > 1 ? who : (who0.length > 40 ? '' : who), what: lp.length > 1 ? what : (who0.length > 40 ? lab : ''), code, date, det, status, payTo, full: x.sub || '' };
+  }
+  function omfTable(shown, on, sel, K) {
+    const H = [L('النوع', 'Kind'), L('لمين', 'For whom'), L('على إيه', 'For what'), L('الأمر', 'Order'), L('التاريخ', 'Date'), L('التفاصيل', 'Details'), L('الحالة', 'Status'), L('يتحوّل على', 'Pay to'), L('المبلغ', 'Amount')];
+    const rows = shown.map(x => { const f = omfSplit(x); const td = (i, v, cls) => { const e = !v || /^<[^>]+><\/[^>]+>$/.test(v) || /^<span class="nftb-why"[^>]*><\/span>$/.test(v); return `<td data-l="${esc(H[i])}" class="${cls || ''}${e ? ' e' : ''}">${e ? '<span class="muted">—</span>' : v}</td>`; };
+      const pick = on ? `<td class="pk"><input type="checkbox" data-omfk="${esc(x.id)}" ${sel.has(x.id) ? 'checked' : ''} ${x.sel ? '' : 'disabled'} aria-label="${esc(L('اختار', 'Select'))}"></td>` : '';
+      return `<tr class="${on && !x.sel ? 'dis' : ''}" ${on ? `data-omfrow="${esc(x.id)}"` : `data-nfhref="${esc(x.href)}"`}>${pick}${td(0, `<span class="badge ${(K[x.k] || ['', ''])[1]}">${esc((K[x.k] || [x.k])[0])}</span>`, 'k0')}${td(1, `<b>${esc(f.who)}</b>`, 'k')}${td(2, esc(f.what))}${td(3, esc(f.code), 'num')}${td(4, esc(f.date), 'num')}${td(5, `<span class="nftb-why" title="${esc(f.full)}">${esc(f.det)}</span>`, 'why')}${td(6, esc(f.status))}${td(7, `<span class="nftb-why" title="${esc(f.payTo)}">${esc(f.payTo)}</span>`, 'why')}${td(8, x.amount ? `<b>${esc(fmtMoney(x.amount))}</b>` : '', 'num amt')}</tr>`; }).join('');
+    return `<div class="nftb-wrap"><table class="nftb omf-tb"><thead><tr>${on ? '<th></th>' : ''}${H.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
   function card(items) {
     const K = KIND(); const u = SU(); const pickable = items.filter(x => x.sel); const on = u.on && pickable.length > 0;
     const counts = {}; items.forEach(x => { const c = catOf(x); counts[c] = (counts[c] || 0) + 1; });
@@ -40787,11 +40836,12 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     const total = shown.reduce((a, x) => a + (+x.amount || 0), 0);
     return `<div class="card omf" id="omf"><div class="cardhead"><h3>${icon('money')}${esc(L('فلوس مستنياك', 'Money waiting for you'))}</h3><span class="badge warn">${items.length}</span><div class="grow"></div>${pickable.length >= 1 && writable() ? `<button type="button" class="btn xs ${on ? '' : 'ghost'}" data-action="omfPick">${esc(on ? L('إلغاء الاختيار', 'Cancel') : L('اختار', 'Pick'))}</button>` : ''}<a class="btn xs ghost" href="#/money">${esc(L('الفلوس', 'Money'))}</a></div>
       ${catBar}${on ? `<div class="tiny muted" style="margin:-2px 0 6px">${esc(L('علّم على اللي هيتحوّل مرة واحدة.', 'Tick what goes in one transfer.'))}</div>` : ''}
-      <div class="omf-l">${shown.map(row).join('')}</div>
+      ${omfTable(shown, on, sel, K)}
       ${on ? `<div class="omf-foot"><span>${esc(L(`المحدد ${chosen.length}`, `${chosen.length} selected`))} · <b>${esc(fmtMoney(chosen.reduce((a, x) => a + (+x.amount || 0), 0)))} ${esc(CUR())}</b></span><div class="grow"></div>${btn}</div>${hint ? `<div class="tiny omf-hint">${esc(hint)}</div>` : ''}`
         : `${total ? `<div class="omf-tot">${esc(cat === 'all' || cats.length < 2 ? L('المجموع', 'Total') : L(`مجموع ${(cats.find(c => c[0] === cat) || ['', ''])[1]}`, `Total — ${(cats.find(c => c[0] === cat) || ['', ''])[1]}`))} <b>${esc(fmtMoney(total))} ${esc(CUR())}</b></div>` : ''}`}</div>`;
   }
   window.nfMoneyCard = () => { const it = moneyFor(); return it.length ? card(it) : ''; };
+  document.addEventListener('click', e => { const tr = e.target.closest && e.target.closest('tr[data-omfrow]'); if (!tr || e.target.closest('input')) return; const c = tr.querySelector('input[data-omfk]'); if (!c || c.disabled) return; c.checked = !c.checked; c.dispatchEvent(new Event('change', { bubbles: true })); });
   ACTIONS.omfPick = () => { const u = SU(); u.on = !u.on; u.keys = []; render(true); };
   document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-omfcat]'); if (!b) return; e.preventDefault(); SU().cat = b.dataset.omfcat; render(true); });
   document.addEventListener('change', e => { const c = e.target.closest && e.target.closest('input[data-omfk]'); if (!c) return; const u = SU(); const s = new Set(u.keys); if (c.checked) s.add(c.dataset.omfk); else s.delete(c.dataset.omfk); u.keys = [...s]; render(true); });
@@ -41412,32 +41462,75 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   --side-bg:#f6f4ee; --side-ink:#22281f; --side-muted:#7b8476; --side-line:rgba(60,75,55,.10); --side-hover:rgba(110,125,110,.11); --side-on:#4f7a64; --side-on-bg:#fffdf8; --nf-side:#f6f4ee;
   --nf-side-ink:#22281f; --nf-side-muted:#7b8476; --mh-logo:none; --mh-ink:#22281f;`;
   const DARK = `
-  --bg:#151b26; --surface:#1f2735; --surface-2:#273042; --surface-3:rgba(150,165,190,.14); --card:rgba(32,40,56,.86);
-  --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12);
-  --primary:#94b3d6; --primary-ink:#141a24; --accent:#94b3d6; --accent-ink:#141a24; --accent-soft:rgba(148,179,214,.16); --accent-2:#aec5df;
-  --good:#7fae8e; --warn:#d2ac6e; --serious:#cf9875; --crit:#cf8a80;
-  --good-soft:rgba(127,174,142,.15); --warn-soft:rgba(210,172,110,.15); --serious-soft:rgba(207,152,117,.15); --crit-soft:rgba(207,138,128,.15);
-  --good-ink:#9cc8aa; --warn-ink:#e0c08a; --serious-ink:#e0b090; --crit-ink:#e3a59c;
-  --glass:#1f2735; --glass-solid:#1f2735; --glass-brd:transparent;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 26px -16px rgba(0,0,0,.6); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
-  --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);
-  --side-bg:#18202c; --side-ink:#e9edf3; --side-muted:#94a0b0; --side-line:rgba(255,255,255,.07); --side-hover:rgba(150,165,190,.14); --side-on:#94b3d6; --side-on-bg:#1f2735; --nf-side:#18202c;
-  --nf-side-ink:#e9edf3; --nf-side-muted:#94a0b0; --mh-logo:invert(1); --mh-ink:#e9edf3;`;
+  --bg:#08161d; --surface:#0f2530; --surface-2:#132c38; --surface-3:rgba(94,145,167,.16); --card:rgba(15,37,48,.9);
+  --ink:#e6eef2; --ink-2:#c3d1d8; --muted:#8fa3b0; --line:#1c3a48; --line-2:#24495a;
+  --primary:#5e91a7; --primary-ink:#06121a; --accent:#5e91a7; --accent-ink:#06121a; --accent-soft:rgba(94,145,167,.18); --accent-2:#79c8c2;
+  --good:#79c8c2; --warn:#d8b07a; --serious:#f0855f; --crit:#f05a43;
+  --good-soft:rgba(121,200,194,.15); --warn-soft:rgba(216,176,122,.15); --serious-soft:rgba(240,133,95,.15); --crit-soft:rgba(240,90,67,.16);
+  --good-ink:#9fdad5; --warn-ink:#e6c696; --serious-ink:#f5a98a; --crit-ink:#f7907e;
+  --glass:#0f2530; --glass-solid:#0f2530; --glass-brd:transparent;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 26px -16px rgba(0,0,0,.65); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.75);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(16,47,61,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(94,145,167,.16),transparent 68%),linear-gradient(170deg,#0b1f29 0%,#08161d 55%,#061117 100%);
+  --side-bg:#061117; --side-ink:#e6eef2; --side-muted:#8fa3b0; --side-line:#1c3a48; --side-hover:rgba(94,145,167,.14); --side-on:#5e91a7; --side-on-bg:#0f2530; --nf-side:#061117;
+  --nf-side-ink:#e6eef2; --nf-side-muted:#8fa3b0; --mh-logo:invert(1); --mh-ink:#e6eef2;`;
+  /* v7.82 (Mahmoud 16 Oct: «the night look a few shades darker»): the navy of both night palettes went about 5 steps darker */
   const X = 'html.apple:not(.iph)';
   const XL = `
   --bg:#f3f1ea; --surface:#fffdf8; --surface-2:rgba(110,125,110,.09); --surface-3:rgba(110,125,110,.15);
   --ink:#22281f; --ink-2:#3f4a3c; --muted:#7b8476; --line:rgba(60,75,55,.11); --line-2:rgba(60,75,55,.19);
   --primary:#3f6a52; --primary-ink:#fff; --accent:#4f7a64; --accent-ink:#fff; --accent-soft:rgba(79,122,100,.13);
   --glass:rgba(255,253,248,.72); --glass-solid:rgba(255,253,248,.94); --glass-brd:rgba(255,253,248,.85);
-  --side-bg:rgba(24,32,44,.9); --nf-side:rgba(24,32,44,.92);
+  --side-bg:#f6f4ee; --side-ink:#22281f; --side-muted:#7b8476; --side-line:rgba(60,75,55,.10); --side-hover:rgba(110,125,110,.11); --side-on:#4f7a64; --side-on-bg:#fffdf8; --nf-side:#f6f4ee;
+  --nf-side-ink:#22281f; --nf-side-muted:#7b8476; --mh-logo:none; --mh-ink:#22281f;
   --wall:radial-gradient(560px 520px at 108% -8%,rgba(172,204,182,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(240,212,172,.95),transparent 68%),linear-gradient(170deg,#d9e8dd 0%,#f3f1ea 48%,#f4e4cb 100%);`;
   const XD = `
-  --bg:#151b26; --surface:#1f2735; --surface-2:rgba(150,165,190,.14); --surface-3:rgba(150,165,190,.22);
-  --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.13);
-  --primary:#94b3d6; --primary-ink:#141a24; --accent:#94b3d6; --accent-ink:#141a24; --accent-soft:rgba(148,179,214,.16);
-  --glass:rgba(31,39,53,.66); --glass-solid:rgba(31,39,53,.95); --glass-brd:rgba(255,255,255,.06);
-  --side-bg:rgba(20,27,38,.92); --nf-side:rgba(20,27,38,.94);
-  --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);`;
+  --bg:#08161d; --surface:#0f2530; --surface-2:rgba(94,145,167,.12); --surface-3:rgba(94,145,167,.2);
+  --ink:#e6eef2; --ink-2:#c3d1d8; --muted:#8fa3b0; --line:#1c3a48; --line-2:#24495a;
+  --primary:#5e91a7; --primary-ink:#06121a; --accent:#5e91a7; --accent-ink:#06121a; --accent-soft:rgba(94,145,167,.18);
+  --crit:#f05a43; --crit-soft:rgba(240,90,67,.16); --crit-ink:#f7907e;
+  --glass:rgba(15,37,48,.78); --glass-solid:rgba(15,37,48,.97); --glass-brd:rgba(94,145,167,.12);
+  --side-bg:rgba(6,17,23,.96); --side-ink:#e6eef2; --side-muted:#8fa3b0; --side-line:#1c3a48; --side-hover:rgba(94,145,167,.14); --side-on:#e6eef2; --side-on-bg:#0f2530; --nf-side:rgba(6,17,23,.97);
+  --nf-side-ink:#e6eef2; --nf-side-muted:#8fa3b0; --mh-logo:invert(1); --mh-ink:#e6eef2;
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(16,47,61,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(94,145,167,.16),transparent 68%),linear-gradient(170deg,#0b1f29 0%,#08161d 55%,#061117 100%);`;
+  /* v7.82 (Mahmoud 16 Oct, computer screenshot: «when the mode is light, make these light»): on the Advanced look by day the menu, the
+     Ninety home top bar and its side column are light like the page (the same rules as the Icons look); at night they stay dark. */
+  const lightMenu = S => `
+${S} .side,${S}.apple-blur .side,${S} .nhome .nside{background:var(--surface-2)!important;color:var(--ink)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;border-inline-end:.5px solid var(--line)!important}
+${S} .side .brand .wordmark,${S} .side .brand img{filter:none}
+${S} .side .userchip,${S} .side .viewbtn,${S} .side .acct a,${S} .side .mobextra button,${S} .side .nfback,${S} .side .nfst{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 2px rgba(0,0,0,.04)!important}
+${S} .side .userchip *{color:inherit}
+${S} .side .userchip .muted,${S} .side .userchip small{color:var(--muted)!important}
+${S} .side .acct a.logout,${S} .side .nfst[data-action="logout"]{color:var(--crit-ink)!important}
+${S} .side .nav .grp{color:var(--muted)!important}
+${S} .side .acct.nfstrip>.nfst,${S} .side .nftogs>.nfst{background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 1px 2px rgba(0,0,0,.04)!important}
+${S} .side .acct.nfstrip>.nfst.logout,${S} .side .acct.nfstrip>a.logout{color:var(--crit-ink)!important}
+${S} .side .nav .ngh{color:var(--ink)!important}
+${S} .side .nav .ngh:hover{background:var(--surface-3)!important}
+${S} .side .nav .ngh > svg:first-child{color:var(--accent)!important}
+${S} .side .nav .ngh svg{color:var(--muted)}
+${S} .side .nav .ngh .ngc{background:var(--accent-soft)!important;color:var(--accent)!important}
+${S} .side .nav a{color:var(--ink)!important}
+${S} .side .nav a svg{color:var(--accent)!important}
+${S} .side .nav a:hover{background:var(--surface-3)!important}
+${S} .side .nav a.on{background:var(--surface)!important;color:var(--accent)!important;box-shadow:0 1px 2px rgba(0,0,0,.05)!important}
+${S} .side .nav a.on svg{color:var(--accent)!important}
+${S} .side .nav a .cnt{background:var(--accent-soft)!important;color:var(--accent)!important}
+${S} .side .foot{color:var(--muted)!important;border-top:.5px solid var(--line)!important}
+${S} .side .avatar{background:var(--accent-soft)!important;color:var(--accent)!important}
+
+${S} .nhome .mhead{border-bottom:.5px solid var(--line)}
+${S} .nhome .mhead img.wordmark,${S} .nhome .nbrand img{filter:var(--mh-logo,invert(1))!important}
+${S} .nhome .mhead .langsw{color:var(--mh-ink,#e5e7eb)!important;border-color:var(--line-2)!important;opacity:1!important}
+${S} .nhome .mhead .langsw *{color:inherit!important}
+${S} .nhome .nbrand{border-bottom-color:var(--line)!important}
+${S} .nhome .co{background:var(--surface)!important}
+${S} .nhome .co .mini span{background:var(--surface-3)!important}
+${S} .nhome .qa button{border-color:var(--line-2)!important;background:var(--surface)!important;color:var(--ink)!important}
+
+${S} .side .brand .wordmark,${S} .side .brand img,${S} .nhome .mhead img.wordmark,${S} .nhome .nbrand img{filter:none!important}
+${S} .side .avatar{background:var(--accent-soft)!important;color:var(--accent)!important}
+${S} .tb-logo{background:var(--surface)}
+`;
   document.head.insertAdjacentHTML('beforeend', `<style id="iphone-look">
 ${I}{${LIGHT}}
 @media (prefers-color-scheme: dark){ ${I}:not([data-theme="light"]){${DARK}} }
@@ -41557,6 +41650,7 @@ ${I} .nhome .qa button{border-color:var(--line-2)!important;background:var(--sur
 /* v7.80 (Mahmoud 16 Oct: «you did not set it to what we chose — option 3 by day, option 2 at night»; he works on Advanced):
    the same two palettes on the Advanced look too — sage & sand by day, calm navy at night, a navy menu instead of black.
    Only colours: the Advanced shapes (glass, pills, the dark menu) stay as they are. */
+
 ${X}{${XL}}
 @media (prefers-color-scheme: dark){ ${X}:not([data-theme="light"]){${XD}} }
 ${X}[data-theme="dark"]{${XD}}
@@ -41569,6 +41663,8 @@ ${X} .side .avatar{background:linear-gradient(135deg,#2c3a50,#18202c)}
 html.apple:not(.iph) body:has(.side.open)::before{background:#18202c}
 ${X} .tb-logo{background:#18202c}
 @media (prefers-reduced-transparency: reduce){ ${X} .side,${X} .nhome .nside{background:#18202c!important} }
+${lightMenu(X + '[data-theme="light"]')}
+@media (prefers-color-scheme: light){ ${lightMenu(X + ':not([data-theme])')} }
 </style>`);
 })();
 /* =====================================================================
@@ -46075,6 +46171,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     fleet: { t: () => L('العربيات لايف', 'Vehicles live'), d: () => L('خريطة العربيات بمكانها وحالتها دلوقتي', 'The vehicles on the map, where they are now'), ic: 'map', col: '#0a84ff', sizes: ['S', 'M', 'L'], href: '#/fleetmap', ok: () => { const f = FW(); try { return !!(f && f.mayView()); } catch (e) { return false; } } },
     photos: { t: () => L('معرض الصور', 'Photo gallery'), d: () => L('آخر صور الأوامر والمشاريع والمواقع اللي بتشوفها', 'The latest photos of the orders, projects and sites you see'), ic: 'image', col: '#ff9f0a', sizes: ['S', 'M', 'L'], ok: () => false },   /* v7.49 (12 Oct — Mahmoud, PIN): no gallery in the system — the pictures live inside their task / project */
     fleetmv: { t: () => L('حركة الأسطول', 'Fleet movement'), d: () => L('كل عربية: مين سايقها ورايحة فين ووصلت ولا راجعة — لايف', 'Every vehicle: who drives it, where it is going, arrived or on the way back — live'), ic: 'route', col: '#32ade6', sizes: ['S', 'M', 'L'], href: '#/fleetmap', ok: () => { const f = FW(); try { return !!(f && f.mayView()); } catch (e) { return false; } } },
+    supply: { t: () => L('صور التوريدات', 'Supply photos'), d: () => L('صور استلام الخامات في المصنع والتسليم والتركيب في الموقع — على كل أوردر', 'Photos of materials received at the factory, delivery and installation on site — per order'), ic: 'image', col: '#bf5af2', sizes: ['S', 'M', 'L'], ok: () => !!(window.nfSupply && window.nfSupply.has()) },   /* v7.82 — parts/99zzZzZZzzy-supply-photos.js */
     att: { t: () => L('الحضور', 'Attendance'), d: () => L('مين حاضر ومين لسه ومين اتأخر النهارده', 'Who is in, who is not and who was late today'), ic: 'clock', col: '#ff3b30', sizes: ['S', 'M', 'L'], href: '#/attendance', ok: () => can('attendance') },
     ot: { t: () => L('سهر النهارده', 'Overtime tonight'), d: () => L('السهر المتسجّل النهارده وعدد الناس', 'Tonight\'s overtime and how many people'), ic: 'moon', col: '#5e5ce6', sizes: ['S', 'M'], href: '#/otnight', ok: () => can('otnight') },
     trips: { t: () => L('مشاوير النهارده', 'Today\'s trips'), d: () => L('مشاوير النهارده وحالة كل مشوار', 'Today\'s trips and the state of each'), ic: 'route', col: '#64d2ff', sizes: ['S', 'M', 'L'], href: '#/fleet', ok: () => can('fleet') },
@@ -46083,7 +46180,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     /* v7.58: Ninety Studioz — the showreel / the studio's stills (parts/99zzZzZZzy-stu-media.js) */
     stuwork: { t: () => L('شغل الاستوديو', 'Studio work'), d: () => L('الشوريل ولقطات من شغل الاستوديو', 'The showreel and stills from the studio\'s work'), ic: 'image', col: '#1c1c1e', sizes: ['S', 'M', 'L'], ok: () => !!(window.nfStuMedia && window.nfStuMedia.ready()) }
   };
-  const ORDER = ['stuwork', 'today', 'money', 'fleet', 'fleetmv', 'att', 'ot', 'trips', 'tasks', 'msgs'];
+  const ORDER = ['stuwork', 'today', 'money', 'supply', 'fleet', 'fleetmv', 'att', 'ot', 'trips', 'tasks', 'msgs'];
   const okW = id => { const w = WD[id]; if (!w) return false; try { return !!w.ok(); } catch (e) { return false; } };
 
   /* ---------- the layout (per person, per phone / computer) ---------- */
@@ -46094,7 +46191,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   const clean = arr => { const seen = new Set(); return (Array.isArray(arr) ? arr : []).filter(x => x && WD[x.id] && !seen.has(x.id) && seen.add(x.id)).map(x => ({ id: x.id, s: WD[x.id].sizes.includes(x.s) ? x.s : (WD[x.id].sizes.includes('M') ? 'M' : WD[x.id].sizes[0]) })); };
   function defaults() {
     const r = R(); const desk = dev() === 'desk'; let d;
-    if (isAdmin()) d = desk ? [['today', 'M'], ['money', 'M'], ['fleet', 'L'], ['fleetmv', 'L'], ['ot', 'S'], ['trips', 'S'], ['att', 'S'], ['msgs', 'S']] : [['today', 'M'], ['money', 'L'], ['fleet', 'L'], ['fleetmv', 'M'], ['ot', 'S']];
+    if (isAdmin()) d = desk ? [['today', 'M'], ['money', 'M'], ['supply', 'M'], ['fleet', 'L'], ['fleetmv', 'L'], ['ot', 'S'], ['trips', 'S'], ['att', 'S'], ['msgs', 'S']] : [['today', 'M'], ['money', 'L'], ['supply', 'M'], ['fleet', 'L'], ['fleetmv', 'M'], ['ot', 'S']];
     else if (['manager', 'vice', 'hr'].includes(r)) d = [['today', 'M'], ['att', 'S'], ['ot', 'S'], ['fleet', 'L'], ['money', 'L'], ['tasks', 'M']];
     else if (r === 'head') d = [['today', 'M'], ['att', 'S'], ['ot', 'S'], ['tasks', 'M'], ['msgs', 'M']];
     else if (r === 'driver' || r === 'fleet') d = [['today', 'M'], ['trips', 'M'], ['fleet', 'L'], ['tasks', 'M']];
@@ -46291,13 +46388,46 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     let ws = []; try { ws = (typeof visibleWorkers === 'function' ? visibleWorkers() : list('workers')).filter(x => x && x.status !== 'inactive' && x.status !== 'suspended' && x.role !== 'admin' && x.role !== 'kiosk'); } catch (e) { ws = []; }
     const pres = ws.filter(x => (att[x.id] || {}).in); const late = pres.filter(x => +(att[x.id] || {}).late > 0); const off = ws.filter(x => { const r = att[x.id] || {}; return !r.in && ['A', 'H', 'L'].includes(r.s); }); const not = ws.filter(x => { const r = att[x.id] || {}; return !r.in && !r.s; });
     if (!ws.length) return hd(w) + empty('clock', L('مفيش موظفين', 'No staff'));
-    if (s === 'S') return hd(w) + big(w.href, `${pres.length}/${ws.length}`, L('حاضر', 'Present'), late.length ? `<em class="warn">${esc(L(`${late.length} متأخر`, `${late.length} late`))}</em>` : '');
+    /* v7.82 (Mahmoud 16 Oct: «when I tap the widget show me the data itself — the four who are in — not the whole list; and if possible
+       inside the widget»): the small widget lists who is in (up to 4, with the punch time), and a tap opens a short sheet with the
+       people themselves (in · late · not in yet · off) instead of the whole attendance page. */
+    const inT = x => { const r = att[x.id] || {}; return r.in ? String(typeof fmtTm === 'function' ? fmtTm(r.in) : r.in) : ''; };
+    ATT_LAST = { pres, late, not, off, att };
+    if (s === 'S') { const nm = x => String(x.name || '').split(' ').slice(0, 2).join(' ');
+      const names = pres.slice(0, 4).map(x => `<span class="nfw-an"><b>${esc(nm(x))}</b><small>${esc(inT(x))}${+(att[x.id] || {}).late > 0 ? ' · ' + esc(L('متأخر', 'late')) : ''}</small></span>`).join('') + (pres.length > 4 ? `<span class="nfw-an more">${esc(L(`+ ${pres.length - 4} كمان`, `+ ${pres.length - 4} more`))}</span>` : '');
+      return hd(w) + `<button type="button" class="nfw-big nfw-attb" data-action="nfwAtt" data-arg="pres"><b>${esc(`${pres.length}/${ws.length}`)}</b><span>${esc(L('حاضر', 'Present'))}</span>${late.length ? `<em class="warn">${esc(L(`${late.length} متأخر`, `${late.length} late`))}</em>` : ''}${names ? `<span class="nfw-anl">${names}</span>` : ''}</button>`; }
     const kv = [[L('حاضر', 'Present'), pres.length, '#30d158'], [L('لسه', 'Not in'), not.length, '#ff9f0a'], [L('متأخر', 'Late'), late.length, '#ff453a'], [L('إجازة/غياب', 'Off/absent'), off.length, '#8e8e93']];
-    const k = `<div class="nfw-kv">${kv.map(([l, v, c]) => `<div><b style="color:${c}">${esc(String(v))}</b><span>${esc(l)}</span></div>`).join('')}</div>`;
+    const kk = ['pres', 'not', 'late', 'off']; const k = `<div class="nfw-kv">${kv.map(([l, v, c], i) => `<button type="button" data-action="nfwAtt" data-arg="${kk[i]}"><b style="color:${c}">${esc(String(v))}</b><span>${esc(l)}</span></button>`).join('')}</div>`;
     if (s === 'M') return hd(w, `<span class="nfw-hs">${pres.length}/${ws.length}</span>`) + k;
     const nl = not.slice(0, 8).map(x => row(w.href, esc(x.name || ''), esc(typeof deptName === 'function' && x.deptId ? deptName(x.deptId) : ''), `<small>${esc(L('لسه', 'Not in'))}</small>`)).join('');
     return hd(w, `<span class="nfw-hs">${pres.length}/${ws.length}</span>`) + k + (nl ? `<div class="nfw-rows">${nl}</div>` : '');
   }
+
+  let ATT_LAST = null;
+  ACTIONS.nfwAtt = which => {
+    if (W.edit || !ATT_LAST) return; const A = ATT_LAST; const grp = { pres: [L('حاضر', 'Present'), A.pres], late: [L('متأخر', 'Late'), A.late], not: [L('لسه', 'Not in'), A.not], off: [L('إجازة/غياب', 'Off/absent'), A.off] };
+    const cur = grp[which] ? which : 'pres';
+    const tabs = Object.keys(grp).map(k => `<button type="button" class="${k === cur ? 'on' : ''}" data-action="nfwAtt" data-arg="${k}">${esc(grp[k][0])} <span>${grp[k][1].length}</span></button>`).join('');
+    const ST = { A: L('غياب', 'Absent'), H: L('إجازة رسمية', 'Holiday'), L: L('إجازة', 'Leave') };
+    const rows = grp[cur][1].map(x => { const r = A.att[x.id] || {}; const t = v => (v ? esc(String(typeof fmtTm === 'function' ? fmtTm(v) : v)) : ''); const end = cur === 'off' ? esc(ST[r.s] || '') : r.in ? `${t(r.in)}${r.out ? ' ← ' + t(r.out) : ''}${+r.late > 0 ? ` <em class="nfw-al">${esc(L(`متأخر ${r.late} د`, `${r.late} min late`))}</em>` : ''}` : '';
+      return `<div class="nfw-ar"><span class="nfw-av">${typeof avatarHTML === 'function' ? avatarHTML(x, 30) : ''}</span><span class="nfw-at"><b>${esc(x.name || '')}</b><small>${esc(typeof deptName === 'function' && x.deptId ? deptName(x.deptId) : '')}</small></span><span class="nfw-ae">${end}</span></div>`; }).join('');
+    openModal({ title: L('الحضور النهارده', 'Attendance today'), body: `<div class="nfw-atabs">${tabs}</div><div class="nfw-alist">${rows || `<div class="muted small" style="padding:14px 4px">${esc(L('مفيش حد', 'Nobody'))}</div>`}</div>`, footer: `<a class="btn ghost" href="#/attendance" data-action="closemodal">${esc(L('صفحة الحضور كلها', 'The whole attendance page'))}</a><button type="button" class="btn" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button>` });
+  };
+  document.head.insertAdjacentHTML('beforeend', `<style>
+.nfw-attb{border:0;background:none;font:inherit;color:inherit;text-align:start;cursor:pointer;padding:0;width:100%}
+.nfw-anl{display:flex;flex-direction:column;gap:2px;margin-top:6px;width:100%}
+.nfw-an{display:flex;justify-content:space-between;gap:6px;font-size:11.5px;line-height:1.3;min-width:0}
+.nfw-an b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px!important;color:var(--ink)!important}
+.nfw-an small{color:var(--muted);white-space:nowrap;flex:none}.nfw-an.more{color:var(--muted)}
+.nfw-kv button{border:0;background:none;font:inherit;color:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:10px}
+.nfw-kv button:hover{background:var(--surface-2)}
+.nfw-atabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.nfw-atabs button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
+.nfw-atabs button span{font-weight:700;margin-inline-start:4px}.nfw-atabs button.on{background:var(--ink);color:var(--surface);border-color:transparent}
+.nfw-ar{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)}.nfw-ar:last-child{border-bottom:0}
+.nfw-at{flex:1;min-width:0;display:flex;flex-direction:column}.nfw-at b{font-size:13.5px}.nfw-at small{font-size:11.5px;color:var(--muted)}
+.nfw-ae{font-size:12.5px;white-space:nowrap;font-variant-numeric:tabular-nums}.nfw-al{color:var(--crit-ink,#b91c1c);font-style:normal;margin-inline-start:6px}
+</style>`);
 
   /* ---------- overtime tonight ---------- */
   function wOt(s) {
@@ -46367,7 +46497,7 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   document.head.insertAdjacentHTML('beforeend', '<style>.nfw-msgm .nfw-rows{overflow:visible}.nfw-msgm .nfw-r{padding:10px 4px}</style>');
   document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('#mform [data-nfwclose]'); if (a && typeof closeModal === 'function') setTimeout(() => closeModal(), 0); });
 
-  const RENDER = { today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs, stuwork: s => (window.nfStuMedia ? window.nfStuMedia.widget(s) : '') };
+  const RENDER = { supply: s => hd(WD.supply) + (window.nfSupply ? window.nfSupply.widget(s) : ''), today: wToday, money: wMoney, fleet: wFleet, fleetmv: wFleetMv, photos: wPhotos, att: wAtt, ot: wOt, trips: wTrips, tasks: wTasks, msgs: wMsgs, stuwork: s => (window.nfStuMedia ? window.nfStuMedia.widget(s) : '') };
 
   /* ---------- the grid ---------- */
   const SZ = () => ({ S: L('صغير', 'Small'), M: L('متوسط', 'Medium'), L: L('كبير', 'Large') });
@@ -54973,9 +55103,24 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   const tokTxt = s => esc(String(s || '')).replace(/\{\{d:([^}]{1,40})\}\}/g, (m, id) => `<b class="nfl-tk">${esc(dName(id))}</b>`);
   const riskCls = p => (p >= 70 ? 'crit' : p >= 40 ? 'warn' : '');
   const whyTxt = x => (x.why || []).map(w => tokTxt(en() ? w.en : w.ar)).join(L('، ', ', '));
+  /* v7.82 (Mahmoud 16 Oct: «make these a table, with a short detail next to each»): one row per order — client, the department it is
+     in now, the delivery date, how late, the last movement, the chance, and why. On a phone each row is a small card (no sideways scroll). */
+  const msOf = v => { const t = Date.parse(String(v || '')); return isFinite(t) ? t : 0; };
+  function rowFacts(o) {
+    const t = todayISO(); const st = (o.stages && typeof o.stages === 'object') ? o.stages : {};
+    const cur = (Array.isArray(o.route) ? o.route : []).find(d => !['done', 'skipped'].includes(String((st[d] || {}).status || ''))) || '';
+    const late = o.dueDate && String(o.dueDate).slice(0, 10) < t ? Math.round((Date.parse(t) - Date.parse(String(o.dueDate).slice(0, 10))) / 864e5) : 0;
+    const last = Math.max(0, ...Object.values(st).map(x => Math.max(msOf(x && x.at), msOf(x && x.end), msOf(x && x.start))), msOf(o.updatedAt));
+    const idle = last ? Math.max(0, Math.floor((Date.now() - last) / 864e5)) : null;
+    return { cur, late, idle };
+  }
+  const dTxt = n => (n == null ? '—' : n === 0 ? L('النهارده', 'today') : L(`من ${n} يوم`, `${n} days ago`));
   function vPredict(maxN) {
     const arr = predict().filter(x => byId('orders', x.orderId)).slice(0, maxN || 8); if (!arr.length) return '';
-    return `<div class="list">${arr.map(x => { const o = byId('orders', x.orderId); return `<div class="item"><div class="main"><div class="title"><a href="#/orders/${esc(x.orderId)}">${esc(o.code || x.code)}</a> <span class="badge ${riskCls(x.p)}">${esc(L(`احتمال التأخير ${x.p}%`, `${x.p}% chance of delay`))}</span></div><div class="meta"><span>${whyTxt(x)}</span></div></div></div>`; }).join('')}</div>`;
+    const H = [L('الأمر', 'Order'), L('العميل', 'Client'), L('القسم دلوقتي', 'Department now'), L('التسليم', 'Delivery'), L('متأخر', 'Late by'), L('آخر حركة', 'Last movement'), L('الاحتمال', 'Chance'), L('ليه', 'Why')];
+    const rows = arr.map(x => { const o = byId('orders', x.orderId); const f = rowFacts(o); const c = v => `<td data-l="${esc(H[v[0]])}" class="${v[2] || ''}${v[1] === '—' ? ' e' : ''}">${v[1]}</td>`;
+      return `<tr data-nfhref="#/orders/${esc(x.orderId)}">${[[0, `<a href="#/orders/${esc(x.orderId)}"><b>${esc(o.code || x.code || '')}</b></a>`, 'k'], [1, esc(o.clientName || o.client || '—')], [2, f.cur ? esc(dName(f.cur)) : '—'], [3, o.dueDate ? esc(fmtDate(String(o.dueDate).slice(0, 10))) : '—', 'num'], [4, f.late ? `<span class="nftb-bad">${esc(L(`${f.late} يوم`, `${f.late} days`))}</span>` : '—', 'num'], [5, esc(dTxt(f.idle)), 'num'], [6, `<span class="badge ${riskCls(x.p)}">${esc(x.p)}%</span>`, 'num'], [7, `<span class="nftb-why">${whyTxt(x)}</span>`, 'why']].map(c).join('')}</tr>`; }).join('');
+    return `<div class="nftb-wrap"><table class="nftb"><thead><tr>${H.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
     const html = base.apply(this, arguments); if (!isOwner()) return html; const x = predict().find(p => p.orderId === id); if (!x || x.p < 40) return html;
@@ -55308,7 +55453,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
   function vTimeline() {
     if (!isOwner()) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
     const A = axis(); const x = iso => Math.max(0, Math.min(100, dd(A.s, iso) / A.tot * 100)); const its = items(); const t = T();
-    const head = `<div class="nft-mh">${A.months.map(m => `<span>${esc(mName(m))}</span>`).join('')}</div>`;
+    const head = `<div class="nft-mh">${A.months.map(m => `<span>${esc(MONTHS[+m.slice(5, 7) - 1][en() ? 1 : 0])}<i> ${esc(m.slice(2, 4))}</i></span>`).join('')}</div>`;   /* v7.82: the year hides on a phone (labels ran into each other) */
     const rows = its.slice(0, 60).map(it => `<div class="nft-row"><div class="nft-l"><a href="${esc(it.href)}" title="${esc(it.sub)}">${esc(it.label)}</a></div><div class="nft-tr">${it.segs.filter(s => s.e >= A.s && s.s <= A.end).map(s => `<i class="nft-a ${s.done ? 'done' : 'on'} ${s.late ? 'late' : ''}" style="inset-inline-start:${x(maxD(s.s, A.s))}%;width:${Math.max(0.8, (dd(maxD(s.s, A.s), minD(s.e, A.end)) + 1) / A.tot * 100)}%;--h:${hue(s.d)}" title="${esc(CO() === 'factory' ? dName(s.d) : CO() === 'studio' && window.nfStuTL ? it.sub + ' — ' + window.nfStuTL.phName(s.d) : it.sub)} ${esc(fmtDate(s.s))} → ${esc(fmtDate(s.e))}"></i>`).join('')}${it.due && it.due >= A.s && it.due <= A.end ? `<i class="nft-dueM" style="inset-inline-start:${x(it.due)}%" title="${esc(L('الميعاد', 'Due'))} ${esc(fmtDate(it.due))}"></i>` : ''}</div></div>`).join('');
     const gantt0 = its.length ? `<div class="nft-g nft-big">${head}${rows}<i class="nft-today" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(t) / 100})"></i></div>` : `<div class="empty small">${esc(L('مفيش شغل شغّال دلوقتي.', 'Nothing running now.'))}</div>`;
     /* how crowded each month is */
@@ -55383,7 +55528,7 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     .nft-leg{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 0}.nft-leg span{display:inline-flex;gap:4px;align-items:center}.nft-k{display:inline-block;width:14px;height:8px;border-radius:3px}.nft-k.p{background:rgba(42,98,216,.28)}.nft-k.a{background:#2a62d8}.nft-k.l{background:#d64545}.nft-k.b{border:1px dashed #8a8f99}.nft-k.t{width:2px;height:12px;background:#2a62d8}.nft-k.d{width:0;height:12px;border-inline-start:2px dashed #d64545}
     .nft-btns{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}.nft-drift{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}.nft-drift>span{flex:1 1 220px}
     .nft-two{display:flex;gap:6px;align-items:center}.nft-two input{min-width:0;flex:1}
-    .nft-mh{display:grid;grid-template-columns:repeat(6,1fr);margin-inline-start:calc(var(--lw) + 6px);font-size:11px;color:var(--muted,#667)}.nft-mh span{border-inline-start:1px solid var(--line,#e3e5ea);padding-inline-start:3px;white-space:nowrap;overflow:hidden}
+    .nft-mh{display:grid;grid-template-columns:repeat(6,1fr);margin-inline-start:calc(var(--lw) + 6px);font-size:11px;color:var(--muted,#667)}.nft-mh span{border-inline-start:1px solid var(--line,#e3e5ea);padding-inline-start:3px;white-space:nowrap;overflow:hidden}.nft-mh i{font-style:normal}@media(max-width:820px){.nft-mh i{display:none}.nft-mh span{font-size:10.5px;text-overflow:ellipsis}}
     .nft-crowd{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:end;height:110px}.nft-crowd>div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:11px}.nft-crowd b{display:block;width:70%;background:var(--accent,#2a62d8);border-radius:4px 4px 0 0;min-height:2px}.nft-crowd em{font-style:normal;font-weight:600}
     .nft-plan{margin:0 0 12px}.nft-plan .item{text-decoration:none;color:inherit}.nft-reasons{display:flex;flex-wrap:wrap;gap:6px}
     .nft-det{margin:1px 0 3px}.nft-det>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:var(--lw) auto;gap:6px;align-items:center;min-height:20px;font-size:11.5px;color:var(--muted,#667)}.nft-det>summary::-webkit-details-marker{display:none}
@@ -56162,4 +56307,487 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     .nfst-wk{white-space:pre-line;line-height:1.7;font-size:14px}
     .nft-btns{display:flex;gap:6px;flex-wrap:wrap}
   </style>`);
+})();
+/* =====================================================================
+   v7.82 — the owner's Ninety home on a phone, compact (Mahmoud 16 Oct, screenshot: «I want the three systems on this screen from
+   top to bottom; the Ninety UI more compact, less empty space; the «+» exactly at the bottom left; «Good evening Mahmoud» and the
+   three systems all on the screen at once»).
+   · Phone only (820px and less), the owner's Ninety home only (.nhome). Nothing about the content or who sees what changes.
+   · Smaller top bar and greeting; the four numbers in one row; each company is a short card: its header with «Enter the system»,
+     and for the factory its six numbers in small tiles plus up to two «needed from you» lines. The studio and construction cards
+     show their header only (what is inside each system is one tap away).
+   · The quick actions / alerts card under the systems is gone from the phone (Mahmoud: «cancel these»); the computer keeps its side column.
+   · The «+» sits at the bottom left with the safe margin (there is no tab bar on this page, so it no longer floats up).
+   ===================================================================== */
+(function () {
+  if (window.__NF_NCOMPACT__) return; window.__NF_NCOMPACT__ = 1;
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="ninety-compact">
+@media (max-width:820px){
+  .nhome{align-content:start!important;min-height:0!important}   /* the page used to stretch its rows to the screen height, leaving a hole before the bottom card */
+  .nhome .nmain{padding:10px 12px 10px!important;gap:9px!important}
+  .nhome .mhead{margin:-10px -12px 0!important;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px!important}
+  .nhome .mhead img.wordmark{height:18px!important}
+  .nhome .mhead .av{width:30px!important;height:30px!important}
+  .nhome .mhead .langsw{transform:scale(.9);transform-origin:center}
+  .nhome .hhead h1{font-size:18px!important;line-height:1.25}
+  .nhome .hhead p{font-size:11.5px!important;margin-top:1px!important}
+  .nhome .strip{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:6px!important}
+  .nhome .strip .st{flex-direction:column;align-items:flex-start;gap:3px!important;padding:7px 8px!important;border-radius:12px!important;min-width:0}
+  .nhome .strip .st b{font-size:18px!important}
+  .nhome .strip .st span{font-size:10px!important;line-height:1.2!important}
+  .nhome .blk{border-radius:14px!important}
+  .nhome .blk .hd{padding:8px 12px 8px 10px!important;gap:8px!important;border-bottom:0!important;min-width:0}
+  .nhome .blk .hd b{font-size:14px!important;white-space:nowrap}
+  .nhome .blk .hd small{font-size:11px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+  .nhome .blk .hd .open{padding:5px 10px!important;font-size:12px!important;flex:none}
+  .nhome .blk .soon{display:none!important}
+  .nhome .blk .bd{grid-template-columns:1fr!important;gap:6px!important;padding:6px 10px 10px!important;border-top:1px solid var(--line)}
+  .nhome .blk .r{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important}
+  .nhome .blk .it{flex-direction:column;align-items:flex-start;gap:2px!important;padding:6px 8px!important;min-width:0}
+  .nhome .blk .it b{font-size:17px!important;min-width:0!important;text-align:start!important}
+  .nhome .blk .it span{font-size:10.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .nhome .blk .it small{display:none!important}
+  .nhome .blk .todo{gap:4px!important}
+  .nhome .blk .todo .h{display:none}
+  .nhome .blk .todo li{padding:5px 8px!important;font-size:11.5px!important}
+  .nhome .blk .todo li:nth-child(n+4){display:none}
+  .nhome .nside{display:none!important}   /* Mahmoud 16 Oct: «cancel these» — the quick actions / alerts card under the systems, on the phone */
+  body:has(.nhome) .nfdial .nfd-main{left:14px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important}
+}
+</style>`);
+})();
+/* =====================================================================
+   v7.82 — the owner's Ninety home: the three systems, each with the widgets he picks (briefs claude/ninety-widgets-brief.md +
+   claude/ninety-oeko-look-brief.md, go-ahead 16 Oct).
+   · The four-number strip at the top is gone: the greeting, one small line «N things waiting in the three systems», then three
+     cards — Fabrication, Studioz, Construction — always in that order, in every one of the three apps.
+   · Each card: a caption like the Ökoplan home (a small spaced line FACTORY / STUDIOZ / CONSTRUCTION + the name in thin capitals)
+     on a calm Ninety-colour wash with fine dots, «Enter the system», «Edit», then the chosen widgets (number + name; red = late,
+     amber = waiting for you).
+   · «Edit» opens a sheet with every widget of that system: show / hide and move up / down. The choice is saved on his own
+     account (nf_uprefs «ninety.w»), so the phone and the computer show the same, with a local copy that paints at once.
+   · A tap opens the thing itself: one item → straight to it; several → a short list, each line opens its item; zero → nothing.
+     Items of another system open inside that system (its own URL, the same single sign-on as today).
+   · Numbers of this system come from what is loaded here; the other two are read with his own session there (the hub's
+     peer client, RLS on that side decides) — if that system cannot be reached the card says so, never a wrong zero.
+   · Counts and names only — no money on the cards, no amounts in the lists. Who sees what does not change: the page is the
+     owner's only. iPhone, Android, computer · Arabic and English · day and night.
+   ===================================================================== */
+(function () {
+  if (window.__NF_NW__) return; window.__NF_NW__ = 1;
+  if (typeof ninetyHomeHTML !== 'function' || typeof ACTIONS === 'undefined') return;
+  const SELF = (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : (typeof STU_ON !== 'undefined' && STU_ON) ? 'studio' : 'factory';
+  const ORDER = ['factory', 'studio', 'construction'];
+  const CAP = { factory: ['NINETY · FACTORY', 'Ninety Fabrication', 'var(--nf-fab)', 'Fabrication'], studio: ['NINETY · STUDIO', 'Ninety Studioz', 'var(--nf-stu)', 'Studioz'], construction: ['NINETY · CONTRACTING', 'Ninety Construction', 'var(--nf-con)', 'Construction'] };
+  const DAY = 864e5;
+  const today = () => (typeof todayISO === 'function' ? todayISO() : new Date().toISOString().slice(0, 10));
+  const ms = s => { if (!s) return null; const t = Date.parse(String(s).length === 10 ? s + 'T12:00:00' : s); return isFinite(t) ? t : null; };
+  const OPEN_T = t => t && !t.deleted && ['open', 'doing'].includes(String(t.status || 'open')) && !['update', 'notice'].includes(String(t.kind || 'task'));
+  const ORDER_OPEN = o => o && !o.deleted && !['delivered', 'cancelled', 'closed', 'done'].includes(String(o.status || ''));
+  const PURCH_DONE = new Set(['received', 'done', 'closed', 'cancelled', 'delivered', 'rejected']);
+  const reqLabel = r => ((typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || r.type || 'طلب') + (r.createdByName || r.requesterName ? ' — ' + (r.createdByName || r.requesterName) : '');
+  const taskIt = t => ({ t: t.title || 'مهمة', h: '#/tasks/' + t.id });
+  /* the owner is awaited in another system: there every pending request waits for him (studio / construction); in the factory
+     only when the step is his or it climbed to him after the escalation hours (same rule as awaitingMe, from the stored chain) */
+  const pendingForOwner = (co, r) => {
+    if (!r || r.status !== 'pending') return false; if (co !== 'factory') return true;
+    const ch = Array.isArray(r.chain) && r.chain.length ? r.chain : ['hr']; const st = Math.min(r.step || 0, ch.length - 1);
+    if (ch[st] === 'admin') return true; const at = ms(r.stepAt || r.createdAt); return at != null && Date.now() - at >= (ch.length - st) * 24 * 36e5;
+  };
+  function attOf(G) {
+    const d = today(); const ym = d.slice(0, 7); let present = 0; const seen = new Set();
+    G('attendance').forEach(doc => { if (!doc || (doc.month && doc.month !== ym)) return; const rows = (doc.rows || {})[d] || {}; Object.entries(rows).forEach(([wid, r]) => { if (r && (r.in || ['P', 'H'].includes(r.s)) && !seen.has(wid)) { seen.add(wid); present++; } }); });
+    const total = G('workers').filter(w => w && w.status !== 'inactive' && !w.deleted).length; return { present, total };
+  }
+  /* ---------- the widgets of each system: calc(G, here) → { n, items:[{t,h}], h? (where a tap goes when there is no list) } ---------- */
+  const W = {
+    factory: [
+      { id: 'appr', t: 'اعتماد مستنيك', tone: 'wn', def: 1, calc: (G, here) => { const rs = G('requests').filter(r => here && typeof awaitingMe === 'function' ? (() => { try { return awaitingMe(r); } catch (e) { return false; } })() : pendingForOwner('factory', r)); return { items: rs.map(r => ({ t: reqLabel(r), h: '#/requests' })), h: '#/requests' }; } },
+      { id: 'transfer', t: 'تحويل لمورد', tone: 'wn', def: 1, calc: G => ({ items: G('purchases').filter(p => p && p.status === 'transfer').map(p => ({ t: p.supplier || p.code || p.number || 'أمر شراء', h: '#/purchases/' + p.id })) }) },
+      { id: 'late', t: 'أوامر متأخرة', tone: 'bad', def: 1, calc: G => ({ items: G('orders').filter(o => ORDER_OPEN(o) && o.dueDate && String(o.dueDate).slice(0, 10) < today()).map(o => ({ t: [o.code, o.title].filter(Boolean).join(' — ') || 'أمر', h: '#/orders/' + o.id })) }) },
+      { id: 'open', t: 'أوامر جارية', tone: '', def: 1, calc: G => ({ items: G('orders').filter(ORDER_OPEN).map(o => ({ t: [o.code, o.title].filter(Boolean).join(' — ') || 'أمر', h: '#/orders/' + o.id })), h: '#/orders' }) },
+      { id: 'esc', t: 'مهمة مصعَّدة', tone: 'bad', def: 1, calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.escalation && t.escalation.level >= 3).map(taskIt) }) },
+      { id: 'att', t: 'حضور المصنع', tone: '', def: 1, att: 1, calc: G => Object.assign({ items: [], h: '#/attendance' }, attOf(G)) },
+      { id: 'suspect', t: 'بصمة مشبوهة', tone: 'wn', calc: G => { const seen = new Set(); return { items: G('tasks').filter(t => t && t.kind === 'suspect' && t.status !== 'done').filter(t => { const k = String(t.id || '').replace(/^sush?_/, ''); if (seen.has(k)) return false; seen.add(k); return true; }).map(taskIt) }; } },
+      { id: 'risk', t: 'أوامر ممكن تتأخر', tone: 'wn', here: 1, calc: G => { const off = (window.nfLearn && window.nfLearn.data && window.nfLearn.data.office) || {}; const ord = new Map(G('orders').filter(ORDER_OPEN).map(o => [o.id, o])); return { items: (Array.isArray(off.predict) ? off.predict : []).filter(x => x && (x.p || 0) >= 60 && ord.has(x.orderId)).map(x => ({ t: (ord.get(x.orderId).code || x.code || 'أمر') + ' — ' + Math.round(x.p) + '%', h: '#/orders/' + x.orderId })) }; } },
+      { id: 'pstuck', t: 'شراء واقف 3 أيام', tone: 'wn', calc: G => ({ items: G('purchases').filter(p => p && !p.deleted && !PURCH_DONE.has(String(p.status)) && (ms(p.updatedAt) || ms(p.createdAt) || Date.now()) <= Date.now() - 3 * DAY).map(p => ({ t: p.code || p.supplier || 'أمر شراء', h: '#/purchases/' + p.id })) }) },
+      { id: 'tlate', t: 'مهام متأخرة', tone: 'bad', calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.dueDate && String(t.dueDate).slice(0, 10) < today()).map(taskIt) }) },
+      { id: 'money', t: 'فلوس مستنياك', tone: 'wn', here: 1, calc: () => { let it = []; try { it = typeof window.nfOwnerMoney === 'function' ? window.nfOwnerMoney() || [] : []; } catch (e) { it = []; } return { items: it.map(x => ({ t: x.label || '—', h: x.href || '#/money' })), h: '#/money' }; } },
+    ],
+    studio: [
+      { id: 'active', t: 'مشاريع شغّالة', tone: '', def: 1, calc: G => ({ items: G('projects').filter(p => p && !p.deleted && p.status === 'active' && !['delivered', 'closed'].includes(String(p.osStatus || ''))).map(p => ({ t: [p.code, p.name].filter(Boolean).join(' — '), h: '#/projects/' + p.id })), h: '#/projects' }) },
+      { id: 'owner', t: 'لقطات مستنية اعتمادك', tone: 'wn', def: 1, calc: G => ({ items: G('shots').filter(s => s && !s.deleted && s.state === 'owner').map(s => ({ t: [s.code, s.name].filter(Boolean).join(' — ') || 'لقطة', h: s.projectId ? '#/projects/' + s.projectId : '#/projects' })) }) },
+      { id: 'client', t: 'مستنية رد العميل', tone: 'wn', def: 1, calc: G => ({ items: G('projects').filter(p => p && p.status === 'active' && ['camera', 'client'].includes(String(p.osStatus))).map(p => ({ t: [p.code, p.name].filter(Boolean).join(' — '), h: '#/projects/' + p.id })) }) },
+      { id: 'tlate', t: 'مهام متأخرة', tone: 'bad', def: 1, calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.dueDate && String(t.dueDate).slice(0, 10) < today()).map(taskIt) }) },
+      { id: 'week', t: 'مواعيد عملاء الأسبوع ده', tone: '', def: 1, calc: G => ({ items: G('projects').filter(p => { if (!p || p.status !== 'active') return false; const d = ms(p.clientDeadline || p.dueDate); return d != null && d >= Date.now() - DAY && d <= Date.now() + 7 * DAY; }).map(p => ({ t: [p.code, p.name].filter(Boolean).join(' — '), h: '#/projects/' + p.id })) }) },
+      { id: 'appr', t: 'اعتماد مستنيك', tone: 'wn', def: 1, calc: G => ({ items: G('requests').filter(r => pendingForOwner('studio', r)).map(r => ({ t: reqLabel(r), h: '#/requests' })), h: '#/requests' }) },
+      { id: 'att', t: 'حضور المكتب', tone: '', att: 1, calc: G => Object.assign({ items: [], h: '#/attendance' }, attOf(G)) },
+      { id: 'esc', t: 'مهمة مصعَّدة', tone: 'bad', calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.escalation && t.escalation.level >= 3).map(taskIt) }) },
+    ],
+    construction: [
+      { id: 'active', t: 'مشاريع شغّالة', tone: '', def: 1, calc: G => ({ items: G('cprojects').filter(p => p && !p.deleted && p.status === 'active').map(p => ({ t: [p.code, p.name].filter(Boolean).join(' — '), h: '#/cprojects/' + p.id })), h: '#/cprojects' }) },
+      { id: 'checks', t: 'طلبات استلام مستنية', tone: 'wn', def: 1, calc: G => ({ items: G('checks').filter(c => c && c.status === 'submitted').map(c => ({ t: c.title || c.name || c.code || 'طلب استلام', h: c.projectId ? '#/cprojects/' + c.projectId + '/checks' : '#/cprojects' })) }) },
+      { id: 'snags', t: 'ملاحظات موقع أقدم من 14 يوم', tone: 'bad', def: 1, calc: G => ({ items: G('snags').filter(s => s && !s.deleted && !['done', 'closed', 'fixed', 'cancelled'].includes(String(s.status || 'open')) && (ms(s.at) || ms(s.createdAt) || Date.now()) <= Date.now() - 14 * DAY).map(s => ({ t: s.title || s.text || 'ملاحظة', h: s.projectId ? '#/cprojects/' + s.projectId + '/snags' : '#/cprojects' })) }) },
+      { id: 'tlate', t: 'مهام متأخرة', tone: 'bad', def: 1, calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.dueDate && String(t.dueDate).slice(0, 10) < today()).map(taskIt) }) },
+      { id: 'appr', t: 'اعتماد مستنيك', tone: 'wn', def: 1, calc: G => ({ items: G('requests').filter(r => pendingForOwner('construction', r)).map(r => ({ t: reqLabel(r), h: '#/requests' })), h: '#/requests' }) },
+      { id: 'att', t: 'حضور الموظفين', tone: '', def: 1, att: 1, calc: G => Object.assign({ items: [], h: '#/attendance' }, attOf(G)) },
+      { id: 'esc', t: 'مهمة مصعَّدة', tone: 'bad', calc: G => ({ items: G('tasks').filter(t => OPEN_T(t) && t.escalation && t.escalation.level >= 3).map(taskIt) }) },
+    ],
+  };
+  window.nfNinetyWidgets = W;
+
+  /* ---------- his choice (local copy now, his server row follows) ---------- */
+  const LK = 'nf.ninety.w'; const PK = 'ninety.w';
+  const lsGet = () => { try { return JSON.parse(localStorage.getItem(LK) || 'null'); } catch (e) { return null; } };
+  const lsSet = v => { try { localStorage.setItem(LK, JSON.stringify(v)); } catch (e) { /* private mode */ } };
+  const hosted = () => !!(S.sb && S.mode !== 'local' && typeof S.sb.rpc === 'function');
+  let PREF = lsGet(); let pulled = false;
+  const chosen = co => { const all = W[co].map(w => w.id); const p = PREF && Array.isArray(PREF[co]) ? PREF[co].filter(id => all.includes(id)) : null; return p && (p.length || (PREF.at && PREF[co])) ? p : W[co].filter(w => w.def).map(w => w.id); };
+  async function pull() {
+    if (pulled || !hosted()) return; pulled = true;
+    try { const r = await S.sb.rpc('nf_uprefs_get'); const v = r && !r.error && r.data && r.data[PK]; if (v && typeof v === 'object' && (!PREF || !PREF.at || String(v.at || '') > String(PREF.at))) { PREF = v; lsSet(v); if (document.querySelector('#nhome')) render(true); } } catch (e) { /* the local copy is enough */ }
+  }
+  async function push() { lsSet(PREF); if (!hosted()) return; try { await S.sb.rpc('nf_uprefs_set', { p_key: PK, p_val: PREF }); } catch (e) { /* kept locally until next time */ } }
+
+  /* ---------- data: this system here, the other two with his session there ---------- */
+  const PEER_COLS = { factory: ['requests', 'purchases', 'orders', 'tasks', 'attendance', 'workers'], studio: ['projects', 'shots', 'tasks', 'requests', 'attendance', 'workers'], construction: ['cprojects', 'checks', 'snags', 'tasks', 'requests', 'attendance', 'workers'] };
+  const P = window.__nfNwPeer = window.__nfNwPeer || {};   /* co → { at, busy, err, data:{col:[docs]} } */
+  async function readPeer(co) {
+    if (typeof window.__nfNwPeerStub === 'function') return window.__nfNwPeerStub(co);   /* test hook */
+    if (typeof window.nfPeerSession !== 'function') return { err: 'nopeer' };
+    const ps = await window.nfPeerSession(co); if (!ps) return { err: 'nosession' };
+    const { c } = ps; const data = {}; const ym = today().slice(0, 7);
+    for (const col of PEER_COLS[co]) {
+      let q = c.from('docs').select('id, data').eq('col', col);
+      if (col === 'tasks') q = q.in('data->>status', ['open', 'doing']); else if (col === 'requests') q = q.eq('data->>status', 'pending'); else if (col === 'attendance') q = q.eq('data->>month', ym);
+      const r = await q.limit(1000); if (r.error) return { err: 'read' };
+      data[col] = (r.data || []).map(x => Object.assign({ id: x.id }, x.data || {}));
+    }
+    return { data };
+  }
+  function refreshPeer(co, force) {
+    const p = P[co] || (P[co] = {}); if (p.busy || (!force && p.at && Date.now() - p.at < (p.err ? 20000 : 60000))) return;
+    p.busy = true; p.at = Date.now();
+    readPeer(co).then(r => { p.err = r && r.err || ''; if (r && r.data) p.data = r.data; }).catch(() => { p.err = 'read'; }).finally(() => { p.busy = false; if (document.querySelector('#nhome') && !document.querySelector('#modalroot .overlay')) render(true); });
+  }
+  const getter = co => co === SELF ? (col => { try { return list(col); } catch (e) { return []; } }) : (col => ((P[co] && P[co].data) || {})[col] || []);
+  function calcCo(co) {
+    const here = co === SELF; if (!here) { refreshPeer(co); if (!(P[co] && P[co].data)) return { state: P[co] && P[co].err ? 'off' : 'wait' }; }
+    const G = getter(co); const out = {};
+    W[co].forEach(w => { if (w.here && !here) return; let r = null; try { r = w.calc(G, here); } catch (e) { r = null; } if (r) { r.n = w.att ? r.present : r.items.length; out[w.id] = r; } });
+    return { state: 'ok', v: out };
+  }
+  const CACHE = {};
+
+  /* ---------- the page ---------- */
+  document.head.insertAdjacentHTML('beforeend', `<style id="ninety-widgets">
+html{--font:"Noto Sans","Noto Sans Arabic","IBM Plex Sans Arabic",system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif!important}   /* 16 Oct (owner): the fonts of the Ninety Studio PDF — Noto Sans for Latin + digits, Noto Sans Arabic for Arabic, no thin weights; all three systems */
+#nhome .hhead h1{font-weight:700!important;font-size:24px!important;line-height:1.25}
+#nhome .nw-sum{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+#nhome .nw-cards{display:grid;grid-template-columns:1fr;gap:12px}
+#nhome .nw-card{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:var(--surface);isolation:isolate;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+#nhome .nw-card::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:var(--c)}
+#nhome .nw-cap{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:12px 16px 10px 14px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--c) 5%,var(--surface))}
+#nhome .nw-cap .nw-tt{flex:1 1 150px;min-width:0;display:flex;align-items:center;gap:9px;cursor:pointer}
+#nhome .nw-dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
+#nhome .nw-k{font-weight:700;font-size:12px;letter-spacing:.1em;color:var(--ink);direction:ltr;text-align:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[dir="rtl"] #nhome .nw-k{text-align:right}
+#nhome .nw-acts{display:flex;gap:6px;flex:none;margin-inline-start:auto}
+#nhome .nw-acts button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:6px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+#nhome .nw-acts .nw-go{background:var(--c);border-color:transparent;color:#fff}
+#nhome .nw-acts svg{width:14px;height:14px}
+#nhome .nw-acts .nw-s{display:none}
+#nhome .nw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px;padding:12px 14px 14px}
+#nhome .nw-w{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px;border-radius:11px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;text-align:start;cursor:pointer;min-width:0}
+#nhome .nw-w b{font-weight:700;font-size:21px;line-height:1;font-variant-numeric:tabular-nums}
+#nhome .nw-w b small{font-size:13px;font-weight:400;color:var(--muted)}
+#nhome .nw-w span{font-size:11.5px;line-height:1.25;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#nhome .nw-w.wn b{color:#b8862f}#nhome .nw-w.bad b{color:#c0504d}
+#nhome .nw-w.z{cursor:default}#nhome .nw-w:not(.z):hover{border-color:var(--c)}
+#nhome .nw-off{padding:14px 16px;color:var(--muted);font-size:12.5px}
+#nhome .nw-off button{border:0;background:none;color:var(--c);font:inherit;font-weight:600;cursor:pointer;padding:0}
+:root[data-theme="dark"] #nhome .nw-w.wn b{color:#e3b55e}:root[data-theme="dark"] #nhome .nw-w.bad b{color:#ec8a86}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #nhome .nw-w.wn b{color:#e3b55e}:root:not([data-theme="light"]) #nhome .nw-w.bad b{color:#ec8a86}}
+@media (min-width:1100px){#nhome .nw-cards{grid-template-columns:repeat(3,minmax(0,1fr))}#nhome .nw-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:820px){
+  #nhome .nw-cards{gap:9px}
+  #nhome .nw-card{border-radius:14px}
+  #nhome .nw-cap{padding:9px 12px 8px 11px;gap:8px}
+  #nhome .nw-k{font-size:11px}
+  #nhome .nw-acts button{padding:5px 10px;font-size:11.5px}
+  #nhome .nw-acts .nw-ed span{display:none}
+  #nhome .nw-acts .nw-l{display:none}#nhome .nw-acts .nw-s{display:inline}
+  #nhome .nw-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:9px 10px 10px}
+  #nhome .nw-w{padding:7px 8px;border-radius:9px;gap:2px}
+  #nhome .nw-w b{font-size:18px}
+  #nhome .nw-w span{font-size:10.5px}
+  #nhome .nw-sum{font-size:11.5px}
+  #nhome .hhead h1{font-size:20px!important}
+}
+.nw-sheet .nw-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.nw-sheet .nw-row label{flex:1;display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px}
+.nw-sheet .nw-row input{width:20px;height:20px;accent-color:var(--accent)}
+.nw-sheet .nw-row button{border:1px solid var(--line);background:var(--surface-2);color:var(--ink);border-radius:9px;width:34px;height:30px;font:inherit;cursor:pointer}
+.nw-sheet .nw-row button:disabled{opacity:.35;cursor:default}
+.nw-list .nw-li{display:flex;align-items:center;gap:10px;width:100%;padding:11px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:13.5px;text-align:start;cursor:pointer;margin-bottom:6px}
+.nw-list .nw-li i{width:8px;height:8px;border-radius:50%;background:var(--c,var(--accent));flex:none}
+.nw-list .nw-li .ar{margin-inline-start:auto;color:var(--muted)}
+</style>`);
+
+  const ic = n => (typeof icon === 'function' ? icon(n) : '');
+  function widgetHTML(co, w, r) {
+    const n = r ? r.n : 0; const z = !n && !(r && r.att && r.h);
+    const num = w.att ? `${r.present}<small>/${r.total}</small>` : String(n);
+    return `<button type="button" class="nw-w ${n && w.tone ? w.tone : ''} ${z ? 'z' : ''}" data-action="nwTap" data-arg="${co}|${w.id}"><b>${num}</b><span>${esc(w.t)}</span></button>`;
+  }
+  function cardHTML(co) {
+    const [k, nm, c] = CAP[co]; const res = calcCo(co); CACHE[co] = res;
+    let body;
+    if (res.state === 'wait') body = `<div class="nw-off">جاري تحميل الأرقام…</div>`;
+    else if (res.state === 'off') body = `<div class="nw-off">الأرقام مش متاحة دلوقتي — <button type="button" data-action="ninetyGo" data-arg="${co}">ادخل السيستم</button></div>`;
+    else { const ids = chosen(co); const ws = ids.map(id => W[co].find(w => w.id === id)).filter(w => w && res.v[w.id]); body = ws.length ? `<div class="nw-grid">${ws.map(w => widgetHTML(co, w, res.v[w.id])).join('')}</div>` : `<div class="nw-off">مفيش ويدجتس — دوس «تعديل» واختار</div>`; }
+    return `<section class="nw-card" style="--c:${c}" data-co="${co}"><div class="nw-cap"><div class="nw-tt" data-action="ninetyGo" data-arg="${co}" title="${esc(nm)}"><i class="nw-dot"></i><span class="nw-k">${k}</span></div><div class="nw-acts"><button type="button" class="nw-ed" data-action="nwEdit" data-arg="${co}" title="تعديل">${ic('edit')}<span>تعديل</span></button><button type="button" class="nw-go" data-action="ninetyGo" data-arg="${co}">${ic('external')}<span class="nw-l">دخول السيستم</span><span class="nw-s">افتح</span></button></div></div>${body}</section>`;
+  }
+  function waitingTotal() {
+    let n = 0; ORDER.forEach(co => { const r = CACHE[co]; if (!r || r.state !== 'ok') return; W[co].forEach(w => { if (w.tone && r.v[w.id] && chosen(co).includes(w.id)) n += r.v[w.id].n; }); }); return n;
+  }
+  ninetyHomeHTML = (base => function () {
+    let h = base.apply(this, arguments); pull();
+    const cards = `<div class="nw-cards">${ORDER.map(cardHTML).join('')}</div>`;
+    const a = h.indexOf('<div class="strip">'); const b = h.lastIndexOf('</main>');
+    if (a < 0 || b < a) return h;
+    h = h.slice(0, a) + cards + h.slice(b);
+    const n = waitingTotal(); const day = typeof fmtDate === 'function' ? fmtDate(today()) : today();
+    if (h.indexOf('id="modalroot"') < 0) h += '<div id="modalroot"></div><div class="toasts" id="toasts"></div>';   /* the home replaces the whole shell — the sheets and lists need their layer */
+    h = h.replace(/(<div class="hhead"><div><h1>[\s\S]*?<\/h1>)<p>[\s\S]*?<\/p>/, `$1<p class="nw-sum">${esc(day)} · ${n ? `${n} حاجة مستنياك في التلات سيستمز` : 'مفيش حاجة مستنياك في التلات سيستمز ✓'}</p>`);
+    return h;
+  })(ninetyHomeHTML);
+
+  /* a data refresh must not wipe an open sheet / list on the home (the home repaints the whole root) */
+  render = (base => function () { const h = (location.hash || '').replace(/^#\/?/, ''); if ((h === 'ninety' || h === '') && document.querySelector('#nhome') && document.querySelector('#modalroot .overlay .nw-sheet, #modalroot .overlay .nw-list')) return; return base.apply(this, arguments); })(render);
+
+  /* ---------- open: here, or inside the other system ---------- */
+  const urlOf = co => { try { return (NINETY_COS[co] && NINETY_COS[co].url) || ''; } catch (e) { return ''; } };
+  function openIn(co, href) {
+    if (co === SELF) { if (typeof ACTIONS.ninetyOpen === 'function') ACTIONS.ninetyOpen(href || '#/dashboard'); return; }
+    const u = urlOf(co); if (!u) { ACTIONS.ninetyGo && ACTIONS.ninetyGo(co); return; } location.href = u + (href || '');
+  }
+  ACTIONS.nwTap = arg => {
+    const [co, id] = String(arg || '').split('|'); const r = CACHE[co] && CACHE[co].v && CACHE[co].v[id]; const w = W[co] && W[co].find(x => x.id === id); if (!r || !w) return;
+    if (!r.items.length) { if (r.h && (w.att || r.n)) openIn(co, r.h); return; }
+    if (r.items.length === 1) { openIn(co, r.items[0].h); return; }
+    const rows = r.items.slice(0, 60).map((x, i) => `<button type="button" class="nw-li" data-action="nwGo" data-arg="${co}|${esc(x.h)}"><i></i><span>${esc(x.t)}</span><span class="ar">←</span></button>`).join('');
+    openModal({ title: `${w.t} (${r.items.length})`, body: `<div class="nw-list" style="--c:${CAP[co][2]}">${rows}${r.items.length > 60 ? `<button type="button" class="nw-li" data-action="nwGo" data-arg="${co}|${esc(r.h || r.items[0].h)}"><span class="muted">+ ${r.items.length - 60} كمان</span></button>` : ''}</div>`, footer: `<button type="button" class="btn" data-action="closemodal">إغلاق</button>` });
+  };
+  ACTIONS.nwGo = arg => { const s = String(arg || ''); const i = s.indexOf('|'); if (typeof closeModal === 'function') closeModal(); openIn(s.slice(0, i), s.slice(i + 1)); };
+
+  /* ---------- «Edit»: show / hide, up / down ---------- */
+  let ED = null;
+  function sheet() {
+    const co = ED.co; const all = W[co].filter(w => !(w.here && co !== SELF));
+    const order = ED.ids.concat(all.map(w => w.id).filter(id => !ED.ids.includes(id)));
+    return `<div class="nw-sheet">${order.map(id => { const w = all.find(x => x.id === id); if (!w) return ''; const on = ED.ids.includes(id); const i = ED.ids.indexOf(id); return `<div class="nw-row"><label><input type="checkbox" data-nwk="${id}" ${on ? 'checked' : ''}>${esc(w.t)}</label><button type="button" data-action="nwMove" data-arg="${id}|-1" ${!on || i <= 0 ? 'disabled' : ''} aria-label="فوق">↑</button><button type="button" data-action="nwMove" data-arg="${id}|1" ${!on || i >= ED.ids.length - 1 ? 'disabled' : ''} aria-label="تحت">↓</button></div>`; }).join('')}</div>`;
+  }
+  const paint = () => { const b = document.querySelector('#modalroot .mb'); if (b && ED) b.innerHTML = sheet(); };
+  ACTIONS.nwEdit = co => {
+    if (!W[co]) return; ED = { co, ids: chosen(co).slice() };
+    openModal({ title: `ويدجتس ${CAP[co][1]}`, body: sheet(), footer: `<button type="button" class="btn" data-action="closemodal">إلغاء</button><button type="button" class="btn p" data-action="nwSave">حفظ</button>` });
+  };
+  ACTIONS.nwMove = arg => { if (!ED) return; const [id, d] = String(arg).split('|'); const i = ED.ids.indexOf(id); const j = i + (+d); if (i < 0 || j < 0 || j >= ED.ids.length) return; [ED.ids[i], ED.ids[j]] = [ED.ids[j], ED.ids[i]]; paint(); };
+  document.addEventListener('change', e => { const el = e.target; if (!ED || !el || !el.matches || !el.matches('.nw-sheet input[data-nwk]')) return; const id = el.dataset.nwk; if (el.checked) { if (!ED.ids.includes(id)) ED.ids.push(id); } else ED.ids = ED.ids.filter(x => x !== id); paint(); });
+  ACTIONS.nwSave = () => { if (!ED) return; PREF = Object.assign({}, PREF || {}, { [ED.co]: ED.ids.slice(), at: new Date().toISOString() }); const co = ED.co; ED = null; push(); if (typeof closeModal === 'function') closeModal(); if (typeof toast === 'function') toast('اتحفظ ✓'); render(true); void co; };
+})();
+/* =====================================================================
+   v7.82 — the shared look of the small tables on the owner's dashboard («Orders that may be late», «Money waiting for you» —
+   Mahmoud 16 Oct: «make these a table, with a short detail next to each»).
+   · Computer: a calm table — muted column heads, thin lines, the long detail cut with «…» (full text on hover), the whole row opens.
+   · Phone (820 px and less): no sideways scroll — each row is a small card: the first cells on top, then «label: value» lines.
+   · Colours come from the theme variables, so day / night and the three systems follow on their own.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TBL__) return; window.__NF_TBL__ = 1;
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-tables">
+.nftb-wrap{margin:4px -4px 0;overflow:hidden}
+.nftb{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:auto}
+.nftb th{font-size:11.5px;font-weight:600;color:var(--muted);text-align:start;padding:8px 10px;border-bottom:1px solid var(--line);background:transparent!important;white-space:nowrap}
+.nftb td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle;color:var(--ink);background:transparent!important}
+.nftb tbody tr:last-child td{border-bottom:0}
+.nftb tbody tr[data-nfhref],.nftb tbody tr[data-omfrow]{cursor:pointer}
+.nftb tbody tr[data-nfhref]:hover td,.nftb tbody tr[data-omfrow]:hover td{background:var(--surface-2)!important}
+.nftb td.num{white-space:nowrap;font-variant-numeric:tabular-nums}
+.nftb td.k{white-space:nowrap}
+.nftb td.k a{color:var(--ink);text-decoration:none}.nftb td.k a:hover{text-decoration:underline}
+.nftb td.why{max-width:320px;color:var(--muted);font-size:12px}
+.nftb .nftb-why{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45}
+.nftb .nftb-bad{color:var(--crit-ink,#b91c1c);font-weight:600}
+.nftb td.amt{text-align:end}
+.nftb td.pk{width:28px}.nftb td.pk input{width:18px;height:18px;accent-color:var(--accent);margin:0}
+.nftb tr.dis{opacity:.55}
+@media (max-width:820px){
+  .nftb-wrap{margin:2px 0 0}
+  .nftb,.nftb tbody,.nftb tr,.nftb td{display:block;width:auto}
+  .nftb thead{display:none}
+  .nftb tbody tr{border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:0 0 8px;background:var(--surface)}
+  .nftb tbody tr:last-child{margin-bottom:0}
+  .nftb td{border:0!important;padding:3px 0;display:flex;gap:10px;align-items:baseline;max-width:none!important}
+  .nftb td::before{content:attr(data-l);flex:0 0 96px;font-size:11.5px;color:var(--muted)}
+  .nftb td.k,.nftb td.k0,.nftb td.pk{display:inline-flex}
+  .nftb td.k::before,.nftb td.k0::before,.nftb td.pk::before{display:none}
+  .nftb td.k{font-size:14px;margin-inline-end:8px}
+  .nftb td.amt{justify-content:flex-start;text-align:start}
+  .nftb td .nftb-why{-webkit-line-clamp:3}
+  .nftb td.e{display:none}
+}
+</style>`);
+  /* the whole row opens its page (links and boxes inside keep their own tap) */
+  document.addEventListener('click', e => {
+    const tr = e.target.closest && e.target.closest('tr[data-nfhref]'); if (!tr || e.target.closest('a,button,input,label')) return;
+    const h = tr.getAttribute('data-nfhref'); if (h) location.hash = h.replace(/^#/, '');
+  });
+})();
+/* =====================================================================
+   v7.82 — supply photos, organised per order (brief claude/supply-photos-brief.md; go-ahead 16 Oct).
+   · What counts: materials received at the factory (purchase proof photos) · delivered on site (the driver's trip photos) ·
+     installed on site (proof photos of installation tasks / installation stages). Nothing else: no renders, drawings, chat,
+     receipts, cheques or anything about money.
+   · Dashboard: a «Supply photos» card — one row per order (newest first) with the count of each kind and a strip of its latest
+     photos; filters by kind and period; a tap on the order opens its gallery split by kind (date and who took it); a tap on a
+     photo opens it full size.
+   · Icons home: a «Supply photos» widget (S / M / L) — the latest photo with its order, then the orders with their counts.
+   · Who sees it: whoever already sees the orders (no change in permissions). Photos come from the files already on the server.
+   · iPhone, Android, computer · Arabic and English · day and night.
+   ===================================================================== */
+(function () {
+  if (window.__NF_SUPPLY__) return; window.__NF_SUPPLY__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const KIND = () => ({ rcv: [L('استلام مصنع', 'Factory receipt'), '#5e91a7'], dlv: [L('تسليم موقع', 'Site delivery'), '#c9963f'], ins: [L('تركيب', 'Installation'), '#4f8a6d'] });
+  const KS = ['rcv', 'dlv', 'ins'];
+  const can = () => { try { return !!S.session && canSee('orders'); } catch (e) { return false; } };
+  const isImg = f => f && !f.deleted && !f.hidden && f.thumb && String(f.thumb).length > 100 && (!f.mime || /^image\//.test(String(f.mime)));
+  /* which photos count, and as what (v7.82, checked on the real files 16 Oct): a purchase's own files are mostly the supplier offers
+     (and transfer slips / invoices) — only a receiving photo counts; trips count by what the trip was for; tasks / stages count when
+     they are installation work. */
+  const PH = f => ['proof', 'photo', 'receipt', 'received', 'grn'].includes(String(f.kind || 'proof'));
+  function tripKind(t) {
+    const k = String(t.kind || ''); const p = String(t.purpose || t.dest || '');
+    if (k === 'materials' || k === 'pickup_ext') return 'rcv'; if (k === 'delivery') return 'dlv'; if (k === 'install') return 'ins';
+    if (/\u062a\u0631\u0643\u064a\u0628|\u062a\u0634\u0637\u064a\u0628/.test(p)) return 'ins'; if (/\u062a\u0633\u0644\u064a\u0645|\u062a\u0648\u0635\u064a\u0644/.test(p)) return 'dlv'; if (/\u0627\u0633\u062a\u0644\u0627\u0645|\u0634\u0631\u0627\u0621|\u0645\u0634\u062a\u0631/.test(p)) return 'rcv';
+    return '';
+  }
+  function kindOf(f) {
+    if (!PH(f)) return '';
+    if (f.ownerKind === 'purchase') return ['receipt', 'received', 'grn'].includes(String(f.kind)) || /استلام|اتسلم|وصل/.test(String(f.note || '')) ? 'rcv' : '';
+    if (f.ownerKind === 'trip') { const t = byId('trips', f.ownerId); return t ? tripKind(t) : ''; }
+    if (f.ownerKind === 'task') { const t = byId('tasks', f.ownerId); if (!t) return ''; if (/^inst/.test(String(t.deptId || '')) || /تركيب/.test(String(t.title || ''))) return 'ins'; return /مشوار تسليم|تسليم/.test(String(t.title || '') + String(f.note || '')) ? 'dlv' : ''; }
+    if (f.ownerKind === 'stage') return /inst/.test(String(f.ownerId || '')) ? 'ins' : '';
+    return '';
+  }
+  function orderOf(f) {
+    if (f.orderId) return f.orderId;
+    const col = { purchase: 'purchases', trip: 'trips', task: 'tasks' }[f.ownerKind]; const x = col && byId(col, f.ownerId);
+    return (x && x.orderId) || '';
+  }
+  function photos() {
+    const out = [];
+    try { list('files').forEach(f => { if (!isImg(f)) return; const k = kindOf(f); if (!k) return; out.push({ f, k, oid: orderOf(f), at: String(f.createdAt || f.updatedAt || '') }); }); } catch (e) { /* partial data */ }
+    return out.sort((a, b) => b.at.localeCompare(a.at));
+  }
+  const SU = () => (S.ui.nfsup ||= { k: 'all', r: 'month', more: false });
+  const since = r => { const d = new Date(); if (r === 'week') d.setDate(d.getDate() - 7); else if (r === 'month') d.setDate(d.getDate() - 31); else return ''; return d.toISOString(); };
+  function groups(kf, r) {
+    const s0 = since(r); const m = new Map();
+    photos().filter(p => (kf === 'all' || p.k === kf) && (!s0 || p.at >= s0)).forEach(p => {
+      const key = p.oid || '_'; let g = m.get(key); if (!g) { g = { oid: p.oid, o: p.oid ? byId('orders', p.oid) : null, items: [], n: { rcv: 0, dlv: 0, ins: 0 }, last: p.at }; m.set(key, g); }
+      g.items.push(p); g.n[p.k]++;
+    });
+    return [...m.values()].sort((a, b) => ((a.oid ? 0 : 1) - (b.oid ? 0 : 1)) || b.last.localeCompare(a.last));   /* the photos with no order go last */
+  }
+  const oName = g => g.o ? [g.o.code, g.o.title].filter(Boolean).join(' — ') : L('من غير أوردر', 'No order');
+  const when = iso => { if (!iso) return ''; try { return fmtDate(iso.slice(0, 10)); } catch (e) { return iso.slice(0, 10); } };
+  const chips = n => KS.filter(k => n[k]).map(k => `<span class="sup-c" style="--k:${KIND()[k][1]}"><i></i>${esc(KIND()[k][0])} <b>${n[k]}</b></span>`).join('');
+  const th = (p, cls) => `<button type="button" class="${cls || 'sup-t'}" data-action="supPhoto" data-arg="${esc(p.f.id)}" title="${esc(KIND()[p.k][0])} · ${esc(when(p.at))}"><img src="${esc(p.f.thumb)}" alt="" loading="lazy" draggable="false"><i style="background:${KIND()[p.k][1]}"></i></button>`;
+
+  /* ---------- dashboard card ---------- */
+  function card() {
+    const u = SU(); const gs = groups(u.k, u.r); const all = photos(); if (!all.length) return '';
+    const kinds = [['all', L('الكل', 'All')]].concat(KS.map(k => [k, KIND()[k][0]]));
+    const ranges = [['week', L('الأسبوع ده', 'This week')], ['month', L('الشهر ده', 'This month')], ['all', L('الكل', 'All')]];
+    const seg = (arr, cur, key) => `<div class="sup-seg">${arr.map(([k, l]) => `<button type="button" class="${k === cur ? 'on' : ''}" data-action="supSet" data-arg="${key}|${k}">${esc(l)}</button>`).join('')}</div>`;
+    const shown = u.more ? gs : gs.slice(0, 6);
+    const rows = shown.map(g => `<div class="sup-r"><button type="button" class="sup-h" data-action="supGallery" data-arg="${esc(g.oid || '_')}"><b>${esc(oName(g))}</b><span class="sup-cs">${chips(g.n)}</span><small>${esc(L('آخر صورة', 'Latest'))} ${esc(when(g.last))}</small></button><div class="sup-strip">${g.items.slice(0, 8).map(p => th(p)).join('')}${g.items.length > 8 ? `<button type="button" class="sup-t sup-more" data-action="supGallery" data-arg="${esc(g.oid || '_')}">+${g.items.length - 8}</button>` : ''}</div></div>`).join('');
+    return `<div class="card sup" id="nfsup"><div class="cardhead"><h3>${typeof icon === 'function' ? icon('camera') : ''}${esc(L('صور التوريدات', 'Supply photos'))}</h3><span class="badge">${gs.length}</span><div class="grow"></div></div>
+      <div class="sup-fl">${seg(kinds, u.k, 'k')}${seg(ranges, u.r, 'r')}</div>
+      ${rows || `<div class="muted small" style="padding:10px 2px">${esc(L('مفيش صور في المدة دي', 'No photos in this period'))}</div>`}
+      ${gs.length > 6 ? `<button type="button" class="sup-all" data-action="supSet" data-arg="more|${u.more ? '0' : '1'}">${esc(u.more ? L('أقل', 'Less') : L(`كل الأوامر (${gs.length})`, `All orders (${gs.length})`))}</button>` : ''}</div>`;
+  }
+  ACTIONS.supSet = arg => { const [k, v] = String(arg).split('|'); const u = SU(); if (k === 'more') u.more = v === '1'; else { u[k] = v; u.more = false; } render(true); };
+  ACTIONS.supPhoto = id => { if (typeof ACTIONS.fileOpen === 'function') ACTIONS.fileOpen(id); };
+  ACTIONS.supGallery = oid => {
+    const items = photos().filter(p => (p.oid || '_') === oid); if (!items.length) return;
+    const o = oid !== '_' ? byId('orders', oid) : null; const g = { o };
+    const sec = KS.map(k => { const xs = items.filter(p => p.k === k); if (!xs.length) return ''; return `<div class="sup-gs"><div class="sup-gh"><i style="background:${KIND()[k][1]}"></i><b>${esc(KIND()[k][0])}</b><span>${xs.length}</span></div><div class="sup-gg">${xs.map(p => `<figure>${th(p, 'sup-gt')}<figcaption>${esc(when(p.at))}${p.f.byName ? ' · ' + esc(String(p.f.byName).split(' ').slice(0, 2).join(' ')) : ''}</figcaption></figure>`).join('')}</div></div>`; }).join('');
+    openModal({ title: oName(g), wide: true, body: `<div class="sup-gal">${sec}</div>`, footer: `${o ? `<a class="btn ghost" href="#/orders/${esc(o.id)}" data-action="closemodal">${esc(L('صفحة الأوردر', 'The order page'))}</a>` : ''}<button type="button" class="btn" data-action="closemodal">${esc(L('إغلاق', 'Close'))}</button>` });
+  };
+  RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; const v = document.getElementById('view'); if (!v || r.view !== 'dashboard' || !can()) return;
+      const old = v.querySelector('#nfsup'); const h = card(); if (old) { if (old.outerHTML !== h) old.outerHTML = h; return; } if (!h) return;
+      const after = v.querySelector('#omf') || v.querySelector('#nfl-risk-card'); if (after) after.insertAdjacentHTML('afterend', h); else v.insertAdjacentHTML('afterbegin', h);
+    } catch (e) { /* ignore */ }
+  });
+
+  /* ---------- Icons home widget (registered in parts/99zzZzZZzi-widgets.js) ---------- */
+  window.nfSupply = {
+    has: () => can() && photos().length > 0,
+    widget: s => {
+      const ps = photos(); const g = groups('all', 'all'); const KD = KIND();
+      const head = '';   /* the widget frame draws the title */
+      if (!ps.length) return head + `<div class="muted small" style="padding:10px">${esc(L('مفيش صور لسه', 'No photos yet'))}</div>`;
+      const p = ps[0]; const o = p.oid ? byId('orders', p.oid) : null;
+      const big = `<button type="button" class="sup-wbig" data-action="supGallery" data-arg="${esc(p.oid || '_')}"><img src="${esc(p.f.thumb)}" alt="" loading="lazy" draggable="false"><span><b>${esc(o ? o.code || '' : L('من غير أوردر', 'No order'))}</b><small>${esc(KD[p.k][0])} · ${esc(when(p.at))}</small></span></button>`;
+      if (s === 'S') return head + big;
+      const rows = g.slice(0, s === 'L' ? 4 : 2).map(x => `<button type="button" class="sup-wr" data-action="supGallery" data-arg="${esc(x.oid || '_')}"><b>${esc(x.o ? x.o.code || '' : L('من غير أوردر', 'No order'))}</b><span>${KS.filter(k => x.n[k]).map(k => `<em style="color:${KD[k][1]}">${x.n[k]}</em>`).join(' · ')}</span></button>`).join('');
+      return head + `<div class="sup-w">${big}<div class="sup-wrs">${rows}</div></div>`;
+    },
+  };
+
+  (document.head || document.body).insertAdjacentHTML('beforeend', `<style id="nf-supply">
+.sup .cardhead h3{display:flex;align-items:center;gap:6px}.sup .cardhead h3 svg{width:18px;height:18px}
+.sup-fl{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 6px}
+.sup-seg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--surface-2)}
+.sup-seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;padding:5px 11px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.sup-seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.sup-r{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.sup-h{border:0;background:none;font:inherit;color:inherit;text-align:start;cursor:pointer;display:flex;flex-direction:column;gap:4px;padding:0;min-width:0}
+.sup-h b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sup-h small{font-size:11.5px;color:var(--muted)}
+.sup-cs{display:flex;gap:6px;flex-wrap:wrap}
+.sup-c{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-2,var(--ink));background:var(--surface-2);border-radius:999px;padding:2px 8px}
+.sup-c i{width:7px;height:7px;border-radius:50%;background:var(--k)}.sup-c b{font-weight:700}
+.sup-strip{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0}.sup-strip::-webkit-scrollbar{display:none}
+.sup-t,.sup-gt{position:relative;flex:none;width:72px;height:56px;border-radius:10px;overflow:hidden;border:1px solid var(--line);padding:0;cursor:zoom-in;background:var(--surface-2)}
+.sup-t img,.sup-gt img{width:100%;height:100%;object-fit:cover;display:block}
+.sup-t i,.sup-gt i{position:absolute;inset-inline-start:5px;bottom:5px;width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.85)}
+.sup-more{display:grid;place-items:center;font:inherit;font-weight:700;color:var(--muted);cursor:pointer}
+.sup-all{display:block;width:100%;margin-top:6px;padding:8px;border-radius:10px;border:0;background:var(--surface-2);color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.sup-gal{display:flex;flex-direction:column;gap:14px}
+.sup-gh{display:flex;align-items:center;gap:8px;margin-bottom:8px}.sup-gh i{width:9px;height:9px;border-radius:50%}.sup-gh span{color:var(--muted);font-size:12px}
+.sup-gg{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.sup-gg figure{margin:0;display:flex;flex-direction:column;gap:4px}.sup-gg .sup-gt{width:100%;height:auto;aspect-ratio:4/3}
+.sup-gg figcaption{font-size:11.5px;color:var(--muted)}
+.sup-w{display:flex;flex-direction:column;gap:6px;height:100%}
+.sup-wbig{position:relative;display:block;width:100%;flex:1;min-height:110px;border:0;padding:0;border-radius:14px;overflow:hidden;cursor:pointer;background:var(--surface-2)}
+.sup-wbig img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.sup-wbig span{position:absolute;inset-inline:0;bottom:0;display:flex;flex-direction:column;align-items:flex-start;padding:18px 10px 8px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff;text-align:start}
+.sup-wbig b{font-size:13px}.sup-wbig small{font-size:11px;opacity:.85}
+.sup-wrs{display:flex;flex-direction:column;gap:2px}
+.sup-wr{display:flex;justify-content:space-between;gap:8px;border:0;background:none;font:inherit;color:inherit;padding:5px 2px;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
+.sup-wr em{font-style:normal;font-weight:700}
+@media (max-width:820px){
+  .sup-r{grid-template-columns:1fr;gap:8px}
+  .sup-t{width:64px;height:50px}
+  .sup-gg{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+</style>`);
 })();
