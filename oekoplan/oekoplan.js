@@ -1129,6 +1129,8 @@ html[data-theme="dark"] .okpst{background:rgba(5,14,22,.82)}
 .spgrid[data-okcols="1"]{grid-template-columns:1fr!important;gap:10px}
 .spgrid[data-okcols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}
 .spgrid[data-okcols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+/* 3 across on a phone: the state badge becomes a dot and the cover text moves below it, so nothing sits on top of anything */
+@media (max-width:760px){.spgrid[data-okcols="3"] .spcard .okpst,.spgrid[data-okcols="2"] .spcard .okpst{padding:5px;gap:0;top:6px;inset-inline-end:6px;font-size:0;letter-spacing:0}.spgrid[data-okcols="3"] .spcard .okpst i,.spgrid[data-okcols="2"] .spcard .okpst i{margin:0}.spgrid[data-okcols="3"] .spcard .cov .okdevnm{font-size:10px;letter-spacing:.08em;padding:22px 6px 4px;display:block}.spgrid[data-okcols="3"] .spcard .okrdot{top:6px;inset-inline-start:6px;width:10px;height:10px}}
 /* the list: a row — cover on the side, text next to it */
 .spgrid[data-okcols="1"] .spcard{flex-direction:row;min-height:0;align-items:stretch}
 .spgrid[data-okcols="1"] .spcard .cov{aspect-ratio:auto;width:112px;min-width:112px;font-size:18px}
