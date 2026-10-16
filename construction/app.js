@@ -14748,8 +14748,9 @@ ACTIONS.fundAsk = wid => {
 /* v7.56 (Mahmoud, 12 Oct: «I approved the request here — shouldn't it come to me in the amounts to transfer?»): a custody request
    approved from the request itself (no transfer made with it) is «approved — waiting for the transfer» (toPay) and stays in «to transfer»
    until the owner (or a pay batch) transfers it. The money reaches the custody only with the transfer. */
-function fundToPay(r) { return !!r && r.type === 'fund' && !r.paidAt && (r.status === 'pending' || (r.status === 'approved' && r.toPay === true)); }
 const fundXfer = id => { const m = byId('money', `fund_${id}`); return m && m.type === 'xfer' ? m : null; };
+/* v7.87: a request whose transfer is already recorded is never «to transfer» again (Mahmoud 16 Oct: «I uploaded the transfer photo but can't find it — feels mixed up»: transfers made while the request was still waiting were saved without «paidAt») */
+function fundToPay(r) { return !!r && r.type === 'fund' && !r.paidAt && !fundXfer(r.id) && (r.status === 'pending' || (r.status === 'approved' && r.toPay === true)); }
 /* v7.58 (Mahmoud, 12 Oct, on «Transfer to Mahmoud El-Behiry's custody»: «transfer here to whom — Bahaa or El-Behiry — and where is the number to
    transfer to?»): the money goes to the custody's holder; his receiving number («Advance pay ← Employees' numbers») shows in the transfer
    dialog (with «Copy») and in the «to transfer» line; no number → says so and where to register it. */
@@ -14821,6 +14822,8 @@ ACTIONS.fundPay = async id => {
   await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
   if (r.status === 'approved') { await Store.update('requests', r.id, { toPay: false, paidAt: nowISO(), paidByName: S.session?.name || '' }); await applyRequestEffects(byId('requests', r.id)); rerender(); return; }
   await decideRequest(r.id, 'approved', res.note || '');
+  try { const r2 = byId('requests', r.id); if (r2 && r2.status === 'approved' && !r2.paidAt && fundXfer(r.id)) await Store.update('requests', r.id, { toPay: false, paidAt: nowISO(), paidByName: S.session?.name || '' }); } catch (e) { /* the transfer itself is saved */ }   /* v7.87 */
+  rerender();
 };
 applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   if (r && r.type === 'fund') {
@@ -14838,7 +14841,7 @@ applyRequestEffects = (base => async (r, w, patch, opts = {}) => {
   }
   return base(r, w, patch, opts);
 })(applyRequestEffects);
-reqDesc = (base => r => { if (r && r.type === 'fund') { const w = walletOf(r.walletId); return `طلب ${fmtMoney(r.amount)} ${CUR()} لعهدة ${w ? w.name : ''} — ${catLabel(r.cat)}${r.status === 'approved' && r.toPay && !r.paidAt ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? ' — waiting for the transfer' : ' — مستني التحويل') : ''}`; } if (r && r.type === 'opex') return `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''} (${fmtMonth(r.month)}): ${fmtMoney(r.amount)} ${CUR()}`; return base(r); })(reqDesc);
+reqDesc = (base => r => { if (r && r.type === 'fund') { const w = walletOf(r.walletId); return `طلب ${fmtMoney(r.amount)} ${CUR()} لعهدة ${w ? w.name : ''} — ${catLabel(r.cat)}${r.paidAt || fundXfer(r.id) ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? ' — transferred ✓' : ' — اتحوّل ✓') : r.status === 'approved' && r.toPay ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? ' — waiting for the transfer' : ' — مستني التحويل') : ''}`; } if (r && r.type === 'opex') return `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''} (${fmtMonth(r.month)}): ${fmtMoney(r.amount)} ${CUR()}`; return base(r); })(reqDesc);
 /* owner transfers to a wallet without a request / takes back the rest */
 ACTIONS.walletFund = async wid => {
   if (!isAdmin()) return; const w = walletOf(wid); if (!w) return;
@@ -56953,6 +56956,24 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
     } catch (e) { console.warn('fund proj', e); }
     return out;
   })(ACTIONS.reqOpen);
+  /* v7.87 (Mahmoud 16 Oct: «I uploaded the transfer photo but can't find it»): a transferred custody request shows its transfer —
+     from which account, when, by whom — and the photo / file of the transfer (a tap opens it full size). */
+  ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); if (!r || r.type !== 'fund' || document.getElementById('rq-xfer')) return out;
+      const x = typeof fundXfer === 'function' ? fundXfer(r.id) : null; if (!x && !r.paidAt) return out;
+      const th = document.getElementById('rq-thread'); if (!th) return out;
+      const fid = ((x && x.fileIds) || r.payFileIds || [])[0] || ''; const thumb = (x && x.thumb) || r.payThumb || '';
+      const from = (x && x.from) || r.payFrom || ''; const when = String((x && (x.at || x.createdAt)) || r.paidAt || '');
+      const meta = [from && typeof acctLabel === 'function' ? L('من ', 'From ') + acctLabel(from) : '', when ? (typeof fmtDate === 'function' ? fmtDate(when.slice(0, 10)) : when.slice(0, 10)) + (typeof fmtAtTm === 'function' && when.length > 10 ? ' ' + fmtAtTm(when) : '') : '', r.paidByName || (x && x.byName) || ''].filter(Boolean).join(' · ');
+      const pic = thumb ? `<button type="button" class="rqx-pic" data-action="rqxPic" data-arg="${esc(r.id)}" aria-label="${esc(L('صورة التحويل', 'Transfer photo'))}"><img src="${esc(thumb)}" alt=""></button>` : `<span class="tiny muted">${esc(L('من غير صورة', 'No photo'))}</span>`;
+      const anchor = document.getElementById('rq-proj') || th;
+      anchor.insertAdjacentHTML(anchor === th ? 'beforebegin' : 'afterend', `<div id="rq-xfer" class="rqxfer">${pic}<div><b>${esc(L('اتحوّل ✓', 'Transferred ✓'))}</b><div class="tiny muted">${esc(meta)}</div></div></div>`);
+    } catch (e) { console.warn('fund xfer box', e); }
+    return out;
+  })(ACTIONS.reqOpen);
+  ACTIONS.rqxPic = id => { const r = byId('requests', id); if (!r) return; const x = typeof fundXfer === 'function' ? fundXfer(r.id) : null; const fid = ((x && x.fileIds) || r.payFileIds || [])[0]; const thumb = (x && x.thumb) || r.payThumb || ''; if (fid && byId('files', fid) && typeof ACTIONS.fileOpen === 'function') { ACTIONS.fileOpen(fid); } else if (thumb && typeof lightbox === 'function') lightbox(thumb, L('صورة التحويل', 'Transfer photo')); };
   ACTIONS.fundProjEdit = id => {
     const r = byId('requests', id); if (!editable(r)) return;
     openModal({
@@ -56972,4 +56993,6 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
   };
   const css = document.createElement('style'); css.textContent = '.rqproj{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}.rqproj b{font-weight:600;flex:1 1 160px;min-width:0}.rqproj b a{color:var(--ink);text-decoration:none}.rqproj b a:hover{text-decoration:underline}';
   document.head.appendChild(css);
+  const css2 = document.createElement('style'); css2.textContent = '.rqxfer{display:flex;align-items:center;gap:12px;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}.rqxfer b{color:var(--good-ink,#15803d)}.rqx-pic{flex:none;width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--line);padding:0;cursor:zoom-in;background:var(--surface)}.rqx-pic img{width:100%;height:100%;object-fit:cover;display:block}';
+  document.head.appendChild(css2);
 })();
