@@ -2242,3 +2242,11 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
 
 /* Ökoplan — menu names in English by meaning, not word for word (Mahmoud, 16 Oct) */
 (() => { if (typeof OEKO_I18N !== 'object') return; Object.assign(OEKO_I18N, { 'المشاريع ومراحلها': 'Projects', 'المشاريع والمهام': 'Project boards', 'لوحة المهام': 'Project boards', 'لوحة التشغيل': 'Deliverables board', 'معرض المشاريع': 'Projects gallery', 'المعرض': 'Gallery', 'فريق المكتب': 'Team', 'التقييم ربع السنوي': 'Appraisals', 'عروض الأسعار والدفعات': 'Quotations & payments', 'المهام والتحديثات': 'Tasks & updates', 'الأجهزة عن بُعد': 'Remote computers', 'عن بُعد': 'Remote', 'تعديل البايب لاين': 'Pipeline editor', 'البايب لاين': 'Pipeline', 'الحضور اليومي': 'Attendance', 'الجزاءات والسلف': 'Penalties & advances', 'الرواتب': 'Payroll', 'مواقع البصمة (المكتب والمشاريع)': 'Punch locations', 'لوحة الحسابات': 'Accounts board', 'مشتريات المكتب': 'Office purchases', 'تكلفة المشاريع': 'Project costs', 'الهيكل التنظيمي': 'Org chart', 'سجل النشاط': 'Activity log', 'اللائحة الداخلية': 'Internal regulations', 'عن المكتب': 'About the office', 'المبيعات': 'Business development', 'تطوير الأعمال': 'Business development', 'الذكاء': 'AI', 'الفرص والعروض': 'Enquiries & proposals', 'كونسبت درووينج': 'Concept drawing', 'المحادثات': 'Chats', 'الاجتماعات': 'Meetings', 'البريد': 'Email', 'المساعد الذكي': 'AI assistant', 'العملاء': 'Clients', 'الطلبات': 'Requests', 'المصروفات': 'Expenses', 'الاشتراكات': 'Subscriptions', 'التقارير': 'Reports', 'الإعدادات': 'Settings', 'الدعم الفني': 'Support', 'الرئيسية': 'Home' }); })();
+
+/* v-site (16 Oct 2026): the engine grew its own AI layer (stusmart / nflearn / nfrules / nfuicheck / nfaiset / nftimeline).
+   Ökoplan has its own (oksmart / oklearn / okrules / oktimeline) — the engine's pages stay out of this menu until the two are unified. */
+(() => {
+  if (typeof NAV === 'undefined' || !Array.isArray(NAV)) return;
+  const drop = new Set(['stusmart', 'nfsmart', 'nflearn', 'nfrules', 'nfuicheck', 'nfaiset', 'nftimeline']);
+  for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (!n) continue; if (drop.has(n.id) || n.grp === 'AI') NAV.splice(i, 1); }
+})();

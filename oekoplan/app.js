@@ -2968,7 +2968,11 @@ function reqStage(r) {
   return { chain, base, idx, role: beyond ? 'admin' : chain[idx], beyond, escalated, sinceAt: new Date(at).toISOString(), hours: Math.floor((Date.now() - at) / 36e5) };
 }
 function stepActor(step, r) { const rl = role(); if (rl === 'admin') return true; if (step === 'head') return (rl === 'head' && myDepts().includes(r.deptId)) || isManagerOf(byId('workers', r.workerId)); if (step === 'hr') return rl === 'hr'; if (step === 'manager') return rl === 'manager'; if (step === 'acc') return rl === 'acc' || rl === 'hr'; return false; }
-const awaitingMe = r => r.status === 'pending' && requestVisible(r) && stepActor(reqStage(r).role, r);
+/* v7.79 (Mahmoud 16 Oct, PIN on «before → after»): in the factory the owner is no longer «awaited» on every pending request —
+   only when the current step is his (a chain with «admin», or a request escalated to him after 24 h with no answer). He can still
+   open and approve any request (stepActor is unchanged). The office and construction stay as they were. */
+const ownerQuietReqs = () => !(typeof STU_ON !== 'undefined' && STU_ON) && !(typeof isConstruction === 'function' && isConstruction());
+const awaitingMe = r => r.status === 'pending' && requestVisible(r) && (role() === 'admin' && ownerQuietReqs() ? reqStage(r).role === 'admin' : stepActor(reqStage(r).role, r));
 const hoursTxt = h => h < 1 ? 'أقل من ساعة' : h < 48 ? `${h} ساعة` : `${Math.floor(h / 24)} يوم`;
 function stageChip(r) {
   if (r.status !== 'pending') return badge(REQ_STATUS, r.status);
@@ -28300,6 +28304,7 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         await patchCheque(o, p.id, { stage: 'cleared', amount: amt, date: d.date || todayISO(), clearedAt: (d.date || todayISO()) + 'T12:00:00.000Z', clearedBy: me().id || null, clearedByName: me().name || '', clearNote: d.note || '', log: (p.log || []).concat([logLine('deposited', 'cleared', d.note)]) });
         toast('تم التحصيل ✓ — أُضيف للمحصَّل من العميل');
         await notifyRole('admin', `تحصّل شيك ${o.code} رقم ${p.chequeNo || ''} — ${fmtMoney(amt)} ${CUR()}`, `${o.title} · ${fmtDate(d.date)} · ${me().name || ''}`, { orderId: o.id, id: `own_clear_${p.id}` });
+        await closeChqNotes(p.id);
       } });
   });
   ACTIONS.inChequeBounce = arg => withCheque(arg, (o, p) => {
@@ -28310,8 +28315,14 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
         toast('تم تسجيل الشيك كمرتجع', 'err');
         await notifyRole('admin', `⚠️ شيك ${o.code} رقم ${p.chequeNo || ''} مرتجع`, `${fmtMoney(p.chequeAmount)} ${CUR()} — ${d.note} · ${me().name || ''}`, { orderId: o.id, id: `own_bounce_${p.id}`, priority: 'urgent' });
         await notifyRole('hr', `شيك ${o.code} رقم ${p.chequeNo || ''} مرتجع — تابع مع العميل`, d.note, { orderId: o.id, id: `hr_bounce_${p.id}`, priority: 'urgent' });
+        await closeChqNotes(p.id);
       } });
   });
+  /* v7.79 (Mahmoud 16 Oct): once a client cheque is collected or bounced, the owner's «cheque received» notice and any deposit-slip
+     warning on it close by themselves — they no longer sit in «money waiting for you» */
+  async function closeChqNotes(pid) {
+    try { for (const t of list('tasks').filter(t => t && t.status !== 'done' && (t.id === `own_incheque_${pid}` || String(t.id).startsWith(`own_chqocr_${pid}_`)))) await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO() }, { silent: true }); } catch (e) { console.warn('chq notes', e); }
+  }
 
   /* ---------- الإشعار لمدير الحسابات مع كل أمر جديد (شغلانة اتعاقدت) ---------- */
   if (typeof orderSavedHook === 'function') orderSavedHook = (base => async function (doc, prev) {
@@ -29017,26 +29028,49 @@ html .wa .bb .btn,html[data-theme] .wa .bb .btn{color:#111b21;background:rgba(0,
   /* ---------- 3b) v5.98 قائمة المالك: مجموعة «المبيعات» بتتقسم مكانها لمجموعة لكل CRM براند (المبيعات · العملاء · عروض الأسعار · الفواتير)
      جوه CRM البراند نفسه، والصفحات العامة (كل البراندات) تحت في «كل البراندات». ---------- */
   const OWNER_ITEMS = [['board', 'المبيعات', 'board'], ['clist', 'العملاء', 'clients'], ['quotes', 'عروض الأسعار', 'quote'], ['invoices', 'الفواتير', 'money']];
+  /* v7.79 (Mahmoud 16 Oct: «a module called CRM in the side menu, with the three CRMs inside it and the combined one»): one «CRM»
+     group (the side-menu modules make it one row that opens and closes); inside it «CRM — <brand>» for each brand and «CRM combined —
+     all brands» (the all-brand clients / quotes / invoices / import). The CRM you are in shows its own pages under it. */
   function ownerNav(html) {
     const brands = (S.settings && S.settings.brands) || []; if (!brands.length || typeof CRM_VIEW !== 'function') return html;
     const v = S.route.view, rid = S.route.id || ''; const TK = OWNER_ITEMS.map(x => x[0]);
     const cur = TK.includes(rid) ? rid : (!rid ? ((S.ui.filter.crm || {}).tab || 'board') : '');
-    const hasSk = typeof canSee === 'function' && canSee('saleskit'); // v6.01: الـSales Kit جوه مجموعة CRM — lōf
-    const groups = brands.filter(b => typeof canSee !== 'function' || canSee(CRM_VIEW(b.id))).map(b => { const cv = CRM_VIEW(b.id);
-      return `<div class="grp">CRM — ${esc(brandKit(b.id).name)}</div>` + OWNER_ITEMS.filter(([k]) => k !== 'invoices' || typeof canSee !== 'function' || canSee('invoices')).map(([k, l, ic]) => `<a href="#/${cv}/${k}" class="${v === cv && cur === k ? 'on' : ''}" data-action="navgo" data-crmtab="${k}">${icon(ic)}<span>${l}</span></a>`).join('') + (b.id === 'lof' && hasSk ? `<a href="#/saleskit" class="${v === 'saleskit' ? 'on' : ''}" data-action="navgo">${icon('layers')}<span>ملفات البيع</span></a>` : ''); }).join('');
+    const hasSk = typeof canSee === 'function' && canSee('saleskit'); // v6.01: the Sales Kit sits inside CRM — lōf
+    const seen = brands.filter(b => typeof canSee !== 'function' || canSee(CRM_VIEW(b.id)));
     const ALL = ['clients', 'quotes', 'invoices', 'cimport'];
     const toks = []; const tail = html.replace(/<div class="grp">([^<]*)<\/div>|<a href="#\/([^"]*)"[\s\S]*?<\/a>/g, (m, g, id) => { toks.push(g !== undefined ? { grp: g.replace(/&amp;/g, '&'), m } : { id, m }); return ''; });
-    const allBr = toks.filter(t => t.id && ALL.includes(t.id.split('/')[0])).sort((x, y) => ALL.indexOf(x.id.split('/')[0]) - ALL.indexOf(y.id.split('/')[0])).map(t => t.m).join('');
+    const allToks = toks.filter(t => t.id && ALL.includes(t.id.split('/')[0])).sort((x, y) => ALL.indexOf(x.id.split('/')[0]) - ALL.indexOf(y.id.split('/')[0]));
+    const inBrand = seen.find(b => v === CRM_VIEW(b.id) || (b.id === 'lof' && hasSk && v === 'saleskit'));
+    const inAll = !inBrand && ALL.includes(v);
+    const T = (a, e) => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? e : a);
+    const sub = (href, on, ic, label, extra) => `<a href="${href}" class="nfcrm-s${on ? ' on' : ''}" data-action="navgo"${extra || ''}>${icon(ic)}<span>${esc(label)}</span></a>`;
+    let mod = '';
+    if (seen.length || allToks.length) {
+      mod += '<div class="grp">CRM</div>';
+      seen.forEach(b => {
+        const cv = CRM_VIEW(b.id); const k = brandKit(b.id); const here = inBrand === b;
+        mod += `<a href="#/${cv}" class="nfcrm-m${here ? ' on' : ''}" data-action="navgo">${icon('quote')}<span>CRM — ${esc(k.name)}</span><i class="nfcrm-dot" style="background:${esc(k.accent || '#888')}"></i></a>`;
+        if (here) mod += OWNER_ITEMS.filter(([x]) => x !== 'invoices' || typeof canSee !== 'function' || canSee('invoices')).map(([x, l, ic]) => sub(`#/${cv}/${x}`, v === cv && cur === x, ic, l, ` data-crmtab="${x}"`)).join('') + (b.id === 'lof' && hasSk ? sub('#/saleskit', v === 'saleskit', 'layers', 'ملفات البيع') : '');
+      });
+      if (allToks.length) {
+        const first = allToks[0].id.split('/')[0];
+        mod += `<a href="#/${first}" class="nfcrm-m${inAll ? ' on' : ''}" data-action="navgo">${icon('layers')}<span>${esc(T('CRM مجمّع — كل البراندات', 'CRM combined — all brands'))}</span></a>`;
+        if (inAll) mod += allToks.map(t => t.m.replace(/class="([^"]*)"/, (m0, c) => `class="${c} nfcrm-s"`)).join('');
+      }
+    }
     let out = '', pend = null, placed = false;
     toks.forEach(t => {
-      if (t.grp !== undefined) { if (t.grp === 'المبيعات') { out += groups + (allBr ? '<div class="grp">كل البراندات</div>' + allBr : ''); placed = true; pend = null; return; } pend = t.m; return; }
+      if (t.grp !== undefined) { if (t.grp === 'المبيعات') { out += mod; placed = true; pend = null; return; } pend = t.m; return; }
       if (/^crm-/.test(t.id) || ALL.includes(t.id.split('/')[0]) || (hasSk && t.id.split('/')[0] === 'saleskit')) return;
       if (pend) { out += pend; pend = null; } out += t.m;
     });
-    if (!placed) out += groups + (allBr ? '<div class="grp">كل البراندات</div>' + allBr : '');
+    if (!placed) out += mod;
     return out + tail;
   }
-
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    a.nfcrm-s{padding-inline-start:40px!important;font-size:13px;opacity:.92}a.nfcrm-s svg{width:16px;height:16px}
+    .nfcrm-dot{width:9px;height:9px;border-radius:3px;flex:none;display:inline-block;margin-inline-start:auto}
+  </style>`);
   /* ---------- 4) القائمة الجانبية: مجموعات فوق بالترتيب (navGroups) أو مجموعة واحدة (navTop)
      v5.72: عنصر { fromGrp: 'المخازن' } بياخد كل اللي باقي من مجموعة أصلية، وعنصر 'saleskit/catalogues' = صفحة فرعية.
      ده ترتيب بس — مفيش حاجة بتستخبى أو تظهر غير اللي canSee بيسمح بيه. ---------- */
@@ -35995,12 +36029,16 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
     const b3 = document.getElementById(elId); if (!b3 || b3._gm || !window.google) return;
     const g = window.google.maps; const fz = typeof factoryZone === 'function' ? factoryZone() : null;
     b3.innerHTML = '';
-    const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: big || !!opt.zoom, gestureHandling: big ? 'greedy' : 'cooperative', clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
+    /* v7.79 (Mahmoud 16 Oct, the small «vehicles live» widget: «I want the vehicles to show on the map here»): opt.mini = a still
+       picture of the map — small icons, no names, no controls, no gestures (the page scrolls over it); a tap opens the fleet map */
+    const mini = !!opt.mini;
+    const map = new g.Map(b3, { center: fz ? { lat: fz.lat, lng: fz.lng } : { lat: 30.03, lng: 31.45 }, zoom: big ? 11 : 10, mapTypeControl: false, streetViewControl: false, fullscreenControl: big, zoomControl: !mini && (big || !!opt.zoom), gestureHandling: mini ? 'none' : big ? 'greedy' : 'cooperative', keyboardShortcuts: !mini, disableDefaultUI: mini, clickableIcons: false, styles: [{ featureType: 'poi', stylers: [{ visibility: 'off' }] }] });
+    if (mini && map.addListener) map.addListener('click', () => { location.hash = '#/fleetmap'; });
     /* v6.93 (Mahmoud: the big factory emoji hid the vehicles parked there): a small dot with a tiny tag, under everything */
     if (fz) new g.Marker({ map, position: { lat: fz.lat, lng: fz.lng }, title: L('المصنع', 'Factory'), icon: { path: g.SymbolPath ? g.SymbolPath.CIRCLE : 0, scale: 5, fillColor: '#1b7f4b', fillOpacity: .9, strokeColor: '#fff', strokeWeight: 1.5, labelOrigin: g.Point ? new g.Point(0, 3) : undefined }, label: { text: L('المصنع', 'Factory'), fontSize: '10px', fontWeight: '700', className: 'fm-lbl' }, zIndex: 0 });
     const marks = new Map(); let line = null, ghost = null, fitted = false, lastBounds = null;   /* line: the route overlays (v7.77: several — real fixes, road fills, dashed gaps) */
     /* v6.84 (Mahmoud: «أشكال العربيات»): a top-view vehicle drawing per vehicle type, coloured by its state, turned the way it drives */
-    const iconFor = r => { const sz = big ? 44 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
+    const iconFor = r => { const sz = big ? 44 : mini ? 22 : 34; return { url: vehSvg(r), scaledSize: g.Size ? new g.Size(sz, sz) : undefined, anchor: g.Point ? new g.Point(sz / 2, sz / 2) : undefined, labelOrigin: g.Point ? new g.Point(sz / 2, sz + 8) : undefined }; };
     /* v7.02 (Mahmoud, 9 Oct: «عايز مكان كل عربية الحقيقي») — every icon sits exactly on its vehicle; nothing is moved. The tag is the
        vehicle's name only, in the vehicle's own colour. When icons would meet ON SCREEN (the four parked at the factory) only the TAGS
        move: each one takes its own row under the group (one row per vehicle, name order) so no tag is drawn over another — the colour
@@ -36024,14 +36062,14 @@ html body .trf-map{height:420px;border-radius:12px;overflow:hidden;background:va
       const slot = tagRows(rows);
       rows.forEach(r => {
         keep.add(r.id); let e = marks.get(r.id); const pos = { lat: r.lat, lng: r.lng }; const lbl = { text: r.name.split('—')[0].trim(), color: vehColor(r.v), fontSize: big ? '12px' : '11px', fontWeight: '700', className: 'fm-lbl' + (r.st === 'of' ? ' off' : '') };
-        const ic = iconAt(r, slot.get(r.id) || 0);
-        if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: ic, label: lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else { if (opt.pick) { FM.sel = r.id; loadRoute(r.id); } location.hash = '#/fleetmap'; } }); e = { m }; marks.set(r.id, e); }
-        else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(ic); if (e.m.setLabel) e.m.setLabel(lbl); }
+        const ic = mini ? iconFor(r) : iconAt(r, slot.get(r.id) || 0);
+        if (!e) { const m = new g.Marker({ map, position: pos, title: r.name, icon: ic, label: mini ? null : lbl, zIndex: r.st === 'mv' ? 5 : 3 }); if (m.addListener) m.addListener('click', () => { if (big) ACTIONS.fmSelect(r.id); else { if (opt.pick) { FM.sel = r.id; loadRoute(r.id); } location.hash = '#/fleetmap'; } }); e = { m }; marks.set(r.id, e); }
+        else { if (e.m.setPosition) e.m.setPosition(pos); if (e.m.setIcon) e.m.setIcon(ic); if (e.m.setLabel) e.m.setLabel(mini ? null : lbl); }
         bounds.extend(pos); n++;
       });
       marks.forEach((e, k) => { if (!keep.has(k)) { e.m.setMap(null); marks.delete(k); } });
       lastBounds = n > 1 ? bounds : null;
-      if (!fitted && n > 1) { fitted = true; map.fitBounds(bounds, big ? 70 : 30); } else if (!fitted && n === 1 && fz) { fitted = true; map.setCenter && map.setCenter({ lat: fz.lat, lng: fz.lng }); }
+      if (!fitted && n > 1) { fitted = true; map.fitBounds(bounds, big ? 70 : mini ? 16 : 30); } else if (!fitted && n === 1 && fz) { fitted = true; map.setCenter && map.setCenter({ lat: fz.lat, lng: fz.lng }); }
       if (big && FM.follow && FM.sel) { const r = rows.find(x => x.id === FM.sel); if (r && map.panTo) map.panTo({ lat: r.lat, lng: r.lng }); }
       if (big) drawRouteOn();
     };
@@ -38567,7 +38605,9 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   const weak = () => { try { const m = navigator.deviceMemory, c = navigator.hardwareConcurrency; if (m && m <= 3) return true; if (/Android/.test(ua) && c && c <= 4) return true; } catch (e) { /* ignore */ } return false; };
   const sysLook = () => { const s = (typeof S !== 'undefined' && S.settings && S.settings.ui) || null; return s && s.look ? s.look : (ls(KEY) || 'apple'); };
   const device = () => { const d = ls(DKEY); return d === 'apple' || d === 'classic' ? d : ''; };
-  const want = () => device() || (sysLook() === 'apple' && weak() ? 'classic' : sysLook());
+  /* v7.80 (Mahmoud 16 Oct: «remove Classic / Advanced from me — I work on Advanced always»): the owner is always Advanced, no switch */
+  const ownerLock = () => { try { return typeof S !== 'undefined' && !!S.session && typeof isAdmin === 'function' && isAdmin() && !(typeof isViewing === 'function' && isViewing()); } catch (e) { return false; } };
+  const want = () => (ownerLock() ? 'apple' : (device() || (sysLook() === 'apple' && weak() ? 'classic' : sysLook())));
   function apply() {
     const on = want() !== 'classic'; const h = document.documentElement;
     h.classList.toggle('apple', on); h.classList.toggle('apple-blur', on && blurOK);
@@ -38575,7 +38615,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
   }
   apply();
   if (typeof render === 'function') render = (base => function () { try { apply(); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(render);
-  window.nfLook = { want, sysLook, device, weak };
+  window.nfLook = { want, sysLook, device, weak, ownerLock };
 
   /* Settings → «System look» (owner) */
   if (typeof EXTRA_SETTINGS === 'object') EXTRA_SETTINGS.look = {
@@ -38598,7 +38638,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
     try { localStorage.setItem(DKEY, k); } catch (e) { /* ignore */ }
     apply(); render(true);
   };
-  const mineHTML = () => { const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
+  const mineHTML = () => { if (ownerLock()) return ''; const on = want() !== 'classic'; return `<div class="lookmine notr" role="group" aria-label="${L('شكل الجهاز ده', 'This device look')}"><button type="button" class="${on ? 'on' : ''}" data-action="lookMine" data-arg="apple">Advanced</button><button type="button" class="${on ? '' : 'on'}" data-action="lookMine" data-arg="classic">Classic</button></div>`; };
   /* v7.15 — day / night as the same kind of switch, on phones (Mahmoud: «where is night mode here?» — the phone menu button
      never showed, and the switches should match each other) */
   const themeHTML = () => { if (typeof themeCurrent !== 'function' || !ACTIONS.themeToggle) return ''; const dark = themeCurrent() === 'dark'; return `<div class="lookmine thememine" role="group" aria-label="${L('الوضع', 'Mode')}"><button type="button" class="${dark ? '' : 'on'}" data-action="themeSet" data-arg="light">☀︎ ${L('نهاري', 'Light')}</button><button type="button" class="${dark ? 'on' : ''}" data-action="themeSet" data-arg="dark">☾ ${L('ليلي', 'Dark')}</button></div>`; };
@@ -38611,7 +38651,7 @@ function ownerCard() { const k = ownerCardKey(); if (!k) return null; try { retu
     if (lr) lr.insertAdjacentHTML('beforeend', mineHTML() + themeHTML()); else chip.insertAdjacentHTML('afterend', `<div class="lookrow">${mineHTML()}${themeHTML()}</div>`);
   });
   /* the Ninety home has no RENDER_HOOKS — same switch under its name chip */
-  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
+  if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); try { const uc = document.querySelector('#root .nhome .nside .uchip'); if (uc && !ownerLock() && !uc.parentNode.querySelector('.lookmine')) { const after = uc.parentNode.querySelector('.langrow.nh') || uc; after.insertAdjacentHTML('afterend', `<div class="lookrow nh">${mineHTML()}</div>`); } } catch (e) { /* ignore */ } return r; })(render);
   (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
 .lookrow{display:flex;justify-content:center;margin:6px 10px 2px}
 .lookmine{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:rgba(127,127,127,.18)}
@@ -39065,6 +39105,8 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
    v7.56 (Mahmoud, 12 Oct, on the office «Projects» module: «some things here should not be in the same module»): «Meetings» moves
    to «Communication» in the three systems, and the office's drawing tools (Concept Drawing, Studio Boards) are a «Design» module
    of their own right after «Projects» (Projects = projects and stages, projects & tasks, operations board). Pages only move.
+   v7.79 (Mahmoud, 16 Oct: «a module called AI with everything of the twin and the automation inside it»): the assistant left
+   «Communication» — the «AI» group comes from the menu itself (parts/99zzZzZZzzx6-ai-module.js).
    ===================================================================== */
 (function () {
   if (typeof navHTML !== 'function') return;
@@ -39078,7 +39120,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
   const LAYOUTS = {
     factory: {
       top: ['dashboard'],
-      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'calls', 'meetings', 'ai'], before: 'workers' }],
+      add: [{ key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'calls', 'meetings'], before: 'workers' }],
       into: [{ near: 'settings', ids: ['reports', 'org', 'cctv', 'audit', 'regulation', 'settings'] }],
       rename: [{ near: 'orders', ar: 'التشغيل والإنتاج', en: 'Production' }],
     },
@@ -39090,7 +39132,7 @@ ${A} .fab{background:var(--primary)!important;color:var(--primary-ink)!important
     },
     construction: {
       top: ['dashboard'],
-      add: [{ key: 'supply', ar: 'التوريد', en: 'Supply', ids: ['purchases', 'csubs'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'meetings', 'ai'], before: 'workers' }],
+      add: [{ key: 'supply', ar: 'التوريد', en: 'Supply', ids: ['purchases', 'csubs'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'meetings'], before: 'workers' }],
       into: [{ near: 'settings', ids: ['reports', 'org', 'audit', 'regulation', 'settings'] }],
       rename: [{ near: 'clients', ar: 'العملاء', en: 'Clients' }],
     },
@@ -39341,6 +39383,7 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     ai: G('<path d="M10 3.6c.55 3.75 2.45 5.65 6.2 6.2-3.75.55-5.65 2.45-6.2 6.2-.55-3.75-2.45-5.65-6.2-6.2 3.75-.55 5.65-2.45 6.2-6.2z"/><path d="M18.2 14.6c.25 1.55.95 2.25 2.5 2.5-1.55.25-2.25.95-2.5 2.5-.25-1.55-.95-2.25-2.5-2.5 1.55-.25 2.25-.95 2.5-2.5z"/>'),
     memo: G('<rect x="5.2" y="3.4" width="13.6" height="17.2" rx="2.6"/><path d="M8.8 8.2h6.4M8.8 12h6.4M8.8 15.8h3.8"/>'),
     concept: G('<path d="M4.6 19.4c2.3-.4 3.6-1.2 4.6-2.9"/><path d="M14.9 4.6l4.5 4.5-8.6 8.6-4.9 1.1 1.1-4.9z"/><path d="M13.1 6.4l4.5 4.5"/>'),
+    support: G('<circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="3.4"/><path d="M6.1 6.1l3.5 3.5M14.4 14.4l3.5 3.5M17.9 6.1l-3.5 3.5M9.6 14.4l-3.5 3.5"/>'),
     call: G('<path d="M20.6 16.3v2.6a1.75 1.75 0 0 1-1.9 1.75 17.3 17.3 0 0 1-7.55-2.7 17 17 0 0 1-5.25-5.25 17.3 17.3 0 0 1-2.7-7.6A1.75 1.75 0 0 1 4.95 3.2h2.6a1.75 1.75 0 0 1 1.75 1.5c.11.85.32 1.67.61 2.46a1.75 1.75 0 0 1-.39 1.85l-1.1 1.1a14 14 0 0 0 5.25 5.25l1.1-1.1a1.75 1.75 0 0 1 1.85-.39c.79.29 1.61.5 2.46.61a1.75 1.75 0 0 1 1.5 1.77z"/>'),
   };
   const addLabel = el => { const a = el.dataset.action || ''; return a === 'materialNew' ? L('خامة جديدة', 'New material') : a === 'drvTripNew' ? L('مشوار جديد', 'New trip') : a === 'fabMenu' ? (typeof role === 'function' && role() === 'driver' ? L('مشوار جديد', 'New trip') : L('إضافة', 'Add')) : L('مهمة جديدة', 'New task'); };
@@ -39352,11 +39395,12 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
     { k: 'call', sel: '.callfab', label: () => L('المكالمات', 'Calls'), cls: 'call' },
     { k: 'snap', sel: '.snapfab', label: () => L('صوّر الشاشة', 'Screenshot'), cls: 'snap' },   /* v7.37: screenshot + sketch onto a task */
     { k: 'concept', sel: '.conceptfab', label: () => L('كونسبت', 'Concept'), cls: 'concept' },   /* v7.49: a new blank Concept drawing */
+    { k: 'support', sel: '.supdial', label: () => L('الدعم الفني', 'Support'), cls: 'support' },   /* v7.79 (Mahmoud 16 Oct): «Support» — the top circle */
   ];
   const D = { root: null, open: false, sig: '' };
   const shown = el => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
   /* v7.37: «Screenshot» rides along with the other actions - it never keeps the «+» on screen by itself (forms, side menu, chats hide it as before) */
-  const avail = () => { const xs = SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el)); return xs.some(x => x.k !== 'snap' && x.k !== 'concept') ? xs : []; };
+  const avail = () => { const xs = SRC.map(s => Object.assign({ el: document.querySelector(s.sel) }, s)).filter(x => shown(x.el)); return xs.some(x => !['snap', 'concept', 'support'].includes(x.k)) ? xs : []; };   /* v7.79: «Support» rides along too */
   const badge = el => { const n = el && el.querySelector('.n'); const v = n ? parseInt(n.textContent, 10) : 0; return v > 0 ? v : 0; };
   const iconOf = x => ICONS[x.k] || (x.el && (x.el.querySelector('svg') || {}).outerHTML) || PLUS;
 
@@ -39425,7 +39469,8 @@ html.apple .ngfly .cnt.crit,html.apple .ngfly .cnt.bad{background:#ff453a}
 
   (document.head || document.body).insertAdjacentHTML('beforeend', `<style>
 /* the old buttons stay in the page (their own rules decide when they show) but out of sight and out of reach */
-.nfd-src{opacity:0!important;pointer-events:none!important;transform:translateX(-300vw)!important}
+/* v7.79: hidden in place (visibility) — the old far-left shift (translateX(-300vw)) made right-to-left pages scroll sideways on a computer */
+.nfd-src{opacity:0!important;pointer-events:none!important;visibility:hidden!important}
 .nfdial[hidden]{display:none!important}
 .nfdial{--lx-face:linear-gradient(180deg,#ffffff,#eff1f4);--lx-ring:linear-gradient(150deg,#eceef1,#b4bac3 45%,#9aa1ab 62%,#e9ebee);--lx-ink:#2a2e35;--lx-shadow:0 12px 26px -12px rgba(20,24,32,.35),inset 0 1px 0 rgba(255,255,255,.95);--lx-pill:rgba(255,255,255,.9);--lx-pill-ink:#1d2026;--lx-pill-line:rgba(20,24,32,.1);--lx-veil:rgba(12,14,18,.24);--lx-badge:#c4413c}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .nfdial{--lx-face:radial-gradient(120% 120% at 30% 18%,#3b3d42 0%,#202226 52%,#141518 100%);--lx-ring:linear-gradient(150deg,rgba(255,255,255,.55),rgba(255,255,255,.14) 42%,rgba(255,255,255,.06) 62%,rgba(255,255,255,.4));--lx-ink:#eceef2;--lx-shadow:0 14px 30px -12px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.08);--lx-pill:rgba(28,29,32,.8);--lx-pill-ink:#eceef2;--lx-pill-line:rgba(255,255,255,.12);--lx-veil:rgba(0,0,0,.46);--lx-badge:#d0453f}}
@@ -40356,7 +40401,9 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 
   /* ---------- v7.78: «no overtime tonight» (the head — the factory manager / owner for any department) ---------- */
   const ADMIN_D = ['tech', 'acct', 'purch', 'store', 'fleet', 'mgmt', 'sales'];
-  const prodDepts = () => (S.settings.departments || []).filter(d => d && d.id && !d.admin && !ADMIN_D.includes(d.id) && list('workers').some(w => w.deptId === d.id && w.status !== 'inactive' && w.status !== 'suspended' && w.role !== 'admin')).map(d => d.id);
+  /* v7.79: not on a day off — a holiday, or a weekday every worker of the department is off (same rule as the server, remind v14) */
+  const offToday = w => { try { return typeof isOffDay === 'function' && isOffDay(w, todayISO()); } catch (e) { return false; } };
+  const prodDepts = () => (typeof isHoliday === 'function' && isHoliday(todayISO())) ? [] : (S.settings.departments || []).filter(d => d && d.id && !d.admin && !ADMIN_D.includes(d.id) && list('workers').some(w => w.deptId === d.id && w.status !== 'inactive' && w.status !== 'suspended' && w.role !== 'admin' && !offToday(w))).map(d => d.id);
   const noneOf = (date, d) => byId('tasks', `otnone_${date}_${d}`);
   const deptState = (date, d) => { const es = nights(date).filter(t => t.deptId === d); if (es.length) return { k: 'reg', n: es.reduce((a, t) => a + liveIds(t).length, 0) }; const x = noneOf(date, d); return x && x.status !== 'cancelled' ? { k: 'none', by: x.createdByName || '' } : { k: 'open' }; };
   ACTIONS.otnNone = async arg => {
@@ -40625,6 +40672,19 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
   const SRC = new Set(['advbatch', 'advpay', 'money', 'opex', 'suppay', 'cheque', 'chq', 'podue', 'fund']);
   const RE = /سلف|عهد|تحويل|شيك|مصروف تشغيل|دفعة|سداد|مستحق/;
   const isMoneyTask = t => !!t && (SRC.has(t.source) || /^(podue|fund|abt|opx|chq)_/.test(String(t.id)) || RE.test(String(t.title || '')));
+  /* the client cheque behind a «cheque received» notice (own_incheque_<pid>) or a deposit-slip warning (own_chqocr_<pid>_<t>) */
+  function chqOf(t) {
+    try {
+      const m = /^own_incheque_([a-z0-9]+)$/.exec(String(t.id)) || /^own_chqocr_([a-z0-9]+)_[a-z0-9]+$/.exec(String(t.id)); if (!m || !t.orderId) return null;
+      const o = byId('orders', t.orderId); const p = o && (o.payments || []).find(x => x && x.id === m[1]); if (!p) return null;
+      const d = iso => fmtDate(String(iso || '').slice(0, 10));
+      const where = d(p.depositedAt) + (p.depositAccount ? ' · ' + p.depositAccount : '');
+      const sub = !/^own_incheque_/.test(String(t.id)) ? '' : p.stage === 'deposited'
+        ? L(`اتودع ${where} — لما الفلوس تنزل الحساب دوس «تحصّل» في صفحة الأمر`, `Deposited ${where} — once the money is in the account, tap «Collected» on the order page`)
+        : p.stage === 'received' ? L(`مستلَم ${d(p.date)} — لسه ما اتودعش البنك`, `Received ${d(p.date)} — not deposited yet`) : '';
+      return { o, p, sub };
+    } catch (e) { return null; }
+  }
   function moneyItems() {
     if (!S.session || !isAdmin()) return [];
     const out = []; const seen = new Set(); const today = todayISO();
@@ -40645,7 +40705,10 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
     } catch (e) { /* ignore */ }
     try {
       if (typeof tasksForMe === 'function') tasksForMe().filter(t => t && !seen.has(t.id) && !(t.reqId && seen.has(t.reqId)) && isMoneyTask(t)).forEach(t => {
-        out.push({ k: /شيك/.test(String(t.title)) || /chq|cheque/.test(String(t.id) + String(t.source)) ? 'chq' : 'money', id: 't:' + t.id, label: String(t.title || ''), sub: String(t.desc || '').split('\n')[0].slice(0, 90), href: '#/tasks/' + t.id });
+        /* v7.79 (Mahmoud 16 Oct, «what am I supposed to do with this cheque?»): a client-cheque notice says where the cheque is now
+           and opens its order (where the «collected» button is); once collected or bounced it leaves the list */
+        const cq = chqOf(t); if (cq && ['cleared', 'bounced'].includes(cq.p.stage)) return;
+        out.push({ k: /شيك/.test(String(t.title)) || /chq|cheque/.test(String(t.id) + String(t.source)) ? 'chq' : 'money', id: 't:' + t.id, label: String(t.title || ''), sub: cq && cq.sub ? cq.sub : String(t.desc || '').split('\n')[0].slice(0, 90), href: cq ? '#/orders/' + cq.o.id : '#/tasks/' + t.id });
       });
     } catch (e) { /* ignore */ }
     return out;
@@ -41327,7 +41390,7 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 (function () {
   if (window.__NF_IPH__) return; window.__NF_IPH__ = 1;
   const on = () => { try { return !!(window.nfHomeOn && window.nfHomeOn()) && document.documentElement.classList.contains('apple'); } catch (e) { return false; } };
-  const sync = () => { try { document.documentElement.classList.toggle('iph', on()); } catch (e) { /* ignore */ } };
+  const sync = () => { try { document.documentElement.classList.toggle('iph', on()); if (document.body && !document.getElementById('nf-wall')) { const w = document.createElement('div'); w.id = 'nf-wall'; w.setAttribute('aria-hidden', 'true'); document.body.insertBefore(w, document.body.firstChild); } } catch (e) { /* ignore */ } };
   if (typeof render === 'function') render = (base => function () { const r = base.apply(this, arguments); sync(); return r; })(render);
   if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.unshift(sync);
   sync();
@@ -41335,40 +41398,65 @@ html.apple .side .nftogs>.nfst{border:0;background:rgba(255,255,255,.07);color:#
 
   const I = 'html.apple.iph';
   const LIGHT = `
-  --bg:#f2f2f4; --surface:#ffffff; --surface-2:#f5f5f7; --surface-3:rgba(116,116,128,.10);
-  --ink:#1c1c1e; --ink-2:#3c3c43; --muted:#8a8a8f; --line:rgba(60,60,67,.09); --line-2:rgba(60,60,67,.16);
-  --primary:#4f6e8e; --primary-ink:#fff; --accent:#4f6e8e; --accent-ink:#fff; --accent-soft:rgba(79,110,142,.11); --accent-2:#6f8aa6;
+  --bg:#f3f1ea; --surface:#fffdf8; --surface-2:#f7f5ef; --surface-3:rgba(110,125,110,.11); --card:rgba(255,253,248,.84);
+  --ink:#22281f; --ink-2:#3f4a3c; --muted:#7b8476; --line:rgba(60,75,55,.10); --line-2:rgba(60,75,55,.17);
+  --primary:#4f7a64; --primary-ink:#fff; --accent:#4f7a64; --accent-ink:#fff; --accent-soft:rgba(79,122,100,.13); --accent-2:#6e9580;
   --good:#5c8a6b; --warn:#c0914c; --serious:#bd7a55; --crit:#b5655b;
   --good-soft:rgba(92,138,107,.13); --warn-soft:rgba(192,145,76,.15); --serious-soft:rgba(189,122,85,.14); --crit-soft:rgba(181,101,91,.12);
   --good-ink:#3f6a4e; --warn-ink:#83602a; --serious-ink:#8c4f2f; --crit-ink:#8f4239;
-  --glass:#ffffff; --glass-solid:#ffffff; --glass-brd:transparent;
-  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px -8px rgba(20,30,50,.10); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.22);
-  --wall:#f2f2f4; --radius:18px; --radius-sm:12px;
-  --side-bg:#f5f5f7; --side-ink:#1c1c1e; --side-muted:#8a8a8f; --side-line:rgba(60,60,67,.09); --side-hover:rgba(116,116,128,.10); --side-on:#4f6e8e; --side-on-bg:#ffffff; --nf-side:#f5f5f7;`;
+  --glass:#fffdf8; --glass-solid:#fffdf8; --glass-brd:transparent;
+  --shadow:0 1px 2px rgba(30,40,30,.04),0 8px 22px -14px rgba(40,50,35,.20); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.22);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(172,204,182,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(240,212,172,.95),transparent 68%),linear-gradient(170deg,#d9e8dd 0%,#f3f1ea 48%,#f4e4cb 100%);
+  --radius:18px; --radius-sm:12px;
+  --side-bg:#f6f4ee; --side-ink:#22281f; --side-muted:#7b8476; --side-line:rgba(60,75,55,.10); --side-hover:rgba(110,125,110,.11); --side-on:#4f7a64; --side-on-bg:#fffdf8; --nf-side:#f6f4ee;
+  --nf-side-ink:#22281f; --nf-side-muted:#7b8476; --mh-logo:none; --mh-ink:#22281f;`;
   const DARK = `
-  --bg:#0f0f11; --surface:#1b1b1e; --surface-2:#232327; --surface-3:rgba(140,140,150,.14);
-  --ink:#ececef; --ink-2:#c9c9cf; --muted:#8e8e94; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12);
-  --primary:#8eaacb; --primary-ink:#0f0f11; --accent:#8eaacb; --accent-ink:#0f0f11; --accent-soft:rgba(142,170,203,.14); --accent-2:#a7bdd6;
+  --bg:#151b26; --surface:#1f2735; --surface-2:#273042; --surface-3:rgba(150,165,190,.14); --card:rgba(32,40,56,.86);
+  --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12);
+  --primary:#94b3d6; --primary-ink:#141a24; --accent:#94b3d6; --accent-ink:#141a24; --accent-soft:rgba(148,179,214,.16); --accent-2:#aec5df;
   --good:#7fae8e; --warn:#d2ac6e; --serious:#cf9875; --crit:#cf8a80;
   --good-soft:rgba(127,174,142,.15); --warn-soft:rgba(210,172,110,.15); --serious-soft:rgba(207,152,117,.15); --crit-soft:rgba(207,138,128,.15);
   --good-ink:#9cc8aa; --warn-ink:#e0c08a; --serious-ink:#e0b090; --crit-ink:#e3a59c;
-  --glass:#1b1b1e; --glass-solid:#1b1b1e; --glass-brd:transparent;
-  --shadow:0 1px 2px rgba(0,0,0,.4); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
-  --wall:#0f0f11;
-  --side-bg:#141416; --side-ink:#ececef; --side-muted:#8e8e94; --side-line:rgba(255,255,255,.07); --side-hover:rgba(140,140,150,.14); --side-on:#8eaacb; --side-on-bg:#1b1b1e; --nf-side:#141416;`;
+  --glass:#1f2735; --glass-solid:#1f2735; --glass-brd:transparent;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 26px -16px rgba(0,0,0,.6); --shadow-lg:0 24px 60px -24px rgba(0,0,0,.7);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);
+  --side-bg:#18202c; --side-ink:#e9edf3; --side-muted:#94a0b0; --side-line:rgba(255,255,255,.07); --side-hover:rgba(150,165,190,.14); --side-on:#94b3d6; --side-on-bg:#1f2735; --nf-side:#18202c;
+  --nf-side-ink:#e9edf3; --nf-side-muted:#94a0b0; --mh-logo:invert(1); --mh-ink:#e9edf3;`;
+  const X = 'html.apple:not(.iph)';
+  const XL = `
+  --bg:#f3f1ea; --surface:#fffdf8; --surface-2:rgba(110,125,110,.09); --surface-3:rgba(110,125,110,.15);
+  --ink:#22281f; --ink-2:#3f4a3c; --muted:#7b8476; --line:rgba(60,75,55,.11); --line-2:rgba(60,75,55,.19);
+  --primary:#3f6a52; --primary-ink:#fff; --accent:#4f7a64; --accent-ink:#fff; --accent-soft:rgba(79,122,100,.13);
+  --glass:rgba(255,253,248,.72); --glass-solid:rgba(255,253,248,.94); --glass-brd:rgba(255,253,248,.85);
+  --side-bg:rgba(24,32,44,.9); --nf-side:rgba(24,32,44,.92);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(172,204,182,.95),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(240,212,172,.95),transparent 68%),linear-gradient(170deg,#d9e8dd 0%,#f3f1ea 48%,#f4e4cb 100%);`;
+  const XD = `
+  --bg:#151b26; --surface:#1f2735; --surface-2:rgba(150,165,190,.14); --surface-3:rgba(150,165,190,.22);
+  --ink:#e9edf3; --ink-2:#c6ccd6; --muted:#94a0b0; --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.13);
+  --primary:#94b3d6; --primary-ink:#141a24; --accent:#94b3d6; --accent-ink:#141a24; --accent-soft:rgba(148,179,214,.16);
+  --glass:rgba(31,39,53,.66); --glass-solid:rgba(31,39,53,.95); --glass-brd:rgba(255,255,255,.06);
+  --side-bg:rgba(20,27,38,.92); --nf-side:rgba(20,27,38,.94);
+  --wall:radial-gradient(560px 520px at 108% -8%,rgba(72,108,168,.55),transparent 68%),radial-gradient(560px 560px at -12% 106%,rgba(150,106,78,.38),transparent 68%),linear-gradient(170deg,#1c2840 0%,#151b26 50%,#2a211d 100%);`;
   document.head.insertAdjacentHTML('beforeend', `<style id="iphone-look">
 ${I}{${LIGHT}}
 @media (prefers-color-scheme: dark){ ${I}:not([data-theme="light"]){${DARK}} }
 ${I}[data-theme="dark"]{${DARK}}
-${I} body{background:var(--bg)!important;background-attachment:scroll!important}
-${I} .nhome,${I} .login{background:var(--bg)!important}
+/* v7.79 (Mahmoud 16 Oct: «the black is gloomy — calm soft colours»; option 3 by day, option 2 at night): two soft colours behind
+   everything — sage & sand by day, calm navy at night — on one fixed layer (#nf-wall: the phone ignores background-attachment fixed) */
+${I}{background:var(--bg)}
+${I} body{background:transparent!important;background-attachment:scroll!important}
+${I} .nhome,${I} .login{background:transparent!important}
+#nf-wall{display:none}
+${I} #nf-wall{display:block;position:fixed;top:0;left:0;right:0;bottom:0;z-index:-1;pointer-events:none;background:var(--wall)}
+${I} .nfw{background:var(--card)!important;border-color:transparent!important;box-shadow:var(--shadow)!important}
+@media print{#nf-wall{display:none!important}}
 ${I} ::selection{background:var(--accent-soft)}
 ${I} input[type=checkbox],${I} input[type=radio]{accent-color:var(--accent)}
 ${I} a{color:var(--accent)}
 ${I} .item,${I} .card a,${I} .aha,${I} .ahn,${I} .ahm,${I} .ahw-i,${I} .omf-r,${I} .nav a{color:inherit}
 
 /* cards and lists: flat white, no borders, soft shadow */
-${I} .card,${I} .kpi,${I} .item,${I} .vehcard,${I} .vcard,${I} .orgnode,${I} .set-tile,${I} .lhcard,${I} .tcard,${I} .col{background:var(--surface)!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+${I} .card,${I} .kpi,${I} .item,${I} .vehcard,${I} .vcard,${I} .orgnode,${I} .set-tile,${I} .lhcard,${I} .tcard,${I} .col{background:var(--card,var(--surface))!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 ${I} .card{border-radius:18px}${I} .item{border-radius:14px}${I} .kpi{border-radius:16px}
 ${I} .col{background:transparent!important;box-shadow:none!important}
 ${I} .lhcard{background:var(--surface-2)!important;box-shadow:none!important}
@@ -41409,7 +41497,7 @@ ${I} tbody tr:nth-child(even) td{background:transparent!important}
 ${I} .tablewrap{background:var(--surface);border:0!important}
 
 /* top bar and tab bar: calm, frosted white */
-${I} .topbar{background:color-mix(in srgb,var(--bg) 88%,transparent)!important;border-bottom:.5px solid var(--line)!important;-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
+${I} .topbar{background:color-mix(in srgb,var(--bg) 62%,transparent)!important;border-bottom:.5px solid var(--line)!important;-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%)}
 ${I} .tabbar{background:color-mix(in srgb,var(--surface) 90%,transparent)!important;border:0!important;box-shadow:0 10px 30px -14px rgba(20,30,50,.28)!important;-webkit-backdrop-filter:blur(24px) saturate(160%)!important;backdrop-filter:blur(24px) saturate(160%)!important}
 ${I} .tabbar a{color:var(--muted)!important}
 ${I} .tabbar a.on{color:var(--accent)!important;background:var(--accent-soft)!important}
@@ -41445,7 +41533,7 @@ ${I} .side .avatar{background:var(--accent-soft)!important;color:var(--accent)!i
 ${I} .aha-ic,${I} .ahn-ic,${I} .rq-ic{filter:saturate(.55) brightness(1.04)}
 ${I} .aha-ic{box-shadow:0 2px 8px rgba(20,30,50,.12)}
 ${I} .aha-ic i,${I} .ahm-n{background:#c7584c}
-${I} .ahw,${I} .ahn,${I} .ahm{background:var(--surface)!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+${I} .ahw,${I} .ahn,${I} .ahm{background:var(--card,var(--surface))!important;border:0!important;box-shadow:var(--shadow)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 ${I} .ahw-d small{color:var(--crit)}
 ${I} .ahw-p{background:var(--accent)!important;color:var(--accent-ink)!important}
 ${I} .ahw-i,${I} .ahw-k div{background:var(--surface-2)!important}
@@ -41454,6 +41542,32 @@ ${I} .rq-t{background:var(--surface)!important;border-color:transparent!importan
 ${I} .pf-pick{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 ${I} .pf-pick.on{border-color:var(--good-ink);color:var(--good-ink);background:var(--good-soft)}
 ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
+/* v7.80 (Mahmoud 16 Oct, screenshot «some text does not show»): on the light Ninety home the header and the side card were still
+   drawn for a dark background — white logo and pale words on the light colour. The logo and the words follow the mode now. */
+${I} .nhome .mhead{border-bottom:.5px solid var(--line)}
+${I} .nhome .mhead img.wordmark,${I} .nhome .nbrand img{filter:var(--mh-logo,invert(1))!important}
+${I} .nhome .mhead .langsw{color:var(--mh-ink,#e5e7eb)!important;border-color:var(--line-2)!important;opacity:1!important}
+${I} .nhome .mhead .langsw *{color:inherit!important}
+${I} .nhome .nbrand{border-bottom-color:var(--line)!important}
+${I} .nhome .co{background:var(--surface)!important}
+${I} .nhome .co .mini span{background:var(--surface-3)!important}
+${I} .nhome .qa button{border-color:var(--line-2)!important;background:var(--surface)!important;color:var(--ink)!important}
+
+/* v7.80 (Mahmoud 16 Oct: «you did not set it to what we chose — option 3 by day, option 2 at night»; he works on Advanced):
+   the same two palettes on the Advanced look too — sage & sand by day, calm navy at night, a navy menu instead of black.
+   Only colours: the Advanced shapes (glass, pills, the dark menu) stay as they are. */
+${X}{${XL}}
+@media (prefers-color-scheme: dark){ ${X}:not([data-theme="light"]){${XD}} }
+${X}[data-theme="dark"]{${XD}}
+${X}{background:var(--bg)}
+${X} body{background:transparent!important;background-attachment:scroll!important}
+${X} .nhome,${X} .login{background:transparent!important}
+${X} #nf-wall{display:block;position:fixed;top:0;left:0;right:0;bottom:0;z-index:-1;pointer-events:none;background:var(--wall)}
+${X} .side,${X} .nhome .nside{background:var(--side-bg)!important}
+${X} .side .avatar{background:linear-gradient(135deg,#2c3a50,#18202c)}
+html.apple:not(.iph) body:has(.side.open)::before{background:#18202c}
+${X} .tb-logo{background:#18202c}
+@media (prefers-reduced-transparency: reduce){ ${X} .side,${X} .nhome .nside{background:#18202c!important} }
 </style>`);
 })();
 /* =====================================================================
@@ -43265,6 +43379,9 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
    Ökoplan Landscaping): layers (the picture locked at the bottom, «Hidden», «Drawing», add more), pen / marker / highlighter / eraser
    that follow pen pressure, line / arrow / box / circle, numbers, text, hide, a colour wheel, two-finger zoom, select / move / delete.
    v7.69 - «Send it to support» beside «Send to the task» (part 99zzZzZZzzl-support.js): the picture opens a new problem.
+   v7.79 - window.nfSnapFor(hash, cb) (Mahmoud 16 Oct: «a screenshot box inside support — take the screen and write the comment»):
+   support's «Screenshot» goes back to the page the person came from, takes it, opens the drawing tools, and the second step is
+   only «write the comment» + «Add it to the problem» — the picture and the comment go back to the support window (cb).
    ===================================================================== */
 (function () {
   if (window.__NF_SNAP__) return; window.__NF_SNAP__ = 1;
@@ -43373,6 +43490,7 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
      the copy skips #nfsnap, so the screen on top does not get into the picture and the page under it does not move */
   async function start() {
     if (E.busy || document.getElementById('nfsnap')) return;
+    if (!E.cbArm) E.cb = null; E.cbArm = false;   /* v7.79: only a start from nfSnapFor keeps the way back to support */
     E.busy = true; document.documentElement.classList.add('nfsnap-taking');
     try { if (window.nfFabDial) window.nfFabDial.close(); } catch (e) { /* ignore */ }
     E.from = location.hash || '#/'; E.page = pageTitle(); E.order = (S.route && S.route.view === 'orders' && S.route.id) || '';
@@ -43500,6 +43618,15 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   }
   function paintSend() {
     const el = $('.sn-send'); if (!el) return; const ps = E.ed.pins();
+    if (E.cb) {   /* v7.79: from inside support — only the comment, then back to the problem */
+      el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x sn-back" data-sn="back">‹ ${esc(L('رجوع للرسم', 'Back to drawing'))}</button><b>${esc(L('للدعم الفني', 'For support'))}</b><span style="width:40px"></span></div>
+      <div class="sn-body"><img class="sn-prev" alt="" src="${final(560).toDataURL('image/jpeg', 0.8)}">
+        ${ps.length ? `<div class="sn-lbl">${esc(L('تعليق كل رقم', 'A comment for each number'))}</div>${ps.map(p => `<div class="sn-pin"><b style="background:${esc(pinBg(p.color))};color:${light(pinBg(p.color)) ? '#1c1c1e' : '#fff'}">${p.n}</b><input type="text" data-pin="${p.n}" data-pid="${esc(p.id)}" value="${esc(E.notes[p.id] || '')}" placeholder="${esc(L('اكتب الملاحظة على الرقم ده', 'Write the note for this number'))}"></div>`).join('')}` : ''}
+        <div class="sn-lbl">${esc(L('اكتب الكومنت', 'Write the comment'))}</div><textarea id="sn-note" rows="3" placeholder="${esc(L('إيه اللي غلط في الصورة؟', 'What is wrong in the picture?'))}">${esc(E.note || '')}</textarea>
+        <div class="sn-warn">${esc(L('الصورة رايحة للدعم الفني بس — استخدم «إخفاء» لأي حاجة خاصة.', 'The picture goes to support only — use «Hide» for anything private.'))}</div></div>
+      <div class="sn-foot"><button type="button" class="btn p" data-sn="cbdone">${esc(L('ضيفها للمشكلة', 'Add it to the problem'))}</button></div>`;
+      return;
+    }
     el.innerHTML = `<div class="sn-top"><button type="button" class="sn-x sn-back" data-sn="back">‹ ${esc(L('رجوع للرسم', 'Back to drawing'))}</button><b>${esc(L('ابعت على مهمة', 'Send to a task'))}</b><span style="width:40px"></span></div>
       <div class="sn-body"><img class="sn-prev" alt="" src="${final(560).toDataURL('image/jpeg', 0.8)}">
         <div class="sn-lbl">${esc(L('المهمة', 'The task'))}</div>
@@ -43572,6 +43699,23 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
     const page = { hash: E.from || '', title: E.page || '' }; closeEditor();
     window.nfSupportFromSnap({ blob, note: lines.join('\n'), page });
   }
+  /* v7.79: back to the support window with the picture + the comment (null = cancelled) */
+  async function cbDone() {
+    if (!E.cb || !E.ed || E.busy) return; collect();
+    const lines = []; if (E.note) lines.push(E.note.trim());
+    pins().forEach(p => { const n = String(E.notes[p.id] || '').trim(); if (n) lines.push(`${PIN(p.n)} ${n}`); });
+    const blob = await new Promise(res => final(1600).toBlob(res, 'image/jpeg', 0.86)); if (!blob) return;
+    const page = { hash: E.from || '', title: E.page || '' }; const cb = E.cb; E.cb = null; closeEditor();
+    try { cb({ blob, note: lines.join('\n'), page }); } catch (e) { console.warn('snap cb', e); }
+  }
+  window.nfSnapFor = async (hash, cb) => {
+    if (!canWrite() || E.busy || document.getElementById('nfsnap')) return false;
+    E.cb = typeof cb === 'function' ? cb : null;
+    if (hash && location.hash !== hash) { location.hash = hash; await new Promise(r => setTimeout(r, 900)); }
+    E.cbArm = true; await start();
+    if (!document.getElementById('nfsnap') && E.cb) { const c = E.cb; E.cb = null; try { c(null); } catch (e) { /* ignore */ } }
+    return true;
+  };
   function collect() {
     const el = document.getElementById('nfsnap'); if (!el || E.step !== 'send') return;
     const n = el.querySelector('#sn-note'); if (n) E.note = n.value;
@@ -43583,13 +43727,14 @@ ${I} .toast{background:var(--ink)!important;color:var(--surface)!important}
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('#nfsnap [data-sn]'); if (!b) return; e.preventDefault();
     const a = b.dataset.sn; const ed = E.ed;
-    if (a === 'cancel') return closeEditor();
+    if (a === 'cancel') { const cb = E.cb; E.cb = null; closeEditor(); if (cb) { try { cb(null); } catch (x) { /* ignore */ } } return; }
+    if (a === 'cbdone') return cbDone();
     if (a === 'send') return send();
     if (a === 'support') return toSupport();
     if (a === 'back') { collect(); E.step = 'draw'; return paint(); }
     if (a === 'task') { collect(); E.task = b.dataset.k; document.querySelectorAll('#nfsnap .sn-task').forEach(x => x.classList.toggle('on', x.dataset.k === E.task)); return; }
     if (!ed) return;
-    if (a === 'concept') { if (!window.nfConcept) return; const img = E.img, doc = ed.toJSON(), t = E.page, ctx = { task: E.ctask || curTaskId(), link: E.link || '' }, fromHash = E.from; closeEditor(); window.nfConcept.fromSnap({ img, doc, title: t, ctx, fromHash }).catch(x => { console.warn(x); toast(L('مقدرتش أنقلها لكونسبت درووينج', 'Could not move it to Concept Drawing'), 'err'); }); return; }
+    if (a === 'concept') { if (!window.nfConcept) return; E.cb = null; const img = E.img, doc = ed.toJSON(), t = E.page, ctx = { task: E.ctask || curTaskId(), link: E.link || '' }, fromHash = E.from; closeEditor(); window.nfConcept.fromSnap({ img, doc, title: t, ctx, fromHash }).catch(x => { console.warn(x); toast(L('مقدرتش أنقلها لكونسبت درووينج', 'Could not move it to Concept Drawing'), 'err'); }); return; }
     if (a === 'next') { closePop(); ed.clearSelection(); E.step = 'send'; E.note = E.note || ''; return paint(); }
     if (a === 'tool') { E.tool = b.dataset.k; ed.setTool(E.tool); closePop(); document.querySelectorAll('#nfsnap .sn-t').forEach(x => x.classList.toggle('on', x.dataset.k === E.tool)); refreshSel(); return; }
     if (a === 'color') { E.color = b.dataset.k; ed.setColor(E.color); closePop(); document.querySelectorAll('#nfsnap .sn-c').forEach(x => x.classList.toggle('on', x.dataset.k === E.color)); const cw = $('.sn-cw'); if (cw) cw.style.setProperty('--c', E.color); return; }
@@ -46027,17 +46172,24 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
   }
 
   /* ---------- vehicles live ---------- */
+  /* v7.79: the state names in the reader's language (the fleet map builds its own once, at load) */
+  const STL = k => ({ mv: L('ماشية', 'Moving'), id: L('واقفة', 'Stopped'), of: L('غير متصلة', 'Offline') })[k] || '';
   function wFleet(s) {
     const f = FW(); const w = WD.fleet; if (!f) return hd(w);
     let rows = []; try { rows = f.rows(); } catch (e) { rows = []; }
     const c = f.counts(rows);
-    if (s === 'S') return hd(w) + `<a class="nfw-fs" href="#/fleetmap">${['mv', 'id', 'of'].map(k => `<span><b style="color:${f.ST[k][0]}">${c[k]}</b><small>${esc(f.ST[k][1])}</small></span>`).join('')}${c.warn ? `<em>⚠ ${c.warn}</em>` : ''}</a>`;
+    /* v7.79 (Mahmoud 16 Oct: «I want the vehicles' places to show on the map here»): the small size shows a still map with the vehicles
+       on it, and the three counts under it (a tap opens the fleet map) */
+    if (s === 'S') {
+      if (!W.edit) setTimeout(() => { if (document.getElementById('nfw-map')) { try { f.ensureMap('nfw-map', false, { mini: true }); f.pollStart(document.getElementById('fm-map') ? 3000 : 10000); } catch (e) { /* the map shows its own message */ } } }, 40);
+      return hd(w, c.warn ? `<em class="nfw-fw">⚠ ${c.warn}</em>` : '') + `<div id="nfw-map" class="nfw-map"><div class="muted small" style="padding:8px">${esc(L('جارٍ تحميل الخريطة…', 'Loading the map…'))}</div></div><a class="nfw-fs nfw-fsm" href="#/fleetmap">${['mv', 'id', 'of'].map(k => `<span><b style="color:${f.ST[k][0]}">${c[k]}</b><small>${esc(STL(k))}</small></span>`).join('')}</a>`;
+    }
     if (!W.edit) setTimeout(() => { if (document.getElementById('nfw-map')) { try { f.ensureMap('nfw-map', false, { zoom: s === 'L', pick: true }); f.pollStart(document.getElementById('fm-map') ? 3000 : 10000); } catch (e) { /* the map shows its own message */ } } }, 40);
     const cnt = `<span class="nfw-fc">${['mv', 'id', 'of'].map(k => `<i style="background:${f.ST[k][0]}"></i>${c[k]}`).join('')}</span>`;
     const loc = W.edit ? '' : `<button type="button" class="nfw-x" data-action="fmLocate" data-arg="nfw-map" title="${esc(L('حدّد مكان كل العربيات', 'Locate every vehicle'))}" aria-label="${esc(L('حدّد مكان كل العربيات', 'Locate every vehicle'))}">${icon('map')}</button>`;
     const map = `<div id="nfw-map" class="nfw-map"><div class="muted small" style="padding:12px">${esc(L('جارٍ تحميل الخريطة…', 'Loading the map…'))}</div></div>`;
     if (s === 'M') return hd(w, cnt + loc) + map;
-    const lst = rows.slice(0, 4).map(r => row('#/fleetmap', `<i class="nfw-dot" style="background:${f.ST[r.st][0]}"></i>${esc(String(r.name || '').split('—')[0].trim())}`, `${esc(f.ST[r.st][1])}${r.st === 'mv' && r.speed != null ? ` · ${esc(fmtNum(Math.round(r.speed)))} ${esc(L('كم/س', 'km/h'))}` : ''}${r.driverId ? ` · ${esc(shortName(r.driverId))}` : ''}`, `<small>${esc(f.ago(r.at))}</small>`, `data-fmd="${esc(r.id)}"`)).join('');
+    const lst = rows.slice(0, 4).map(r => row('#/fleetmap', `<i class="nfw-dot" style="background:${f.ST[r.st][0]}"></i>${esc(String(r.name || '').split('—')[0].trim())}`, `${esc(STL(r.st))}${r.st === 'mv' && r.speed != null ? ` · ${esc(fmtNum(Math.round(r.speed)))} ${esc(L('كم/س', 'km/h'))}` : ''}${r.driverId ? ` · ${esc(shortName(r.driverId))}` : ''}`, `<small>${esc(f.ago(r.at))}</small>`, `data-fmd="${esc(r.id)}"`)).join('');
     return hd(w, cnt + loc) + map + `<div class="nfw-rows nfw-fl">${lst}</div>`;
   }
 
@@ -46347,7 +46499,9 @@ html.nfv-open,html.nfv-open body{overflow:hidden;overscroll-behavior:none}
     .nfw-td{flex:1;display:flex;flex-direction:column;padding:13px 14px;min-width:0}.nfw-td small{color:#ff453a;font-weight:700;font-size:12.5px}.nfw-td b{font-size:40px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
     .nfw-td .ahw-st{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nfw-pb{margin-top:auto!important;min-height:38px!important;font-size:14px!important;padding:0 10px!important}
     .nfw.w-money.s-L{padding:0}.nfw-sc{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 13px}.nfw-sc .omf{border:0!important;padding:0;margin:0;background:transparent;box-shadow:none}
-    .nfw.w-fleet.s-M,.nfw.w-fleet.s-L{padding:10px 10px 0}
+    .nfw.w-fleet.s-M,.nfw.w-fleet.s-L,.nfw.w-fleet.s-S{padding:10px 10px 0}.nfw.w-fleet.s-S .nfw-map{min-height:60px;margin-top:6px}
+    .nfw-fs.nfw-fsm{flex:0 0 auto;align-items:center;padding:4px 0 6px;gap:2px}.nfw-fs.nfw-fsm b{font-size:17px;line-height:1.1}.nfw-fs.nfw-fsm small{font-size:9.5px}
+    .nfw-fw{font-style:normal;font-size:11px;font-weight:700;color:var(--crit-ink,#d70015);margin-inline-start:auto}
     .nfw.w-fleetmv.s-L{padding:10px 10px 0}.nfw.w-fleetmv.s-L .nfw-map{flex:1.2}.nfw-mvd{font-weight:400;opacity:.7;font-size:11px}
     .nfw-map{flex:1;min-height:90px;margin:0 -10px;border-top:1px solid var(--line);background:var(--surface-2)}.nfw.w-fleet.s-L .nfw-map{flex:1.6}
     .nfwg.edit .nfw-map{pointer-events:none}
@@ -48872,6 +49026,10 @@ function oxFlow(k) {
      page «extra hours» (#/otpend) with approve / reject; approved → it becomes overtime and goes on through the existing
      overtime approval (factory manager → accounts manager) before payroll. Rejected → the 8 hours stay.
    · the real punch times are kept as they are (in / out), plus hrsRaw / countFrom / countTo for the screens.
+   · v7.79 (go-ahead 16 Oct, Mahmoud on the «extra hours waiting» card: «add a box so I can edit the time»): next to «approve» a box
+     with the computed hours — whoever may approve can change it (quarter-hour steps, not more than from the shift end to the
+     check-out, more than zero — zero is «reject») and approves that number; the change is kept on the day (otEdit: from → to,
+     who, when) and shown on the overtime approval that follows (factory manager → accounts manager).
    ===================================================================== */
 (function () {
   if (window.__NF_V753ATT__) return; window.__NF_V753ATT__ = 1;
@@ -48882,6 +49040,16 @@ function oxFlow(k) {
   const hpd = () => +(S.settings && S.settings.hoursPerDay) || 8;
   const xh = () => (typeof window.nfHeadDepts === 'function' ? window.nfHeadDepts() : []);   /* v7.78: a department led on top of the person's role */
   const canDecide = w => !!S.session && (isAdmin() || role() === 'manager' || ((role() === 'head' || xh().includes(w && w.deptId)) && w && myDepts().includes(w.deptId)));
+  /* v7.79: the most extra hours a day can have = from the end of the counted day (shift end, or the counted start if later) to the check-out */
+  function maxPend(w, r) {
+    try {
+      const a = tmToMin(r.in), b0 = tmToMin(r.out); if (a == null || b0 == null) return +r.otPend || 0;
+      let b = b0; if (b < a) b += 1440; const sh = shiftFor(w); const ss = tmToMin(sh.start); let se = tmToMin(sh.end); if (ss == null || se == null) return +r.otPend || 0; if (se <= ss) se += 1440;
+      const cf = tmToMin(r.countFrom); const cap = Math.max(se, cf != null ? cf : ss);
+      return Math.max(+r.otPend || 0, r2(Math.max(0, b - cap) / 60));
+    } catch (e) { return +r.otPend || 0; }
+  }
+  window.nfOtPendMax = maxPend;
   /* ---------- the rule ---------- */
   function earlyStart(w, date, row) {
     const ss = tmToMin(shiftFor(w).start); let e = null; const a = tmToMin(row.in);
@@ -48976,16 +49144,28 @@ function oxFlow(k) {
     const [d, wid, k] = String(arg || '').split('|'); const w = byId('workers', wid); if (!w || !canDecide(w)) return;
     const cur = (attendanceFor(d) || {})[wid] || {}; if (!(+cur.otPend > 0)) return;
     const me = { by: (S.session && S.session.id) || null, byName: (S.session && S.session.name) || '', at: nowISO() };
+    /* v7.79: the hours typed in the box next to «approve» (if changed) */
+    let h = null;
+    if (k === 'ok') {
+      const inp = Array.from(document.querySelectorAll('input.otp-h')).find(x => x.dataset.k === d + '|' + wid);
+      if (inp && String(inp.value).trim() !== '') {
+        const v = Math.round(parseFloat(String(inp.value).replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(',', '.')) * 100) / 100; const mx = maxPend(w, cur);
+        if (!(v >= 0.25)) { toast(T('أقل حاجة ربع ساعة (0.25) — ولو مش عايز تحسبله ساعات زيادة دوس «ارفض»', 'At least a quarter hour (0.25) — to give no extra hours, tap «Reject»'), 'err'); inp.focus(); return; }
+        if (v > mx + 0.001) { toast(T(`أكتر من وقت الانصراف — الأقصى ${mx} ساعة`, `More than the time to the check-out — at most ${mx} h`), 'err'); inp.focus(); return; }
+        if (Math.abs(v - (+cur.otPend || 0)) > 0.001) h = v;
+      }
+    }
     let patch = Object.assign({}, cur, k === 'ok' ? { otDeptOk: me, otDeptRej: null } : { otDeptRej: me, otDeptOk: null, otPend: 0 });
+    if (h != null) Object.assign(patch, { otManual: true, ot: h, otEdit: { from: +cur.otPend || 0, to: h, by: me.by, byName: me.byName, at: me.at } });
     if (typeof computeAttRow === 'function') patch = computeAttRow(patch, w);
     await setAtt(d, w, patch);
     try { const t = byId('tasks', tid(d, wid)); if (t && t.status !== 'done') await Store.update('tasks', t.id, { status: 'done', doneAt: nowISO(), doneByName: me.byName, doneNote: k === 'ok' ? 'اتعتمدت' : 'اترفضت' }, { silent: true }); } catch (e) { /* ignore */ }
-    toast(k === 'ok' ? T('اتعتمدت — بقت سهر ومكمّلة على اعتماد السهر', 'Approved — it is overtime now and goes on to the overtime approval') : T('اترفضت — اتحسبت 8 ساعات بس', 'Rejected — only the 8 hours count'));
+    toast(k !== 'ok' ? T('اترفضت — اتحسبت 8 ساعات بس', 'Rejected — only the 8 hours count') : h != null ? T(`اتعتمدت ${h} ساعة — بقت سهر ومكمّلة على اعتماد السهر`, `Approved ${h} h — it is overtime now and goes on to the overtime approval`) : T('اتعتمدت — بقت سهر ومكمّلة على اعتماد السهر', 'Approved — it is overtime now and goes on to the overtime approval'));
     rerender();
   };
   function listHTML(rows) {
     if (!rows.length) return `<div class="empty small">${esc(T('مفيش ساعات زيادة مستنية', 'No extra hours waiting'))}</div>`;
-    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span><bdi>${esc(fmtTm(r.in || ''))}</bdi> ${en() ? '→' : '←'} <bdi>${esc(fmtTm(r.out || ''))}</bdi></span>${+r.late > 0 ? `<span class="badge warn">${esc(T(`متأخر ${r.late} دقيقة`, `${r.late} min late`))}</span>` : ''}<span>${esc(T(`محسوب ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`, `Counted ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`))}</span></div></div><div class="end" style="gap:6px;display:flex"><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
+    return `<div class="list">${rows.map(({ d, w, r }) => `<div class="item otp-it"><div class="main"><div class="title">${esc(w.name)} <span class="badge warn">${esc(T(`${r.otPend} ساعة زيادة`, `${r.otPend} h extra`))}</span></div><div class="meta"><span>${esc(fmtDate(d))}</span><span>${esc(deptName(w.deptId))}</span><span><bdi>${esc(fmtTm(r.in || ''))}</bdi> ${en() ? '→' : '←'} <bdi>${esc(fmtTm(r.out || ''))}</bdi></span>${+r.late > 0 ? `<span class="badge warn">${esc(T(`متأخر ${r.late} دقيقة`, `${r.late} min late`))}</span>` : ''}<span>${esc(T(`محسوب ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`, `Counted ${fmtTm(r.countFrom || '')} – ${fmtTm(r.countTo || '')}`))}</span></div></div><div class="end otp-end"><label class="otp-ed" title="${esc(T('تقدر تغيّر الساعات قبل ما تعتمد', 'You can change the hours before approving'))}"><input type="number" class="otp-h ltr" data-k="${esc(d + '|' + w.id)}" value="${esc(String(r.otPend))}" min="0.25" max="${esc(String(maxPend(w, r)))}" step="0.25" inputmode="decimal" aria-label="${esc(T('ساعات الزيادة', 'Extra hours'))}"><span>${esc(T('ساعة', 'h'))}</span></label><button type="button" class="btn sm p" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|ok')}">${icon('check')}${esc(T('اعتمد', 'Approve'))}</button><button type="button" class="btn sm ghost" data-action="otpDecide" data-arg="${esc(d + '|' + w.id + '|no')}">${esc(T('ارفض', 'Reject'))}</button></div></div>`).join('')}</div>`;
   }
   if (typeof EXTRA_VIEWS !== 'undefined') {
     VIEW_TITLES.otpend = 'ساعات زيادة';
@@ -49015,7 +49195,23 @@ function oxFlow(k) {
     return base.apply(this, arguments);
   })(Store.save);
   /* «my attendance» rows: show what counted when it differs from the punches */
-  document.head.insertAdjacentHTML('beforeend', `<style>.otp-it .meta span{white-space:nowrap}</style>`);
+  document.head.insertAdjacentHTML('beforeend', `<style>.otp-it .meta span{white-space:nowrap}.otp-it{flex-wrap:wrap;row-gap:8px}.otp-end{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.otp-ed{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted,#667)}.otp-ed input{width:72px;min-height:36px;padding:4px 6px;text-align:center;font-size:15px}</style>`);
+  /* v7.79: an edited number shows on the overtime approval (factory manager → accounts manager) — «edited from X to Y — who» */
+  const editTxt = e => T(`اتعدّلت من ${e.from} لـ ${e.to} ساعة — ${e.byName || ''}`, `Edited from ${e.from} to ${e.to} h — ${e.byName || ''}`);
+  window.nfOtEditTxt = editTxt;
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => {
+    try {
+      if (!S.route || S.route.view !== 'attendance') return; const v = document.getElementById('view'); if (!v) return;
+      const f = (S.ui && S.ui.filter && S.ui.filter.att) || {}; const date = f.date || todayISO(); const att = attendanceFor(date) || {};
+      v.querySelectorAll('.badge.warn[data-otb]').forEach(b => {
+        if (b.dataset.otedit) return; const tr = b.closest('tr') || b.closest('.item') || b.parentElement; if (!tr) return;
+        const ref = tr.querySelector('[data-action="attFlags"]') || tr.querySelector('[data-ot]') || tr.querySelector('[data-action="otApprove"]'); const oi = tr.querySelector('input.ot[id^="ot-"]');
+        const arg = (ref && (ref.dataset.arg || ref.dataset.ot)) || (oi ? `${date}:${oi.id.slice(3)}` : ''); const wid = String(arg).split(':')[1]; const r = wid && att[wid];
+        if (!r || !r.otEdit) return; b.dataset.otedit = '1';
+        b.insertAdjacentHTML('afterend', ` <span class="badge otp-edb" title="${esc(fmtDate(String(r.otEdit.at || '').slice(0, 10)))}">${icon('edit')}${esc(editTxt(r.otEdit))}</span>`);
+      });
+    } catch (e) { /* ignore */ }
+  });
 })();
 /* =====================================================================
    v7.53 — what you are typing survives a screen refresh (Mahmoud, 12 Oct, screen recording: typing in a task chat on the
@@ -51724,6 +51920,10 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
    window.nfSupportApi below). Ökoplan (a separate system, no shared sign-in) gets «Support» too — only the support-owner account(s)
    the server lists (Mahmoud's) see the tickets there; other admins get the «new problem» chat like everyone. A ticket keeps «urgent» (his work is stuck)
    and his manager's name.
+   v7.79 (brief support-fab-brief, go-ahead 16 Oct): «Support» is the top circle of the «+» (hidden source button .supdial; the owner's
+   count rides on it); inside support: «Screenshot» goes back to the page he came from, takes it, he draws and writes the comment, and
+   the picture + comment come back into the problem (window.nfSnapFor); «Screen video» — a computer records the screen with his voice
+   (as before), a phone opens two lines on how to record with the phone itself (iPhone / Android) and «Choose the video».
    ===================================================================== */
 (function () {
   if (window.__NF_SUP__) return; window.__NF_SUP__ = 1;
@@ -51736,6 +51936,7 @@ html.rdopen,html.rdopen body{overflow:hidden!important;overscroll-behavior:none}
   if (typeof ICONS === 'object' && !ICONS.refresh) ICONS.refresh = '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>';
   if (typeof ICONS === 'object' && !ICONS.vid) ICONS.vid = '<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="M16 10.5l5-3v9l-5-3z"/>';
   if (typeof ICONS === 'object' && !ICONS.screenrec) ICONS.screenrec = '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/><circle cx="12" cy="10.2" r="2.6" fill="currentColor" stroke="none"/>';
+  if (typeof ICONS === 'object' && !ICONS.gallery) ICONS.gallery = '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M20.5 16l-5-5-8 8.5"/>';
   if (typeof ICONS === 'object' && !ICONS.lifebuoy) ICONS.lifebuoy = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/><path d="M5.7 5.7l3.8 3.8M14.5 14.5l3.8 3.8M18.3 5.7l-3.8 3.8M9.5 14.5l-3.8 3.8"/>';
 
   const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
@@ -51993,7 +52194,7 @@ ${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}
   const ctxChips = (page, dev) => `<div class="supctx">${page && page.title ? `<span>${icon('link')}<span class="notr">${esc(page.title)}</span></span>` : ''}${dev ? `<span>${esc(devTxt(dev))}</span>` : ''}<span>${esc(sysName(sysKey()))}</span></div>`;
   const composer = (id, slot, action, ph, arg) => {
     const pc = device().kind === 'computer'; const scr = pc && canScreen();
-    return `<div class="supcomp"><textarea id="${id}" placeholder="${esc(ph)}">${esc(SUP.draft[id] || '')}</textarea>${thumbs(slot)}<div class="row"><button type="button" class="btn p" data-action="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${icon('send')}<span>${esc(L('ابعت', 'Send'))}</span></button><label class="btn ghost supatt">${icon('camera')}<span>${esc(L('صورة', 'Picture'))}</span><input type="file" accept="image/*" multiple data-supfile="${slot}" hidden></label><button type="button" class="btn ghost supvoice${REC.voice ? ' on' : ''}" data-supvoice="${slot}">${icon('mic')}<span>${esc(REC.voice ? L('وقّف', 'Stop') : L('صوت', 'Voice'))}</span></button>${scr ? `<button type="button" class="btn ghost" data-suprec="${slot}">${icon('screenrec')}<span>${esc(L('سجّل الشاشة', 'Record the screen'))}</span></button>` : `<label class="btn ghost supatt">${icon('vid')}<span>${esc(L('فيديو', 'Video'))}</span><input type="file" accept="video/*" data-supfile="${slot}" hidden></label>`}</div>${pc ? '' : `<div class="tiny muted suphint">${esc(L('عايز تصوّر الشاشة فيديو؟ سجّلها من الموبايل نفسه (تسجيل الشاشة) وارفعها من «فيديو».', 'Want a video of the screen? Record it with the phone\'s own screen recording and add it from «Video».'))}</div>`}</div>`;
+    return `<div class="supcomp"><textarea id="${id}" placeholder="${esc(ph)}">${esc(SUP.draft[id] || '')}</textarea>${thumbs(slot)}<div class="row"><button type="button" class="btn p" data-action="${action}"${arg ? ` data-arg="${esc(arg)}"` : ''}>${icon('send')}<span>${esc(L('ابعت', 'Send'))}</span></button>${typeof window.nfSnapFor === 'function' ? `<button type="button" class="btn ghost supsnap" data-supsnap="${slot}">${icon('camera')}<span>${esc(L('صوّر الشاشة', 'Screenshot'))}</span></button>` : ''}<label class="btn ghost supatt">${icon('gallery')}<span>${esc(L('صورة', 'Picture'))}</span><input type="file" accept="image/*" multiple data-supfile="${slot}" hidden></label><button type="button" class="btn ghost supvoice${REC.voice ? ' on' : ''}" data-supvoice="${slot}">${icon('mic')}<span>${esc(REC.voice ? L('وقّف', 'Stop') : L('صوت', 'Voice'))}</span></button>${scr ? `<button type="button" class="btn ghost" data-suprec="${slot}">${icon('screenrec')}<span>${esc(L('فيديو للشاشة', 'Screen video'))}</span></button>` : `<button type="button" class="btn ghost" data-supvid="${slot}">${icon('vid')}<span>${esc(L('فيديو للشاشة', 'Screen video'))}</span></button>`}</div></div>`;
   };
   function chatHTML() {
     if (!SUP.chat) newChat(); const c = SUP.chat;
@@ -52191,11 +52392,48 @@ ${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}
     const g = e.target.closest && e.target.closest('[data-supgo]'); if (g) { e.preventDefault(); go(); return; }
     const v = e.target.closest && e.target.closest('[data-supvoice]'); if (v) { e.preventDefault(); voiceToggle(v.getAttribute('data-supvoice')); return; }
     const rc = e.target.closest && e.target.closest('[data-suprec]'); if (rc) { e.preventDefault(); screenStart(rc.getAttribute('data-suprec'), location.hash); return; }
+    const sn = e.target.closest && e.target.closest('[data-supsnap]'); if (sn) { e.preventDefault(); snapInto(sn.getAttribute('data-supsnap')); return; }
+    const sv = e.target.closest && e.target.closest('[data-supvid]'); if (sv) { e.preventDefault(); vidHelp(sv.getAttribute('data-supvid')); return; }
     if (e.target.closest && e.target.closest('[data-suprecstop]')) { e.preventDefault(); if (REC.screen) REC.screen.stop(); return; }
     if (e.target.closest && e.target.closest('[data-supreccancel]')) { e.preventDefault(); if (REC.screen) REC.screen.cancel(); return; }
     const d = e.target.closest && e.target.closest('[data-supdel]'); if (d) { e.preventDefault(); const [slot, k] = d.getAttribute('data-supdel').split(':'); SUP.files[slot] = (SUP.files[slot] || []).filter(x => x.k !== k); render(false); return; }
     if (e.target.closest && e.target.closest('[data-aifab]')) setTimeout(fabBtn, 30);
   });
+  /* v7.79: «Screenshot» inside support — back to the page he came from, the picture + the drawing + the comment come back here */
+  const DRAFT_OF = { chat: 'supq', reply: 'supr' };
+  function snapInto(slot) {
+    if (typeof window.nfSnapFor !== 'function') return;
+    const did = DRAFT_OF[slot]; const ta = did && document.getElementById(did); if (ta) SUP.draft[did] = ta.value;
+    const back = location.hash || '#/support';
+    const target = (slot === 'chat' && SUP.chat && SUP.chat.page && SUP.chat.page.hash) || SUP.lastHash || (SUP.last && SUP.last.hash) || '#/home';
+    window.nfSnapFor(target, async res => {
+      if (location.hash !== back) { location.hash = back; await new Promise(r => setTimeout(r, 500)); } else render(false);
+      if (!res || !res.blob) return;
+      const note = String(res.note || '').trim(); if (note && did) { const cur = String(SUP.draft[did] || '').trim(); SUP.draft[did] = cur ? cur + '\n' + note : note; }
+      await addBlob(res.blob, slot, { kind: 'image' });
+    });
+  }
+  /* v7.79: «Screen video» on a phone — the browser cannot record the screen there, so: how to record with the phone itself, then choose it */
+  function vidHelp(slot) {
+    const k = device().kind;
+    const steps = k === 'iphone' ? [L('افتح «مركز التحكم» (اسحب من فوق على اليمين) ودوس زرار التسجيل ⏺.', 'Open «Control Center» (swipe down from the top right) and tap the record button ⏺.'), L('ارجع للسيستم واعمل الخطوات اللي فيها المشكلة.', 'Go back to the system and do the steps where the problem happens.'), L('وقّف التسجيل من الشريط الأحمر فوق.', 'Stop the recording from the red bar at the top.'), L('ارجع هنا ودوس «اختار الفيديو».', 'Come back here and tap «Choose the video».')]
+      : k === 'android' ? [L('اسحب «الإعدادات السريعة» من فوق ودوس «مسجّل الشاشة».', 'Pull down «Quick settings» from the top and tap «Screen recorder».'), L('ارجع للسيستم واعمل الخطوات اللي فيها المشكلة.', 'Go back to the system and do the steps where the problem happens.'), L('وقّف التسجيل من الإشعار.', 'Stop the recording from the notification.'), L('ارجع هنا ودوس «اختار الفيديو».', 'Come back here and tap «Choose the video».')]
+      : [L('سجّل الشاشة بأي برنامج على الجهاز.', 'Record the screen with any app on the computer.'), L('ارجع هنا ودوس «اختار الفيديو».', 'Come back here and tap «Choose the video».')];
+    const tip = k === 'iphone' ? L('مش لاقي زرار التسجيل؟ الإعدادات ← مركز التحكم ← ضيف «تسجيل الشاشة».', 'No record button? Settings ← Control Center ← add «Screen Recording».') : k === 'android' ? L('مش لاقيه؟ عدّل «الإعدادات السريعة» وضيف «مسجّل الشاشة».', 'Not there? Edit «Quick settings» and add «Screen recorder».') : '';
+    openModal({ title: L('فيديو للشاشة', 'Screen video'), cls: 'supvidm', body: `<ol class="supvsteps">${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>${tip ? `<p class="tiny muted">${esc(tip)}</p>` : ''}<p class="tiny muted">${esc(L('لحد دقيقتين.', 'Up to two minutes.'))}</p>`,
+      footer: `<label class="btn p supatt">${icon('vid')}<span>${esc(L('اختار الفيديو', 'Choose the video'))}</span><input type="file" accept="video/*" data-supfile="${esc(slot)}" hidden></label><button type="button" class="btn" data-action="closemodal">${esc(L('رجوع', 'Back'))}</button>` });
+  }
+  document.addEventListener('change', e => { const i = e.target; if (i && i.matches && i.matches('#mform input[data-supfile]') && typeof closeModal === 'function') setTimeout(closeModal, 0); });
+  /* v7.79: «Support» in the «+» — the hidden source button the dial reads (the owner's count of new problems rides on it) */
+  function dialSrc() {
+    let b = document.querySelector('.supdial'); const want = canUse() && !(S.route && S.route.view === 'support');
+    if (!b) { if (!canUse()) return; b = document.createElement('button'); b.type = 'button'; b.className = 'supdial'; b.tabIndex = -1; b.addEventListener('click', () => go()); document.body.appendChild(b); }
+    b.setAttribute('aria-label', L('الدعم الفني', 'Support'));
+    const n = isOwner() ? navCount() : 0; const html = n ? `<span class="n">${n}</span>` : '';
+    if (b.innerHTML !== html) b.innerHTML = html;
+    const d = want ? '' : 'none'; if (b.style.display !== d) b.style.display = d;
+  }
+  RENDER_HOOKS.push(() => { try { dialSrc(); } catch (e) { /* ignore */ } });
   function fabBtn() {
     const p = document.querySelector('#aipanel'); if (!p || !canUse()) return; const h = p.querySelector('.aih'); if (!h || h.querySelector('[data-supgo]')) return;
     const n = isOwner() ? navCount() : 0;
@@ -52221,6 +52459,8 @@ ${facts ? 'بيانات الموظف (ليه هو بس):\n' + facts + '\n' : ''}
 .supctx{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.supctx>span{display:inline-flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.supctx svg{width:13px;height:13px}
 .supcomp textarea{display:block;width:100%;min-height:86px;resize:vertical;font:inherit;font-size:15px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-sizing:border-box}
 .supcomp .row,.supacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.supvsteps{margin:0 0 10px;padding-inline-start:20px;display:grid;gap:8px;font-size:14.5px;line-height:1.5}.supvidm .mf .supatt{display:inline-flex;align-items:center;gap:6px}
+@media (max-width:520px){.supcomp .row .btn.ghost{padding-inline:10px}.supcomp .row .btn.p{flex:1 0 100%;justify-content:center}}
 .supatt{cursor:pointer}.supmic.on{background:#e5484d!important;color:#fff!important;border-color:#e5484d!important}
 .supthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.supthumbs .th{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}.supthumbs .th.busy{opacity:.55}
 .supthumbs img{width:100%;height:100%;object-fit:cover;display:block}.supthumbs .th button{position:absolute;top:3px;inset-inline-end:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer}.supthumbs .th button svg{width:13px;height:13px}
@@ -54206,4 +54446,1719 @@ ${sg ? `اقتراح البوت قبل كده: ${sg.cause} — ${sg.fix}\n` : ''
     } catch (e) { /* ignore */ }
   });
   document.head.insertAdjacentHTML('beforeend', '<style>.lvb{margin:0 0 10px}.lvb .small{margin-top:2px}.lv-it .meta span{white-space:nowrap}.lvbtn{color:var(--crit-ink,#c4302b)}</style>');
+})();
+/* =====================================================================
+   v7.79 (inbox #18, brief claude/digital-twin-90-brief.md): the digital twin, phase 1. All three Ninety systems.
+   · A light usage log: the page and the time on it, the buttons, whether a window was saved or closed, which records were
+     saved. Sent once every 20 seconds (or 40 events) to nf_ev_log; the server stamps the person from the login. Off on the
+     kiosk, while the owner views as someone, and when the person turns «log my use» off (this device).
+   · Every night the server (Edge nf-learn) reads the last 90 days and writes nf_learn: office (the owner only) and
+     p:<person> (that person only, the owner answer).
+   · #/nflearn «What the system learned»: the owner sees the suggestions with their numbers and decides Apply / Try a month /
+     No (nf_learn_decide), the follow-up of what he accepted, the work patterns and the usage totals with no names;
+     everyone sees «My use» and the two switches.
+   · «Your shortcuts» on top of the home page: the 5 pages the person opens most (server, or this device until the first
+     night), with «Why do I see this?» and a switch.
+   Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_LEARN__) return; window.__NF_LEARN__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || typeof NAV === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const K_LOG = 'nf.learn', K_UI = 'nf.learn.ui', K_SEEN = 'nf.learn.seen', K_TOP = 'nf.learn.top';
+  const lsg = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lss = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+  const viewing = () => typeof isViewing === 'function' && isViewing();
+  const hosted = () => !!(S.sb && typeof S.sb.rpc === 'function' && S.sbUser);
+  const logOn = () => lsg(K_LOG) !== 'off';
+  const uiOn = () => lsg(K_UI) !== 'off';
+  /* v7.79 (Mahmoud 16 Oct, PIN on «before → after»): in Ökoplan Landscaping the twin is for Mahmoud and Mohamed Sabek only
+     (settings.nfTwinViewers, default the worker stu_sabek; the owner always) — nobody else sees anything of it and nothing of
+     theirs is logged; settings.nfTwin.enabled false turns the twin off there. The other systems are as before. */
+  const isStuSys = () => (typeof STU_ON !== 'undefined' && !!STU_ON);
+  const twinVIP = () => { if (!S.session || viewing()) return false; if (isAdmin()) return true; const v = (S.settings && Array.isArray(S.settings.nfTwinViewers)) ? S.settings.nfTwinViewers.map(String) : ['stu_sabek']; const ids = [S.session.workerId, String(S.session.personId || S.session.id || '').replace(/^w:/, '')].filter(Boolean).map(String); return ids.some(x => v.includes(x) || v.includes('w:' + x)); };
+  const twinOn = () => !(S.settings && S.settings.nfTwin && S.settings.nfTwin.enabled === false);
+  window.nfTwinOk = () => twinOn() && (!isStuSys() || twinVIP());   /* v7.79 AI module: the owner's twin switch (Settings → AI) applies to the three systems */
+  window.nfTwinBoss = () => twinOn() && (isStuSys() ? twinVIP() : (!!S.session && isAdmin() && !viewing()));
+  window.nfTwinOn = twinOn;
+  window.nfTwinVIP = twinVIP;
+  const person = () => !!S.session && role() !== 'kiosk' && !viewing() && window.nfTwinOk();
+  const canLog = () => hosted() && person() && logOn();
+  const isOwner = () => window.nfTwinBoss();
+  const device = () => { const ua = navigator.userAgent || ''; if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios'; if (/Android/i.test(ua)) return 'android'; return window.innerWidth < 760 ? 'mobile' : 'desktop'; };
+  const viewName = () => (S.route && S.route.view) || '';
+  const pageName = () => { const v = viewName(); return v ? v + (S.route && S.route.id ? '/*' : '') : ''; };
+
+  /* ---------------- the queue ---------------- */
+  const Q = []; let busy = false;
+  function push(kind, name, extra) {
+    if (!canLog() || !name) return;
+    Q.push(Object.assign({ at: new Date().toISOString(), kind, name: String(name).slice(0, 80), device: device() }, extra || {}));
+    if (Q.length > 400) Q.splice(0, Q.length - 400);
+    if (Q.length >= 40) flush();
+  }
+  async function flush() {
+    if (busy || !Q.length || !hosted()) return; busy = true;
+    const batch = Q.splice(0, 200);
+    try { const r = await S.sb.rpc('nf_ev_log', { p_rows: batch }); if (r && r.error) throw r.error; }
+    catch (e) { if (logOn()) Q.unshift(...batch.slice(-200)); }
+    finally { busy = false; }
+  }
+  setInterval(flush, 20000);
+
+  /* ---------------- pages ---------------- */
+  let cur = null;
+  function topBump(v) { if (!uiOn() || !v || /\//.test(v) || !person()) return; let m = {}; try { m = JSON.parse(lsg(K_TOP) || '{}') || {}; } catch (e) { m = {}; } const key = String(S.session.id || ''); const mine = m[key] || (m[key] = {}); mine[v] = (mine[v] || 0) + 1; lss(K_TOP, JSON.stringify(m)); }
+  function navStart() { const v = pageName(); if (!v || !person() || document.hidden) { cur = null; return; } cur = { name: v, t: Date.now(), who: S.session.id, acts: 0 }; topBump(v); }
+  /* «left quickly» = under 4 seconds, nothing pressed, and not just opening one of its own items */
+  function navEnd(next) { if (!cur) return; const c = cur; cur = null; if (!S.session || S.session.id !== c.who) return; const d = Date.now() - c.t; const child = !!next && next.split('/')[0] === c.name.split('/')[0]; push('nav', c.name, { dur_ms: Math.min(d, 3600000), meta: { b: !!next && d < 4000 && !c.acts && !child } }); }
+  window.addEventListener('hashchange', () => { navEnd(pageName() || ''); setTimeout(navStart, 0); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { navEnd(); flush(); } else navStart(); });
+  window.addEventListener('pagehide', () => { navEnd(); flush(); });
+
+  /* ---------------- buttons ---------------- */
+  const SKIP_ACT = new Set(['navgo', 'openside', 'closeside', 'closemodal', 'go', 'logout']);
+  let lastAct = null;
+  document.addEventListener('click', ev => {
+    const a = ev.target && ev.target.closest ? ev.target.closest('[data-action]') : null; if (!a) return;
+    const act = a.dataset.action; if (!act || SKIP_ACT.has(act) || /^nfl/.test(act)) return;
+    const raw = a.matches('button,.btn') ? (a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+    lastAct = { name: act, at: Date.now(), label: /\d/.test(raw) ? '' : raw }; if (cur) cur.acts++;
+    push('act', act, { ref: viewName() || null });
+  }, true);
+
+  /* ---------------- windows (opened → saved or left) ---------------- */
+  let mod = null;
+  function modEnd(ok) { if (!mod) return; const m = mod; mod = null; push('modal', m.name, { dur_ms: Math.min(Date.now() - m.t, 3600000), meta: Object.assign({ ok: !!ok }, m.label ? { label: m.label } : {}) }); }
+  if (typeof openModal === 'function') openModal = (base => function (o) {
+    if (mod) modEnd(mod.ok || mod.sub);
+    try {
+      if (o && typeof o.onSubmit === 'function' && !o.__nfl) {
+        const sub = o.onSubmit; o.__nfl = 1;
+        o.onSubmit = async function () { const m = mod && mod.o === o ? mod : null; if (m) m.sub = true; try { const r = await sub.apply(this, arguments); if (m) { m.sub = false; if (r !== false) m.ok = true; } return r; } catch (e) { if (m) m.sub = false; throw e; } };
+      }
+    } catch (e) { /* ignore */ }
+    const la = lastAct && Date.now() - lastAct.at < 1500 ? lastAct : null;
+    mod = { o, t: Date.now(), name: la ? la.name : 'modal:' + viewName(), label: la ? la.label : '', ok: false, sub: false };
+    return base.apply(this, arguments);
+  })(openModal);
+  if (typeof closeModal === 'function') closeModal = (base => function () { if (mod) modEnd(mod.ok); return base.apply(this, arguments); })(closeModal);
+
+  /* ---------------- records saved by a person (not the automatic ones) ---------------- */
+  const SKIP_COL = new Set(['changes', 'pushsubs', 'fleetday', 'driverpos', 'presence', 'trash', 'dict', 'stage', 'backups']);
+  const lastSave = {};
+  const userish = () => !!mod || (lastAct && Date.now() - lastAct.at < 10000);
+  const sv = (col, op) => { if (!col || SKIP_COL.has(col) || !userish()) return; const k = col + '|' + op; const t = Date.now(); if (lastSave[k] && t - lastSave[k] < 3000) return; lastSave[k] = t; push('save', col, { meta: { op } }); };
+  if (typeof Store !== 'undefined') {
+    Store.save = (base => function (col, doc, opts) { try { sv(col, 'save'); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(Store.save);
+    Store.update = (base => function (col, id, patch, opts) { try { sv(col, 'update'); } catch (e) { /* ignore */ } return base.apply(this, arguments); })(Store.update);
+  }
+
+  /* ---------------- what the server learned ---------------- */
+  const LD = { at: 0, office: null, dec: null, me: null, upd: null, err: '', loading: false, meAt: 0, rows: {} };
+  async function load(meOnly) {
+    if (!hosted() || LD.loading) return; LD.loading = true;
+    try {
+      let q = S.sb.from('nf_learn').select('id,data,updated_at'); if (meOnly) q = q.or('id.like.p:%,id.eq.typ');
+      const { data, error } = await q; if (error) throw error;
+      const rows = data || []; LD.me = null;
+      rows.forEach(r => { LD.rows[r.id] = r.data; if (r.id === 'office') { LD.office = r.data; LD.upd = r.updated_at; } else if (r.id === 'decisions') LD.dec = r.data || {}; else if (String(r.id).startsWith('p:')) LD.me = r.data; });
+      if (!meOnly) LD.at = Date.now(); LD.meAt = Date.now(); LD.err = '';
+    } catch (e) { LD.err = String((e && e.message) || e); }
+    finally { LD.loading = false; rerender(); }
+  }
+  window.nfLearn = { flush, queue: Q, load, data: LD, push };
+
+  const GATES = { comp: ['التكوين', 'Composition'], light: ['الإضاءة', 'Concept lighting'], detail: ['التفاصيل', 'Detailing'], post: ['البوست النهائي', 'Final post'] };
+  const navOf = v => NAV.find(n => n && n.id === v);
+  const viewLabel = v0 => { const det = /\/\*$/.test(String(v0 || '')); const v = String(v0 || '').replace(/\/\*$/, ''); const n = navOf(v); const b = (n && n.label) || (typeof VIEW_TITLES !== 'undefined' && VIEW_TITLES[v]) || v; return det ? b + L(' — التفاصيل', ' — details') : b; };
+  function tokName(k, id) {
+    const o = LD.office || {}; const nm = o.names || {};
+    if (k === 'd') return typeof deptName === 'function' ? deptName(id) : ((nm.d || {})[id] || id);
+    if (k === 'v') return viewLabel(id);
+    if (k === 'g') return (GATES[id] || [id, id])[en() ? 1 : 0];
+    if (k === 's') { const s = typeof byId === 'function' ? byId('cstages', id) : null; return (s && s.name) || (nm.s || {})[id] || id; }
+    if (k === 'p') return (en() ? (nm.pEn || {})[id] : (nm.p || {})[id]) || id;
+    return id;
+  }
+  const rich = s => esc(String(s || '')).replace(/\{\{([dvgsp]):([^}]{1,80})\}\}/g, (m, k, id) => `<b class="nfl-tk">${esc(tokName(k, id.replace(/&amp;/g, '&')))}</b>`);
+  const txt = s => rich(en() ? (s.en || s.ar) : (s.ar || s.en));
+  const AREA = { ops: ['تشغيل', 'Operations'], auto: ['يتعمل لوحده', 'Automation'], ui: ['الواجهة', 'Interface'] };
+  const areaBadge = a => `<span class="badge nfl-a-${esc(a)}">${esc((AREA[a] || [a, a])[en() ? 1 : 0])}</span>`;
+  const UNIT = { tasks: ['مهام', 'tasks'], orders: ['أوامر', 'orders'], days: ['يوم', 'days'], hours: ['ساعة', 'hours'], requests: ['طلبات', 'requests'], shots: ['لقطات', 'shots'], snags: ['ملاحظات', 'snags'], '%': ['%', '%'], 'tasks/30d': ['مهام في 30 يوم', 'tasks in 30 days'], 'trips/30d': ['مشاوير في 30 يوم', 'trips in 30 days'] };
+  const unit = u => (UNIT[u] || [u, u])[en() ? 1 : 0];
+  const decided = id => (LD.dec || {})[id] || null;
+
+  /* ---------------- the owner decides ---------------- */
+  ACTIONS.nflDecide = async arg => {
+    const i = String(arg || '').lastIndexOf('|'); const sid = String(arg).slice(0, i), v = String(arg).slice(i + 1);
+    if (!isOwner() || !isAdmin() || !hosted() || !sid || !['apply', 'try', 'no', 'reset'].includes(v)) return;   /* v7.79: deciding stays with the owner (Sabek sees, Mahmoud decides) */
+    try { const { data, error } = await S.sb.rpc('nf_learn_decide', { p_sid: sid, p_v: v }); if (error) throw error; LD.dec = data || {}; }
+    catch (e) { toast(L('ماتسجّلش — جرّب تاني', 'Not saved — try again'), 'err'); return; }
+    toast(v === 'apply' ? L('اتسجّل «نطبّقه» — هيتبني في تحديث جاي، والسيستم هيقيس أثره', 'Saved «Apply» — it will be built in a coming update, and the system will measure its effect') : v === 'try' ? L('اتسجّل «نجرّبه شهر» — بعد 30 يوم هتشوف الرقم اتحسّن ولا لأ', 'Saved «Try a month» — after 30 days you will see whether the number improved') : v === 'no' ? L('تمام — مش هيتقال تاني إلا لو الرقم بقى الضعف', 'OK — it will not come back unless the number doubles') : L('رجع زي الأول', 'Back as it was'));
+    rerender();
+  };
+  ACTIONS.nflWhy = sid => {
+    const o = LD.office || {}; const s = (o.suggestions || []).find(x => x.id === sid) || (o.followups || []).find(x => x.id === sid) || decided(sid); if (!s) return;
+    const ev = s.evidence || {}; const m = s.metric || s.base || {};
+    const rows = Object.entries(ev).filter(([k, v]) => v != null && typeof v !== 'object' && !['dept', 'from', 'to', 'status', 'stage', 'gate', 'name', 'label', 'title'].includes(k)).map(([k, v]) => `<div class="nfl-ev"><span>${esc(EVK(k))}</span><b>${esc(String(v))}</b></div>`).join('');
+    openModal({ title: L('ليه بشوف ده؟', 'Why do I see this?'), footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('تمام', 'OK'))}</button>`, body: `<div class="nfl-why">
+      <p style="margin:0 0 8px">${txt(s)}</p>
+      <p class="small muted" style="margin:0 0 8px">${esc(L('السيستم طلّع ده لوحده من الشغل المتسجّل في آخر 90 يوم — مفيش تخمين: دي الأرقام اللي بنى عليها.', 'The system found this by itself in the work recorded over the last 90 days — no guessing: these are the numbers behind it.'))}</p>
+      ${m && m.v != null ? `<div class="nfl-ev"><span>${esc(L('الرقم اللي بنقيسه', 'The number we measure'))}</span><b>${esc(String(m.v))} ${esc(unit(m.unit || ''))}</b></div>` : ''}${rows}
+      <p class="tiny muted" style="margin:10px 0 0">${esc(L('ولا حاجة بتتعمل لوحدها من غير موافقتك.', 'Nothing runs by itself without your approval.'))}</p></div>` });
+  };
+  const EVK = k => ({ stale: L('مهام ساكنة', 'still tasks'), open: L('مفتوح', 'open'), refs: L('عدد الأوامر/المشاريع', 'orders / projects'), n: L('العدد', 'count'), n30: L('في آخر 30 يوم', 'last 30 days'), days30: L('أيام مختلفة', 'different days'), stuck: L('متأخر عن المعتاد', 'past the usual'), med: L('الوسيط', 'median'), lim: L('الحد', 'limit'), waiting: L('مستنيين دلوقتي', 'waiting now'), lateNow: L('عدّت ميعادها', 'past due'), resched: L('اتأجّلت', 'rescheduled'), all: L('كل الأوامر', 'all orders'), medH: L('وسيط الساعات', 'median hours'), step: L('الخطوة', 'step'), backs2: L('رجعت مرتين+', 'back twice+'), backsPct: L('النسبة', 'share'), rej: L('اترفضت', 'rejected'), rejPct: L('نسبة الرفض', 'rejected share'), old: L('أقدم من 14 يوم', 'older than 14 days'), saved: L('اتحفظت', 'saved'), people: L('أشخاص', 'people'), bounce: L('اتقفلت بسرعة', 'left quickly') }[k] || k);
+
+  /* ---------------- switches ---------------- */
+  ACTIONS.nflLog = () => { const on = logOn(); lss(K_LOG, on ? 'off' : null); if (on) Q.length = 0; else navStart(); toast(on ? L('اتقفل — مش هيتسجّل استخدامك على الجهاز ده', 'Off — your use is no longer logged on this device') : L('اتفتح', 'On')); rerender(); };
+  ACTIONS.nflUi = () => { const on = uiOn(); lss(K_UI, on ? 'off' : null); toast(on ? L('اتقفل — الرئيسية رجعت زي ما كانت', 'Off — the home page is back as it was') : L('اتفتح', 'On')); rerender(); };
+  /* v7.79: the morning report (server, nf_learn morning_off) — on unless the person turns it off */
+  const MOR = { v: null, busy: false };
+  const morningOn = () => { if (MOR.v === null && !MOR.busy && hosted()) { MOR.busy = true; Promise.resolve(S.sb.rpc('nf_morning_get')).then(r => { MOR.v = !(r && !r.error && r.data === true); }).catch(() => { MOR.v = true; }).finally(() => { MOR.busy = false; rerender(); }); } return MOR.v !== false; };
+  window.nfMorningOn = morningOn;
+  ACTIONS.nflMorning = async () => { const on = morningOn(); try { const r = await S.sb.rpc('nf_morning_set', { p_off: on }); if (r && r.error) throw r.error; MOR.v = !on; toast(on ? L('اتقفل — مش هيوصلك تقرير الصبح', 'Off — no morning report for you') : L('اتفتح', 'On')); } catch (e) { toast(L('ما اتحفظش — جرّب تاني', 'Not saved — try again'), 'err'); } rerender(); };
+  ACTIONS.nflSeen = arg => { lss(K_SEEN, '1'); if (arg === 'go') go('nflearn'); else rerender(); };
+  ACTIONS.nflWhyShort = () => openModal({ title: L('ليه بشوف ده؟', 'Why do I see this?'), footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('تمام', 'OK'))}</button> <a class="btn ghost" href="#/nflearn">${esc(L('خصّص واجهتي', 'Tailor my screens'))}</a>`, body: `<p style="margin:0">${esc(L('دي أكتر الصفحات اللي إنت بتفتحها، عشان توصلها بدوسة. السيستم بيرتّبها لوحده من استخدامك، وإنت بس اللي بتشوفها. تقدر تقفلها من «ما تعلّمه السيستم».', 'These are the pages you open most, one tap away. The system orders them from your own use, and only you see them. You can turn them off from «What the system learned».'))}</p>` });
+
+  /* ---------------- shortcuts on the home page ---------------- */
+  function shortcuts() {
+    if (!person()) return [];
+    const home = typeof homeView === 'function' ? homeView() : 'dashboard';
+    const ok = v => v && v !== home && v !== 'nflearn' && v !== 'ninety' && navOf(v) && (typeof canSee !== 'function' || canSee(v));
+    let top = (LD.me && Array.isArray(LD.me.top) ? LD.me.top : []).filter(ok);
+    if (top.length < 2) { let m = {}; try { m = JSON.parse(lsg(K_TOP) || '{}') || {}; } catch (e) { m = {}; } const mine = m[String(S.session.id || '')] || {}; top = Object.entries(mine).filter(([v, n]) => n >= 3 && ok(v)).sort((a, b) => b[1] - a[1]).map(([v]) => v); }
+    return top.slice(0, 5);
+  }
+  const isHome = () => { const v = viewName(); const home = typeof homeView === 'function' ? homeView() : 'dashboard'; return v === home || v === 'ninety'; };
+  function bar() {
+    const sc = uiOn() ? shortcuts() : [];
+    const intro = person() && !lsg(K_SEEN) ? `<div class="banner nfl-intro" id="nfl-intro">${icon('info')}<span>${esc(L('جديد: السيستم بيسجّل استخدامك (الصفحات والأزرار) عشان يسهّل عليك الواجهة بس — مش لتقييمك. تقدر تقفله في أي وقت.', 'New: the system logs your use (pages and buttons) only to make your screens easier — not to rate you. You can turn it off any time.'))}</span><span class="nfl-intro-b"><button type="button" class="btn sm" data-action="nflSeen">${esc(L('تمام', 'OK'))}</button><button type="button" class="btn sm ghost" data-action="nflSeen" data-arg="go">${esc(L('إعداداتي', 'My settings'))}</button></span></div>` : '';
+    const chips = sc.length >= 2 ? `<div class="nfsc" id="nfsc"><span class="nfsc-h">${esc(L('اختصاراتك', 'Your shortcuts'))}</span>${sc.map(v => `<a class="nfsc-i" href="#/${esc(v)}">${icon((navOf(v) || {}).icon || 'star')}<span>${esc(viewLabel(v))}</span></a>`).join('')}<button type="button" class="nfsc-w" data-action="nflWhyShort" aria-label="${esc(L('ليه بشوف ده؟', 'Why do I see this?'))}" title="${esc(L('ليه بشوف ده؟', 'Why do I see this?'))}">?</button></div>` : '';
+    return intro + chips;
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    const vw = document.getElementById('view'); if (!vw) return;
+    const who = S.session ? String(S.session.id || '') : ''; if (LD.who !== who) { LD.who = who; LD.office = null; LD.dec = null; LD.me = null; LD.upd = null; LD.at = 0; LD.meAt = 0; LD.rows = {}; }
+    if (!cur && person() && !document.hidden) navStart();
+    if (person() && hosted() && !LD.meAt) { LD.meAt = 1; setTimeout(() => load(!isOwner()), 2500); }
+    const old = document.getElementById('nfl-top'); if (old) old.remove();
+    if (!person() || !isHome()) return;
+    const h = bar(); if (!h) return;
+    vw.insertAdjacentHTML('afterbegin', `<div id="nfl-top">${h}</div>`);
+  });
+
+  /* ---------------- the page ---------------- */
+  VIEW_TITLES.nflearn = 'ما تعلّمه السيستم';
+  (() => { if (NAV.some(n => n.id === 'nflearn')) return; const i = NAV.findIndex(n => n.id === 'settings'); const entry = { id: 'nflearn', label: 'ما تعلّمه السيستم', icon: 'star', count: () => (isOwner() && LD.office ? (LD.office.suggestions || []).filter(s => !decided(s.id)).length : 0), countCls: 'warn' }; if (i >= 0) NAV.splice(i, 0, entry); else NAV.push(entry); })();
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'nflearn') return !!S.session && role() !== 'kiosk' && window.nfTwinOk(); return base.apply(this, arguments); })(canSee);
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.nflearn = () => ({ title: L('ما تعلّمه السيستم', 'What the system learned'), sub: L('كل ليلة بيقرا الشغل والاستخدام، ويطلّع الأنماط والمقترحات بأرقامها', 'Every night it reads the work and the use, and brings out the patterns and suggestions with their numbers') });
+
+  const sw = (on, act, a, b, note) => `<div class="item nfl-sw"><div class="main"><div class="title">${esc(a)}</div><div class="meta"><span>${esc(note)}</span></div></div><div class="end"><button type="button" class="btn sm ${on ? 'p' : 'ghost'}" data-action="${act}" aria-pressed="${on}">${esc(on ? L('شغّال', 'On') : L('مقفول', 'Off'))}</button></div></div>`;
+  const bars = (arr, label, val, maxN) => { const mx = Math.max(1, ...arr.map(x => +val(x) || 0)); return arr.slice(0, maxN || 6).map(x => `<div class="nfl-bar"><span class="nfl-bl">${label(x)}</span><span class="nfl-bt"><i style="width:${Math.round(((+val(x) || 0) / mx) * 100)}%"></i></span><b>${esc(String(val(x)))}</b></div>`).join(''); };
+  const sec = (t, inner, sub) => inner ? `<div class="card nfl-sec"><h3 class="nfl-h">${esc(t)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>` : '';
+  const hrs = a => (a || []).map(h => fmtTm(String(h).padStart(2, '0') + ':00')).join(L('، ', ', '));
+
+  function vSuggest(o) {
+    const list0 = (o.suggestions || []).filter(s => !decided(s.id) || ['no'].includes(decided(s.id).v) && s.again);
+    if (!list0.length) return `<div class="empty small">${esc(L('مفيش مقترحات جديدة دلوقتي — السيستم بيطلّعها لما الرقم يبقى واضح (مش من حالة واحدة).', 'No new suggestions now — the system brings them out when the number is clear (never from a single case).'))}</div>`;
+    return `<div class="list">${list0.map(s => `<div class="item nfl-s"><div class="main"><div class="title">${areaBadge(s.area)}${s.again ? ` <span class="badge warn">${esc(L('رجع تاني — الرقم بقى الضعف', 'Back — the number doubled'))}</span>` : ''}</div><div class="nfl-t">${txt(s)}</div></div>
+      ${isAdmin() ? `<div class="end nfl-btns"><button type="button" class="btn sm p" data-action="nflDecide" data-arg="${esc(s.id)}|apply">${esc(L('نطبّقه', 'Apply'))}</button><button type="button" class="btn sm" data-action="nflDecide" data-arg="${esc(s.id)}|try">${esc(L('نجرّبه شهر', 'Try a month'))}</button><button type="button" class="btn sm ghost" data-action="nflDecide" data-arg="${esc(s.id)}|no">${esc(L('لا', 'No'))}</button>` : `<div class="end nfl-btns">`}<button type="button" class="btn sm ghost nfl-q" data-action="nflWhy" data-arg="${esc(s.id)}">${esc(L('ليه بشوف ده؟', 'Why do I see this?'))}</button></div></div>`).join('')}</div>`;
+  }
+  function vFollow(o) {
+    const st = { measuring: ['', ''], better: ['ok', ''], same: ['', ''], worse: ['crit', ''] };
+    const f = (o.followups || []); const rej = Object.entries(LD.dec || {}).filter(([, d]) => d && d.v === 'no').slice(0, 10);
+    if (!f.length && !rej.length) return '';
+    const fl = f.map(x => { const left = Math.max(0, 30 - (x.since || 0)); const s = x.state === 'measuring' ? L(`بنقيس — النتيجة بعد ${left} يوم`, `Measuring — result in ${left} days`) : x.state === 'better' ? L(`اتحسّن: من ${x.base} لـ ${x.now} ${unit(x.unit)}`, `Improved: from ${x.base} to ${x.now} ${unit(x.unit)}`) : x.state === 'worse' ? L(`بقى أسوأ: من ${x.base} لـ ${x.now} ${unit(x.unit)}`, `Got worse: from ${x.base} to ${x.now} ${unit(x.unit)}`) : L(`زي ما هو: ${x.base} ← ${x.now} ${unit(x.unit)}`, `About the same: ${x.base} → ${x.now} ${unit(x.unit)}`);
+      return `<div class="item"><div class="main"><div class="title"><span class="badge">${esc(x.v === 'try' ? L('تجربة شهر', 'One-month trial') : L('نطبّقه', 'Apply'))}</span> <span class="badge ${(st[x.state] || st.same)[0]}">${esc(s)}</span></div><div class="nfl-t">${txt(x)}</div></div><div class="end nfl-btns">${x.v === 'try' && x.state !== 'measuring' ? `<button type="button" class="btn sm p" data-action="nflDecide" data-arg="${esc(x.id)}|apply">${esc(L('ثبّته', 'Keep it'))}</button><button type="button" class="btn sm ghost" data-action="nflDecide" data-arg="${esc(x.id)}|no">${esc(L('وقّفه', 'Stop it'))}</button>` : ''}<button type="button" class="btn sm ghost" data-action="nflDecide" data-arg="${esc(x.id)}|reset">${esc(L('رجّع', 'Undo'))}</button></div></div>`; }).join('');
+    const rl = rej.map(([id, d]) => `<div class="item"><div class="main"><div class="title"><span class="badge">${esc(L('رفضته', 'You said no'))}</span> <span class="small muted">${esc(fmtDate(String(d.at || '').slice(0, 10)))}</span></div><div class="nfl-t">${txt(d)}</div></div><div class="end"><button type="button" class="btn sm ghost" data-action="nflDecide" data-arg="${esc(id)}|reset">${esc(L('رجّعه', 'Bring back'))}</button></div></div>`).join('');
+    const muted = Object.entries(o.learned || {}).filter(([, x]) => x && x.muted).map(([k]) => k);
+    return `<div class="list">${fl}${rl}</div>${muted.length ? `<p class="small muted" style="margin:8px 0 0">${esc(L(`اتعلّم من قراراتك: فيه ${muted.length} نوع مقترحات رفضتهم 3 مرات — مش هيطلعوا تاني إلا لو الرقم بقى الضعف.`, `Learned from your decisions: ${muted.length} kinds of suggestion you refused 3 times — they will not come back unless the number doubles.`))}</p>` : ''}`;
+  }
+  function vOps(o) {
+    const ops = o.ops || {}; let h = '';
+    const t = ops.tasks || {};
+    h += `<div class="nfl-kpis"><div><b>${t.open ?? '—'}</b><span>${esc(L('مهام مفتوحة', 'open tasks'))}</span></div><div><b>${t.stale ?? '—'}</b><span>${esc(L('ساكنة 14 يوم+', 'still 14 days+'))}</span></div><div><b>${t.medClose ?? '—'}</b><span>${esc(L('يوم وسيط الإقفال', 'days to close (median)'))}</span></div></div>`;
+    const f = ops.factory;
+    if (f) {
+      const ds = (f.depts || []).filter(d => d.n || d.active);
+      if (ds.length) h += `<h4 class="nfl-h4">${esc(L('الأقسام: المعتاد ← الشغّال دلوقتي', 'Departments: the usual → running now'))}</h4><div class="list">${ds.map(d => `<div class="item"><div class="main"><div class="title"><b class="nfl-tk">${esc(tokName('d', d.id))}</b>${d.stuck ? ` <span class="badge crit">${esc(L(`${d.stuck} متأخر`, `${d.stuck} late`))}</span>` : ''}</div><div class="meta"><span>${esc(L(`المعتاد ${d.med ?? '—'} يوم`, `usual ${d.med ?? '—'} days`))}</span><span>${esc(L(`أطول ${d.max ?? '—'}`, `longest ${d.max ?? '—'}`))}</span><span>${esc(L(`خلص ${d.n}`, `${d.n} done`))}</span><span>${esc(L(`شغّال ${d.active}`, `${d.active} running`))}</span></div></div></div>`).join('')}</div>`;
+      const hs = (f.handoffs || []).filter(x => x.n).slice(0, 5);
+      if (hs.length) h += `<h4 class="nfl-h4">${esc(L('بيستنى فين بين الأقسام', 'Where it waits between departments'))}</h4>${bars(hs, x => `<b class="nfl-tk">${esc(tokName('d', x.from))}</b> ← <b class="nfl-tk">${esc(tokName('d', x.to))}</b>`, x => x.med ?? 0)}`;
+      const ps = (f.purch || []);
+      if (ps.length) h += `<h4 class="nfl-h4">${esc(L('طلبات الشراء المفتوحة (العدد)', 'Open purchase requests (count)'))}</h4>${bars(ps, x => `<b class="nfl-tk">${esc(tokName('p', x.status))}</b> <span class="tiny muted">${esc(L(`وسيط ${x.med} يوم`, `median ${x.med} days`))}</span>`, x => x.n)}`;
+      if (f.orders) h += `<p class="small" style="margin:8px 0 0">${esc(L(`أوامر مفتوحة ${f.orders.open} · عدّت ميعادها ${f.orders.lateNow} · اتأجّل ميعادها ${f.orders.resched}`, `Open orders ${f.orders.open} · past due ${f.orders.lateNow} · rescheduled ${f.orders.resched}`))}</p>`;
+      const tr = (f.trips && f.trips.top || []).filter(x => x.n30 >= 2).slice(0, 5);
+      if (tr.length) h += `<h4 class="nfl-h4">${esc(L('أكتر أماكن المشاوير (آخر 30 يوم)', 'Most visited places (last 30 days)'))}</h4>${bars(tr, x => esc(x.to), x => x.n30)}`;
+    }
+    const s = ops.studio;
+    if (s) {
+      if ((s.gates || []).length) h += `<h4 class="nfl-h4">${esc(L('البوابات: وسيط الانتظار بالساعات', 'Gates: median wait in hours'))}</h4>${bars(s.gates, x => `<b class="nfl-tk">${esc(tokName('g', x.gate))}</b> <span class="tiny muted">${esc(x.step === 1 ? L('الاعتماد الأول', 'first approval') : L('الاعتماد التاني', 'second approval'))}</span>`, x => x.medH)}`;
+      if (s.shots) h += `<p class="small" style="margin:8px 0 0">${esc(L(`لقطات مفتوحة ${s.shots.open} · ساكنة 5 أيام+ ${s.shots.stuck} · رجعت مرتين+ ${s.shots.backsPct}%`, `Open shots ${s.shots.open} · still 5 days+ ${s.shots.stuck} · back twice+ ${s.shots.backsPct}%`))}${s.pmOver ? esc(L(` · مهام متأخرة ${s.pmOver}`, ` · late tasks ${s.pmOver}`)) : ''}</p>`;
+    }
+    const c = ops.construction;
+    if (c) {
+      if ((c.checks || []).length) h += `<h4 class="nfl-h4">${esc(L('طلبات الاستلام: وسيط الانتظار بالساعات', 'Inspections: median wait in hours'))}</h4>${bars(c.checks, x => `<b class="nfl-tk">${esc(tokName('s', x.stage))}</b>${x.rejPct ? ` <span class="tiny muted">${esc(L(`رفض ${x.rejPct}%`, `${x.rejPct}% rejected`))}</span>` : ''}`, x => x.medH ?? 0)}`;
+      if (c.snags) h += `<p class="small" style="margin:8px 0 0">${esc(L(`ملاحظات موقع مفتوحة ${c.snags.open} · أقدم من 14 يوم ${c.snags.old}`, `Open snags ${c.snags.open} · older than 14 days ${c.snags.old}`))}</p>`;
+    }
+    const ld = (t.load || []).slice(0, 5).map(x => ({ n: x.n, name: (typeof byId === 'function' && (byId('workers', x.id) || byId('staff', x.id) || {}).name) || '' })).filter(x => x.name);
+    if (ld.length) h += `<h4 class="nfl-h4">${esc(L('مين عليه مهام مفتوحة أكتر', 'Who holds the most open tasks'))}</h4>${bars(ld, x => esc(x.name), x => x.n)}`;
+    const rp = (t.repeated || []).slice(0, 5);
+    if (rp.length) h += `<h4 class="nfl-h4">${esc(L('مهام بتتعمل بالإيد وبتتكرر', 'Tasks made by hand again and again'))}</h4>${bars(rp, x => esc(x.title), x => x.n)}`;
+    return h;
+  }
+  function vUi(o) {
+    const u = o.ui || {}; if (!u.n) return `<div class="empty small">${esc(L('لسه مفيش استخدام متسجّل — هيبان هنا بعد أول يوم.', 'No use logged yet — it shows here after the first day.'))}</div>`;
+    let h = `<div class="nfl-kpis"><div><b>${u.n}</b><span>${esc(L('حدث', 'events'))}</span></div><div><b>${u.people}</b><span>${esc(L('شخص', 'people'))}</span></div><div><b>${u.mobilePct}%</b><span>${esc(L('من الموبايل', 'from phones'))}</span></div></div>`;
+    if ((u.pages || []).length) h += `<h4 class="nfl-h4">${esc(L('أكتر الصفحات اللي بتتفتح', 'The most opened pages'))}</h4>${bars(u.pages, x => `<b class="nfl-tk">${esc(viewLabel(x.name))}</b>${x.bouncePct >= 50 ? ` <span class="tiny muted">${esc(L(`${x.bouncePct}% بتتقفل بسرعة`, `${x.bouncePct}% left quickly`))}</span>` : ''}`, x => x.n, 8)}`;
+    const fa = (u.forms || []).filter(x => x.abandon > 0).sort((a, b) => b.abandon - a.abandon).slice(0, 6);
+    if (fa.length) h += `<h4 class="nfl-h4">${esc(L('نوافذ بتتقفل من غير حفظ', 'Windows closed without saving'))}</h4>${bars(fa, x => `${esc(x.label || x.name)} <span class="tiny muted">${esc(L(`من ${x.n}`, `of ${x.n}`))}</span>`, x => x.abandon)}`;
+    return h;
+  }
+  function vMine() {
+    const m = LD.me;
+    let h = sw(logOn(), 'nflLog', L('سجّل استخدامي', 'Log my use'), '', L('على الجهاز ده. لو قفلته، مفيش حاجة بتتبعت من الجهاز ده.', 'On this device. When off, nothing is sent from this device.'));
+    h = `<div class="list">${h}${sw(uiOn(), 'nflUi', L('خصّص واجهتي', 'Tailor my screens'), '', L('«اختصاراتك» فوق الرئيسية من أكتر الصفحات اللي بتفتحها.', '«Your shortcuts» on top of the home page, from the pages you open most.'))}${hosted() ? sw(morningOn(), 'nflMorning', L('تقرير الصبح', 'Morning report'), '', L('كل يوم شغل الساعة 8:30: مهامك المتأخرة واللي ميعادها النهارده واللي من غير حركة.', 'Every working day at 8:30: your late tasks, the ones due today and the ones with no movement.')) : ''}</div>`;
+    if (!m) return h + `<p class="small muted" style="margin:10px 0 0">${esc(L('لسه بيتعلّم — استخدامك هيبان هنا بعد أول ليلة.', 'Still learning — your use shows here after the first night.'))}</p>`;
+    h += `<div class="nfl-kpis"><div><b>${m.days || 0}</b><span>${esc(L('يوم استخدام', 'days of use'))}</span></div><div><b>${m.mobilePct || 0}%</b><span>${esc(L('من الموبايل', 'from the phone'))}</span></div><div><b>${(m.tasks && m.tasks.open) || 0}</b><span>${esc(L('مهامك المفتوحة', 'your open tasks'))}</span></div></div>`;
+    if ((m.hours || []).length) h += `<p class="small" style="margin:6px 0">${esc(L(`أكتر وقت بتشتغل فيه على السيستم: ${hrs(m.hours)}`, `When you use the system most: ${hrs(m.hours)}`))}</p>`;
+    if ((m.pages || []).length) h += `<h4 class="nfl-h4">${esc(L('أكتر صفحاتك', 'Your top pages'))}</h4>${bars(m.pages, x => `<b class="nfl-tk">${esc(viewLabel(x.name))}</b>`, x => x.n)}`;
+    if ((m.forms || []).length) h += `<h4 class="nfl-h4">${esc(L('نوافذ بتسيبها من غير حفظ', 'Windows you close without saving'))}</h4>${bars(m.forms, x => esc(x.label || x.name), x => (x.n || 0) - (x.saved || 0))}<p class="tiny muted" style="margin:4px 0 0">${esc(L('لو فيه نافذة صعبة أو مش واضحة قول للإدارة — ده بيتجمّع عشان نبسّطها.', 'If a window is hard or unclear, tell the office — this is collected to simplify it.'))}</p>`;
+    if (m.tasks && m.tasks.stale) h += `<p class="small" style="margin:8px 0 0">${esc(L(`عندك ${m.tasks.stale} مهام مفيش عليها حركة 14 يوم.`, `You have ${m.tasks.stale} tasks with no movement for 14 days.`))} <a href="#/tasks">${esc(L('افتح المهام', 'Open the tasks'))}</a></p>`;
+    return h;
+  }
+  EXTRA_VIEWS.nflearn = () => {
+    if (!S.session || role() === 'kiosk') return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    if (hosted() && !LD.loading && (!LD.at || Date.now() - LD.at > 300000)) setTimeout(() => load(false), 0);
+    const o = LD.office;
+    const head = `<div class="banner nfl-note">${icon('info')}<span>${esc(L('السيستم بيقرا الشغل والاستخدام كل ليلة الساعة 4 الفجر. «استخدامي» بتشوفه إنت بس. بيانات الاستخدام لتسهيل الواجهة بس — مش لتقييم حد، ومفيش حاجة بتشتغل لوحدها من غير موافقة.', 'The system reads the work and the use every night at 4 am. «My use» is seen by you only. Usage data is only for easier screens — never to rate anyone, and nothing runs by itself without approval.'))}${LD.upd ? ` <span class="tiny muted">${esc(L(`آخر تحديث ${fmtDate(String(LD.upd).slice(0, 10))} ${fmtAtTm(LD.upd)}`, `Last update ${fmtDate(String(LD.upd).slice(0, 10))} ${fmtAtTm(LD.upd)}`))}</span>` : ''}</span></div>`;
+    const err = LD.err && !o && !LD.me ? `<div class="banner warn">${icon('alert')}<span>${esc(L('مش قادر يجيب اللي اتعلّمه دلوقتي — جرّب بعد شوية.', 'Could not fetch what it learned right now — try again shortly.'))}</span></div>` : '';
+    let body = '';
+    if (isOwner()) {
+      if (!o) body += sec(L('المقترحات', 'Suggestions'), `<div class="empty small">${esc(LD.loading ? L('بيحمّل…', 'Loading…') : L('لسه مفيش — أول نتيجة بتطلع بعد أول ليلة.', 'Nothing yet — the first results come after the first night.'))}</div>`);
+      else {
+        body += sec(L('المقترحات', 'Suggestions'), vSuggest(o), L('كل مقترح معاه رقمه. «نطبّقه» بيتسجّل ويتبني في تحديث جاي، «نجرّبه شهر» بيتقاس بعد 30 يوم، و«لا» مش بيتقال تاني.', 'Each suggestion comes with its number. «Apply» is recorded and built in a coming update, «Try a month» is measured after 30 days, and «No» will not come back.'));
+        body += sec(L('اللي قرّرته وأثره', 'What you decided and its effect'), vFollow(o));
+        body += sec(L('أنماط الشغل', 'Work patterns'), vOps(o), L('آخر 90 يوم.', 'The last 90 days.'));
+        body += sec(L('استخدام الواجهة — المجموع', 'Use of the screens — totals'), vUi(o), L('مجموع من غير أسامي.', 'Totals, with no names.'));
+      }
+    }
+    body += sec(L('استخدامي أنا', 'My use'), vMine(), L('ده بتاعك إنت بس — محدش تاني بيشوفه.', 'This is yours only — nobody else sees it.'));
+    return head + err + body;
+  };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    #nfl-top{margin:0 0 10px}
+    .nfl-intro{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin:0 0 8px}.nfl-intro>span:nth-child(2){flex:1 1 220px}.nfl-intro-b{display:flex;gap:6px}
+    .nfsc{display:flex;gap:8px;align-items:center;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:2px 0 6px;scrollbar-width:none}.nfsc::-webkit-scrollbar{display:none}
+    .nfsc-h{font-size:12px;color:var(--muted,#667);white-space:nowrap;flex:0 0 auto}
+    .nfsc-i{display:inline-flex;gap:6px;align-items:center;white-space:nowrap;flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line,#e3e5ea);background:var(--card,#fff);color:inherit;text-decoration:none;font-size:13px;min-height:36px}
+    .nfsc-i svg{width:16px;height:16px}.nfsc-w{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--line,#e3e5ea);background:transparent;color:var(--muted,#667);cursor:pointer}
+    .nfl-sec{margin:0 0 12px}.nfl-h{margin:0 0 6px;font-size:16px}.nfl-h4{margin:12px 0 6px;font-size:13px;color:var(--muted,#667)}.nfl-sub{margin:0 0 8px}
+    .nfl-s .nfl-t,.nfl-t{margin:4px 0 0;line-height:1.6}.nfl-btns{display:flex;gap:6px;flex-wrap:wrap}.nfl-tk{font-weight:600}
+    .nfl-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:6px 0}.nfl-kpis>div{border:1px solid var(--line,#e3e5ea);border-radius:10px;padding:8px;text-align:center}.nfl-kpis b{display:block;font-size:18px}.nfl-kpis span{font-size:11px;color:var(--muted,#667)}
+    .nfl-bar{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:8px;align-items:center;margin:4px 0;font-size:13px}.nfl-bl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nfl-bt{height:8px;border-radius:4px;background:var(--line,#eceef2);overflow:hidden}.nfl-bt i{display:block;height:100%;background:var(--accent,#2a62d8);border-radius:4px}
+    .nfl-ev{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dashed var(--line,#e3e5ea);font-size:13px}
+    .badge.nfl-a-auto{background:rgba(42,98,216,.12)}.badge.nfl-a-ui{background:rgba(140,90,200,.14)}
+    @media (max-width:640px){.nfl-s{flex-direction:column;align-items:stretch}.nfl-s .end{margin-top:8px}.nfl-btns .btn{flex:1 1 auto}.nfl-bar{grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) auto}}
+  </style>`);
+})();
+/* =====================================================================
+   v7.80 (inbox #20, brief claude/twin-rules-timeline-brief.md): the digital twin, phases 2-5. All three Ninety systems.
+   · Rules: «Apply» / «Try a month» on a suggestion opens a window that turns it into a rule (kind + settings); the rule
+     lives in settings.nfRules and the server (Edge nf-rules, every 15 minutes) runs it — only rules the owner turned on,
+     a trial stops by itself after 30 days. «Rules» on #/nflearn: state, what each rule did (nf_learn rulelog), on / off.
+   · Weekly AI suggestions come from the server (row llm) and show with an «AI» badge, same buttons.
+   · Screens that fit the person (switch «Tailor my screens»): the side menu ordered by his own use (after 30 visits),
+     windows remember the choices he picks again and again (lists only, never money / role / status fields), «usually
+     next» after the same page-to-page path 4 times, and the task form suggests who and how long from similar tasks.
+   · Delay chance of each order (owner): on the order page, on the dashboard and on #/nflearn, with the reasons.
+   · The assistant may propose «create a task» as a card; nothing happens until the person saves the task window.
+   Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TWIN__) return; window.__NF_TWIN__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || !window.nfLearn || !EXTRA_VIEWS.nflearn) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const LD = window.nfLearn.data;
+  const lsg = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lss = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+  const jget = k => { try { return JSON.parse(lsg(k) || '{}') || {}; } catch (e) { return {}; } };
+  const viewing = () => typeof isViewing === 'function' && isViewing();
+  const person = () => !!S.session && role() !== 'kiosk' && !viewing() && (typeof window.nfTwinOk !== 'function' || window.nfTwinOk());   /* v7.79: the office twin is for the two of them only */
+  const me = () => String((S.session && S.session.id) || '');
+  const isOwner = () => (typeof window.nfTwinBoss === 'function' ? window.nfTwinBoss() : (!!S.session && isAdmin() && !viewing()));
+  const uiOn = () => lsg('nf.learn.ui') !== 'off';
+  const CO = () => ((typeof isStudioz === 'function' && isStudioz()) ? 'studio' : (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : 'factory');
+  const viewName = () => (S.route && S.route.view) || '';
+  const isHome = () => { const v = viewName(); const h = typeof homeView === 'function' ? homeView() : 'dashboard'; return v === h || v === 'ninety'; };
+  const dName = id => (typeof deptName === 'function' ? deptName(id) : id);
+  const navOf = v => NAV.find(n => n && n.id === v);
+  const vLabel = v => { const n = navOf(v); return (n && n.label) || (typeof VIEW_TITLES !== 'undefined' && VIEW_TITLES[v]) || v; };
+
+  /* ================= rules ================= */
+  const KINDS = {
+    stage_tasks: ['افتح مهام مع القسم', 'Open tasks with the department', 'factory'],
+    recurring_task: ['مهمة متكررة بتتفتح لوحدها', 'A recurring task that opens by itself', ''],
+    escalate_stale: ['صعّد المهمة الساكنة', 'Escalate still tasks', ''],
+    remind_step: ['ذكّر بخطوة الشراء الواقفة', 'Remind a stuck purchase step', 'factory'],
+    next_dept: ['بلّغ القسم الجاي', 'Tell the next department', 'factory'],
+    dept_over: ['نبّه لما الأمر يعدّي المعتاد في القسم', 'Alert when an order passes the usual time', 'factory'],
+    deadline_guard: ['حارس ميعاد التسليم', 'Delivery date guard', 'factory'],
+    trip_digest: ['ملخص المشاوير المتكررة كل أسبوع', 'Weekly digest of repeated trips', 'factory'],
+    gate_remind: ['ذكّر اللي بيعتمد', 'Remind the approver', 'studio'],
+    stu_deadline: ['حارس موعد العميل', 'Client deadline guard', 'studio'],
+    stu_stage_tasks: ['مهام المرحلة تتفتح لوحدها', 'Stage tasks open by themselves', 'studio'],
+    shot_stale: ['ذكّر باللقطة الساكنة', 'Remind about still shots', 'studio'],
+    check_remind: ['ذكّر بطلب الاستلام', 'Remind about inspection requests', 'construction'],
+    snag_escalate: ['صعّد ملاحظات الموقع', 'Escalate site snags', 'construction'],
+  };
+  const kindName = k => (KINDS[k] ? KINDS[k][en() ? 1 : 0] : k);
+  const STEPS = { draft: ['مسودة', 'Draft'], need_ok: ['اعتماد الاحتياج', 'Need approval'], rfq: ['طلب عروض الأسعار', 'Request for quotes'], rfq_price: ['اعتماد السعر', 'Price approval'], ordered: ['اتطلب من المورد', 'Ordered'], transfer: ['التحويل للمورد', 'Paying the supplier'] };
+  const WD = [['الأحد', 'Sunday'], ['الاتنين', 'Monday'], ['التلات', 'Tuesday'], ['الأربع', 'Wednesday'], ['الخميس', 'Thursday'], ['الجمعة', 'Friday'], ['السبت', 'Saturday']];
+  const rules = () => (S.settings && Array.isArray(S.settings.nfRules) ? S.settings.nfRules : []);
+  const saveRules = arr => Store.saveSettings(Object.assign({}, S.settings, { nfRules: arr }));
+  function mapRule(s) {
+    const ev = (s && s.evidence) || {};
+    switch (s && s.kind) {
+      case 'auto_task': return CO() === 'factory' && +ev.refs >= 3 ? { kind: 'stage_tasks', params: { dept: '', titles: [ev.title || ''] } } : { kind: 'recurring_task', params: { title: ev.title || '', everyDays: 7, deptId: '' } };
+      case 'stale_tasks': return { kind: 'escalate_stale', params: { days: 14 } };
+      case 'dept_slow': return { kind: 'dept_over', params: { dept: ev.dept, days: Math.max(2, Math.round(+ev.lim || 7)) } };
+      case 'handoff': return { kind: 'next_dept', params: { from: ev.from, to: ev.to } };
+      case 'late_orders': return { kind: 'deadline_guard', params: { days: 3 } };
+      case 'purch_wait': return { kind: 'remind_step', params: { status: ev.status, days: 3, every: 2 } };
+      case 'trip_repeat': return { kind: 'trip_digest', params: { weekday: 6 } };
+      case 'gate_wait': return { kind: 'gate_remind', params: { hours: 24 } };
+      case 'shot_stuck': return { kind: 'shot_stale', params: { days: 5 } };
+      case 'check_wait': return { kind: 'check_remind', params: { hours: 24 } };
+      case 'snags_old': return { kind: 'snag_escalate', params: { days: 14 } };
+      default: return null;
+    }
+  }
+  const deptOpts = sel => `<option value="">${esc(L('— اختار القسم —', '— choose the department —'))}</option>` + ((S.settings && S.settings.departments) || []).filter(d => d && d.id && !d.admin).map(d => `<option value="${esc(d.id)}" ${d.id === sel ? 'selected' : ''}>${esc(d.name || d.id)}</option>`).join('');
+  const num = (name, v, lab, unitTxt) => `<div class="field"><label>${esc(lab)}</label><div class="nfr-num"><input type="number" class="inp" name="${name}" min="1" max="365" value="${esc(String(v))}"><span class="small muted">${esc(unitTxt)}</span></div></div>`;
+  function ruleFields(kind, P) {
+    const days = L('يوم', 'days'), hours = L('ساعة', 'hours');
+    switch (kind) {
+      case 'stage_tasks': return `<div class="field"><label>${esc(L('لما الأمر يدخل قسم', 'When an order enters'))}</label><select name="dept" class="inp" required>${deptOpts(P.dept)}</select></div><div class="field full"><label>${esc(L('المهام اللي تتفتح (كل سطر مهمة)', 'Tasks to open (one per line)'))}</label><textarea name="titles" class="inp" rows="3">${esc((P.titles || []).join('\n'))}</textarea></div>`;
+      case 'recurring_task': return `<div class="field full"><label>${esc(L('المهمة', 'The task'))}</label><input name="title" class="inp" value="${esc(P.title || '')}" required></div>${num('everyDays', P.everyDays || 7, L('كل', 'Every'), days)}<div class="field"><label>${esc(L('القسم (اختياري)', 'Department (optional)'))}</label><select name="deptId" class="inp">${deptOpts(P.deptId)}</select></div>`;
+      case 'escalate_stale': return num('days', P.days || 14, L('مفيش حركة من', 'No movement for'), days);
+      case 'remind_step': return `<p class="small" style="margin:0 0 6px">${esc(L(`الخطوة: «${(STEPS[P.status] || [P.status])[0]}»`, `Step: «${(STEPS[P.status] || [P.status, P.status])[1]}»`))}</p>${num('days', P.days || 3, L('واقفة من', 'Stuck for'), days)}${num('every', P.every || 2, L('التذكير كل', 'Remind every'), days)}`;
+      case 'next_dept': return `<p class="small" style="margin:0 0 6px"><b class="nfl-tk">${esc(dName(P.from))}</b> ← <b class="nfl-tk">${esc(dName(P.to))}</b></p><label class="nfr-chk"><input type="checkbox" name="all"> ${esc(L('لكل الأقسام، مش القسمين دول بس', 'For all departments, not only these two'))}</label>`;
+      case 'dept_over': return `<p class="small" style="margin:0 0 6px"><b class="nfl-tk">${esc(dName(P.dept))}</b></p>${num('days', P.days || 7, L('نبّه بعد', 'Alert after'), days)}`;
+      case 'deadline_guard': return num('days', P.days || 3, L('قبل ميعاد التسليم بـ', 'Before the delivery date by'), days);
+      case 'trip_digest': return `<div class="field"><label>${esc(L('يوم الملخص', 'Digest day'))}</label><select name="weekday" class="inp">${WD.map((w, i) => `<option value="${i}" ${+P.weekday === i ? 'selected' : ''}>${esc(w[en() ? 1 : 0])}</option>`).join('')}</select></div>`;
+      case 'gate_remind': case 'check_remind': return num('hours', P.hours || 24, L('ذكّر بعد', 'Remind after'), hours);
+      case 'shot_stale': case 'snag_escalate': return num('days', P.days || (kind === 'shot_stale' ? 5 : 14), L('مفيش حركة من', 'No movement for'), days);
+      default: return '';
+    }
+  }
+  /* v7.79 AI module: a rule made by hand (no suggestion) also asks for what the suggestion used to carry */
+  function handFields(kind, P) {
+    switch (kind) {
+      case 'dept_over': return `<div class="field"><label>${esc(L('القسم', 'Department'))}</label><select name="dept" class="inp" required>${deptOpts(P.dept)}</select></div>`;
+      case 'remind_step': return `<div class="field"><label>${esc(L('خطوة الشراء', 'Purchase step'))}</label><select name="status" class="inp">${Object.keys(STEPS).map(k => `<option value="${k}" ${P.status === k ? 'selected' : ''}>${esc(STEPS[k][en() ? 1 : 0])}</option>`).join('')}</select></div>`;
+      case 'next_dept': return `<div class="field"><label>${esc(L('من قسم', 'From department'))}</label><select name="from" class="inp">${deptOpts(P.from)}</select></div><div class="field"><label>${esc(L('لقسم', 'To department'))}</label><select name="to" class="inp">${deptOpts(P.to)}</select></div>`;
+      default: return '';
+    }
+  }
+  function readParams(kind, f, P) {
+    const g = n => { const el = f.querySelector(`[name="${n}"]`); return el ? el.value : ''; }; const n = (k, d) => Math.max(1, Math.min(365, Math.round(+g(k) || d)));
+    if (P && P.hand) { if (kind === 'dept_over') P = Object.assign({}, P, { dept: g('dept') }); if (kind === 'remind_step') P = Object.assign({}, P, { status: g('status') || 'need_ok' }); if (kind === 'next_dept') P = Object.assign({}, P, { from: g('from'), to: g('to') }); }
+    switch (kind) {
+      case 'stage_tasks': return { dept: g('dept'), titles: g('titles').split('\n').map(x => x.trim()).filter(Boolean).slice(0, 8) };
+      case 'recurring_task': return { title: g('title').trim(), everyDays: n('everyDays', 7), deptId: g('deptId') };
+      case 'escalate_stale': return { days: n('days', 14) };
+      case 'remind_step': return { status: P.status, days: n('days', 3), every: n('every', 2) };
+      case 'next_dept': { const all = f.querySelector('[name="all"]'); return all && all.checked ? {} : { from: P.from, to: P.to }; }
+      case 'dept_over': return { dept: P.dept, days: n('days', 7) };
+      case 'deadline_guard': return { days: n('days', 3) };
+      case 'trip_digest': return { weekday: Math.max(0, Math.min(6, +g('weekday') || 0)) };
+      case 'gate_remind': case 'check_remind': return { hours: n('hours', 24) };
+      case 'shot_stale': return { days: n('days', 5) };
+      case 'snag_escalate': return { days: n('days', 14) };
+      default: return {};
+    }
+  }
+  function paramsText(r) {
+    const P = r.params || {}; const d = x => L(`${x} يوم`, `${x} days`);
+    switch (r.kind) {
+      case 'stage_tasks': return L(`مع دخول ${dName(P.dept)}: ${(P.titles || []).join('، ')}`, `When entering ${dName(P.dept)}: ${(P.titles || []).join(', ')}`);
+      case 'recurring_task': return L(`كل ${d(P.everyDays || 7)}: ${P.title || ''}`, `Every ${d(P.everyDays || 7)}: ${P.title || ''}`);
+      case 'escalate_stale': case 'shot_stale': case 'snag_escalate': return L(`بعد ${d(P.days)} من غير حركة`, `After ${d(P.days)} with no movement`);
+      case 'remind_step': return L(`«${(STEPS[P.status] || [P.status])[0]}» بعد ${d(P.days)}، والتذكير كل ${d(P.every)}`, `«${(STEPS[P.status] || [P.status, P.status])[1]}» after ${d(P.days)}, reminder every ${d(P.every)}`);
+      case 'next_dept': return P.from ? `${dName(P.from)} ← ${dName(P.to)}` : L('كل الأقسام', 'All departments');
+      case 'dept_over': return L(`${dName(P.dept)} بعد ${d(P.days)}`, `${dName(P.dept)} after ${d(P.days)}`);
+      case 'deadline_guard': return L(`قبل الميعاد بـ ${d(P.days)}`, `${d(P.days)} before the date`);
+      case 'trip_digest': return L(`كل ${(WD[+P.weekday] || WD[6])[0]}`, `Every ${(WD[+P.weekday] || WD[6])[1]}`);
+      case 'gate_remind': case 'check_remind': return L(`بعد ${P.hours} ساعة`, `After ${P.hours} hours`);
+      case 'stu_deadline': return L(`قبل موعد العميل بـ ${d(P.days || 3)}`, `${d(P.days || 3)} before the client deadline`);
+      case 'stu_stage_tasks': return L(`مع دخول «${P.stage}»: ${(P.titles || []).join('، ')}`, `When entering «${P.stage}»: ${(P.titles || []).join(', ')}`);
+      default: return '';
+    }
+  }
+  const WHO = { stage_tasks: ['رؤساء القسم', 'the department heads'], recurring_task: ['القسم أو المالك', 'the department or the owner'], escalate_stale: ['صاحب المهمة، وبعد 3 أيام مديره', 'the task owner, then his manager 3 days later'], remind_step: ['مسؤول الخطوة', 'whoever owns the step'], next_dept: ['رؤساء القسم الجاي', 'the heads of the next department'], dept_over: ['رؤساء القسم', 'the department heads'], deadline_guard: ['مدير المصنع', 'the factory manager'], trip_digest: ['مدير النقل ومدير المصنع', 'the transport and factory managers'], gate_remind: ['اللي عليه الاعتماد', 'whoever must approve'], shot_stale: ['صاحب اللقطة ومسؤول المشروع', 'the artist and the project lead'], check_remind: ['مدير المشروع', 'the project manager'], snag_escalate: ['مدير المشروع', 'the project manager'] };
+  const findSug = sid => ((LD.office && LD.office.suggestions) || []).find(x => x.id === sid);
+  function openRuleModal(s, m, v, done) {
+    const P = m.params || {};
+    openModal({ title: L('نحوّله لقاعدة بتشتغل لوحدها', 'Turn it into a rule that runs by itself'), submitLabel: v === 'try' ? L('جرّبها شهر', 'Try it a month') : L('شغّلها', 'Turn it on'), body: `<div class="form nfr-form">
+      <div class="banner full" style="margin:0">${icon('info')}<span>${esc(kindName(m.kind))} — ${esc(L(`بيتبلّغ: ${(WHO[m.kind] || ['', ''])[0]}`, `Who is told: ${(WHO[m.kind] || ['', ''])[1]}`))}</span></div>
+      ${ruleFields(m.kind, P)}
+      <p class="tiny muted full" style="margin:4px 0 0">${esc(v === 'try' ? L('التجربة بتقف لوحدها بعد 30 يوم، وبعدها تشوف الرقم اتحسّن ولا لأ.', 'The trial stops by itself after 30 days; then you see whether the number improved.') : L('تقدر توقفها في أي وقت من «القواعد».', 'You can turn it off any time from «Rules».'))}</p></div>`,
+      onSubmit: async f => {
+        const params = readParams(m.kind, f, P);
+        if (m.kind === 'stage_tasks' && (!params.dept || !params.titles.length)) { toast(L('اختار القسم واكتب مهمة واحدة على الأقل', 'Choose the department and write at least one task'), 'err'); return false; }
+        if (m.kind === 'recurring_task' && !params.title) { toast(L('اكتب المهمة', 'Write the task'), 'err'); return false; }
+        const rule = { id: 'r' + Date.now().toString(36), kind: m.kind, params, state: v === 'try' ? 'try' : 'on', at: nowISO(), from: s.id, by: (S.session && S.session.name) || '' };
+        try { await saveRules(rules().filter(r => r.from !== s.id).concat([rule])); } catch (e) { toast(L('ماتسجّلتش القاعدة — جرّب تاني', 'The rule was not saved — try again'), 'err'); return false; }
+        await done(); return true;
+      } });
+  }
+  /* v7.79 AI module: «+ قاعدة جديدة» on #/nfrules — choose the kind, fill its settings, on or trial */
+  const handKinds = () => Object.keys(KINDS).filter(k => (!KINDS[k][2] || KINDS[k][2] === CO()) && !/^stu_/.test(k));
+  const handBody = kind => { const P = { hand: true }; return `<div class="banner full" style="margin:0">${icon('info')}<span>${esc(L(`بيتبلّغ: ${(WHO[kind] || ['', ''])[0]}`, `Who is told: ${(WHO[kind] || ['', ''])[1]}`))}</span></div>${handFields(kind, P)}${['remind_step', 'next_dept', 'dept_over'].includes(kind) ? ruleFields(kind, P).replace(/<p class="small"[^>]*>[\s\S]*?<\/p>/, '') : ruleFields(kind, P)}`; };
+  function openNewRule(kind0) {
+    if (!isOwner() || !isAdmin()) return; const ks = handKinds(); if (!ks.length) return; let kind = ks.includes(kind0) ? kind0 : ks[0];
+    openModal({ title: L('قاعدة جديدة بتشتغل لوحدها', 'A new rule that runs by itself'), submitLabel: L('شغّلها', 'Turn it on'), extra: `<button type="button" class="btn ghost" data-action="nfrNewTry">${esc(L('جرّبها شهر', 'Try it a month'))}</button>`,
+      body: `<div class="form nfr-form"><div class="field full"><label>${esc(L('نوع القاعدة', 'Rule kind'))}</label><select name="kind" class="inp" id="nfr-kind">${ks.map(k => `<option value="${k}" ${k === kind ? 'selected' : ''}>${esc(kindName(k))}</option>`).join('')}</select></div><div id="nfr-fields" class="form full" style="padding:0">${handBody(kind)}</div><p class="tiny muted full" style="margin:4px 0 0">${esc(L('تقدر توقفها في أي وقت من «قواعد التشغيل الآلي».', 'You can turn it off any time from «Automation rules».'))}</p></div>`,
+      onSubmit: async (f, st) => {
+        kind = f.querySelector('#nfr-kind').value; const params = readParams(kind, f, { hand: true });
+        if (kind === 'stage_tasks' && (!params.dept || !params.titles.length)) { toast(L('اختار القسم واكتب مهمة واحدة على الأقل', 'Choose the department and write at least one task'), 'err'); return false; }
+        if (kind === 'recurring_task' && !params.title) { toast(L('اكتب المهمة', 'Write the task'), 'err'); return false; }
+        if (kind === 'dept_over' && !params.dept) { toast(L('اختار القسم', 'Choose the department'), 'err'); return false; }
+        if (kind === 'next_dept' && params.from && params.from === params.to) { toast(L('اختار قسمين مختلفين', 'Choose two different departments'), 'err'); return false; }
+        const v = st === 'try' ? 'try' : 'on';
+        const rule = { id: 'r' + Date.now().toString(36), kind, params, state: v, at: nowISO(), from: 'manual_' + kind, by: (S.session && S.session.name) || '' };
+        try { await saveRules(rules().concat([rule])); } catch (e) { toast(L('ماتسجّلتش القاعدة — جرّب تاني', 'The rule was not saved — try again'), 'err'); return false; }
+        toast(v === 'try' ? L('اتشغّلت كتجربة شهر', 'On as a one-month trial') : L('اتشغّلت', 'Turned on')); rerender(); return true;
+      } });
+  }
+  ACTIONS.nfrNew = kind => openNewRule(kind);
+  ACTIONS.nfrNewTry = async () => { const f = document.getElementById('mform'); if (!f || !f.querySelector('#nfr-kind')) return; const m = (typeof _modal !== 'undefined' && _modal) || null; if (m && typeof m.onSubmit === 'function') { if (await m.onSubmit(f, 'try') !== false) closeModal(); } };
+  document.addEventListener('change', ev => { const t = ev.target; if (!t || t.id !== 'nfr-kind') return; const box = document.getElementById('nfr-fields'); if (box) box.innerHTML = handBody(t.value); });
+  window.nfTwinRules = { steps: STEPS, list: () => vRules(), newKinds: handKinds, steps: STEPS, predict: n => vPredict(n), predictN: () => predict().filter(x => byId('orders', x.orderId)).length, kindName, paramsText };
+  const dec0 = ACTIONS.nflDecide;
+  ACTIONS.nflDecide = async arg => {
+    const i = String(arg || '').lastIndexOf('|'); const sid = String(arg).slice(0, i), v = String(arg).slice(i + 1);
+    if (isOwner() && isAdmin() && sid) {
+      const mine = rules().filter(r => r.from === sid);
+      if ((v === 'apply' || v === 'try') && mine.length) { await saveRules(rules().map(r => (r.from === sid ? Object.assign({}, r, { state: v === 'try' ? 'try' : 'on', at: v === 'try' ? nowISO() : r.at }) : r))); return dec0(arg); }
+      if (v === 'apply' || v === 'try') { const s = findSug(sid); const m = s && mapRule(s); if (m && (!KINDS[m.kind][2] || KINDS[m.kind][2] === CO())) { openRuleModal(s, m, v, () => dec0(arg)); return; } }
+      if ((v === 'no' || v === 'reset') && mine.some(r => r.state !== 'off')) await saveRules(rules().map(r => (r.from === sid ? Object.assign({}, r, { state: 'off', offAt: nowISO() }) : r)));
+    }
+    return dec0(arg);
+  };
+  ACTIONS.nflRuleState = async arg => {
+    const [rid, st] = String(arg || '').split('|'); if (!isOwner() || !isAdmin() || !['on', 'off', 'try'].includes(st)) return;   /* rules write the settings: the owner only */
+    await saveRules(rules().map(r => (r.id === rid ? Object.assign({}, r, { state: st }, st === 'try' ? { at: nowISO() } : {}, st === 'off' ? { offAt: nowISO() } : {}) : r)));
+    toast(st === 'off' ? L('اتقفلت', 'Turned off') : L('اتشغّلت', 'Turned on'));
+  };
+  ACTIONS.nflRuleLog = rid => {
+    const lg = (((LD.rows || {}).rulelog || {}).rules || {})[rid] || { items: [] }; const r = rules().find(x => x.id === rid) || {};
+    openModal({ title: L('القاعدة دي عملت إيه', 'What this rule did'), footer: `<button type="button" class="btn" data-action="closemodal">${esc(L('تمام', 'OK'))}</button>`, body: `<p class="small muted" style="margin:0 0 8px">${esc(kindName(r.kind))} — ${esc(paramsText(r))}</p>${(lg.items || []).length ? `<div class="list">${lg.items.map(x => `<div class="item"><div class="main"><div class="title">${esc(x.title || '')}</div><div class="meta"><span>${esc(fmtDate(String(x.at || '').slice(0, 10)))} ${esc(fmtAtTm(x.at))}</span></div></div></div>`).join('')}</div>` : `<div class="empty small">${esc(L('لسه ماعملتش حاجة.', 'Nothing yet.'))}</div>`}` });
+  };
+  const ruleState = r => { if (r.state === 'on') return ['ok', L('شغّالة', 'On')]; if (r.state === 'try') { const left = 30 - Math.floor((Date.now() - Date.parse(r.at || 0)) / 864e5); return left > 0 ? ['warn', L(`تجربة — باقي ${left} يوم`, `Trial — ${left} days left`)] : ['', L('التجربة خلصت', 'Trial ended')]; } return ['', L('مقفولة', 'Off')]; };
+  function vRules() {
+    const rs = rules(); if (!rs.length) return `<div class="empty small">${esc(L('مفيش قواعد لسه. «نطبّقه» أو «نجرّبه شهر» على مقترح بيحوّله لقاعدة.', 'No rules yet. «Apply» or «Try a month» on a suggestion turns it into a rule.'))}</div>`;
+    const logs = ((LD.rows || {}).rulelog || {}).rules || {};
+    return `<div class="list">${rs.slice().reverse().map(r => { const st = ruleState(r); const lg = logs[r.id]; return `<div class="item nfl-s"><div class="main"><div class="title"><b>${esc(kindName(r.kind))}</b> <span class="badge ${st[0]}">${esc(st[1])}</span>${lg && lg.n ? ` <span class="badge">${esc(L(`عملت ${lg.n} مرة`, `Ran ${lg.n} times`))}</span>` : ''}</div><div class="nfl-t small">${esc(paramsText(r))}</div></div>
+      <div class="end nfl-btns">${r.state !== 'on' ? `<button type="button" class="btn sm p" data-action="nflRuleState" data-arg="${esc(r.id)}|on">${esc(L('شغّلها', 'Turn on'))}</button>` : ''}${r.state !== 'off' ? `<button type="button" class="btn sm ghost" data-action="nflRuleState" data-arg="${esc(r.id)}|off">${esc(L('اقفلها', 'Turn off'))}</button>` : ''}${lg && lg.n ? `<button type="button" class="btn sm ghost" data-action="nflRuleLog" data-arg="${esc(r.id)}">${esc(L('عملت إيه', 'What it did'))}</button>` : ''}</div></div>`; }).join('')}</div>`;
+  }
+
+  /* ================= delay chances (owner) ================= */
+  const predict = () => ((LD.office && LD.office.predict) || []);
+  const tokTxt = s => esc(String(s || '')).replace(/\{\{d:([^}]{1,40})\}\}/g, (m, id) => `<b class="nfl-tk">${esc(dName(id))}</b>`);
+  const riskCls = p => (p >= 70 ? 'crit' : p >= 40 ? 'warn' : '');
+  const whyTxt = x => (x.why || []).map(w => tokTxt(en() ? w.en : w.ar)).join(L('، ', ', '));
+  function vPredict(maxN) {
+    const arr = predict().filter(x => byId('orders', x.orderId)).slice(0, maxN || 8); if (!arr.length) return '';
+    return `<div class="list">${arr.map(x => { const o = byId('orders', x.orderId); return `<div class="item"><div class="main"><div class="title"><a href="#/orders/${esc(x.orderId)}">${esc(o.code || x.code)}</a> <span class="badge ${riskCls(x.p)}">${esc(L(`احتمال التأخير ${x.p}%`, `${x.p}% chance of delay`))}</span></div><div class="meta"><span>${whyTxt(x)}</span></div></div></div>`; }).join('')}</div>`;
+  }
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); if (!isOwner()) return html; const x = predict().find(p => p.orderId === id); if (!x || x.p < 40) return html;
+    return `<div class="banner ${riskCls(x.p)} nfl-risk">${icon('alert')}<span><b>${esc(L(`احتمال التأخير ${x.p}%`, `${x.p}% chance of delay`))}</b> — ${whyTxt(x)} <a class="tiny" href="#/nfsmart">${esc(L('ليه؟', 'Why?'))}</a></span></div>` + html;
+  })(vOrderDetail);
+
+  /* v7.79 AI module: the rules live on #/nfrules and the delay chances on the Smart desk (parts/99zzZzZZzzx6-ai-module.js) */
+  /* AI suggestions get their badge */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    if (viewName() !== 'nflearn') return;
+    ((LD.office && LD.office.suggestions) || []).filter(s => s.kind === 'llm').forEach(s => { const b = document.querySelector(`.nfl-s [data-arg="${CSS.escape(s.id)}|apply"]`); const it = b && b.closest('.nfl-s'); const t = it && it.querySelector('.title'); if (t && !t.querySelector('.nfl-ai')) t.insertAdjacentHTML('beforeend', ' <span class="badge acc nfl-ai" title="AI">AI</span>'); });
+  });
+
+  /* dashboard: orders that may be late (owner) */
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    const vw = document.getElementById('view'); if (!vw || !isOwner() || viewName() !== 'dashboard' || vw.querySelector('#nfl-risk-card')) return;
+    const arr = predict().filter(x => x.p >= 50); if (!arr.length) return;
+    vw.insertAdjacentHTML('afterbegin', `<div class="card nfl-sec" id="nfl-risk-card"><div class="cardhead"><h3>${esc(L('أوامر ممكن تتأخر', 'Orders that may be late'))}</h3><a class="btn sm ghost" href="#/nfsmart">${esc(L('الكل', 'All'))}</a></div>${vPredict(4)}</div>`);
+  });
+
+  /* ================= screens that fit the person ================= */
+  const K_FFD = 'nf.learn.ffd', K_SEQ = 'nf.learn.seq', K_SEQX = 'nf.learn.seqx';
+  /* 1) the side menu ordered by his own use (within each group, after 30 visits) */
+  function useCounts() {
+    const m = {}; const loc = (jget('nf.learn.top')[me()]) || {}; Object.entries(loc).forEach(([v, n]) => { m[v] = (m[v] || 0) + (+n || 0); });
+    ((LD.me && LD.me.pages) || []).forEach(p => { const v = String(p.name || '').replace(/\/\*$/, ''); m[v] = Math.max(m[v] || 0, +p.n || 0); });
+    return m;
+  }
+  function navOrder() {
+    const nav = document.getElementById('nav'); if (!nav || !uiOn() || !person()) return;
+    const cnt = useCounts(); const total = Object.values(cnt).reduce((a, b) => a + b, 0); if (total < 30) return;
+    const score = a => { const m = /^#\/([a-z0-9_]+)/i.exec(a.getAttribute('href') || ''); return m ? (cnt[m[1]] || 0) : 0; };
+    const parents = new Set([...nav.querySelectorAll('a[href^="#/"]')].map(a => a.parentElement));
+    parents.forEach(P => {
+      const kids = [...P.children]; let run = [];
+      const flush = after => { if (run.length > 1) { const sorted = run.map((a, i) => ({ a, i, s: score(a) })).sort((x, y) => y.s - x.s || x.i - y.i).map(x => x.a); if (sorted.some((a, i) => a !== run[i])) sorted.forEach(a => P.insertBefore(a, after)); } run = []; };
+      kids.forEach(k => { if (k.tagName === 'A' && /^#\//.test(k.getAttribute('href') || '')) run.push(k); else flush(k); });
+      flush(null);
+    });
+  }
+  /* 2) windows remember the list choices he picks again and again (empty lists only; never money, role, status) */
+  const FF_SKIP = /amount|price|cost|money|wallet|pay|bank|acc|iban|role|status|perm|vat|currency|salary|basic|rate|discount|fee|tax|approv|chain|level|lang/i;
+  let lastAct = null;
+  document.addEventListener('click', ev => { const a = ev.target && ev.target.closest ? ev.target.closest('[data-action]') : null; if (a && a.dataset.action && !/^(navgo|closemodal|go|nfl)/.test(a.dataset.action)) lastAct = { n: a.dataset.action, t: Date.now() }; }, true);
+  const ffKey = (mn, f) => mn + '|' + f;
+  function ffRemember(mn, form) {
+    if (!uiOn() || !person()) return; const all = jget(K_FFD); const mine = all[me()] || (all[me()] = {});
+    form.querySelectorAll('select[name]').forEach(sel => { if (FF_SKIP.test(sel.name) || sel.multiple || !sel.value) return; const k = ffKey(mn, sel.name); const c = mine[k] || (mine[k] = {}); c[sel.value] = (c[sel.value] || 0) + 1; const ks = Object.keys(c); if (ks.length > 12) ks.sort((a, b) => c[a] - c[b]).slice(0, ks.length - 12).forEach(x => delete c[x]); });
+    const keys = Object.keys(mine); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete mine[k]);
+    lss(K_FFD, JSON.stringify(all));
+  }
+  function ffFill(mn, form) {
+    if (!uiOn() || !person()) return; const mine = (jget(K_FFD)[me()]) || {};
+    form.querySelectorAll('select[name]').forEach(sel => {
+      if (FF_SKIP.test(sel.name) || sel.multiple || sel.value) return; const c = mine[ffKey(mn, sel.name)]; if (!c) return;
+      const tot = Object.values(c).reduce((a, b) => a + b, 0); const best = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; if (!best || best[1] < 3 || best[1] / tot < 0.6) return;
+      if (![...sel.options].some(o => o.value === best[0])) return;
+      sel.value = best[0]; sel.dispatchEvent(new Event('change', { bubbles: true })); sel.classList.add('nfl-ff'); sel.title = L('اتملت من اختياراتك اللي بتتكرر — غيّرها لو مش مناسبة', 'Filled from the choice you keep making — change it if it does not fit');
+    });
+  }
+  /* 4) the task form suggests who and how long, from similar tasks */
+  const toks = s => String(s || '').toLowerCase().replace(/[٠-٩\d]+/g, ' ').replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(w => w.length >= 3);
+  const jac = (a, b) => { const A = new Set(a), B = new Set(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach(x => { if (B.has(x)) n++; }); return n / (A.size + B.size - n); };
+  function taskHint(form) {
+    const ti = form.querySelector('#f-title'), as = form.querySelector('#f-assigneeId'); if (!ti || !as || !uiOn() || !person()) return;
+    let tm = null; const box = document.createElement('div'); box.className = 'nfl-tsug small'; box.hidden = true; (ti.closest('.field') || ti).insertAdjacentElement('afterend', box);
+    const run = () => {
+      const tk = toks(ti.value); if (tk.length < 2) { box.hidden = true; return; }
+      const sims = list('tasks').filter(t => t && t.assigneeId && t.kind !== 'update' && t.source !== 'rule' && t.title).map(t => ({ t, j: jac(tk, toks(t.title)) })).filter(x => x.j >= 0.5);
+      if (sims.length < 2) { box.hidden = true; return; }
+      const by = {}; sims.forEach(x => { by[x.t.assigneeId] = (by[x.t.assigneeId] || 0) + 1; }); const who = Object.entries(by).sort((a, b) => b[1] - a[1])[0][0];
+      const durs = sims.filter(x => x.t.doneAt && x.t.createdAt).map(x => Math.max(1, Math.round((Date.parse(x.t.doneAt) - Date.parse(x.t.createdAt)) / 864e5))).sort((a, b) => a - b); const md = durs.length ? durs[Math.floor(durs.length / 2)] : null;
+      const opt = [...as.options].find(o => o.value === who); if (!opt) { box.hidden = true; return; }
+      box.hidden = false; box.innerHTML = `${icon('star')}<span>${esc(L(`مهام شبهها (${sims.length}) كانت بتروح لـ «${opt.textContent.trim()}»${md ? ` وبتخلص في حوالي ${md} يوم` : ''}`, `Similar tasks (${sims.length}) went to «${opt.textContent.trim()}»${md ? ` and took about ${md} days` : ''}`))}</span> <button type="button" class="btn xs" data-nfl-tuse>${esc(L('استخدمه', 'Use it'))}</button>`;
+      box.querySelector('[data-nfl-tuse]').onclick = () => { as.value = who; as.dispatchEvent(new Event('change', { bubbles: true })); const du = form.querySelector('#f-dueDate'); if (du && !du.value && md) du.value = addDays(todayISO(), md); box.hidden = true; };
+    };
+    ti.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(run, 400); });
+  }
+  if (typeof openModal === 'function') openModal = (base => function (o) {
+    const la = lastAct && Date.now() - lastAct.t < 1500 ? lastAct.n : 'modal:' + viewName();
+    try { if (o && typeof o.onSubmit === 'function' && !o.__nfl2) { const sub = o.onSubmit; o.__nfl2 = 1; o.onSubmit = async function (f) { const r = await sub.apply(this, arguments); try { if (r !== false && f) ffRemember(la, f); } catch (e) { /* ignore */ } return r; }; } } catch (e) { /* ignore */ }
+    const out = base.apply(this, arguments);
+    try { const f = document.getElementById('mform'); if (f) { ffFill(la, f); taskHint(f); } } catch (e) { /* ignore */ }
+    return out;
+  })(openModal);
+  /* 3) «usually next»: the same page-to-page path 4 times */
+  let prevView = viewName();
+  window.addEventListener('hashchange', () => {
+    const v = viewName(); const a = prevView; prevView = v; if (!a || !v || a === v || !uiOn() || !person()) return;
+    const all = jget(K_SEQ); const mine = all[me()] || (all[me()] = {}); const c = mine[a] || (mine[a] = {}); c[v] = (c[v] || 0) + 1; lss(K_SEQ, JSON.stringify(all));
+  });
+  ACTIONS.nflNextX = k => { const x = jget(K_SEQX); x[k] = 1; lss(K_SEQX, JSON.stringify(x)); const e = document.getElementById('nfl-next'); if (e) e.remove(); };
+  function nextHint() {
+    const vw = document.getElementById('view'); if (!vw || !uiOn() || !person() || isHome() || S.route.id || vw.querySelector('#nfl-next')) return;
+    const a = viewName(); const c = ((jget(K_SEQ)[me()]) || {})[a]; if (!c) return; const tot = Object.values(c).reduce((x, y) => x + y, 0);
+    const best = Object.entries(c).sort((x, y) => y[1] - x[1])[0]; if (!best || best[1] < 4 || best[1] / tot < 0.5) return; const b = best[0];
+    if (!navOf(b) || (typeof canSee === 'function' && !canSee(b)) || jget(K_SEQX)[a + '>' + b]) return;
+    vw.insertAdjacentHTML('afterbegin', `<div class="nfl-next" id="nfl-next">${icon('arrow')}<span>${esc(L('عادةً بعد الصفحة دي بتفتح', 'After this page you usually open'))} <a href="#/${esc(b)}">«${esc(vLabel(b))}»</a></span><button type="button" class="nfl-x" data-action="nflNextX" data-arg="${esc(a + '>' + b)}" aria-label="${esc(L('اقفل', 'Close'))}">×</button></div>`);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => { try { navOrder(); } catch (e) { /* ignore */ } try { nextHint(); } catch (e) { /* ignore */ } });
+
+  /* ================= the assistant may propose a task ================= */
+  const ACT_NOTE = '\nلو المستخدم طلب صراحةً تعمل مهمة أو تفكّر حد بحاجة، ضيف في نفس JSON الرد حقل "action": {"type":"create_task","title":"عنوان قصير","assignee":"اسم الشخص زي ما هو في السيستم أو فاضي","due":"YYYY-MM-DD أو فاضي","orderId":"id المشروع أو فاضي"} — ماتعملش action غير لو طلب ده، والمستخدم هو اللي هيراجع ويحفظ.';
+  /* v7.79 (studio, like Ökoplan): the assistant may also propose «open the project» and «log a client event» — a card each, nothing
+     happens until the person taps «Do it» */
+  const STU_NOTE = '\nوكمان لو طلب صراحةً يفتح مشروع: "action": {"type":"open_project","project":"كود أو اسم المشروع"} — أو يسجّل حركة عميل على مشروع: "action": {"type":"client_event","project":"كود أو اسم المشروع","k":"sent أو reply أو approved أو rejected","note":"ملاحظة قصيرة"}.';
+  const isStu = () => typeof STU_ON !== 'undefined' && !!STU_ON;
+  let pendingAct = null;
+  if (typeof aiJson === 'function') aiJson = (base => async function (input, opts) {
+    const asst = typeof input === 'string' && input.indexOf('أنت مساعد داخل نظام إدارة') === 0 && typeof canTasks === 'function' && canTasks() && person();
+    const j = await base.call(this, asst ? input + ACT_NOTE + (isStu() ? STU_NOTE : '') : input, opts);
+    try {
+      const a = asst && j && j.reply && j.action; const ty = a && a.type;
+      if (ty === 'create_task' && a.title) pendingAct = { a, t: Date.now() };
+      else if (isStu() && (ty === 'open_project' || ty === 'client_event') && a.project) pendingAct = { a, t: Date.now() };
+    } catch (e) { /* ignore */ }
+    return j;
+  })(aiJson);
+  const findProject = q => { const x = String(q || '').trim().toLowerCase(); if (!x) return null; const ps = list('projects').filter(p => p && !p.deleted); return ps.find(p => p.id === q) || ps.find(p => String(p.code || '').toLowerCase() === x) || ps.find(p => String(p.name || '').toLowerCase() === x) || ps.find(p => String(p.name || '').toLowerCase().includes(x) || x.includes(String(p.code || '-').toLowerCase())) || null; };
+  const CEV = { sent: ['اتبعت للعميل', 'Sent to the client'], reply: ['العميل رد', 'The client replied'], approved: ['العميل اعتمد', 'The client approved'], rejected: ['العميل رفض / طلب تعديل', 'The client rejected / asked for changes'] };
+  function aiTask(a) {
+    const oid = a.orderId && byId('orders', a.orderId) ? a.orderId : '';
+    ACTIONS.taskNew(oid ? 'order:' + oid : '');
+    setTimeout(() => {
+      const f = document.getElementById('mform'); if (!f) return; const ti = f.querySelector('#f-title'); if (ti) ti.value = String(a.title || '').slice(0, 140);
+      const du = f.querySelector('#f-dueDate'); if (du && /^\d{4}-\d\d-\d\d$/.test(String(a.due || ''))) du.value = a.due;
+      const as = f.querySelector('#f-assigneeId'); const nm = String(a.assignee || '').trim(); if (as && nm) { const o = [...as.options].find(x => x.value && (x.textContent.includes(nm) || nm.includes(x.textContent.trim()))); if (o) as.value = o.value; }
+      toast(L('راجع المهمة واحفظها', 'Check the task and save it'));
+    }, 80);
+  }
+  new MutationObserver(ms => {
+    if (!pendingAct || Date.now() - pendingAct.t > 15000) return;
+    for (const m of ms) for (const n of m.addedNodes) {
+      if (!n || n.nodeType !== 1 || !n.classList || !n.classList.contains('msg') || !n.classList.contains('bot') || !n.closest || !n.closest('#aipanel')) continue;
+      if (/بفكّر|Thinking/.test(n.textContent || '') && n.textContent.length < 20) continue;
+      const a = pendingAct.a; pendingAct = null;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'btn xs p nfl-aitask';
+      if (a.type === 'open_project' || a.type === 'client_event') {
+        const p = findProject(a.project); if (!p) return; const nm = String(p.code || p.name || '').slice(0, 40); const k = CEV[a.k] ? a.k : 'reply';
+        if (a.type === 'open_project') { b.textContent = L(`نفّذ: افتح «${nm}»`, `Do it: open «${nm}»`); b.onclick = () => { location.hash = '#/projects/' + p.id; }; }
+        else { b.textContent = L(`نفّذ: سجّل على «${nm}»: ${CEV[k][0]}`, `Do it: log on «${nm}»: ${CEV[k][1]}`); b.onclick = async () => { if (typeof window.nfStuClientLog === 'function') { await window.nfStuClientLog(p.id, k, String(a.note || '').slice(0, 200)); toast(L('اتسجّل على المشروع', 'Logged on the project')); b.disabled = true; } }; }
+      } else { b.textContent = L(`نفّذ: اعمل المهمة «${String(a.title).slice(0, 40)}»`, `Do it: create the task «${String(a.title).slice(0, 40)}»`); b.onclick = () => aiTask(a); }
+      let box = n.querySelector('.acts'); if (!box) { box = document.createElement('div'); box.className = 'acts'; n.appendChild(box); } box.appendChild(b);
+      return;
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  window.nfTwin = { mapRule, rules, aiTask, navOrder, useCounts };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nfr-num{display:flex;gap:6px;align-items:center}.nfr-num input{max-width:110px}.nfr-chk{display:flex;gap:6px;align-items:center;font-size:13px}
+    .nfl-risk{margin:0 0 10px}.nfl-ff{outline:2px dashed var(--accent,#2a62d8);outline-offset:1px}
+    .nfl-tsug{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:-4px 0 8px;padding:6px 8px;border-radius:8px;background:rgba(42,98,216,.08)}.nfl-tsug svg{width:14px;height:14px}
+    .nfl-next{display:flex;gap:8px;align-items:center;margin:0 0 10px;padding:6px 10px;border:1px dashed var(--line,#d9dce3);border-radius:10px;font-size:13px}.nfl-next span{flex:1}.nfl-next svg{width:14px;height:14px}.nfl-x{border:0;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:var(--muted,#667)}
+    .nfl-aitask{margin-top:4px;white-space:normal;text-align:start}
+  </style>`);
+})();
+/* =====================================================================
+   v7.80 (inbox #23, brief claude/twin-rules-timeline-brief.md): the timeline layer. All three Ninety systems.
+   · Factory order page: a Gantt of its departments — planned / actual / late, today and the delivery date lines.
+     The plan is automatic (start → delivery date split by each department usual time, from the nightly nf-learn «typ»)
+     until someone saves «Save as baseline» or sets «Department dates». A department that slipped shows «move the next
+     departments by N days» and whether that passes the delivery date; «Accept the re-plan» with a reason keeps a log.
+   · #/nftimeline (the owner only, his answer): every running order on a months axis with its departments, how crowded
+     each month is, the load of each department against its capacity, planning accuracy (baseline → actual) and the
+     re-plan reasons. Studio: projects to their due date. Construction: projects to their end date.
+   · «Today's plan» on the home page: the person's top 5 tasks (priority + date + doing + rules).
+   Arabic and English, phone and desktop.
+   v7.80 (Mahmoud 16 Oct: «why is the timeline in AI — it belongs in project management, and every project its timeline with
+   its items»; brief claude/project-timeline-brief.md, Start 16 Oct): the big timeline left the AI module — factory: it is the
+   «Timeline» tab of «Projects manager» for the owner (the others keep the old schedule there); studio / construction: a row
+   inside the Projects module. Each project / order timeline shows under every department its tasks, then purchases and
+   trips, then the order items (each item from the start to the delivery date with its own tasks). Who sees what: unchanged.
+   ===================================================================== */
+(function () {
+  if (window.__NF_TIMELINE__) return; window.__NF_TIMELINE__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || !window.nfLearn) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const LD = window.nfLearn.data;
+  const lsg = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const viewing = () => typeof isViewing === 'function' && isViewing();
+  const person = () => !!S.session && role() !== 'kiosk' && !viewing() && (typeof window.nfTwinOk !== 'function' || window.nfTwinOk());   /* v7.79: the office twin is for the two of them only */
+  const isOwner = () => (typeof window.nfTwinBoss === 'function' ? window.nfTwinBoss() : (!!S.session && isAdmin() && !viewing()));
+  const uiOn = () => lsg('nf.learn.ui') !== 'off';
+  const CO = () => ((typeof isStudioz === 'function' && isStudioz()) ? 'studio' : (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : 'factory');
+  const viewName = () => (S.route && S.route.view) || '';
+  const isHome = () => { const v = viewName(); const h = typeof homeView === 'function' ? homeView() : 'dashboard'; return v === h || v === 'ninety'; };
+  const dName = id => (typeof deptName === 'function' ? deptName(id) : id);
+  const D = s => String(s || '').slice(0, 10);
+  const dd = (a, b) => daysBetween(D(a), D(b));
+  const T = () => todayISO();
+  const maxD = (...a) => a.filter(Boolean).map(D).sort().slice(-1)[0] || '';
+  const minD = (...a) => a.filter(Boolean).map(D).sort()[0] || '';
+  const HUES = [212, 28, 150, 280, 352, 190, 48, 100, 320, 240];
+  const hue = id => { if (window.nfStuTL && CO() === 'studio') return window.nfStuTL.hue(id); const ds = ((S.settings && S.settings.departments) || []).map(d => d.id); const i = ds.indexOf(id); return HUES[(i < 0 ? String(id).length : i) % HUES.length]; };
+
+  /* ================= the plan of a factory order ================= */
+  const typ = () => (((LD.rows || {}).typ || {}).depts) || {};
+  const routeOf = o => (Array.isArray(o.route) ? o.route : []).filter(d => !((o.stages || {})[d] && (o.stages || {})[d].status === 'skipped'));
+  const startOf = o => D(o.startDate || o.orderDate || o.releasedAt || o.createdAt) || T();
+  function autoPlan(o) {
+    const r = routeOf(o); if (!r.length) return {}; const t = typ(); const w = r.map(d => Math.max(1, +t[d] || 5)); const s0 = startOf(o);
+    const span = o.dueDate && D(o.dueDate) > s0 ? dd(s0, o.dueDate) + 1 : 0; const sum = w.reduce((a, b) => a + b, 0); const k = span ? span / sum : 1;
+    const out = {}; let cur = s0;
+    r.forEach((d, i) => { const len = Math.max(1, Math.round(w[i] * k)); let end = addDays(cur, len - 1); if (span && i === r.length - 1) end = maxD(D(o.dueDate), cur); out[d] = { start: cur, end }; cur = addDays(end, 1); });
+    return out;
+  }
+  const planOf = o => { const p = o.nfPlan && o.nfPlan.stages; return p && Object.keys(p).length ? { stages: p, auto: false } : { stages: autoPlan(o), auto: true }; };
+  const actOf = (o, d) => { const s = (o.stages || {})[d] || {}; const done = s.status === 'done'; return { start: D(s.start), end: done ? D(s.end || s.at) : (s.start ? T() : ''), done, active: !!s.start && !done }; };
+  function drift(o) {
+    const { stages: P } = planOf(o); const r = routeOf(o); const t = T();
+    for (let i = 0; i < r.length; i++) {
+      const d = r[i], p = P[d], a = actOf(o, d); if (!p) continue;
+      if (a.done) { if (a.end > p.end) { const nx = r[i + 1] && P[r[i + 1]]; if (nx && nx.start <= a.end && !actOf(o, r[i + 1]).start) return { dept: d, delta: dd(p.end, a.end), kind: 'end' }; } continue; }
+      if (!a.start && t > p.start) return { dept: d, delta: dd(p.start, t), kind: 'start' };
+      if (a.start && a.start > p.start) return { dept: d, delta: dd(p.start, a.start), kind: 'start' };
+      if (a.active && t > p.end) return { dept: d, delta: dd(p.end, t), kind: 'end' };
+      break;
+    }
+    return null;
+  }
+  function shifted(o, dr) {
+    const { stages: P } = planOf(o); const r = routeOf(o); const out = JSON.parse(JSON.stringify(P)); let on = false;
+    r.forEach(d => { if (!out[d]) return; if (d === dr.dept) { on = true; if (dr.kind === 'end') { out[d].end = addDays(out[d].end, dr.delta); return; } } if (on) { out[d].start = addDays(out[d].start, dr.delta); out[d].end = addDays(out[d].end, dr.delta); } });
+    return out;
+  }
+  const planEnd = st => maxD(...Object.values(st).map(x => x && x.end));
+  const canPlan = () => typeof writable === 'function' && writable() && (isAdmin() || role() === 'manager' || (typeof canDo === 'function' && canDo('orders.edit')));
+
+  /* v7.80: what sits under each line of an order timeline — its tasks, its purchases and trips, its items */
+  const TK_OK = t => t && !t.deleted && !['update', 'notice'].includes(String(t.kind || 'task')) && t.source !== 'morning';
+  const tkS = (t, s0) => D(t.createdAt) || D(t.dueDate) || s0;
+  const tkE = (t, s0) => maxD(tkS(t, s0), t.status === 'done' ? D(t.doneAt || t.updatedAt) : '', D(t.dueDate)) || tkS(t, s0);
+  const tkLate = t => ['open', 'doing'].includes(String(t.status || 'open')) && t.dueDate && D(t.dueDate) < T();
+  const PO_DONE = ['received', 'closed', 'arrived', 'done', 'cancelled'];
+  function under(o) {
+    const s0 = startOf(o); const r = routeOf(o);
+    const tasks = list('tasks').filter(t => TK_OK(t) && t.orderId === o.id).slice(0, 300);
+    const byD = {}; const other = []; tasks.forEach(t => { if (t.deptId && r.includes(t.deptId)) (byD[t.deptId] = byD[t.deptId] || []).push(t); else other.push(t); });
+    const pos = list('purchases').filter(p => p && p.orderId === o.id && p.status !== 'cancelled').map(p => ({ id: p.id, href: `#/purchases/${p.id}`, label: L(`شراء ${p.number || ''}`, `Purchase ${p.number || ''}`), s: D(p.createdAt) || s0, e: PO_DONE.includes(String(p.status)) ? (D(p.receivedAt || p.updatedAt) || D(p.createdAt) || s0) : maxD(D(p.createdAt) || s0, D(p.expectedDate || p.eta), T()), done: PO_DONE.includes(String(p.status)), late: !PO_DONE.includes(String(p.status)) && !!(p.expectedDate || p.eta) && D(p.expectedDate || p.eta) < T() }));
+    const trips = list('trips').filter(x => x && x.orderId === o.id && x.status !== 'cancelled').map(x => { const d0 = D(x.date || x.createdAt) || s0; return { id: x.id, href: `#/fleet/${x.id}`, label: L(`مشوار: ${x.purpose || x.dest || ''}`, `Trip: ${x.purpose || x.dest || ''}`), s: d0, e: d0, done: ['done'].includes(String(x.status)), late: !['done'].includes(String(x.status)) && d0 < T() }; });
+    const items = (Array.isArray(o.items) ? o.items : []).filter(Boolean).slice(0, 40).map((it, i) => { const pr = it.productId ? byId('products', it.productId) : null; const nm = String(it.name || (pr && pr.name) || L(`بند ${i + 1}`, `Item ${i + 1}`)); return { it, i, name: nm + (+it.qty > 1 ? ` × ${+it.qty}` : ''), tasks: it.productId ? tasks.filter(t => t.productId === it.productId) : [] }; });
+    return { s0, tasks, byD, other, pos, trips, items };
+  }
+  const tkCls = t => (t.status === 'done' ? 'done' : tkLate(t) ? 'late' : t.status === 'doing' ? 'doing' : 'open');
+  function gantt(o) {
+    const r = routeOf(o); if (!r.length) return '';
+    const { stages: P, auto } = planOf(o); const B = o.nfPlan && o.nfPlan.baseline && o.nfPlan.baseline.stages; const t = T();
+    const pts = []; r.forEach(d => { const p = P[d], a = actOf(o, d); if (p) pts.push(p.start, p.end); if (a.start) pts.push(a.start, a.end); if (B && B[d]) pts.push(B[d].start, B[d].end); });
+    pts.push(t); if (o.dueDate) pts.push(D(o.dueDate));
+    const U = under(o); const lo0 = addDays(U.s0, -45);
+    U.tasks.forEach(k => { const a = tkS(k, U.s0), b = tkE(k, U.s0); if (a >= lo0) pts.push(a); if (b >= lo0) pts.push(b); });
+    U.pos.concat(U.trips).forEach(k => { if (k.s >= lo0) pts.push(k.s); if (k.e >= lo0) pts.push(k.e); });
+    const lo = addDays(minD(...pts), -1), hi = addDays(maxD(...pts), 1); const tot = Math.max(1, dd(lo, hi) + 1);
+    const x = iso => Math.max(0, Math.min(100, dd(lo, iso) / tot * 100)); const w = (a, b) => Math.max(0.8, (dd(a, b) + 1) / tot * 100);
+    const rows = r.map(d => {
+      const p = P[d], a = actOf(o, d), b = B && B[d]; const late = a.start && p && (a.end > p.end || (!a.done && t > p.end));
+      return `<div class="nft-row"><div class="nft-l" title="${esc(dName(d))}">${esc(dName(d))}</div><div class="nft-tr">
+        ${b ? `<i class="nft-b" style="inset-inline-start:${x(b.start)}%;width:${w(b.start, b.end)}%"></i>` : ''}
+        ${p ? `<i class="nft-p" style="inset-inline-start:${x(p.start)}%;width:${w(p.start, p.end)}%;--h:${hue(d)}" title="${esc(L('المخطط', 'Planned'))} ${esc(fmtDate(p.start))} → ${esc(fmtDate(p.end))}"></i>` : ''}
+        ${a.start ? `<i class="nft-a ${a.done ? 'done' : 'on'} ${late ? 'late' : ''}" style="inset-inline-start:${x(a.start)}%;width:${w(a.start, a.end)}%;--h:${hue(d)}" title="${esc(L('الفعلي', 'Actual'))} ${esc(fmtDate(a.start))} → ${esc(a.done ? fmtDate(a.end) : L('لسه شغّال', 'running'))}"></i>` : ''}
+      </div></div>${subTasks(U.byD[d] || [], d)}`;
+    }).join('') + extraRows();
+    function bar(cls, a, b, hu) { return `<i class="nft-t ${cls}" style="inset-inline-start:${x(a)}%;width:${w(a, b)}%${hu != null ? `;--h:${hu}` : ''}"></i>`; }
+    function subRow(href, label, inner, title) { return `<a class="nft-row nft-sub" href="${esc(href)}" title="${esc(title || label)}"><div class="nft-l">${esc(label)}</div><div class="nft-tr nft-trs">${inner}</div></a>`; }
+    function taskRow(k, hu) { const a = tkS(k, U.s0), b = tkE(k, U.s0); return subRow(`#/tasks/${k.id}`, String(k.title || ''), bar(tkCls(k), a, b, hu), `${k.title || ''}${k.dueDate ? ' — ' + fmtDate(k.dueDate) : ''}`); }
+    function group(label, n, body, open) { return n ? `<details class="nft-det"${open ? ' open' : ''}><summary class="nft-sum"><span class="nft-l">${esc(label)}</span><span class="small muted">${n}</span></summary>${body}</details>` : ''; }
+    function subTasks(ts, d) { return group(L('مهام القسم', 'Department tasks'), ts.length, ts.slice(0, 30).map(k => taskRow(k, hue(d))).join(''), false); }
+    function extraRows() {
+      let h = group(L('مهام تانية', 'Other tasks'), U.other.length, U.other.slice(0, 30).map(k => taskRow(k, null)).join(''), false);
+      const pt = U.pos.concat(U.trips); h += group(L('المشتريات والنقل', 'Purchases and trips'), pt.length, pt.slice(0, 30).map(k => subRow(k.href, k.label, bar(k.done ? 'done' : k.late ? 'late' : 'open', k.s, k.e, null))).join(''), false);
+      const end = D(o.dueDate) || planEnd(P) || t;
+      h += group(L('بنود الأمر', 'Order items'), U.items.length, U.items.map(m => {
+        const dots = m.tasks.slice(0, 12).map(k => { const at = k.status === 'done' ? (D(k.doneAt) || tkE(k, U.s0)) : (D(k.dueDate) || tkS(k, U.s0)); return `<i class="nft-dot ${tkCls(k)}" style="inset-inline-start:${x(at)}%" title="${esc(String(k.title || ''))}"></i>`; }).join('');
+        return `<div class="nft-row nft-sub nft-item"><div class="nft-l" title="${esc(m.name)}">${esc(m.name)}</div><div class="nft-tr nft-trs">${bar('item', U.s0, end, null)}${dots}</div></div>`;
+      }).join('') + (U.items.length ? `<p class="tiny muted nft-note">${esc(L('كل بند من بداية الأمر لميعاد التسليم، والنقط مهامه. البنود بتتحرك مع الأمر في الأقسام.', 'Each item runs from the start of the order to the delivery date; the dots are its tasks. Items move through the departments with the order.'))}</p>` : ''), false);
+      return h;
+    }
+    const dr = drift(o); let warn = '';
+    if (dr) { const ns = shifted(o, dr); const ne = planEnd(ns); const over = o.dueDate && ne > D(o.dueDate) ? dd(o.dueDate, ne) : 0;
+      warn = `<div class="banner warn nft-drift">${icon('alert')}<span>${esc(dr.kind === 'start' ? L(`«${dName(dr.dept)}» بدأ متأخر ${dr.delta} يوم عن الخطة`, `«${dName(dr.dept)}» started ${dr.delta} days late`) : L(`«${dName(dr.dept)}» عدّى نهايته المخططة بـ ${dr.delta} يوم`, `«${dName(dr.dept)}» is ${dr.delta} days past its planned end`))}. ${esc(L(`لو زحزحنا الأقسام اللي بعده، الأمر يخلص ${fmtDate(ne)}`, `Moving the next departments, the order ends ${fmtDate(ne)}`))}${over ? ` — <b>${esc(L(`بعد ميعاد التسليم بـ ${over} يوم`, `${over} days after the delivery date`))}</b>` : ''}.</span>${canPlan() ? `<button type="button" class="btn sm" data-action="nftReplan" data-arg="${esc(o.id)}">${esc(L('اقبل إعادة الجدولة', 'Accept the re-plan'))}</button>` : ''}</div>`; }
+    const reps = (o.nfPlan && o.nfPlan.replans) || [];
+    return `<div class="card nft-card" id="nft-card"><div class="cardhead"><h3>${esc(L('التايم لاين', 'Timeline'))}</h3><span class="small muted">${esc(auto ? L('خطة تلقائية من المدد المعتادة', 'Automatic plan from the usual times') : B ? L(`خطة أساسية ${fmtDate(D(o.nfPlan.baseline.at))}`, `Baseline ${fmtDate(D(o.nfPlan.baseline.at))}`) : L('خطة متعدّلة', 'Edited plan'))}</span></div>
+      ${warn}
+      <div class="nft-g" style="--today:${x(t)}%">${rows}<i class="nft-today" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(t) / 100})" title="${esc(L('النهارده', 'Today'))}"></i>${o.dueDate ? `<i class="nft-due" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(D(o.dueDate)) / 100})" title="${esc(L('ميعاد التسليم', 'Delivery date'))} ${esc(fmtDate(D(o.dueDate)))}"></i>` : ''}</div>
+      <div class="nft-leg small muted"><span><i class="nft-k p"></i>${esc(L('المخطط', 'Planned'))}</span><span><i class="nft-k a"></i>${esc(L('الفعلي', 'Actual'))}</span><span><i class="nft-k l"></i>${esc(L('متأخر', 'Late'))}</span>${B ? `<span><i class="nft-k b"></i>${esc(L('الأساسية', 'Baseline'))}</span>` : ''}<span><i class="nft-k t"></i>${esc(L('النهارده', 'Today'))}</span>${o.dueDate ? `<span><i class="nft-k d"></i>${esc(L('التسليم', 'Delivery'))} ${esc(fmtDate(D(o.dueDate)))}</span>` : ''}</div>
+      ${canPlan() ? `<div class="nft-btns"><button type="button" class="btn sm" data-action="nftBase" data-arg="${esc(o.id)}">${esc(L('احفظ كخطة أساسية', 'Save as baseline'))}</button><button type="button" class="btn sm ghost" data-action="nftDates" data-arg="${esc(o.id)}">${esc(L('تواريخ الأقسام', 'Department dates'))}</button></div>` : ''}
+      ${reps.length ? `<p class="tiny muted" style="margin:6px 0 0">${esc(L(`اتعادت جدولته ${reps.length} مرة — آخرها: ${RS(reps[reps.length - 1].reason)}`, `Re-planned ${reps.length} times — last: ${RS(reps[reps.length - 1].reason)}`))}</p>` : ''}</div>`;
+  }
+  const REASONS = { client: ['العميل', 'The client'], internal: ['سبب داخلي', 'Internal'], scope: ['تغيير في الشغل', 'Change of scope'], other: ['حاجة تانية', 'Other'] };
+  const RS = k => (REASONS[k] || REASONS.other)[en() ? 1 : 0];
+  const savePlan = (o, patch) => Store.update('orders', o.id, { nfPlan: Object.assign({}, o.nfPlan || {}, patch) });
+  ACTIONS.nftBase = async id => { const o = byId('orders', id); if (!o || !canPlan()) return; const { stages } = planOf(o); await savePlan(o, { stages, baseline: { at: nowISO(), by: (S.session && S.session.name) || '', stages } }); toast(L('اتحفظت الخطة الأساسية', 'Baseline saved')); };
+  ACTIONS.nftDates = id => {
+    const o = byId('orders', id); if (!o || !canPlan()) return; const { stages } = planOf(o);
+    openModal({ title: L(`تواريخ الأقسام — ${o.code || ''}`, `Department dates — ${o.code || ''}`), body: `<div class="form">${routeOf(o).map(d => { const p = stages[d] || {}; return `<div class="field full nft-dl"><label>${esc(dName(d))}</label><div class="nft-two"><input type="date" class="inp" name="s_${esc(d)}" value="${esc(p.start || '')}" aria-label="${esc(L('من', 'From'))}"><span>←</span><input type="date" class="inp" name="e_${esc(d)}" value="${esc(p.end || '')}" aria-label="${esc(L('لحد', 'To'))}"></div></div>`; }).join('')}</div>`,
+      onSubmit: async f => {
+        const out = {}; for (const d of routeOf(o)) { const s = f.querySelector(`[name="s_${CSS.escape(d)}"]`).value, e = f.querySelector(`[name="e_${CSS.escape(d)}"]`).value; if (!s || !e) continue; if (e < s) { toast(L(`«${dName(d)}»: النهاية قبل البداية`, `«${dName(d)}»: the end is before the start`), 'err'); return false; } out[d] = { start: s, end: e }; }
+        if (!Object.keys(out).length) return false; await savePlan(o, { stages: out }); toast(L('اتحفظت التواريخ', 'Dates saved')); return true;
+      } });
+  };
+  ACTIONS.nftReplan = id => {
+    const o = byId('orders', id); if (!o || !canPlan()) return; const dr = drift(o); if (!dr) return; const ns = shifted(o, dr); const ne = planEnd(ns); const over = o.dueDate && ne > D(o.dueDate) ? dd(o.dueDate, ne) : 0;
+    openModal({ title: L('إعادة الجدولة', 'Re-plan'), submitLabel: L('اقبل', 'Accept'), body: `<div class="form"><p class="small full" style="margin:0">${esc(L(`الأقسام من «${dName(dr.dept)}» وبعده هتتزحزح ${dr.delta} يوم، والأمر يخلص ${fmtDate(ne)}.`, `The departments from «${dName(dr.dept)}» on move ${dr.delta} days; the order ends ${fmtDate(ne)}.`))}${over ? ` <b>${esc(L(`ده بعد ميعاد التسليم بـ ${over} يوم.`, `That is ${over} days after the delivery date.`))}</b>` : ''}</p>
+      <div class="field"><label>${esc(L('السبب', 'Reason'))}</label><select name="reason" class="inp">${Object.keys(REASONS).map(k => `<option value="${k}">${esc(RS(k))}</option>`).join('')}</select></div><div class="field full"><label>${esc(L('ملاحظة (اختياري)', 'Note (optional)'))}</label><input name="note" class="inp" maxlength="200"></div></div>`,
+      onSubmit: async f => { const reason = f.querySelector('[name=reason]').value; const note = f.querySelector('[name=note]').value.trim(); await savePlan(o, { stages: ns, replans: ((o.nfPlan && o.nfPlan.replans) || []).concat([{ at: nowISO(), by: (S.session && S.session.name) || '', reason, delta: dr.delta, dept: dr.dept, note, over }]).slice(-30) }); toast(L('اتعادت الجدولة', 'Re-planned')); return true; } });
+  };
+  if (typeof vOrderDetail === 'function') vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); if (CO() !== 'factory') return html; const o = byId('orders', id); if (!o || ['cancelled'].includes(o.status)) return html;
+    let g = ''; try { g = gantt(o); } catch (e) { g = ''; } if (!g) return html;
+    const k = '<div class="card"><div class="cardhead"><h3>مراحل التصنيع</h3>'; const i = html.indexOf(k); return i < 0 ? html + g : html.slice(0, i) + g + html.slice(i);
+  })(vOrderDetail);
+
+  /* ================= #/nftimeline (owner) ================= */
+  VIEW_TITLES.nftimeline = 'التايم لاين';
+  (() => { if (CO() === 'factory' || NAV.some(n => n.id === 'nftimeline')) return; const near = CO() === 'studio' ? 'projects' : 'cprojects'; const i = NAV.findIndex(n => n.id === near); const e = { id: 'nftimeline', label: 'التايم لاين', icon: 'calendar' }; if (i >= 0) NAV.splice(i + 1, 0, e); else NAV.push(e); })();   /* v7.80: inside the Projects module, not AI */
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'nftimeline') return isOwner(); return base.apply(this, arguments); })(canSee);
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.nftimeline = () => ({ title: L('التايم لاين', 'Timeline'), sub: L('كل الشغل الشغّال على الشهور، زحمة كل شهر، وحمل كل قسم', 'All running work on the months, how crowded each month is, and the load of each department') });
+  const MONTHS = [['يناير', 'Jan'], ['فبراير', 'Feb'], ['مارس', 'Mar'], ['أبريل', 'Apr'], ['مايو', 'May'], ['يونيو', 'Jun'], ['يوليو', 'Jul'], ['أغسطس', 'Aug'], ['سبتمبر', 'Sep'], ['أكتوبر', 'Oct'], ['نوفمبر', 'Nov'], ['ديسمبر', 'Dec']];
+  const mName = ym => `${MONTHS[+ym.slice(5, 7) - 1][en() ? 1 : 0]} ${ym.slice(2, 4)}`;
+  function axis() { const t = T(); const s = addDays(t.slice(0, 7) + '-01', -31).slice(0, 7) + '-01'; const months = []; let c = s; for (let i = 0; i < 6; i++) { months.push(c.slice(0, 7)); const [y, m] = c.split('-').map(Number); c = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`; } const end = addDays(c, -1); return { s, end, months, tot: dd(s, end) + 1 }; }
+  function items() {
+    const co = CO(); const out = [];
+    if (co === 'factory') list('orders').filter(o => o && !['delivered', 'cancelled', 'closed'].includes(o.status)).forEach(o => { const { stages } = planOf(o); const segs = routeOf(o).map(d => { const p = stages[d]; const a = actOf(o, d); return p ? { d, s: a.start || p.start, e: a.done ? a.end : maxD(p.end, a.active ? T() : ''), done: a.done, late: !!a.start && (a.end > p.end || (!a.done && T() > p.end)) } : null; }).filter(Boolean); if (segs.length) out.push({ id: o.id, href: `#/orders/${o.id}`, label: o.code || o.title || '', sub: o.title || '', due: D(o.dueDate), segs }); });
+    else if (co === 'studio' && window.nfStuTL) window.nfStuTL.items().forEach(it => out.push(it));   /* v7.79: the projects with their phases (part x5) */
+    else if (co === 'studio') list('projects').filter(p => p && !['done', 'archived', 'cancelled', 'closed'].includes(String(p.status || p.osStatus || ''))).forEach(p => { const s = D(p.createdAt) || T(); const e = D(p.dueDate || p.clientDeadline) || addDays(s, 30); out.push({ id: p.id, href: `#/projects/${p.id}`, label: p.code || p.name || '', sub: p.name || '', due: D(p.dueDate || p.clientDeadline), segs: [{ d: String(p.stage || 'p'), s, e: maxD(e, s), done: false, late: !!(p.dueDate || p.clientDeadline) && T() > D(p.dueDate || p.clientDeadline) }] }); });
+    else list('cprojects').filter(p => p && !['done', 'closed', 'cancelled'].includes(String(p.status || ''))).forEach(p => { const s = D(p.startDate || p.createdAt) || T(); const e = D(p.endDate || p.dueDate || p.handoverDate) || addDays(s, 90); out.push({ id: p.id, href: `#/cprojects/${p.id}`, label: p.code || p.name || '', sub: p.name || '', due: D(p.endDate || p.dueDate), segs: [{ d: 'c', s, e: maxD(e, s), done: false, late: !!(p.endDate || p.dueDate) && T() > D(p.endDate || p.dueDate) }] }); });
+    return out.sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')));
+  }
+  function vTimeline() {
+    if (!isOwner()) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const A = axis(); const x = iso => Math.max(0, Math.min(100, dd(A.s, iso) / A.tot * 100)); const its = items(); const t = T();
+    const head = `<div class="nft-mh">${A.months.map(m => `<span>${esc(mName(m))}</span>`).join('')}</div>`;
+    const rows = its.slice(0, 60).map(it => `<div class="nft-row"><div class="nft-l"><a href="${esc(it.href)}" title="${esc(it.sub)}">${esc(it.label)}</a></div><div class="nft-tr">${it.segs.filter(s => s.e >= A.s && s.s <= A.end).map(s => `<i class="nft-a ${s.done ? 'done' : 'on'} ${s.late ? 'late' : ''}" style="inset-inline-start:${x(maxD(s.s, A.s))}%;width:${Math.max(0.8, (dd(maxD(s.s, A.s), minD(s.e, A.end)) + 1) / A.tot * 100)}%;--h:${hue(s.d)}" title="${esc(CO() === 'factory' ? dName(s.d) : CO() === 'studio' && window.nfStuTL ? it.sub + ' — ' + window.nfStuTL.phName(s.d) : it.sub)} ${esc(fmtDate(s.s))} → ${esc(fmtDate(s.e))}"></i>`).join('')}${it.due && it.due >= A.s && it.due <= A.end ? `<i class="nft-dueM" style="inset-inline-start:${x(it.due)}%" title="${esc(L('الميعاد', 'Due'))} ${esc(fmtDate(it.due))}"></i>` : ''}</div></div>`).join('');
+    const gantt0 = its.length ? `<div class="nft-g nft-big">${head}${rows}<i class="nft-today" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(t) / 100})"></i></div>` : `<div class="empty small">${esc(L('مفيش شغل شغّال دلوقتي.', 'Nothing running now.'))}</div>`;
+    /* how crowded each month is */
+    const load = A.months.map(m => { const ms0 = m + '-01'; const me0 = addDays(A.months[A.months.indexOf(m) + 1] ? A.months[A.months.indexOf(m) + 1] + '-01' : addDays(A.end, 1), -1); return { m, n: its.reduce((c, it) => c + it.segs.filter(s => s.s <= me0 && s.e >= ms0).length, 0) }; });
+    const mx = Math.max(1, ...load.map(l => l.n));
+    const crowd = `<div class="nft-crowd">${load.map(l => `<div><b style="height:${Math.round(l.n / mx * 100)}%"></b><span>${esc(mName(l.m))}</span><em>${l.n}</em></div>`).join('')}</div>`;
+    let deps = '', acc = '', why = '';
+    if (CO() === 'factory') {
+      const cap = (S.settings && S.settings.nfCapacity) || {}; const act = {}; list('orders').filter(o => o && !['delivered', 'cancelled', 'closed'].includes(o.status)).forEach(o => routeOf(o).forEach(d => { if (actOf(o, d).active) act[d] = (act[d] || 0) + 1; }));
+      const ds = ((S.settings && S.settings.departments) || []).filter(d => d && d.id && !d.admin);
+      deps = `<div class="list">${ds.map(d => { const n = act[d.id] || 0, c = +cap[d.id] || 3; const ws = list('workers').filter(w => w && w.status !== 'inactive' && w.deptId === d.id); const tl = ws.map(w => ({ w, n: list('tasks').filter(t => t && t.assigneeId === w.id && ['open', 'doing'].includes(t.status) && t.kind !== 'update').length })).sort((a, b) => b.n - a.n); const hi = tl[0], lo = tl[tl.length - 1];
+        return `<div class="item"><div class="main"><div class="title"><b class="nfl-tk">${esc(d.name)}</b> <span class="badge ${n > c ? 'crit' : n === c ? 'warn' : ''}">${esc(L(`${n} شغّال من طاقة ${c}`, `${n} running of ${c} capacity`))}</span></div>${n > c ? `<div class="meta"><span>${esc(L('القسم عليه أكتر من طاقته — أجّل بداية أمر جديد فيه أو زوّد الناس.', 'Over capacity — delay starting a new order here or add people.'))}</span></div>` : ''}${hi && lo && hi.n - lo.n >= 3 ? `<div class="meta"><span>${esc(L(`المهام: ${hi.w.name} عليه ${hi.n} و${lo.w.name} عليه ${lo.n} — ممكن تنقل منه.`, `Tasks: ${hi.w.name} holds ${hi.n} and ${lo.w.name} ${lo.n} — you could move some.`))}</span></div>` : ''}</div></div>`; }).join('')}</div><div class="nft-btns"><button type="button" class="btn sm ghost" data-action="nftCap">${esc(L('طاقة الأقسام', 'Department capacity'))}</button></div>`;
+      /* planning accuracy: baseline end → actual end, per department */
+      const dev = {}; const rs = {}; list('orders').forEach(o => { const B = o && o.nfPlan && o.nfPlan.baseline && o.nfPlan.baseline.stages; ((o && o.nfPlan && o.nfPlan.replans) || []).forEach(r => { rs[r.reason] = (rs[r.reason] || 0) + 1; }); if (!B) return; routeOf(o).forEach(d => { const a = actOf(o, d); if (a.done && B[d] && B[d].end) (dev[d] = dev[d] || []).push(dd(B[d].end, a.end)); }); });
+      const dk = Object.keys(dev); acc = dk.length ? `<div class="list">${dk.map(d => { const a = dev[d].slice().sort((p, q) => p - q); const m = a[Math.floor(a.length / 2)]; return `<div class="item"><div class="main"><div class="title"><b class="nfl-tk">${esc(dName(d))}</b> <span class="badge ${m > 2 ? 'warn' : m <= 0 ? 'ok' : ''}">${esc(m > 0 ? L(`بيتأخر ${m} يوم عادةً`, `usually ${m} days late`) : m < 0 ? L(`بيخلص بدري ${-m} يوم`, `usually ${-m} days early`) : L('في ميعاده', 'on time'))}</span></div><div class="meta"><span>${esc(L(`من ${a.length} أوامر ليها خطة أساسية`, `from ${a.length} orders with a baseline`))}</span></div></div></div>`; }).join('')}</div>` : `<div class="empty small">${esc(L('لما الأوامر يتحفظلها «خطة أساسية» وتخلص، هتبان هنا دقة التخطيط.', 'Once orders have a «baseline» and finish, planning accuracy shows here.'))}</div>`;
+      const rk = Object.keys(rs); why = rk.length ? `<div class="nft-reasons">${rk.sort((a, b) => rs[b] - rs[a]).map(k => `<span class="badge">${esc(RS(k))}: ${rs[k]}</span>`).join(' ')}</div>` : `<div class="empty small">${esc(L('مفيش إعادة جدولة لسه.', 'No re-plans yet.'))}</div>`;
+    }
+    const sec = (tt, inner, sub) => `<div class="card nfl-sec"><h3 class="nfl-h">${esc(tt)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
+    return sec(CO() === 'factory' ? L('الأوامر الشغّالة', 'Running orders') : L('المشاريع الشغّالة', 'Running projects'), gantt0, CO() === 'factory' ? L('كل لون قسم. الأحمر متأخر عن خطته.', 'Each colour is a department. Red is behind its plan.') : '')
+      + sec(L('زحمة كل شهر', 'How crowded each month is'), crowd, CO() === 'factory' ? L('عدد مراحل الأقسام اللي شغّالة أو مخططة في الشهر.', 'Department stages running or planned in the month.') : CO() === 'studio' && window.nfStuTL ? L('عدد مراحل المشاريع اللي شغّالة أو مخططة في الشهر.', 'Project phases running or planned in the month.') : L('عدد المشاريع الشغّالة في الشهر.', 'Projects running in the month.'))
+      + (CO() === 'factory' ? sec(L('حمل الأقسام دلوقتي', 'Department load now'), deps) + sec(L('دقة التخطيط', 'Planning accuracy'), acc) + sec(L('أسباب إعادة الجدولة', 'Re-plan reasons'), why) : '')
+      + (CO() === 'studio' && window.nfStuTL ? window.nfStuTL.sections(sec) : '');
+  }
+  EXTRA_VIEWS.nftimeline = () => {
+    /* v7.80: in the factory the timeline is the «Timeline» tab of «Projects manager» — old links land there */
+    if (CO() === 'factory' && typeof vProjects === 'function') { (S.ui.filter.projects ||= { brand: '', risk: false, tab: 'cards', status: 'open' }).tab = 'gantt'; setTimeout(() => { if (S.route && S.route.view === 'nftimeline') location.hash = '#/projects'; }, 0); }
+    return vTimeline();
+  };
+  const PJ_TABS = on => `<div class="tabs" style="margin-bottom:10px"><button ${on === 'cards' ? 'class="on" ' : ''}data-action="pjTab" data-arg="cards">المشاريع والمراحل</button><button ${on === 'gantt' ? 'class="on" ' : ''}data-action="pjTab" data-arg="gantt">الجدول الزمني</button></div>`;
+  if (typeof vProjects === 'function') vProjects = (base => function () {
+    if (CO() === 'factory' && S.route && !S.route.id && isOwner() && ((S.ui.filter.projects || {}).tab === 'gantt')) return PJ_TABS('gantt') + vTimeline();
+    return base.apply(this, arguments);
+  })(vProjects);
+  if (typeof vProjectDetail === 'function') vProjectDetail = (base => function (o) {
+    const html = base.apply(this, arguments); if (CO() !== 'factory' || !o || o.status === 'cancelled') return html;
+    let g = ''; try { g = gantt(o); } catch (e) { g = ''; } if (!g) return html;
+    const k = '<div class="flow">'; const i = html.indexOf(k); return i < 0 ? html + g : html.slice(0, i) + g + html.slice(i);
+  })(vProjectDetail);
+  ACTIONS.nftCap = () => {
+    if (!isOwner()) return; const cap = (S.settings && S.settings.nfCapacity) || {}; const ds = ((S.settings && S.settings.departments) || []).filter(d => d && d.id && !d.admin);
+    openModal({ title: L('طاقة الأقسام', 'Department capacity'), body: `<div class="form"><p class="small muted full" style="margin:0">${esc(L('كام أمر ممكن يشتغل في القسم في نفس الوقت.', 'How many orders a department can run at the same time.'))}</p>${ds.map(d => `<div class="field"><label>${esc(d.name)}</label><input type="number" min="1" max="50" class="inp" name="c_${esc(d.id)}" value="${esc(String(+cap[d.id] || 3))}"></div>`).join('')}</div>`,
+      onSubmit: async f => { const out = {}; ds.forEach(d => { const v = Math.max(1, Math.min(50, Math.round(+f.querySelector(`[name="c_${CSS.escape(d.id)}"]`).value || 3))); out[d.id] = v; }); await Store.saveSettings(Object.assign({}, S.settings, { nfCapacity: out })); toast(L('اتحفظت', 'Saved')); return true; } });
+  };
+
+  /* ================= «Today's plan» on the home page ================= */
+  function todayPlan() {
+    if (typeof tasksForMe !== 'function') return [];
+    const t = T(); const P = { urgent: 40, high: 25, normal: 10, low: 0 };
+    return tasksForMe().filter(x => x && x.kind !== 'update').map(x => { let s = P[x.priority || 'normal'] ?? 10; if (x.dueDate) { const g = dd(t, x.dueDate); s += g < 0 ? 30 : g === 0 ? 25 : g <= 2 ? 15 : 0; } if (x.status === 'doing') s += 10; if (x.source === 'rule') s += 5; if (isOwner() && x.orderId) { const pr = ((LD.office && LD.office.predict) || []).find(p => p.orderId === x.orderId); if (pr) s += Math.round(pr.p / 5); }
+      if (x.projectId && window.nfStuTL && CO() === 'studio') { s += Math.round(window.nfStuTL.riskOf(x.projectId) / 5); if (window.nfStuTL.critical(x.projectId)) s += 10; }   /* v7.79: project risk + critical path */ return { x, s }; })
+      .sort((a, b) => b.s - a.s).slice(0, 5).map(z => z.x);
+  }
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    const vw = document.getElementById('view'); const old = document.getElementById('nft-today'); if (old) old.remove();
+    if (!vw || !person() || !uiOn() || !isHome()) return; const arr = todayPlan(); if (!arr.length) return; const t = T();
+    const html = `<div class="card nft-plan" id="nft-today"><div class="cardhead"><h3>${esc(L('خطة النهارده', "Today's plan"))}</h3><a class="btn sm ghost" href="#/tasks">${esc(L('كل المهام', 'All tasks'))}</a></div><div class="list">${arr.map(x => { const g = x.dueDate ? dd(t, x.dueDate) : null; return `<a class="item" href="#/tasks/${esc(x.id)}"><div class="main"><div class="title">${esc(x.title || '')}</div><div class="meta">${g != null && g < 0 ? `<span class="badge crit">${esc(L('متأخرة', 'Late'))}</span>` : g === 0 ? `<span class="badge warn">${esc(L('النهارده', 'Today'))}</span>` : x.dueDate ? `<span>${esc(fmtDate(x.dueDate))}</span>` : ''}${x.priority === 'urgent' ? `<span class="badge crit">${esc(L('عاجلة', 'Urgent'))}</span>` : x.priority === 'high' ? `<span class="badge warn">${esc(L('مهمة', 'High'))}</span>` : ''}${x.status === 'doing' ? `<span class="badge">${esc(L('شغّال فيها', 'In progress'))}</span>` : ''}</div></div></a>`; }).join('')}</div></div>`;
+    const top = document.getElementById('nfl-top'); if (top) top.insertAdjacentHTML('afterend', html); else vw.insertAdjacentHTML('afterbegin', html);
+  });
+  window.nfTimeline = { autoPlan, planOf, drift, shifted, todayPlan };
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nft-card{margin:0 0 12px}.nft-g{--lw:92px;position:relative;margin:6px 0 4px}.nft-big{--lw:96px}
+    .nft-row{display:grid;grid-template-columns:var(--lw) minmax(0,1fr);align-items:center;gap:6px;min-height:24px}
+    .nft-l{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nft-l a{color:inherit}
+    .nft-tr{position:relative;height:18px;border-radius:5px;background:var(--line,#eef0f4)}
+    .nft-tr i{position:absolute;top:0;height:100%;border-radius:5px}
+    .nft-p{background:hsla(var(--h),60%,55%,.28);border:1px solid hsla(var(--h),55%,45%,.5);box-sizing:border-box}
+    .nft-a{top:4px!important;height:10px!important;background:hsl(var(--h),58%,46%)}.nft-a.on{background:repeating-linear-gradient(45deg,hsl(var(--h),58%,46%) 0 6px,hsl(var(--h),58%,58%) 6px 12px)}.nft-a.late{background:#d64545!important}
+    .nft-b{top:-2px!important;height:22px!important;border:1px dashed var(--muted,#8a8f99);background:transparent}
+    .nft-today,.nft-due{position:absolute;top:0;bottom:0;width:0;border-inline-start:2px solid #2a62d8;pointer-events:none}.nft-due{border-inline-start:2px dashed #d64545}
+    .nft-dueM{position:absolute;top:-2px;bottom:-2px;width:0;border-inline-start:2px dashed #d64545}
+    .nft-leg{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 0}.nft-leg span{display:inline-flex;gap:4px;align-items:center}.nft-k{display:inline-block;width:14px;height:8px;border-radius:3px}.nft-k.p{background:rgba(42,98,216,.28)}.nft-k.a{background:#2a62d8}.nft-k.l{background:#d64545}.nft-k.b{border:1px dashed #8a8f99}.nft-k.t{width:2px;height:12px;background:#2a62d8}.nft-k.d{width:0;height:12px;border-inline-start:2px dashed #d64545}
+    .nft-btns{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}.nft-drift{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}.nft-drift>span{flex:1 1 220px}
+    .nft-two{display:flex;gap:6px;align-items:center}.nft-two input{min-width:0;flex:1}
+    .nft-mh{display:grid;grid-template-columns:repeat(6,1fr);margin-inline-start:calc(var(--lw) + 6px);font-size:11px;color:var(--muted,#667)}.nft-mh span{border-inline-start:1px solid var(--line,#e3e5ea);padding-inline-start:3px;white-space:nowrap;overflow:hidden}
+    .nft-crowd{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;align-items:end;height:110px}.nft-crowd>div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:11px}.nft-crowd b{display:block;width:70%;background:var(--accent,#2a62d8);border-radius:4px 4px 0 0;min-height:2px}.nft-crowd em{font-style:normal;font-weight:600}
+    .nft-plan{margin:0 0 12px}.nft-plan .item{text-decoration:none;color:inherit}.nft-reasons{display:flex;flex-wrap:wrap;gap:6px}
+    .nft-det{margin:1px 0 3px}.nft-det>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:var(--lw) auto;gap:6px;align-items:center;min-height:20px;font-size:11.5px;color:var(--muted,#667)}.nft-det>summary::-webkit-details-marker{display:none}
+    .nft-det>summary .nft-l::before{content:'▸';display:inline-block;margin-inline-end:4px;transition:transform .15s}[dir=rtl] .nft-det>summary .nft-l::before{content:'◂'}.nft-det[open]>summary .nft-l::before{transform:rotate(90deg)}[dir=rtl] .nft-det[open]>summary .nft-l::before{transform:rotate(-90deg)}
+    .nft-sub{min-height:18px;text-decoration:none;color:inherit}.nft-sub .nft-l{font-size:11px;padding-inline-start:12px;color:var(--ink-2,#445)}.nft-trs{height:10px;background:transparent;border-bottom:1px dashed var(--line,#e3e5ea);border-radius:0}
+    .nft-t{top:1px!important;height:8px!important;border-radius:4px;background:hsla(var(--h,215),45%,55%,.55)}.nft-t.open{background:hsla(var(--h,215),45%,55%,.45)}.nft-t.doing{background:hsl(var(--h,215),55%,50%)}.nft-t.done{background:#7fae8e}.nft-t.late{background:#d64545}.nft-t.item{background:rgba(120,135,160,.22)!important;border:1px solid rgba(120,135,160,.5);box-sizing:border-box}
+    .nft-dot{position:absolute;top:0;width:9px!important;height:9px!important;border-radius:50%;margin-inline-start:-4px;background:#2a62d8;border:1.5px solid var(--surface,#fff)}.nft-dot.done{background:#5c8a6b}.nft-dot.late{background:#d64545}
+    .nft-note{margin:2px 0 4px;padding-inline-start:calc(var(--lw) + 6px)}
+    @media (max-width:640px){.nft-g{--lw:74px}.nft-big{--lw:72px}.nft-l{font-size:11px}.nft-sub .nft-l{font-size:10.5px;padding-inline-start:6px}.nft-note{padding-inline-start:0}}
+  </style>`);
+})();
+/* =====================================================================
+   v7.79 — «screen check» (brief claude/ui-check-morning-brief.md, go-ahead 16 Oct — Mahmoud: «the system checks the whole UI:
+   text running into each other, or something moving»). Part of the digital twin, on by default, all three Ninety systems.
+   · after each page (and each window) is drawn, in idle time only, the page checks itself on the person's own device:
+       overlap  — two texts drawn over each other (the text boxes themselves, not their cards);
+       clip     — text cut by its box (hidden overflow, no «…» meant for it);
+       spill    — text running out of its button / chip / box;
+       edge     — a button or chip cut by the side of the screen;
+       wide     — the page scrolls sideways (something sticks out of the screen);
+       jump     — something moves by itself after the page opened (no touch, no scroll) — the browser's layout-shift
+                  report where it exists (Chrome / Android), and position samples everywhere (iPhone too);
+       flicker  — a part redrawn again and again with nobody touching (more than 6 times in 10 s).
+   · it records only: the page, the place of the part (a short CSS path), the device kind, the screen width, the language and
+     the build — never the text itself, nor any number. One record per problem per page per device per day, 25 a day at most.
+   · records go with the twin's usage log (nf_ev_log, kind «ui»), so «log my use» off (this device), the kiosk and «view as»
+     send nothing. Every night the server groups them and files each new problem in «Support» as a problem from «the system»
+     for the developer (no notice to the owner); one not seen for a week closes by itself.
+   · window.nfUiCheck.scan(root?) returns the problems on the screen now (for tests and for the developer).
+   ===================================================================== */
+(function () {
+  if (window.__NF_UIC__) return; window.__NF_UIC__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const lsg = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lss = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+  const viewing = () => typeof isViewing === 'function' && isViewing();
+  const hosted = () => !!(S.sb && typeof S.sb.rpc === 'function' && S.sbUser);
+  const on = () => !!S.session && (typeof role !== 'function' || role() !== 'kiosk') && !viewing() && lsg('nf.learn') !== 'off';
+  const device = () => { const ua = navigator.userAgent || ''; if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios'; if (/Android/i.test(ua)) return 'android'; return window.innerWidth < 760 ? 'mobile' : 'desktop'; };
+  const pageName = () => { const v = (S.route && S.route.view) || ''; return v ? v + (S.route && S.route.id ? '/*' : '') : ''; };
+  const lang = () => (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'en' : 'ar');
+  const today = () => (typeof todayISO === 'function' ? todayISO() : new Date().toISOString().slice(0, 10));
+
+  /* ---------- where not to look ---------- */
+  const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG', 'PATH', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION', 'CANVAS', 'VIDEO', 'IFRAME', 'IMG', 'BR', 'HR']);
+  const SKIP_SEL = '#nfwm, #nfsnap, #nfdial, .nfd-src, .gm-style, [aria-hidden="true"], .toast, #toasts, .sn-stage, [contenteditable="true"], .nfuic-skip';
+  const ROOTS = () => [document.getElementById('view'), document.querySelector('.topbar'), document.getElementById('modalroot')].filter(Boolean);
+  const skipped = el => { try { return !!el.closest(SKIP_SEL); } catch (e) { return false; } };
+
+  /* ---------- a short, stable path to a part ---------- */
+  const BAD_CLS = /\d|^(on|open|cur|busy|active|sel|hot|fly|show|hidden|in|out|done|warn|crit|good|acc|p|sm|xs|lg)$/;
+  function selOf(el) {
+    const parts = []; let e = el;
+    for (let i = 0; e && e.nodeType === 1 && i < 5; i++, e = e.parentElement) {
+      if (e.id === 'view' || e.id === 'modalroot' || e.id === 'nav' || e === document.body) { parts.unshift('#' + (e.id || 'body')); break; }
+      let s = e.tagName.toLowerCase(); if (s === 'html') break;
+      if (e.id && !/\d/.test(e.id) && e.id.length < 24) { parts.unshift(s + '#' + e.id); break; }
+      const cls = (typeof e.className === 'string' ? e.className : '').split(/\s+/).filter(c => c && !BAD_CLS.test(c) && c.length < 24).slice(0, 2);
+      if (cls.length) s += '.' + cls.join('.');
+      parts.unshift(s);
+    }
+    return parts.join('>').slice(0, 160);
+  }
+
+  /* ---------- one scan ---------- */
+  function scan(rootIn) {
+    const out = []; const W = window.innerWidth, H = window.innerHeight;
+    const cs = new Map(); const st = el => { let s = cs.get(el); if (!s) { s = getComputedStyle(el); cs.set(el, s); } return s; };
+    const shown = el => { for (let e = el, i = 0; e && e.nodeType === 1 && i < 8; e = e.parentElement, i++) { const s = st(e); if (s.display === 'none' || s.visibility === 'hidden' || +s.opacity < 0.5) return false; } return true; };
+    const roots = rootIn ? [rootIn] : ROOTS();
+    const cand = [];
+    for (const root of roots) {
+      const all = root.querySelectorAll('*'); let n = 0;
+      for (const el of all) {
+        if (++n > 1800 || cand.length > 450) break;
+        if (SKIP_TAGS.has(el.tagName)) continue;
+        let txt = false; for (const c of el.childNodes) if (c.nodeType === 3 && c.textContent.trim().length > 1) { txt = true; break; }
+        if (!txt) continue;
+        const r = el.getBoundingClientRect(); if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.top > H || r.right < -2 || r.left > W + 2) continue;
+        if (skipped(el) || !shown(el)) continue;
+        cand.push(el);
+      }
+    }
+    const textRect = el => { let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity; const rg = document.createRange(); for (const c of el.childNodes) { if (c.nodeType !== 3 || !c.textContent.trim()) continue; rg.selectNodeContents(c); for (const q of rg.getClientRects()) { if (q.width < 1) continue; L = Math.min(L, q.left); T = Math.min(T, q.top); R = Math.max(R, q.right); B = Math.max(B, q.bottom); } } return R > L ? { left: L, top: T, right: R, bottom: B, width: R - L, height: B - T } : null; };
+    /* what of the text can be seen: cut by every box around it that hides or scrolls its overflow, and by the screen */
+    const SCROLLS = /auto|scroll/;
+    const clipBoxes = el => { const out = []; for (let e = el, i = 0; e && e.nodeType === 1 && i < 8; e = e.parentElement, i++) { const q = st(e); if (/hidden|clip|auto|scroll/.test(q.overflowX + ' ' + q.overflowY)) out.push(e.getBoundingClientRect()); } return out; };
+    const inScroller = el => { for (let e = el.parentElement, i = 0; e && e.nodeType === 1 && i < 10; e = e.parentElement, i++) if (SCROLLS.test(st(e).overflowX) && e.scrollWidth > e.clientWidth + 2) return true; return false; };
+    const clampR = (r, bs) => { let { left, top, right, bottom } = r; for (const q of bs.concat([{ left: 0, top: 0, right: W, bottom: H }])) { left = Math.max(left, q.left); top = Math.max(top, q.top); right = Math.min(right, q.right); bottom = Math.min(bottom, q.bottom); } return right - left > 1 && bottom - top > 1 ? { left, top, right, bottom, width: right - left, height: bottom - top } : null; };
+    const boxes = []; const edgeSeen = new Set();
+    for (const el of cand) {
+      const s = st(el); const disp = s.display; const er = el.getBoundingClientRect();
+      const tr = textRect(el); const vis = tr ? clampR(tr, clipBoxes(el)) : null;
+      /* clip: cut by its own box, no «…» meant for it */
+      const oxH = /hidden|clip/.test(s.overflowX), oyH = /hidden|clip/.test(s.overflowY);
+      if (oxH && el.scrollWidth > el.clientWidth + 2 && s.textOverflow !== 'ellipsis' && disp !== 'inline') out.push({ k: 'clip', el });
+      else if (oyH && el.scrollHeight > el.clientHeight + 3 && (s.webkitLineClamp === 'none' || !s.webkitLineClamp) && disp !== 'inline' && el.clientHeight > 0) out.push({ k: 'clip', el });
+      /* spill: the text itself shows outside its button / chip / box */
+      else if (!oxH && disp !== 'inline' && vis && el.matches('button, .btn, .badge, .chip, .tag, .pill, label, .seg button, .tabs button') && (vis.right > er.right + 3 || vis.left < er.left - 3)) out.push({ k: 'spill', el });
+      /* edge: a button / chip cut by the side of the screen (not inside a sideways list) */
+      const ctl = el.closest('button, .btn, .chip, .badge, .tag, .pill'); if (ctl && !edgeSeen.has(ctl)) { edgeSeen.add(ctl); const cr = ctl.getBoundingClientRect(); if ((cr.left < -1 || cr.right > W + 1) && cr.width < W && !inScroller(ctl) && st(ctl).position !== 'fixed') out.push({ k: 'edge', el: ctl }); }
+      if (vis && vis.width * vis.height >= 30) boxes.push({ el, r: vis });
+    }
+    /* overlap: text drawn over text (only what can be seen; a 64 px grid keeps it quick) */
+    const grid = new Map(); const G = 64; const pairs = new Set();
+    boxes.forEach((b, i) => { for (let x = Math.floor(b.r.left / G); x <= Math.floor(b.r.right / G); x++) for (let y = Math.floor(b.r.top / G); y <= Math.floor(b.r.bottom / G); y++) { const k = x + ':' + y; const arr = grid.get(k) || []; arr.forEach(j => pairs.add(j < i ? j + ',' + i : i + ',' + j)); arr.push(i); grid.set(k, arr); } });
+    const seenEl = new Set();
+    pairs.forEach(p => {
+      const [i, j] = p.split(',').map(Number); const a = boxes[i], b = boxes[j];
+      if (a.el.contains(b.el) || b.el.contains(a.el)) return;
+      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top); if (w <= 2 || h <= 2) return;
+      const small = Math.min(a.r.width * a.r.height, b.r.width * b.r.height); if (w * h < Math.max(40, small * 0.3)) return;
+      if (seenEl.has(a.el) || seenEl.has(b.el)) return; seenEl.add(a.el); seenEl.add(b.el);
+      out.push({ k: 'overlap', el: a.el, el2: b.el });
+    });
+    /* wide: the page scrolls sideways — the outermost part that sticks out of the screen */
+    if (!rootIn && document.documentElement.scrollWidth > W + 2) {
+      let best = null;
+      for (const root of ROOTS()) {
+        let n = 0;
+        for (const el of root.querySelectorAll('*')) {
+          if (++n > 2500) break; if (SKIP_TAGS.has(el.tagName) && el.tagName !== 'svg') continue;
+          const r = el.getBoundingClientRect(); if (!r.width || (r.right <= W + 2 && r.left >= -2)) continue;
+          let clipped = false; for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) { const s = st(e); if (/hidden|clip|auto|scroll/.test(s.overflowX)) { clipped = true; break; } }
+          if (clipped || skipped(el) || st(el).position === 'fixed' || !shown(el)) continue;
+          best = el; break;
+        }
+        if (best) break;
+      }
+      out.push({ k: 'wide', el: best || document.getElementById('view') || document.body });
+    }
+    return out.map(x => ({ k: x.k, sel: selOf(x.el), sel2: x.el2 ? selOf(x.el2) : '', el: x.el }));
+  }
+
+  /* ---------- report (once per problem per page per device per day) ---------- */
+  const FOUND = []; const Q = [];
+  const SENT = 'nf.uic.sent';
+  const sentMap = () => { try { const o = JSON.parse(lsg(SENT) || 'null'); if (o && o.d === today() && o.k) return o; } catch (e) { /* new day */ } return { d: today(), k: {}, n: 0 }; };
+  function report(page, it) {
+    if (!page || !it || !it.sel) return; const m = sentMap(); const key = page + '|' + it.k + '|' + it.sel;
+    if (m.k[key] || m.n >= 25) return; m.k[key] = 1; m.n++; lss(SENT, JSON.stringify(m));
+    FOUND.push({ page, k: it.k, sel: it.sel, sel2: it.sel2 || '', at: new Date().toISOString() }); if (FOUND.length > 60) FOUND.shift();
+    if (!on()) return;
+    Q.push({ at: new Date().toISOString(), kind: 'ui', name: page.slice(0, 80), device: device(), meta: Object.assign({ k: it.k, sel: it.sel, w: Math.round(window.innerWidth), h: Math.round(window.innerHeight), lang: lang(), b: String(window.NF_BUILD || '').slice(0, 24) }, it.sel2 ? { sel2: it.sel2 } : {}) });
+    if (Q.length > 60) Q.splice(0, Q.length - 60);
+  }
+  let flushing = false;
+  async function flush() {
+    if (flushing || !Q.length || !hosted() || !on()) return; flushing = true; const batch = Q.splice(0, 40);
+    try { const r = await S.sb.rpc('nf_ev_log', { p_rows: batch }); if (r && r.error) throw r.error; } catch (e) { Q.unshift(...batch); } finally { flushing = false; }
+  }
+  setInterval(flush, 30000); window.addEventListener('pagehide', flush); document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
+
+  /* ---------- when to look: after a page settles, after a window opens; idle time only, at most every 4 s ---------- */
+  let tmr = null, last = 0, lastInput = 0, navAt = Date.now();
+  ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(t => window.addEventListener(t, () => { lastInput = Date.now(); }, { passive: true, capture: true }));
+  window.addEventListener('hashchange', () => { navAt = Date.now(); });
+  const idle = f => (window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 4000 }) : setTimeout(f, 200));
+  function run(root) {
+    if (document.hidden || document.getElementById('nfsnap') || !S.session) return; last = Date.now();
+    const page = pageName(); let res = []; try { res = scan(root); } catch (e) { return; }
+    res.forEach(it => report(page, it));
+    if (!root) jumpWatch(page);
+  }
+  function schedule(root, delay) {
+    clearTimeout(tmr);
+    tmr = setTimeout(() => idle(() => { if (Date.now() - last < 4000) return; run(root); }), delay || 1400);
+  }
+  RENDER_HOOKS.push(() => schedule(null, 1400));
+  if (typeof openModal === 'function') openModal = (base => function () { const r = base.apply(this, arguments); setTimeout(() => { const m = document.getElementById('modalroot'); if (m && m.firstElementChild) schedule(m, 700); }, 50); return r; })(openModal);
+
+  /* ---------- jump: positions sampled after the page opened, nobody touching ---------- */
+  let jw = null;
+  function jumpWatch(page) {
+    if (jw) return; const v = document.getElementById('view'); if (!v) return;
+    const els = Array.from(v.querySelectorAll('.card, h1, h2, h3, .btn, .kpi, .item')).filter(e => { const r = e.getBoundingClientRect(); return r.width > 20 && r.height > 10 && r.top >= 0 && r.top < innerHeight; }).slice(0, 40);
+    if (!els.length) return; const y0 = scrollY, t0 = Date.now(); const p0 = els.map(e => { const r = e.getBoundingClientRect(); return [r.left, r.top]; });
+    jw = setTimeout(() => {
+      jw = null; if (pageName() !== page || scrollY !== y0 || lastInput > t0 || document.hidden) return;
+      for (let i = 0; i < els.length; i++) { const e = els[i]; if (!e.isConnected) continue; const r = e.getBoundingClientRect(); if (Math.abs(r.left - p0[i][0]) > 30 || Math.abs(r.top - p0[i][1]) > 30) { report(page, { k: 'jump', sel: selOf(e) }); break; } }
+    }, 2500);
+  }
+  try {
+    if (window.PerformanceObserver && (PerformanceObserver.supportedEntryTypes || []).includes('layout-shift')) {
+      new PerformanceObserver(list => {
+        for (const e of list.getEntries()) {
+          if (e.hadRecentInput || e.value < 0.1 || Date.now() - navAt < 800) continue;
+          const src = (e.sources || []).map(s => s.node).find(n => n && n.nodeType === 1 && !skipped(n)); if (src) report(pageName(), { k: 'jump', sel: selOf(src) });
+        }
+      }).observe({ type: 'layout-shift', buffered: false });
+    }
+  } catch (e) { /* not supported */ }
+
+  /* ---------- flicker: a part rebuilt again and again with nobody touching ---------- */
+  const fl = new Map();
+  function flWatch() {
+    const v = document.getElementById('view'); if (!v || v.__uicFl) return; v.__uicFl = 1;
+    new MutationObserver(recs => {
+      const now = Date.now(); if (now - lastInput < 2000 || now - navAt < 8000) return;
+      const tops = new Set();
+      recs.forEach(r => { if (!r.addedNodes.length || !r.removedNodes.length) return; const t = r.target.nodeType === 1 ? r.target : r.target.parentElement; if (!t || skipped(t)) return; const top = t === v ? v : (t.closest('.card') || t); tops.add(top); });
+      tops.forEach(t => { const a = (fl.get(t) || []).filter(x => now - x < 10000); a.push(now); fl.set(t, a); if (a.length > 6) { fl.set(t, []); report(pageName(), { k: 'flicker', sel: selOf(t) }); } });
+    }).observe(v, { childList: true, subtree: true });
+  }
+  RENDER_HOOKS.push(flWatch);
+
+  window.nfUiCheck = { scan: root => scan(root).map(({ el, ...x }) => x), run, found: () => FOUND.slice(), selOf, flush };
+})();
+/* =====================================================================
+   v7.79 — the digital twin in Ökoplan Landscaping, like Ökoplan (brief claude/studio-twin-brief.md, go-ahead 16 Oct; visibility
+   «before → after» needs the PIN). Studio only. Everything here is for the owner and Mohamed Sabek (window.nfTwinBoss);
+   deciding / rules / settings stay with the owner. Nobody else sees any of it.
+   · The project timeline (project page): the six phases of the Studio OS flow (data & setup · creative & cameras · production ·
+     internal review · client & revisions · final QC & delivery — old projects: their five stages) — planned (blue), actual
+     (green, striped while open, red when behind), the shots and tasks on their dates, today and the client deadline lines.
+     Automatic plan from the project start to the client deadline by the phase weights (or the phase times learned from finished
+     projects), «Save as baseline», «Phase dates», the re-plan banner (move the next phases + the effect on the deadline,
+     «Accept the re-plan» with a reason — client / internal / change of scope / other — and a log), the critical path badge.
+   · The office timeline (#/nftimeline, part x3) gets the projects with their phases, the load of each person against the
+     capacity with a suggestion to move work to the least loaded colleague, planning accuracy and the re-plan reasons.
+   · «Smart desk» (#/stusmart): alerts (no movement 10 / 20 days, a phase past its expected time or near it, waiting for the
+     client 7 / 14 days with «Remind the client» — a real email from the office address, or «sent from outside — log it»,
+     blocked projects, late shots, the critical path), the delay chance % of each project with its reasons (phase pace 45% ·
+     no movement 20% · waiting for the client 20% · Project Owner load 15%), team load per Project Owner with «least loaded»,
+     the client file (projects, active, average answer in days, approvals / revisions), the weekly report (server, Sunday)
+     and the twin settings (on / off, alert thresholds in days, capacity, studio rules: client deadline guard, stage tasks).
+   · Before a project moves to a next status: a checklist (shots approved, open tasks, client approval, blocked); moving
+     with something missing needs a reason; the checks are kept on the project (stageChecks).
+   · No money anywhere. Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_STUTWIN__) return; window.__NF_STUTWIN__ = 1;
+  if (typeof STU_ON === 'undefined' || !STU_ON || typeof EXTRA_VIEWS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const VIP = () => typeof window.nfTwinBoss === 'function' && window.nfTwinBoss();
+  const OWNER = () => !!S.session && isAdmin() && !(typeof isViewing === 'function' && isViewing());
+  const ADM = () => OWNER();   /* the settings card stays reachable for the owner even when the twin is off */
+  const D = s => String(s || '').slice(0, 10);
+  const T = () => todayISO();
+  const dd = (a, b) => daysBetween(D(a), D(b));
+  const maxD = (...a) => a.filter(Boolean).map(D).sort().slice(-1)[0] || '';
+  const minD = (...a) => a.filter(Boolean).map(D).sort()[0] || '';
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const TW = () => (S.settings && S.settings.nfTwin) || {};
+  const TH = () => Object.assign({ idleWarn: 10, idleCrit: 20, clientWarn: 7, clientCrit: 14, risk: 60, cap: 8 }, TW().alert || {});
+  const pName = id => { try { const p = typeof stuPerson === 'function' ? stuPerson(id) : null; return (p && p.name) || ''; } catch (e) { return ''; } };
+  const me = () => (S.session && (S.session.name || '')) || '';
+
+  /* ---------------- phases ---------------- */
+  const PH = [
+    { id: 'setup', st: ['data', 'setup'], ar: 'الداتا والتجهيز', en: 'Data & setup', days: 4, h: 212 },
+    { id: 'creative', st: ['creative', 'camera'], ar: 'الاتجاه البصري والكاميرات', en: 'Creative & cameras', days: 7, h: 280 },
+    { id: 'prod', st: ['kickoff', 'production'], ar: 'الإنتاج', en: 'Production', days: 18, h: 150 },
+    { id: 'review', st: ['review'], ar: 'المراجعة الداخلية', en: 'Internal review', days: 3, h: 48 },
+    { id: 'client', st: ['client', 'revisions'], ar: 'العميل والتعديلات', en: 'Client & revisions', days: 7, h: 28 },
+    { id: 'final', st: ['qc', 'delivered'], ar: 'المراجعة النهائية والتسليم', en: 'Final QC & delivery', days: 2, h: 190 },
+  ];
+  const OLD_DAYS = [10, 14, 14, 14, 3]; const OLD_H = [212, 280, 150, 28, 190];
+  const isOSp = p => !!p && (p.flow === 'os' || !!p.ownerId || !!p.osStatus);
+  const oldPh = () => (typeof STU_STAGES !== 'undefined' ? STU_STAGES : []).map((s, i) => ({ id: s.id, st: [s.id], ar: s.ar, en: s.name, days: OLD_DAYS[i] || 7, h: OLD_H[i] || 200 }));
+  const phasesOf = p => (isOSp(p) ? PH : oldPh());
+  const phName = (p, id) => { const x = phasesOf(p).find(f => f.id === id) || PH.find(f => f.id === id) || oldPh().find(f => f.id === id); return x ? (en() ? x.en : x.ar) : id; };
+  const stamps = p => (isOSp(p) ? (p.osStatusAt || {}) : (p.stageAt || {}));
+  const curSt = p => (isOSp(p) ? (p.osStatus || 'data') : (p.stage || 'concept'));
+  const curIdx = p => Math.max(0, phasesOf(p).findIndex(f => f.st.includes(curSt(p))));
+  const finished = p => (isOSp(p) ? ['delivered', 'closed'].includes(p.osStatus) : ['done', 'archived', 'closed'].includes(String(p.status || '')));
+  const active = p => p && !p.deleted && p.status !== 'archived' && !finished(p);
+  const dueOf = p => D(p.clientDeadline || p.dueDate);
+  const startOf = p => D(p.startDate || p.createdAt) || T();
+  const shotsOf = pid => list('shots').filter(s => s && s.projectId === pid && !s.deleted);
+  const shotDue = s => D(s.due || (s.gateDue && Object.values(s.gateDue).filter(Boolean).sort().slice(-1)[0]));
+  const tasksOf = pid => list('tasks').filter(t => t && t.projectId === pid && ['open', 'doing'].includes(t.status) && t.kind !== 'update').concat((typeof S.data.pmtasks !== 'undefined' ? list('pmtasks') : []).filter(t => t && t.projectId === pid && t.status !== 'done'));
+
+  function actOf(p, i) {
+    const phs = phasesOf(p); const ph = phs[i]; if (!ph) return { start: '', end: '', done: false, active: false }; const sa = stamps(p); const ci = curIdx(p); const fin = finished(p);
+    const firstOf = f => f.st.map(x => D(sa[x])).filter(Boolean).sort()[0] || '';
+    let start = firstOf(ph); if (!start && i === 0) start = startOf(p);
+    const done = fin || i < ci;
+    if (!start) return { start: '', end: '', done, active: false };
+    if (done) {
+      let ns = ''; for (let j = i + 1; j < phs.length && !ns; j++) ns = firstOf(phs[j]);
+      const end = ns ? (ns > start ? addDays(ns, -1) : start) : (i === phs.length - 1 ? (D(sa.delivered || sa.closed || p.updatedAt) || start) : start);
+      return { start, end: maxD(end, start), done: true, active: false };
+    }
+    if (i === ci) return { start, end: maxD(T(), start), done: false, active: true };
+    return { start: '', end: '', done: false, active: false };
+  }
+  /* the phase times learned from finished phases (3 or more), else the defaults */
+  let LM = { k: '', v: {} };
+  function learned() {
+    const k = list('projects').length + ':' + T(); if (LM.k === k) return LM.v; const acc = {};
+    list('projects').forEach(p => { if (!p || p.deleted) return; phasesOf(p).forEach((ph, i) => { const a = actOf(p, i); if (a.done && a.start && a.end) (acc[ph.id] = acc[ph.id] || []).push(Math.max(1, dd(a.start, a.end) + 1)); }); });
+    const v = {}; Object.entries(acc).forEach(([id, a]) => { if (a.length >= 3) { const b = a.slice().sort((x, y) => x - y); v[id] = b[Math.floor(b.length / 2)]; } });
+    LM = { k, v }; return v;
+  }
+  function autoPlan(p) {
+    const phs = phasesOf(p); const lm = learned(); const w = phs.map(f => Math.max(1, lm[f.id] || f.days)); const s0 = startOf(p); const due = dueOf(p);
+    const span = due && due > s0 ? dd(s0, due) + 1 : 0; const sum = w.reduce((a, b) => a + b, 0); const k = span ? span / sum : 1;
+    const out = {}; let cur = s0;
+    phs.forEach((f, i) => { const len = Math.max(1, Math.round(w[i] * k)); let end = addDays(cur, len - 1); if (span && i === phs.length - 1) end = maxD(due, cur); out[f.id] = { start: cur, end }; cur = addDays(end, 1); });
+    return out;
+  }
+  const planOf = p => { const q = p.nfPlan && p.nfPlan.stages; return q && Object.keys(q).length ? { stages: q, auto: false } : { stages: autoPlan(p), auto: true }; };
+  function drift(p) {
+    const { stages: P } = planOf(p); const phs = phasesOf(p); const t = T();
+    for (let i = 0; i < phs.length; i++) {
+      const id = phs[i].id, q = P[id], a = actOf(p, i); if (!q) continue;
+      if (a.done) { if (a.end > q.end) { const nx = phs[i + 1] && P[phs[i + 1].id]; if (nx && nx.start <= a.end && !actOf(p, i + 1).start) return { ph: id, delta: dd(q.end, a.end), kind: 'end' }; } continue; }
+      if (!a.start && t > q.start && i <= curIdx(p)) return { ph: id, delta: dd(q.start, t), kind: 'start' };
+      if (a.start && a.start > q.start + '' && dd(q.start, a.start) > 2) return { ph: id, delta: dd(q.start, a.start), kind: 'start' };
+      if (a.active && t > q.end) return { ph: id, delta: dd(q.end, t), kind: 'end' };
+      break;
+    }
+    return null;
+  }
+  function shifted(p, dr) {
+    const { stages: P } = planOf(p); const out = JSON.parse(JSON.stringify(P)); let on = false;
+    phasesOf(p).forEach(f => { const id = f.id; if (!out[id]) return; if (id === dr.ph) { on = true; if (dr.kind === 'end') { out[id].end = addDays(out[id].end, dr.delta); return; } } if (on) { out[id].start = addDays(out[id].start, dr.delta); out[id].end = addDays(out[id].end, dr.delta); } });
+    return out;
+  }
+  const planEnd = st => maxD(...Object.values(st).map(x => x && x.end));
+  /* the critical path: where the work ends (moved by the drift) against the client deadline */
+  function critical(p) { const due = dueOf(p); if (!due || !active(p)) return 0; const dr = drift(p); const st = dr ? shifted(p, dr) : planOf(p).stages; const e = planEnd(st); return e && e > due ? dd(due, e) : 0; }
+  function lastMove(p) {
+    const ts = [p.updatedAt, ...Object.values(stamps(p) || {})];
+    shotsOf(p.id).forEach(s => { ts.push(s.updatedAt); (Array.isArray(s.log) ? s.log : []).forEach(e => ts.push(e && e.at)); });
+    list('tasks').forEach(t => { if (t && t.projectId === p.id) ts.push(t.updatedAt, t.lastMsgAt); });
+    (Array.isArray(p.clientLog) ? p.clientLog : []).forEach(e => ts.push(e && e.at));
+    return ts.filter(Boolean).map(String).sort().slice(-1)[0] || p.createdAt || '';
+  }
+  const idleDays = p => { const m = lastMove(p); return m ? Math.max(0, dd(m, T())) : 0; };
+  /* waiting for the client: the project sits in «client camera approval» or «client review», or is blocked by the client */
+  function clientWait(p) {
+    if (!active(p)) return null; const sa = stamps(p);
+    if (isOSp(p) && ['camera', 'client'].includes(p.osStatus) && sa[p.osStatus]) {
+      const log = (Array.isArray(p.clientLog) ? p.clientLog : []).filter(e => e && e.at >= sa[p.osStatus] && ['reply', 'approved', 'rejected'].includes(e.k));
+      if (!log.length) return { days: dd(sa[p.osStatus], T()), why: p.osStatus };
+    }
+    if (p.blocked && ['data', 'client'].includes(p.blocked.cause) && p.blocked.since) return { days: dd(p.blocked.since, T()), why: 'blocked' };
+    return null;
+  }
+  const ownerOf = p => p.ownerId || p.leadId || '';
+  function risk(p) {
+    if (!active(p)) return { p: 0, why: [] }; const th = TH(); const why = [];
+    const { stages: P } = planOf(p); const due = dueOf(p); const t = T(); const dr = drift(p);
+    let pace = 0;
+    if (dr) { pace = clamp(dr.delta / 7, 0, 1); why.push(dr.kind === 'start' ? L(`«${phName(p, dr.ph)}» بدأت متأخر ${dr.delta} يوم`, `«${phName(p, dr.ph)}» started ${dr.delta} days late`) : L(`«${phName(p, dr.ph)}» عدّت مدتها بـ ${dr.delta} يوم`, `«${phName(p, dr.ph)}» is ${dr.delta} days over`)); }
+    else if (due) { const ci = curIdx(p); let rem = 0; phasesOf(p).forEach((f, i) => { if (i < ci || !P[f.id]) return; rem += i === ci ? Math.max(0, dd(t, P[f.id].end)) : dd(P[f.id].start, P[f.id].end) + 1; }); const left = dd(t, due); pace = left <= 0 ? 1 : clamp((rem / left - 0.8) / 0.6, 0, 1); if (pace >= 0.3) why.push(L(`فاضل حوالي ${rem} يوم شغل و${Math.max(0, left)} يوم على موعد العميل`, `about ${rem} days of work left and ${Math.max(0, left)} days to the client deadline`)); }
+    const idl = idleDays(p); const stale = idl < th.idleWarn ? 0 : clamp(idl / th.idleCrit, 0, 1); if (stale >= 0.3) why.push(L(`مفيش حركة من ${idl} يوم`, `no movement for ${idl} days`));
+    const cw = clientWait(p); const wait = cw ? clamp(cw.days / th.clientCrit, 0, 1) : 0; if (wait > 0 && cw.days >= 2) why.push(L(`مستني العميل من ${cw.days} يوم`, `waiting for the client for ${cw.days} days`));
+    const o = ownerOf(p); const n = o ? list('projects').filter(x => active(x) && ownerOf(x) === o).length : 0; const load = clamp((n - 2) / 3, 0, 1); if (load >= 0.3) why.push(L(`الـOwner عليه ${n} مشاريع شغّالة`, `the Project Owner has ${n} running projects`));
+    let pct = Math.round(100 * (0.45 * pace + 0.2 * stale + 0.2 * wait + 0.15 * load)); const cr = critical(p); if (cr > 0) { pct = Math.max(pct, 75); why.unshift(L(`هيخلص بعد موعد العميل بـ ${cr} يوم`, `ends ${cr} days after the client deadline`)); }
+    return { p: clamp(pct, 0, 100), why };
+  }
+
+  /* ---------------- the project timeline card ---------------- */
+  const canPlan = () => VIP() && typeof writable === 'function' && writable();
+  function gantt(p) {
+    const phs = phasesOf(p); if (!phs.length) return '';
+    const { stages: P, auto } = planOf(p); const B = p.nfPlan && p.nfPlan.baseline && p.nfPlan.baseline.stages; const t = T(); const due = dueOf(p);
+    const shots = shotsOf(p.id).filter(s => shotDue(s)); const tasks = tasksOf(p.id).filter(x => D(x.dueDate || x.due));
+    const pts = [t]; phs.forEach((f, i) => { const q = P[f.id], a = actOf(p, i); if (q) pts.push(q.start, q.end); if (a.start) pts.push(a.start, a.end); if (B && B[f.id]) pts.push(B[f.id].start, B[f.id].end); });
+    if (due) pts.push(due); shots.forEach(s => pts.push(shotDue(s))); tasks.forEach(x => pts.push(D(x.dueDate || x.due)));
+    const lo = addDays(minD(...pts), -1), hi = addDays(maxD(...pts), 1); const tot = Math.max(1, dd(lo, hi) + 1);
+    const x = iso => clamp(dd(lo, iso) / tot * 100, 0, 100); const w = (a, b) => Math.max(0.8, (dd(a, b) + 1) / tot * 100);
+    const rows = phs.map((f, i) => {
+      const q = P[f.id], a = actOf(p, i), b = B && B[f.id]; const late = a.start && q && (a.end > q.end || (!a.done && t > q.end));
+      return `<div class="nft-row"><div class="nft-l" title="${esc(phName(p, f.id))}">${esc(phName(p, f.id))}</div><div class="nft-tr">
+        ${b ? `<i class="nft-b" style="inset-inline-start:${x(b.start)}%;width:${w(b.start, b.end)}%"></i>` : ''}
+        ${q ? `<i class="nft-p" style="inset-inline-start:${x(q.start)}%;width:${w(q.start, q.end)}%;--h:${f.h}" title="${esc(L('المخطط', 'Planned'))} ${esc(fmtDate(q.start))} → ${esc(fmtDate(q.end))}"></i>` : ''}
+        ${a.start ? `<i class="nft-a ${a.done ? 'done' : 'on'} ${late ? 'late' : ''}" style="inset-inline-start:${x(a.start)}%;width:${w(a.start, a.end)}%;--h:${f.h}" title="${esc(L('الفعلي', 'Actual'))} ${esc(fmtDate(a.start))} → ${esc(a.done ? fmtDate(a.end) : L('لسه شغّال', 'running'))}"></i>` : ''}
+      </div></div>`;
+    }).join('');
+    const dots = shots.length || tasks.length ? `<div class="nft-row"><div class="nft-l">${esc(L('اللقطات والمهام', 'Shots & tasks'))}</div><div class="nft-tr nfst-dots">${shots.map(s => `<i class="nfst-dot ${s.state === 'done' ? 'ok' : shotDue(s) < t ? 'late' : ''}" style="inset-inline-start:${x(shotDue(s))}%" title="${esc((s.code || s.name || '') + ' — ' + fmtDate(shotDue(s)))}"></i>`).join('')}${tasks.map(k => `<i class="nfst-dot task" style="inset-inline-start:${x(D(k.dueDate || k.due))}%" title="${esc((k.title || '') + ' — ' + fmtDate(D(k.dueDate || k.due)))}"></i>`).join('')}</div></div>` : '';
+    const dr = drift(p); let warn = '';
+    if (dr) { const ns = shifted(p, dr); const ne = planEnd(ns); const over = due && ne > due ? dd(due, ne) : 0;
+      warn = `<div class="banner warn nft-drift">${icon('alert')}<span>${esc(dr.kind === 'start' ? L(`«${phName(p, dr.ph)}» بدأت متأخر ${dr.delta} يوم عن الخطة`, `«${phName(p, dr.ph)}» started ${dr.delta} days late`) : L(`«${phName(p, dr.ph)}» عدّت نهايتها المخططة بـ ${dr.delta} يوم`, `«${phName(p, dr.ph)}» is ${dr.delta} days past its planned end`))}. ${esc(L(`لو زحزحنا المراحل اللي بعدها، المشروع يخلص ${fmtDate(ne)}`, `Moving the next phases, the project ends ${fmtDate(ne)}`))}${over ? ` — <b>${esc(L(`بعد موعد العميل بـ ${over} يوم`, `${over} days after the client deadline`))}</b>` : ''}</span>${canPlan() ? `<button type="button" class="btn sm" data-action="nfstReplan" data-arg="${esc(p.id)}">${esc(L('اقبل إعادة الجدولة', 'Accept the re-plan'))}</button>` : ''}</div>`; }
+    const cr = critical(p); const reps = (p.nfPlan && p.nfPlan.replans) || []; const rk = risk(p);
+    return `<div class="card nft-card nfst-card" id="nfst-card" style="margin-top:14px"><div class="cardhead"><h3>${esc(L('التايم لاين', 'Timeline'))}</h3>${cr ? `<span class="badge crit">🔴 ${esc(L(`مسار حرج — ${cr} يوم بعد موعد العميل`, `Critical path — ${cr} days after the client deadline`))}</span>` : ''}${rk.p >= 20 ? `<span class="badge ${rk.p >= TH().risk ? 'crit' : 'warn'}" title="${esc(rk.why.join(' · '))}">${esc(L(`احتمال التأخير ${rk.p}%`, `Delay chance ${rk.p}%`))}</span>` : ''}<span class="small muted">${esc(auto ? L('خطة تلقائية من المدد المعتادة', 'Automatic plan from the usual times') : B ? L(`خطة أساسية ${fmtDate(D(p.nfPlan.baseline.at))}`, `Baseline ${fmtDate(D(p.nfPlan.baseline.at))}`) : L('خطة متعدّلة', 'Edited plan'))}</span></div>
+      ${warn}
+      <div class="nft-g">${rows}${dots}<i class="nft-today" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(t) / 100})" title="${esc(L('النهارده', 'Today'))}"></i>${due ? `<i class="nft-due" style="inset-inline-start:calc(var(--lw) + 6px + (100% - var(--lw) - 6px) * ${x(due) / 100})" title="${esc(L('موعد العميل', 'Client deadline'))} ${esc(fmtDate(due))}"></i>` : ''}</div>
+      <div class="nft-leg small muted"><span><i class="nft-k p"></i>${esc(L('المخطط', 'Planned'))}</span><span><i class="nft-k a"></i>${esc(L('الفعلي', 'Actual'))}</span><span><i class="nft-k l"></i>${esc(L('متأخر', 'Late'))}</span>${B ? `<span><i class="nft-k b"></i>${esc(L('الأساسية', 'Baseline'))}</span>` : ''}<span><i class="nfst-dot ok" style="position:static;display:inline-block"></i>${esc(L('لقطة اتعتمدت', 'Shot approved'))}</span><span><i class="nfst-dot task" style="position:static;display:inline-block"></i>${esc(L('مهمة', 'Task'))}</span><span><i class="nft-k t"></i>${esc(L('النهارده', 'Today'))}</span>${due ? `<span><i class="nft-k d"></i>${esc(L('موعد العميل', 'Client deadline'))} ${esc(fmtDate(due))}</span>` : ''}</div>
+      ${canPlan() ? `<div class="nft-btns"><button type="button" class="btn sm" data-action="nfstBase" data-arg="${esc(p.id)}">${esc(L('احفظ كخطة أساسية', 'Save as baseline'))}</button><button type="button" class="btn sm ghost" data-action="nfstDates" data-arg="${esc(p.id)}">${esc(L('تواريخ المراحل', 'Phase dates'))}</button></div>` : ''}
+      ${reps.length ? `<details class="nfst-log"><summary class="tiny muted">${esc(L(`اتعادت جدولته ${reps.length} مرة — آخرها: ${RS(reps[reps.length - 1].reason)}`, `Re-planned ${reps.length} times — last: ${RS(reps[reps.length - 1].reason)}`))}</summary>${reps.slice().reverse().map(r => `<div class="tiny">${esc(fmtDate(D(r.at)))} · ${esc(RS(r.reason))} · ${esc(phName(p, r.ph))} +${esc(String(r.delta))} ${esc(L('يوم', 'days'))}${r.note ? ' · ' + esc(r.note) : ''} · ${esc(r.by || '')}</div>`).join('')}</details>` : ''}</div>`;
+  }
+  const REASONS = { client: ['العميل', 'The client'], internal: ['سبب داخلي', 'Internal'], scope: ['تغيير في الشغل', 'Change of scope'], other: ['حاجة تانية', 'Other'] };
+  const RS = k => (REASONS[k] || REASONS.other)[en() ? 1 : 0];
+  const savePlan = (p, patch) => Store.update('projects', p.id, { nfPlan: Object.assign({}, p.nfPlan || {}, patch) });
+  ACTIONS.nfstBase = async id => { const p = byId('projects', id); if (!p || !canPlan()) return; const { stages } = planOf(p); await savePlan(p, { stages, baseline: { at: nowISO(), by: me(), stages } }); toast(L('اتحفظت الخطة الأساسية', 'Baseline saved')); };
+  ACTIONS.nfstDates = id => {
+    const p = byId('projects', id); if (!p || !canPlan()) return; const { stages } = planOf(p); const hasB = !!(p.nfPlan && p.nfPlan.baseline);
+    openModal({ title: L(`تواريخ المراحل — ${p.code || p.name || ''}`, `Phase dates — ${p.code || p.name || ''}`), body: `<div class="form">${phasesOf(p).map(f => { const q = stages[f.id] || {}; return `<div class="field full nft-dl"><label>${esc(phName(p, f.id))}</label><div class="nft-two"><input type="date" class="inp" name="s_${esc(f.id)}" value="${esc(q.start || '')}" aria-label="${esc(L('من', 'From'))}"><span>←</span><input type="date" class="inp" name="e_${esc(f.id)}" value="${esc(q.end || '')}" aria-label="${esc(L('لحد', 'To'))}"></div></div>`; }).join('')}${hasB ? `<div class="field"><label>${esc(L('سبب التعديل', 'Reason for the change'))}</label><select name="reason" class="inp">${Object.keys(REASONS).map(k => `<option value="${k}">${esc(RS(k))}</option>`).join('')}</select></div>` : ''}</div>`,
+      onSubmit: async f => {
+        const out = {}; for (const ph of phasesOf(p)) { const s = f.querySelector(`[name="s_${CSS.escape(ph.id)}"]`).value, e = f.querySelector(`[name="e_${CSS.escape(ph.id)}"]`).value; if (!s || !e) continue; if (e < s) { toast(L(`«${phName(p, ph.id)}»: النهاية قبل البداية`, `«${phName(p, ph.id)}»: the end is before the start`), 'err'); return false; } out[ph.id] = { start: s, end: e }; }
+        if (!Object.keys(out).length) return false;
+        const patch = { stages: out }; if (hasB) { const rs = f.querySelector('[name=reason]'); patch.replans = ((p.nfPlan && p.nfPlan.replans) || []).concat([{ at: nowISO(), by: me(), reason: rs ? rs.value : 'other', delta: dd(planEnd(stages), planEnd(out)), ph: '', note: L('تعديل يدوي', 'Manual change'), over: 0 }]).slice(-30); }
+        await savePlan(p, patch); toast(L('اتحفظت التواريخ', 'Dates saved')); return true;
+      } });
+  };
+  ACTIONS.nfstReplan = id => {
+    const p = byId('projects', id); if (!p || !canPlan()) return; const dr = drift(p); if (!dr) return; const ns = shifted(p, dr); const ne = planEnd(ns); const due = dueOf(p); const over = due && ne > due ? dd(due, ne) : 0;
+    openModal({ title: L('إعادة الجدولة', 'Re-plan'), submitLabel: L('اقبل', 'Accept'), body: `<div class="form"><p class="small full" style="margin:0">${esc(L(`المراحل من «${phName(p, dr.ph)}» وبعدها هتتزحزح ${dr.delta} يوم، والمشروع يخلص ${fmtDate(ne)}.`, `The phases from «${phName(p, dr.ph)}» on move ${dr.delta} days; the project ends ${fmtDate(ne)}.`))}${over ? ` <b>${esc(L(`ده بعد موعد العميل بـ ${over} يوم.`, `That is ${over} days after the client deadline.`))}</b>` : ''}</p>
+      <div class="field"><label>${esc(L('السبب', 'Reason'))}</label><select name="reason" class="inp">${Object.keys(REASONS).map(k => `<option value="${k}">${esc(RS(k))}</option>`).join('')}</select></div><div class="field full"><label>${esc(L('ملاحظة (اختياري)', 'Note (optional)'))}</label><input name="note" class="inp" maxlength="200"></div></div>`,
+      onSubmit: async f => { const reason = f.querySelector('[name=reason]').value; const note = f.querySelector('[name=note]').value.trim(); await savePlan(p, { stages: ns, replans: ((p.nfPlan && p.nfPlan.replans) || []).concat([{ at: nowISO(), by: me(), reason, delta: dr.delta, ph: dr.ph, note, over }]).slice(-30) }); toast(L('اتعادت الجدولة', 'Re-planned')); return true; } });
+  };
+  if (typeof vProjects === 'function') vProjects = (base => function () {
+    const html = base.apply(this, arguments); if (!S.route || !S.route.id || !VIP()) return html; const p = byId('projects', S.route.id); if (!p || p.deleted) return html;
+    let g = ''; try { g = gantt(p); } catch (e) { console.warn('stu timeline', e); g = ''; } if (!g) return html;
+    const a = html.indexOf('class="card osp"'); if (a < 0) return html + g; const b = html.indexOf('<div class="card', a + 10); return b < 0 ? html + g : html.slice(0, b) + g + html.slice(b);
+  })(vProjects);
+
+  /* ---------------- the office timeline (used by part x3) ---------------- */
+  function tlItems() {
+    return list('projects').filter(active).map(p => { const { stages } = planOf(p); const segs = phasesOf(p).map((f, i) => { const q = stages[f.id]; const a = actOf(p, i); return q ? { d: f.id, s: a.start || q.start, e: a.done ? a.end : maxD(q.end, a.active ? T() : ''), done: a.done, late: !!a.start && (a.end > q.end || (!a.done && T() > q.end)) } : null; }).filter(Boolean); const cr = critical(p); return { id: p.id, href: `#/projects/${p.id}`, label: (cr ? '🔴 ' : drift(p) ? '🟠 ' : '') + (p.code || p.name || ''), sub: p.name || '', due: dueOf(p), segs, rank: cr ? 0 : drift(p) ? 1 : 2 }; })
+      .filter(it => it.segs.length).sort((a, b) => a.rank - b.rank || String(a.due || '9999').localeCompare(String(b.due || '9999')));
+  }
+  function personLoad() {
+    const cap = +TH().cap || 8; const ws = list('workers').filter(w => w && !['inactive', 'suspended'].includes(w.status) && w.role !== 'kiosk');
+    const n = w => list('tasks').filter(t => t && t.assigneeId === w.id && ['open', 'doing'].includes(t.status) && t.kind !== 'update').length + list('shots').filter(s => s && s.assigneeId === w.id && s.state !== 'done' && !s.deleted).length;
+    return ws.map(w => ({ w, n: n(w), cap })).filter(x => x.n > 0).sort((a, b) => b.n - a.n);
+  }
+  function tlSections(sec) {
+    const ld = personLoad(); const all = list('workers').filter(w => w && !['inactive', 'suspended'].includes(w.status) && w.role !== 'kiosk');
+    const least = dept => all.filter(w => (w.deptId || '') === (dept || '')).map(w => ({ w, n: (ld.find(x => x.w.id === w.id) || { n: 0 }).n })).sort((a, b) => a.n - b.n)[0];
+    const load = ld.length ? `<div class="list">${ld.slice(0, 12).map(x => { const over = x.n > x.cap; const lo = over ? least(x.w.deptId) : null; return `<div class="item"><div class="main"><div class="title"><b>${esc(x.w.name)}</b> <span class="badge ${over ? 'crit' : x.n === x.cap ? 'warn' : ''}">${esc(L(`${x.n} مفتوح من طاقة ${x.cap}`, `${x.n} open of ${x.cap} capacity`))}</span></div>${over && lo && lo.w.id !== x.w.id ? `<div class="meta"><span>${esc(L(`انقل ${x.n - x.cap} لـ ${lo.w.name} (عليه ${lo.n})`, `Move ${x.n - x.cap} to ${lo.w.name} (has ${lo.n})`))}</span></div>` : ''}</div></div>`; }).join('')}</div>` : `<div class="empty small">${esc(L('مفيش شغل مفتوح على حد.', 'Nobody has open work.'))}</div>`;
+    const dev = {}; const rs = {};
+    list('projects').forEach(p => { if (!p) return; const B = p.nfPlan && p.nfPlan.baseline && p.nfPlan.baseline.stages; ((p.nfPlan && p.nfPlan.replans) || []).forEach(r => { rs[r.reason] = (rs[r.reason] || 0) + 1; }); if (!B) return; phasesOf(p).forEach((f, i) => { const a = actOf(p, i); if (a.done && B[f.id] && B[f.id].end) { const q = B[f.id]; const pl = Math.max(1, dd(q.start, q.end) + 1); (dev[f.id] = dev[f.id] || []).push(Math.round((dd(q.start, a.end) + 1 - pl) * 100 / pl)); } }); });
+    const dk = Object.keys(dev);
+    const acc = dk.length ? `<div class="list">${dk.map(id => { const a = dev[id].slice().sort((x, y) => x - y); const m = a[Math.floor(a.length / 2)]; return `<div class="item"><div class="main"><div class="title"><b>${esc(phName({ flow: 'os' }, id))}</b> <span class="badge ${m > 15 ? 'warn' : m <= 0 ? 'ok' : ''}">${esc(m > 0 ? L(`بتطوّل ${m}% عن خطتها عادةً`, `usually ${m}% over its plan`) : m < 0 ? L(`بتخلص قبل خطتها بـ ${-m}%`, `usually ${-m}% under its plan`) : L('في ميعادها', 'on time'))}</span></div><div class="meta"><span>${esc(L(`من ${a.length} مرحلة ليها خطة أساسية`, `from ${a.length} phases with a baseline`))}</span></div></div></div>`; }).join('')}</div>` : `<div class="empty small">${esc(L('لما المشاريع يبقى ليها «خطة أساسية» وتقفل مراحل، دقة التخطيط هتبان هنا.', 'Once projects have a «baseline» and close phases, planning accuracy shows here.'))}</div>`;
+    const rk = Object.keys(rs); const why = rk.length ? `<div class="nft-reasons">${rk.sort((a, b) => rs[b] - rs[a]).map(k => `<span class="badge">${esc(RS(k))}: ${rs[k]}</span>`).join(' ')}</div>` : `<div class="empty small">${esc(L('مفيش إعادة جدولة لسه.', 'No re-plans yet.'))}</div>`;
+    return sec(L('توزيع الحمل', 'Load per person'), load, L('المهام واللقطات المفتوحة على كل واحد مقابل طاقته.', 'Open tasks and shots of each person against the capacity.')) + sec(L('دقة التخطيط', 'Planning accuracy'), acc) + sec(L('أسباب إعادة الجدولة', 'Re-plan reasons'), why);
+  }
+  const riskOf = pid => { const p = byId('projects', pid); return p ? risk(p).p : 0; };
+  window.nfStuTL = { items: tlItems, sections: tlSections, riskOf, critical: pid => { const p = byId('projects', pid); return p ? critical(p) : 0; }, hue: id => ((PH.find(f => f.id === id) || oldPh().find(f => f.id === id) || { h: 200 }).h), phName: id => phName({ flow: 'os' }, id) };
+
+  /* ---------------- the client file + team load + alerts ---------------- */
+  function alerts() {
+    const th = TH(); const out = [];
+    list('projects').filter(active).forEach(p => {
+      const nm = p.code ? `${p.code} — ${p.name || ''}` : (p.name || ''); const href = `#/projects/${p.id}`;
+      const idl = idleDays(p); if (idl >= th.idleWarn) out.push({ lv: idl >= th.idleCrit ? 'crit' : 'warn', p, href, t: L(`«${nm}» من غير حركة من ${idl} يوم`, `«${nm}» has had no movement for ${idl} days`) });
+      const { stages: P } = planOf(p); const ci = curIdx(p); const ph = phasesOf(p)[ci]; const q = ph && P[ph.id]; const a = actOf(p, ci);
+      if (q && a.active) { const len = Math.max(1, dd(q.start, q.end) + 1); const used = dd(a.start, T()) + 1; if (T() > q.end) out.push({ lv: 'crit', p, href, t: L(`«${nm}»: مرحلة «${phName(p, ph.id)}» عدّت مدتها المتوقعة بـ ${dd(q.end, T())} يوم`, `«${nm}»: «${phName(p, ph.id)}» is ${dd(q.end, T())} days past its expected time`) }); else if (used >= len * 0.8) out.push({ lv: 'info', p, href, t: L(`«${nm}»: مرحلة «${phName(p, ph.id)}» قرّبت تخلص مدتها`, `«${nm}»: «${phName(p, ph.id)}» is near its expected time`) }); }
+      const cw = clientWait(p); if (cw && cw.days >= th.clientWarn) out.push({ lv: cw.days >= th.clientCrit ? 'crit' : 'warn', p, href, client: true, t: L(`«${nm}» مستني رد العميل من ${cw.days} يوم`, `«${nm}» is waiting for the client for ${cw.days} days`) });
+      if (p.blocked) out.push({ lv: 'crit', p, href, t: L(`«${nm}» واقف من ${p.blocked.since ? dd(p.blocked.since, T()) : '?'} يوم`, `«${nm}» is blocked for ${p.blocked.since ? dd(p.blocked.since, T()) : '?'} days`) });
+      const late = shotsOf(p.id).filter(s => s.state !== 'done' && shotDue(s) && shotDue(s) < T()).length; if (late) out.push({ lv: 'warn', p, href, t: L(`«${nm}»: ${late} لقطات عدّى ميعادها`, `«${nm}»: ${late} shots past their date`) });
+      const cr = critical(p); if (cr) out.push({ lv: 'crit', p, href, t: L(`«${nm}»: مسار حرج — هيخلص بعد موعد العميل بـ ${cr} يوم`, `«${nm}»: critical path — ends ${cr} days after the client deadline`) });
+    });
+    const o = { crit: 0, warn: 1, info: 2 }; return out.sort((a, b) => o[a.lv] - o[b.lv]);
+  }
+  function teamLoad() {
+    const m = {}; const th = TH(); const since = addDays(T(), -90);
+    list('projects').forEach(p => { if (!p || p.deleted) return; const o = ownerOf(p); if (!o) return; const r = m[o] || (m[o] = { id: o, active: 0, risk: 0, idle: 0, blocked: 0, delivered: 0 });
+      if (active(p)) { r.active++; if (risk(p).p >= th.risk) r.risk++; if (idleDays(p) >= th.idleWarn) r.idle++; if (p.blocked) r.blocked++; } else if (finished(p) && D((stamps(p) || {}).delivered || p.updatedAt) >= since) r.delivered++; });
+    const rows = Object.values(m).sort((a, b) => b.active - a.active); const least = rows.slice().sort((a, b) => a.active - b.active)[0];
+    return { rows, least };
+  }
+  function clientFile() {
+    const m = {};
+    list('projects').forEach(p => { if (!p || p.deleted) return; const c = String(p.client || '').trim() || L('من غير عميل', 'No client'); const r = m[c] || (m[c] = { c, n: 0, active: 0, waits: [], ok: 0, back: 0 }); r.n++; if (active(p)) r.active++;
+      const sa = stamps(p); if (isOSp(p)) { ['camera', 'client'].forEach(st => { if (!sa[st]) return; const nx = Object.entries(sa).filter(([k, v]) => k !== st && v > sa[st]).map(([, v]) => v).sort()[0]; if (nx) r.waits.push(Math.max(0, dd(sa[st], nx))); }); if (sa.revisions) r.back++; }
+      (Array.isArray(p.clientLog) ? p.clientLog : []).forEach(e => { if (e && e.k === 'approved') r.ok++; if (e && e.k === 'rejected') r.back++; }); });
+    return Object.values(m).map(r => Object.assign(r, { avg: r.waits.length ? Math.round(r.waits.reduce((a, b) => a + b, 0) / r.waits.length) : null })).sort((a, b) => b.active - a.active || b.n - a.n);
+  }
+
+  /* ---------------- «Smart desk» ---------------- */
+  VIEW_TITLES.stusmart = 'لوحة الذكاء';
+  (() => { if (NAV.some(n => n.id === 'stusmart')) return; const i = NAV.findIndex(n => n.id === 'nflearn'); const e = { id: 'stusmart', label: 'لوحة الذكاء', icon: 'star', countCls: 'warn', count: () => { try { return VIP() ? alerts().filter(a => a.lv === 'crit').length : 0; } catch (e) { return 0; } } }; if (i >= 0) NAV.splice(i, 0, e); else NAV.push(e); })();
+  if (typeof canSee === 'function') canSee = (base => function (v) { if (v === 'stusmart') return VIP() || OWNER(); return base.apply(this, arguments); })(canSee);
+  if (typeof EXTRA_TITLES !== 'undefined') EXTRA_TITLES.stusmart = () => ({ title: L('لوحة الذكاء', 'Smart desk'), sub: L('اللي محتاج انتباهك، احتمال تأخير كل مشروع، حمل الفريق، ملف العملاء، والتقرير الأسبوعي — لينا إحنا بس', 'What needs you, the delay chance of each project, team load, the client file and the weekly report — for the two of you only') });
+  const WK = { at: 0, data: null, busy: false };
+  function weekly() {
+    if (!WK.busy && Date.now() - WK.at > 10 * 60000 && S.sb && typeof S.sb.from === 'function' && S.sbUser) { WK.busy = true; WK.at = Date.now(); try { Promise.resolve(S.sb.from('nf_learn').select('data').eq('id', 'weekly').maybeSingle()).then(r => { WK.data = r && r.data ? r.data.data : null; }).catch(() => { }).finally(() => { WK.busy = false; if (S.route && S.route.view === 'stusmart') rerender(); }); } catch (e) { WK.busy = false; } }
+    return WK.data;
+  }
+  function vSmart() {
+    const sec0 = (tt, inner, sub) => `<div class="card nfl-sec"><h3 class="nfl-h">${esc(tt)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
+    if (!VIP()) return OWNER() ? `<div class="banner warn">${icon('info')}<span>${esc(L('التوأم الرقمي مقفول في المكتب.', 'The digital twin is off in the office.'))} <a href="#/nfaiset">${esc(L('شغّله من إعدادات الـAI', 'Turn it on in the AI settings'))}</a></span></div>` : `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const th = TH(); const al = alerts(); const sec = (tt, inner, sub, extra) => `<div class="card nfl-sec"${extra || ''}><h3 class="nfl-h">${esc(tt)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
+    const alH = al.length ? `<div class="list">${al.slice(0, 30).map(a => `<div class="item nfst-al ${a.lv}"><div class="main"><div class="title"><span class="badge ${a.lv === 'crit' ? 'crit' : a.lv === 'warn' ? 'warn' : ''}">${esc(a.lv === 'crit' ? L('عاجل', 'Urgent') : a.lv === 'warn' ? L('متابعة', 'Follow up') : L('للعلم', 'FYI'))}</span> <a href="${esc(a.href)}">${esc(a.t)}</a></div></div>${a.client && OWNER() ? `<div class="end"><button type="button" class="btn sm" data-action="nfstRemind" data-arg="${esc(a.p.id)}">${icon('send')}${esc(L('ذكّر العميل', 'Remind the client'))}</button></div>` : ''}</div>`).join('')}</div>` : `<div class="empty small">${esc(L('مفيش حاجة محتاجة انتباهك دلوقتي.', 'Nothing needs you right now.'))}</div>`;
+    const rk = list('projects').filter(active).map(p => ({ p, r: risk(p) })).filter(x => x.r.p >= 20).sort((a, b) => b.r.p - a.r.p);
+    const rkH = rk.length ? `<div class="list">${rk.slice(0, 15).map(({ p, r }) => `<div class="item"><div class="main"><div class="title"><a href="#/projects/${esc(p.id)}"><b>${esc(p.code || p.name || '')}</b></a> <span class="badge ${r.p >= th.risk ? 'crit' : 'warn'}">${esc(L(`احتمال التأخير ${r.p}%`, `Delay chance ${r.p}%`))}</span></div><div class="meta">${r.why.slice(0, 3).map(w => `<span>${esc(w)}</span>`).join('')}</div></div></div>`).join('')}</div>` : `<div class="empty small">${esc(L('مفيش مشروع في خطر دلوقتي.', 'No project at risk right now.'))}</div>`;
+    const tl = teamLoad();
+    const tlH = tl.rows.length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${esc(L('الـProject Owner', 'Project Owner'))}</th><th>${esc(L('شغّال', 'Running'))}</th><th>${esc(L('في خطر', 'At risk'))}</th><th>${esc(L('ساكن', 'Still'))}</th><th>${esc(L('واقف', 'Blocked'))}</th><th>${esc(L('اتسلّم (90 يوم)', 'Delivered (90 d)'))}</th></tr></thead><tbody>${tl.rows.map(r => `<tr><td>${esc(pName(r.id) || r.id)}</td><td>${r.active}</td><td>${r.risk ? `<b class="crit">${r.risk}</b>` : 0}</td><td>${r.idle}</td><td>${r.blocked}</td><td>${r.delivered}</td></tr>`).join('')}</tbody></table></div>${tl.least ? `<p class="small" style="margin:8px 0 0">${esc(L(`الأقل حمل: ${pName(tl.least.id) || ''} (${tl.least.active} مشاريع شغّالة) — اختاره للمشروع الجاي.`, `Least loaded: ${pName(tl.least.id) || ''} (${tl.least.active} running) — pick him for the next project.`))}</p>` : ''}` : `<div class="empty small">${esc(L('لسه مفيش Project Owners.', 'No Project Owners yet.'))}</div>`;
+    const cf = clientFile();
+    const cfH = cf.length ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${esc(L('العميل', 'Client'))}</th><th>${esc(L('المشاريع', 'Projects'))}</th><th>${esc(L('شغّال', 'Running'))}</th><th>${esc(L('متوسط رده', 'Average answer'))}</th><th>${esc(L('اعتمادات', 'Approvals'))}</th><th>${esc(L('تعديلات/رفض', 'Revisions / rejections'))}</th></tr></thead><tbody>${cf.slice(0, 25).map(r => `<tr><td>${esc(r.c)}</td><td>${r.n}</td><td>${r.active}</td><td>${r.avg == null ? '—' : esc(L(`${r.avg} يوم`, `${r.avg} days`))}</td><td>${r.ok}</td><td>${r.back}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty small">—</div>`;
+    const wk = weekly();
+    const wkH = wk ? `<p class="small muted" style="margin:0 0 6px">${esc(L(`أسبوع ${fmtDate(D(wk.from))} — ${fmtDate(D(wk.to))}`, `Week ${fmtDate(D(wk.from))} — ${fmtDate(D(wk.to))}`))}</p><div class="nfst-wk">${esc((en() ? wk.en : wk.ar) || '')}</div>` : `<div class="empty small">${esc(L('أول تقرير هيتكتب يوم الأحد الصبح.', 'The first report is written on Sunday morning.'))}</div>`;
+    return sec(L('محتاج انتباهك', 'Needs your attention'), alH, L(`ساكن ${th.idleWarn} / ${th.idleCrit} يوم · مستني العميل ${th.clientWarn} / ${th.clientCrit} يوم · مرحلة عدّت مدتها · لقطات متأخرة · مسار حرج`, `Still ${th.idleWarn} / ${th.idleCrit} days · waiting for the client ${th.clientWarn} / ${th.clientCrit} days · a phase past its time · late shots · critical path`))
+      + sec(L('احتمال التأخير', 'Delay chance'), rkH, L('وتيرة المرحلة 45% · مفيش حركة 20% · مستني العميل 20% · حمل الـOwner 15%', 'Phase pace 45% · no movement 20% · waiting for the client 20% · Project Owner load 15%'))
+      + sec(L('حمل الفريق', 'Team load'), tlH) + sec(L('ملف العملاء', 'Client file'), cfH, L('متوسط رد العميل = الأيام في «اعتماد الكونسبت» و«مراجعة العميل».', 'Average answer = the days in «camera approval» and «client review».'))
+      + sec(L('التقرير الأسبوعي', 'Weekly report'), wkH);   /* v7.79 AI module: the settings card lives on #/nfaiset, the office rules on #/nfrules */
+  }
+  EXTRA_VIEWS.stusmart = () => vSmart();
+
+  /* ---------------- the twin settings (owner) ---------------- */
+  /* v7.79 AI module: the two studio rule buttons, shown on #/nfrules (the module switch and the thresholds are on #/nfaiset) */
+  function stuRuleButtons() {
+    if (!ADM()) return '';
+    return `<div class="nft-btns"><button type="button" class="btn sm" data-action="nfstRule" data-arg="stu_deadline">${esc(L('+ حارس موعد العميل', '+ Client deadline guard'))}</button><button type="button" class="btn sm" data-action="nfstRule" data-arg="stu_stage_tasks">${esc(L('+ مهام المرحلة تتفتح لوحدها', '+ Stage tasks open by themselves'))}</button></div>`;
+  }
+  window.nfStuRuleButtons = stuRuleButtons;
+  const OS_ST = () => [['data', 'Data Received', 'استلام الداتا'], ['setup', 'Project Setup', 'تجهيز المشروع'], ['creative', 'Creative Direction', 'الاتجاه البصري'], ['camera', 'Client Camera Approval', 'اعتماد العميل للكاميرات'], ['kickoff', 'Team Kickoff', 'بداية الفريق'], ['production', 'Production', 'الإنتاج'], ['review', 'Internal Review', 'المراجعة الداخلية'], ['client', 'Client Review', 'مراجعة العميل'], ['revisions', 'Revisions', 'التعديلات'], ['qc', 'Final QC', 'المراجعة النهائية']];
+  const kindTxt = k => (k === 'stu_deadline' ? L('حارس موعد العميل', 'Client deadline guard') : L('مهام المرحلة تتفتح لوحدها', 'Stage tasks open by themselves'));
+  ACTIONS.nfstOn = async () => { if (!ADM()) return; const on = TW().enabled !== false; await Store.saveSettings(Object.assign({}, S.settings, { nfTwin: Object.assign({}, TW(), { enabled: !on }) })); toast(on ? L('اتقفل', 'Off') : L('اتفتح', 'On')); rerender(); };
+  ACTIONS.nfstRule = kind => {
+    if (!ADM() || !['stu_deadline', 'stu_stage_tasks'].includes(kind)) return;
+    const body = kind === 'stu_deadline' ? `<div class="field"><label>${esc(L('قبل موعد العميل بـ', 'Before the client deadline by'))}</label><input type="number" min="1" max="30" class="inp" name="days" value="3"></div><p class="small muted full" style="margin:0">${esc(L('بيتبلّغ: الـProject Owner وإنتوا الاتنين.', 'Who is told: the Project Owner and the two of you.'))}</p>`
+      : `<div class="field"><label>${esc(L('لما المشروع يدخل', 'When the project enters'))}</label><select name="stage" class="inp">${OS_ST().map(s => `<option value="${s[0]}">${esc(en() ? s[1] : s[2])}</option>`).join('')}</select></div><div class="field full"><label>${esc(L('المهام اللي تتفتح (كل سطر مهمة)', 'Tasks to open (one per line)'))}</label><textarea name="titles" class="inp" rows="4" required></textarea></div><p class="small muted full" style="margin:0">${esc(L('المهام بتتفتح على الـProject Owner ومربوطة بالمشروع.', 'The tasks open for the Project Owner, linked to the project.'))}</p>`;
+    openModal({ title: kindTxt(kind), submitLabel: L('شغّلها', 'Turn it on'), body: `<div class="form">${body}</div>`, onSubmit: async f => {
+      const params = kind === 'stu_deadline' ? { days: Math.max(1, Math.min(30, Math.round(+f.querySelector('[name=days]').value || 3))) } : { stage: f.querySelector('[name=stage]').value, titles: f.querySelector('[name=titles]').value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 8) };
+      if (kind === 'stu_stage_tasks' && !params.titles.length) { toast(L('اكتب مهمة واحدة على الأقل', 'Write at least one task'), 'err'); return false; }
+      const rule = { id: 'r' + Date.now().toString(36), kind, params, state: 'on', at: nowISO(), from: 'manual_' + kind, by: me() };
+      await Store.saveSettings(Object.assign({}, S.settings, { nfRules: (Array.isArray(S.settings.nfRules) ? S.settings.nfRules : []).concat([rule]) })); toast(L('اتشغّلت', 'Turned on')); rerender(); return true;
+    } });
+  };
+
+  /* ---------------- «Remind the client» — a real email from the office address, or log one sent from outside ---------------- */
+  ACTIONS.nfstRemind = pid => {
+    const p = byId('projects', pid); if (!p || !OWNER()) return; const cw = clientWait(p);   /* v7.80 (PIN 16 Oct): the owner only */ const what = cw && cw.why === 'camera' ? 'the camera views' : 'the latest renders';
+    const subj = `Follow-up — ${p.name || p.code || ''}`; const txt = `Dear ${p.client || 'client'},\n\nWe hope you are well. We shared ${what} for ${p.name || 'the project'}${cw ? ` ${cw.days} days ago` : ''} and are waiting for your feedback / approval so we can continue on schedule.\n\nKind regards,\nÖkoplan Landscaping`;
+    openModal({ title: L('ذكّر العميل', 'Remind the client'), submitLabel: L('ابعت الإيميل', 'Send the email'), body: `<div class="form"><div class="field full"><label>${esc(L('إلى', 'To'))}</label><input type="email" name="to" class="inp ltr" value="${esc(p.clientEmail || '')}" required></div><div class="field full"><label>${esc(L('نسخة (اختياري)', 'Cc (optional)'))}</label><input type="email" name="cc" class="inp ltr"></div><div class="field full"><label>${esc(L('الموضوع', 'Subject'))}</label><input name="subject" class="inp ltr" value="${esc(subj)}" required></div><div class="field full"><label>${esc(L('الرسالة', 'Message'))}</label><textarea name="text" class="inp ltr" rows="7">${esc(txt)}</textarea></div><p class="tiny muted full" style="margin:0">${esc(L('بيتبعت من إيميل المكتب، والرد بيرجعلك.', 'Sent from the office address; replies come back to you.'))}</p></div>`,
+      extra: `<button type="button" class="btn ghost" data-action="nfstRemindLog" data-arg="${esc(p.id)}">${esc(L('اتبعت من برّه — سجّل بس', 'Sent from outside — just log it'))}</button>`,
+      onSubmit: async f => {
+        const d = { to: f.querySelector('[name=to]').value.trim(), cc: f.querySelector('[name=cc]').value.trim(), subject: f.querySelector('[name=subject]').value.trim(), text: f.querySelector('[name=text]').value };
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.to)) { toast(L('اكتب إيميل صحيح', 'Enter a valid email'), 'err'); return false; }
+        let ok = false; try { const r = await S.sb.functions.invoke('mail', { body: Object.assign({ action: 'client', projectId: p.id }, d) }); ok = !!(r && r.data && r.data.status === 'ok'); if (!ok) throw new Error((r && r.data && r.data.status) || 'send_failed'); } catch (e) { toast(L('ما اتبعتش — اتأكد من إعدادات البريد في الإعدادات، أو سجّله «اتبعت من برّه»', 'Not sent — check the mail settings, or log it as «sent from outside»'), 'err'); return false; }
+        await logClient(p, 'remind', d.subject, d.to); toast(L('اتبعت التذكير ✓', 'Reminder sent ✓')); return true;
+      } });
+  };
+  async function logClient(p, k, note, email) { const cur = byId('projects', p.id) || p; await Store.update('projects', p.id, Object.assign({ clientLog: (Array.isArray(cur.clientLog) ? cur.clientLog : []).concat([{ at: nowISO(), by: me(), k, note: String(note || '').slice(0, 200) }]).slice(-60) }, email ? { clientEmail: email } : {})); }
+  ACTIONS.nfstRemindLog = async pid => { const p = byId('projects', pid); if (!p || !OWNER()) return; await logClient(p, 'remind', L('اتبعت من برّه', 'Sent from outside')); if (typeof closeModal === 'function') closeModal(); toast(L('اتسجّل', 'Logged')); rerender(); };
+  window.nfStuClientLog = (pid, k, note) => { const p = byId('projects', pid); return p && VIP() ? logClient(p, k, note) : null; };
+
+  /* ---------------- the checklist before the next status ---------------- */
+  const CHECKED = new Set();
+  function checksFor(p, target) {
+    const shots = shotsOf(p.id); const open = tasksOf(p.id).length; const okShots = shots.filter(s => s.state === 'done').length; const out = [];
+    const pastProd = ['review', 'client', 'revisions', 'qc', 'delivered'].includes(target);
+    if (shots.length && pastProd) out.push({ k: 'shots', ok: okShots === shots.length, t: L(`اللقطات المعتمدة: ${okShots} من ${shots.length}`, `Shots approved: ${okShots} of ${shots.length}`) });
+    out.push({ k: 'tasks', ok: open === 0, t: open ? L(`مهام مفتوحة على المشروع: ${open}`, `Open tasks on the project: ${open}`) : L('مفيش مهام مفتوحة', 'No open tasks') });
+    if (['kickoff', 'production'].includes(target) && p.camReq !== 'opt') { const ap = (Array.isArray(p.clientLog) ? p.clientLog : []).some(e => e && e.k === 'approved' && (!stamps(p).camera || e.at >= stamps(p).camera)); out.push({ k: 'client', ok: ap || curSt(p) !== 'camera', t: ap ? L('العميل اعتمد الكاميرات (متسجّل)', 'The client approved the cameras (logged)') : L('اعتماد العميل للكاميرات مش متسجّل', 'The client camera approval is not logged') }); }
+    if (['qc', 'delivered'].includes(target)) { const ap = (Array.isArray(p.clientLog) ? p.clientLog : []).some(e => e && e.k === 'approved' && (!stamps(p).client || e.at >= stamps(p).client)); out.push({ k: 'client', ok: ap, t: ap ? L('العميل اعتمد (متسجّل)', 'The client approved (logged)') : L('اعتماد العميل مش متسجّل', 'The client approval is not logged') }); }
+    if (p.blocked) out.push({ k: 'blocked', ok: false, t: L('المشروع واقف', 'The project is blocked') });
+    return out;
+  }
+  if (ACTIONS.osStatus) {
+    const base = ACTIONS.osStatus;
+    ACTIONS.osStatus = arg => {
+      const [pid, st] = String(arg || '').split(':'); const p = byId('projects', pid); const ord = OS_ST().map(x => x[0]).concat(['delivered', 'closed']);
+      if (!p || !VIP() || TW().enabled === false || CHECKED.has(arg) || ord.indexOf(st) <= ord.indexOf(p.osStatus || 'data')) { CHECKED.delete(arg); return base(arg); }
+      const cs = checksFor(p, st); const miss = cs.filter(c => !c.ok);
+      openModal({ title: L('قبل ما تنقل المشروع', 'Before moving the project'), submitLabel: miss.length ? L('انقله مع النواقص', 'Move it anyway') : L('انقله', 'Move it'), body: `<div class="form"><ul class="nfst-chk full">${cs.map(c => `<li class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'} ${esc(c.t)}</li>`).join('')}</ul>${miss.length ? `<div class="field full"><label>${esc(L('سبب النقل مع النواقص', 'Why move with something missing'))}</label><input name="why" class="inp" maxlength="200" required></div>` : ''}</div>`,
+        onSubmit: async f => {
+          const why = miss.length ? f.querySelector('[name=why]').value.trim() : ''; if (miss.length && !why) { toast(L('اكتب السبب', 'Write the reason'), 'err'); return false; }
+          const cur = byId('projects', pid) || p; await Store.update('projects', pid, { stageChecks: Object.assign({}, cur.stageChecks || {}, { [st]: { at: nowISO(), by: me(), ok: cs.filter(c => c.ok).map(c => c.k), missing: miss.map(c => c.k), why } }) });
+          CHECKED.add(arg); setTimeout(() => ACTIONS.osStatus(arg), 50); return true;
+        } });
+    };
+  }
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nfst-dots{background:transparent!important}.nfst-dot{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;margin-inline-start:-4.5px;border-radius:50%;background:#1c1c1e;border:1.5px solid var(--surface,#fff);box-sizing:border-box}
+    .nfst-dot.ok{background:#2f9e5b}.nfst-dot.late{background:#d64545}.nfst-dot.task{background:#e2a300;border-radius:2px;transform:rotate(45deg)}
+    .nfst-card .cardhead{flex-wrap:wrap;gap:6px}.nfst-log summary{cursor:pointer;margin-top:6px}.nfst-log div{padding:2px 0}
+    .nfst-al.crit .title a{font-weight:600}.nfst-wk{white-space:pre-wrap;font-size:14px;line-height:1.6}
+    .nfst-chk{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:6px}.nfst-chk li.ok{color:var(--good-ink,#2f9e5b)}.nfst-chk li.no{color:var(--crit-ink,#d64545)}
+  </style>`);
+})();
+/* =====================================================================
+   v7.79 — the «AI» module (Mahmoud, 16 Oct, brief claude/ai-module-brief.md: «make me a module called AI and put everything
+   inside it — the twin, the automation, all the ideas we talked about — like Ökoplan»). The three Ninety systems.
+   · One «AI» group in the side menu (the menu modules make it one row), the same order everywhere:
+     Smart desk · Assistant · What the system learned · Automation rules · Timeline · Screen check · AI settings.
+   · New pages: #/nfsmart (the Smart desk of the factory and of construction — alerts, delay chances, department load, the
+     weekly report; the office keeps #/stusmart), #/nfrules (all the rules with «+ new rule» — they used to sit inside «What
+     the system learned»), #/nfuicheck (what the screen check found: open, fixed, on which devices — the owner),
+     #/nfaiset (the twin switch, the alert thresholds in days, the morning report, the keys — the owner).
+   · Who sees what does not change: each page shows to whoever saw it before; the new ones follow the same gates.
+   · Nothing runs by itself from here: the rules are the rules, the assistant still waits for «Do it». No money anywhere.
+   Arabic and English, phone and desktop.
+   ===================================================================== */
+(function () {
+  if (window.__NF_AIMOD__) return; window.__NF_AIMOD__ = 1;
+  if (typeof EXTRA_VIEWS === 'undefined' || typeof NAV === 'undefined' || typeof canSee !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const viewing = () => typeof isViewing === 'function' && isViewing();
+  const CO = () => ((typeof isStudioz === 'function' && isStudioz()) ? 'studio' : (typeof isConstruction === 'function' && isConstruction()) ? 'construction' : 'factory');
+  const admin = () => !!S.session && isAdmin() && !viewing();
+  const boss = () => (typeof window.nfTwinBoss === 'function' ? window.nfTwinBoss() : admin());
+  const twinOn = () => (typeof window.nfTwinOn === 'function' ? window.nfTwinOn() : true);
+  const hosted = () => !!(S.sb && typeof S.sb.from === 'function' && S.sbUser);
+  const DAY = 864e5; const today = () => (typeof todayISO === 'function' ? todayISO() : new Date().toISOString().slice(0, 10));
+  const ms = v => { if (!v) return 0; const t = Date.parse(String(v).length === 10 ? v + 'T12:00:00' : v); return isFinite(t) ? t : 0; };
+  const days = t => Math.floor((Date.now() - t) / DAY);
+  const dName = id => (typeof deptName === 'function' ? deptName(id) : id);
+  const TW = () => (S.settings && S.settings.nfTwin) || {};
+  const TH = () => Object.assign({ idleWarn: 10, idleCrit: 20, clientWarn: 7, clientCrit: 14, risk: 60, cap: 8, purch: 3, snag: 14, check: 24 }, TW().alert || {});
+  const sec = (t, inner, sub, id) => `<div class="card nfl-sec"${id ? ` id="${id}"` : ''}><h3 class="nfl-h">${esc(t)}</h3>${sub ? `<p class="small muted nfl-sub">${esc(sub)}</p>` : ''}${inner}</div>`;
+  const empty = t => `<div class="empty small">${esc(t)}</div>`;
+  const LD = () => (window.nfLearn && window.nfLearn.data) || {};
+  ICONS.sparkle = '<path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/><path d="M5 2l.6 1.6L7.2 4.2 5.6 4.8 5 6.4 4.4 4.8 2.8 4.2l1.6-.6z"/>';
+  ICONS.scan = '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>';
+
+  /* ================= the menu: one «AI» group, the same order everywhere ================= */
+  const smartId = () => (CO() === 'studio' ? 'stusmart' : 'nfsmart');
+  const ORDER = () => [smartId(), 'ai', 'nflearn', 'nfrules', 'nfuicheck', 'nfaiset'];   /* v7.80: the timeline moved to project management (part x3) */
+  const seesSmart = () => boss();   /* the Smart desk is the owner's, like the office one — who sees what does not change */
+  const push = (id, label, icon0, extra) => { if (!NAV.some(n => n && n.id === id)) NAV.push(Object.assign({ id, label, icon: icon0 }, extra || {})); };
+  if (CO() !== 'studio') push('nfsmart', 'لوحة الذكاء', 'sparkle', { countCls: 'warn', count: () => { try { return seesSmart() ? alerts().filter(a => a.lv === 'crit').length : 0; } catch (e) { return 0; } } });
+  push('nfrules', 'قواعد التشغيل الآلي', 'check', { count: () => { try { return boss() ? rulesArr().filter(r => r.state === 'try' && 30 - days(ms(r.at)) <= 0).length : 0; } catch (e) { return 0; } } });
+  push('nfuicheck', 'فحص الشاشات', 'scan');
+  push('nfaiset', 'إعدادات الـAI', 'settings');
+  (() => {
+    const st = NAV.find(n => n && n.id === 'stusmart'); if (st) st.icon = 'sparkle';
+    const gi = NAV.findIndex(n => n && n.grp === 'AI'); if (gi >= 0) NAV.splice(gi, 1);
+    const take = id => { const i = NAV.findIndex(n => n && n.id === id); return i >= 0 ? NAV.splice(i, 1)[0] : null; };
+    const items = ORDER().map(take).filter(Boolean);
+    const si = NAV.findIndex(n => n && n.id === 'settings'); let at = -1; for (let i = si; i >= 0; i--) if (NAV[i] && NAV[i].grp) { at = i; break; }
+    NAV.splice(at >= 0 ? at : NAV.length, 0, { grp: 'AI' }, ...items);
+  })();
+  VIEW_TITLES.nfsmart = 'لوحة الذكاء'; VIEW_TITLES.nfrules = 'قواعد التشغيل الآلي'; VIEW_TITLES.nfuicheck = 'فحص الشاشات'; VIEW_TITLES.nfaiset = 'إعدادات الـAI';
+  canSee = (base => function (v) {
+    if (v === 'nfsmart') return CO() !== 'studio' && seesSmart();
+    if (v === 'nfrules') return boss() || admin();
+    if (v === 'nfuicheck' || v === 'nfaiset') return admin();
+    return base.apply(this, arguments);
+  })(canSee);
+  if (typeof EXTRA_TITLES !== 'undefined') {
+    EXTRA_TITLES.nfsmart = () => ({ title: L('لوحة الذكاء', 'Smart desk'), sub: CO() === 'construction' ? L('ملاحظات الموقع القديمة، وطلبات الاستلام المستنية، والمهام الساكنة، والتقرير الأسبوعي', 'Old site snags, waiting inspections, still tasks and the weekly report') : L('اللي محتاج انتباهك، والأوامر اللي ممكن تتأخر، وحمل الأقسام، والتقرير الأسبوعي', 'What needs you, orders that may be late, department load and the weekly report') });
+    EXTRA_TITLES.nfrules = () => ({ title: L('قواعد التشغيل الآلي', 'Automation rules'), sub: L('اللي وافقت عليه بيشتغل لوحده على السيرفر كل ربع ساعة، حتى لو محدش فاتح السيستم', 'What you approved runs by itself on the server every 15 minutes, even when nobody has the system open') });
+    EXTRA_TITLES.nfuicheck = () => ({ title: L('فحص الشاشات', 'Screen check'), sub: L('السيستم بيفحص شاشاته على أجهزة الناس وهما شغالين، ومشاكل الشكل بتدخل الدعم الفني لوحدها', 'The system checks its screens on people\'s devices as they work; look problems go to support by themselves') });
+    EXTRA_TITLES.nfaiset = () => ({ title: L('إعدادات الـAI', 'AI settings'), sub: L('مفتاح التوأم، وعتبات التنبيهات بالأيام، وتقرير الصبح، والمفاتيح', 'The twin switch, the alert thresholds in days, the morning report and the keys') });
+  }
+
+  /* ================= shared ================= */
+  const rulesArr = () => (S.settings && Array.isArray(S.settings.nfRules) ? S.settings.nfRules : []);
+  const OPEN_T = t => t && !t.deleted && !['done', 'cancelled'].includes(String(t.status || 'open'));
+  const WORK_T = t => OPEN_T(t) && !['update', 'notice'].includes(String(t.kind || 'task')) && t.source !== 'morning' && t.source !== 'rule';
+  const lastMove = t => Math.max(ms(t.lastMsgAt), ms(t.updatedAt), ms(t.createdAt));
+  const mine = () => (role() === 'head' ? (typeof myDepts === 'function' ? myDepts() : []) : null);   /* a head sees his departments only */
+  const inMine = d => { const m = mine(); return !m || !d || m.includes(d); };
+  const WK = { at: 0, data: null, busy: false };
+  function weekly(view) {
+    if (!WK.busy && Date.now() - WK.at > 10 * 60000 && hosted()) {
+      WK.busy = true; WK.at = Date.now();
+      try { Promise.resolve(S.sb.from('nf_learn').select('data').eq('id', 'weekly').maybeSingle()).then(r => { WK.data = r && r.data ? r.data.data : null; }).catch(() => { }).finally(() => { WK.busy = false; if (S.route && S.route.view === view) rerender(); }); } catch (e) { WK.busy = false; }
+    }
+    return WK.data;
+  }
+  const weeklyHTML = view => { const wk = weekly(view); return wk ? `<p class="small muted" style="margin:0 0 6px">${esc(L(`أسبوع ${fmtDate(wk.from)} — ${fmtDate(wk.to)}`, `Week ${fmtDate(wk.from)} — ${fmtDate(wk.to)}`))}</p><div class="nfst-wk">${esc((en() ? wk.en : wk.ar) || '')}</div>` : empty(hosted() ? L('أول تقرير هيتكتب يوم الأحد الصبح.', 'The first report is written on Sunday morning.') : L('التقرير بيتكتب على السيرفر.', 'The report is written on the server.')); };
+
+  /* ================= the Smart desk of the factory and of construction ================= */
+  function alerts() {
+    const th = TH(); const out = []; const td = today(); const now = Date.now();
+    const add = (lv, t, href, k) => out.push({ lv, t, href, k });
+    if (CO() === 'factory') {
+      const off = LD().office || {}; const F = (off.ops && off.ops.factory) || {}; const lim = {}; (F.depts || []).forEach(d => { lim[d.id] = +d.lim || 14; });
+      const risk = (off.predict || []);
+      list('orders').filter(o => o && !['delivered', 'cancelled', 'closed'].includes(String(o.status))).forEach(o => {
+        const st = (o.stages && typeof o.stages === 'object') ? o.stages : {}; const cur = Object.keys(st).find(d => st[d] && st[d].start && st[d].status !== 'done') || '';
+        if (!inMine(cur || o.deptId)) return;
+        if (o.dueDate && String(o.dueDate).slice(0, 10) < td) add('crit', L(`${o.code || ''} عدّى ميعاد التسليم ${fmtDate(String(o.dueDate).slice(0, 10))}`, `${o.code || ''} passed its delivery date ${fmtDate(String(o.dueDate).slice(0, 10))}`), '#/orders/' + o.id, 'late');
+        else { const r = risk.find(x => x.orderId === o.id); if (r && r.p >= th.risk) add('warn', L(`${o.code || ''} احتمال التأخير ${r.p}%`, `${o.code || ''} delay chance ${r.p}%`), '#/orders/' + o.id, 'risk'); }
+        if (cur && st[cur].start) { const d = days(ms(st[cur].start)); if (d > (lim[cur] || 14)) add('warn', L(`${o.code || ''} في ${dName(cur)} من ${d} يوم — أكتر من المعتاد (${lim[cur] || 14})`, `${o.code || ''} in ${dName(cur)} for ${d} days — past the usual (${lim[cur] || 14})`), '#/orders/' + o.id, 'stuck'); }
+      });
+      if (!mine()) { const DONE = ['received', 'done', 'closed', 'cancelled', 'delivered', 'rejected']; const ST = (window.nfTwinRules && window.nfTwinRules.steps) || {};
+        list('purchases').filter(p => p && !p.deleted && !DONE.includes(String(p.status))).forEach(p => { const d = days(ms(p.updatedAt) || ms(p.createdAt) || now); if (d >= th.purch) add(d >= th.purch * 3 ? 'crit' : 'warn', L(`${p.number || ''} واقف في «${(ST[p.status] || [p.status])[0]}» من ${d} يوم`, `${p.number || ''} stuck at «${(ST[p.status] || [p.status, p.status])[1]}» for ${d} days`), '#/purchases/' + p.id, 'purch'); }); }
+    } else {
+      list('snags').filter(s => s && !s.deleted && !['done', 'closed', 'cancelled'].includes(String(s.status || 'open'))).forEach(s => { const d = days(ms(s.at) || ms(s.createdAt) || now); if (d >= th.snag) add(d >= th.snag * 2 ? 'crit' : 'warn', L(`ملاحظة موقع مفتوحة من ${d} يوم: ${s.title || s.text || ''}`, `Site snag open for ${d} days: ${s.title || s.text || ''}`).slice(0, 90), '#/csite', 'snag'); });
+      list('checks').filter(c => c && !c.deleted && c.status === 'submitted').forEach(c => { const h = Math.floor((now - (ms(c.submittedAt) || ms(c.at) || now)) / 36e5); if (h >= th.check) add(h >= th.check * 3 ? 'crit' : 'warn', L(`طلب استلام مستني من ${h} ساعة${c.projectId ? ' — ' + ((byId('cprojects', c.projectId) || {}).name || '') : ''}`, `Inspection waiting for ${h} hours${c.projectId ? ' — ' + ((byId('cprojects', c.projectId) || {}).name || '') : ''}`), '#/csite', 'check'); });
+    }
+    list('tasks').filter(WORK_T).filter(t => inMine(t.deptId)).forEach(t => {
+      const d = days(lastMove(t) || now); const due = String(t.dueDate || '').slice(0, 10);
+      if (d >= th.idleCrit) add('crit', L(`مهمة من غير حركة من ${d} يوم: ${t.title || ''}`, `Task with no movement for ${d} days: ${t.title || ''}`), '#/tasks/' + t.id, 'still');
+      else if (d >= th.idleWarn) add('warn', L(`مهمة من غير حركة من ${d} يوم: ${t.title || ''}`, `Task with no movement for ${d} days: ${t.title || ''}`), '#/tasks/' + t.id, 'still');
+      else if (due && due < td) add('warn', L(`مهمة متأخرة عن ${fmtDate(due)}: ${t.title || ''}`, `Task late since ${fmtDate(due)}: ${t.title || ''}`), '#/tasks/' + t.id, 'late');
+    });
+    const W = { crit: 0, warn: 1, info: 2 }; return out.sort((a, b) => W[a.lv] - W[b.lv]).slice(0, 60);
+  }
+  function loadTable() {
+    const rows = {}; const dep = (id, k) => { if (!id || !inMine(id)) return; const r = rows[id] || (rows[id] = { tasks: 0, late: 0, still: 0, orders: 0, over: 0 }); r[k]++; };
+    const th = TH(); const td = today();
+    list('tasks').filter(WORK_T).forEach(t => { const d = t.deptId || ((byId('workers', t.assigneeId) || {}).deptId); if (!d) return; dep(d, 'tasks'); if (String(t.dueDate || '').slice(0, 10) && String(t.dueDate).slice(0, 10) < td) dep(d, 'late'); if (days(lastMove(t) || Date.now()) >= th.idleWarn) dep(d, 'still'); });
+    if (CO() === 'factory') { const F = ((LD().office || {}).ops || {}).factory || {}; const lim = {}; (F.depts || []).forEach(d => { lim[d.id] = +d.lim || 14; });
+      list('orders').filter(o => o && !['delivered', 'cancelled', 'closed'].includes(String(o.status))).forEach(o => { const st = (o.stages && typeof o.stages === 'object') ? o.stages : {}; Object.keys(st).forEach(d => { if (!st[d] || !st[d].start || st[d].status === 'done') return; dep(d, 'orders'); if (days(ms(st[d].start)) > (lim[d] || 14)) dep(d, 'over'); }); }); }
+    const arr = Object.entries(rows).map(([id, r]) => Object.assign({ id, name: dName(id) }, r)).sort((a, b) => (b.late + b.still + b.over) - (a.late + a.still + a.over));
+    if (!arr.length) return empty(L('مفيش شغل مفتوح على الأقسام دلوقتي.', 'No open work on the departments right now.'));
+    const fac = CO() === 'factory';
+    return `<div class="tablewrap"><table class="tbl"><thead><tr><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('مهام مفتوحة', 'Open tasks'))}</th><th>${esc(L('متأخرة', 'Late'))}</th><th>${esc(L('ساكنة', 'Still'))}</th>${fac ? `<th>${esc(L('أوامر عنده', 'Orders with it'))}</th><th>${esc(L('عدّت المعتاد', 'Past the usual'))}</th>` : ''}</tr></thead><tbody>${arr.map(r => `<tr><td>${esc(r.name)}</td><td>${r.tasks}</td><td>${r.late ? `<b class="crit">${r.late}</b>` : 0}</td><td>${r.still ? `<b class="warn">${r.still}</b>` : 0}</td>${fac ? `<td>${r.orders}</td><td>${r.over ? `<b class="crit">${r.over}</b>` : 0}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
+  }
+  const alertsHTML = al => (al.length ? `<div class="list">${al.map(a => `<div class="item nfst-al ${a.lv}"><div class="main"><div class="title"><span class="badge ${a.lv === 'crit' ? 'crit' : 'warn'}">${esc(a.lv === 'crit' ? L('عاجل', 'Urgent') : L('متابعة', 'Follow up'))}</span> <a href="${esc(a.href)}">${esc(a.t)}</a></div></div></div>`).join('')}</div>` : empty(L('مفيش حاجة محتاجة انتباهك دلوقتي.', 'Nothing needs you right now.')));
+  EXTRA_VIEWS.nfsmart = () => {
+    if (!canSee('nfsmart')) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    if (window.nfLearn && hosted() && !LD().loading && (!LD().at || Date.now() - LD().at > 300000)) setTimeout(() => window.nfLearn.load(false), 0);
+    const th = TH(); const al = alerts(); const m = mine();
+    const scope = m ? `<div class="banner nfl-note">${icon('info')}<span>${esc(L(`بتشوف أقسامك بس: ${m.map(dName).join('، ')}.`, `Your departments only: ${m.map(dName).join(', ')}.`))}</span></div>` : '';
+    let h = scope + sec(L('محتاج انتباهك', 'Needs your attention'), alertsHTML(al), CO() === 'factory' ? L(`أوامر عدّت ميعادها أو هتتأخر (≥${th.risk}%) أو واقفة في قسم أكتر من المعتاد · طلبات شراء واقفة ${th.purch} أيام · مهام ساكنة ${th.idleWarn} / ${th.idleCrit} يوم`, `Orders past their date, likely late (≥${th.risk}%) or stuck in a department past the usual · purchases stuck ${th.purch} days · still tasks ${th.idleWarn} / ${th.idleCrit} days`) : L(`ملاحظات موقع مفتوحة ${th.snag} يوم · طلبات استلام مستنية ${th.check} ساعة · مهام ساكنة ${th.idleWarn} / ${th.idleCrit} يوم`, `Site snags open ${th.snag} days · inspections waiting ${th.check} hours · still tasks ${th.idleWarn} / ${th.idleCrit} days`));
+    if (CO() === 'factory' && !m && window.nfTwinRules && window.nfTwinRules.predictN()) h += sec(L('احتمال التأخير', 'Delay chance'), window.nfTwinRules.predict(12), L('من وتيرة الأقسام، والسكون، وطلبات الشراء المستنية، وحمل القسم — بيتحسب كل ليلة.', 'From department pace, no movement, waiting purchases and department load — computed every night.'));
+    h += sec(L('حمل الأقسام', 'Department load'), loadTable());
+    if (!m) h += sec(L('التقرير الأسبوعي', 'Weekly report'), weeklyHTML('nfsmart'), L('بيتكتب يوم الأحد الصبح — أرقام بس، من غير ترتيب ناس.', 'Written on Sunday morning — numbers only, no ranking of people.'));
+    return h;
+  };
+
+  /* ================= the rules page ================= */
+  EXTRA_VIEWS.nfrules = () => {
+    if (!canSee('nfrules')) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const R = window.nfTwinRules; const off = !twinOn();
+    const head = off ? `<div class="banner warn">${icon('info')}<span>${esc(L('التوأم الرقمي مقفول — القواعد واقفة لحد ما تشغّله من إعدادات الـAI.', 'The digital twin is off — the rules are paused until you turn it on in the AI settings.'))} <a href="#/nfaiset">${esc(L('إعدادات الـAI', 'AI settings'))}</a></span></div>` : '';
+    const btns = admin() && R ? `<div class="nft-btns" style="margin:0 0 10px"><button type="button" class="btn sm p" data-action="nfrNew">${esc(L('+ قاعدة جديدة', '+ New rule'))}</button>${CO() === 'studio' && typeof window.nfStuRuleButtons === 'function' ? window.nfStuRuleButtons().replace('<div class="nft-btns">', '').replace(/<\/div>$/, '') : ''}</div>` : '';
+    const kinds = R ? R.newKinds().map(k => R.kindName(k)) : [];
+    return head + sec(L('القواعد', 'Rules'), btns + (R ? R.list() : empty('—')), L('القاعدة بتتعمل من مقترح في «ما تعلّمه السيستم» أو من هنا. التجربة بتقف لوحدها بعد 30 يوم. «عملت إيه» بيوريك سجلها.', 'A rule comes from a suggestion in «What the system learned» or from here. A trial stops by itself after 30 days. «What it did» shows its log.'))
+      + (kinds.length ? sec(L('الأنواع المتاحة هنا', 'Kinds available here'), `<div class="nfai-kinds">${kinds.map(k => `<span class="badge">${esc(k)}</span>`).join(' ')}</div>`) : '');
+  };
+
+  /* ================= the screen check page (owner) ================= */
+  const UI = { at: 0, rows: null, busy: false, err: '' };
+  const KIND = { overlap: ['كلام داخل في بعض', 'Text overlapping'], clip: ['كلام مقطوع', 'Text cut off'], spill: ['كلام طالع برة مكانه', 'Text spilling out'], edge: ['زرار مقطوع عند طرف الشاشة', 'A button cut at the screen edge'], wide: ['الصفحة بتتسحب بالعرض', 'The page scrolls sideways'], jump: ['حاجة بتتنطط في الصفحة', 'Something jumps on the page'], flicker: ['جزء بيرعش', 'A part flickers'] };
+  const DEV = { ios: ['آيفون', 'iPhone'], android: ['أندرويد', 'Android'], mobile: ['موبايل', 'phone'], desktop: ['كمبيوتر', 'computer'] };
+  function loadUi() {
+    if (UI.busy || !hosted() || Date.now() - UI.at < 5 * 60000) return; UI.busy = true; UI.at = Date.now();
+    try { Promise.resolve(S.sb.from('docs').select('id, data').eq('col', 'support').order('updated_at', { ascending: false }).limit(400)).then(r => { if (r && r.error) throw r.error; UI.rows = ((r && r.data) || []).map(x => x.data).filter(t => t && t.source === 'uicheck'); UI.err = ''; }).catch(e => { UI.err = String((e && e.message) || e); }).finally(() => { UI.busy = false; if (S.route && S.route.view === 'nfuicheck') rerender(); }); } catch (e) { UI.busy = false; }
+  }
+  const devTxt = t => Array.from(new Set((t.uiDevices || []).map(d => (DEV[d] ? DEV[d][en() ? 1 : 0] : d)))).join(L('، ', ', '));
+  const tRow = t => `<div class="item"><div class="main"><div class="title"><b>${esc((KIND[t.uiK] || [t.uiK, t.uiK])[en() ? 1 : 0])}</b> — <a href="${esc((t.page && t.page.hash) || '#/')}">${esc((t.page && t.page.title) || '')}</a> <span class="badge ${t.status === 'solved' ? 'ok' : t.dev === 'fixed' ? 'warn' : ''}">${esc(t.status === 'solved' ? L('اتصلّحت', 'Fixed') : t.dev === 'fixed' ? L('اتصلّحت — مستنية الرفع', 'Fixed — awaiting release') : L('بيتشغل عليها', 'In work'))}</span></div><div class="meta"><span>${esc(L(`اتشافت ${t.uiN || 0} مرة عند ${t.uiPeople || 0}`, `Seen ${t.uiN || 0} times by ${t.uiPeople || 0}`))}</span><span>${esc(devTxt(t) || '—')}</span>${t.uiW && t.uiW[0] ? `<span>${esc(L(`عرض ${t.uiW[0] === t.uiW[1] ? t.uiW[0] : `${t.uiW[0]}–${t.uiW[1]}`}px`, `width ${t.uiW[0] === t.uiW[1] ? t.uiW[0] : `${t.uiW[0]}–${t.uiW[1]}`}px`))}</span>` : ''}<span>${esc(L('آخر مرة', 'Last'))} ${esc(fmtDate(String(t.uiLast || t.lastAt || '').slice(0, 10)))}</span><span class="tiny muted">${esc(String(t.uiSel || '').slice(0, 70))}</span></div></div><div class="end"><a class="btn sm ghost" href="#/support">${esc(L('الدعم', 'Support'))}</a></div></div>`;
+  EXTRA_VIEWS.nfuicheck = () => {
+    if (!canSee('nfuicheck')) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    loadUi(); const rows = UI.rows || []; const open = rows.filter(t => t.status !== 'solved'); const fixed = rows.filter(t => t.status === 'solved' && Date.now() - ms(t.solvedAt) <= 14 * DAY);
+    const yd = new Date(Date.now() - DAY).toISOString().slice(0, 10); const fresh = rows.filter(t => String(t.uiLast || '').slice(0, 10) >= yd).length;
+    const k = `<div class="nfl-kpis"><div><b>${open.length}</b><span>${esc(L('بيتشغل عليها', 'In work'))}</span></div><div><b>${fresh}</b><span>${esc(L('اتشافت من إمبارح', 'Seen since yesterday'))}</span></div><div><b>${fixed.length}</b><span>${esc(L('اتصلّحت (14 يوم)', 'Fixed (14 days)'))}</span></div></div>`;
+    const live = window.nfUiCheck && Array.isArray(window.nfUiCheck.found) ? window.nfUiCheck.found : null;
+    const note = `<div class="banner nfl-note">${icon('info')}<span>${esc(L('بيفحص بعد ما كل صفحة تفتح وفي وقت الفراغ: كلام داخل في بعض أو مقطوع، وصفحة بتتسحب بالعرض، وحاجة بتتنطط أو بترعش. بيسجّل الصفحة والمكان والجهاز بس — من غير أي كلام ولا أرقام. المشكلة الجديدة بتدخل الدعم الفني من «السيستم» وبتتصلّح من غير ما ترجعلك، ولو ما اتشافتش أسبوع بعد التصليح بتتقفل لوحدها.', 'It checks after each page opens, in idle time: overlapping or cut text, a page that scrolls sideways, something that jumps or flickers. It records the page, the spot and the device only — no text, no numbers. A new problem goes to support from «the system» and is fixed without coming back to you; unseen for a week after the fix, it closes by itself.'))}</span></div>`;
+    const err = UI.err ? `<div class="banner warn">${icon('alert')}<span>${esc(L('مش قادر يجيب القايمة دلوقتي.', 'Could not fetch the list right now.'))}</span></div>` : '';
+    const liveH = `<div class="nft-btns" style="margin:0 0 8px"><button type="button" class="btn sm" data-action="nfaiScan">${esc(L('افحص الشاشة دي دلوقتي', 'Check this screen now'))}</button></div>${live && live.length ? `<div class="list">${live.slice(0, 10).map(x => `<div class="item"><div class="main"><div class="title">${esc((KIND[x.k] || [x.k, x.k])[en() ? 1 : 0])}</div><div class="meta"><span class="tiny muted">${esc(String(x.sel || '').slice(0, 80))}</span></div></div></div>`).join('')}</div>` : `<p class="small muted" style="margin:0">${esc(L('آخر فحص على الجهاز ده ما لقاش حاجة.', 'The last check on this device found nothing.'))}</p>`}`;
+    return note + err + k + sec(L('بيتشغل عليها', 'In work'), open.length ? `<div class="list">${open.map(tRow).join('')}</div>` : empty(hosted() ? (UI.rows ? L('مفيش مشاكل شكل مفتوحة.', 'No open look problems.') : L('بيحمّل…', 'Loading…')) : L('القايمة بتيجي من السيرفر.', 'The list comes from the server.')))
+      + sec(L('اتصلّحت', 'Fixed'), fixed.length ? `<div class="list">${fixed.map(tRow).join('')}</div>` : empty('—'), L('آخر 14 يوم.', 'The last 14 days.'))
+      + sec(L('على الجهاز ده', 'On this device'), liveH);
+  };
+  ACTIONS.nfaiScan = () => { if (!window.nfUiCheck || typeof window.nfUiCheck.scan !== 'function') { toast(L('الفحص مش شغال على الجهاز ده', 'The check is not running on this device')); return; } try { const f = window.nfUiCheck.scan(); window.nfUiCheck.found = Array.isArray(f) ? f : (window.nfUiCheck.found || []); } catch (e) { /* ignore */ } toast(L('اتفحصت', 'Checked')); rerender(); };
+
+  /* ================= AI settings (owner) ================= */
+  const THK = () => (CO() === 'studio' ? [['idleWarn', L('مشروع ساكن (متابعة) بعد', 'Still project (follow up) after'), 365], ['idleCrit', L('مشروع ساكن (عاجل) بعد', 'Still project (urgent) after'), 365], ['clientWarn', L('مستني العميل (متابعة) بعد', 'Waiting for the client (follow up) after'), 365], ['clientCrit', L('مستني العميل (عاجل) بعد', 'Waiting for the client (urgent) after'), 365], ['risk', L('احتمال التأخير «في خطر» من %', '«At risk» delay chance from %'), 100], ['cap', L('طاقة الشخص (مهام + لقطات مفتوحة)', 'Capacity per person (open tasks + shots)'), 50]]
+    : CO() === 'factory' ? [['idleWarn', L('مهمة ساكنة (متابعة) بعد', 'Still task (follow up) after'), 365], ['idleCrit', L('مهمة ساكنة (عاجل) بعد', 'Still task (urgent) after'), 365], ['risk', L('احتمال التأخير «في خطر» من %', '«At risk» delay chance from %'), 100], ['purch', L('طلب شراء واقف بعد (أيام)', 'Purchase stuck after (days)'), 60]]
+      : [['idleWarn', L('مهمة ساكنة (متابعة) بعد', 'Still task (follow up) after'), 365], ['idleCrit', L('مهمة ساكنة (عاجل) بعد', 'Still task (urgent) after'), 365], ['snag', L('ملاحظة موقع قديمة بعد (أيام)', 'Old site snag after (days)'), 180], ['check', L('طلب استلام مستني بعد (ساعات)', 'Inspection waiting after (hours)'), 240]]);
+  const myMorning = () => { const w = S.session && S.session.workerId; const key = w || (isAdmin() ? 'owner' : ''); return key ? byId('tasks', `morning_${today()}_${key}`) : null; };
+  const viewerNames = () => { const v = (S.settings && Array.isArray(S.settings.nfTwinViewers)) ? S.settings.nfTwinViewers : ['stu_sabek']; return v.map(id => { const w = byId('workers', String(id).replace(/^w:/, '')); return w ? w.name : String(id); }); };
+  EXTRA_VIEWS.nfaiset = () => {
+    if (!canSee('nfaiset')) return `<div class="empty"><b>${esc(L('مش متاحة', 'Not available'))}</b></div>`;
+    const on = twinOn(); const th = TH(); const mOn = typeof window.nfMorningOn === 'function' ? window.nfMorningOn() : true; const allOn = TW().morning !== false; const mt = myMorning();
+    const sw = (lab, note, act, v) => `<div class="item"><div class="main"><div class="title"><b>${esc(lab)}</b></div><div class="meta"><span>${esc(note)}</span></div></div><div class="end"><button type="button" class="btn sm ${v ? 'p' : 'ghost'}" data-action="${act}" aria-pressed="${v}">${esc(v ? L('شغّال', 'On') : L('مقفول', 'Off'))}</button></div></div>`;
+    const twin = sec(L('التوأم الرقمي', 'The digital twin'), `<div class="list">${sw(L('المديول شغّال', 'The module is on'), L('لو اتقفل: مفيش تسجيل استخدام، ولا واجهة متكيّفة، ولا مقترحات، ولا قواعد، ولا تقرير صبح. لوحة الذكاء والمساعد بيفضلوا شغّالين.', 'When off: no usage log, no adaptive screens, no suggestions, no rules and no morning report. The Smart desk and the assistant stay on.'), 'nfaiTwin', on)}</div>`
+      + (CO() === 'studio' ? `<p class="small" style="margin:8px 0 0">${esc(L(`بيشوفه في المكتب: إنت و${viewerNames().join('، ')} بس، ومن غير تسجيل استخدام للباقي. تغيير ده محتاج PIN من الشات.`, `Seen in the office by you and ${viewerNames().join(', ')} only; no usage log for the others. Changing this needs the PIN in the chat.`))}</p>` : ''));
+    const thH = sec(L('عتبات التنبيهات', 'Alert thresholds'), `<form id="nfai-th" class="form">${THK().map(([k, lab, mx]) => `<div class="field"><label>${esc(lab)}</label><input type="number" min="1" max="${mx}" class="inp" name="${k}" value="${esc(String(th[k]))}"></div>`).join('')}<div class="field full"><button type="submit" class="btn sm p">${esc(L('احفظ', 'Save'))}</button></div></form>`, L('بالأيام إلا ما هو مكتوب غير كده. بتأثر على لوحة الذكاء والتقارير والقواعد.', 'In days unless stated. They drive the Smart desk, the reports and the rules.'));
+    const mor = sec(L('تقرير الصبح', 'Morning report'), `<div class="list">${sw(L('للكل (المالك)', 'For everyone (owner)'), L('8:30 كل يوم شغل: كل واحد مهامه هو بس، ورئيس القسم قسمه، والمدير والمالك ملخص. من غير مبالغ ولا ترتيب ناس.', '8:30 every working day: each person his own tasks, a head his department, the manager and the owner a summary. No money, no ranking of people.'), 'nfaiMorningAll', allOn)}${hosted() ? sw(L('تقريري أنا', 'My report'), L('تقدر تقفله لنفسك بس.', 'You can turn it off for yourself only.'), 'nflMorning', mOn) : ''}</div>`
+      + (mt ? `<h4 class="nfl-h4">${esc(L('تقرير النهارده', 'Today\'s report'))}</h4><div class="nfst-wk">${esc(mt.desc || mt.title || '')}</div>` : `<p class="small muted" style="margin:8px 0 0">${esc(L('مفيش تقرير النهارده لحد دلوقتي.', 'No report for today yet.'))}</p>`));
+    const more = sec(L('باقي الـAI', 'The rest of the AI'), `<div class="list">
+      <a class="item" href="#/nfuicheck"><div class="main"><div class="title"><b>${esc(L('فحص الشاشات', 'Screen check'))}</b></div><div class="meta"><span>${esc(L('شغّال عند الكل، ومشاكل الشكل بتدخل الدعم الفني لوحدها.', 'Runs for everyone; look problems go to support by themselves.'))}</span></div></div></a>
+      <a class="item" href="#/settings"><div class="main"><div class="title"><b>${esc(L('مفاتيح الـAI', 'AI keys'))}</b></div><div class="meta"><span>${esc(L('مفتاح Anthropic وباقي المفاتيح بتتكتب في «الإعدادات» بس — مش في الشات.', 'The Anthropic key and the other keys are entered in «Settings» only — never in the chat.'))}</span></div></div></a>
+      <a class="item" href="#/nflearn"><div class="main"><div class="title"><b>${esc(L('استخدامي والواجهة المتكيّفة', 'My use and the adaptive screens'))}</b></div><div class="meta"><span>${esc(L('مفاتيح «سجّل استخدامي» و«خصّص واجهتي» في «ما تعلّمه السيستم». بيانات الاستخدام لتسهيل الواجهة بس — مش لتقييم حد.', 'The «log my use» and «tailor my screens» switches are in «What the system learned». Usage data only eases the screens — never to rate anyone.'))}</span></div></div></a></div>`);
+    return twin + thH + mor + more;
+  };
+  ACTIONS.nfaiTwin = async () => { if (!admin()) return; const on = twinOn(); await Store.saveSettings(Object.assign({}, S.settings, { nfTwin: Object.assign({}, TW(), { enabled: !on }) })); toast(on ? L('اتقفل', 'Off') : L('اتفتح', 'On')); rerender(); };
+  ACTIONS.nfaiMorningAll = async () => { if (!admin()) return; const on = TW().morning !== false; await Store.saveSettings(Object.assign({}, S.settings, { nfTwin: Object.assign({}, TW(), { morning: !on }) })); toast(on ? L('اتقفل للكل', 'Off for everyone') : L('اتفتح', 'On')); rerender(); };
+  document.addEventListener('submit', async ev => {
+    const f = ev.target; if (!f || f.id !== 'nfai-th') return; ev.preventDefault(); if (!admin()) return; const th = TH(); const out = Object.assign({}, TW().alert || {});
+    THK().forEach(([k, , mx]) => { const el = f.querySelector(`[name="${k}"]`); const v = Math.round(+(el && el.value) || th[k]); out[k] = Math.max(1, Math.min(mx, v)); });
+    if (out.idleCrit <= out.idleWarn) out.idleCrit = out.idleWarn + 1; if (out.clientCrit != null && out.clientWarn != null && out.clientCrit <= out.clientWarn) out.clientCrit = out.clientWarn + 1;
+    await Store.saveSettings(Object.assign({}, S.settings, { nfTwin: Object.assign({}, TW(), { alert: out }) })); toast(L('اتحفظت', 'Saved')); rerender();
+  });
+
+  document.head.insertAdjacentHTML('beforeend', `<style>
+    .nfai-kinds{display:flex;flex-wrap:wrap;gap:6px}
+    #view a.item{color:inherit;text-decoration:none}
+    .nfst-wk{white-space:pre-line;line-height:1.7;font-size:14px}
+    .nft-btns{display:flex;gap:6px;flex-wrap:wrap}
+  </style>`);
 })();

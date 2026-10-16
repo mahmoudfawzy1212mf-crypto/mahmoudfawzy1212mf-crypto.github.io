@@ -53,7 +53,8 @@ rep('<meta name="description" content="نظام إدارة مكتب Ninety Studi
 rep('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">', 1)
 
 # ---- Ökoplan menu modules (Mahmoud, 16 Oct): Projects · Intelligence · Design · Communication · Business development · HR · Accounts · Management
-rep("""      add: [{ key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }],
+if "ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }]," in html: html = html.replace("ids: ['tasks', 'pchats', 'meetings', 'ai'], before: 'clients' }],", "ids: ['tasks', 'pchats', 'meetings'], before: 'clients' }],", 1)  # studio ≤ 16 Oct morning kept 'ai' here
+rep("""      add: [{ key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings'], before: 'clients' }],
       into: [{ near: 'projects', ids: ['projects', 'pm', 'studioos'] }, { near: 'settings', ids: ['reports', 'org', 'stuorg', 'audit', 'regulation', 'settings'] }],
       rename: [],""",
 """      add: [{ key: 'intel', ar: 'الذكاء', en: 'AI', ids: ['oksmart', 'ai', 'oklearn', 'okrules'], before: 'clients' }, { key: 'design', ar: 'التصميم', en: 'Design', ids: ['concept', 'studio'], before: 'clients' }, { key: 'comm', ar: 'التواصل', en: 'Communication', ids: ['tasks', 'pchats', 'meetings', 'mail'], before: 'clients' }],

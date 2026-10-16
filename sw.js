@@ -78,6 +78,7 @@ self.addEventListener('fetch', e => {
   if (same && /^\/c\//.test(url.pathname)) return; // v5.97: public client catalogue pages (/c/<slug>/) are not part of the app
   if (same && url.pathname === '/meet.html') return; // v7.48: the meeting guest page is its own page (never cached as the app)
   if (same && /^\/oauth\//.test(url.pathname)) return; // v7.66: the sign-in / consent page for ChatGPT is its own page (never cached as the app)
+  if (same && url.pathname.startsWith(SCOPE + 'site/')) return; // v7.74: the public website (/<app>/site/) is its own pages — never the app shell
   if (same && (req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html'))) {
     // app page: network first (so updates arrive), cached copy when offline
     // (cache: 'no-cache' revalidates with the host even when it sends a max-age, e.g. GitHub Pages)
