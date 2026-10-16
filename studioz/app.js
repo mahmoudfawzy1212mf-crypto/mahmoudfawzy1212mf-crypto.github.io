@@ -34375,7 +34375,7 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     return summary(o, c, R) +
       `<div class="pfnav">${[['contract', 'التعاقد'], ['money', 'الحسابات'], ['cost', 'التكلفة'], ['prod', 'الإنتاج'], ['admin', 'الإدارة']].map(([k, t]) => `<button type="button" class="btn sm ghost" data-action="pfJump" data-arg="${k}">${t}</button>`).join('')}</div>` +
       sec('contract', 'التعاقد', safe(() => contractSec(o), empty('—'))) +
-      sec('money', 'الحسابات', safe(() => moneySec(o, c, R), empty('—')), (o.payments || []).length) +
+      sec('money', 'الحسابات', safe(() => moneySec(o, c, R) + (window.nfOrderLedger ? window.nfOrderLedger.card(o, true) : ''), empty('—')), (o.payments || []).length) +
       sec('cost', 'التكلفة', safe(() => costSec(o, c, R), empty('—'))) +
       sec('prod', 'الإنتاج', safe(() => prodSec(o, R), empty('—')), R.tasks.length) +
       sec('admin', 'الإدارة', safe(() => adminSec(o, R), empty('—')));
@@ -34394,6 +34394,9 @@ if (typeof STU_ON !== 'undefined' && STU_ON) {
     if (!owner() || !S.route || !['orders', 'projects'].includes(S.route.view) || !S.route.id) return;
     const o = byId('orders', S.route.id); if (!o) return;
     const btn = `<button type="button" class="btn sm p" id="pfbtn" data-action="pfOpen" data-arg="${esc(o.id)}">${icon('orders')}ملف المشروع</button>`;
+    /* v7.89: on the order page the button sits with the order's own buttons (the sections hid it inside «Technical office») */
+    const pj = S.route.view === 'orders' && v.querySelector('[data-action="printJob"]');
+    if (pj) { pj.insertAdjacentHTML('beforebegin', btn); return; }
     const anchor = v.querySelector('[data-action="routePlan"]');
     if (anchor) anchor.insertAdjacentHTML('beforebegin', btn);
     else v.insertAdjacentHTML('afterbegin', `<div class="toolbar" id="pfbtnbar" style="justify-content:flex-end">${btn}</div>`); 
@@ -49442,8 +49445,14 @@ function oxFlow(k) {
     { k: 'buy', ar: 'الشراء والاعتمادات', en: 'Purchasing & approvals', ic: 'purchase' },
     { k: 'make', ar: 'التصنيع', en: 'Production', ic: 'layers' },
     { k: 'site', ar: 'النقل والتركيب', en: 'Transport & installation', ic: 'map' },
-    { k: 'money', ar: 'الفلوس', en: 'Money', ic: 'money' }
+    { k: 'money', ar: 'الفلوس', en: 'Money', ic: 'money' },
+    /* v7.89 — every piece of the project's data in the project (parts/99zzZzZZzzz3-proj-all.js draws them) */
+    { k: 'files', ar: 'الملفات والصور', en: 'Files & photos', ic: 'camera' },
+    { k: 'team', ar: 'الناس والساعات', en: 'People & hours', ic: 'workers' },
+    { k: 'tasks', ar: 'المهام والمحادثات', en: 'Tasks & chats', ic: 'chat' },
+    { k: 'log', ar: 'السجل', en: 'Log', ic: 'calendar' }
   ];
+  const ALWAYS = ['draw', 'tech', 'files', 'team', 'tasks', 'log'];
   const KEYS = SECS.map(s => s.k);
   /* a card's section from its heading (the Arabic source, even after the page was translated) */
   const RULES = [   /* Arabic headings, and the cards that draw their heading in English themselves */
@@ -49467,7 +49476,7 @@ function oxFlow(k) {
   const openOf = ts => ts.filter(t => ['open', 'doing'].includes(t.status));
   const projPurchases = o => (typeof canSee === 'function' && !canSee('purchases') && !isAdmin()) ? [] : list('purchases').filter(p => p && p.orderId === o.id && !p.deleted);
   const reqVis = r => (typeof requestVisible === 'function' ? requestVisible(r) : isAdmin());
-  const projRequests = o => { const pids = new Set(list('purchases').filter(p => p && p.orderId === o.id).map(p => p.id)); return list('requests').filter(r => r && !r.deleted && (r.orderId === o.id || (r.purchaseId && pids.has(r.purchaseId))) && reqVis(r)); };
+  const projRequests = o => { const pids = new Set(list('purchases').filter(p => p && p.orderId === o.id).map(p => p.id)); return list('requests').filter(r => r && !r.deleted && r.type !== 'fund' && (r.orderId === o.id || (r.purchaseId && pids.has(r.purchaseId))) && reqVis(r)); };   /* v7.88: custody money goes to «Money», not purchasing */
   const pendingReqs = o => projRequests(o).filter(r => r.status === 'pending');
   const counts = o => ({ draw: openOf(drawTasks(o)).length, tech: openOf(techTasks(o)).length, buy: pendingReqs(o).length });
   /* ---------- new cards ---------- */
@@ -49506,6 +49515,7 @@ function oxFlow(k) {
       ${tile('make', 0, esc(T(`${sd} من ${sn} مرحلة خلصت`, `${sd} of ${sn} stages done`)))}
       ${tile('site', tOpen, esc(T(`${trips.length} مشوار${tOpen ? ` · ${tOpen} شغال` : ''}`, `${trips.length} trips${tOpen ? ` · ${tOpen} running` : ''}`)))}
       ${tile('money', 0, esc(T('التعاقد والدفعات والتكلفة', 'Contract, payments and cost')))}
+      ${(window.nfProjAll ? window.nfProjAll.tiles(o, tile) : '')}
       <a class="psec-tile" href="#/projects/${esc(o.id)}">${icon('board')}<b>${esc(T('سير العمل', 'Workflow'))}</b><span>${esc(T('مهام كل الأقسام بالمراحل وصورها', 'Every department’s tasks by stage, with photos'))}</span></a></div></div>`;
   }
   /* the new cards are added to the page html (before the cost / late cards are appended) */
@@ -49534,7 +49544,7 @@ function oxFlow(k) {
       [...v.children].filter(e => e !== grid && e.classList && e.classList.contains('card')).forEach(e => grid.appendChild(e));
       const cards = [...grid.querySelectorAll('.card')].filter(c => c !== head && !c.parentElement.closest('.card'));
       const have = new Set(['over']); cards.forEach(c => { const k = secOf(c); c.dataset.psec = k; have.add(k); });
-      ['draw', 'tech'].forEach(k => have.add(k));
+      ALWAYS.forEach(k => have.add(k));
       const on = have.has(cur(o.id)) ? cur(o.id) : 'over'; (S.ui.psec ||= {})[o.id] = on;
       v.classList.add('psec'); v.setAttribute('data-psec-on', on);
       const slot = v.querySelector('.psec-over-slot'); if (slot) { slot.remove(); const ov = grid.querySelector('.psec-ov'); const html = overCard(o, have); if (ov) ov.outerHTML = html; else if (head) head.insertAdjacentHTML('afterend', html); else grid.insertAdjacentHTML('afterbegin', html); }
@@ -49552,7 +49562,7 @@ function oxFlow(k) {
   RENDER_HOOKS.push(() => {
     const r = S.route || {}; if (r.view !== 'projects' || !r.id) return; const o = byId('orders', r.id); const v = document.getElementById('view'); if (!o || !v || v.querySelector('.psec-bar')) return;
     if (typeof canSee === 'function' && !canSee('orders')) return;
-    const have = new Set(['over', 'draw', 'tech', 'buy', 'make', 'site']); if (typeof seesFinance === 'function' && seesFinance()) have.add('money');
+    const have = new Set(['over', 'draw', 'tech', 'buy', 'make', 'site', 'files', 'team', 'tasks', 'log']); if (typeof seesFinance === 'function' && seesFinance()) have.add('money');
     v.insertAdjacentHTML('afterbegin', barHTML(o, have, '', true));
   });
   /* opening a section from the bar keeps the place at the top of the page */
@@ -56991,8 +57001,396 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
       }
     });
   };
+  /* v7.88 (Mahmoud 16 Oct, on ELM-26-005: «where is the money transferred to Bahaa here?»): the order's «Money» section gets
+     «Custody money on this order» — each custody request linked to the order (who, what for, waiting / transferred and when, the
+     amount) and what was spent from the custodies on the order. A row opens its request. Amounts follow the page's hide-amounts rule. */
+  const fundCard = o => {
+    const rs = sortBy(list('requests').filter(r => r && r.type === 'fund' && r.orderId === o.id && !['cancelled', 'rejected'].includes(r.status)), r => r.createdAt || '', true);
+    const spent = list('expenses').filter(e => e && e.src === 'wallet' && e.orderId === o.id && !e.deleted);
+    if (!rs.length && !spent.length) return '';
+    const cur = typeof CUR === 'function' ? CUR() : ''; const m = n => `${fmtMoney(+n || 0)} ${cur}`;
+    const sent = rs.filter(r => r.paidAt || (typeof fundXfer === 'function' && fundXfer(r.id))).reduce((a, r) => a + (+r.paidAmount || +r.amount || 0), 0);
+    const used = spent.reduce((a, e) => a + (+e.amount || 0), 0);
+    const st = r => { const x = typeof fundXfer === 'function' ? fundXfer(r.id) : null; const when = String(r.paidAt || (x && (x.at || x.createdAt)) || ''); if (when) return `<span class="badge good">${esc(L('اتحوّل', 'Transferred'))} ${esc(fmtDate(when.slice(0, 10)))}</span>`; return r.status === 'pending' ? `<span class="badge warn">${esc(L('مستني موافقة', 'Waiting for approval'))}</span>` : `<span class="badge warn">${esc(L('مستني التحويل', 'Waiting for the transfer'))}</span>`; };
+    const row = r => { const w = typeof walletOf === 'function' ? walletOf(r.walletId) : null; return `<div class="item" data-action="reqOpen" data-arg="${esc(r.id)}" style="cursor:pointer"><div class="main"><div class="title">${esc(L('عهدة', 'Custody') + ' ' + (w ? w.name : (r.requesterName || '')))} — ${esc(r.reason || '')}</div><div class="meta">${st(r)}<span>${esc(r.requesterName || '')}</span><span>${esc(fmtDate(String(r.createdAt || '').slice(0, 10)))}</span></div></div><div class="end"><b>${esc(m(r.paidAmount || r.amount))}</b></div></div>`; };
+    const sp = spent.length ? `<div class="psec-sub small bold">${esc(L('اتصرف من العهد على الأمر', 'Spent from custodies on this order'))} — ${esc(m(used))}</div><div class="list">${sortBy(spent, e => e.date || '', true).slice(0, 12).map(e => `<div class="item"><div class="main"><div class="title">${esc(e.payee || (typeof catLabel === 'function' ? catLabel(e.cat) : e.cat) || '')}</div><div class="meta"><span>${esc(fmtDate(e.date || ''))}</span><span>${esc(typeof catLabel === 'function' ? catLabel(e.cat) : '')}</span>${e.byName ? `<span>${esc(e.byName)}</span>` : ''}</div></div><div class="end"><b>${esc(m(e.amount))}</b></div></div>`).join('')}</div>` : '';
+    return `<div class="card" id="fund-on-order" data-psec="money"><div class="cardhead"><h3>${esc(L('فلوس العهدة على الأمر', 'Custody money on this order'))}</h3><span class="muted small">${esc(L('اتحوّل', 'Transferred'))} ${esc(m(sent))} · ${esc(L('اتصرف', 'Spent'))} ${esc(m(used))}</span></div>${rs.length ? `<div class="list">${rs.map(row).join('')}</div>` : ''}${sp}</div>`;
+  };
+  if (typeof RENDER_HOOKS !== 'undefined') RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; if (r.view !== 'orders' || !r.id) return; if (!(isAdmin() || (typeof seesFinance === 'function' && seesFinance()))) return;
+      const o = byId('orders', r.id); const v = document.getElementById('view'); if (!o || !v) return;
+      const host = v.querySelector('.gmain .stack') || v.querySelector('.gmain'); if (!host) return;
+      const html = fundCard(o); const old = v.querySelector('#fund-on-order');
+      if (old) { if (!html) old.remove(); else if (old.outerHTML !== html) old.outerHTML = html; return; }
+      if (html) host.insertAdjacentHTML('beforeend', html);
+    } catch (e) { console.warn('fund on order', e); }
+  });
   const css = document.createElement('style'); css.textContent = '.rqproj{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}.rqproj b{font-weight:600;flex:1 1 160px;min-width:0}.rqproj b a{color:var(--ink);text-decoration:none}.rqproj b a:hover{text-decoration:underline}';
   document.head.appendChild(css);
   const css2 = document.createElement('style'); css2.textContent = '.rqxfer{display:flex;align-items:center;gap:12px;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}.rqxfer b{color:var(--good-ink,#15803d)}.rqx-pic{flex:none;width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--line);padding:0;cursor:zoom-in;background:var(--surface)}.rqx-pic img{width:100%;height:100%;object-fit:cover;display:block}';
   document.head.appendChild(css2);
+})();
+/* =====================================================================
+   v7.88 — «Project money statement»: every pound transferred and spent on the order (Mahmoud 16 Oct: «when I open the project's
+   expenses I should see every pound spent and transferred»; brief claude/order-ledger-brief.md, go-ahead the same day).
+   · In the order's «Money» section: one table, newest first — supplier transfers (the order's purchase orders: main transfer and
+     deferred payments), custody transfers linked to the order, expenses on the order (from custodies or accounts), outside work,
+     and materials issued from stock (their value — a cost, not a transfer).
+   · Columns: date · type · to whom / what · from account · by · amount · photo (a tap opens it). Tabs with counts: all · transfers ·
+     expenses · materials. Totals on top, custody money never counted twice (custody spends sit inside the custody transfers).
+   · Owner and money roles only (like the section). Amounts follow the order page's hide-amounts rule. Phone: each row is a card.
+   · Display only — nothing is recorded or changed. All three systems · phone and computer · Arabic and English.
+   v7.89 (Mahmoud: «money is missing too — every pound spent should be in the project's accounts»): transport rows (the order's
+   finished trips: fuel · upkeep · driver time) inside the money out, a «From the client» tab with the client's payments (collected ·
+   difference), and the same statement inside the owner's «Project file» window (accounts section).
+   ===================================================================== */
+(() => {
+  if (window.__NF_OLEDGER__) return; window.__NF_OLEDGER__ = 1;
+  if (typeof RENDER_HOOKS === 'undefined') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const allowed = () => { try { return !!S.session && (isAdmin() || (typeof seesFinance === 'function' && seesFinance())); } catch (e) { return false; } };
+  const acct = id => { if (!id) return ''; try { return typeof acctLabel === 'function' ? acctLabel(id) : id; } catch (e) { return id; } };
+  const day = s => String(s || '').slice(0, 10);
+  const KIND = () => ({ sup: [L('تحويل لمورد', 'Supplier transfer'), 'acc'], fund: [L('تحويل لعهدة', 'Custody transfer'), 'acc'], exp: [L('مصروف', 'Expense'), 'warn'], wexp: [L('مصروف من عهدة', 'Custody spend'), 'warn'], ext: [L('تشغيل خارجي', 'Outside work'), 'warn'], trip: [L('نقل', 'Transport'), 'warn'], mat: [L('خامات من المخزن', 'Stock materials'), ''], cin: [L('داخل من العميل', 'From the client'), 'good'] });
+  const GROUP = { sup: 'xfer', fund: 'xfer', exp: 'exp', wexp: 'exp', ext: 'exp', trip: 'exp', mat: 'mat', cin: 'in' };
+  const fpic = fid => { const f = fid && byId('files', fid); return f && f.thumb ? { thumb: f.thumb, fid } : null; };
+
+  function rowsOf(o) {
+    const out = [];
+    /* 1) suppliers: the order's purchase orders */
+    const pos = list('purchases').filter(p => p && p.orderId === o.id && !p.deleted && p.status !== 'cancelled');
+    const pids = new Set(pos.map(p => p.id));
+    const poExp = list('expenses').filter(e => e && e.purchaseId && pids.has(e.purchaseId) && !e.deleted);
+    const seen = new Set();
+    poExp.forEach(e => { const p = byId('purchases', e.purchaseId) || {}; seen.add(e.purchaseId); out.push({ id: e.id, k: 'sup', d: e.date || day(e.createdAt), who: e.payee || p.supplier || '', what: p.number || e.ref || '', from: acct(e.account), by: e.byName || '', amt: +e.amount || 0, pic: e.thumb ? { thumb: e.thumb, fid: (e.fileIds || [])[0] } : null, href: p.id ? '#/purchases/' + p.id : '' }); });
+    pos.forEach(p => {
+      if (seen.has(p.id)) return;
+      if (p.transfer && +p.transfer.amount) out.push({ id: p.id + ':t', k: 'sup', d: day(p.transfer.at), who: p.supplier || '', what: p.number || '', from: p.transfer.sourceName || p.transfer.methodLabel || acct(p.transfer.source || p.transfer.src), by: p.transfer.byName || '', amt: +p.transfer.amount || 0, pic: p.transfer.thumb ? { thumb: p.transfer.thumb, fid: (p.transfer.fileIds || [])[0] } : null, href: '#/purchases/' + p.id });
+      ((p.deferred && p.deferred.payments) || []).forEach(x => { if (x && +x.amount) out.push({ id: p.id + ':' + x.id, k: 'sup', d: day(x.at), who: p.supplier || '', what: p.number || '', from: x.srcName || acct(x.src), by: x.byName || '', amt: +x.amount || 0, pic: x.thumb ? { thumb: x.thumb, fid: (x.fileIds || [])[0] } : null, href: '#/purchases/' + p.id }); });
+    });
+    /* 2) custody transfers linked to the order */
+    list('requests').filter(r => r && r.type === 'fund' && r.orderId === o.id && !['cancelled', 'rejected'].includes(r.status)).forEach(r => {
+      const x = typeof fundXfer === 'function' ? fundXfer(r.id) : null; if (!x && !r.paidAt) return;
+      const w = typeof walletOf === 'function' ? walletOf(r.walletId) : null;
+      out.push({ id: r.id, k: 'fund', d: day((x && (x.date || x.at || x.createdAt)) || r.paidAt), who: L('عهدة ', 'Custody ') + (w ? w.name : (r.requesterName || '')), what: r.reason || '', from: acct((x && x.from) || r.payFrom), by: r.paidByName || (x && x.byName) || '', amt: +((x && x.amount) || r.paidAmount || r.amount) || 0, pic: (x && x.thumb) || r.payThumb ? { thumb: (x && x.thumb) || r.payThumb, fid: ((x && x.fileIds) || r.payFileIds || [])[0] } : null, act: 'reqOpen', arg: r.id });
+    });
+    /* 3) expenses on the order */
+    list('expenses').filter(e => e && e.orderId === o.id && !e.deleted && !(e.purchaseId && pids.has(e.purchaseId))).forEach(e => {
+      const w = e.src === 'wallet' && typeof walletOf === 'function' ? walletOf(e.account) : null;
+      out.push({ id: e.id, k: w ? 'wexp' : 'exp', d: e.date || day(e.createdAt), who: e.payee || '', what: [typeof catLabel === 'function' ? catLabel(e.cat) : (e.cat || ''), e.note || ''].filter(Boolean).join(' — '), from: w ? L('عهدة ', 'Custody ') + w.name : acct(e.account), by: e.byName || '', amt: +e.amount || 0, pic: e.thumb ? { thumb: e.thumb, fid: (e.fileIds || [])[0] } : null });
+    });
+    /* 4) outside work */
+    list('extorders').filter(x => x && x.orderId === o.id && x.status !== 'cancelled' && x.offer && +x.offer.price).forEach(x => out.push({ id: x.id, k: 'ext', d: day(x.offer.at || x.createdAt), who: x.vendorName || x.supplier || (x.offer && x.offer.vendor) || '', what: x.title || x.name || '', from: '', by: x.byName || '', amt: +x.offer.price || 0 }));
+    /* 5) materials issued from stock */
+    list('movements').forEach(m => { if (!m) return; Object.entries(m.items || {}).forEach(([iid, it]) => { if (!it || it.orderId !== o.id || it.type !== 'out') return; const mat = (it.materialId && byId('materials', it.materialId)) || {}; const q = +it.qty || 0; out.push({ id: (m.id || m.month || '') + ':' + (it.id || iid), k: 'mat', d: day(it.date || it.ts), who: it.name || mat.name || '', what: `${q} ${mat.unit || it.unit || ''}`.trim(), from: L('المخزن', 'Stock'), by: it.byName || '', amt: q * (+it.cost || 0) }); }); });
+    /* 6) v7.89 transport: the order's finished trips (fuel · upkeep · driver time) */
+    try { if (typeof orderTransport === 'function') orderTransport(o).rows.forEach(x => { const t = x.t || {}; if (!(+x.total)) return; const v = t.vehicleId && byId('vehicles', t.vehicleId); out.push({ id: 'trip:' + t.id, k: 'trip', d: day(t.endedAt || t.date || t.createdAt), who: [t.number, t.to].filter(Boolean).join(' — '), what: [x.km ? `${fmtNum(x.km)} ${L('كم', 'km')}` : '', v ? (v.plate || v.name || '') : '', x.fuelEst ? L('الوقود تقديري', 'fuel estimated') : ''].filter(Boolean).join(' · '), from: '', by: t.driverName || '', amt: +x.total || 0, href: '#/fleet/' + t.id }); }); } catch (e) { /* ignore */ }
+    /* 7) v7.89 money in: the client's payments on the order (not part of the money out) */
+    (o.payments || []).forEach(p => { if (!p || p._ph || !(+p.amount)) return; out.push({ id: 'pay:' + p.id, k: 'cin', d: p.date || day(p.receivedAt || p.at), who: (typeof clientName === 'function' ? clientName(o.clientId) : '') || '', what: [p.kind === 'cheque' ? L('شيك', 'Cheque') + ' ' + (p.number || p.no || p.chequeNo || '') : p.method || '', p.ref || '', p.note || ''].filter(Boolean).join(' — '), from: acct(p.account || (typeof payAccount === 'function' ? payAccount(p) : '')), by: p.by || p.byName || '', amt: +p.amount || 0, pic: fpic(p.receiptFileId || p.imageFileId || p.depositFileId) }); });
+    return out.sort((a, b) => String(b.d).localeCompare(String(a.d)));
+  }
+  function totals(rows) {
+    const s = k => rows.filter(r => r.k === k).reduce((a, r) => a + r.amt, 0);
+    const sup = s('sup'), fund = s('fund'), wexp = s('wexp'), exp = s('exp'), ext = s('ext'), trip = s('trip'), mat = s('mat'), cin = s('cin');
+    const out = sup + Math.max(fund, wexp) + exp + ext + trip;
+    return { sup, fund, wexp, exp, ext, trip, mat, cin, left: Math.max(0, fund - wexp), out, net: cin - out };
+  }
+  const cur = () => (typeof CUR === 'function' ? CUR() : '');
+  const m = n => `${fmtMoney(Math.round((+n || 0) * 100) / 100)} ${cur()}`;
+  const UI = oid => { S.ui.olg = S.ui.olg || {}; return (S.ui.olg[oid] = S.ui.olg[oid] || { tab: 'all', more: false }); };
+  function card(o, modal) {
+    const rows = rowsOf(o); if (!rows.length) return '';
+    const u = modal ? { tab: 'all', more: true } : UI(o.id); const t = totals(rows); const K = KIND();
+    const cnt = g => g === 'all' ? rows.length : rows.filter(r => GROUP[r.k] === g).length;
+    const tabs = [['all', L('الكل', 'All')], ['xfer', L('تحويلات', 'Transfers')], ['exp', L('مصروفات', 'Expenses')], ['mat', L('خامات', 'Materials')], ['in', L('داخل من العميل', 'From the client')]].filter(([g]) => g === 'all' || cnt(g));
+    const shownAll = rows.filter(r => u.tab === 'all' || GROUP[r.k] === u.tab); const shown = u.more ? shownAll : shownAll.slice(0, 40);
+    const chip = (lab, v, cls) => `<div class="olg-t ${cls || ''}"><span>${esc(lab)}</span><b>${esc(m(v))}</b></div>`;
+    const tot = `<div class="olg-tots">${chip(L('إجمالي الفلوس اللي طلعت', 'Total money out'), t.out, 'main')}${t.sup ? chip(L('للموردين', 'To suppliers'), t.sup) : ''}${t.fund || t.wexp ? chip(L('للعهد', 'To custodies'), t.fund) + chip(L('اتصرف من العهد', 'Spent from custodies'), t.wexp) + chip(L('فاضل في العهد', 'Left in custodies'), t.left) : ''}${t.exp ? chip(L('مصروفات من الحسابات', 'Expenses from accounts'), t.exp) : ''}${t.ext ? chip(L('تشغيل خارجي', 'Outside work'), t.ext) : ''}${t.trip ? chip(L('نقل', 'Transport'), t.trip) : ''}${t.mat ? chip(L('خامات من المخزن', 'Stock materials'), t.mat, 'mut') : ''}${t.cin ? chip(L('اتحصّل من العميل', 'Collected from the client'), t.cin, 'in') + chip(L('الفرق (اتحصّل − طلع)', 'Difference (in − out)'), t.net, t.net < 0 ? 'neg' : 'in') : ''}</div>`;
+    const pic = r => r.pic ? `<button type="button" class="olg-pic" data-action="olgPic" data-arg="${esc(o.id)}|${esc(r.id)}" aria-label="${esc(L('الصورة', 'Photo'))}"><img src="${esc(r.pic.thumb)}" alt=""></button>` : '';
+    const tr = r => `<tr${r.href ? ` data-nfhref="${esc(r.href)}"` : r.act ? ` data-action="${esc(r.act)}" data-arg="${esc(r.arg)}" style="cursor:pointer"` : ''}><td class="num k0" data-l="${esc(L('التاريخ', 'Date'))}">${esc(r.d ? fmtDate(r.d) : '—')}</td><td data-l="${esc(L('النوع', 'Type'))}"><span class="badge ${K[r.k][1]}">${esc(K[r.k][0])}</span></td><td data-l="${esc(L('لمين / البيان', 'To / what'))}"><b>${esc(r.who || '—')}</b>${r.what ? `<div class="tiny muted">${esc(r.what)}</div>` : ''}</td><td class="${r.from ? '' : 'e'}" data-l="${esc(L('الحساب', 'Account'))}">${esc(r.from || '—')}</td><td class="${r.by ? '' : 'e'}" data-l="${esc(L('بواسطة', 'By'))}">${esc(r.by || '—')}</td><td class="num amt" data-l="${esc(L('المبلغ', 'Amount'))}"><b>${esc(m(r.amt))}</b></td><td class="pk ${r.pic ? '' : 'e'}" data-l="">${pic(r)}</td></tr>`;
+    const head = `<thead><tr><th>${esc(L('التاريخ', 'Date'))}</th><th>${esc(L('النوع', 'Type'))}</th><th>${esc(L('لمين / البيان', 'To / what'))}</th><th>${esc(L('الحساب', 'Account'))}</th><th>${esc(L('بواسطة', 'By'))}</th><th>${esc(L('المبلغ', 'Amount'))}</th><th></th></tr></thead>`;
+    return `<div class="card olg" ${modal ? 'id="order-ledger-pf"' : 'id="order-ledger" data-psec="money"'}><div class="cardhead"><h3>${esc(L('كشف فلوس المشروع', 'Project money statement'))}</h3><span class="muted small">${rows.length} ${esc(L('حركة', 'entries'))}</span></div>${tot}
+      ${modal ? '' : `<div class="olg-tabs">${tabs.map(([g, lab]) => `<button type="button" class="${u.tab === g ? 'on' : ''}" data-action="olgTab" data-arg="${esc(o.id)}|${g}">${esc(lab)} <i>${cnt(g)}</i></button>`).join('')}</div>`}
+      <div class="nftb-wrap"><table class="nftb">${head}<tbody>${shown.map(tr).join('')}</tbody></table></div>
+      ${shownAll.length > shown.length ? `<button type="button" class="btn sm ghost" style="margin-top:8px" data-action="olgMore" data-arg="${esc(o.id)}">${esc(L(`عرض الكل (${shownAll.length})`, `Show all (${shownAll.length})`))}</button>` : ''}
+      <div class="tiny muted" style="margin-top:8px">${esc(L('مصروفات العهد جوه تحويلات العهد — مابتتحسبش مرتين. النقل تكلفة المشاوير (وقود وصيانة ووقت السواق). الخامات من المخزن قيمتها للتكلفة، والداخل من العميل مش من اللي طلع — الاتنين مش داخلين في الإجمالي.', 'Custody spends sit inside the custody transfers — never counted twice. Transport is the trips’ cost (fuel, upkeep, driver time). Stock materials are a cost value and money in from the client is not money out — neither is in the total.'))}</div></div>`;
+  }
+  window.nfOrderLedger = { rows: o => (allowed() ? rowsOf(o) : []), totals, card: (o, modal) => (allowed() ? card(o, modal) : '') };
+  ACTIONS.olgTab = arg => { const [oid, g] = String(arg).split('|'); UI(oid).tab = g; UI(oid).more = false; render(true); };
+  ACTIONS.olgMore = oid => { UI(oid).more = true; render(true); };
+  ACTIONS.olgPic = arg => { const [oid, rid] = String(arg).split('|'); const o = byId('orders', oid); if (!o) return; const r = rowsOf(o).find(x => x.id === rid); if (!r || !r.pic) return; if (r.pic.fid && byId('files', r.pic.fid) && typeof ACTIONS.fileOpen === 'function') ACTIONS.fileOpen(r.pic.fid); else if (typeof lightbox === 'function') lightbox(r.pic.thumb, r.who || ''); };
+  RENDER_HOOKS.push(() => {
+    try {
+      const r = S.route || {}; if (r.view !== 'orders' || !r.id || !allowed()) return;
+      const o = byId('orders', r.id); const v = document.getElementById('view'); if (!o || !v) return;
+      const host = v.querySelector('.gmain .stack') || v.querySelector('.gmain'); if (!host) return;
+      const html = card(o); const old = v.querySelector('#order-ledger');
+      if (old) { if (!html) old.remove(); else old.outerHTML = html; return; }
+      if (!html) return; const fo = v.querySelector('#fund-on-order'); if (fo) fo.insertAdjacentHTML('beforebegin', html); else host.insertAdjacentHTML('beforeend', html);
+    } catch (e) { console.warn('order ledger', e); }
+  });
+  const css = document.createElement('style'); css.textContent = `
+.olg-tots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:2px 0 10px}
+.olg-t{border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--surface-2);display:flex;flex-direction:column;gap:2px}
+.olg-t span{font-size:11.5px;color:var(--muted)}.olg-t b{font-size:15px;font-variant-numeric:tabular-nums}
+.olg-t.in b{color:var(--good-ink,#15803d)}.olg-t.neg b{color:var(--crit-ink,#b91c1c)}
+.olg-t.main{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}.olg-t.mut b{color:var(--muted)}
+.olg-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.olg-tabs button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.olg-tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}.olg-tabs i{font-style:normal;opacity:.75;margin-inline-start:2px}
+.olg-pic{width:40px;height:40px;border-radius:8px;overflow:hidden;border:1px solid var(--line);padding:0;cursor:zoom-in;background:var(--surface)}.olg-pic img{width:100%;height:100%;object-fit:cover;display:block}
+@media (max-width:820px){.olg-tots{grid-template-columns:repeat(2,minmax(0,1fr))}.olg-t.main{grid-column:1/-1}}`;
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.89 — every piece of the project's data inside the project (Mahmoud 16 Oct: «when I open a project it should hold all
+   the project's data»; he picked all four: log · people & hours · files & photos · tasks & chats; brief
+   claude/project-all-data-brief.md, go-ahead the same day).
+   Four new sections in the order page's bar (parts/99zzZzZZzw-proj-sections.js lists them):
+   · Files & photos — one gallery of every file and photo on the project: the order's files, its products' drawings and
+     renders, task photos and chat pictures, stage and handover proofs, purchase and trip proofs; receipts, transfers and
+     invoices for the owner and money roles only. Filters by kind with counts; a tap opens the viewer.
+   · People & hours — who worked on the project and how many hours (from the daily attendance split), by department, by
+     person and by day, plus everyone who took part (tasks, purchasing, trips). No money here. For display only.
+   · Tasks & chats — every task of the project from every department (open · late · done · all, by department) and the
+     latest messages of its task chats and request threads, newest first.
+   · Log — everything that happened on the project in order, who and when: the order, the departments, tasks, purchasing,
+     files, trips, and (owner / money roles only) the money moves — never an amount.
+   Read only; every item keeps the visibility it already has (task, request, purchase, CAD and money rules).
+   Phone and computer · Arabic and English.
+   ===================================================================== */
+(() => {
+  if (window.__NF_PALL__) return; window.__NF_PALL__ = 1;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  if (typeof RENDER_HOOKS === 'undefined' || typeof vOrderDetail !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const KEYS = ['files', 'team', 'tasks', 'log'];
+  const fin = () => { try { return !!S.session && (isAdmin() || (typeof seesFinance === 'function' && seesFinance())); } catch (e) { return false; } };
+  const can = v => { try { return isAdmin() || (typeof canSee === 'function' && canSee(v)); } catch (e) { return false; } };
+  const day = s => String(s || '').slice(0, 10);
+  const tm = s => { try { return s && String(s).length > 10 && typeof fmtAtTm === 'function' ? fmtAtTm(s) : ''; } catch (e) { return ''; } };
+  const short = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  const first = s => String(s || '').split(' — ')[0];
+  const UI = oid => { S.ui.pall = S.ui.pall || {}; return (S.ui.pall[oid] = S.ui.pall[oid] || { f: 'all', t: 'open', d: '', l: 'all', more: {} }); };
+  const onSec = id => { const r = S.route || {}; return r.sub || ((S.ui.psec || {})[id]) || 'over'; };
+  const chips = (oid, key, list, on) => `<div class="pall-chips">${list.filter(x => x[0] === 'all' || x[2]).map(([k, lab, n]) => `<button type="button" class="${on === k ? 'on' : ''}" data-action="pallSet" data-arg="${esc(oid)}|${key}|${esc(k)}">${esc(lab)}${n != null ? ` <i>${n}</i>` : ''}</button>`).join('')}</div>`;
+  const more = (oid, key, all, n) => all > n ? `<button type="button" class="btn sm ghost pall-more" data-action="pallMore" data-arg="${esc(oid)}|${key}">${esc(L(`عرض الكل (${all})`, `Show all (${all})`))}</button>` : '';
+  const lim = (oid, key, n) => (UI(oid).more[key] ? 1e9 : n);
+
+  /* ---------- what belongs to the project ---------- */
+  function scope(o) {
+    const tasks = list('tasks').filter(t => t && t.orderId === o.id && !t.deleted && t.kind !== 'update' && (typeof taskVisible !== 'function' || taskVisible(t)));
+    const pos = can('purchases') ? list('purchases').filter(p => p && p.orderId === o.id && !p.deleted) : [];
+    const allPids = new Set(list('purchases').filter(p => p && p.orderId === o.id).map(p => p.id));
+    const trips = list('trips').filter(t => t && (t.orderId === o.id || (t.purchaseId && allPids.has(t.purchaseId))) && t.status !== 'cancelled');
+    const reqVis = r => (typeof requestVisible === 'function' ? requestVisible(r) : isAdmin());
+    const reqs = list('requests').filter(r => r && !r.deleted && (r.orderId === o.id || (r.purchaseId && allPids.has(r.purchaseId))) && (r.type !== 'fund' || fin()) && reqVis(r));
+    const exps = fin() ? list('expenses').filter(e => e && !e.deleted && (e.orderId === o.id || (e.purchaseId && allPids.has(e.purchaseId)))) : [];
+    let prods = []; try { prods = (typeof orderItems === 'function' ? orderItems(o) : (o.items || [])).map(it => it && it.productId).filter(Boolean); } catch (e) { /* ignore */ }
+    return { tasks, pos, trips, reqs, exps, prods: new Set(prods) };
+  }
+
+  /* ---------- 1) files & photos ---------- */
+  const MONEY_KINDS = /^(transfer|money|receipt|cheque_in|cheque_out|cheque_receipt|deposit_slip|invoice|quote)$/;
+  const MONEY_OWNERS = /^(payment|expense|money|cheque)$/;
+  const DRAW_KINDS = /^(drawing|cad|render|model|html|doc|concept|sketch|shop)$/;
+  const isImg = f => /^image\//.test(f.mime || '') || (!f.mime && !!f.thumb);
+  const isPdf = f => /pdf/.test(f.mime || '') || /\.pdf$/i.test(f.name || '');
+  function filesOf(o, sc) {
+    const out = []; const seen = new Set(); const tIds = new Map(sc.tasks.map(t => [t.id, t])); const pIds = new Map(sc.pos.map(p => [p.id, p])); const trIds = new Map(sc.trips.map(t => [t.id, t]));
+    const rIds = new Map(sc.reqs.map(r => [r.id, r])); const eIds = new Set(sc.exps.map(e => e.id)); const payIds = new Set((o.payments || []).map(p => p && p.id).filter(Boolean));
+    const fundIds = new Set(sc.reqs.filter(r => r.type === 'fund').map(r => 'fund_' + r.id));
+    const cad = typeof canSeeCad === 'function' ? canSeeCad() : true; const src = typeof canSeeSrc === 'function' ? canSeeSrc() : true;
+    list('files').forEach(f => {
+      if (!f || f.deleted || seen.has(f.id) || /^audio\//.test(f.mime || '') || ['saleskit', 'cimport', 'mail', 'idcard'].includes(f.kind)) return;
+      const ok = f.ownerKind; const oid = String(f.ownerId || ''); let from = '', grp = '', money = MONEY_KINDS.test(f.kind || '');
+      if (f.orderId === o.id || (ok === 'order' && oid === o.id)) { from = L('الأمر', 'The order'); grp = 'order'; }
+      else if (ok === 'task' && tIds.has(oid)) { from = L('مهمة: ', 'Task: ') + short(tIds.get(oid).title, 40); grp = 'task'; }
+      else if ((ok === 'stage' || ok === 'handover') && oid.startsWith(o.id)) { from = ok === 'stage' ? L('توثيق مرحلة', 'Stage proof') : L('تسليم', 'Handover'); grp = 'proof'; }
+      else if (ok === 'purchase' && pIds.has(oid)) { from = L('أمر شراء ', 'Purchase ') + (pIds.get(oid).number || ''); grp = 'buy'; }
+      else if (ok === 'trip' && trIds.has(oid)) { from = L('مشوار ', 'Trip ') + (trIds.get(oid).number || ''); grp = 'proof'; }
+      else if (ok === 'request' && rIds.has(oid)) { from = L('طلب', 'Request'); grp = 'buy'; }
+      else if (ok === 'expense' && eIds.has(oid)) { from = L('مصروف', 'Expense'); grp = 'money'; money = true; }
+      else if (ok === 'payment' && payIds.has(oid)) { from = L('دفعة من العميل', 'Client payment'); grp = 'money'; money = true; }
+      else if (ok === 'money' && fundIds.has(oid)) { from = L('تحويل عهدة', 'Custody transfer'); grp = 'money'; money = true; }
+      else if ((f.productId && sc.prods.has(f.productId)) || (ok === 'product' && sc.prods.has(oid))) { const p = byId('products', f.productId || oid); from = L('منتج: ', 'Product: ') + short((p && (p.code || p.name)) || '', 30); grp = 'draw'; }
+      else return;
+      if (MONEY_OWNERS.test(ok || '')) money = true;
+      if (money && !fin()) return;
+      if (f.restricted && !cad) return;
+      if (typeof isSecretLink === 'function' && isSecretLink(f) && !src) return;
+      seen.add(f.id);
+      const cat = money ? 'money' : DRAW_KINDS.test(f.kind || '') || grp === 'draw' ? 'draw' : (f.kind === 'proof' || grp === 'proof') ? 'proof' : isPdf(f) ? 'pdf' : isImg(f) ? 'img' : 'other';
+      out.push({ id: f.id, cat, thumb: f.thumb || '', name: f.title || f.name || '', note: f.note || '', from, by: f.byName || '', at: f.createdAt || '', pdf: isPdf(f), act: 'fileOpen', arg: f.id });
+    });
+    /* task photos kept on the task itself */
+    sc.tasks.forEach(t => (Array.isArray(t.photos) ? t.photos : []).forEach(ph => { if (!ph || (ph.fileId && seen.has(ph.fileId))) return; const th = typeof photoSrc === 'function' ? photoSrc(ph) : ph.thumb; if (!th) return; out.push({ id: 'tp:' + t.id + ':' + ph.id, cat: 'img', thumb: th, name: ph.note || ph.caption || '', note: '', from: L('مهمة: ', 'Task: ') + short(t.title, 40), by: ph.byName || '', at: ph.at || t.createdAt || '', act: 'taskPhotoOpen', arg: `${t.id}:${ph.id}` }); }));
+    return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  }
+  function filesCard(o, sc) {
+    const all = filesOf(o, sc); const u = UI(o.id); const n = k => all.filter(f => f.cat === k).length;
+    const cats = [['all', L('الكل', 'All'), all.length], ['img', L('صور', 'Photos'), n('img')], ['proof', L('صور الشغل والتسليم', 'Work & handover photos'), n('proof')], ['draw', L('رسومات وتصميمات', 'Drawings & designs'), n('draw')], ['pdf', 'PDF', n('pdf')], ['money', L('فواتير وتحويلات', 'Invoices & transfers'), n('money')], ['other', L('ملفات تانية', 'Other files'), n('other')]];
+    const on = cats.some(c => c[0] === u.f && (c[0] === 'all' || c[2])) ? u.f : 'all';
+    const shownAll = all.filter(f => on === 'all' || f.cat === on); const N = lim(o.id, 'files', 48); const shown = shownAll.slice(0, N);
+    const tile = f => `<button type="button" class="pall-f" data-action="${esc(f.act)}" data-arg="${esc(f.arg)}" title="${esc([f.name, f.note].filter(Boolean).join(' — '))}">${f.thumb ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">` : `<span class="pall-fi">${f.pdf ? 'PDF' : esc(String((f.name.split('.').pop() || '').slice(0, 4)).toUpperCase() || L('ملف', 'File'))}</span>`}<span class="pall-fc notr"><b>${esc(short(f.name || f.from, 34))}</b><small><bdi>${esc(short(f.from, 40))}</bdi>${f.at ? ' · <bdi>' + esc(fmtDate(day(f.at))) + '</bdi>' : ''}${f.by ? ' · <bdi>' + esc(first(f.by)) + '</bdi>' : ''}</small></span></button>`;
+    return `<div class="card pall" id="pall-files" data-psec="files"><div class="cardhead"><h3>${esc(L('ملفات وصور المشروع', 'Project files & photos'))}</h3><span class="muted small">${all.length} ${esc(L('ملف', 'files'))}</span></div>
+      ${all.length ? chips(o.id, 'f', cats, on) + `<div class="pall-grid">${shown.map(tile).join('')}</div>` + more(o.id, 'files', shownAll.length, N) : `<div class="muted small">${esc(L('مفيش ملفات أو صور على المشروع ده لسه.', 'No files or photos on this project yet.'))}</div>`}</div>`;
+  }
+
+  /* ---------- 2) people & hours ---------- */
+  function hoursOf(o) {
+    const byW = {}, byD = {}, byDay = {}; let total = 0;
+    list('attendance').forEach(doc => Object.entries((doc && doc.rows) || {}).forEach(([date, rows]) => Object.entries(rows || {}).forEach(([wid, r]) => ((r && r.alloc) || []).forEach(al => {
+      if (!al || al.orderId !== o.id) return; const h = +al.h || 0; if (!h) return; const w = byId('workers', wid); const dk = (w && w.deptId) || (doc && doc.deptId) || 'none';
+      total += h; const b = byW[wid] ||= { w, wid, h: 0, days: new Set(), dk }; b.h += h; b.days.add(date);
+      const d = byD[dk] ||= { h: 0, ws: new Set() }; d.h += h; d.ws.add(wid);
+      const y = byDay[date] ||= { h: 0, ws: new Set() }; y.h += h; y.ws.add(wid);
+    }))));
+    return { total, byW, byD, byDay };
+  }
+  function peopleOf(o, sc) {
+    const P = new Map(); const add = (name, what) => { name = first(name); if (!name) return; const x = P.get(name) || { name, n: 0, what: new Set() }; x.n++; x.what.add(what); P.set(name, x); };
+    sc.tasks.forEach(t => { if (t.assigneeId) add(typeof assigneeName === 'function' ? assigneeName(t.assigneeId) : '', L('مهام', 'Tasks')); if (t.doneByName) add(t.doneByName, L('مهام', 'Tasks')); (t.participants || []).forEach(p => add(p && p.name, L('محادثات', 'Chats'))); });
+    Object.values(o.stages || {}).forEach(s => s && s.byName && add(s.byName, L('مراحل', 'Stages')));
+    sc.pos.forEach(p => add(p.requestedByName || p.createdByName, L('شراء', 'Purchasing')));
+    sc.trips.forEach(t => add(t.driverName, L('نقل', 'Transport')));
+    return [...P.values()].sort((a, b) => b.n - a.n);
+  }
+  function teamCard(o, sc) {
+    const H = hoursOf(o); const fh = h => (typeof fmtHrs === 'function' ? fmtHrs(h) : String(Math.round(h * 10) / 10));
+    const wlink = (wid, nm) => can('workers') ? `<a href="#/workers/${esc(wid)}">${esc(nm)}</a>` : esc(nm);
+    const depts = Object.entries(H.byD).sort((a, b) => b[1].h - a[1].h);
+    const ws = Object.values(H.byW).sort((a, b) => b.h - a.h); const NW = lim(o.id, 'tw', 25);
+    const days = Object.entries(H.byDay).sort((a, b) => b[0].localeCompare(a[0])); const ND = lim(o.id, 'td', 14);
+    const ppl = peopleOf(o, sc);
+    const dTiles = depts.map(([dk, d]) => `<div class="pall-dt"><span>${esc(dk === 'none' ? L('من غير قسم', 'No department') : deptName(dk))}</span><b class="num">${fh(d.h)} ${esc(L('س', 'h'))}</b><small>${d.ws.size} ${esc(L('عامل', 'workers'))}</small></div>`).join('');
+    const wRows = ws.slice(0, NW).map(b => `<tr><td data-l="${esc(L('العامل', 'Worker'))}"><b>${b.w ? wlink(b.wid, b.w.name || '') : esc(L('عامل', 'Worker'))}</b></td><td data-l="${esc(L('القسم', 'Department'))}">${esc(b.dk === 'none' ? '—' : deptName(b.dk))}</td><td class="num" data-l="${esc(L('أيام', 'Days'))}">${b.days.size}</td><td class="num" data-l="${esc(L('ساعات', 'Hours'))}"><b>${fh(b.h)}</b></td></tr>`).join('');
+    const dRows = days.slice(0, ND).map(([d, y]) => `<tr><td class="num" data-l="${esc(L('اليوم', 'Day'))}">${esc(fmtDate(d))}</td><td class="num" data-l="${esc(L('عمال', 'Workers'))}">${y.ws.size}</td><td class="num" data-l="${esc(L('ساعات', 'Hours'))}"><b>${fh(y.h)}</b></td></tr>`).join('');
+    return `<div class="card pall" id="pall-team" data-psec="team"><div class="cardhead"><h3>${esc(L('الناس والساعات على المشروع', 'People & hours on the project'))}</h3><span class="muted small">${fh(H.total)} ${esc(L('ساعة', 'hours'))} · ${ws.length} ${esc(L('عامل', 'workers'))}</span></div>
+      ${H.total ? `<div class="pall-dts">${dTiles}</div>
+      <div class="tiny muted pall-sub">${esc(L('كل عامل', 'Each worker'))}</div><div class="nftb-wrap"><table class="nftb"><thead><tr><th>${esc(L('العامل', 'Worker'))}</th><th>${esc(L('القسم', 'Department'))}</th><th>${esc(L('أيام', 'Days'))}</th><th>${esc(L('ساعات', 'Hours'))}</th></tr></thead><tbody>${wRows}</tbody></table></div>${more(o.id, 'tw', ws.length, NW)}
+      <details class="pall-det"><summary class="tiny muted">${esc(L('بالأيام', 'By day'))} (${days.length})</summary><div class="nftb-wrap"><table class="nftb"><thead><tr><th>${esc(L('اليوم', 'Day'))}</th><th>${esc(L('عمال', 'Workers'))}</th><th>${esc(L('ساعات', 'Hours'))}</th></tr></thead><tbody>${dRows}</tbody></table></div>${more(o.id, 'td', days.length, ND)}</details>`
+      : `<div class="muted small">${esc(L('لسه مفيش ساعات متسجّلة على المشروع ده. الساعات بتتوزّع لما الحضور اليومي يتسجّل على الأوامر الجارية في القسم.', 'No hours recorded on this project yet. Hours are split when the daily attendance is recorded on the department’s running orders.'))}</div>`}
+      ${ppl.length ? `<div class="tiny muted pall-sub">${esc(L('كل اللي شارك في المشروع', 'Everyone who took part'))} (${ppl.length})</div><div class="pall-ppl">${ppl.map(p => `<span class="pall-p"><b>${esc(p.name)}</b><small>${esc([...p.what].join(' · '))}</small></span>`).join('')}</div>` : ''}
+      <div class="tiny muted" style="margin-top:8px">${esc(L('للعرض بس — من الحضور اليومي وتوزيع الساعات على الأوامر.', 'Display only — from the daily attendance and the hours split on orders.'))}</div></div>`;
+  }
+
+  /* ---------- 3) tasks & chats ---------- */
+  const late = t => t.dueDate && t.dueDate < todayISO() && ['open', 'doing'].includes(t.status);
+  function tasksCard(o, sc) {
+    const u = UI(o.id); const ts = sc.tasks.filter(t => t.status !== 'cancelled');
+    const F = { open: t => ['open', 'doing'].includes(t.status), late, done: t => t.status === 'done', all: () => true };
+    const st = F[u.t] ? u.t : 'open';
+    const deptsIn = [...new Set(ts.map(t => t.deptId).filter(Boolean))];
+    const dOn = deptsIn.includes(u.d) ? u.d : '';
+    const pick = ts.filter(F[st]).filter(t => !dOn || t.deptId === dOn);
+    const sorted = st === 'done' ? sortBy(pick, t => t.doneAt || t.updatedAt || '', true) : sortBy(pick, t => (late(t) ? '0' : '1') + (t.dueDate || '9'));
+    const N = lim(o.id, 'tasks', 30);
+    const row = t => `<a class="item pall-t ${late(t) ? 'late' : ''}" href="#/tasks/${esc(t.id)}"><div class="main"><div class="title">${t.status === 'done' ? '✓ ' : ''}${esc(t.title || '')}</div><div class="meta">${badge(TASK_STATUS, t.status)}${t.deptId ? `<span>${esc(deptName(t.deptId))}</span>` : ''}${t.assigneeId ? `<span>${esc(first(typeof assigneeName === 'function' ? assigneeName(t.assigneeId) : ''))}</span>` : ''}${t.dueDate ? `<span class="${late(t) ? 'crit-ink' : ''}">${fmtDate(t.dueDate)}</span>` : ''}${(t.thread || []).length ? `<span>${icon('chat')}${(t.thread || []).length}</span>` : ''}</div></div></a>`;
+    const tabs = [['open', L('مفتوحة', 'Open'), ts.filter(F.open).length], ['late', L('متأخرة', 'Late'), ts.filter(late).length], ['done', L('خلصت', 'Done'), ts.filter(F.done).length], ['all', L('الكل', 'All'), ts.length]];
+    const dchips = deptsIn.length > 1 ? `<div class="pall-chips sm"><button type="button" class="${!dOn ? 'on' : ''}" data-action="pallSet" data-arg="${esc(o.id)}|d|">${esc(L('كل الأقسام', 'All departments'))}</button>${deptsIn.map(d => `<button type="button" class="${dOn === d ? 'on' : ''}" data-action="pallSet" data-arg="${esc(o.id)}|d|${esc(d)}">${esc(deptName(d))} <i>${ts.filter(F[st]).filter(t => t.deptId === d).length}</i></button>`).join('')}</div>` : '';
+    /* the chats: task threads + request threads, newest first */
+    const msgs = [];
+    sc.tasks.forEach(t => (Array.isArray(t.thread) ? t.thread : []).forEach(m => { if (!m || m.sys || m.kind === 'system') return; const txt = m.text ? short(m.text, 180) : m.audioFileId ? L('رسالة صوتية', 'Voice note') : (m.fileId || m.thumb) ? L('صورة / ملف', 'Photo / file') : ''; if (!txt) return; msgs.push({ at: m.at || '', by: m.byName || '', txt, thumb: m.thumb || '', on: t.title || '', href: '#/tasks/' + t.id }); }));
+    sc.reqs.forEach(r => (Array.isArray(r.thread) ? r.thread : []).forEach(m => { if (!m || !m.text || m.kind === 'system') return; msgs.push({ at: m.at || '', by: m.byName || '', txt: short(m.text, 180), on: ((typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || L('طلب', 'Request')), act: 'reqOpen', arg: r.id }); }));
+    msgs.sort((a, b) => String(b.at).localeCompare(String(a.at))); const NM = lim(o.id, 'msgs', 20);
+    const mrow = m => `<${m.href ? `a href="${esc(m.href)}"` : `div data-action="${esc(m.act)}" data-arg="${esc(m.arg)}" style="cursor:pointer"`} class="item pall-m"><div class="main"><div class="meta"><b>${esc(first(m.by) || '—')}</b><span class="notr">${esc(short(m.on, 50))}</span><span class="num">${esc(fmtDate(day(m.at)))} ${esc(tm(m.at))}</span></div><div class="pall-mt notr">${m.thumb ? `<img src="${esc(m.thumb)}" alt="" loading="lazy">` : ''}${esc(m.txt)}</div></div></${m.href ? 'a' : 'div'}>`;
+    return `<div class="card pall" id="pall-tasks" data-psec="tasks"><div class="cardhead"><h3>${esc(L('كل مهام المشروع', 'All project tasks'))}</h3><span class="muted small">${ts.length} ${esc(L('مهمة', 'tasks'))}</span></div>
+      ${ts.length ? chips(o.id, 't', tabs, st) + dchips + (sorted.length ? `<div class="list">${sorted.slice(0, N).map(row).join('')}</div>` + more(o.id, 'tasks', sorted.length, N) : `<div class="muted small">${esc(L('مفيش مهام هنا.', 'No tasks here.'))}</div>`) : `<div class="muted small">${esc(L('مفيش مهام على المشروع ده لسه.', 'No tasks on this project yet.'))}</div>`}</div>
+      <div class="card pall" id="pall-chats" data-psec="tasks"><div class="cardhead"><h3>${esc(L('محادثات المشروع', 'Project chats'))}</h3><span class="muted small">${msgs.length} ${esc(L('رسالة', 'messages'))}</span></div>
+      ${msgs.length ? `<div class="list">${msgs.slice(0, NM).map(mrow).join('')}</div>` + more(o.id, 'msgs', msgs.length, NM) : `<div class="muted small">${esc(L('مفيش رسايل على مهام أو طلبات المشروع ده لسه.', 'No messages on this project’s tasks or requests yet.'))}</div>`}</div>`;
+  }
+
+  /* ---------- 4) the log ---------- */
+  function events(o, sc) {
+    const E = []; const ev = (at, k, txt, by, link) => { if (at) E.push(Object.assign({ at: String(at), k, txt, by: by || '' }, link || {})); };
+    const me = { href: '#/orders/' + o.id };
+    ev(o.createdAt, 'flow', L('اتفتح الأمر', 'The order was opened'), o.createdByName, me);
+    if (o.approval && o.approval.at) ev(o.approval.at, 'flow', o.approval.status === 'rejected' ? L('اعتماد التشغيل اترفض', 'Start approval refused') : L('اتعتمد التشغيل', 'Production approved'), o.approval.byName, me);
+    if (o.releasedAt) ev(o.releasedAt, 'flow', L('اتصرّح بالتشغيل', 'Released to production'), o.releasedByName || '', me);
+    (Array.isArray(o.dueHistory) ? o.dueHistory : []).forEach(h => h && ev(h.at, 'flow', L(`ميعاد التسليم اتغيّر${h.from ? ' من ' + fmtDate(h.from) : ''}${h.to ? ' لـ ' + fmtDate(h.to) : ''}`, `Delivery date changed${h.from ? ' from ' + fmtDate(h.from) : ''}${h.to ? ' to ' + fmtDate(h.to) : ''}`), h.byName, me));
+    if (o.cancelledAt) ev(o.cancelledAt, 'flow', L('الأمر اتلغى', 'The order was cancelled'), '', me);
+    Object.entries(o.stages || {}).forEach(([dk, s]) => { if (!s || typeof s !== 'object') return; const dn = deptName(dk); const lk = { href: `#/orders/${o.id}/make` };
+      if (s.start) ev(s.start.length > 10 ? s.start : s.start + 'T08:00', 'flow', L(`بدأ في ${dn}`, `Started in ${dn}`), s.status === 'done' ? '' : s.byName, lk);
+      if (s.status === 'done' && (s.end || s.at)) ev(s.end && s.end.length > 10 ? s.end : (s.at || s.end + 'T17:00'), 'flow', L(`خلص في ${dn}`, `Finished in ${dn}`), s.byName, lk); });
+    sc.tasks.forEach(t => { const lk = { href: '#/tasks/' + t.id }; ev(t.createdAt, 'task', [L('مهمة جديدة: ', 'New task: '), short(t.title, 70)], t.createdByName, lk); if (t.status === 'done' && t.doneAt) ev(t.doneAt, 'task', [L('خلصت: ', 'Done: '), short(t.title, 70)], t.doneByName, lk); });
+    sc.pos.forEach(p => { const lk = { href: '#/purchases/' + p.id }; const nm = p.number || '';
+      ev(p.createdAt, 'buy', L('طلب شراء ', 'Purchase request ') + nm, p.requestedByName || p.createdByName, lk);
+      if (p.approval && (p.approval.approvedAt || p.approval.at) && p.approval.status === 'approved') ev(p.approval.approvedAt || p.approval.at, 'buy', L('اتعتمد طلب الشراء ', 'Purchase approved ') + nm, p.approval.approvedByName || p.approval.byName, lk);
+      if (p.rfqQuote && p.rfqQuote.at) ev(p.rfqQuote.at, 'buy', [L('عرض سعر', 'Quote') + (p.rfqQuote.supplierName ? ' — ' : ''), (p.rfqQuote.supplierName || ''), ' · ' + nm], p.rfqQuote.byName, lk);
+      if (p.cancelledAt) ev(p.cancelledAt, 'buy', L('اتلغى طلب الشراء ', 'Purchase cancelled ') + nm, p.cancelledByName, lk);
+      if (fin() && p.transfer && p.transfer.at) ev(p.transfer.at, 'money', [L('اتحوّل للمورد', 'Paid to the supplier') + (p.supplier ? ' — ' : ''), (p.supplier || ''), ' · ' + nm], p.transfer.byName, lk);
+      if (fin() && p.invoice && p.invoice.at) ev(p.invoice.at, 'money', L('اتسجّلت فاتورة المورد ', 'Supplier invoice recorded ') + nm, p.invoice.byName, lk); });
+    sc.reqs.forEach(r => { const ty = (typeof REQ_TYPES !== 'undefined' && REQ_TYPES[r.type]) || L('طلب', 'Request'); const lk = { act: 'reqOpen', arg: r.id }; const k = r.type === 'fund' ? 'money' : 'buy';
+      ev(r.createdAt, k, L('طلب جديد: ', 'New request: ') + ty, r.requesterName || r.createdByName, lk);
+      if (r.decidedAt && ['approved', 'rejected', 'cancelled'].includes(r.status)) ev(r.decidedAt, k, (r.status === 'approved' ? L('اتوافق على ', 'Approved: ') : r.status === 'rejected' ? L('اترفض ', 'Refused: ') : L('اتلغى ', 'Cancelled: ')) + ty, r.decidedByName, lk);
+      if (r.type === 'fund' && r.paidAt) ev(r.paidAt, 'money', [L('اتحوّل لعهدة ', 'Paid to the custody of '), first(r.requesterName || '')], r.paidByName, lk); });
+    sc.trips.forEach(t => { const lk = { href: '#/fleet/' + t.id };
+      ev(t.startedAt || t.departedAt, 'trip', [L('مشوار ', 'Trip ') + (t.number || '') + (t.to ? L(' لـ ', ' to ') : ''), t.to ? short(t.to, 40) : '', L(' اتحرك', ' left')], t.driverName, lk);
+      if (t.status === 'done' && (t.endedAt || t.arrivedAt)) ev(t.endedAt || t.arrivedAt, 'trip', L('مشوار ', 'Trip ') + (t.number || '') + L(' خلص', ' finished'), t.driverName, lk); });
+    if (fin()) {
+      (o.payments || []).forEach(p => p && !p._ph && ev(p.at || p.receivedAt || (p.date ? p.date + 'T12:00' : ''), 'money', p.kind === 'cheque' ? L('شيك من العميل اتسجّل', 'Client cheque recorded') : L('دفعة من العميل اتسجّلت', 'Client payment recorded'), p.by || p.byName, { href: `#/orders/${o.id}/money` }));
+      sc.exps.forEach(e => !e.purchaseId && ev(e.createdAt || (e.date ? e.date + 'T12:00' : ''), 'money', [L('مصروف اتسجّل', 'Expense recorded') + (e.payee ? ' — ' : ''), e.payee ? short(e.payee, 30) : ''], e.byName, { href: `#/orders/${o.id}/money` }));
+    }
+    try { filesOf(o, sc).forEach(f => ev(f.at, 'file', [L('اترفع: ', 'Uploaded: '), short(f.name || f.from, 50) + (f.from ? ' · ' + short(f.from, 40) : '')], f.by, { act: f.act, arg: f.arg })); } catch (e) { /* ignore */ }
+    return E.sort((a, b) => b.at.localeCompare(a.at));
+  }
+  function logCard(o, sc) {
+    const all = events(o, sc); const u = UI(o.id); const n = k => all.filter(e => e.k === k).length;
+    const kinds = [['all', L('الكل', 'All'), all.length], ['flow', L('الأمر والأقسام', 'Order & departments'), n('flow')], ['task', L('المهام', 'Tasks'), n('task')], ['buy', L('الشراء والطلبات', 'Purchasing & requests'), n('buy')], ['file', L('الملفات', 'Files'), n('file')], ['trip', L('النقل', 'Transport'), n('trip')], ['money', L('الفلوس', 'Money'), n('money')]];
+    const on = kinds.some(c => c[0] === u.l && (c[0] === 'all' || c[2])) ? u.l : 'all';
+    const pick = all.filter(e => on === 'all' || e.k === on); const N = lim(o.id, 'log', 60);
+    const IC = { flow: 'layers', task: 'check', buy: 'purchase', file: 'camera', trip: 'map', money: 'money' };
+    let last = ''; const rows = pick.slice(0, N).map(e => { const d = day(e.at); const h = d !== last ? `<div class="pall-day">${esc(fmtDate(d))}</div>` : ''; last = d;
+      const attrs = e.href ? `href="${esc(e.href)}"` : `data-action="${esc(e.act)}" data-arg="${esc(e.arg)}" style="cursor:pointer"`;
+      return h + `<${e.href ? 'a' : 'div'} class="pall-e k-${e.k}" ${attrs}><span class="pall-ei">${icon(IC[e.k] || 'info')}</span><span class="pall-et">${Array.isArray(e.txt) ? esc(e.txt[0]) + (e.txt[1] ? `<span class="notr">${esc(e.txt[1])}</span>` : '') + esc(e.txt[2] || '') : esc(e.txt)}</span><span class="pall-eb">${e.by ? esc(first(e.by)) + ' · ' : ''}<span class="num">${esc(tm(e.at))}</span></span></${e.href ? 'a' : 'div'}>`; }).join('');
+    return `<div class="card pall" id="pall-log" data-psec="log"><div class="cardhead"><h3>${esc(L('سجل المشروع', 'Project log'))}</h3><span class="muted small">${all.length} ${esc(L('حدث', 'events'))}</span></div>
+      ${all.length ? chips(o.id, 'l', kinds, on) + `<div class="pall-log">${rows}</div>` + more(o.id, 'log', pick.length, N) : `<div class="muted small">${esc(L('لسه مفيش حاجة متسجّلة على المشروع ده.', 'Nothing recorded on this project yet.'))}</div>`}
+      <div class="tiny muted" style="margin-top:8px">${esc(L('كل اللي حصل على المشروع، مين عمله وإمتى. الفلوس هنا من غير مبالغ — المبالغ في «الفلوس».', 'Everything that happened on the project, who and when. Money shows without amounts here — amounts are in «Money».'))}</div></div>`;
+  }
+
+  /* ---------- the page: only the open section's card is drawn ---------- */
+  vOrderDetail = (base => function (id) {
+    const html = base.apply(this, arguments); const o = byId('orders', id); if (!o || typeof html !== 'string') return html;
+    const on = onSec(o.id); if (!KEYS.includes(on)) return html;
+    try { const sc = scope(o); return html + (on === 'files' ? filesCard(o, sc) : on === 'team' ? teamCard(o, sc) : on === 'tasks' ? tasksCard(o, sc) : logCard(o, sc)); }
+    catch (e) { console.warn('project data', e); return html; }
+  })(vOrderDetail);
+  window.nfProjAll = {
+    tiles: (o, tile) => { try { const sc = scope(o); const open = sc.tasks.filter(t => ['open', 'doing'].includes(t.status)).length; const lt = sc.tasks.filter(late).length; const nf = filesOf(o, sc).length; const H = hoursOf(o);
+      return tile('files', 0, esc(L(`${nf} ملف وصورة`, `${nf} files and photos`))) + tile('team', 0, esc(L(`${typeof fmtHrs === 'function' ? fmtHrs(H.total) : Math.round(H.total)} ساعة · ${Object.keys(H.byW).length} عامل`, `${typeof fmtHrs === 'function' ? fmtHrs(H.total) : Math.round(H.total)} hours · ${Object.keys(H.byW).length} workers`))) + tile('tasks', lt, esc(L(`${open} مهمة مفتوحة${lt ? ` · ${lt} متأخرة` : ''}`, `${open} open tasks${lt ? ` · ${lt} late` : ''}`)), lt > 0) + tile('log', 0, esc(L('كل اللي حصل بالترتيب', 'Everything that happened, in order'))); } catch (e) { return ''; } },
+    files: o => filesOf(o, scope(o)), events: o => events(o, scope(o)), hours: o => hoursOf(o)
+  };
+  ACTIONS.pallSet = arg => { const [oid, k, v] = String(arg).split('|'); const u = UI(oid); u[k] = v || ''; u.more = {}; render(true); };
+  ACTIONS.pallMore = arg => { const [oid, k] = String(arg).split('|'); UI(oid).more[k] = true; render(true); };
+  const css = document.createElement('style'); css.textContent = `
+#view.psec .gmain .card.pall{grid-column:1/-1}
+.pall-chips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
+.pall-chips button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.pall-chips button.on{background:var(--accent);border-color:var(--accent);color:#fff}.pall-chips i{font-style:normal;opacity:.75;margin-inline-start:2px}
+.pall-chips.sm button{padding:3px 10px;font-size:12px}
+.pall-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.pall-f{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);padding:0;cursor:zoom-in;text-align:start;font:inherit;color:inherit;min-width:0}
+.pall-f img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--surface-2)}
+.pall-fi{display:grid;place-items:center;width:100%;aspect-ratio:4/3;background:var(--surface-2);color:var(--muted);font-weight:700;font-size:15px;letter-spacing:.5px}
+.pall-fc{display:flex;flex-direction:column;gap:2px;padding:6px 8px;min-width:0}.pall-fc b{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pall-fc small{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pall-more{margin-top:8px}.pall-sub{margin:12px 0 4px}
+.pall-dts{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.pall-dt{border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--surface-2);display:flex;flex-direction:column;gap:2px}.pall-dt span{font-size:12px;color:var(--muted)}.pall-dt b{font-size:16px}.pall-dt small{font-size:11px;color:var(--muted)}
+.pall-ppl{display:flex;flex-wrap:wrap;gap:6px}.pall-p{display:inline-flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;padding:5px 10px;background:var(--surface)}.pall-p b{font-size:12.5px}.pall-p small{font-size:11px;color:var(--muted)}
+.pall-det summary{cursor:pointer;margin-top:12px}
+.pall a.item,.pall a.item:hover{text-decoration:none;color:inherit}.pall-t.late .title{color:var(--crit-ink)}
+.pall-m .meta b{color:var(--ink)}.pall-mt{font-size:13px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:2px}.pall-mt img{width:44px;height:44px;object-fit:cover;border-radius:8px;float:inline-start;margin-inline-end:8px}
+.pall-log{display:flex;flex-direction:column}
+.pall-day{font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+.pall-e{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;padding:6px 4px;border-radius:8px;color:inherit;text-decoration:none;font-size:13px}
+.pall-e:hover{background:var(--surface-2);text-decoration:none}
+.pall-ei{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--surface-2)}.pall-ei svg{width:15px;height:15px;opacity:.8}
+.pall-e.k-money .pall-ei{background:color-mix(in srgb,var(--accent) 14%,var(--surface))}.pall-e.k-task .pall-ei{background:color-mix(in srgb,var(--good,#16a34a) 14%,var(--surface))}
+.pall-et{min-width:0;overflow-wrap:anywhere}.pall-eb{font-size:11.5px;color:var(--muted);white-space:nowrap}
+@media (max-width:759px){.pall-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pall-e{grid-template-columns:26px 1fr}.pall-eb{grid-column:2;white-space:normal}.pall-dts{grid-template-columns:repeat(2,minmax(0,1fr))}}`;
+  document.head.appendChild(css);
 })();
