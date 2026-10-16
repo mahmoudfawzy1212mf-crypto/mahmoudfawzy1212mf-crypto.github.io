@@ -2250,3 +2250,18 @@ html[data-theme="dark"] .okflow .okpill.g{color:#86efac}html[data-theme="dark"] 
   const drop = new Set(['stusmart', 'nfsmart', 'nflearn', 'nfrules', 'nfuicheck', 'nfaiset', 'nftimeline']);
   for (let i = NAV.length - 1; i >= 0; i--) { const n = NAV[i]; if (!n) continue; if (drop.has(n.id) || n.grp === 'AI') NAV.splice(i, 1); }
 })();
+
+/* 16 Oct 2026 — the system moved to its own address. This copy keeps working; a banner asks everyone to install the new one once. */
+(() => {
+  if (/oekoplan-landscaping\.github\.io|oekoplanlandscaping\.com/.test(location.hostname)) return;
+  const NEW = 'https://oekoplan-landscaping.github.io/app/';
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const show = () => {
+    if (document.getElementById('okmoved') || !S.session) return;
+    const b = document.createElement('div'); b.id = 'okmoved';
+    b.innerHTML = `<div class="okmv"><b>${en() ? 'The system has moved to a new address' : 'السيستم اتنقل لعنوان جديد'}</b><span>${en() ? 'Install it again from the new link — same account, same data. This copy will be switched off later.' : 'ثبّته تاني من اللينك الجديد — نفس الحساب ونفس البيانات. النسخة دي هتتقفل بعدين.'}</span><a class="btn p sm" href="${NEW}" target="_blank" rel="noopener">${en() ? 'Open the new address' : 'افتح العنوان الجديد'}</a><button type="button" class="okmvx" aria-label="close">✕</button></div>`;
+    document.body.appendChild(b); b.querySelector('.okmvx').onclick = () => { b.remove(); try { sessionStorage.setItem('okmoved', '1'); } catch (e) { /* ignore */ } };
+  };
+  document.head.insertAdjacentHTML('beforeend', '<style>#okmoved{position:fixed;left:12px;right:12px;bottom:12px;z-index:900;display:flex;justify-content:center;pointer-events:none}.okmv{pointer-events:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0e1f1b;color:#fff;border-radius:14px;padding:12px 14px;max-width:720px;box-shadow:0 12px 40px rgba(0,0,0,.3);font-size:13px}.okmv b{font-size:14px}.okmv span{opacity:.85;flex:1 1 260px}.okmvx{color:#fff;opacity:.7;font-size:16px;padding:4px 8px}</style>');
+  if (Array.isArray(RENDER_HOOKS)) RENDER_HOOKS.push(() => { try { if (sessionStorage.getItem('okmoved')) return; } catch (e) { /* ignore */ } setTimeout(show, 800); });
+})();
