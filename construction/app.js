@@ -14711,15 +14711,35 @@ function notifyHolder(w, title, body, url) { if (!w || !w.holder) return; try { 
 /* ---------- 2+3) custody: request money / owner transfers / holder spends ---------- */
 REQ_TYPES.fund = 'طلب مبلغ للعهدة'; DEFAULT_CHAINS.fund = ['admin'];
 REQ_TYPES.opex = 'مصروف تشغيل'; DEFAULT_CHAINS.opex = ['hr'];
+/* v7.86 (Mahmoud 16 Oct: «Bahaa sent this custody request and had no field to add the project»; brief claude/fund-project-brief.md,
+   go-ahead «mandatory»): a custody request and a spend from the custody carry the project — a running order (factory), project
+   (studio) or site project (construction) — or «General expenses — not on a project». */
+const FUND_GEN = '_general';
+function fundProjects() {
+  const live = x => x && !x.deleted && !['delivered', 'cancelled', 'closed', 'done', 'archived'].includes(String(x.status || '').toLowerCase());
+  const out = [];
+  [['orders', '#/orders/'], ['projects', '#/projects/'], ['cprojects', '#/cprojects/']].forEach(([col, h]) => { let xs = []; try { xs = list(col); } catch (e) { xs = []; } xs.filter(live).forEach(x => out.push({ id: x.id, code: x.code || '', name: x.title || x.name || '', href: h + x.id })); });
+  return out.sort((a, b) => String(b.code).localeCompare(String(a.code)));
+}
+function fundProjOf(id) {
+  if (!id) return null; if (id === FUND_GEN) return { id, code: '', name: 'مصروفات عامة — مش على مشروع', href: '' };
+  for (const [col, h] of [['orders', '#/orders/'], ['projects', '#/projects/'], ['cprojects', '#/cprojects/']]) { let x = null; try { x = byId(col, id); } catch (e) { x = null; } if (x) return { id, code: x.code || '', name: x.title || x.name || '', href: h + id }; }
+  return null;
+}
+const fundProjLabel = id => { const p = fundProjOf(id); return p ? [p.code, p.name].filter(Boolean).join(' — ') : ''; };
+function fundProjSelect(sel, label) {
+  const ps = fundProjects(); const cur = sel && !ps.some(p => p.id === sel) && sel !== FUND_GEN ? fundProjOf(sel) : null;
+  return field(label || 'المشروع', `<select name="orderId" required><option value="">اختار المشروع…</option>${cur ? `<option value="${esc(cur.id)}" selected>${esc([cur.code, cur.name].filter(Boolean).join(' — '))}</option>` : ''}${ps.map(p => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${esc([p.code, p.name].filter(Boolean).join(' — '))}</option>`).join('')}<option value="${FUND_GEN}" ${sel === FUND_GEN ? 'selected' : ''}>مصروفات عامة — مش على مشروع</option></select>`, 'full');
+}
 ACTIONS.fundAsk = wid => {
   const mine = wallets().filter(w => myWalletIds().includes(w.id) || isAdmin()); if (!mine.length) return; const w0 = walletOf(wid) || mine[0];
-  openModal({ title: 'طلب مبلغ للعهدة', submitLabel: 'إرسال للمالك', body: `<div class="form">${mine.length > 1 ? field('العهدة', `<select name="walletId">${mine.map(w => `<option value="${w.id}" ${w.id === w0.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field(`المبلغ (${CUR()})`, inp('amount', '', 'type="number" step="any" min="0" required inputmode="decimal"'))}
+  openModal({ title: 'طلب مبلغ للعهدة', submitLabel: 'إرسال للمالك', body: `<div class="form">${mine.length > 1 ? field('العهدة', `<select name="walletId">${mine.map(w => `<option value="${w.id}" ${w.id === w0.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field(`المبلغ (${CUR()})`, inp('amount', '', 'type="number" step="any" min="0" required inputmode="decimal"'))}${fundProjSelect('', 'على أنهي مشروع')}
     ${field('هتعمل بيه إيه', `<select name="cat">${SPEND_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('العربية (لو للعربيات)', `<select name="vehicleId"><option value="">—</option>${list('vehicles').map(v => `<option value="${v.id}">${esc(v.name || v.plate || v.id)}</option>`).join('')}</select>`)}${field('التفاصيل', '<textarea name="reason" required placeholder="مثلاً: تغيير زيت عربية النقل + فلتر"></textarea>', 'full')}
     <div class="tiny muted full">الطلب بيوصل المالك على طول — أول ما يحوّل المبلغ بيدخل عهدتك ويوصلك إشعار.</div></div>`,
     onSubmit: async f => {
-      const d = formData(f); const w = walletOf(d.walletId); if (!w || !(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب هتعمل بيه إيه', 'err'); return false; }
-      const me = S.session || {}; const now = nowISO();
-      const r = { id: uid(), type: 'fund', walletId: w.id, amount: num(d.amount), cat: d.cat, vehicleId: d.vehicleId || null, reason: d.reason.trim(), requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب ${fmtMoney(num(d.amount))} ${CUR()} لعهدة ${w.name} — ${catLabel(d.cat)}` }] };
+      const d = formData(f); const w = walletOf(d.walletId); if (!w || !(num(d.amount) > 0)) { toast('اكتب المبلغ', 'err'); return false; } if (!(d.reason || '').trim()) { toast('اكتب هتعمل بيه إيه', 'err'); return false; } if (!d.orderId) { toast('اختار المشروع (أو «مصروفات عامة»)', 'err'); return false; }
+      const me = S.session || {}; const now = nowISO(); const pj = fundProjOf(d.orderId);
+      const r = { id: uid(), type: 'fund', walletId: w.id, amount: num(d.amount), cat: d.cat, vehicleId: d.vehicleId || null, orderId: d.orderId, orderCode: (pj && pj.code) || '', reason: d.reason.trim(), requesterId: me.workerId || me.id, requesterName: me.name || '', workerId: null, deptId: null, status: 'pending', chain: ['admin'], step: 0, stepAt: now, createdBy: me.id || null, createdByName: me.name || '', createdAt: now, thread: [{ id: uid(), at: now, by: me.id || null, byName: me.name || '', role: role(), kind: 'system', text: `طلب ${fmtMoney(num(d.amount))} ${CUR()} لعهدة ${w.name} — ${catLabel(d.cat)}` }] };
       await Store.save('requests', r, { silent: true });
       if (typeof notifyOwner === 'function') await notifyOwner(`طلب مبلغ للعهدة — ${w.name}: ${fmtMoney(r.amount)} ${CUR()}`, `${catLabel(r.cat)} — ${r.reason}`, { id: `fund_${r.id}`, reqId: r.id });
       toast('الطلب اتبعت للمالك'); rerender();
@@ -14795,7 +14815,7 @@ document.head.insertAdjacentHTML('beforeend', '<style>.fto{border:1px solid var(
 /* owner pays a custody request */
 ACTIONS.fundPay = async id => {
   const r = byId('requests', id); if (!r || !isAdmin() || !fundToPay(r)) return; const w = walletOf(r.walletId); if (!w) return;
-  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}`, amount: r.amount, fields: fundToHTML(r) + fundToPick(r) + field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
+  const res = await moneyDialog({ title: `تحويل لعهدة ${w.name}`, intro: `${esc(r.requesterName || '')} طالب ${fmtMoney(r.amount)} ${CUR()} — ${esc(catLabel(r.cat))}: ${esc(r.reason || '')}${r.orderId ? ` · ${esc(fundProjLabel(r.orderId))}` : ''}`, amount: r.amount, fields: fundToHTML(r) + fundToPick(r) + field('حوّلت من', `<select name="from">${srcOptions('personal', false)}</select>`), submitLabel: 'تم التحويل', ownerKind: 'request', ownerId: r.id });
   if (!res) return;
   { const t0 = fundTo(r); const to = res.payTo || (t0 && t0.via ? t0.id : ''); if (to) await fundHandover(r, to); }
   await Store.update('requests', r.id, { payFrom: res.from, paidAmount: res.amount, payThumb: res.thumb, payFileIds: res.fileIds, payNote: res.note || '' });
@@ -14831,18 +14851,21 @@ ACTIONS.walletBack = async wid => {
   const res = await moneyDialog({ title: `استرداد من عهدة ${w.name}`, intro: `الرصيد الحالي ${fmtMoney(bal)} ${CUR()}`, amount: bal > 0 ? bal : '', fields: field('رجع على', `<select name="to">${srcOptions('personal', false)}</select>`), fileRequired: false, submitLabel: 'تسجيل' });
   if (!res) return; await saveXfer({ from: w.id, to: res.to, amount: res.amount, note: res.note || 'استرداد الباقي', thumb: res.thumb, fileIds: res.fileIds }); toast('تم');
 };
+/* v7.86: the project of the last custody request transferred to this wallet — the spend form starts on it */
+function lastFundProj(wid) { const r = sortBy(list('requests').filter(x => x && x.type === 'fund' && x.walletId === wid && x.paidAt && x.orderId), x => x.paidAt || '', true)[0]; return r ? r.orderId : ''; }
 /* holder spends from his wallet (receipt photo required) */
 ACTIONS.walletSpend = async wid => {
   const ids = isAdmin() || role() === 'hr' ? wallets().map(w => w.id) : myWalletIds(); if (!ids.length) return; const w0 = walletOf(wid) || walletOf(ids[0]);
   const fields = `${ids.length > 1 ? field('من عهدة', `<select name="walletId">${ids.map(id => `<option value="${id}" ${id === w0.id ? 'selected' : ''}>${esc(walletOf(id).name)} — ${fmtMoney(walletBalance(id).balance)}</option>`).join('')}</select>`) : `<input type="hidden" name="walletId" value="${w0.id}">`}${field('التاريخ', inp('date', todayISO(), 'type="date"'))}
     ${field('البند', `<select name="cat">${SPEND_CATS.map(c => `<option value="${c}">${esc(catLabel(c))}</option>`).join('')}</select>`)}${field('العربية (للبنزين والزيت والصيانة)', `<select name="vehicleId"><option value="">—</option>${list('vehicles').map(v => `<option value="${v.id}">${esc(v.name || v.plate || v.id)}</option>`).join('')}</select>`)}
-    ${homes().length ? field('السكن (لو مصروف سكن)', `<select name="homeId"><option value="">—</option>${homes().map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`) : ''}${field('اتدفع لمين', inp('payee', ''))}`;
+    ${fundProjSelect(lastFundProj(w0.id), 'على أنهي مشروع')}${homes().length ? field('السكن (لو مصروف سكن)', `<select name="homeId"><option value="">—</option>${homes().map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`) : ''}${field('اتدفع لمين', inp('payee', ''))}`;
   const res = await moneyDialog({ title: 'تسجيل مصروف من العهدة', intro: 'صورة الإيصال أو الفاتورة إلزامية.', amount: '', fields, fileLabel: 'صورة الإيصال / الفاتورة', submitLabel: 'تسجيل المصروف', ownerKind: 'expense' });
   if (!res) return; const w = walletOf(res.walletId); if (!w) return; const bal = walletBalance(w.id).balance;
   if (res.amount > bal + 0.5) { toast(`رصيد العهدة ${fmtMoney(bal)} ${CUR()} — اطلب مبلغ الأول`, 'err'); return; }
   if (CAR_CATS.includes(res.cat) && !res.vehicleId) { toast('اختار العربية', 'err'); return; }
   if (HOME_CATS.includes(res.cat) && !res.homeId) { toast('اختار السكن', 'err'); return; }
-  await Store.save('expenses', { id: uid(), date: res.date || todayISO(), month: monthOf(res.date || todayISO()), amount: res.amount, cat: res.cat, account: w.id, holderId: w.holder, orderId: null, vehicleId: res.vehicleId || null, homeId: res.homeId || null, payee: res.payee || '', ref: '', note: res.note || '', src: 'wallet', fileIds: res.fileIds, thumb: res.thumb, byName: S.session?.name || '', createdAt: nowISO() });
+  if (!res.orderId) { toast('اختار المشروع (أو «مصروفات عامة»)', 'err'); return; }
+  await Store.save('expenses', { id: uid(), date: res.date || todayISO(), month: monthOf(res.date || todayISO()), amount: res.amount, cat: res.cat, account: w.id, holderId: w.holder, orderId: res.orderId && res.orderId !== FUND_GEN ? res.orderId : null, general: res.orderId === FUND_GEN || undefined, vehicleId: res.vehicleId || null, homeId: res.homeId || null, payee: res.payee || '', ref: '', note: res.note || '', src: 'wallet', fileIds: res.fileIds, thumb: res.thumb, byName: S.session?.name || '', createdAt: nowISO() });
   toast('تم تسجيل المصروف من العهدة');
 };
 
@@ -14943,7 +14966,7 @@ canSee = (base => view => (view === 'money' ? (moneyOn() && !!S.session && (isAd
 function moneyDue() {
   if (!moneyOn()) return []; const out = [];
   list('purchases').filter(p => p.status === 'transfer').forEach(p => out.push({ kind: 'po', id: p.id, label: `أمر شراء ${p.number} — ${p.supplier || ''}`, sub: 'معتمد من الحسابات', amount: poPayable(p), action: 'poTransfer', href: `purchases/${p.id}` }));
-  list('requests').filter(fundToPay).forEach(r => { const w = walletOf(r.walletId); const sub0 = `${r.status === 'approved' ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Approved · ' : 'موافق عليه · ') : ''}${r.requesterName || ''}: ${r.reason || ''}`; const to = fundToLine(r); out.push(Object.assign({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: to ? `${sub0} · ${to}` : sub0, amount: +r.amount || 0, action: 'fundPay' }, to ? { to, sub0 } : {})); });
+  list('requests').filter(fundToPay).forEach(r => { const w = walletOf(r.walletId); const sub0 = `${r.status === 'approved' ? (typeof I18N !== 'undefined' && I18N.lang === 'en' ? 'Approved · ' : 'موافق عليه · ') : ''}${r.requesterName || ''}: ${r.reason || ''}${r.orderId && r.orderId !== FUND_GEN ? ` · ${(fundProjOf(r.orderId) || {}).code || ''}` : ''}`; const to = fundToLine(r); out.push(Object.assign({ kind: 'fund', id: r.id, label: `عهدة ${w ? w.name : ''} — ${catLabel(r.cat)}`, sub: to ? `${sub0} · ${to}` : sub0, amount: +r.amount || 0, action: 'fundPay' }, to ? { to, sub0 } : {})); });
   list('requests').filter(r => r.type === 'opex' && r.status === 'approved' && !r.paidAt).forEach(r => out.push({ kind: 'opex', id: r.id, label: `مصروف تشغيل — ${catLabel(r.cat)}${r.homeId ? ' · ' + homeName(r.homeId) : ''}`, sub: `${fmtMonth(r.month)} · ${r.payee || ''}`, amount: +r.amount || 0, action: 'opexPay' }));
   return out;
 }
@@ -56900,5 +56923,53 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
   }
   window.nfReqCancel = { cancellable };
   const css = document.createElement('style'); css.textContent = '#modalroot .mf .rqoc{color:var(--crit-ink,#b91c1c)}#modalroot .mf .rqoc svg{width:16px;height:16px}';
+  document.head.appendChild(css);
+})();
+/* =====================================================================
+   v7.86 — the project of a custody request, in the request window (brief claude/fund-project-brief.md).
+   · The request shows its project (code — name; a tap opens it) or «General expenses».
+   · The owner can set / change it («Change the project») while the request is not finished (waiting for approval, or approved and
+     not transferred yet) — a line goes into the request's thread. Older requests without a project show «No project yet».
+   · No change in who approves, transfers or sees what. All three systems · phone and computer · Arabic and English.
+   ===================================================================== */
+(() => {
+  if (window.__NF_FUNDPROJ__) return; window.__NF_FUNDPROJ__ = 1;
+  if (typeof ACTIONS === 'undefined' || typeof ACTIONS.reqOpen !== 'function' || typeof fundProjOf !== 'function') return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const owner = () => { try { return !!S.session && isAdmin() && (typeof writable !== 'function' || writable()); } catch (e) { return false; } };
+  const editable = r => !!r && r.type === 'fund' && !r.paidAt && (r.status === 'pending' || r.status === 'approved') && owner();
+  ACTIONS.reqOpen = (base => function (id) {
+    const out = base.apply(this, arguments);
+    try {
+      const r = byId('requests', id); if (!r || r.type !== 'fund') return out;
+      const th = document.getElementById('rq-thread'); if (!th || document.getElementById('rq-proj')) return out;
+      const p = fundProjOf(r.orderId);
+      const name = p ? (p.id === FUND_GEN ? L('مصروفات عامة — مش على مشروع', 'General expenses — not on a project') : [p.code, p.name].filter(Boolean).join(' — ')) : L('لسه مالوش مشروع', 'No project yet');
+      const link = p && p.href ? `<a href="${esc(p.href)}" data-action="closemodal">${esc(name)}</a>` : `<span class="${p ? '' : 'muted'}">${esc(name)}</span>`;
+      const btn = editable(r) ? `<button type="button" class="btn sm ghost" data-action="fundProjEdit" data-arg="${esc(r.id)}">${esc(p ? L('غيّر المشروع', 'Change the project') : L('حدّد المشروع', 'Set the project'))}</button>` : '';
+      const anchor = document.getElementById('rq-pay') || th;
+      anchor.insertAdjacentHTML('beforebegin', `<div id="rq-proj" class="rqproj"><span class="tiny muted">${esc(L('المشروع', 'Project'))}</span><b>${link}</b>${btn}</div>`);
+    } catch (e) { console.warn('fund proj', e); }
+    return out;
+  })(ACTIONS.reqOpen);
+  ACTIONS.fundProjEdit = id => {
+    const r = byId('requests', id); if (!editable(r)) return;
+    openModal({
+      title: L('مشروع الطلب', 'Project of the request'),
+      body: `<div class="form"><div class="small full" style="margin-bottom:6px">${esc(r.requesterName || '')} — ${esc(r.reason || '')}</div>${fundProjSelect(r.orderId || '', L('المشروع', 'Project'))}</div>`,
+      submitLabel: L('حفظ', 'Save'),
+      onSubmit: async f => {
+        const v = String((f.querySelector('[name="orderId"]') || {}).value || ''); if (!v) { toast(L('اختار المشروع (أو «مصروفات عامة»)', 'Pick the project (or «General expenses»)'), 'err'); return false; }
+        const r1 = byId('requests', id); if (!editable(r1)) return true; if (v === r1.orderId) return true;
+        const me = S.session || {}; const p = fundProjOf(v);
+        const txt = v === FUND_GEN ? L('اتربط بـ «مصروفات عامة — مش على مشروع»', 'Set to «General expenses — not on a project»') : L(`اتربط بمشروع ${fundProjLabel(v)}`, `Linked to project ${fundProjLabel(v)}`);
+        const thread = (r1.thread || []).concat([{ id: uid(), at: nowISO(), by: me.id || null, byName: me.name || '', role: typeof role === 'function' ? role() : 'admin', kind: 'system', text: `${txt} (${me.name || ''})` }]);
+        await Store.update('requests', id, { orderId: v, orderCode: (p && p.code) || '', thread });
+        toast(L('اتحفظ ✓', 'Saved ✓')); setTimeout(() => { try { ACTIONS.reqOpen(id); } catch (e) { /* ignore */ } }, 60);
+      }
+    });
+  };
+  const css = document.createElement('style'); css.textContent = '.rqproj{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}.rqproj b{font-weight:600;flex:1 1 160px;min-width:0}.rqproj b a{color:var(--ink);text-decoration:none}.rqproj b a:hover{text-decoration:underline}';
   document.head.appendChild(css);
 })();
