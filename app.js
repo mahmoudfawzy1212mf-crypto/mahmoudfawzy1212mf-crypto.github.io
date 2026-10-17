@@ -57394,3 +57394,49 @@ html[dir="rtl"] #nhome .nw-k{text-align:right}
 @media (max-width:759px){.pall-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pall-e{grid-template-columns:26px 1fr}.pall-eb{grid-column:2;white-space:normal}.pall-dts{grid-template-columns:repeat(2,minmax(0,1fr))}}`;
   document.head.appendChild(css);
 })();
+/* =====================================================================
+   v7.90 — Settings → «Publishing on GitHub» (owner only, factory server).
+   The three Ninety systems move to their own GitHub organisation `ninetystudioz` (site ninetystudioz.github.io —
+   brief claude/new-address-brief.md, Mahmoud's go-ahead 16 Oct). Publishing there needs a key that belongs to the
+   organisation: the owner makes it on GitHub (one repo · Contents read/write) and pastes it here.
+   It goes to the server only (RPC nf_set_gh_token → admin_config 'gh_token_org') and is never shown again —
+   the card shows only «saved ✓» and the date. Nothing else changes until the move is published.
+   ===================================================================== */
+(() => {
+  if (window.__NF_GHTOKEN__) return; window.__NF_GHTOKEN__ = 1;
+  if (typeof EXTRA_SETTINGS !== 'object') return;
+  if ((typeof isStuSys === 'function' && isStuSys()) || (typeof isConstruction === 'function' && isConstruction())) return;
+  const en = () => typeof I18N !== 'undefined' && I18N.lang === 'en';
+  const L = (a, b) => (en() ? b : a);
+  const NEW_URL = 'https://github.com/settings/personal-access-tokens/new?name=' + encodeURIComponent('Ninety publish') + '&description=' + encodeURIComponent('Publishes the Ninety systems to ninetystudioz.github.io') + '&target_name=ninetystudioz&contents=write';
+  EXTRA_SETTINGS.ghpub = { label: 'النشر على GitHub', render: () => {
+    if (!isAdmin()) return `<div class="card"><p class="small muted">${esc(L('للمالك فقط', 'Owner only'))}</p></div>`;
+    const st = S.ui.ghTok || {};
+    if (!S.ui.ghTokAsked && typeof sbOn === 'function' && sbOn()) { S.ui.ghTokAsked = true; Promise.resolve().then(() => S.sb.rpc('nf_gh_token_info')).then(r => { S.ui.ghTok = (r && r.data) || {}; rerender(); }, () => { S.ui.ghTok = {}; }); }
+    const ok = !!st.set;
+    return `<form class="card" id="ghtokform"><h3>${esc(L('النشر على GitHub — المنظمة ninetystudioz', 'Publishing on GitHub — the ninetystudioz organisation'))}</h3>
+      <p class="small muted">${esc(L('السيستم بيتنشر على ninetystudioz.github.io. ده محتاج مفتاح من المنظمة نفسها. المفتاح بيتحفظ على السيرفر بس ومش بيتعرض تاني لأي حد.', 'The system is published to ninetystudioz.github.io. That needs a key from the organisation itself. The key is kept on the server only and is never shown again to anyone.'))}</p>
+      <p class="small"><b>${esc(L('الحالة:', 'Status:'))}</b> ${ok ? `<span style="color:var(--ok,#2a9d5c)">${esc(L('المفتاح مسجّل ✓', 'Key saved ✓'))}</span> <span class="tiny muted">${esc(st.at ? fmtDate(String(st.at).slice(0, 10)) : '')}</span>` : `<span style="color:var(--warn,#d98c00)">${esc(L('المفتاح لسه ما اتسجّلش', 'Key not saved yet'))}</span>`}</p>
+      <ol class="small" style="margin:8px 0 12px;padding-inline-start:20px;line-height:1.9">
+        <li>${esc(L('دوس «اعمل المفتاح على GitHub».', 'Tap «Make the key on GitHub».'))}</li>
+        <li>${esc(L('Resource owner: ninetystudioz · Expiration: No expiration.', 'Resource owner: ninetystudioz · Expiration: No expiration.'))}</li>
+        <li>${esc(L('Repository access: Only select repositories ← ninetystudioz.github.io.', 'Repository access: Only select repositories → ninetystudioz.github.io.'))}</li>
+        <li>${esc(L('Permissions ← Contents: Read and write.', 'Permissions → Contents: Read and write.'))}</li>
+        <li>${esc(L('Generate token ← انسخه ← الزقه هنا ← حفظ.', 'Generate token → copy it → paste it here → Save.'))}</li>
+      </ol>
+      <a class="btn" href="${esc(NEW_URL)}" target="_blank" rel="noopener">${esc(L('اعمل المفتاح على GitHub', 'Make the key on GitHub'))}</a>
+      <div class="form" style="margin-top:12px"><div class="field full"><label>${esc(L('المفتاح', 'The key'))}${ok ? ' — ' + esc(L('مسجّل ✓', 'saved ✓')) : ''}</label><input name="gh_token" class="ltr notr" type="password" autocomplete="new-password" spellcheck="false" placeholder="${esc(ok ? L('اتركه فاضي عشان يفضل الحالي', 'Leave empty to keep the current one') : 'github_pat_…')}"></div></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button type="submit" class="btn p">${esc(L('حفظ', 'Save'))}</button></div></form>`;
+  } };
+  document.addEventListener('submit', async ev => {
+    if (!ev.target || ev.target.id !== 'ghtokform') return; ev.preventDefault();
+    if (!isAdmin() || typeof sbOn !== 'function' || !sbOn()) { toast(L('محتاج اتصال بالسيرفر', 'Needs the server connection'), 'err'); return; }
+    const inp = ev.target.querySelector('input[name=gh_token]'); const v = String((inp && inp.value) || '').trim();
+    if (!v) { toast(L('مفيش تغيير', 'No change')); return; }
+    if (v.length < 20 || /\s/.test(v)) { toast(L('ده مش شكل مفتاح GitHub — انسخه تاني كامل', 'That does not look like a GitHub key — copy it again in full'), 'err'); return; }
+    const { error } = await S.sb.rpc('nf_set_gh_token', { p_value: v });
+    if (inp) inp.value = '';
+    if (error) { toast(L('فشل الحفظ: ', 'Save failed: ') + error.message, 'err'); return; }
+    S.ui.ghTokAsked = false; toast(L('اتحفظ ✓', 'Saved ✓')); rerender();
+  });
+})();
